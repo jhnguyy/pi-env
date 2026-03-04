@@ -1,0 +1,10 @@
+node_modules/
+auth.json
+settings.json
+models.json
+*.env
+sessions/
+.DS_Store
+
+# Machine-local handoffs — never committed
+.pi/handoffs/

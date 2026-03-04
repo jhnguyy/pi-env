@@ -1,0 +1,11 @@
+{
+  "_comment": "Add custom model providers here. Example shows Ollama local setup.",
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": []
+    }
+  }
+}

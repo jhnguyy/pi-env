@@ -1,0 +1,27 @@
+{
+  "name": "pi-env",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": [".pi/extensions"],
+    "skills": [".agents/skills"]
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "@sinclair/typebox": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@sinclair/typebox": "^0.34.48",
+    "@mariozechner/pi-coding-agent": "^0.55.3",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}

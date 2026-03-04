@@ -1,0 +1,176 @@
+/**
+ * JiT-Catch Extension — entry point.
+ *
+ * Provides the `jit_catch` tool, which automates the full catching-test
+ * workflow for pi extension diffs:
+ *
+ *   1. Acquire diff (via git or raw param)
+ *   2. Parse which extensions changed
+ *   3. Prepare test environment
+ *   4. Spawn a subagent to generate ephemeral catching tests
+ *   5. Run `bun test` on the generated file
+ *   6. Auto-discard on pass; surface test output on fail
+ *
+ * Decision rule (when to use vs `bun test` directly) lives in the updated
+ * jit-catch skill, which is now much thinner.
+ */
+
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
+import { Text } from "@mariozechner/pi-tui";
+
+import { parseDiff } from "./parser";
+import { captureDiff, runForExtension } from "./runner";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "jit_catch",
+    label: "JiT-Catch",
+    description: [
+      "Generate and run ephemeral catching tests for a code diff against extension files.",
+      "Tests are written by a subagent, executed with bun test, then auto-discarded on pass.",
+      "Never commits test files. Use instead of manually running the jit-catch skill workflow.",
+      "",
+      "Diff acquisition (pick one):",
+      "  diff_source='unstaged' (default) — runs `git diff` in git_cwd",
+      "  diff_source='staged'             — runs `git diff --cached` in git_cwd",
+      "  diff_source='commit', commit=<SHA> — runs `git show <SHA>` in git_cwd",
+      "  diff=<raw text>                  — skip git entirely, pass diff directly",
+      "",
+      "Optional: ext_name overrides auto-detected extension (useful for multi-extension diffs).",
+    ].join("\n"),
+
+    parameters: Type.Object({
+      diff_source: Type.Optional(
+        StringEnum(["unstaged", "staged", "commit"] as const, {
+          description: "How to acquire the diff. Default: 'unstaged'.",
+        }),
+      ),
+      commit: Type.Optional(
+        Type.String({ description: "Commit SHA — required when diff_source='commit'." }),
+      ),
+      git_cwd: Type.Optional(
+        Type.String({
+          description:
+            "Working directory for git commands. Defaults to the agent's current working directory.",
+        }),
+      ),
+      diff: Type.Optional(
+        Type.String({
+          description:
+            "Raw unified diff text. When provided, skips git entirely.",
+        }),
+      ),
+      ext_name: Type.Optional(
+        Type.String({
+          description:
+            "Override auto-detected extension name. Useful to target one extension in a multi-extension diff.",
+        }),
+      ),
+    }),
+
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const exec = pi.exec.bind(pi);
+
+      // ─── 1. Acquire diff ──────────────────────────────────────
+      let diffText: string;
+      try {
+        if (params.diff) {
+          diffText = params.diff;
+        } else {
+          const source = params.diff_source ?? "unstaged";
+          const gitCwd = params.git_cwd ?? ctx.cwd;
+          diffText = await captureDiff(source, exec, gitCwd, params.commit);
+        }
+      } catch (e) {
+        return err(String(e));
+      }
+
+      // ─── 2. Parse extensions from diff ────────────────────────
+      const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
+
+      if (extensions.length === 0) {
+        const hint = hasNonExtensionFiles
+          ? "Diff only touches non-extension files — jit-catch does not apply."
+          : "No changed files found in the diff.";
+        return err(hint);
+      }
+
+      // ─── 3. Filter by ext_name override if provided ───────────
+      const targets = params.ext_name
+        ? extensions.filter((e) => e.name === params.ext_name)
+        : extensions;
+
+      if (targets.length === 0) {
+        return err(
+          `Extension '${params.ext_name}' not found in diff. ` +
+          `Extensions present: ${extensions.map((e) => e.name).join(", ")}`,
+        );
+      }
+
+      // ─── 4. Run workflow for each extension ───────────────────
+      const results = [];
+      for (const ext of targets) {
+        const result = await runForExtension(ext, diffText, exec, signal);
+        results.push(result);
+      }
+
+      // ─── 5. Format output ─────────────────────────────────────
+      const lines: string[] = [];
+      if (hasNonExtensionFiles) {
+        lines.push("Note: diff also contains non-extension files (ignored).\n");
+      }
+
+      let anyFailed = false;
+      for (const r of results) {
+        if (r.passed) {
+          lines.push(`✓ ${r.extName} — tests passed, catching test discarded.`);
+        } else {
+          anyFailed = true;
+          lines.push(`✗ ${r.extName} — tests FAILED.`);
+          if (r.testPath) lines.push(`  Test file kept at: ${r.testPath}`);
+          lines.push(`  Output:\n${r.testOutput.split("\n").map((l) => "  " + l).join("\n")}`);
+        }
+      }
+
+      const summary = lines.join("\n");
+
+      return {
+        content: [{ type: "text", text: summary }],
+        details: { results, anyFailed },
+      };
+    },
+
+    renderCall(args, theme) {
+      let text = theme.fg("toolTitle", theme.bold("jit_catch"));
+      const source = args.diff ? "raw diff" : (args.diff_source ?? "unstaged");
+      text += " " + theme.fg("accent", source);
+      if (args.ext_name) text += " " + theme.fg("muted", args.ext_name);
+      if (args.commit) text += " " + theme.fg("dim", args.commit.slice(0, 8));
+      return new Text(text, 0, 0);
+    },
+
+    renderResult(result, _opts, theme) {
+      const details = result.details as { anyFailed?: boolean } | null;
+      const failed = details?.anyFailed ?? false;
+      const first = result.content[0];
+      const text = first?.type === "text" ? first.text.split("\n")[0] ?? "" : "";
+
+      const isError =
+        failed ||
+        (details != null && typeof details === "object" && "error" in details);
+      if (isError) {
+        return new Text(theme.fg("error", "✗ " + text), 0, 0);
+      }
+      return new Text(theme.fg("success", text), 0, 0);
+    },
+  });
+}
+
+function err(msg: string) {
+  return {
+    content: [{ type: "text" as const, text: msg }],
+    details: { error: msg },
+  };
+}

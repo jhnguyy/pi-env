@@ -1,0 +1,4 @@
+[test]
+root = "."
+# tests/ is a symlink to .pi/extensions/ — bun skips dot-directories,
+# so this alias gives it a visible entry point for test discovery.

@@ -1,0 +1,128 @@
+/**
+ * LSP Extension — registers the `lsp` tool and hooks auto-diagnostics.
+ *
+ * Wires together: LspClient, formatters, renderers.
+ * The daemon is spawned on first use (managed by client.ts).
+ */
+
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import { StringEnum } from "@mariozechner/pi-ai";
+import { LspClient } from "./client";
+import { formatResult, formatDiagnosticsSummary } from "./formatters";
+import { renderLspCall, renderLspResult } from "./renderers";
+import type { DiagnosticsResult, LspAction } from "./protocol";
+
+export default function (pi: ExtensionAPI) {
+  const client = new LspClient();
+
+  // ─── lsp tool ───────────────────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "lsp",
+    label: "LSP",
+    description:
+      "TypeScript language intelligence — diagnostics, hover, go-to-definition, " +
+      "find-references, document/workspace symbols. Communicates with a shared daemon " +
+      "that manages typescript-language-server, spawning it on first use.",
+
+    promptSnippet:
+      "TypeScript language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
+      "Use instead of grep chains for type-aware code navigation.",
+
+    promptGuidelines: [
+      "When working in a TypeScript codebase, reach for lsp before grep or read for any symbol-level task.",
+      "To find where a symbol is defined: lsp definition — not grep + read.",
+      "To find all call sites of a function, type, or variable: lsp references — not grep -r.",
+      "To understand a type, signature, or overload at a usage site: lsp hover — not reading the declaration file.",
+      "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
+      "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
+      "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
+      "lsp uses 1-indexed lines and characters, matching read tool output.",
+    ],
+
+    parameters: Type.Object({
+      action: StringEnum(
+        ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
+        { description: "Action to perform" },
+      ),
+      path: Type.Optional(Type.String({
+        description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
+      })),
+      line: Type.Optional(Type.Number({
+        description: "Line number (1-indexed). Required for hover, definition, references.",
+      })),
+      character: Type.Optional(Type.Number({
+        description: "Column number (1-indexed). Required for hover, definition, references.",
+      })),
+      query: Type.Optional(Type.String({
+        description: "Search query for workspace symbols (action=symbols without path).",
+      })),
+    }),
+
+    async execute(_toolCallId, params, _signal) {
+      try {
+        const result = await client.call({
+          action: params.action as LspAction,
+          path: params.path,
+          line: params.line,
+          character: params.character,
+          query: params.query,
+        });
+
+        return {
+          content: [{ type: "text", text: formatResult(result) }],
+          details: result,
+        };
+      } catch (err: unknown) {
+        return {
+          content: [{ type: "text", text: err instanceof Error ? err.message : "LSP error" }],
+          details: null,
+        };
+      }
+    },
+
+    renderCall(args, theme) {
+      return renderLspCall(args, theme);
+    },
+
+    renderResult(result, opts, theme) {
+      return renderLspResult(result, opts, theme);
+    },
+  });
+
+  // ─── Auto-diagnostics hook ───────────────────────────────────────────────
+
+  pi.on("tool_result", async (event) => {
+    const { toolName, input } = event;
+
+    // Only for edit/write tools on TypeScript files
+    if (toolName !== "edit" && toolName !== "write") return;
+
+    const inp = input as Record<string, unknown> | null | undefined;
+    const path: string | undefined =
+      typeof inp?.path === "string" ? inp.path :
+      typeof inp?.file_path === "string" ? inp.file_path :
+      undefined;
+
+    if (!path) return;
+    if (!path.endsWith(".ts") && !path.endsWith(".tsx")) return;
+    if (event.isError) return;
+
+    try {
+      const result = await client.call({ action: "diagnostics", path });
+      const diags = result as DiagnosticsResult;
+      const summary = formatDiagnosticsSummary(diags, 5);
+
+      if (summary) {
+        const first = event.content?.[0];
+        const existing = first?.type === "text" ? first.text : "";
+        return {
+          content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
+        };
+      }
+    } catch {
+      // Non-fatal — diagnostics are best-effort
+    }
+  });
+}

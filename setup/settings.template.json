@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy to ~/.pi/agent/settings.json. Customize: defaultModel, enabledModels (add/remove per machine), permissionLevel, theme. Add ollama or other local models in enabledModels only if running locally — see models.template.json.",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-6",
+  "defaultThinkingLevel": "high",
+  "hideThinkingBlock": false,
+  "steeringMode": "one-at-a-time",
+  "enabledModels": [
+    "anthropic/claude-haiku-4-5",
+    "anthropic/claude-opus-4-6",
+    "anthropic/claude-sonnet-4-6"
+  ],
+  "images": {
+    "blockImages": true
+  },
+  "transport": "sse",
+  "localExtensions": [],
+  "packages": [],
+  "permissionLevel": "none",
+  "theme": "dark",
+  "extensions": [],
+  "skills": []
+}
