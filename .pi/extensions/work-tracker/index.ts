@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { BranchGuard } from "./branch-guard";
-import { RetrospectiveStore } from "./retrospective";
+import { RetrospectiveStore, formatRetroList, formatVaultEntry } from "./retrospective";
 import { WorkStateStore } from "./work-state";
 import type { WorkTrackerConfig } from "./types";
 
@@ -274,6 +274,41 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  // ─── 6. /retro Command ────────────────────────────────────────────
+  pi.registerCommand("retro", {
+    description: [
+      "Browse session retrospectives. Usage:",
+      "  /retro        — list recent sessions (last 10)",
+      "  /retro vault  — format most recent session for vault appending",
+    ].join("\n"),
+
+    handler: async (args, ctx) => {
+      const trimmed = args?.trim() ?? "";
+      const all = retros.readAll();
+
+      if (trimmed === "vault") {
+        if (all.length === 0) {
+          ctx.ui.notify("(no retrospectives yet)", "info");
+          return;
+        }
+        const entry = formatVaultEntry(all[0]);
+        ctx.ui.notify(
+          [
+            entry,
+            "",
+            "─".repeat(54),
+            "Use the notes tool to append this to a vault note.",
+          ].join("\n"),
+          "info"
+        );
+        return;
+      }
+
+      // /retro — list
+      ctx.ui.notify(formatRetroList(all), "info");
     },
   });
 }
