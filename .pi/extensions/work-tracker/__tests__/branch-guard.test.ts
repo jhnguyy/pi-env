@@ -5,8 +5,6 @@ import type { WorkTrackerConfig } from "../types";
 const config: WorkTrackerConfig = {
   guardedRepos: [], // No runtime repo checks in unit tests
   protectedBranches: ["main", "master"],
-  workStatePath: "/tmp/test-work-state.json",
-  retrospectivesDir: "/tmp/test-retrospectives",
 };
 
 describe("BranchGuard", () => {

@@ -31,9 +31,8 @@ describeE2E("LSP E2E", () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "lsp-e2e-"));
-    const suffix = Date.now().toString(36);
-    socketPath = join(tmpDir, `e2e-${suffix}.sock`);
-    pidPath = join(tmpDir, `e2e-${suffix}.pid`);
+    socketPath = join(tmpDir, "t.sock");
+    pidPath = join(tmpDir, "t.pid");
 
     // Write a tsconfig
     writeFileSync(join(tmpDir, "tsconfig.json"), JSON.stringify({
