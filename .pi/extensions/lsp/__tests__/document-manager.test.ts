@@ -111,6 +111,10 @@ describeIfEnabled("lsp", "DocumentManager", () => {
       ["foo.cts", "typescript"],
       ["foo.js", "javascript"],
       ["foo.jsx", "javascriptreact"],
+      ["foo.sh", "shellscript"],
+      ["foo.bash", "shellscript"],
+      ["foo.zsh", "shellscript"],
+      ["foo.ksh", "shellscript"],
     ];
 
     for (const [filename, expectedId] of cases) {

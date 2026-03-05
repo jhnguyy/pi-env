@@ -4,7 +4,7 @@
  *
  * We test by instantiating LspDaemon with mocked internals rather than
  * spawning a real process, since the goal is to test the routing and
- * formatting logic, not the typescript-language-server itself.
+ * formatting logic, not the language servers themselves.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
@@ -36,44 +36,47 @@ describeIfEnabled("lsp", "LspDaemon", () => {
   });
 
   afterEach(async () => {
-    // If daemon is still running, shut it down
     try {
-      if (daemon) (daemon as any).lspReady = false; // prevent real LSP calls
       if (existsSync(socketPath)) unlinkSync(socketPath);
       if (existsSync(pidPath)) unlinkSync(pidPath);
     } catch {}
     try { rmSync(tmpDir, { recursive: true }); } catch {}
   });
 
-  // ─── MockedDaemon: replaces LSP subprocess with a in-process mock ─────────
+  // ─── MockedDaemon: replaces LSP subprocess with an in-process mock ────────
 
   /**
-   * Create a LspDaemon with the LSP subprocess mocked out.
-   * The mock intercepts lspRequest() calls and returns canned responses.
+   * Create a LspDaemon with the TypeScript backend's LSP subprocess mocked out.
+   * Patches tsBackend directly since diagnostics, lspRequest, etc. now live there.
    */
   function createMockedDaemon(
     lspResponses: Map<string, any> = new Map(),
     diagsByUri: Map<string, any[]> = new Map(),
   ): LspDaemon {
     const d = new LspDaemon(socketPath, pidPath, 60_000);
+    const tsBackend = (d as any).tsBackend;
 
-    // Mark as ready without actually spawning LSP
-    (d as any).lspReady = true;
+    // Mark TypeScript backend as ready without spawning a real process
+    tsBackend.lspReady = true;
+    tsBackend.started = true;
 
-    // Override lspRequest to return from canned responses
-    (d as any).lspRequest = async (method: string, params: any) => {
+    // Override lspRequest to return canned responses
+    tsBackend.lspRequest = async (method: string, _params: any) => {
       const result = lspResponses.get(method);
       if (result === undefined) return { jsonrpc: "2.0", id: 1, result: null };
       return { jsonrpc: "2.0", id: 1, result };
     };
 
+    // Override ensureReady so workspace/symbol queries don't spin up LSP
+    tsBackend.ensureReady = async () => {};
+
+    // Override ensureFile to return a predictable URI without real LSP calls
+    tsBackend.ensureFile = async (p: string) => `file://${resolve(p)}`;
+
     // Pre-populate diagnostics cache
     for (const [uri, diags] of diagsByUri) {
-      (d as any).diagCache.set(uri, diags);
+      tsBackend.diagCache.set(uri, diags);
     }
-
-    // Override spawnLsp to no-op
-    (d as any).spawnLsp = async () => {};
 
     return d;
   }
@@ -136,8 +139,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
       ];
 
       daemon = createMockedDaemon(new Map(), new Map([[uri, diagItems]]));
-      // Ensure the doc manager pre-opens the file
-      await (daemon as any).ensureFile(tsFile);
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 2, action: "diagnostics", path: tsFile });
@@ -153,8 +154,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
       writeFileSync(tsFile, "const x: string = 'hello';", "utf8");
 
       daemon = createMockedDaemon();
-      // Mock ensureFile to avoid real LSP calls
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 3, action: "diagnostics", path: tsFile });
@@ -188,7 +187,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
           range: { start: { line: 0, character: 6 }, end: { line: 0, character: 14 } },
         }],
       ]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 5, action: "hover", path: tsFile, line: 1, character: 7 });
@@ -204,7 +202,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
       writeFileSync(tsFile, "const x = 1;", "utf8");
 
       daemon = createMockedDaemon(new Map([["textDocument/hover", null]]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 6, action: "hover", path: tsFile, line: 1, character: 1 });
@@ -240,7 +237,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
           },
         ]],
       ]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 8, action: "definition", path: typesFile, line: 1, character: 1 });
@@ -256,7 +252,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
       writeFileSync(tsFile, "const x = 1;", "utf8");
 
       daemon = createMockedDaemon(new Map([["textDocument/definition", null]]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 9, action: "definition", path: tsFile, line: 1, character: 1 });
@@ -280,7 +275,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
           { uri, range: { start: { line: 3, character: 0 }, end: { line: 3, character: 5 } } },
         ]],
       ]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 10, action: "references", path: srcFile, line: 1, character: 10 });
@@ -296,7 +290,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
       writeFileSync(tsFile, "const x = 1;", "utf8");
 
       daemon = createMockedDaemon(new Map([["textDocument/references", null]]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 11, action: "references", path: tsFile, line: 1, character: 1 });
@@ -320,7 +313,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
           { name: "bar", kind: 12, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 17 } }, selectionRange: { start: { line: 1, character: 9 }, end: { line: 1, character: 12 } } },
         ]],
       ]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 12, action: "symbols", path: tsFile });
@@ -347,7 +339,6 @@ describeIfEnabled("lsp", "LspDaemon", () => {
           },
         ]],
       ]));
-      (daemon as any).ensureFile = async (p: string) => `file://${resolve(p)}`;
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 13, action: "symbols", query: "User" });
@@ -395,14 +386,15 @@ describeIfEnabled("lsp", "LspDaemon", () => {
     });
   });
 
-  // ─── onDiagnostics ────────────────────────────────────────────────────────
+  // ─── onDiagnostics (internal, tested via tsBackend) ───────────────────────
 
   describe("onDiagnostics (internal)", () => {
     it("caches diagnostics by URI", () => {
       daemon = createMockedDaemon();
+      const tsBackend = (daemon as any).tsBackend;
       const uri = "file:///test.ts";
 
-      (daemon as any).onDiagnostics({
+      (tsBackend as any).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 4, character: 2 } }, severity: 1, code: 2339, message: "Property 'x' does not exist on type 'Y'." },
@@ -410,7 +402,7 @@ describeIfEnabled("lsp", "LspDaemon", () => {
         ],
       });
 
-      const cached = (daemon as any).diagCache.get(uri) as any[];
+      const cached = tsBackend.diagCache.get(uri) as any[];
       expect(cached).toHaveLength(2);
       expect(cached[0].severity).toBe("error");
       expect(cached[0].code).toBe("TS2339");
@@ -421,33 +413,35 @@ describeIfEnabled("lsp", "LspDaemon", () => {
 
     it("truncates diagnostic message at 200 characters", () => {
       daemon = createMockedDaemon();
+      const tsBackend = (daemon as any).tsBackend;
       const uri = "file:///test.ts";
       const longMsg = "A".repeat(250);
 
-      (daemon as any).onDiagnostics({
+      (tsBackend as any).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 0, character: 0 } }, severity: 1, code: 2322, message: longMsg },
         ],
       });
 
-      const cached = (daemon as any).diagCache.get(uri) as any[];
+      const cached = tsBackend.diagCache.get(uri) as any[];
       expect(cached[0].message).toBe("A".repeat(200) + "…");
     });
 
     it("does not truncate messages under 200 characters", () => {
       daemon = createMockedDaemon();
+      const tsBackend = (daemon as any).tsBackend;
       const uri = "file:///test2.ts";
       const msg = "Type 'number' is not assignable to type 'string'. Did you mean 'foo'?";
 
-      (daemon as any).onDiagnostics({
+      (tsBackend as any).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 0, character: 0 } }, severity: 1, code: 2322, message: msg },
         ],
       });
 
-      const cached = (daemon as any).diagCache.get(uri) as any[];
+      const cached = tsBackend.diagCache.get(uri) as any[];
       expect(cached[0].message).toBe(msg);
     });
   });

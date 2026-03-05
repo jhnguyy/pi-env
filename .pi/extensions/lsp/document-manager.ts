@@ -170,5 +170,6 @@ function getLanguageId(path: string): string {
   if (path.endsWith(".tsx")) return "typescriptreact";
   if (path.endsWith(".jsx")) return "javascriptreact";
   if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".cts")) return "typescript";
+  if (path.endsWith(".sh") || path.endsWith(".bash") || path.endsWith(".zsh") || path.endsWith(".ksh")) return "shellscript";
   return "javascript";
 }

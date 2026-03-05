@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
 /**
- * LSP Daemon — standalone process that manages typescript-language-server.
+ * LSP Daemon — standalone process that manages language servers.
  *
- * Spawns as a detached child process on first tool use, then survives across
- * pi sessions. Listens on a Unix socket for JSON-over-newline requests.
+ * Manages multiple language server backends (TypeScript, Bash) via a shared
+ * Unix socket. Backends start lazily on first file request and are routed
+ * by file extension.
  *
  * Lifecycle:
  *   - Spawned by client.ts if socket not available
@@ -17,8 +18,7 @@
 import { createServer, type Socket, type Server } from "node:net";
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { resolve } from "node:path";
+import { extname, resolve as resolvePath } from "node:path";
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
 import { DocumentManager } from "./document-manager";
 import { FileWatcher } from "./file-watcher";
@@ -36,10 +36,32 @@ import {
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const LSP_INIT_TIMEOUT_MS = 10_000;
+const LSP_REQUEST_TIMEOUT_MS = 5_000;
+const DIAG_WAIT_TIMEOUT_MS = 1_500;
 
-// ─── LspDaemon class ─────────────────────────────────────────────────────────
+// ─── LSP Capabilities ─────────────────────────────────────────────────────────
 
-export class LspDaemon {
+const STANDARD_CAPABILITIES = {
+  textDocument: {
+    hover: { contentFormat: ["plaintext"] },
+    definition: {},
+    references: {},
+    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
+    publishDiagnostics: { relatedInformation: false },
+  },
+  workspace: {
+    workspaceFolders: true,
+    symbol: {},
+  },
+};
+
+// ─── LspBackend ───────────────────────────────────────────────────────────────
+
+/**
+ * Manages a single language server subprocess.
+ * Backends start lazily on first file request.
+ */
+class LspBackend {
   private lsp: ChildProcess | null = null;
   private lspReady = false;
   private lspReadyResolvers: Array<() => void> = [];
@@ -53,60 +75,62 @@ export class LspDaemon {
   // Pending waiters for first diagnostics publish: uri → resolvers
   private diagReady = new Map<string, Array<() => void>>();
 
-  private docManager = new DocumentManager();
-  private fileWatcher: FileWatcher;
-  private server: Server | null = null;
+  readonly docManager = new DocumentManager();
+  readonly fileWatcher: FileWatcher;
 
-  private lastActivity = Date.now();
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private started = false;
+  private startPromise: Promise<void> | null = null;
 
   constructor(
-    private socketPath = SOCKET_PATH,
-    private pidPath = PID_PATH,
-    private idleTimeoutMs = IDLE_TIMEOUT_MS,
+    /** Display name, e.g. "typescript" or "bash" */
+    readonly name: string,
+    /** Binary to find + spawn, e.g. "typescript-language-server" */
+    private binaryName: string,
+    /** Args for the binary, e.g. ["--stdio"] or ["start"] */
+    private binaryArgs: string[],
+    /** File extensions this backend handles, e.g. new Set([".ts", ".tsx"]) */
+    readonly extensions: Set<string>,
+    /** LSP initialize capabilities object */
+    private lspCapabilities: object,
+    /** Prefix for diagnostic codes, e.g. "TS" for TypeScript (code 2339 → "TS2339") */
+    private codePrefix: string,
   ) {
-    this.fileWatcher = new FileWatcher((path) => { this.onFileChange(path).catch(() => {}); });
+    this.fileWatcher = new FileWatcher((path) => { this.handleFileChange(path).catch(() => {}); });
   }
 
-  // ─── Startup ────────────────────────────────────────────────────────────────
-
-  async start(): Promise<void> {
-    // Write PID file
-    writeFileSync(this.pidPath, String(process.pid), "utf8");
-
-    // Remove stale socket
-    if (existsSync(this.socketPath)) {
-      try { unlinkSync(this.socketPath); } catch {}
-    }
-
-    // Spawn LSP
-    await this.spawnLsp();
-
-    // Start socket server
-    await this.startServer();
-
-    // Start idle timer
-    this.resetIdleTimer();
+  /** Returns true if this backend handles the given file path (by extension). */
+  handles(filePath: string): boolean {
+    return this.extensions.has(extname(filePath));
   }
 
-  private async spawnLsp(): Promise<void> {
-    // Find typescript-language-server binary
-    const tsserverBin = await findBinary("typescript-language-server");
-    if (!tsserverBin) {
-      throw new Error("typescript-language-server not found in PATH");
-    }
+  get isRunning(): boolean { return this.lspReady; }
+  get openUris(): string[] { return this.docManager.openUris; }
+  get projectRoots(): string[] { return this.docManager.projectRoots; }
 
-    this.lsp = spawn(tsserverBin, ["--stdio"], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+  // ─── Startup ──────────────────────────────────────────────────────────────
+
+  async ensureStarted(): Promise<void> {
+    if (this.started) return;
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.doStart()
+      .then(() => { this.started = true; })
+      .finally(() => { this.startPromise = null; });
+    return this.startPromise;
+  }
+
+  private async doStart(): Promise<void> {
+    const bin = await findBinary(this.binaryName);
+    if (!bin) throw new Error(`${this.binaryName} not found in PATH or local node_modules`);
+
+    this.lsp = spawn(bin, this.binaryArgs, { stdio: ["pipe", "pipe", "pipe"] });
 
     const parser = new LspParser((msg) => this.onLspMessage(msg));
-
     this.lsp.stdout!.on("data", (chunk: Buffer) => parser.push(chunk));
     this.lsp.stderr!.on("data", () => {}); // suppress stderr
     this.lsp.on("exit", () => {
       this.lspReady = false;
       this.lsp = null;
+      this.started = false; // allow restart on next request
     });
 
     // Send initialize request
@@ -114,7 +138,7 @@ export class LspDaemon {
     const initPromise = new Promise<LspMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingLsp.delete(initId);
-        reject(new Error("LSP initialize timed out"));
+        reject(new Error(`${this.name} LSP initialize timed out`));
       }, LSP_INIT_TIMEOUT_MS);
       this.pendingLsp.set(initId, {
         resolve: (msg) => { clearTimeout(timer); resolve(msg); },
@@ -129,19 +153,7 @@ export class LspDaemon {
       params: {
         processId: process.pid,
         rootUri: null,
-        capabilities: {
-          textDocument: {
-            hover: { contentFormat: ["plaintext"] },
-            definition: {},
-            references: {},
-            documentSymbol: { hierarchicalDocumentSymbolSupport: false },
-            publishDiagnostics: { relatedInformation: false },
-          },
-          workspace: {
-            workspaceFolders: true,
-            symbol: {},
-          },
-        },
+        capabilities: this.lspCapabilities,
         workspaceFolders: null,
       },
     });
@@ -158,6 +170,209 @@ export class LspDaemon {
     return new Promise((resolve) => this.lspReadyResolvers.push(resolve));
   }
 
+  // ─── File sync ────────────────────────────────────────────────────────────
+
+  /** Ensure the LSP has the file open, starting the backend if needed. Returns the file URI. */
+  async ensureFile(absolutePath: string): Promise<string> {
+    await this.ensureStarted();
+    await this.waitForLspReady();
+    const { uri, notification, isNewRoot, projectRoot } = this.docManager.ensure(absolutePath);
+
+    if (isNewRoot) {
+      this.addWorkspaceFolder(projectRoot);
+      this.fileWatcher.watch(projectRoot);
+    }
+
+    if (notification) {
+      this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
+    }
+
+    return uri;
+  }
+
+  /** Ensure the backend is started and ready (without opening a specific file). */
+  async ensureReady(): Promise<void> {
+    await this.ensureStarted();
+    await this.waitForLspReady();
+  }
+
+  private addWorkspaceFolder(root: string): void {
+    this.sendLsp({
+      jsonrpc: "2.0",
+      method: "workspace/didChangeWorkspaceFolders",
+      params: {
+        event: {
+          added: [{ uri: pathToUri(root), name: root.split("/").pop() ?? root }],
+          removed: [],
+        },
+      },
+    });
+  }
+
+  private async handleFileChange(absolutePath: string): Promise<void> {
+    if (!this.started) return;
+    const { notification } = this.docManager.ensure(absolutePath);
+    if (notification) {
+      this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
+    }
+  }
+
+  // ─── Diagnostics ──────────────────────────────────────────────────────────
+
+  /** Wait for the first diagnostics publish for this URI (with timeout). */
+  async waitForFirstDiagnostics(uri: string): Promise<void> {
+    if (this.diagCache.has(uri)) return;
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, DIAG_WAIT_TIMEOUT_MS);
+      const waiters = this.diagReady.get(uri) ?? [];
+      waiters.push(() => { clearTimeout(timeout); resolve(); });
+      this.diagReady.set(uri, waiters);
+    });
+  }
+
+  getDiagnostics(uri: string): DiagnosticItem[] {
+    return this.diagCache.get(uri) ?? [];
+  }
+
+  // ─── LSP Transport ────────────────────────────────────────────────────────
+
+  lspRequest(method: string, params: unknown): Promise<LspMessage | null> {
+    return new Promise((resolve) => {
+      if (!this.lsp || !this.lspReady) { resolve(null); return; }
+      const id = this.idGen.get();
+      const timer = setTimeout(() => {
+        this.pendingLsp.delete(id);
+        resolve(null);
+      }, LSP_REQUEST_TIMEOUT_MS);
+
+      this.pendingLsp.set(id, {
+        resolve: (msg) => { clearTimeout(timer); resolve(msg); },
+        reject: () => { clearTimeout(timer); resolve(null); },
+      });
+
+      this.sendLsp({ jsonrpc: "2.0", id, method, params });
+    });
+  }
+
+  private onLspMessage(msg: LspMessage): void {
+    // Diagnostics notification
+    if (msg.method === "textDocument/publishDiagnostics") {
+      this.onDiagnostics(msg.params as any);
+      return;
+    }
+
+    // Response to a pending request
+    if (msg.id != null) {
+      const pending = this.pendingLsp.get(msg.id as number);
+      if (pending) {
+        this.pendingLsp.delete(msg.id as number);
+        pending.resolve(msg);
+      }
+    }
+  }
+
+  private onDiagnostics(params: { uri: string; diagnostics: any[] }): void {
+    const prefix = this.codePrefix;
+    const items: DiagnosticItem[] = params.diagnostics.map((d) => {
+      const pos = toOneBased(d.range.start.line, d.range.start.character);
+      const rawCode = d.code != null ? String(d.code) : "";
+      // Avoid double-prefixing if the code already starts with the prefix
+      const code = rawCode && prefix && !rawCode.startsWith(prefix) ? `${prefix}${rawCode}` : rawCode;
+      return {
+        line: pos.line,
+        character: pos.character,
+        severity: severityLabel(d.severity),
+        code,
+        message: truncateMessage(d.message),
+      };
+    });
+    this.diagCache.set(params.uri, items);
+    const waiters = this.diagReady.get(params.uri);
+    if (waiters) {
+      this.diagReady.delete(params.uri);
+      for (const w of waiters) w();
+    }
+  }
+
+  private sendLsp(msg: LspMessage): void {
+    if (!this.lsp?.stdin) return;
+    this.lsp.stdin.write(serializeMessage(msg));
+  }
+
+  // ─── Shutdown ─────────────────────────────────────────────────────────────
+
+  shutdown(): void {
+    this.fileWatcher.close();
+    if (this.lsp) {
+      try { this.sendLsp({ jsonrpc: "2.0", id: this.idGen.get(), method: "shutdown", params: null }); } catch {}
+      try { this.lsp.kill(); } catch {}
+      this.lsp = null;
+    }
+    this.started = false;
+    this.lspReady = false;
+  }
+}
+
+// ─── LspDaemon ────────────────────────────────────────────────────────────────
+
+export class LspDaemon {
+  private backends: LspBackend[];
+  /** TypeScript backend — also handles workspace/symbol queries */
+  private tsBackend: LspBackend;
+  private server: Server | null = null;
+
+  private lastActivity = Date.now();
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private socketPath = SOCKET_PATH,
+    private pidPath = PID_PATH,
+    private idleTimeoutMs = IDLE_TIMEOUT_MS,
+  ) {
+    this.tsBackend = new LspBackend(
+      "typescript",
+      "typescript-language-server",
+      ["--stdio"],
+      new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]),
+      STANDARD_CAPABILITIES,
+      "TS",
+    );
+
+    const bashBackend = new LspBackend(
+      "bash",
+      "bash-language-server",
+      ["start"],
+      new Set([".sh", ".bash", ".zsh", ".ksh"]),
+      STANDARD_CAPABILITIES,
+      "",  // shellcheck codes are already prefixed (SC2034) or numeric
+    );
+
+    this.backends = [this.tsBackend, bashBackend];
+  }
+
+  /** Return the backend that handles this file, falling back to TypeScript. */
+  private getBackend(filePath: string): LspBackend {
+    return this.backends.find((b) => b.handles(filePath)) ?? this.tsBackend;
+  }
+
+  // ─── Startup ──────────────────────────────────────────────────────────────
+
+  async start(): Promise<void> {
+    // Write PID file
+    writeFileSync(this.pidPath, String(process.pid), "utf8");
+
+    // Remove stale socket
+    if (existsSync(this.socketPath)) {
+      try { unlinkSync(this.socketPath); } catch {}
+    }
+
+    // Start socket server (backends start lazily on first request)
+    await this.startServer();
+
+    // Start idle timer
+    this.resetIdleTimer();
+  }
+
   private startServer(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = createServer((socket) => this.handleConnection(socket));
@@ -166,7 +381,7 @@ export class LspDaemon {
     });
   }
 
-  // ─── Connection handling ─────────────────────────────────────────────────────
+  // ─── Connection handling ──────────────────────────────────────────────────
 
   private handleConnection(socket: Socket): void {
     let buf = "";
@@ -214,79 +429,39 @@ export class LspDaemon {
       case "references":  return this.handleReferences(req);
       case "symbols":     return this.handleSymbols(req);
       case "status":      return this.handleStatus(req);
-      case "shutdown":    this.shutdown(); return okResponse(req.id, { action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0 } as StatusResult);
-      default:            return errorResponse(req.id, `Unknown action: ${(req as any).action}`);
+      case "shutdown":
+        this.shutdown();
+        return okResponse(req.id, {
+          action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
+        } as StatusResult);
+      default:
+        return errorResponse(req.id, `Unknown action: ${(req as any).action}`);
     }
   }
 
-  // ─── File sync ───────────────────────────────────────────────────────────────
-
-  private async ensureFile(absolutePath: string): Promise<string> {
-    await this.waitForLspReady();
-    const { uri, notification, isNewRoot, projectRoot } = this.docManager.ensure(absolutePath);
-
-    if (isNewRoot) {
-      this.addWorkspaceFolder(projectRoot);
-      this.fileWatcher.watch(projectRoot);
-    }
-
-    if (notification) {
-      this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
-    }
-
-    return uri;
-  }
-
-  private addWorkspaceFolder(root: string): void {
-    this.sendLsp({
-      jsonrpc: "2.0",
-      method: "workspace/didChangeWorkspaceFolders",
-      params: {
-        event: {
-          added: [{ uri: pathToUri(root), name: root.split("/").pop() ?? root }],
-          removed: [],
-        },
-      },
-    });
-  }
-
-  private async onFileChange(absolutePath: string): Promise<void> {
-    // Re-sync file on disk change
-    const { notification } = this.docManager.ensure(absolutePath);
-    if (notification) {
-      this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
-    }
-    // Diagnostics will be pushed back via publishDiagnostics
-  }
-
-  // ─── LSP Actions ─────────────────────────────────────────────────────────────
+  // ─── LSP Actions ──────────────────────────────────────────────────────────
 
   private async handleDiagnostics(req: DaemonRequest): Promise<DaemonResponse> {
     if (!req.path) return errorResponse(req.id, "path required for diagnostics");
-    const uri = await this.ensureFile(req.path);
+
+    const backend = this.getBackend(req.path);
+    const uri = await backend.ensureFile(req.path);
 
     // Wait for diagnostics to arrive if not cached yet (first open)
-    if (!this.diagCache.has(uri)) {
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(resolve, 1500);
-        const waiters = this.diagReady.get(uri) ?? [];
-        waiters.push(() => { clearTimeout(timeout); resolve(); });
-        this.diagReady.set(uri, waiters);
-      });
-    }
+    await backend.waitForFirstDiagnostics(uri);
 
-    const items = this.diagCache.get(uri) ?? [];
+    const items = backend.getDiagnostics(uri);
     const errors = items.filter((d) => d.severity === "error");
     const warns = items.filter((d) => d.severity === "warning");
 
-    const result: DiagnosticsResult = {
+    return okResponse(req.id, {
       action: "diagnostics",
       path: req.path,
       errorCount: errors.length,
       warnCount: warns.length,
       items,
-    };
-    return okResponse(req.id, result);
+      language: backend.name,
+    } as DiagnosticsResult);
   }
 
   private async handleHover(req: DaemonRequest): Promise<DaemonResponse> {
@@ -294,30 +469,28 @@ export class LspDaemon {
       return errorResponse(req.id, "path, line, and character required for hover");
     }
 
-    const uri = await this.ensureFile(req.path);
+    const backend = this.getBackend(req.path);
+    const uri = await backend.ensureFile(req.path);
     const pos = toZeroBased(req.line, req.character);
 
-    const lspRes = await this.lspRequest("textDocument/hover", {
+    const lspRes = await backend.lspRequest("textDocument/hover", {
       textDocument: { uri },
       position: pos,
     });
 
-    if (!lspRes || !lspRes.result) {
+    if (!lspRes?.result) {
       return errorResponse(req.id, "No hover information at this position");
     }
 
-    const hover = lspRes.result as any;
-    const { signature, docs } = parseHoverContent(hover);
-
-    const result: HoverResult = {
+    const { signature, docs } = parseHoverContent(lspRes.result as any);
+    return okResponse(req.id, {
       action: "hover",
       path: req.path,
       line: req.line,
       character: req.character,
       signature,
       ...(docs ? { docs } : {}),
-    };
-    return okResponse(req.id, result);
+    } as HoverResult);
   }
 
   private async handleDefinition(req: DaemonRequest): Promise<DaemonResponse> {
@@ -325,26 +498,25 @@ export class LspDaemon {
       return errorResponse(req.id, "path, line, and character required for definition");
     }
 
-    const uri = await this.ensureFile(req.path);
+    const backend = this.getBackend(req.path);
+    const uri = await backend.ensureFile(req.path);
     const pos = toZeroBased(req.line, req.character);
-    const projectRoot = this.docManager.getProjectRoot(req.path);
+    const projectRoot = backend.docManager.getProjectRoot(req.path);
 
-    const lspRes = await this.lspRequest("textDocument/definition", {
+    const lspRes = await backend.lspRequest("textDocument/definition", {
       textDocument: { uri },
       position: pos,
     });
 
-    if (!lspRes?.result) {
-      return errorResponse(req.id, "No definition found");
-    }
+    if (!lspRes?.result) return errorResponse(req.id, "No definition found");
 
     const rawLocations = Array.isArray(lspRes.result) ? lspRes.result : [lspRes.result];
     const locations: DefinitionLocation[] = [];
 
     for (const loc of rawLocations.slice(0, 5)) {
       const defPath = uriToPath(loc.uri);
-      const startLine = loc.range.start.line; // 0-indexed
-      const endLine = loc.range.end.line;     // 0-indexed
+      const startLine = loc.range.start.line;
+      const endLine = loc.range.end.line;
       const expandedEnd = expandToBlock(defPath, startLine, endLine, 30);
       const body = extractLines(defPath, startLine, expandedEnd) ?? "";
       const bodyLines = body.split("\n");
@@ -375,11 +547,12 @@ export class LspDaemon {
       return errorResponse(req.id, "path, line, and character required for references");
     }
 
-    const uri = await this.ensureFile(req.path);
+    const backend = this.getBackend(req.path);
+    const uri = await backend.ensureFile(req.path);
     const pos = toZeroBased(req.line, req.character);
-    const projectRoot = this.docManager.getProjectRoot(req.path);
+    const projectRoot = backend.docManager.getProjectRoot(req.path);
 
-    const lspRes = await this.lspRequest("textDocument/references", {
+    const lspRes = await backend.lspRequest("textDocument/references", {
       textDocument: { uri },
       position: pos,
       context: { includeDeclaration: true },
@@ -419,11 +592,12 @@ export class LspDaemon {
     const MAX = 50;
 
     if (req.path) {
-      // Document symbols
-      const uri = await this.ensureFile(req.path);
-      const projectRoot = this.docManager.getProjectRoot(req.path);
+      // Document symbols — route to the appropriate backend
+      const backend = this.getBackend(req.path);
+      const uri = await backend.ensureFile(req.path);
+      const projectRoot = backend.docManager.getProjectRoot(req.path);
 
-      const lspRes = await this.lspRequest("textDocument/documentSymbol", {
+      const lspRes = await backend.lspRequest("textDocument/documentSymbol", {
         textDocument: { uri },
       });
 
@@ -440,13 +614,14 @@ export class LspDaemon {
     }
 
     if (req.query) {
-      // Workspace symbols
-      const lspRes = await this.lspRequest("workspace/symbol", { query: req.query });
+      // Workspace symbols — TypeScript backend only
+      await this.tsBackend.ensureReady();
+      const lspRes = await this.tsBackend.lspRequest("workspace/symbol", { query: req.query });
       const raw = (lspRes?.result ?? []) as any[];
 
       const items: SymbolItem[] = raw.slice(0, MAX).map((s) => {
         const symPath = uriToPath(s.location.uri);
-        const root = this.docManager.getProjectRoot(symPath);
+        const root = this.tsBackend.docManager.getProjectRoot(symPath);
         return {
           line: s.location.range.start.line + 1,
           name: s.name,
@@ -469,82 +644,22 @@ export class LspDaemon {
   }
 
   private async handleStatus(req: DaemonRequest): Promise<DaemonResponse> {
-    const openFiles = this.docManager.openUris.map(uriToPath);
+    const allOpenFiles = this.backends.flatMap((b) => b.openUris.map(uriToPath));
+    const allProjects = this.backends.flatMap((b) => b.projectRoots);
+
     const result: StatusResult = {
       action: "status",
-      running: this.lspReady,
+      running: this.backends.some((b) => b.isRunning),
       pid: process.pid,
-      projects: this.docManager.projectRoots,
-      openFiles,
-      watchedFiles: openFiles.length,
+      projects: allProjects,
+      openFiles: allOpenFiles,
+      watchedFiles: allOpenFiles.length,
       idleMs: Date.now() - this.lastActivity,
     };
     return okResponse(req.id, result);
   }
 
-  // ─── LSP Transport ────────────────────────────────────────────────────────────
-
-  private sendLsp(msg: LspMessage): void {
-    if (!this.lsp?.stdin) return;
-    this.lsp.stdin.write(serializeMessage(msg));
-  }
-
-  private lspRequest(method: string, params: unknown): Promise<LspMessage | null> {
-    return new Promise((resolve) => {
-      if (!this.lsp || !this.lspReady) { resolve(null); return; }
-
-      const id = this.idGen.get();
-      const timer = setTimeout(() => {
-        this.pendingLsp.delete(id);
-        resolve(null);
-      }, 5000);
-
-      this.pendingLsp.set(id, {
-        resolve: (msg) => { clearTimeout(timer); resolve(msg); },
-        reject: () => { clearTimeout(timer); resolve(null); },
-      });
-
-      this.sendLsp({ jsonrpc: "2.0", id, method, params });
-    });
-  }
-
-  private onLspMessage(msg: LspMessage): void {
-    // Diagnostics notification
-    if (msg.method === "textDocument/publishDiagnostics") {
-      this.onDiagnostics(msg.params as any);
-      return;
-    }
-
-    // Response to a pending request
-    if (msg.id != null) {
-      const pending = this.pendingLsp.get(msg.id as number);
-      if (pending) {
-        this.pendingLsp.delete(msg.id as number);
-        pending.resolve(msg);
-      }
-    }
-  }
-
-  private onDiagnostics(params: { uri: string; diagnostics: any[] }): void {
-    const items: DiagnosticItem[] = params.diagnostics.map((d) => {
-      const pos = toOneBased(d.range.start.line, d.range.start.character);
-      return {
-        line: pos.line,
-        character: pos.character,
-        severity: severityLabel(d.severity),
-        code: d.code ? `TS${d.code}` : "",
-        message: truncateMessage(d.message),
-      };
-    });
-    this.diagCache.set(params.uri, items);
-    const waiters = this.diagReady.get(params.uri);
-    if (waiters) {
-      this.diagReady.delete(params.uri);
-      for (const w of waiters) w();
-    }
-  }
-
-  // ─── Idle / Shutdown ──────────────────────────────────────────────────────────
+  // ─── Idle / Shutdown ──────────────────────────────────────────────────────
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
@@ -553,23 +668,20 @@ export class LspDaemon {
 
   shutdown(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.fileWatcher.close();
+    for (const backend of this.backends) backend.shutdown();
     this.server?.close();
-    if (this.lsp) {
-      try { this.sendLsp({ jsonrpc: "2.0", id: this.idGen.get(), method: "shutdown", params: null }); } catch {}
-      try { this.lsp.kill(); } catch {}
-    }
     try { unlinkSync(this.socketPath); } catch {}
     try { unlinkSync(this.pidPath); } catch {}
     process.exit(0);
   }
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function findBinary(name: string): Promise<string | null> {
   // Check local node_modules first (installed in extension dir)
   const ext = import.meta.dir;
-  const local = resolve(ext, "node_modules", ".bin", name);
+  const local = resolvePath(ext, "node_modules", ".bin", name);
   if (existsSync(local)) return local;
 
   // Check PATH
@@ -608,7 +720,7 @@ function parseHoverContent(hover: any): { signature: string; docs?: string } {
   return { signature: raw };
 }
 
-function flattenSymbols(symbols: any[], projectRoot: string): SymbolItem[] {
+function flattenSymbols(symbols: any[], _projectRoot: string): SymbolItem[] {
   const result: SymbolItem[] = [];
   for (const s of symbols) {
     const line = (s.selectionRange ?? s.range)?.start?.line ?? 0;
@@ -620,7 +732,7 @@ function flattenSymbols(symbols: any[], projectRoot: string): SymbolItem[] {
     });
     // Flatten children if present (hierarchical response)
     if (s.children?.length) {
-      result.push(...flattenSymbols(s.children, projectRoot));
+      result.push(...flattenSymbols(s.children, _projectRoot));
     }
   }
   return result;

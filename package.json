@@ -20,7 +20,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@sinclair/typebox": "^0.34.48",
-    "@mariozechner/pi-coding-agent": "^0.55.3",
+    "@mariozechner/pi-coding-agent": "^0.56.1",
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-tui": "*"
   }

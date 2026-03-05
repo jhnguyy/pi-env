@@ -72,6 +72,8 @@ export interface DiagnosticsResult {
   errorCount: number;
   warnCount: number;
   items: DiagnosticItem[];
+  /** Language server backend name, e.g. "typescript" or "bash" */
+  language?: string;
 }
 
 export interface HoverResult {
