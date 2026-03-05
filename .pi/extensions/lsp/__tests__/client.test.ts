@@ -17,9 +17,8 @@ describeIfEnabled("lsp", "LspClient", () => {
   let server: Server | null;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "lsp-client-test-"));
-    const suffix = Date.now() + Math.random().toString(36).slice(2);
-    socketPath = join(tmpDir, `client-test-${suffix}.sock`);
+    tmpDir = mkdtempSync(join(tmpdir(), "lsp-c-"));
+    socketPath = join(tmpDir, "t.sock");
     server = null;
   });
 

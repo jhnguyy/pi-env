@@ -25,11 +25,9 @@ describeIfEnabled("lsp", "LspDaemon", () => {
   let daemon: LspDaemon;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "lsp-daemon-test-"));
-    // Use unique socket paths per test run
-    const suffix = Date.now() + Math.random().toString(36).slice(2);
-    socketPath = join(tmpDir, `test-${suffix}.sock`);
-    pidPath = join(tmpDir, `test-${suffix}.pid`);
+    tmpDir = mkdtempSync(join(tmpdir(), "lsp-d-"));
+    socketPath = join(tmpDir, "t.sock");
+    pidPath = join(tmpDir, "t.pid");
 
     // Create a tsconfig so project root detection works
     writeFileSync(join(tmpDir, "tsconfig.json"), '{"compilerOptions":{}}', "utf8");
