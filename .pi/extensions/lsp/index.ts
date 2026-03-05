@@ -22,13 +22,14 @@ export default function (pi: ExtensionAPI) {
     name: "lsp",
     label: "LSP",
     description:
-      "TypeScript language intelligence — diagnostics, hover, go-to-definition, " +
-      "find-references, document/workspace symbols. Communicates with a shared daemon " +
-      "that manages typescript-language-server, spawning it on first use.",
+      "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
+      "find-references, document/workspace symbols. Communicates with a shared daemon that " +
+      "manages typescript-language-server (for .ts/.tsx/.js) and bash-language-server " +
+      "(for .sh/.bash/.zsh/.ksh), spawning each on first use.",
 
     promptSnippet:
-      "TypeScript language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
-      "Use instead of grep chains for type-aware code navigation.",
+      "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
+      "Use instead of grep chains for type-aware or shell-aware code navigation.",
 
     promptGuidelines: [
       "When working in a TypeScript codebase, reach for lsp before grep or read for any symbol-level task.",
@@ -37,6 +38,7 @@ export default function (pi: ExtensionAPI) {
       "To understand a type, signature, or overload at a usage site: lsp hover — not reading the declaration file.",
       "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
       "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
+      "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
       "lsp uses 1-indexed lines and characters, matching read tool output.",
     ],
@@ -106,7 +108,8 @@ export default function (pi: ExtensionAPI) {
       undefined;
 
     if (!path) return;
-    if (!path.endsWith(".ts") && !path.endsWith(".tsx")) return;
+    const isBashFile = path.endsWith(".sh") || path.endsWith(".bash") || path.endsWith(".zsh") || path.endsWith(".ksh");
+    if (!path.endsWith(".ts") && !path.endsWith(".tsx") && !isBashFile) return;
     if (event.isError) return;
 
     try {

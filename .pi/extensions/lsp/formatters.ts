@@ -57,9 +57,10 @@ export function formatDiagnostics(r: DiagnosticsResult): string {
 export function formatDiagnosticsSummary(r: DiagnosticsResult, maxItems = 5): string {
   if (r.errorCount === 0 && r.warnCount === 0) return "";
 
+  const lang = r.language === "bash" ? "Bash" : "TS";
   const label = r.errorCount > 0
-    ? `⚠ TS (${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}${r.warnCount ? `, ${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}` : ""})`
-    : `⚠ TS (${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""})`;
+    ? `⚠ ${lang} (${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}${r.warnCount ? `, ${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}` : ""})`
+    : `⚠ ${lang} (${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""})`;
 
   const lines = [label];
   const shown = r.items.slice(0, maxItems);
