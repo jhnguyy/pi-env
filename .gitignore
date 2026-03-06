@@ -6,5 +6,7 @@ models.json
 sessions/
 .DS_Store
 
-# Machine-local handoffs — never committed
+# Machine-local config and data — never committed
 .pi/handoffs/
+permissions.json
+permissions-audit.jsonl
