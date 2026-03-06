@@ -132,4 +132,32 @@ describe("BranchGuard", () => {
       expect(guard.check("git push origin masterclass").shouldBlock).toBe(false);
     });
   });
+
+  // ─── Repo-scoped guard (-C flag) ────────────────────────────────
+
+  describe("repo-scoped guard via -C flag", () => {
+    const guardedConfig: WorkTrackerConfig = {
+      guardedRepos: ["/tank/code/pi-env"],
+      protectedBranches: ["main", "master"],
+    };
+
+    it("blocks push to main in a guarded repo", () => {
+      const g = new BranchGuard(guardedConfig);
+      const r = g.check("git -C /tank/code/pi-env push origin main");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.targetBranch).toBe("main");
+    });
+
+    it("allows push to main in an unguarded repo", () => {
+      const g = new BranchGuard(guardedConfig);
+      const r = g.check("git -C /tank/code/credential-proxy push -u origin main");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("blocks push to main with no -C (conservative, repo unknown)", () => {
+      const g = new BranchGuard(guardedConfig);
+      const r = g.check("git push origin main");
+      expect(r.shouldBlock).toBe(true);
+    });
+  });
 });
