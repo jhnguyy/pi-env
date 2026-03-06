@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import type { BranchGuardResult, WorkTrackerConfig } from "./types";
 
 /**
@@ -25,14 +26,23 @@ export class BranchGuard {
       return { shouldBlock: false };
     }
 
-    // Check for explicit protected branch in the push command
-    for (const branch of this.protectedBranches) {
-      if (this.targetsProtectedBranch(command, branch)) {
-        return {
-          shouldBlock: true,
-          targetBranch: branch,
-          reason: this.buildReason(branch),
-        };
+    // Check for explicit protected branch in the push command.
+    // If the command includes -C <path>, only block if that path is a guarded repo.
+    // This allows initial pushes to main on unguarded repos (e.g. new projects).
+    const explicitRepo = this.extractRepoCFlag(command);
+    const isGuardedRepo = explicitRepo === null || this.guardedRepos.some(
+      (r) => resolve(r) === resolve(explicitRepo),
+    );
+
+    if (isGuardedRepo) {
+      for (const branch of this.protectedBranches) {
+        if (this.targetsProtectedBranch(command, branch)) {
+          return {
+            shouldBlock: true,
+            targetBranch: branch,
+            reason: this.buildReason(branch),
+          };
+        }
       }
     }
 
@@ -69,8 +79,18 @@ export class BranchGuard {
     return null;
   }
 
+  /**
+   * Extracts the path from a `-C <path>` flag in a git command.
+   * Returns null if no -C flag is present.
+   */
+  private extractRepoCFlag(command: string): string | null {
+    const m = command.match(/\bgit\s+-C\s+(\S+)/);
+    return m ? m[1] : null;
+  }
+
   private isGitPush(command: string): boolean {
-    return /\bgit\s+push\b/.test(command);
+    // Match both `git push` and `git -C <path> push` (flags may appear before push)
+    return /\bgit\b.*\bpush\b/.test(command);
   }
 
   /**
@@ -78,9 +98,9 @@ export class BranchGuard {
    * These implicitly push the current branch, so we need a runtime check.
    */
   private isBareGitPush(command: string): boolean {
-    // Strip flags (--force, -u, etc.) to check remaining positional args
+    // Strip `git [flags] push` preamble (handles `git push` and `git -C <path> push`)
     const stripped = command
-      .replace(/\bgit\s+push\b/, "")
+      .replace(/\bgit\b.*?\bpush\b/, "")
       .replace(/\s+--?\w[\w-]*/g, "")
       .trim();
     // If nothing remains, or only a remote name remains: bare push
