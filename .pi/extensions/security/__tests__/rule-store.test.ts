@@ -183,6 +183,47 @@ describeIfEnabled("security", "RuleStore", () => {
     });
   });
 
+  describe("defaultMode", () => {
+    it("getDefaultMode() returns 'default' when not in file", () => {
+      const store = new RuleStore(filePath);
+      expect(store.getDefaultMode()).toBe("default");
+    });
+
+    it("loads defaultMode from file when present", () => {
+      writeFileSync(filePath, JSON.stringify({ version: 1, defaultMode: "permissive", rules: [] }));
+      const store = new RuleStore(filePath);
+      expect(store.getDefaultMode()).toBe("permissive");
+    });
+
+    it("ignores invalid defaultMode values", () => {
+      writeFileSync(filePath, JSON.stringify({ version: 1, defaultMode: "invalid", rules: [] }));
+      const store = new RuleStore(filePath);
+      expect(store.getDefaultMode()).toBe("default");
+    });
+
+    it("persists non-default defaultMode on saveToDisk (via addRule)", () => {
+      writeFileSync(filePath, JSON.stringify({ version: 1, defaultMode: "permissive", rules: [] }));
+      const store = new RuleStore(filePath);
+      store.addRule(makeRule()); // triggers saveToDisk
+      const raw = JSON.parse(readFileSync(filePath, "utf-8"));
+      expect(raw.defaultMode).toBe("permissive");
+    });
+
+    it("omits defaultMode from disk when it is 'default'", () => {
+      const store = new RuleStore(filePath);
+      store.addRule(makeRule());
+      const raw = JSON.parse(readFileSync(filePath, "utf-8"));
+      expect(raw.defaultMode).toBeUndefined();
+    });
+
+    it("survives reload", () => {
+      writeFileSync(filePath, JSON.stringify({ version: 1, defaultMode: "permissive", rules: [] }));
+      const store = new RuleStore(filePath);
+      store.reload();
+      expect(store.getDefaultMode()).toBe("permissive");
+    });
+  });
+
   describe("session mode", () => {
     it("defaults to 'default' mode", () => {
       const store = new RuleStore(filePath);

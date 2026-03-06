@@ -12,12 +12,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import { dirname, join } from "path";
 import { Rule } from "./rule";
 import type { PermissionsConfig, RuleDefinition, SessionMode } from "./types";
+import { SESSION_MODES } from "./types";
 
 export class RuleStore {
   private filePath: string;
   private globalRules: RuleDefinition[] = [];
   private sessionRules: RuleDefinition[] = [];
   private sessionMode: SessionMode = "default";
+  private defaultMode: SessionMode = "default";
 
   /** Cached file stats for change detection */
   private lastMtime: number = 0;
@@ -81,6 +83,10 @@ export class RuleStore {
 
   // ─── Session Mode ───────────────────────────────────────────────
 
+  getDefaultMode(): SessionMode {
+    return this.defaultMode;
+  }
+
   getSessionMode(): SessionMode {
     return this.sessionMode;
   }
@@ -139,6 +145,11 @@ export class RuleStore {
         return true;
       });
 
+      this.defaultMode =
+        config.defaultMode && SESSION_MODES.includes(config.defaultMode)
+          ? config.defaultMode
+          : "default";
+
       const stat = this.getFileStat();
       this.lastMtime = stat.mtime;
       this.lastSize = stat.size;
@@ -160,6 +171,7 @@ export class RuleStore {
   private saveToDisk(): void {
     const config: PermissionsConfig = {
       version: 1,
+      ...(this.defaultMode !== "default" && { defaultMode: this.defaultMode }),
       rules: this.globalRules,
     };
     const content = JSON.stringify(config, null, 2);

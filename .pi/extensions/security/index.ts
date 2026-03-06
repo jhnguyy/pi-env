@@ -50,7 +50,7 @@ export default function (pi: ExtensionAPI) {
 
   const reconstructSession = (ctx: ExtensionContext) => {
     const sessionRules: RuleDefinition[] = [];
-    let sessionMode: SessionMode = "default";
+    let sessionMode: SessionMode = ruleStore.getDefaultMode();
 
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type === "custom" && entry.customType === "permissions-session-rule") {

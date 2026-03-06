@@ -162,6 +162,8 @@ export const SESSION_MODE_DESCRIPTIONS: Record<SessionMode, string> = {
 /** Schema of ~/.pi/permissions.json */
 export interface PermissionsConfig {
   version: number;
+  /** Default session mode for new sessions. Omit or set to "default" for normal behaviour. */
+  defaultMode?: SessionMode;
   rules: RuleDefinition[];
 }
 
