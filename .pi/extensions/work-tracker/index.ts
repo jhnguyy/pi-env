@@ -17,6 +17,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
 import { BranchGuard } from "./branch-guard";
+import { cleanupHandoffs, detectMergedBranch } from "./handoff-cleanup";
 import type { WorkTrackerConfig } from "./types";
 
 function loadConfig(): WorkTrackerConfig {
@@ -112,14 +113,36 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 
-  // ─── 2. Initial widget on session start ───────────────────────────
+  // ─── 2. Handoff cleanup on merge ─────────────────────────────────
+  pi.on("tool_result", async (event, ctx) => {
+    if (event.toolName !== "bash" || event.isError) return;
+
+    const command = (event.input as Record<string, string>).command ?? "";
+    const output = (event.content as Array<{ type: string; text?: string }>)
+      .filter((c) => c.type === "text")
+      .map((c) => c.text ?? "")
+      .join("");
+
+    const merged = detectMergedBranch(command, output);
+    if (!merged) return;
+
+    const deleted = cleanupHandoffs(merged);
+    if (deleted.length > 0) {
+      ctx.ui.notify(
+        `🧹 Merged ${merged} — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
+        "info",
+      );
+    }
+  });
+
+  // ─── 3. Initial widget on session start ───────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     if (process.env.PI_AGENT_ID) return;
     const line = buildStatusLine();
     if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
   });
 
-  // ─── 3. Context Injection + widget refresh (root sessions only) ───
+  // ─── 4. Context Injection + widget refresh (root sessions only) ───
   pi.on("before_agent_start", async (_event, ctx) => {
     // Skip context injection for subagents — PI_AGENT_ID is set by pi
     // when spawning subagents via the tmux tool
