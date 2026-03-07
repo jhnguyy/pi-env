@@ -194,6 +194,28 @@ export class OrchestratorManager {
       branch = `orch/${runId}/${label}`;
       worktreePath = `${orchDir}/${label}`;
       createWorktree(repo, worktreePath, branch);
+
+      // Install commit-msg hook for automatic Agent-Id trailer injection.
+      // Workers don't need to remember — automation handles attribution.
+      const hooksDir = `${worktreePath}/.git-hooks`;
+      mkdirSync(hooksDir, { recursive: true });
+
+      spawnSync(
+        "git",
+        ["-C", worktreePath, "config", "--local", "core.hooksPath", hooksDir],
+        { encoding: "utf8", timeout: 5_000 },
+      );
+
+      const hookScript = [
+        "#!/usr/bin/env bash",
+        'LABEL="${PI_AGENT_LABEL:-}"',
+        'SESSION="${PI_BUS_SESSION:-}"',
+        'if [[ -n "$LABEL" || -n "$SESSION" ]]; then',
+        '  printf "\\nAgent-Id: %s/%s\\n" "${LABEL:-unknown}" "${SESSION:-unknown}" >> "$1"',
+        "fi",
+      ].join("\n");
+
+      writeFileSync(`${hooksDir}/commit-msg`, hookScript, { mode: 0o755 });
     }
 
     // Build the fully-decorated worker command
