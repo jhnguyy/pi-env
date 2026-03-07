@@ -217,6 +217,35 @@ bus read { channel: "builders:b" }
 
 ---
 
+## Multi-Agent Dialogue Protocol
+
+For design decisions requiring real back-and-forth (not just parallel workers reporting results). Use when agents need to reason together about tradeoffs, not just execute scoped tasks.
+
+**Core rules:**
+- **Named positions with reasoning.** Not "I think X" but "X because Y; the alternative Z fails because W." Forces real engagement instead of surface agreement.
+- **One scoped topic per exchange.** Agree the scope before arguing. Disagreements on different topics interleave badly — resolve one before moving to the next.
+- **Both convergence and documented disagreement are valid outputs.** False consensus is the worst outcome. If you disagree, record both positions explicitly.
+- **Escalate after 2–3 unresolved exchanges.** Persistent disagreement is usually about values or priorities, not facts — that's the human's call. Surface both positions clearly and stop.
+
+**Protocol:**
+```
+orchestrator publishes position + reasoning → agent responds with position + reasoning
+→ iterate until: convergence | documented disagreement
+→ on convergence: publish CONSENSUS: <list of agreed items>
+→ on stuck (2-3 exchanges): publish DEADLOCK: <position A> / <position B> → surface to human
+```
+
+**Anti-patterns:**
+- Agreeing without engaging the reasoning (false consensus)
+- Drifting across multiple topics without resolving any
+- Formal ack/nack protocol — too heavy for 2–3 agent conversations
+
+**Model selection for dialogue:**
+- Sonnet ↔ Sonnet: design questions with known solution space
+- Sonnet ↔ Opus: design questions with genuine uncertainty, novel architecture, or high-stakes decisions
+
+---
+
 ## Boundaries
 
-Invocation mechanics and orchestration patterns only. Not covered: domain skill content, safety enforcement, session management or handoffs (see handoff skill).
+Invocation mechanics, orchestration patterns, and multi-agent dialogue. Not covered: domain skill content, safety enforcement, session management or handoffs (see handoff skill).
