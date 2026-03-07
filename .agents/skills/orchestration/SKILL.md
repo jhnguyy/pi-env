@@ -77,10 +77,12 @@ Event-driven. No polling. No sleep loops. `bus` is a core pi tool — unaffected
 bus start { agentId: "orch" }   // → session id
 ```
 
-Spawn workers with the session ID; instruct them in natural language to publish when done:
+Spawn workers with the session ID **and agent ID**; instruct them in natural language to publish when done:
 ```bash
-PI_BUS_SESSION=<id> pi -p --no-session "...task... When done, publish to channel 'phase-1' with a summary."
+PI_BUS_SESSION=<id> PI_AGENT_ID=<label> pi -p --no-session "...task... When done, publish to channel 'phase-1' with a summary."
 ```
+
+`PI_AGENT_ID` is required for workers to call `bus publish`. Without it, the publish call silently fails with "No agent ID". Use the worker's label as the ID (e.g. `PI_AGENT_ID=scout-a`).
 
 `bus wait` wakes on **at least one new message** on any listed channel. `bus read` returns all messages since last read:
 ```
@@ -188,10 +190,10 @@ bus start { agentId: "orch" }   // → session: "abc123"
 
 // Scouts — parallel, per-worker channels, busChannel for crash-safety
 tmux run { label: "scout-a", busChannel: "scouts:a",
-  command: "PI_BUS_SESSION=abc123 pi -p --no-session --tools read,bash --no-extensions \
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-a pi -p --no-session --tools read,bash --no-extensions \
   'Analyze X. Write to /tmp/scout-a.json. Publish to channel scouts:a when done.'" }
 tmux run { label: "scout-b", busChannel: "scouts:b",
-  command: "PI_BUS_SESSION=abc123 pi -p --no-session --tools read --no-extensions \
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-b pi -p --no-session --tools read --no-extensions \
   'Analyze Y. Write to /tmp/scout-b.md. Publish to channel scouts:b when done.'" }
 
 bus wait { channels: ["scouts:a", "scouts:b"] }   // wakes on first; loop if second not yet read
@@ -203,10 +205,10 @@ read { path: "/tmp/scout-b.md" }
 
 // Builders — parallel, per-worker channels
 tmux run { label: "builder-a", busChannel: "builders:a",
-  command: "PI_BUS_SESSION=abc123 pi -p --no-session --tools read,write,bash --no-extensions \
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-a pi -p --no-session --tools read,write,bash --no-extensions \
   @/tmp/scout-a.json 'Implement A. Publish to channel builders:a when done.'" }
 tmux run { label: "builder-b", busChannel: "builders:b",
-  command: "PI_BUS_SESSION=abc123 pi -p --no-session --tools read,write --skills skill-builder --no-extensions \
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-b pi -p --no-session --tools read,write --skills skill-builder --no-extensions \
   @/tmp/scout-b.md 'Write skill B. Publish to channel builders:b when done.'" }
 
 bus wait { channels: ["builders:a", "builders:b"] }
