@@ -10,7 +10,7 @@
  *     `ls -lt /tmp/orch-runs/` to see recent runs.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
 import type { OrchManifest, RunReceipt } from "./types";
 
 export const RECEIPT_DIR = "/tmp/orch-runs";
@@ -18,7 +18,10 @@ export const RECEIPT_DIR = "/tmp/orch-runs";
 // ─── Manifest ─────────────────────────────────────────────────
 
 export function writeManifest(orchDir: string, manifest: OrchManifest): void {
-  writeFileSync(`${orchDir}/.manifest.json`, JSON.stringify(manifest, null, 2));
+  const target = `${orchDir}/.manifest.json`;
+  const tmp = `${target}.tmp`;
+  writeFileSync(tmp, JSON.stringify(manifest, null, 2));
+  renameSync(tmp, target);
 }
 
 export function readManifest(orchDir: string): OrchManifest {

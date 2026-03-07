@@ -54,6 +54,7 @@ export type OrchErrorCode =
   | "RUN_ACTIVE"
   | "NO_ACTIVE_RUN"
   | "NOT_IN_TMUX"
+  | "INVALID_REPO"
   | "WORKTREE_CREATE_FAILED"
   | "SPAWN_FAILED"
   | "INVALID_LABEL";

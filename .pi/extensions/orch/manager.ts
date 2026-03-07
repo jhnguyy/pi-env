@@ -12,6 +12,7 @@
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
 import { createWorktree, removeWorktree, pruneWorktrees } from "./git";
@@ -66,11 +67,12 @@ function validateLabel(label: string): void {
 function buildWorkerCommand(opts: {
   command: string;
   busSession: string;
+  orchDir: string;
   label: string;
   worktreePath?: string;
   busChannel?: string;
 }): string {
-  const { command, busSession, label, worktreePath, busChannel } = opts;
+  const { command, busSession, orchDir, label, worktreePath, busChannel } = opts;
 
   // Escape single quotes in user command for bash -c embedding
   const safeCmd = command.replace(/'/g, "'\\''");
@@ -88,7 +90,11 @@ function buildWorkerCommand(opts: {
   if (worktreePath) {
     envParts.push("-C", worktreePath);
   }
-  envParts.push(`PI_BUS_SESSION=${busSession}`, `PI_AGENT_ID=${label}`);
+  envParts.push(
+    `PI_BUS_SESSION=${busSession}`,
+    `PI_AGENT_ID=${label}`,
+    `ORCH_DIR=${orchDir}`,
+  );
 
   return `${envParts.join(" ")} bash -c '${safeCmd}${suffix}'`;
 }
@@ -110,12 +116,24 @@ export class OrchestratorManager {
       );
     }
 
+    // Validate repo is a git repository before committing to the run
+    if (repo) {
+      const check = spawnSync("git", ["-C", repo, "rev-parse", "--git-dir"], {
+        encoding: "utf8",
+        timeout: 5_000,
+      });
+      if (check.status !== 0) {
+        throw new OrchError(`Not a git repository: ${repo}`, "INVALID_REPO");
+      }
+    }
+
     const runId = randomBytes(3).toString("hex");
     const orchDir = mkdtempSync("/tmp/orch-");
     const busSession = randomBytes(3).toString("hex");
 
-    // Initialize bus session directory so `bus wait` calls work immediately
-    mkdirSync(`/tmp/pi-bus-${busSession}`, { recursive: true });
+    // Initialize bus session directory structure matching agent-bus transport expectations
+    mkdirSync(`/tmp/pi-bus-${busSession}/channels`, { recursive: true });
+    mkdirSync(`/tmp/pi-bus-${busSession}/cursors`, { recursive: true });
     // Set env so subsequent bus tool calls in this process use this session
     process.env.PI_BUS_SESSION = busSession;
     // Set orchestrator agent ID for bus publish calls
@@ -159,6 +177,15 @@ export class OrchestratorManager {
 
     validateLabel(label);
 
+    // Prevent duplicate labels — catches both accidental re-use and re-spawn attempts.
+    // To re-spawn a failed worker, call cleanup first or choose a new label.
+    if (this.state.workers.some(w => w.label === label)) {
+      throw new OrchError(
+        `Worker with label "${label}" already exists in this run — use a unique label`,
+        "INVALID_LABEL",
+      );
+    }
+
     // Create worktree + branch if repo is set
     let branch: string | undefined;
     let worktreePath: string | undefined;
@@ -173,6 +200,7 @@ export class OrchestratorManager {
     const finalCommand = buildWorkerCommand({
       command,
       busSession,
+      orchDir,
       label,
       worktreePath,
       busChannel,
@@ -242,7 +270,7 @@ export class OrchestratorManager {
       pruneWorktrees(repo);
     }
 
-    // Write run receipt before deleting orchDir
+    // Write run receipt before deleting orchDir — best-effort (disk full shouldn't block cleanup)
     const receipt: RunReceipt = {
       runId,
       orchDir,
@@ -255,10 +283,18 @@ export class OrchestratorManager {
       cleanedUp: { panes: panesKilled, worktrees: worktreesRemoved },
       preservedBranches,
     };
-    const receiptPath = writeReceipt(receipt);
+    let receiptPath = "(not written)";
+    try {
+      receiptPath = writeReceipt(receipt);
+    } catch (err) {
+      console.error(`[orch] Failed to write run receipt: ${err}`);
+    }
 
     // Delete ORCH_DIR (manifest + any files workers wrote there)
     rmSync(orchDir, { recursive: true, force: true });
+
+    // Delete bus session directory (prevents /tmp accumulation)
+    rmSync(`/tmp/pi-bus-${busSession}`, { recursive: true, force: true });
 
     // Clear env vars set by start()
     delete process.env.PI_BUS_SESSION;
