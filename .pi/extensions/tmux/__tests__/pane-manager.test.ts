@@ -118,17 +118,10 @@ describeIfEnabled("tmux", "PaneManager", () => {
       await manager.run({ action: "run", command: "echo a", label: "a" });
       await manager.run({ action: "run", command: "echo b", label: "b" });
       await manager.run({ action: "run", command: "echo c", label: "c" });
-      for (const call of client.splitWindowCalls) {
-        expect(call.direction).toBe("right");
-      }
-    });
-
-    it("does not target a specific pane when splitting (rebalance handles layout)", async () => {
-      await manager.run({ action: "run", command: "echo a", label: "a" });
-      await manager.run({ action: "run", command: "echo b", label: "b" });
-      for (const call of client.splitWindowCalls) {
-        expect(call.targetPaneId).toBeUndefined();
-      }
+      // First two workers split right; worker 2+ split below
+      expect(client.splitWindowCalls[0].direction).toBe("right");
+      expect(client.splitWindowCalls[1].direction).toBe("right");
+      expect(client.splitWindowCalls[2].direction).toBe("below");
     });
 
     it("passes command directly when waitOnExit=false", async () => {
@@ -496,7 +489,7 @@ describeIfEnabled("tmux", "PaneManager", () => {
       const tmuxPaneId = result.tmuxPaneId;
       await manager.close(result.paneId, true);
       expect(manager.getActivePanes().length).toBe(0);
-      expect(client.killPaneAndRebalanceCalls).toContain(tmuxPaneId);
+      expect(client.killPaneCalls).toContain(tmuxPaneId);
     });
 
     it("does not call killPaneAndRebalance when kill=false", async () => {
