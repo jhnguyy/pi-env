@@ -1,0 +1,245 @@
+/**
+ * Orch Extension — entry point.
+ *
+ * Thin wiring only. Zero business logic. All state and lifecycle management
+ * lives in OrchestratorManager.
+ *
+ * Automation-vs-judgment boundary:
+ *   - Orch handles: ORCH_DIR creation, bus session init, worktree + branch
+ *     isolation per worker, pane spawning with env injection, cleanup,
+ *     manifest writes, run receipts for retrospectives.
+ *   - LLM handles: decomposition, worker scope, when synthesis is complete,
+ *     merge strategy for preserved branches.
+ *
+ * One active run per session. `orch cleanup` must be called before `orch start`
+ * can be called again. On session_shutdown, logs uncleaned runs — visible in
+ * the TUI for retrospective review.
+ */
+
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import { StringEnum } from "@mariozechner/pi-ai";
+import { Text } from "@mariozechner/pi-tui";
+
+import { OrchestratorManager } from "./manager";
+import { OrchError } from "./types";
+
+export default function (pi: ExtensionAPI) {
+  const exec = pi.exec.bind(pi);
+  const manager = new OrchestratorManager(exec);
+
+  // ─── session_shutdown hook ───────────────────────────────────
+  //
+  // If the session ends without orch cleanup, log the uncleaned run.
+  // This surfaces in the TUI and the retro — making the miss visible
+  // rather than silently letting orphaned panes and worktrees accumulate.
+
+  pi.on("session_shutdown", async () => {
+    const status = manager.getStatus();
+    if (!status) return;
+
+    console.error(
+      `[orch] WARNING: session ended with active run ${status.runId} — ` +
+      `${status.workers.length} workers were not cleaned up. ` +
+      `Branches: ${status.workers.map(w => w.branch).filter(Boolean).join(", ") || "none"}. ` +
+      `ORCH_DIR: ${status.orchDir} (may still exist on disk).`,
+    );
+  });
+
+  // ─── orch tool ───────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "orch",
+    label: "Orch",
+
+    description: [
+      "Orchestration lifecycle manager — enforces branch isolation, temp dir cleanup, and run receipts.",
+      "",
+      "Actions:",
+      "  start   — Begin a new orchestration run. Creates ORCH_DIR (/tmp/orch-*), initializes bus",
+      "            session, sets PI_BUS_SESSION for this process. Optional: repo path enables",
+      "            git worktree isolation per worker (separate branch per pane, no commits collide).",
+      "            Returns: runId, orchDir, busSession.",
+      "",
+      "  spawn   — Spawn one worker pane. Required: label (a-z, 0-9, hyphens), command.",
+      "            Automatically injects PI_BUS_SESSION + PI_AGENT_ID into worker env.",
+      "            If repo was set on start: creates worktree at ORCH_DIR/<label> on branch",
+      "            orch/<runId>/<label>. Worker starts in that directory — no manual cd needed.",
+      "            Optional: busChannel — crash-safe exit signal (same as tmux busChannel).",
+      "            Returns: paneId, branch (if worktree), worktreePath (if worktree).",
+      "",
+      "  cleanup — Kill all panes, remove all worktrees, delete ORCH_DIR.",
+      "            Branches are preserved — merge or discard them before calling cleanup,",
+      "            or after (they're listed in the receipt). Writes a run receipt to",
+      "            /tmp/orch-runs/<ts>-<runId>.json for retrospective review.",
+      "            Required: call this after synthesis is complete.",
+      "",
+      "  status  — Show current run state: runId, workers, orchDir, busSession.",
+      "            Returns 'no active run' if orch start has not been called.",
+      "",
+      "Typical flow:",
+      "  orch start { repo } → orch spawn × N → bus wait → read results → orch cleanup",
+      "",
+      "Branch isolation: each worker gets orch/<runId>/<label>. Two workers cannot commit",
+      "to the same branch. After cleanup, run: git branch --list 'orch/*' to see preserved work.",
+      "",
+      "Retrospectives: ls /tmp/orch-runs/ — each file is a structured run receipt.",
+    ].join("\n"),
+
+    parameters: Type.Object({
+      action: StringEnum(["start", "spawn", "cleanup", "status"] as const, {
+        description: "Operation to perform",
+      }),
+      // start params
+      repo: Type.Optional(
+        Type.String({
+          description:
+            "Absolute path to git repo root. Enables worktree isolation — each worker gets " +
+            "its own branch. Omit for scout-only or non-code runs.",
+        }),
+      ),
+      // spawn params
+      label: Type.Optional(
+        Type.String({
+          description:
+            "Worker label — a-z, 0-9, hyphens only, max 64 chars. " +
+            "Used as pane title, PI_AGENT_ID, and branch suffix.",
+        }),
+      ),
+      command: Type.Optional(
+        Type.String({ description: "Full command to run in the worker pane." }),
+      ),
+      interactive: Type.Optional(
+        Type.Boolean({
+          description:
+            "Whether the pane is interactive (default: true for pi subagents).",
+        }),
+      ),
+      busChannel: Type.Optional(
+        Type.String({
+          description:
+            "Auto-publish exit signal to this bus channel when the worker exits (crash-safe).",
+        }),
+      ),
+    }),
+
+    async execute(_toolCallId, params, _signal) {
+      try {
+        switch (params.action) {
+          case "start": {
+            const result = manager.start(params.repo);
+            const repoNote = params.repo
+              ? `\nRepo: ${params.repo} (worktree isolation active)`
+              : "\nNo repo — scout/note-only run";
+            return ok(
+              `Run ${result.runId} started.\n` +
+              `ORCH_DIR: ${result.orchDir}\n` +
+              `Bus session: ${result.busSession} (PI_BUS_SESSION set)` +
+              repoNote,
+            );
+          }
+
+          case "spawn": {
+            if (!params.label || !params.command) {
+              return err("spawn requires label and command");
+            }
+            const result = await manager.spawn({
+              label: params.label,
+              command: params.command,
+              interactive: params.interactive,
+              busChannel: params.busChannel,
+            });
+            const lines = [`Worker '${params.label}' spawned.`, `Pane: ${result.paneId}`];
+            if (result.branch) lines.push(`Branch: ${result.branch}`);
+            if (result.worktreePath) lines.push(`Worktree: ${result.worktreePath}`);
+            if (params.busChannel) lines.push(`Bus channel: ${params.busChannel}`);
+            return ok(lines.join("\n"));
+          }
+
+          case "cleanup": {
+            const result = await manager.cleanup();
+            const lines = [
+              "Cleanup complete.",
+              `Panes killed: ${result.panes}`,
+              `Worktrees removed: ${result.worktrees}`,
+            ];
+            if (result.preservedBranches.length > 0) {
+              lines.push(`Preserved branches: ${result.preservedBranches.join(", ")}`);
+              lines.push("Review and merge or delete them before the next run.");
+            }
+            lines.push(`Receipt: ${result.receiptPath}`);
+            return ok(lines.join("\n"));
+          }
+
+          case "status": {
+            const state = manager.getStatus();
+            if (!state) {
+              return ok("No active run. Call orch start to begin.");
+            }
+            const lines = [
+              `Run ${state.runId} active since ${new Date(state.startedAt).toISOString()}`,
+              `ORCH_DIR: ${state.orchDir}`,
+              `Bus session: ${state.busSession}`,
+            ];
+            if (state.repo) lines.push(`Repo: ${state.repo}`);
+            if (state.workers.length === 0) {
+              lines.push("Workers: none spawned yet");
+            } else {
+              lines.push(`Workers (${state.workers.length}):`);
+              for (const w of state.workers) {
+                const parts = [`  ${w.label} — pane ${w.tmuxPaneId}`];
+                if (w.branch) parts.push(`branch: ${w.branch}`);
+                lines.push(parts.join(", "));
+              }
+            }
+            return ok(lines.join("\n"));
+          }
+
+          default:
+            return err(`Unknown action: ${params.action}`);
+        }
+      } catch (e) {
+        const msg =
+          e instanceof OrchError
+            ? `orch error [${e.code}]: ${e.message}`
+            : `unexpected error: ${e}`;
+        return err(msg);
+      }
+    },
+
+    renderCall(args, theme) {
+      let text = theme.fg("toolTitle", theme.bold("orch"));
+      text += " " + theme.fg("accent", args.action ?? "");
+      if (args.label) text += " " + theme.fg("muted", args.label);
+      if (args.repo) text += " " + theme.fg("dim", args.repo.split("/").pop() ?? "");
+      return new Text(text, 0, 0);
+    },
+
+    renderResult(result, _opts, theme) {
+      const first = result.content[0];
+      const text = first?.type === "text" ? first.text : "";
+      const isError =
+        result.details != null &&
+        typeof result.details === "object" &&
+        "error" in result.details;
+      if (isError) {
+        return new Text(theme.fg("error", text || "error"), 0, 0);
+      }
+      return new Text(theme.fg("success", "✓ " + text.split("\n")[0]), 0, 0);
+    },
+  });
+}
+
+// ─── Helpers ─────────────────────────────────────────────────
+
+function txt(text: string): { type: "text"; text: string } {
+  return { type: "text", text };
+}
+
+function ok(text: string) {
+  return { content: [txt(text)], details: {} };
+}
+
+function err(msg: string) {
+  return { content: [txt(msg)], details: { error: msg } };
+}
