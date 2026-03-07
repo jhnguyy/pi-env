@@ -16,9 +16,9 @@
 # ~/.local/bin is the XDG standard user binary dir, auto-added to PATH by most
 # Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
 #
-# Asset symlinks must sit next to the binary regardless of PI_PACKAGE_DIR:
-#   getThemesDir() and getExportTemplateDir() resolve relative to
-#   dirname(process.execPath) for bun binaries — not overridable via env var.
+# Asset resolution (package.json, theme/, export-html/) is handled by the
+# PI_PACKAGE_DIR environment variable pointing at pi-env's node_modules —
+# no symlinks next to the binary are needed.
 #
 # Idempotent — re-run after `bun install` picks up a new pi version:
 #   cd /mnt/tank/code/pi-env && bun install && ./setup/install-bun-pi.sh
@@ -31,7 +31,6 @@ BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 
 ok()   { echo "  ✓  $1"; }
 info() { echo "  ·  $1"; }
-link() { echo "  →  $1"; }
 err()  { echo "  ✗  $1" >&2; exit 1; }
 
 # ── Locate the repo-local package ───────────────────────────────────────────
@@ -65,24 +64,6 @@ cp "$TMP_BIN" "$BIN_DIR/pi"
 chmod +x "$BIN_DIR/pi"
 
 ok "Binary: $BIN_DIR/pi"
-
-# ── Asset symlinks ───────────────────────────────────────────────────────────
-#
-# getThemesDir() and getExportTemplateDir() look for theme/ and export-html/
-# next to the binary (dirname(process.execPath)) when isBunBinary=true.
-# package.json is needed for getPackageDir() fallback.
-
-echo ""
-echo "Linking assets..."
-
-ln -sfn "$PI_PKG/package.json" "$BIN_DIR/package.json"
-link "package.json"
-
-ln -sfn "$PI_PKG/dist/modes/interactive/theme" "$BIN_DIR/theme"
-link "theme/"
-
-ln -sfn "$PI_PKG/dist/core/export-html" "$BIN_DIR/export-html"
-link "export-html/"
 
 # ── PATH check ───────────────────────────────────────────────────────────────
 
