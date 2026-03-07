@@ -27,11 +27,4 @@ git branch -d feat/notes-patch
 git push origin main
 ```
 
-## Branches in Flight
 
-| Branch | Purpose |
-|---|---|
-| `feat/notes-patch` | Add patch action to notes-assistant extension |
-| `feat/bun-improvements` | Bun audit + extension scaffold template |
-| `chore/bun-runtime-doc` | Fix stale Node.js claim in agent_bus_design.md |
-| `feat/work-tracker` | Branch guard + work state + context injection + retrospective |
