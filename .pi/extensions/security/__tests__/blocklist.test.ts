@@ -114,6 +114,18 @@ describe("blocklist", () => {
       // Only write/edit path is checked, not bash commands
       expect(blocked("bash", "path", "/etc/cron.d/job")).toBe(false);
     });
+
+    it("does NOT block src/CronScheduler.tsx (false positive regression)", () => {
+      expect(blocked("write", "path", "src/CronScheduler.tsx")).toBe(false);
+    });
+
+    it("does NOT block docs/cron-usage.md (false positive regression)", () => {
+      expect(blocked("write", "path", "docs/cron-usage.md")).toBe(false);
+    });
+
+    it("does NOT block lib/acronym.ts (false positive regression)", () => {
+      expect(blocked("write", "path", "lib/acronym.ts")).toBe(false);
+    });
   });
 
   // ── write-systemd ────────────────────────────────────────────────────────
@@ -125,6 +137,22 @@ describe("blocklist", () => {
 
     it("blocks edit of a systemd drop-in", () => {
       expect(blocked("edit", "path", "/lib/systemd/system/docker.service")).toBe(true);
+    });
+
+    it("blocks /run/systemd paths", () => {
+      expect(blocked("write", "path", "/run/systemd/system/override.conf")).toBe(true);
+    });
+
+    it("blocks user-level ~/.config/systemd/user/ units", () => {
+      expect(blocked("write", "path", "/home/user/.config/systemd/user/myservice.service")).toBe(true);
+    });
+
+    it("does NOT block src/systemd-parser.ts (false positive regression)", () => {
+      expect(blocked("write", "path", "src/systemd-parser.ts")).toBe(false);
+    });
+
+    it("does NOT block docs/systemd-notes.md (false positive regression)", () => {
+      expect(blocked("write", "path", "docs/systemd-notes.md")).toBe(false);
     });
   });
 

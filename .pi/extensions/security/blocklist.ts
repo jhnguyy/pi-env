@@ -6,6 +6,14 @@
  * cron, systemd, git hooks, SSH access control).
  *
  * No prompts. No reviews. Block means block.
+ *
+ * Scope: write and edit tools only.
+ * The bash tool is the trust boundary — if the agent has bash, it can write
+ * anywhere via redirects, heredocs, tee, python one-liners, etc. Trying to
+ * pattern-match bash redirects to blocked paths is whack-a-mole that was
+ * tried in the previous version of this extension and removed for being
+ * fragile theater. These write/edit blocks are defense-in-depth against the
+ * structured file tools, not a filesystem ACL.
  */
 
 export interface BlockEntry {
@@ -43,14 +51,20 @@ export const BLOCKLIST: BlockEntry[] = [
     id: "write-cron",
     tools: ["write", "edit"],
     field: "path",
-    pattern: /cron/i,
+    // Anchored to system cron locations — avoids false positives on source
+    // files like src/CronScheduler.tsx or docs/cron-usage.md.
+    pattern: /^\/(etc|var\/spool)\/(cron|at)/,
     reason: "Cron path writes blocked — edit directly if needed",
   },
   {
     id: "write-systemd",
     tools: ["write", "edit"],
     field: "path",
-    pattern: /systemd/i,
+    // Anchored to system and user unit directories — avoids false positives on
+    // source files like src/systemd-parser.ts or docs/systemd-notes.md.
+    // Covers both system paths (/etc/systemd, /lib/systemd, ...) and
+    // user-scoped units (~/.config/systemd/user/).
+    pattern: /^\/(etc|lib|usr\/lib|run)\/systemd\/|\/\.config\/systemd\//,
     reason: "Systemd unit writes blocked — edit directly if needed",
   },
   {
