@@ -6,6 +6,8 @@
 - Prefer reversible operations. Commit before multi-file changes.
 - Before any code change, create a git worktree on a new branch named for the task. Do not edit directly on the main/master branch.
 - Before any change touching 3+ files, write a numbered step list first.
+- When a branch merges, delete any handoff that tracked that work. Handoffs are launch
+  pads, not trackers — tasks.md is the source of truth for open work.
 
 ## Clarify Before Exploring
 
