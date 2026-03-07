@@ -7,30 +7,34 @@ description: Subagent spawning, scoping, and context gathering. Use when decompo
 
 ## Mental Model
 
-You are the **coordinator**. Workers do bounded, scoped work and report results. You route context, wait for completion, and synthesize. Workers never coordinate with each other — all routing goes through you.
+**Goal:** Route context to scoped workers, wait for completion signals, and synthesize results into a coherent output. Workers do bounded work and report back. Workers can coordinate directly with each other when the exchange is well-scoped and self-contained — route through the orchestrator when its output determines what gets spawned next, or when you need to filter before passing downstream.
 
-`gather context → dispatch workers (parallel) → wait → synthesize → repeat or commit`
+`gather context → dispatch workers (parallel or coordinating) → wait → synthesize → repeat or commit`
 
-**Tool role split — internalize this:**
+**Tool guidance — reason about the situation; these are defaults, not rules:**
 
-| Tool | Role | Never use for |
-|------|------|---------------|
-| `tmux` | Process management — spawn, send keystrokes, observe | Completion detection |
-| `bus` | Completion signaling — event-driven wait/wake | Process management |
-| `tmux read` | Debugging — diagnose stalled panes, read permission gates | Checking if work is done |
+| Tool | Strongest at | Notes |
+|------|--------------|-------|
+| `tmux` | Process management — spawn workers, send keystrokes, observe output | Completion detection via `tmux read` is fragile; prefer `bus` when you can |
+| `bus` | Event-driven completion signaling — no polling, crash-safe exits | Can also carry small data payloads; direct worker-to-worker coordination works when no orchestrator routing is needed |
+| `tmux read` | Diagnosing stalled panes, reading permission prompts | Useful for any "what is on screen right now" question, not just debugging |
+
+> **This skill is a living document.** When you discover a pattern that works better than what's described here — update the skill. Better patterns beat prescribed ones. Note the context so future agents know when to apply each approach.
 
 ---
 
 ## Spawning Workers
 
-`-p` = non-interactive (print mode, no TUI), runs and exits. `--no-session` = ephemeral.
+`--no-session` = ephemeral (no session persistence). Pass `interactive: true` to `tmux run` so the full TUI renders in the pane — the user can follow tool calls and progress in real time.
 
 ```bash
-pi -p --no-session "prompt"
-pi -p --no-session @src/main.ts @package.json "Review this module"
+pi --no-session "prompt"
+pi --no-session @src/main.ts @package.json "Review this module"
 ```
 
 For complex tasks, write a brief (`write { path: '/tmp/brief.md', content: '...' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context. Clean up temp files after workers complete.
+
+**Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona.
 
 ---
 
@@ -47,13 +51,7 @@ For complex tasks, write a brief (`write { path: '/tmp/brief.md', content: '...'
 | `--system-prompt "..."` | Override default system prompt |
 | `--append-system-prompt "..."` | Add constraints, keep defaults |
 
-**Model selection** (pi aliases; verify with `pi models`):
-
-| Tier | Flag | Use for |
-|---|---|---|
-| **Haiku** | `--model claude-haiku-4-5` | Gathering, classification, read-only exploration |
-| **Sonnet** | `--model claude-sonnet-4-5` | Implementation, analysis, review, skill writing |
-| **Opus** | `--model claude-opus-4-5` | Complex design, novel architecture |
+**Model selection** — run `pi --list-models` to get current IDs; pass the full ID, not a short alias. Match capability to what the task genuinely requires: deeper reasoning, adversarial analysis, or catching subtle failure modes warrant a stronger model; well-scoped or mechanical tasks do not.
 
 ---
 
@@ -142,7 +140,7 @@ To prevent permission gates entirely: `--no-extensions` in the worker command.
 Before implementation, gather with a cheap read-only scout:
 
 ```bash
-pi -p --no-session --tools read,bash --no-skills --model claude-haiku-4-5 \
+pi --no-session --tools read,bash --no-skills --model claude-haiku-4-5 \
   "Analyze this repo for: [TASK]. Report only:
    1. Stack and toolchain  2. Exact build/test/lint commands
    3. Files relevant to the task  4. Conventions that constrain implementation
@@ -189,11 +187,11 @@ All `bus *` / `tmux *` / `read *` are **pi tool calls**.
 bus start { agentId: "orch" }   // → session: "abc123"
 
 // Scouts — parallel, per-worker channels, busChannel for crash-safety
-tmux run { label: "scout-a", busChannel: "scouts:a",
-  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-a pi -p --no-session --tools read,bash --no-extensions \
+tmux run { label: "scout-a", busChannel: "scouts:a", interactive: true,
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-a pi --no-session --tools read,bash --no-extensions \
   'Analyze X. Write to /tmp/scout-a.json. Publish to channel scouts:a when done.'" }
-tmux run { label: "scout-b", busChannel: "scouts:b",
-  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-b pi -p --no-session --tools read --no-extensions \
+tmux run { label: "scout-b", busChannel: "scouts:b", interactive: true,
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=scout-b pi --no-session --tools read --no-extensions \
   'Analyze Y. Write to /tmp/scout-b.md. Publish to channel scouts:b when done.'" }
 
 bus wait { channels: ["scouts:a", "scouts:b"] }   // wakes on first; loop if second not yet read
@@ -204,11 +202,11 @@ read { path: "/tmp/scout-a.json" }   // distill before passing to builders
 read { path: "/tmp/scout-b.md" }
 
 // Builders — parallel, per-worker channels
-tmux run { label: "builder-a", busChannel: "builders:a",
-  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-a pi -p --no-session --tools read,write,bash --no-extensions \
+tmux run { label: "builder-a", busChannel: "builders:a", interactive: true,
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-a pi --no-session --tools read,write,bash --no-extensions \
   @/tmp/scout-a.json 'Implement A. Publish to channel builders:a when done.'" }
-tmux run { label: "builder-b", busChannel: "builders:b",
-  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-b pi -p --no-session --tools read,write --skills skill-builder --no-extensions \
+tmux run { label: "builder-b", busChannel: "builders:b", interactive: true,
+  command: "PI_BUS_SESSION=abc123 PI_AGENT_ID=builder-b pi --no-session --tools read,write --skills skill-builder --no-extensions \
   @/tmp/scout-b.md 'Write skill B. Publish to channel builders:b when done.'" }
 
 bus wait { channels: ["builders:a", "builders:b"] }
