@@ -16,15 +16,21 @@
  *   /todo              — show current list
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { TodoStore } from "./store";
 
 export default function (pi: ExtensionAPI) {
   const store = new TodoStore();
 
+  function refreshWidget(ctx: ExtensionContext) {
+    if (process.env.PI_AGENT_ID) return;
+    ctx.ui.setWidget("session-todos", [store.render()], { placement: "belowEditor" });
+  }
+
   // ─── 1. Clear on new session ──────────────────────────────────────
-  pi.on("session_start", async (_event, _ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     store.clear();
+    refreshWidget(ctx);
   });
 
   // ─── 2. Inject on every root turn ────────────────────────────────
@@ -36,7 +42,7 @@ export default function (pi: ExtensionAPI) {
       message: {
         customType: "session-todos",
         content: store.render(),
-        display: true,
+        display: false,
       },
     };
   });
@@ -64,6 +70,7 @@ export default function (pi: ExtensionAPI) {
       // /todo clear
       if (trimmed === "clear") {
         store.clear();
+        refreshWidget(ctx);
         ctx.ui.notify("Cleared.", "info");
         return;
       }
@@ -73,8 +80,12 @@ export default function (pi: ExtensionAPI) {
         const ref = trimmed.slice(5).trim();
         const n = parseInt(ref, 10);
         const item = store.complete(isNaN(n) ? ref : n);
-        if (item) ctx.ui.notify(`✅ (${item.id}) ${item.text}`, "info");
-        else ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        if (item) {
+          refreshWidget(ctx);
+          ctx.ui.notify(`✅ (${item.id}) ${item.text}`, "info");
+        } else {
+          ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        }
         return;
       }
 
@@ -83,13 +94,18 @@ export default function (pi: ExtensionAPI) {
         const ref = trimmed.slice(3).trim();
         const n = parseInt(ref, 10);
         const ok = store.remove(isNaN(n) ? ref : n);
-        if (ok) ctx.ui.notify("Removed.", "info");
-        else ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        if (ok) {
+          refreshWidget(ctx);
+          ctx.ui.notify("Removed.", "info");
+        } else {
+          ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        }
         return;
       }
 
       // /todo <task> — add
       const item = store.add(trimmed);
+      refreshWidget(ctx);
       ctx.ui.notify(`□ (${item.id}) ${item.text}`, "info");
     },
   });

@@ -4,6 +4,7 @@
 
 - **Prefer retrieval-led reasoning over pre-training-led reasoning.** When unsure, read the source — don't reason from what you already know. This applies to code, config, and personal notes equally.
 - Prefer reversible operations. Commit before multi-file changes.
+- Before any code change, create a git worktree on a new branch named for the task. Do not edit directly on the main/master branch.
 - Before any change touching 3+ files, write a numbered step list first.
 
 ## Clarify Before Exploring

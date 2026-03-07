@@ -58,6 +58,19 @@ export default function (pi: ExtensionAPI) {
   const config = loadConfig();
   const guard = new BranchGuard(config);
 
+  function buildStatusLine(): string | null {
+    const parts: string[] = [];
+    for (const repoPath of config.guardedRepos) {
+      const { branch, dirty } = getGitStatus(repoPath);
+      if (!branch) continue;
+      const name = repoPath.split("/").pop() ?? repoPath;
+      const warn = config.protectedBranches.includes(branch) ? " ⚠️" : "";
+      const dirtyNote = dirty > 0 ? ` (${dirty} uncommitted)` : "";
+      parts.push(`${name}: ${branch}${warn}${dirtyNote}`);
+    }
+    return parts.length > 0 ? `[work-tracker] ${parts.join(" | ")}` : null;
+  }
+
   // ─── 1. Branch Guard ──────────────────────────────────────────────
   pi.on("tool_call", async (event, _ctx) => {
     if (event.toolName !== "bash") return undefined;
@@ -69,30 +82,31 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 
-  // ─── 2. Context Injection (root sessions only) ────────────────────
-  pi.on("before_agent_start", async (_event, _ctx) => {
+  // ─── 2. Initial widget on session start ───────────────────────────
+  pi.on("session_start", async (_event, ctx) => {
+    if (process.env.PI_AGENT_ID) return;
+    const line = buildStatusLine();
+    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
+  });
+
+  // ─── 3. Context Injection + widget refresh (root sessions only) ───
+  pi.on("before_agent_start", async (_event, ctx) => {
     // Skip context injection for subagents — PI_AGENT_ID is set by pi
     // when spawning subagents via the tmux tool
     if (process.env.PI_AGENT_ID) return {};
 
-    const parts: string[] = [];
+    const line = buildStatusLine();
 
-    for (const repoPath of config.guardedRepos) {
-      const { branch, dirty } = getGitStatus(repoPath);
-      if (!branch) continue;
-      const name = repoPath.split("/").pop() ?? repoPath;
-      const warn = config.protectedBranches.includes(branch) ? " ⚠️" : "";
-      const dirtyNote = dirty > 0 ? ` (${dirty} uncommitted)` : "";
-      parts.push(`${name}: ${branch}${warn}${dirtyNote}`);
-    }
+    // Refresh the persistent widget with latest git state
+    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
 
-    if (parts.length === 0) return {};
+    if (!line) return {};
 
     return {
       message: {
         customType: "work-tracker",
-        content: `[work-tracker] ${parts.join(" | ")}`,
-        display: true,
+        content: line,
+        display: false,
       },
     };
   });
