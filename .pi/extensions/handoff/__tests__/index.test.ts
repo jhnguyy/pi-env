@@ -67,6 +67,7 @@ describeIfEnabled("handoff", "handoff extension", () => {
       expect(messages.length).toBe(2);
       expect(messages[0]).toContain("handoff");
       expect(messages[1]).toContain("retrospective");
+      expect(messages[1]).toContain("~/.pi/retro/");
       expect(messages[1]).toContain("### Patterns");
     });
   });

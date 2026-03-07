@@ -81,9 +81,9 @@ export default function (pi: ExtensionAPI) {
         `Review the last ${n} session retrospectives and propose behavioral improvements.\n` +
           `\n` +
           `Steps:\n` +
-          `1. Search the vault for the last ${n} retro entries. Look in projects/homelab/worklog/ for\n` +
-          `   notes containing "### Patterns" sections with tagged items ([workflow], [tooling],\n` +
-          `   [convention], [mistake], [knowledge]).\n` +
+          `1. Read the last ${n} retro files from ~/.pi/retro/ (sorted by filename descending — newest first).\n` +
+          `   Each file contains one or more sections with "### Patterns" and tagged items ([workflow],\n` +
+          `   [tooling], [convention], [mistake], [knowledge]).\n` +
           `2. Read ~/.pi/agent/AGENTS.md.\n` +
           `3. Read all active skills in ~/.agents/skills/ (read each SKILL.md).\n` +
           `4. Identify recurring patterns across the retros — the same tag appearing 2 or more times\n` +

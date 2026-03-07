@@ -17,8 +17,8 @@ export default function (pi: ExtensionAPI) {
 			);
 
 			pi.sendUserMessage(
-				`Write a session retrospective and append it to the vault note at\n` +
-					`projects/homelab/worklog/${date}.md (create if it doesn't exist).\n` +
+				`Write a session retrospective and save it to ~/.pi/retro/${date}.md\n` +
+					`(create the file if it doesn't exist; append as a new section if it does).\n` +
 					`\n` +
 					`Use this exact format:\n` +
 					`\n` +
