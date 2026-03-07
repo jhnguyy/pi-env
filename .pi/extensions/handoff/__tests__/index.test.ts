@@ -38,5 +38,36 @@ describeIfEnabled("handoff", "handoff extension", () => {
       expect(typeof registered[0].opts.description).toBe("string");
       expect(registered[0].opts.description.length).toBeGreaterThan(0);
     });
+
+    it("handler queues two sendUserMessage calls (handoff + retro)", async () => {
+      const mod = await import("../index");
+
+      const messages: string[] = [];
+      const mockPi = {
+        registerCommand(
+          _name: string,
+          opts: { description: string; handler: (args: any, ctx: any) => Promise<void> },
+        ) {
+          // Invoke the handler with a mock ctx
+          opts.handler(undefined, {
+            waitForIdle: async () => {},
+            model: { provider: "test", id: "model" },
+          });
+        },
+        sendUserMessage(msg: string) {
+          messages.push(msg);
+        },
+      };
+
+      mod.default(mockPi as any);
+
+      // Allow microtasks to flush (handler is async)
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(messages.length).toBe(2);
+      expect(messages[0]).toContain("handoff");
+      expect(messages[1]).toContain("retrospective");
+      expect(messages[1]).toContain("### Patterns");
+    });
   });
 });
