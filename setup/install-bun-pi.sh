@@ -11,6 +11,7 @@
 #   - Uses @mariozechner/pi-coding-agent from the repo's node_modules (version
 #     pinned by bun.lock — run `bun install` first if node_modules is absent)
 #   - Compiles it with bun build --compile → ~/.local/bin/pi
+#   - Symlinks required assets (package.json, theme/, export-html/) next to binary
 #
 # ~/.local/bin is the XDG standard user binary dir, auto-added to PATH by most
 # Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
