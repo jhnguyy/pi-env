@@ -8,7 +8,7 @@
 - Before any change touching 3+ files, write a numbered step list first.
 - When a branch merges, delete any handoff that tracked that work. Handoffs are launch
   pads, not trackers — tasks.md is the source of truth for open work.
-- **Budget your context for routing, not reading.** If you're dispatching workers, gather context through a scout rather than loading source files yourself. Your job as orchestrator is routing: goals, file paths, distilled summaries — not file contents.
+- **Gather context through scouts.** The orchestrator's primary capability is routing: dispatch cheap read-only scouts to extract file paths and distilled summaries, then synthesize that context into focused worker briefs. Scouts handle source reading; orchestrators handle context routing. This preserves your context budget for orchestration logic, not source files.
 
 ## Clarify Before Exploring
 
