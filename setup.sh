@@ -96,6 +96,24 @@ echo "AGENTS.md"
 echo "---------"
 link_path "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md" "~/.pi/agent/AGENTS.md"
 
+# ── Git hooks ────────────────────────────────────────────────────────────────
+# Install post-merge hook so setup auto-runs after git pull
+
+echo ""
+echo "Git hooks"
+echo "---------"
+HOOK_SRC="$REPO/setup/post-merge"
+HOOK_DST="$REPO/.git/hooks/post-merge"
+if [ -L "$HOOK_DST" ] && [ "$(readlink "$HOOK_DST")" = "$HOOK_SRC" ]; then
+  ok "post-merge hook"
+elif [ -e "$HOOK_DST" ] && [ ! -L "$HOOK_DST" ]; then
+  skip "post-merge hook (custom hook already exists at .git/hooks/post-merge)"
+else
+  ln -sfn "$HOOK_SRC" "$HOOK_DST"
+  chmod +x "$HOOK_SRC"
+  linked "post-merge hook → setup/post-merge"
+fi
+
 # ── Pi binary ────────────────────────────────────────────────────────────────
 # Compile pi from the repo-local node_modules into ~/.pi/bin/pi
 

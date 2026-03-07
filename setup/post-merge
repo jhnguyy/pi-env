@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# post-merge hook — runs setup.sh automatically after git pull
+#
+# Installed by setup.sh. Re-run setup after any merge (pull or manual) so
+# new extensions, skills, and dependency updates are applied immediately.
+
+set -euo pipefail
+
+REPO="$(git rev-parse --show-toplevel)"
+echo "[pi-env] Running setup after pull…"
+"$REPO/setup.sh"
