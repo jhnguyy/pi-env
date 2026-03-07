@@ -15,3 +15,9 @@ Before running exploratory commands to resolve missing context, **ask the user f
 - High-risk ops (bulk deletes, force pushes, DB mutations, prod config): state intent, scope, and undo path — then wait for confirmation.
 - Never commit secrets. If a secret appears unexpectedly in output or context, stop and flag it — do not use it.
 - Scope edits to the working tree unless told otherwise.
+
+## Session Tasks
+
+At the start of each user request, add tasks with `/todo <description>` before beginning work.
+Mark complete with `/todo done <n>` as you finish each one.
+This gives the user a live view of progress within the session.
