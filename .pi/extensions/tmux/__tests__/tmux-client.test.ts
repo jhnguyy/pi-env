@@ -176,10 +176,8 @@ describeIfEnabled("tmux", "TmuxClient", () => {
       const client = new TmuxClient(fn);
       await client.setupPane("%5", "my-label");
       expect(calls.length).toBe(1);
-      expect(calls[0].cmd).toBe("bash");
-      expect(calls[0].args[0]).toBe("-c");
-      expect(calls[0].args).toContain("%5");
-      expect(calls[0].args).toContain("my-label");
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual(["select-pane", "-t", "%5", "-T", "my-label"]);
     });
 
     it("does not throw on failure (best-effort)", async () => {
@@ -218,27 +216,6 @@ describeIfEnabled("tmux", "TmuxClient", () => {
       expect(calls.length).toBe(1);
       expect(calls[0].cmd).toBe("tmux");
       expect(calls[0].args).toEqual(["capture-pane", "-p", "-t", "%5"]);
-    });
-  });
-
-  // ─── killPaneAndRebalance ────────────────────────────────────
-
-  describe("killPaneAndRebalance()", () => {
-    it("sends a single bash exec with paneId as positional param", async () => {
-      const { calls, fn } = captureExec();
-      const client = new TmuxClient(fn);
-      await client.killPaneAndRebalance("%7");
-      expect(calls.length).toBe(1);
-      expect(calls[0].cmd).toBe("bash");
-      expect(calls[0].args[0]).toBe("-c");
-      expect(calls[0].args).toContain("%7");
-    });
-
-    it("does not throw on failure (best-effort)", async () => {
-      const client = new TmuxClient(
-        mockExec({ stdout: "", stderr: "no pane with id", code: 1 }),
-      );
-      await expect(client.killPaneAndRebalance("%99")).resolves.toBeUndefined();
     });
   });
 
@@ -391,23 +368,4 @@ describeIfEnabled("tmux", "TmuxClient", () => {
     });
   });
 
-  // ─── rebalanceLayout ────────────────────────────────────────
-
-  describe("rebalanceLayout()", () => {
-    it("sends set-window-option and select-layout commands", async () => {
-      const { calls, fn } = captureExec();
-      const client = new TmuxClient(fn);
-      await client.rebalanceLayout();
-      expect(calls.length).toBe(2);
-      expect(calls[0].args).toEqual(["set-window-option", "main-pane-width", "50%"]);
-      expect(calls[1].args).toEqual(["select-layout", "main-vertical"]);
-    });
-
-    it("does not throw when tmux commands fail (best-effort)", async () => {
-      const client = new TmuxClient(
-        mockExec({ stdout: "", stderr: "error", code: 1 }),
-      );
-      await expect(client.rebalanceLayout()).resolves.toBeUndefined();
-    });
-  });
 });
