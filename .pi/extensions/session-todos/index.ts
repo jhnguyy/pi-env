@@ -42,7 +42,7 @@ export default function (pi: ExtensionAPI) {
       message: {
         customType: "session-todos",
         content: store.render(),
-        display: true,
+        display: false,
       },
     };
   });

@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
       message: {
         customType: "work-tracker",
         content: line,
-        display: true,
+        display: false,
       },
     };
   });
