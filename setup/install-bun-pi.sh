@@ -10,24 +10,26 @@
 # What it does:
 #   - Uses @mariozechner/pi-coding-agent from the repo's node_modules (version
 #     pinned by bun.lock — run `bun install` first if node_modules is absent)
-#   - Compiles it with bun build --compile → ~/.pi/bin/pi
-#   - Symlinks required assets (package.json, theme/, export-html/) next to binary
+#   - Compiles it with bun build --compile → ~/.local/bin/pi
 #
-# Add to PATH (once, in ~/.profile or ~/.bashrc):
-#   export PATH="$HOME/.pi/bin:$PATH"
+# ~/.local/bin is the XDG standard user binary dir, auto-added to PATH by most
+# Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
+#
+# Asset resolution (package.json, theme/, export-html/) is handled by the
+# PI_PACKAGE_DIR environment variable pointing at pi-env's node_modules —
+# no symlinks next to the binary are needed.
 #
 # Idempotent — re-run after `bun install` picks up a new pi version:
-#   cd ~/pi-env && bun install && ./setup/install-bun-pi.sh
+#   cd /mnt/tank/code/pi-env && bun install && ./setup/install-bun-pi.sh
 #   (or just run ./setup.sh, which calls this automatically)
 
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BIN_DIR="${PI_BIN_DIR:-$HOME/.pi/bin}"
+BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 
 ok()   { echo "  ✓  $1"; }
 info() { echo "  ·  $1"; }
-link() { echo "  →  $1"; }
 err()  { echo "  ✗  $1" >&2; exit 1; }
 
 # ── Locate the repo-local package ───────────────────────────────────────────
@@ -62,23 +64,6 @@ chmod +x "$BIN_DIR/pi"
 
 ok "Binary: $BIN_DIR/pi"
 
-# ── Asset symlinks ───────────────────────────────────────────────────────────
-#
-# When pi is a Bun binary, getPackageDir() = dirname(process.execPath),
-# so package.json, theme/, and export-html/ must sit next to the binary.
-
-echo ""
-echo "Linking assets..."
-
-ln -sfn "$PI_PKG/package.json" "$BIN_DIR/package.json"
-link "package.json"
-
-ln -sfn "$PI_PKG/dist/modes/interactive/theme" "$BIN_DIR/theme"
-link "theme/"
-
-ln -sfn "$PI_PKG/dist/core/export-html" "$BIN_DIR/export-html"
-link "export-html/"
-
 # ── PATH check ───────────────────────────────────────────────────────────────
 
 echo ""
@@ -86,9 +71,8 @@ echo "Done. pi $PI_VERSION ready at $BIN_DIR/pi"
 
 if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$BIN_DIR"; then
   echo ""
-  echo "  Add $BIN_DIR to PATH (once):"
-  echo "    echo 'export PATH=\"\$HOME/.pi/bin:\$PATH\"' >> ~/.profile"
-  echo ""
-  echo "  Then reload your shell or run:"
-  echo "    export PATH=\"\$HOME/.pi/bin:\$PATH\""
+  echo "  ~/.local/bin is not in PATH yet."
+  echo "  On NixOS: ensure interactiveShellInit includes \$HOME/.local/bin"
+  echo "  On other Linux: add to ~/.profile or ~/.bashrc:"
+  echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
 fi
