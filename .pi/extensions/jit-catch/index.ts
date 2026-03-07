@@ -70,11 +70,15 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
 
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const exec = pi.exec.bind(pi);
+
+      const progress = (msg: string) =>
+        onUpdate?.({ content: [{ type: "text", text: msg }], details: { phase: msg } });
 
       // ─── 1. Acquire diff ──────────────────────────────────────
       let diffText: string;
+      progress("Acquiring diff…");
       try {
         if (params.diff) {
           diffText = params.diff;
@@ -109,10 +113,15 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
+      progress(`Found ${targets.length} extension(s): ${targets.map(e => e.name).join(", ")}`);
+
       // ─── 4. Run workflow for each extension ───────────────────
       const results = [];
       for (const ext of targets) {
-        const result = await runForExtension(ext, diffText, exec, signal);
+        progress(`${ext.name}: generating tests…`);
+        const result = await runForExtension(ext, diffText, exec, signal, (phase) => {
+          progress(`${ext.name}: ${phase}`);
+        });
         results.push(result);
       }
 

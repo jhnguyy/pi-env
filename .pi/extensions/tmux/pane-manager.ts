@@ -68,6 +68,8 @@ function makePaneRecord(opts: {
 
 export class PaneManager {
   private registry: Map<string, PaneRecord> = new Map();
+  /** Ordered list of worker tmux pane IDs, used for layout targeting. */
+  private workerPaneIds: string[] = [];
 
   constructor(
     private client: ITmuxClient,
@@ -106,10 +108,39 @@ export class PaneManager {
       command = input.command;
     }
 
-    // Always split right — rebalanceLayout will arrange all panes evenly.
-    const tmuxPaneId = await this.client.splitWindow("right", command);
+    // Layout: orchestrator = full-height left column (1/3 width).
+    // Workers fill a grid in the remaining 2/3:
+    //   col0 (orch) | col1      | col2
+    //   full height  | worker 0  | worker 1
+    //                | worker 2  | worker 3
+    //
+    // Worker 0: split right from orch, new pane gets 67% (orch keeps 33%)
+    // Worker 1: split right from worker 0, 50% of the 67% (two equal worker columns)
+    // Workers 2+: split below existing workers, round-robin across columns
+    const workerIndex = this.workerPaneIds.length;
+    let direction: "right" | "below";
+    let targetPaneId: string | undefined;
+    let sizePercent: number | undefined;
 
-    // Set pane title + rebalance layout in one exec (was 3 separate spawns).
+    if (workerIndex === 0) {
+      direction = "right";
+      targetPaneId = undefined; // splits from orchestrator (current pane)
+      sizePercent = 67;         // new pane gets 67%, orchestrator keeps 33%
+    } else if (workerIndex === 1) {
+      direction = "right";
+      targetPaneId = this.workerPaneIds[0]; // split from first worker
+      sizePercent = 50;                      // equal halves of the 67%
+    } else {
+      // Round-robin below existing worker columns
+      const columnTarget = (workerIndex - 2) % 2;
+      direction = "below";
+      targetPaneId = this.workerPaneIds[columnTarget];
+      sizePercent = undefined; // default 50% vertical split
+    }
+
+    const tmuxPaneId = await this.client.splitWindow(direction, command, targetPaneId, sizePercent);
+    this.workerPaneIds.push(tmuxPaneId);
+
     await this.client.setupPane(tmuxPaneId, input.label);
 
     const pane = makePaneRecord({
@@ -163,10 +194,10 @@ export class PaneManager {
     }
 
     this.registry.delete(paneId);
+    this.workerPaneIds = this.workerPaneIds.filter(id => id !== pane.tmuxPaneId);
 
     if (kill) {
-      // Kill + rebalance in one exec (was 3 separate spawns).
-      await this.client.killPaneAndRebalance(pane.tmuxPaneId);
+      await this.client.killPane(pane.tmuxPaneId);
     }
 
     return { ok: true };
@@ -237,5 +268,6 @@ export class PaneManager {
   cleanup(): void {
     // Clear registry only. Do NOT kill panes — user may want to inspect.
     this.registry.clear();
+    this.workerPaneIds = [];
   }
 }

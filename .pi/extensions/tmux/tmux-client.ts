@@ -20,9 +20,10 @@ export class TmuxClient implements ITmuxClient {
 
   // ─── splitWindow ─────────────────────────────────────────────
 
-  async splitWindow(direction: "right" | "below", command: string, targetPaneId?: string): Promise<string> {
+  async splitWindow(direction: "right" | "below", command: string, targetPaneId?: string, sizePercent?: number): Promise<string> {
     const flag = direction === "right" ? "-h" : "-v";
     const args = ["split-window", flag, "-d", "-P", "-F", "#{pane_id}"];
+    if (sizePercent) args.push("-l", `${sizePercent}%`);
     if (targetPaneId) args.push("-t", targetPaneId);
     args.push(command);
     const result = await this.execFn("tmux", args);
@@ -59,17 +60,10 @@ export class TmuxClient implements ITmuxClient {
   // ─── setupPane ───────────────────────────────────────────────
 
   async setupPane(tmuxPaneId: string, title: string): Promise<void> {
-    // Batched: setPaneTitle + rebalanceLayout in a single bash exec (1 spawn instead of 3).
-    // Uses ; so rebalance still runs even if select-pane fails — all best-effort/cosmetic.
-    const result = await this.execFn("bash", [
-      "-c",
-      'tmux select-pane -t "$1" -T "$2"; tmux set-window-option main-pane-width 50%; tmux select-layout main-vertical',
-      "_",
-      tmuxPaneId, // $1
-      title,      // $2
-    ]);
+    // Set pane title — best-effort, cosmetic only.
+    const result = await this.execFn("tmux", ["select-pane", "-t", tmuxPaneId, "-T", title]);
     if (result.code !== 0) {
-      console.error(`[tmux] setupPane failed (ignored): ${result.stderr || result.stdout}`);
+      console.error(`[tmux] setupPane title failed (ignored): ${result.stderr || result.stdout}`);
     }
   }
 
@@ -85,20 +79,6 @@ export class TmuxClient implements ITmuxClient {
   }
 
   // ─── killPaneAndRebalance ────────────────────────────────────
-
-  async killPaneAndRebalance(tmuxPaneId: string): Promise<void> {
-    // Batched: killPane + rebalanceLayout in a single bash exec (1 spawn instead of 3).
-    // Uses ; not && so rebalance still runs if kill-pane fails (pane already dead).
-    const result = await this.execFn("bash", [
-      "-c",
-      'tmux kill-pane -t "$1"; tmux set-window-option main-pane-width 50%; tmux select-layout main-vertical',
-      "_",
-      tmuxPaneId, // $1
-    ]);
-    if (result.code !== 0) {
-      console.error(`[tmux] killPaneAndRebalance failed (ignored): ${result.stderr || result.stdout}`);
-    }
-  }
 
   // ─── killPane ────────────────────────────────────────────────
 
@@ -165,14 +145,5 @@ export class TmuxClient implements ITmuxClient {
     return result.stdout;
   }
 
-  // ─── rebalanceLayout ─────────────────────────────────────────
 
-  async rebalanceLayout(): Promise<void> {
-    // Applies main-vertical: orchestrator pane stays at 50% left,
-    // all spawned panes stack evenly on the right. Best-effort — cosmetic only.
-    const r1 = await this.execFn("tmux", ["set-window-option", "main-pane-width", "50%"]);
-    if (r1.code !== 0) return; // bail — don't attempt layout on broken state
-    await this.execFn("tmux", ["select-layout", "main-vertical"]);
-    // Both are best-effort, ignore errors
-  }
 }

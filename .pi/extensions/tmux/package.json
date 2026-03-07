@@ -1,0 +1,5 @@
+{
+  "name": "tmux",
+  "type": "module",
+  "private": true
+}

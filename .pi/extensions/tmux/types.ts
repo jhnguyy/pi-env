@@ -75,17 +75,16 @@ export interface ITmuxClient {
     direction: "right" | "below",
     command: string,
     targetPaneId?: string,             // when set, split relative to this pane
+    sizePercent?: number,              // size of new pane as % of available space
   ): Promise<string>;                    // returns tmux pane ID
 
   // ── Batched hot-path methods (1 spawn each) ───────────────
-  /** Set pane title + rebalance layout in a single bash exec. */
+  /** Set pane title — best-effort, cosmetic only. */
   setupPane(tmuxPaneId: string, title: string): Promise<void>;
   /** Send text literally then Enter in a single bash exec. */
   sendKeys(tmuxPaneId: string, text: string): Promise<void>;
   /** capture-pane — exit code determines alive status. No separate listPanes call. */
   capturePaneWithStatus(tmuxPaneId: string): Promise<{ content: string; alive: boolean }>;
-  /** Kill pane + rebalance layout in a single bash exec. */
-  killPaneAndRebalance(tmuxPaneId: string): Promise<void>;
 
   // ── Granular methods (used by reconstruct / kept for compat) ─
   killPane(tmuxPaneId: string): Promise<void>;
@@ -93,7 +92,6 @@ export interface ITmuxClient {
   listPanes(): Promise<string[]>;        // returns list of alive pane IDs
   isPaneAlive(tmuxPaneId: string): Promise<boolean>;
   capturePaneContent(tmuxPaneId: string): Promise<string>;
-  rebalanceLayout(): Promise<void>;
 }
 
 // ─── Config ──────────────────────────────────────────────────
