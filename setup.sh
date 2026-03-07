@@ -5,6 +5,7 @@
 #
 # What it does:
 #   ~/.agents/skills/<name>              → repo/.agents/skills/<name>  (per-skill, skips local dirs)
+#   ~/.agents/roles                      → repo/.agents/roles          (entire directory, no local override)
 #   ~/.pi/agent/extensions/<name>        → repo/.pi/extensions/<name>  (per-extension, skips local dirs)
 #   ~/.pi/agent/AGENTS.md               → repo/AGENTS.md              (skips if local file exists)
 #
@@ -60,6 +61,14 @@ done
 
 # Reference skills linked as a directory (manually loaded, not auto-discovered)
 link_path "$REPO/.agents/skills/reference" "$AGENTS_DIR/skills/reference" "~/.agents/skills/reference"
+
+# ── Roles (entire directory, no local override) ──────────────────────────────
+
+echo ""
+echo "Roles"
+echo "-----"
+mkdir -p "$AGENTS_DIR"
+link_path "$REPO/.agents/roles" "$AGENTS_DIR/roles" "~/.agents/roles"
 
 # ── Extensions (per-extension) ───────────────────────────────────────────────
 

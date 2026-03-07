@@ -149,6 +149,15 @@ pi --no-session --tools read,bash --no-skills --model claude-haiku-4-5 \
 
 Extract: stack → skills to load; commands → pass verbatim to workers; paths → `@file` args; conventions → `--append-system-prompt`.
 
+**Role contracts** are behavioral specifications that live in `~/.agents/roles/` and get injected via `--append-system-prompt`:
+
+```bash
+--append-system-prompt @~/.agents/roles/scout.md
+--append-system-prompt @~/.agents/roles/worker.md
+```
+
+Available roles: `orchestrator.md`, `scout.md`, `worker.md`, `reviewer.md`. Use these to specify what the agent reports, what scope it stays within, and what it doesn't do. As orchestrator, your job is routing — read scout output files and briefs, not source or implementation files (those are scout and worker territory respectively).
+
 ---
 
 ## Error Handling
