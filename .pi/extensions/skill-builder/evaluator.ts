@@ -63,7 +63,7 @@ Does the skill cover its stated purpose?
 
 ### context-efficiency
 Does the skill minimize token consumption?
-- SKILL.md body is under 8KB
+- SKILL.md body is proportionate to what the skill covers — inline only what agents need on every invocation; move reference material to references/ for on-demand loading
 - Detailed docs live in references/ and are loaded on-demand
 - Compressed index pattern used for large knowledge domains
 - No redundant information that could be retrieved instead

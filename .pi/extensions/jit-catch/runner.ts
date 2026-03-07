@@ -249,6 +249,7 @@ export async function runForExtension(
   diffText: string,
   exec: ExecFn,
   signal: AbortSignal | undefined,
+  onProgress?: (phase: string) => void,
 ): Promise<ExtensionRunResult> {
   const extDir = join(EXTENSIONS_DIR, ext.name);
 
@@ -265,9 +266,11 @@ export async function runForExtension(
   prepareEnv(extDir, ext.name);
 
   // 2. Read source files for context
+  onProgress?.("reading source files…");
   const sourceContent = readSourceFiles(ext.changedFiles);
 
   // 3. Build prompt and generate tests via subagent
+  onProgress?.("generating tests via subagent…");
   const prompt = buildTestPrompt(ext, diffText, sourceContent);
   let testContent: string;
   try {
@@ -286,6 +289,7 @@ export async function runForExtension(
   writeFileSync(testPath, testContent + "\n");
 
   // 5. Run tests
+  onProgress?.("running bun test…");
   const { passed, output } = await runCatchingTests(extDir, ext.name, exec);
 
   // 6. Auto-discard on pass

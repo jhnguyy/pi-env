@@ -183,11 +183,13 @@ export function validateSkill(skillDir: string): ValidationResult {
   // ─── Context efficiency ───────────────────────────────────────
   const bodyBytes = Buffer.byteLength(body, "utf-8");
 
+  // No hard size limit — some skills are legitimately large.
+  // Surface size as info so the agent can decide whether decomposition makes sense.
   if (bodyBytes > 8192) {
     issues.push({
       rule: "context-size",
-      severity: "warning",
-      message: `SKILL.md body is ${(bodyBytes / 1024).toFixed(1)}KB. Aim for <8KB — use compressed indexes pointing to reference files.`,
+      severity: "info",
+      message: `SKILL.md body is ${(bodyBytes / 1024).toFixed(1)}KB. Consider: does this skill cover one cohesive concern, or could it decompose into smaller skills? If it's cohesive, the size is fine. If sections are independently useful, splitting reduces per-invocation context cost.`,
       file: "SKILL.md",
     });
   }
