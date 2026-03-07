@@ -41,6 +41,15 @@ jit_catch({ diff_source: "unstaged", git_cwd: "/root/myrepo" })  # override wher
 Generated test file path: `~/.pi/agent/extensions/<ext-name>/__tests__/<ext-name>.catching.test.ts`
 — auto-deleted on pass; kept at that path on fail.
 
+**Symlink edge case:** If the extension directory is symlinked to a git repo (the standard
+pi-env setup), a previous failed run's file may still be staged. After every `jit_catch`
+run, verify:
+```bash
+git status | grep catching
+# expect: no output
+```
+If any `.catching.test.ts` appears staged or modified, `git restore` it before committing.
+
 **Multi-extension diffs:** without `ext_name`, the tool runs the full workflow for each changed extension in sequence.
 
 **Availability:** registered by `~/.pi/agent/extensions/jit-catch/`. If the tool is missing, restart pi to reload extensions.

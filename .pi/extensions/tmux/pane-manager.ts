@@ -13,6 +13,7 @@ import type {
   RunDetails,
   RunResult,
   SendResult,
+  SystemPane,
   TmuxConfig,
   TmuxRunInput,
 } from "./types";
@@ -207,6 +208,20 @@ export class PaneManager {
 
   getActivePanes(): PaneRecord[] {
     return Array.from(this.registry.values());
+  }
+
+  // ─── getUnregisteredPanes ────────────────────────────────────
+
+  /**
+   * Returns system tmux panes that are not tracked in the pi registry.
+   * Useful for surfacing orphaned workers from previous sessions.
+   */
+  async getUnregisteredPanes(): Promise<SystemPane[]> {
+    const systemPanes = await this.client.listAllPanes();
+    const registeredTmuxIds = new Set(
+      Array.from(this.registry.values()).map((p) => p.tmuxPaneId),
+    );
+    return systemPanes.filter((p) => !registeredTmuxIds.has(p.tmuxPaneId));
   }
 
   // ─── getPane ─────────────────────────────────────────────────

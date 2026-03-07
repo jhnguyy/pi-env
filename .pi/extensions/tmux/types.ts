@@ -61,6 +61,15 @@ export interface CloseResult {
   ok: boolean;
 }
 
+// ─── System Pane (raw tmux inventory) ────────────────────────
+
+/** Raw pane entry returned by `tmux list-panes -a`. */
+export interface SystemPane {
+  tmuxPaneId: string;       // e.g. %12
+  pid: string;              // foreground process PID
+  currentCommand: string;   // name of the running process/command
+}
+
 // ─── TmuxClient Interface (for DI) ───────────────────────────
 
 export type ExecFn = (
@@ -92,6 +101,10 @@ export interface ITmuxClient {
   listPanes(): Promise<string[]>;        // returns list of alive pane IDs
   isPaneAlive(tmuxPaneId: string): Promise<boolean>;
   capturePaneContent(tmuxPaneId: string): Promise<string>;
+
+  // ── Orphan detection ──────────────────────────────────────
+  /** List every pane visible to tmux across all sessions, with pid and current command. */
+  listAllPanes(): Promise<SystemPane[]>;
 }
 
 // ─── Config ──────────────────────────────────────────────────

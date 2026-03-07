@@ -36,7 +36,21 @@ export default function (pi: ExtensionAPI) {
     await manager.reconstruct(entries);
   }
 
-  pi.on("session_start", async (_event, ctx) => rebuildRegistry(ctx));
+  pi.on("session_start", async (_event, ctx) => {
+    await rebuildRegistry(ctx);
+    if (client.isInTmux()) {
+      const orphaned = await manager.getUnregisteredPanes();
+      if (orphaned.length > 0) {
+        const list = orphaned
+          .map((p) => `${p.tmuxPaneId} ${p.currentCommand}`)
+          .join(", ");
+        ctx.ui.notify(
+          `⚠ Unregistered tmux panes from prior sessions: ${list}. Run tmux list for details.`,
+          "warning",
+        );
+      }
+    }
+  });
 
   pi.on("session_switch", async (_event, ctx) => rebuildRegistry(ctx));
   pi.on("session_fork", async (_event, ctx) => rebuildRegistry(ctx));
@@ -181,17 +195,27 @@ export default function (pi: ExtensionAPI) {
 
           case "list": {
             const panes = manager.getActivePanes();
-            if (panes.length === 0) {
-              return {
-                content: [txt("No active panes.")],
-                details: { panes: [] },
-              };
+            const registeredSection = panes.length === 0
+              ? "No active panes."
+              : panes.map(p =>
+                  `${p.id} "${p.label}" (${p.interactive ? "interactive" : "non-interactive"})`
+                ).join("\n");
+
+            let content = registeredSection;
+
+            if (client.isInTmux()) {
+              const orphaned = await manager.getUnregisteredPanes();
+              if (orphaned.length > 0) {
+                const orphanLines = orphaned
+                  .map((p) => `  ${p.tmuxPaneId}  ${p.currentCommand}`)
+                  .join("\n");
+                content +=
+                  `\n\nUnregistered system panes (run tmux capture-pane -p -t <id>):\n${orphanLines}`;
+              }
             }
-            const summary = panes.map(p =>
-              `${p.id} "${p.label}" (${p.interactive ? "interactive" : "non-interactive"})`
-            ).join("\n");
+
             return {
-              content: [txt(summary)],
+              content: [txt(content)],
               details: { panes: panes.map(p => ({ id: p.id, label: p.label, interactive: p.interactive })) },
             };
           }
