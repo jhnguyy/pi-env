@@ -25,6 +25,15 @@ linked() { echo "  →  $1"; }
 skip()   { echo "  —  $1 (exists locally, skipping)"; }
 relink() { echo "  ↺  $1 (relinked)"; }
 
+# ── Dependencies ─────────────────────────────────────────────────────────────
+# bun install downloads @mariozechner/pi-coding-agent at the version pinned in
+# bun.lock. install-bun-pi.sh then compiles the binary from that local copy.
+
+echo "Dependencies"
+echo "------------"
+(cd "$REPO" && bun install --frozen-lockfile)
+ok "node_modules up to date"
+
 link_path() {
   local src="$1" target="$2" label="$3"
   if [ -L "$target" ]; then
@@ -87,8 +96,13 @@ echo "AGENTS.md"
 echo "---------"
 link_path "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md" "~/.pi/agent/AGENTS.md"
 
+# ── Pi binary ────────────────────────────────────────────────────────────────
+# Compile pi from the repo-local node_modules into ~/.pi/bin/pi
+
+echo ""
+"$REPO/setup/install-bun-pi.sh"
+
 echo ""
 echo "Done."
 echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
-echo "  Deps:           cd $REPO && bun install"
-echo "  Tests:          bun test"
+echo "  Tests:          cd $REPO && bun test"
