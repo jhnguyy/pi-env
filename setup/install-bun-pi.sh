@@ -8,18 +8,21 @@
 #   Bun-specific APIs (import.meta.dir, etc.) or have mixed module patterns.
 #
 # What it does:
-#   - Finds the npm-installed @mariozechner/pi-coding-agent package
+#   - Uses @mariozechner/pi-coding-agent from the repo's node_modules (version
+#     pinned by bun.lock — run `bun install` first if node_modules is absent)
 #   - Compiles it with bun build --compile → ~/.pi/bin/pi
 #   - Symlinks required assets (package.json, theme/, export-html/) next to binary
 #
 # Add to PATH (once, in ~/.profile or ~/.bashrc):
 #   export PATH="$HOME/.pi/bin:$PATH"
 #
-# Idempotent — re-run after updating pi:
-#   npm install -g @mariozechner/pi-coding-agent && ./setup/install-bun-pi.sh
+# Idempotent — re-run after `bun install` picks up a new pi version:
+#   cd ~/pi-env && bun install && ./setup/install-bun-pi.sh
+#   (or just run ./setup.sh, which calls this automatically)
 
 set -euo pipefail
 
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="${PI_BIN_DIR:-$HOME/.pi/bin}"
 
 ok()   { echo "  ✓  $1"; }
@@ -27,37 +30,16 @@ info() { echo "  ·  $1"; }
 link() { echo "  →  $1"; }
 err()  { echo "  ✗  $1" >&2; exit 1; }
 
-# ── Find the npm package ─────────────────────────────────────────────────────
+# ── Locate the repo-local package ───────────────────────────────────────────
 
-find_package_dir() {
-  # Method 1: npm root -g (most reliable when npm is in PATH)
-  local npm_root
-  npm_root=$(npm root -g 2>/dev/null) && \
-    [ -f "$npm_root/@mariozechner/pi-coding-agent/package.json" ] && \
-    echo "$npm_root/@mariozechner/pi-coding-agent" && return 0
+PI_PKG="$REPO/node_modules/@mariozechner/pi-coding-agent"
 
-  # Method 2: derive from the pi symlink
-  #   npm global: PREFIX/bin/pi -> ../lib/node_modules/PACKAGE/dist/cli.js
-  local pi_bin pi_link prefix candidate
-  pi_bin=$(command -v pi 2>/dev/null) || return 1
-  pi_link=$(readlink "$pi_bin" 2>/dev/null) || return 1
-  prefix=$(dirname "$pi_bin")
-  candidate=$(realpath "$prefix/$pi_link" 2>/dev/null) || return 1
-  # realpath gives us .../PACKAGE/dist/cli.js — strip dist/cli.js
-  candidate=$(dirname "$(dirname "$candidate")")
-  [ -f "$candidate/package.json" ] && echo "$candidate" && return 0
-
-  return 1
-}
-
-echo "Finding @mariozechner/pi-coding-agent..."
-PI_PKG=$(find_package_dir) || \
-  err "Cannot find @mariozechner/pi-coding-agent. Install first:
-       npm install -g @mariozechner/pi-coding-agent"
+[ -f "$PI_PKG/package.json" ] || \
+  err "node_modules not found. Run 'bun install' in $REPO first."
 
 ok "Package: $PI_PKG"
 
-PI_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$PI_PKG/package.json','utf8')).version)" 2>/dev/null || echo "unknown")
+PI_VERSION=$(bun -e "console.log(require('$PI_PKG/package.json').version)" 2>/dev/null || echo "unknown")
 info "Version: $PI_VERSION"
 
 # ── Compile binary ───────────────────────────────────────────────────────────

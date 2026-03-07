@@ -63,7 +63,7 @@ The core loop is conversational: open `pi`, describe the task, and let the model
 
 ## New machine setup
 
-**Prerequisites:** `git`, `npm`, `node`, and [bun](https://bun.sh) (≥1.3)
+**Prerequisites:** `git` and [bun](https://bun.sh) (≥1.3) — no npm or node required.
 
 ```bash
 # Install bun if needed:
@@ -75,25 +75,18 @@ curl -fsSL https://bun.sh/install | bash
 git clone https://github.com/<you>/pi-env.git ~/pi-env
 cd ~/pi-env
 
-# 2. Install pi from npm (source package — binary compiled from this)
-npm install -g @mariozechner/pi-coding-agent
-
-# 3. Compile pi as a Bun binary into ~/.pi/bin/
-./setup/install-bun-pi.sh
-
-# 4. Add ~/.pi/bin to PATH (once — add to ~/.profile or ~/.bashrc)
+# 2. Add ~/.pi/bin to PATH (once — add to ~/.profile or ~/.bashrc)
 export PATH="$HOME/.pi/bin:$PATH"
 
-# 5. Install extension deps and link dotfiles
-bun install
+# 3. Run setup — installs deps, compiles pi binary, links dotfiles
 ./setup.sh
 
-# 6. Copy settings template and customize
+# 4. Copy settings template and customize
 cp setup/settings.template.json ~/.pi/agent/settings.json
 # Key settings to review: defaultModel, permissionLevel ("none"/"warn"/"block"), theme
 # Optional: cp setup/models.template.json ~/.pi/agent/models.json  (add local/ollama models)
 
-# 7. Authenticate — pick one:
+# 5. Authenticate — pick one:
 #   API key:  export ANTHROPIC_API_KEY=sk-ant-...   (add to ~/.profile to persist)
 #   OAuth:    run `pi` then type /login              (auth.json written automatically)
 ```
@@ -110,12 +103,7 @@ pi "say hello"          # quick smoke test — should get a response
 ```bash
 cd ~/pi-env
 git pull
-bun install            # if package.json changed
-./setup.sh             # picks up new extensions/skills, no-ops on existing links
-
-# After updating pi itself:
-npm install -g @mariozechner/pi-coding-agent
-./setup/install-bun-pi.sh   # recompile binary
+./setup.sh    # re-installs deps, recompiles binary if pi version changed, re-links dotfiles
 ```
 
 ## Local-only extensions and skills
