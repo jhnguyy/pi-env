@@ -9,11 +9,21 @@
  *
  * Intentionally excludes:
  *   - Raw tool result content (bash output, file reads, etc.) — too noisy
- *   - Tool_use blocks from assistant messages — already represented in tool counts
+ *   - Tool_use blocks from assistant messages — represented in tool counts
  *   - Metadata entries (session, thinking_level_change, etc.)
+ *   - The `custom` type (internal pi entries without user-readable content)
+ *
+ * Branch note: pi sessions are trees. This extractor reads lines in file order,
+ * which may interleave entries from abandoned branches if the session was forked.
+ * For review purposes this is acceptable — all explored paths are relevant.
+ * Future improvement: accept a leaf entryId and walk parentId chains.
+ *
+ * Security note: output may contain sensitive content from user prompts and agent
+ * reasoning (e.g., API keys typed into prompts, secrets echoed in reasoning).
+ * Review subagents should not log or publish raw read_session output.
  */
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 export interface SessionSummary {
   filename: string;
@@ -38,13 +48,13 @@ interface MessagePayload {
 interface JournalEntry {
   type: string;
   customType?: string;
-  content?: string;
+  content?: unknown; // may be string or array depending on extension
   message?: MessagePayload;
 }
 
 /**
  * Parse raw JSONL lines into a SessionSummary.
- * Accepts the filename and timestamp separately so this function
+ * Accepts filename and timestamp separately so this function
  * is pure and testable without file I/O.
  */
 export function parseLines(
@@ -69,8 +79,11 @@ export function parseLines(
       const { role, toolName, content } = entry.message;
 
       if (role === "user") {
-        const text = content?.find((c) => c.type === "text")?.text?.trim();
-        if (text) userMessages.push(text);
+        // Collect ALL text blocks in a user turn (not just the first)
+        const texts = (content ?? [])
+          .filter((c) => c.type === "text" && c.text?.trim())
+          .map((c) => c.text!.trim());
+        if (texts.length > 0) userMessages.push(texts.join("\n"));
       }
 
       if (role === "assistant") {
@@ -82,15 +95,20 @@ export function parseLines(
         }
       }
 
-      if (role === "toolResult" && toolName) {
-        toolCounts[toolName] = (toolCounts[toolName] ?? 0) + 1;
+      if (role === "toolResult") {
+        // Count by tool name; use "unknown" if toolName is absent
+        const tool = toolName ?? "unknown";
+        toolCounts[tool] = (toolCounts[tool] ?? 0) + 1;
       }
     }
 
     // custom_message entries carry extension-injected context (work-tracker status,
     // session-todos list, etc.) — useful signal for understanding session state.
-    if (entry.type === "custom_message" && entry.content) {
-      customMessages.push(`[${entry.customType ?? "custom"}] ${entry.content}`);
+    // content may be a string or an array depending on the extension.
+    if (entry.type === "custom_message" && entry.content != null) {
+      const raw = entry.content;
+      const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+      customMessages.push(`[${entry.customType ?? "custom"}] ${text}`);
     }
   }
 
@@ -100,10 +118,10 @@ export function parseLines(
 /**
  * Parse a filename like "2026-03-06T23-15-17-780Z_uuid.jsonl"
  * into a readable ISO-8601 timestamp "2026-03-06T23:15:17Z".
+ * Returns the raw base string unchanged if the format doesn't match.
  */
 export function parseTimestamp(filename: string): string {
   const base = filename.replace(/\.jsonl$/, "").split("_")[0];
-  // Replace hyphens in the time portion: T23-15-17-780Z → T23:15:17Z
   return base.replace(/T(\d{2})-(\d{2})-(\d{2})-\d+Z$/, "T$1:$2:$3Z");
 }
 
