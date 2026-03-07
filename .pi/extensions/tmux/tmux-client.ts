@@ -125,6 +125,32 @@ export class TmuxClient implements ITmuxClient {
       .filter(Boolean);
   }
 
+  // ─── listAllPanes ─────────────────────────────────────────────
+
+  async listAllPanes(): Promise<import("./types").SystemPane[]> {
+    const result = await this.execFn("tmux", [
+      "list-panes",
+      "-a",
+      "-F",
+      "#{pane_id} #{pane_pid} #{pane_current_command}",
+    ]);
+    if (result.code !== 0) {
+      return [];
+    }
+    return result.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [tmuxPaneId, pid, ...rest] = line.split(" ");
+        return {
+          tmuxPaneId: tmuxPaneId ?? "",
+          pid: pid ?? "",
+          currentCommand: rest.join(" "),
+        };
+      });
+  }
+
   // ─── isPaneAlive ─────────────────────────────────────────────
 
   async isPaneAlive(tmuxPaneId: string): Promise<boolean> {
