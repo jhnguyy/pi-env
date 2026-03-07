@@ -37,10 +37,34 @@ export function parseHandoffBranch(content: string): string | null {
 }
 
 /**
- * Scans the handoffs directory for files whose `branch` frontmatter field
- * matches the given branch name, deletes them, and returns the deleted filenames.
+ * Returns true if the bash command is any form of git pull.
  */
-export function cleanupHandoffs(branch: string): string[] {
+export function isGitPull(command: string): boolean {
+	return /\bgit\b.*\bpull\b/.test(command);
+}
+
+/**
+ * Parses the output of `git branch --merged HEAD` into a Set of branch names.
+ * Strips the current-branch `*` prefix and surrounding whitespace.
+ */
+export function parseMergedBranches(output: string): Set<string> {
+	const branches = new Set<string>();
+	for (const line of output.split("\n")) {
+		const branch = line.replace(/^\*?\s+/, "").trim();
+		if (branch) branches.add(branch);
+	}
+	return branches;
+}
+
+/**
+ * Scans the handoffs directory for files whose `branch` frontmatter field
+ * appears in the given branch set, deletes them, and returns the deleted filenames.
+ *
+ * Accepts a single branch name or a Set for bulk cleanup (e.g. after git pull).
+ */
+export function cleanupHandoffs(branches: string | Set<string>): string[] {
+	const branchSet =
+		typeof branches === "string" ? new Set([branches]) : branches;
 	const deleted: string[] = [];
 	let files: string[];
 	try {
@@ -55,7 +79,8 @@ export function cleanupHandoffs(branch: string): string[] {
 		const filePath = join(HANDOFFS_DIR, file);
 		try {
 			const content = readFileSync(filePath, "utf8");
-			if (parseHandoffBranch(content) === branch) {
+			const handoffBranch = parseHandoffBranch(content);
+			if (handoffBranch && branchSet.has(handoffBranch)) {
 				unlinkSync(filePath);
 				deleted.push(file);
 			}

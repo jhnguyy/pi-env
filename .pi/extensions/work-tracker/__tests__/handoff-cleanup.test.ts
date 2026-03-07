@@ -1,5 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import { detectMergedBranch, parseHandoffBranch } from "../handoff-cleanup";
+import {
+	detectMergedBranch,
+	isGitPull,
+	parseHandoffBranch,
+	parseMergedBranches,
+} from "../handoff-cleanup";
 
 // ─── detectMergedBranch ───────────────────────────────────────────────────────
 
@@ -46,6 +51,67 @@ describe("detectMergedBranch", () => {
 	it("returns null when command has no branch after flags", () => {
 		// git merge with no branch arg (shouldn't happen but guard it)
 		expect(detectMergedBranch("git merge", mergeOutput)).toBeNull();
+	});
+});
+
+// ─── isGitPull ───────────────────────────────────────────────────────────────
+
+describe("isGitPull", () => {
+	it("matches plain git pull", () => {
+		expect(isGitPull("git pull")).toBe(true);
+	});
+
+	it("matches git pull origin main", () => {
+		expect(isGitPull("git pull origin main")).toBe(true);
+	});
+
+	it("matches git pull --rebase", () => {
+		expect(isGitPull("git pull --rebase")).toBe(true);
+	});
+
+	it("matches git -C /path pull", () => {
+		expect(isGitPull("git -C /mnt/tank/code/pi-env pull")).toBe(true);
+	});
+
+	it("does not match git push", () => {
+		expect(isGitPull("git push origin feat/foo")).toBe(false);
+	});
+
+	it("does not match unrelated commands", () => {
+		expect(isGitPull("git merge feat/foo")).toBe(false);
+		expect(isGitPull("git status")).toBe(false);
+		expect(isGitPull("npm install")).toBe(false);
+	});
+});
+
+// ─── parseMergedBranches ─────────────────────────────────────────────────────
+
+describe("parseMergedBranches", () => {
+	it("parses branches from typical git branch --merged output", () => {
+		const output = "  feat/done\n* main\n  fix/also-done\n";
+		const result = parseMergedBranches(output);
+		expect(result.has("feat/done")).toBe(true);
+		expect(result.has("main")).toBe(true);
+		expect(result.has("fix/also-done")).toBe(true);
+		expect(result.size).toBe(3);
+	});
+
+	it("handles single branch (the current one marked with *)", () => {
+		const output = "* main\n";
+		const result = parseMergedBranches(output);
+		expect(result.has("main")).toBe(true);
+		expect(result.size).toBe(1);
+	});
+
+	it("returns empty set for empty output", () => {
+		expect(parseMergedBranches("").size).toBe(0);
+		expect(parseMergedBranches("\n\n").size).toBe(0);
+	});
+
+	it("ignores blank lines", () => {
+		const output = "\n  feat/done\n\n  fix/other\n\n";
+		const result = parseMergedBranches(output);
+		expect(result.size).toBe(2);
 	});
 });
 

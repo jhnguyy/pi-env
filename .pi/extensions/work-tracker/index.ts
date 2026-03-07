@@ -1,9 +1,10 @@
 /**
  * Work Tracker Extension — entry point.
  *
- * Provides two capabilities:
- *   1. Branch guard  — blocks git push to protected branches (tool_call hook)
- *   2. Context       — injects git branch + dirty status before root agent turns
+ * Provides three capabilities:
+ *   1. Branch guard      — blocks git push to protected branches (tool_call hook)
+ *   2. Handoff cleanup   — deletes handoffs when their branch merges (tool_result hook)
+ *   3. Context injection — injects git branch + dirty status before root agent turns
  *
  * Subagent detection: if PI_AGENT_ID env var is set, context injection is skipped
  * (subagents don't need this context, and injecting it wastes tokens).
@@ -17,7 +18,12 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { spawnSync } from "node:child_process";
 
 import { BranchGuard } from "./branch-guard";
-import { cleanupHandoffs, detectMergedBranch } from "./handoff-cleanup";
+import {
+	cleanupHandoffs,
+	detectMergedBranch,
+	isGitPull,
+	parseMergedBranches,
+} from "./handoff-cleanup";
 import type { WorkTrackerConfig } from "./types";
 
 function loadConfig(): WorkTrackerConfig {
@@ -114,6 +120,15 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── 2. Handoff cleanup on merge ─────────────────────────────────
+  //
+  // Path A — local git merge (fast-forward or merge commit):
+  //   Fires when the agent runs `git merge <branch>` directly.
+  //
+  // Path B — git pull on a protected branch (GitHub PR merge workflow):
+  //   After any git pull, checks each guarded repo. If we're on a protected
+  //   branch, collects all locally-known merged branches and cleans up their
+  //   handoffs. This covers the common flow: PR merges on GitHub → agent runs
+  //   `git checkout main && git pull`.
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "bash" || event.isError) return;
 
@@ -123,13 +138,48 @@ export default function (pi: ExtensionAPI) {
       .map((c) => c.text ?? "")
       .join("");
 
-    const merged = detectMergedBranch(command, output);
-    if (!merged) return;
+    // ── Path A: local git merge ──────────────────────────────────
+    const mergedBranch = detectMergedBranch(command, output);
+    if (mergedBranch) {
+      const deleted = cleanupHandoffs(mergedBranch);
+      if (deleted.length > 0) {
+        ctx.ui.notify(
+          `🧹 Merged ${mergedBranch} — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
+          "info",
+        );
+      }
+      return;
+    }
 
-    const deleted = cleanupHandoffs(merged);
+    // ── Path B: git pull on a protected branch ───────────────────
+    if (!isGitPull(command)) return;
+
+    const allMerged = new Set<string>();
+    for (const repoPath of config.guardedRepos) {
+      const { branch: current } = getGitStatus(repoPath);
+      if (!current || !config.protectedBranches.includes(current)) continue;
+
+      const result = spawnSync(
+        "git",
+        ["-C", repoPath, "branch", "--merged", "HEAD"],
+        { encoding: "utf8", timeout: 3000 },
+      );
+      if (result.status !== 0 || !result.stdout) continue;
+
+      for (const branch of parseMergedBranches(result.stdout)) {
+        // Exclude the protected branches themselves
+        if (!config.protectedBranches.includes(branch)) {
+          allMerged.add(branch);
+        }
+      }
+    }
+
+    if (allMerged.size === 0) return;
+
+    const deleted = cleanupHandoffs(allMerged);
     if (deleted.length > 0) {
       ctx.ui.notify(
-        `🧹 Merged ${merged} — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
+        `🧹 Pulled main — deleted ${deleted.length} handoff(s): ${deleted.join(", ")}`,
         "info",
       );
     }
