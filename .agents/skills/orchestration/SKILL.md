@@ -32,6 +32,14 @@ pi --no-session "prompt"
 pi --no-session @src/main.ts @package.json "Review this module"
 ```
 
+**Worker Identification** — To enable commit attribution, pass env vars to each worker:
+
+```bash
+PI_AGENT_LABEL=<label> PI_BUS_SESSION=<session> pi --no-session "..."
+```
+
+Workers use these to append `Agent-Id: <label>/<session>` trailers to commits, allowing orchestrators to trace which agent made which changes.
+
 For complex tasks, write a brief (`write { path: '/tmp/brief.md', content: '...' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context. Clean up temp files after workers complete.
 
 **Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona.

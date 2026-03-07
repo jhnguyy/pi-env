@@ -25,3 +25,13 @@ Before running exploratory commands to resolve missing context, **ask the user f
 At the start of each user request, add tasks with `/todo <description>` before beginning work.
 Mark complete with `/todo done <n>` as you finish each one.
 This gives the user a live view of progress within the session.
+
+## Attribution
+
+Workers tag all commits with `Agent-Id` trailers in the format `Agent-Id: <label>/<session>`. Orchestrators can query these trailers to audit which agent made which changes:
+
+```bash
+git log --format="%s%n%b" origin/main..HEAD | grep "Agent-Id:"
+```
+
+Workers must receive `PI_AGENT_LABEL` and `PI_BUS_SESSION` as environment variables (set during spawn).
