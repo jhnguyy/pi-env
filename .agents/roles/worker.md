@@ -29,7 +29,7 @@ Write completion report to the assigned output file. Publish completion to the b
 **Always append an Agent-Id trailer to every commit.** Format:
 
 ```
-Agent-Id: $PI_AGENT_LABEL/$PI_BUS_SESSION
+Agent-Id: $PI_AGENT_ID/$PI_BUS_SESSION
 ```
 
 Example:
