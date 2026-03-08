@@ -19,6 +19,7 @@ import { createWorktree, removeWorktree, pruneWorktrees } from "./git";
 import { writeManifest, writeReceipt } from "./manifest";
 import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
+import { getPaneService, initPaneService } from "../tmux/pane-service";
 
 // ─── Bus exit shim ────────────────────────────────────────────
 // Mirrors pane-manager.ts — duplicated intentionally to keep orch self-contained.
@@ -218,7 +219,10 @@ export class OrchestratorManager {
       writeFileSync(`${hooksDir}/commit-msg`, hookScript, { mode: 0o755 });
     }
 
-    // Build the fully-decorated worker command
+    // Build the fully-decorated worker command.
+    // Env injection (PI_BUS_SESSION, PI_AGENT_ID, ORCH_DIR) and the bus exit shim
+    // are embedded in the command here. We do NOT pass busChannel to PaneManager
+    // because the shim is already included — passing it again would double-invoke.
     const finalCommand = buildWorkerCommand({
       command,
       busSession,
@@ -228,9 +232,17 @@ export class OrchestratorManager {
       busChannel,
     });
 
-    // Spawn tmux pane
-    const tmuxPaneId = await this.spawnTmuxPane(finalCommand, label, interactive);
-    const paneId = `orch-${runId}-${label}`;
+    // Spawn via shared PaneManager — gives us window anchoring, column layout,
+    // and rebalancing automatically. initPaneService is idempotent: if tmux
+    // extension already initialized it, this returns the existing instance.
+    const paneManager = getPaneService() ?? initPaneService(this.execFn);
+    const { paneId, tmuxPaneId } = await paneManager.run({
+      action: "run",
+      command: finalCommand,
+      label,
+      interactive: interactive ?? true,
+      // busChannel intentionally omitted — shim is embedded in finalCommand
+    });
 
     // Record in manifest
     const worker: WorkerRecord = {
@@ -268,11 +280,18 @@ export class OrchestratorManager {
     let worktreesRemoved = 0;
     const preservedBranches: string[] = [];
 
-    // Kill all panes — best-effort (pane may already be dead)
+    // Kill all panes via PaneManager so registry and layout columns stay consistent.
+    // Best-effort — pane may already be dead.
+    const paneManager = getPaneService();
     for (const worker of workers) {
       try {
-        const result = await this.execFn("tmux", ["kill-pane", "-t", worker.tmuxPaneId]);
-        if (result.code === 0) panesKilled++;
+        if (paneManager && worker.paneId) {
+          await paneManager.close(worker.paneId, true /* kill */);
+        } else {
+          // Fallback: direct kill if PaneManager not available
+          await this.execFn("tmux", ["kill-pane", "-t", worker.tmuxPaneId]);
+        }
+        panesKilled++;
       } catch {
         // Already dead — don't block cleanup
       }
@@ -333,45 +352,4 @@ export class OrchestratorManager {
     return this.state;
   }
 
-  // ─── Private: spawn tmux pane ──────────────────────────────
-
-  private async spawnTmuxPane(
-    command: string,
-    label: string,
-    _interactive: boolean,
-  ): Promise<string> {
-    // Split horizontally: new pane to the right of the pi process's own pane.
-    // Always target TMUX_PANE so the split lands on the same window,
-    // regardless of which window or pane the user has focused.
-    const args = [
-      "split-window",
-      "-h",   // horizontal split
-      "-d",   // don't switch to new pane
-      "-P",   // print pane ID on stdout
-      "-F", "#{pane_id}",
-    ];
-    const callerPane = process.env.TMUX_PANE;
-    if (callerPane) {
-      args.push("-t", callerPane);
-    }
-    args.push(command);
-
-    const result = await this.execFn("tmux", args);
-
-    if (result.code !== 0) {
-      throw new OrchError(
-        `tmux split-window failed: ${(result.stderr || result.stdout || "").trim()}`,
-        "SPAWN_FAILED",
-      );
-    }
-
-    const tmuxPaneId = result.stdout.trim();
-
-    // Set pane title — best-effort cosmetic
-    await this.execFn("tmux", [
-      "select-pane", "-t", tmuxPaneId, "-T", label,
-    ]).catch(() => {});
-
-    return tmuxPaneId;
-  }
 }

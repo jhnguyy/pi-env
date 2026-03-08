@@ -10,24 +10,16 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
-import { randomBytes } from "node:crypto";
 
-import { TmuxClient } from "./tmux-client";
-import { PaneManager } from "./pane-manager";
-import type { RunDetails, TmuxConfig } from "./types";
-import { DEFAULT_CONFIG, TmuxError } from "./types";
+import type { RunDetails } from "./types";
+import { TmuxError } from "./types";
+import { initPaneService, isInTmux } from "./pane-service";
 
 export default function (pi: ExtensionAPI) {
-  // ─── Config ─────────────────────────────────────────────────
-  const config: TmuxConfig = {
-    ...DEFAULT_CONFIG,
-    sessionPrefix: randomBytes(2).toString("hex"),  // 4-char hex
-  };
-
   // ─── Components (DI wiring) ─────────────────────────────────
+  // initPaneService is idempotent — if orch already initialized it, this is a no-op.
   const exec = pi.exec.bind(pi);
-  const client = new TmuxClient(exec);
-  const manager = new PaneManager(client, config);
+  const manager = initPaneService(exec);
 
   // ─── Session Lifecycle ──────────────────────────────────────
   async function rebuildRegistry(ctx: Parameters<Parameters<typeof pi.on>[1]>[1]) {
@@ -38,7 +30,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     await rebuildRegistry(ctx);
-    if (client.isInTmux()) {
+    if (isInTmux()) {
       const orphaned = await manager.getUnregisteredPanes();
       if (orphaned.length > 0) {
         const list = orphaned
@@ -203,7 +195,7 @@ export default function (pi: ExtensionAPI) {
 
             let content = registeredSection;
 
-            if (client.isInTmux()) {
+            if (isInTmux()) {
               const orphaned = await manager.getUnregisteredPanes();
               if (orphaned.length > 0) {
                 const orphanLines = orphaned

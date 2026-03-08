@@ -15,6 +15,7 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 import { OrchestratorManager } from "../manager";
 import { OrchError } from "../types";
 import type { ExecFn } from "../types";
+import { resetPaneService } from "../../tmux/pane-service";
 
 // ─── Mock ExecFn ─────────────────────────────────────────────
 
@@ -223,14 +224,16 @@ describeIfEnabled("orch", "OrchestratorManager — label validation", () => {
     saved = captureEnv();
     orchDirs = [];
     busSessions = [];
-    // Provide TMUX so spawn doesn't fail at the tmux check
     process.env.TMUX = "test-session,0,0";
+    process.env.TMUX_PANE = "%0";
+    resetPaneService();
   });
 
   afterEach(() => {
     for (const dir of orchDirs) rmSync(dir, { recursive: true, force: true });
     for (const sid of busSessions) rmSync(`/tmp/pi-bus-${sid}`, { recursive: true, force: true });
     restoreEnv(saved);
+    resetPaneService();
   });
 
   async function withRun(
@@ -247,7 +250,9 @@ describeIfEnabled("orch", "OrchestratorManager — label validation", () => {
     await withRun(async mgr => {
       for (const label of ["worker-1", "alpha", "a1b2c3", "scout"]) {
         const result = await mgr.spawn({ label, command: "echo hi" });
-        expect(result.paneId).toContain(label);
+        // paneId is PaneManager format — just verify it's a non-empty string
+        expect(typeof result.paneId).toBe("string");
+        expect(result.paneId.length).toBeGreaterThan(0);
       }
     });
   });
@@ -308,12 +313,16 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
     orchDirs = [];
     busSessions = [];
     process.env.TMUX = "test-session,0,0";
+    process.env.TMUX_PANE = "%0";
+    // Reset shared singleton so each test gets a fresh PaneManager with its own mock exec
+    resetPaneService();
   });
 
   afterEach(() => {
     for (const dir of orchDirs) rmSync(dir, { recursive: true, force: true });
     for (const sid of busSessions) rmSync(`/tmp/pi-bus-${sid}`, { recursive: true, force: true });
     restoreEnv(saved);
+    resetPaneService();
   });
 
   it("throws NO_ACTIVE_RUN before start()", async () => {
@@ -341,14 +350,17 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
     }
   });
 
-  it("returns paneId containing the runId and label", async () => {
+  it("returns a paneId from PaneManager (usable with tmux tool)", async () => {
     const mgr = new OrchestratorManager(makeMockExec("%99"));
-    const { runId, orchDir, busSession } = mgr.start();
+    const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
 
     const result = await mgr.spawn({ label: "builder", command: "echo hi" });
-    expect(result.paneId).toBe(`orch-${runId}-builder`);
+    // paneId is now PaneManager's format (e.g. "abcd-1234") — opaque but defined
+    expect(result.paneId).toBeDefined();
+    expect(typeof result.paneId).toBe("string");
+    expect(result.paneId.length).toBeGreaterThan(0);
   });
 
   it("returns no branch/worktreePath when no repo set", async () => {
@@ -388,26 +400,24 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
 
     const worker = mgr.getStatus()!.workers[0];
     expect(worker.label).toBe("worker-x");
-    expect(worker.paneId).toBe(`orch-${runId}-worker-x`);
+    // paneId is now PaneManager format — opaque string, not orch-specific
+    expect(worker.paneId).toBeDefined();
+    expect(typeof worker.paneId).toBe("string");
     expect(worker.tmuxPaneId).toBe("%7");
     expect(worker.busChannel).toBe("done");
     expect(worker.spawnedAt).toBeGreaterThanOrEqual(spawnTime);
     expect(worker.branch).toBeUndefined();
   });
 
-  it("throws SPAWN_FAILED when tmux split-window fails", async () => {
+  it("throws when tmux split-window fails", async () => {
     const failExec: ExecFn = async () => ({ stdout: "", stderr: "no session", code: 1 });
     const mgr = new OrchestratorManager(failExec);
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
 
-    await expect(mgr.spawn({ label: "worker", command: "echo hi" })).rejects.toThrow(OrchError);
-    try {
-      await mgr.spawn({ label: "worker", command: "echo hi" });
-    } catch (e) {
-      expect((e as OrchError).code).toBe("SPAWN_FAILED");
-    }
+    // PaneManager (shared TmuxClient) propagates SPLIT_FAILED when tmux fails
+    await expect(mgr.spawn({ label: "worker", command: "echo hi" })).rejects.toThrow();
   });
 
   it("updates manifest on disk after each spawn", async () => {
