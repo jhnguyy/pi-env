@@ -221,7 +221,11 @@ export class PaneManager {
     const registeredTmuxIds = new Set(
       Array.from(this.registry.values()).map((p) => p.tmuxPaneId),
     );
-    return systemPanes.filter((p) => !registeredTmuxIds.has(p.tmuxPaneId));
+    // Exclude the pane pi itself is running in — it's never registered by design.
+    const currentPane = process.env.TMUX_PANE;
+    return systemPanes.filter(
+      (p) => !registeredTmuxIds.has(p.tmuxPaneId) && p.tmuxPaneId !== currentPane,
+    );
   }
 
   // ─── getPane ─────────────────────────────────────────────────
