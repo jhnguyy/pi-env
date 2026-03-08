@@ -1,4 +1,4 @@
-import type { TodoItem } from "./types";
+import type { TodoItem } from "./types.ts";
 
 export class TodoStore {
   private items: TodoItem[] = [];

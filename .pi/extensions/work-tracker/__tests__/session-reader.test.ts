@@ -27,7 +27,7 @@ function tempSession(entries: object[]): string {
 
 // ─── parseTimestamp ───────────────────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "parseTimestamp", () => {
+describeIfEnabled("work-tracker", "parseTimestamp", () => {
   it("converts filename datetime to ISO-8601", () => {
     expect(parseTimestamp("2026-03-06T23-15-17-780Z_abc123.jsonl")).toBe(
       "2026-03-06T23:15:17Z",
@@ -43,7 +43,7 @@ describeIfEnabled("session-reader", "parseTimestamp", () => {
 
 // ─── parseLines — user messages ───────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "parseLines — user messages", () => {
+describeIfEnabled("work-tracker", "parseLines — user messages", () => {
   it("extracts text from user messages", () => {
     const result = parseLines(
       lines(
@@ -77,7 +77,7 @@ describeIfEnabled("session-reader", "parseLines — user messages", () => {
 
 // ─── parseLines — agent narrative ────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "parseLines — agent narrative", () => {
+describeIfEnabled("work-tracker", "parseLines — agent narrative", () => {
   it("extracts text blocks from assistant messages", () => {
     const result = parseLines(
       lines({
@@ -130,7 +130,7 @@ describeIfEnabled("session-reader", "parseLines — agent narrative", () => {
 
 // ─── parseLines — tool counts ─────────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "parseLines — tool counts", () => {
+describeIfEnabled("work-tracker", "parseLines — tool counts", () => {
   it("counts tool results by tool name", () => {
     const result = parseLines(
       lines(
@@ -156,7 +156,7 @@ describeIfEnabled("session-reader", "parseLines — tool counts", () => {
 
 // ─── parseLines — custom messages ────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "parseLines — custom messages", () => {
+describeIfEnabled("work-tracker", "parseLines — custom messages", () => {
   it("extracts custom_message entries with their type and content", () => {
     const result = parseLines(
       lines({
@@ -198,7 +198,7 @@ describeIfEnabled("session-reader", "parseLines — custom messages", () => {
 
 // ─── extractSession — file I/O ────────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "extractSession", () => {
+describeIfEnabled("work-tracker", "extractSession", () => {
   const temps: string[] = [];
 
   afterEach(() => {
@@ -234,7 +234,7 @@ describeIfEnabled("session-reader", "extractSession", () => {
 
 // ─── formatSummary ────────────────────────────────────────────────────────────
 
-describeIfEnabled("session-reader", "formatSummary", () => {
+describeIfEnabled("work-tracker", "formatSummary", () => {
   it("includes timestamp header", () => {
     const text = formatSummary({
       filename: "x.jsonl",
