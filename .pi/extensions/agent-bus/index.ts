@@ -12,21 +12,14 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 
-import { BusClient } from "./bus-client";
-import { FsTransport } from "./transport";
-import type { BusConfig } from "./types";
+import { initBusService } from "./bus-service";
 import { BusError } from "./types";
 
 export default function (pi: ExtensionAPI) {
-  // ─── Config ─────────────────────────────────────────────────
-  const config: BusConfig = {
-    sessionId: process.env.PI_BUS_SESSION ?? null,
-    agentId: process.env.PI_AGENT_ID ?? null,
-  };
-
   // ─── Components (DI wiring) ─────────────────────────────────
-  const transport = new FsTransport();
-  const client = new BusClient(transport, config);
+  // Singleton: shared with orch so both extensions operate on the same
+  // BusClient instance, cursor file, and session ID.
+  const { client, transport } = initBusService();
 
   // ─── Context Hook: Passive Notification ─────────────────────
   // ~15 tokens when active, zero tokens when idle.

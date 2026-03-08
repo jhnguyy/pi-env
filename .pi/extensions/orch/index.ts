@@ -78,8 +78,13 @@ export default function (pi: ExtensionAPI) {
       "  status  — Show current run state: runId, workers, orchDir, busSession.",
       "            Returns 'no active run' if orch start has not been called.",
       "",
+      "  wait    — Block until any spawned worker's busChannel receives a message.",
+      "            No arguments required — orch already knows the channels from spawn.",
+      "            Optional: timeout (seconds, default 300).",
+      "            Requires at least one worker spawned with busChannel.",
+      "",
       "Typical flow:",
-      "  orch start { repo } → orch spawn × N → bus wait → read results → orch cleanup",
+      "  orch start { repo } → orch spawn × N → orch wait → read results → orch cleanup",
       "",
       "Branch isolation: each worker gets orch/<runId>/<label>. Two workers cannot commit",
       "to the same branch. After cleanup, run: git branch --list 'orch/*' to see preserved work.",
@@ -88,7 +93,7 @@ export default function (pi: ExtensionAPI) {
     ].join("\n"),
 
     parameters: Type.Object({
-      action: StringEnum(["start", "spawn", "cleanup", "status"] as const, {
+      action: StringEnum(["start", "spawn", "cleanup", "status", "wait"] as const, {
         description: "Operation to perform",
       }),
       // start params
@@ -120,6 +125,12 @@ export default function (pi: ExtensionAPI) {
         Type.String({
           description:
             "Auto-publish exit signal to this bus channel when the worker exits (crash-safe).",
+        }),
+      ),
+      // wait params
+      timeout: Type.Optional(
+        Type.Number({
+          description: "Timeout in seconds for orch wait (default: 300).",
         }),
       ),
     }),
@@ -194,6 +205,28 @@ export default function (pi: ExtensionAPI) {
               }
             }
             return ok(lines.join("\n"));
+          }
+
+          case "wait": {
+            const result = await manager.wait({
+              timeout: params.timeout,
+              signal: _signal ?? undefined,
+            });
+            if (result.timedOut) {
+              const list = result.channels.map((ch) => `#${ch}`).join(", ");
+              return ok(`Timeout (${params.timeout ?? 300}s) — no messages on ${list}`);
+            }
+            const formatted = result.messages
+              .map((m) => {
+                const time = new Date(m.timestamp).toTimeString().slice(0, 8);
+                let line = `[${m.sender} ${time}] ${m.message}`;
+                if (m.data && Object.keys(m.data).length > 0) {
+                  line += ` ${JSON.stringify(m.data)}`;
+                }
+                return line;
+              })
+              .join("\n");
+            return ok(formatted);
           }
 
           default:
