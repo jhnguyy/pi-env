@@ -21,6 +21,9 @@ export interface BusTransport {
   /** Check if session directory exists. */
   sessionExists(sessionId: string): boolean;
 
+  /** Delete session directory. No-op if it does not exist. */
+  deleteSession(sessionId: string): void;
+
   /** Atomically write a message to a channel. */
   publish(sessionId: string, channel: string, msg: BusMessage): void;
 
@@ -81,6 +84,12 @@ export class FsTransport implements BusTransport {
     } catch {
       return false;
     }
+  }
+
+  // ─── deleteSession ───────────────────────────────────────────
+
+  deleteSession(sessionId: string): void {
+    fs.rmSync(this.sessionDir(sessionId), { recursive: true, force: true });
   }
 
   // ─── publish ─────────────────────────────────────────────────

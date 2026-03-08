@@ -11,7 +11,7 @@
  * One active run per manager instance (one run per pi session).
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
@@ -19,29 +19,9 @@ import { createWorktree, removeWorktree, pruneWorktrees } from "./git";
 import { writeManifest, writeReceipt } from "./manifest";
 import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
-
-// ─── Bus exit shim ────────────────────────────────────────────
-// Mirrors pane-manager.ts — duplicated intentionally to keep orch self-contained.
-
-const SHIM_PATH = "/tmp/pi-bus-exit-shim";
-
-const SHIM_SCRIPT = [
-  "#!/usr/bin/env bash",
-  'CHANNEL="$1"',
-  'SESSION="${PI_BUS_SESSION:-}"',
-  '[ -n "$SESSION" ] || exit 0',
-  'DIR="/tmp/pi-bus-${SESSION}/channels/${CHANNEL}"',
-  'mkdir -p "$DIR" 2>/dev/null',
-  'TS=$(date +%s)000',
-  'RAND=$(od -An -N2 -tx1 /dev/urandom 2>/dev/null | tr -dc a-f0-9 | head -c4 || printf "%04x" 0)',
-  'FINAL="$DIR/${TS}-orch-exit-${RAND}.json"',
-  'printf \'{"channel":"%s","sender":"orch-exit","timestamp":%s,"type":"status","message":"process exited"}\' "$CHANNEL" "$TS" > "${FINAL}.tmp" && mv "${FINAL}.tmp" "$FINAL"',
-].join("\n");
-
-function ensureExitShim(): void {
-  if (existsSync(SHIM_PATH)) return;
-  writeFileSync(SHIM_PATH, SHIM_SCRIPT, { mode: 0o755 });
-}
+import { initBusService, getBusService } from "../agent-bus/bus-service";
+import { ensureExitShim, SHIM_PATH } from "../agent-bus/exit-shim";
+import type { BusMessage } from "../agent-bus/types";
 
 // ─── Label validation ─────────────────────────────────────────
 
@@ -131,12 +111,16 @@ export class OrchestratorManager {
     const orchDir = mkdtempSync("/tmp/orch-");
     const busSession = randomBytes(3).toString("hex");
 
-    // Initialize bus session directory structure matching agent-bus transport expectations
-    mkdirSync(`/tmp/pi-bus-${busSession}/channels`, { recursive: true });
-    mkdirSync(`/tmp/pi-bus-${busSession}/cursors`, { recursive: true });
-    // Set env so subsequent bus tool calls in this process use this session
+    // Initialize bus session directory via shared transport.
+    // Orch owns the session lifecycle — we do NOT call client.start() here because
+    // BusClient.start() caches the session ID in-memory and would conflict on restart.
+    // Instead orch sets env vars directly; BusClient.getSessionId() falls back to
+    // process.env.PI_BUS_SESSION when config.sessionId is null.
+    const { transport } = initBusService();
+    transport.ensureSession(busSession);
+    // Set env so subsequent bus tool calls in this process use this session.
     process.env.PI_BUS_SESSION = busSession;
-    // Set orchestrator agent ID for bus publish calls
+    // Set orchestrator agent ID for bus publish calls.
     process.env.PI_AGENT_ID = "orch";
 
     this.state = {
@@ -315,8 +299,8 @@ export class OrchestratorManager {
     // Delete ORCH_DIR (manifest + any files workers wrote there)
     rmSync(orchDir, { recursive: true, force: true });
 
-    // Delete bus session directory (prevents /tmp accumulation)
-    rmSync(`/tmp/pi-bus-${busSession}`, { recursive: true, force: true });
+    // Delete bus session directory via transport (prevents /tmp accumulation)
+    getBusService().transport.deleteSession(busSession);
 
     // Clear env vars set by start()
     delete process.env.PI_BUS_SESSION;
@@ -325,6 +309,32 @@ export class OrchestratorManager {
     this.state = null;
 
     return { panes: panesKilled, worktrees: worktreesRemoved, preservedBranches, receiptPath };
+  }
+
+  // ─── wait ──────────────────────────────────────────────────
+
+  async wait(opts: {
+    timeout?: number;
+    signal?: AbortSignal;
+  }): Promise<{ messages: BusMessage[]; timedOut: boolean; channels: string[] }> {
+    if (!this.state) {
+      throw new OrchError("No active orchestration — call orch start first", "NO_ACTIVE_RUN");
+    }
+
+    const channels = this.state.workers
+      .map((w) => w.busChannel)
+      .filter((ch): ch is string => ch !== undefined);
+
+    if (channels.length === 0) {
+      throw new OrchError(
+        "No workers have busChannels — spawn with busChannel to use orch wait",
+        "NO_BUS_CHANNELS",
+      );
+    }
+
+    const { client } = getBusService();
+    const { messages, timedOut } = await client.wait(channels, opts.timeout ?? 300, opts.signal);
+    return { messages, timedOut, channels };
   }
 
   // ─── getStatus ─────────────────────────────────────────────
