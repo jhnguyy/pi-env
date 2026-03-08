@@ -10,7 +10,7 @@
  * (subagents don't need this context, and injecting it wastes tokens).
  *
  * Config via env vars:
- *   WORK_TRACKER_REPOS      — comma-separated repo paths (default: pi-env, nix-config)
+ *   WORK_TRACKER_REPOS      — comma-separated repo paths (default: pi-env only)
  *   WORK_TRACKER_PROTECTED  — comma-separated protected branches (default: main, master)
  */
 
@@ -29,7 +29,7 @@ import type { WorkTrackerConfig } from "./types";
 function loadConfig(): WorkTrackerConfig {
   const guardedRepos = process.env.WORK_TRACKER_REPOS
     ? process.env.WORK_TRACKER_REPOS.split(",").map((s) => s.trim())
-    : ["/mnt/tank/code/pi-env", "/mnt/tank/code/nix-config"];
+    : ["/mnt/tank/code/pi-env"];
 
   const protectedBranches = process.env.WORK_TRACKER_PROTECTED
     ? process.env.WORK_TRACKER_PROTECTED.split(",").map((s) => s.trim())
