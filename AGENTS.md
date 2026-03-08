@@ -34,4 +34,4 @@ Workers tag all commits with `Agent-Id` trailers in the format `Agent-Id: <label
 git log --format="%s%n%b" origin/main..HEAD | grep "Agent-Id:"
 ```
 
-Workers must receive `PI_AGENT_LABEL` and `PI_BUS_SESSION` as environment variables (set during spawn).
+Workers spawned via `orch spawn` receive `PI_AGENT_ID` and `PI_BUS_SESSION` automatically. The commit-msg hook reads `PI_AGENT_ID` for trailer injection.

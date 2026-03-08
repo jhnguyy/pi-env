@@ -208,7 +208,7 @@ export class OrchestratorManager {
 
       const hookScript = [
         "#!/usr/bin/env bash",
-        'LABEL="${PI_AGENT_LABEL:-}"',
+        'LABEL="${PI_AGENT_ID:-}"',
         'SESSION="${PI_BUS_SESSION:-}"',
         'if [[ -n "$LABEL" || -n "$SESSION" ]]; then',
         '  printf "\\nAgent-Id: %s/%s\\n" "${LABEL:-unknown}" "${SESSION:-unknown}" >> "$1"',
