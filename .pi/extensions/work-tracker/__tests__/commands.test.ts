@@ -17,6 +17,9 @@ describe("work-tracker commands", () => {
         registerCommand(name: string, opts: { description: string; handler: unknown }) {
           registered.push({ name, opts });
         },
+        registerTool: () => {},
+        getActiveTools: () => [] as string[],
+        setActiveTools: () => {},
         on: () => {},
         sendUserMessage: () => {},
       };
@@ -40,6 +43,9 @@ describe("work-tracker commands", () => {
             opts.handler(undefined, {});
           }
         },
+        registerTool: () => {},
+        getActiveTools: () => [] as string[],
+        setActiveTools: () => {},
         on: () => {},
         sendUserMessage(msg: string) {
           messages.push(msg);
@@ -63,6 +69,9 @@ describe("work-tracker commands", () => {
             opts.handler("3", {});
           }
         },
+        registerTool: () => {},
+        getActiveTools: () => [] as string[],
+        setActiveTools: () => {},
         on: () => {},
         sendUserMessage(msg: string) {
           messages.push(msg);

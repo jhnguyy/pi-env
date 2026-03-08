@@ -1,15 +1,15 @@
 /**
- * Handoff extension — smoke tests.
+ * Handoff command — smoke tests (moved from handoff extension).
  *
- * The extension registers a single `/handoff` command that composes a
- * prompt and hands it to sendUserMessage. There is no pure logic to unit
- * test, so this suite just confirms the module contract is intact.
+ * The /handoff command composes a prompt and hands it to sendUserMessage.
+ * There is no pure logic to unit test, so this suite confirms the module
+ * contract is intact after absorption into work-tracker.
  */
 
-import { describe, expect, it, mock } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 
-describeIfEnabled("handoff", "handoff extension", () => {
+describeIfEnabled("work-tracker", "handoff command", () => {
   describe("module contract", () => {
     it("exports a default function", async () => {
       const mod = await import("../index");
@@ -29,37 +29,49 @@ describeIfEnabled("handoff", "handoff extension", () => {
         registerCommand(name: string, opts: { description: string; handler: unknown }) {
           registered.push({ name, opts });
         },
+        registerTool: () => {},
+        getActiveTools: () => [] as string[],
+        setActiveTools: () => {},
+        on: () => {},
+        sendUserMessage: () => {},
       };
 
       mod.default(mockPi as any);
 
-      expect(registered.length).toBe(1);
-      expect(registered[0].name).toBe("handoff");
-      expect(typeof registered[0].opts.description).toBe("string");
-      expect(registered[0].opts.description.length).toBeGreaterThan(0);
+      const handoffCmd = registered.find((r) => r.name === "handoff");
+      expect(handoffCmd).toBeDefined();
+      expect(typeof handoffCmd!.opts.description).toBe("string");
+      expect(handoffCmd!.opts.description.length).toBeGreaterThan(0);
     });
 
     it("handler queues two sendUserMessage calls (handoff + retro)", async () => {
       const mod = await import("../index");
 
       const messages: string[] = [];
+      let handoffHandler: ((args: any, ctx: any) => Promise<void>) | undefined;
       const mockPi = {
         registerCommand(
-          _name: string,
+          name: string,
           opts: { description: string; handler: (args: any, ctx: any) => Promise<void> },
         ) {
-          // Invoke the handler with a mock ctx
-          opts.handler(undefined, {
-            waitForIdle: async () => {},
-            model: { provider: "test", id: "model" },
-          });
+          if (name === "handoff") handoffHandler = opts.handler;
         },
+        registerTool: () => {},
+        getActiveTools: () => [] as string[],
+        setActiveTools: () => {},
+        on: () => {},
         sendUserMessage(msg: string) {
           messages.push(msg);
         },
       };
 
       mod.default(mockPi as any);
+
+      // Invoke the handoff handler with a mock ctx
+      await handoffHandler!(undefined, {
+        waitForIdle: async () => {},
+        model: { provider: "test", id: "model" },
+      });
 
       // Allow microtasks to flush (handler is async)
       await new Promise((r) => setTimeout(r, 0));

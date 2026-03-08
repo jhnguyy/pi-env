@@ -1,10 +1,14 @@
 /**
  * Work Tracker Extension — entry point.
  *
- * Provides three capabilities:
- *   1. Branch guard      — blocks git push to protected branches (tool_call hook)
- *   2. Handoff cleanup   — deletes handoffs when their branch merges (tool_result hook)
- *   3. Context injection — injects git branch + dirty status before root agent turns
+ * Provides session lifecycle management:
+ *   1. Branch guard       — blocks git push to protected branches (tool_call hook)
+ *   2. Handoff cleanup    — deletes handoffs when their branch merges (tool_result hook)
+ *   3. Context injection  — injects git branch + dirty status before root agent turns
+ *   4. /handoff command   — write session handoff + retro
+ *   5. /todo command      — in-memory session task list
+ *   6. read_session tool  — extract high-signal content from session JSONL files
+ *   7. /review-retros     — review past retros and propose behavioral improvements
  *
  * Subagent detection: if PI_AGENT_ID env var is set, context injection is skipped
  * (subagents don't need this context, and injecting it wastes tokens).
@@ -12,10 +16,15 @@
  * Config via env vars:
  *   WORK_TRACKER_REPOS      — comma-separated repo paths (default: pi-env only)
  *   WORK_TRACKER_PROTECTED  — comma-separated protected branches (default: main, master)
+ *   PI_SESSION_READER       — if set, keeps read_session tool active (for review subagents)
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 
 import { BranchGuard } from "./branch-guard";
 import {
@@ -24,7 +33,11 @@ import {
 	isGitPull,
 	parseMergedBranches,
 } from "./handoff-cleanup";
+import { TodoStore } from "./store";
+import { extractSession, formatSummary } from "./extractor";
 import type { WorkTrackerConfig } from "./types";
+
+const SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
 function loadConfig(): WorkTrackerConfig {
   const guardedRepos = process.env.WORK_TRACKER_REPOS
@@ -61,9 +74,20 @@ function getGitStatus(repoPath: string): { branch: string | null; dirty: number 
   return { branch, dirty };
 }
 
+/** Get the branch of the current working directory. Reuses getGitStatus. */
+function getCurrentBranch(): string | null {
+  return getGitStatus(process.cwd()).branch;
+}
+
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
   const guard = new BranchGuard(config);
+  const store = new TodoStore();
+
+  function refreshTodoWidget(ctx: ExtensionContext) {
+    if (process.env.PI_AGENT_ID) return;
+    ctx.ui.setWidget("session-todos", [store.render()], { placement: "belowEditor" });
+  }
 
   function buildStatusLine(): string | null {
     const parts: string[] = [];
@@ -79,6 +103,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ─── 0. Commands ──────────────────────────────────────────────────
+
   pi.registerCommand("review-retros", {
     description: "Review last N session retros and propose behavioral improvements.\nUsage: /review-retros [N]  (default: last 5 retros)",
     handler: async (args, _ctx) => {
@@ -105,6 +130,167 @@ export default function (pi: ExtensionAPI) {
           `6. Present each proposal one at a time and ask: "Apply this? (yes/no/modify)"\n` +
           `7. Apply accepted proposals immediately using the appropriate tool.`,
       );
+    },
+  });
+
+  pi.registerCommand("handoff", {
+    description: "Write a session handoff and display the resume prompt",
+    handler: async (_args, ctx) => {
+      await ctx.waitForIdle();
+
+      const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "unknown";
+      const branch = getCurrentBranch();
+
+      pi.sendUserMessage(
+        `Write a handoff for this session following the handoff skill.\n` +
+          `Use today's date (${date}) and model-used: ${model} in the frontmatter.\n` +
+          (branch ? `Include a \`branch: ${branch}\` field in the frontmatter.\n` : ``) +
+          `Save to ~/.pi/agent/handoffs/${date}-<slug>.md where <slug> is derived from the task.\n` +
+          `After saving, display the full file path and the one-line resume prompt.`,
+      );
+
+      pi.sendUserMessage(
+        `Write a session retrospective and save it to ~/.pi/retro/${date}.md\n` +
+          `(create the file if it doesn't exist; append as a new section if it does).\n` +
+          `\n` +
+          `Use this exact format:\n` +
+          `\n` +
+          `## Session retro — <slug> (${date})\n` +
+          `\n` +
+          `<2-4 sentence freeform summary of what happened>\n` +
+          `\n` +
+          `### Patterns\n` +
+          `- [workflow] <observation about how the work was done>\n` +
+          `- [tooling] <gap or friction in an extension, skill, or tool>\n` +
+          `- [convention] <coding or process pattern noticed>\n` +
+          `- [mistake] <error that was caught — how and when>\n` +
+          `- [knowledge] <domain discovery worth knowing next time>\n` +
+          `\n` +
+          `Only include tags where you have a concrete observation. Omit tags with nothing real to say.\n` +
+          `If the worklog note already has content for today, append as a new section — do not overwrite.`,
+      );
+    },
+  });
+
+  pi.registerCommand("todo", {
+    description: [
+      "Session task list. Usage:",
+      "  /todo <task>       — add a task",
+      "  /todo done <n>     — mark task n complete (by id or partial text)",
+      "  /todo rm <n>       — remove a task",
+      "  /todo clear        — clear all tasks",
+      "  /todo              — show current list",
+    ].join("\n"),
+
+    handler: async (args, ctx) => {
+      const trimmed = args?.trim() ?? "";
+
+      // /todo — show list
+      if (!trimmed) {
+        ctx.ui.notify(store.render(), "info");
+        return;
+      }
+
+      // /todo clear
+      if (trimmed === "clear") {
+        store.clear();
+        refreshTodoWidget(ctx);
+        ctx.ui.notify("Cleared.", "info");
+        return;
+      }
+
+      // /todo done <ref>
+      if (trimmed.startsWith("done ")) {
+        const ref = trimmed.slice(5).trim();
+        const n = parseInt(ref, 10);
+        const item = store.complete(isNaN(n) ? ref : n);
+        if (item) {
+          refreshTodoWidget(ctx);
+          ctx.ui.notify(`✅ (${item.id}) ${item.text}`, "info");
+        } else {
+          ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        }
+        return;
+      }
+
+      // /todo rm <ref>
+      if (trimmed.startsWith("rm ")) {
+        const ref = trimmed.slice(3).trim();
+        const n = parseInt(ref, 10);
+        const ok = store.remove(isNaN(n) ? ref : n);
+        if (ok) {
+          refreshTodoWidget(ctx);
+          ctx.ui.notify("Removed.", "info");
+        } else {
+          ctx.ui.notify(`No matching task: ${ref}`, "warning");
+        }
+        return;
+      }
+
+      // /todo <task> — add
+      const item = store.add(trimmed);
+      refreshTodoWidget(ctx);
+      ctx.ui.notify(`□ (${item.id}) ${item.text}`, "info");
+    },
+  });
+
+  // ─── read_session tool ────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "read_session",
+    label: "Read Session",
+    description:
+      "Extract high-signal content from a pi session JSONL file. " +
+      "Returns user prompts, agent narrative text (no raw tool outputs), " +
+      "tool usage counts, and extension messages. " +
+      "Use to understand what happened in a past session without parsing raw JSONL. " +
+      "Discover session files with: find ~/.pi/agent/sessions/ -name '*.jsonl' | sort -r | head -20",
+    parameters: Type.Object({
+      path: Type.String({
+        description: "Absolute path to a session .jsonl file under ~/.pi/agent/sessions/",
+      }),
+    }),
+
+    async execute(_id, params, signal, _onUpdate, _ctx: any) {
+      // Check cancellation before doing any I/O
+      if (signal?.aborted) {
+        return { content: [{ type: "text" as const, text: "Cancelled." }], details: {} };
+      }
+
+      // Strip leading @ (some models include it in path arguments)
+      const p = resolve(params.path.replace(/^@/, ""));
+
+      // Restrict to session directory — prevents read_session from being
+      // used as a general-purpose JSONL reader on arbitrary files.
+      if (!p.startsWith(SESSION_DIR + "/")) {
+        throw new Error(
+          `read_session is restricted to session files under ${SESSION_DIR}/. Got: ${p}`,
+        );
+      }
+
+      // extractSession validates extension and existence — errors propagate as tool errors
+      const summary = extractSession(p);
+      const raw = formatSummary(summary);
+
+      // Truncate to avoid overwhelming the LLM context window
+      const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+      let text = trunc.content;
+      if (trunc.truncated) {
+        text +=
+          `\n\n[Output truncated: ${formatSize(trunc.outputBytes)} of ${formatSize(trunc.totalBytes)}. ` +
+          `Session had ${summary.userMessages.length} user turns and ${summary.agentNarrative.length} narrative blocks.]`;
+      }
+
+      return {
+        content: [{ type: "text" as const, text }],
+        details: {
+          filename: summary.filename,
+          timestamp: summary.timestamp,
+          toolCounts: summary.toolCounts,
+          truncated: trunc.truncated,
+        },
+      };
     },
   });
 
@@ -185,14 +371,28 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ─── 3. Initial widget on session start ───────────────────────────
+  // ─── 3. Session start — widget init, todo clear, tool deactivation ───
   pi.on("session_start", async (_event, ctx) => {
+    // Clear todo list on new session
+    store.clear();
+
     if (process.env.PI_AGENT_ID) return;
+
+    // Refresh work-tracker git status widget
     const line = buildStatusLine();
     if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
+
+    // Refresh todo widget (empty after clear)
+    refreshTodoWidget(ctx);
+
+    // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it
+    // active (for dedicated review subagents).
+    if (!process.env.PI_SESSION_READER) {
+      pi.setActiveTools(pi.getActiveTools().filter((t) => t !== "read_session"));
+    }
   });
 
-  // ─── 4. Context Injection + widget refresh (root sessions only) ───
+  // ─── 4. Context injection + widget refresh (root sessions only) ───
   pi.on("before_agent_start", async (_event, ctx) => {
     // Skip context injection for subagents — PI_AGENT_ID is set by pi
     // when spawning subagents via the tmux tool
@@ -203,12 +403,29 @@ export default function (pi: ExtensionAPI) {
     // Refresh the persistent widget with latest git state
     if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
 
+    // Refresh todo widget
+    refreshTodoWidget(ctx);
+
     if (!line) return {};
 
     return {
       message: {
         customType: "work-tracker",
         content: line,
+        display: false,
+      },
+    };
+  });
+
+  // ─── 5. Todo context injection (root sessions only) ───────────────
+  pi.on("before_agent_start", async () => {
+    // Skip for subagents — PI_AGENT_ID is set by pi when spawning subagents
+    if (process.env.PI_AGENT_ID) return {};
+
+    return {
+      message: {
+        customType: "session-todos",
+        content: store.render(),
         display: false,
       },
     };
