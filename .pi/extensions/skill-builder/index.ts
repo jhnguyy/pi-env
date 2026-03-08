@@ -9,14 +9,85 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, readdirSync, existsSync } from "fs";
 import { basename, join, resolve } from "path";
+import { homedir } from "os";
+
+const REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 
 import { validateSkill } from "./validator";
 import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
 
 export default function (pi: ExtensionAPI) {
+  pi.registerTool({
+    name: "reference_skill",
+    label: "Reference Skill",
+    description:
+      "Access skills that are not in passive context. Call without a name to list available skills, or with a name to load that skill's instructions.",
+    parameters: Type.Object({
+      name: Type.Optional(
+        Type.String({ description: "Skill name to load. Omit to list available skills." }),
+      ),
+    }),
+
+    async execute(_toolCallId, params) {
+      if (!existsSync(REFERENCE_DIR)) {
+        return {
+          content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }],
+        };
+      }
+
+      const files = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md"));
+
+      // List mode
+      if (!params.name) {
+        const names = files.map((f: string) => f.replace(/\.md$/, ""));
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}`,
+            },
+          ],
+        };
+      }
+
+      // Load mode — fuzzy match on filename or frontmatter name
+      const target = params.name.toLowerCase();
+      let matched: string | null = null;
+
+      for (const file of files) {
+        const filePath = join(REFERENCE_DIR, file);
+        const content = readFileSync(filePath, "utf-8");
+        const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
+        const skillName = nameMatch ? nameMatch[1].trim().toLowerCase() : file.replace(/\.md$/, "");
+
+        if (skillName === target || file.replace(/\.md$/, "").toLowerCase() === target) {
+          matched = filePath;
+          break;
+        }
+      }
+
+      if (!matched) {
+        const names = files.map((f: string) => f.replace(/\.md$/, ""));
+        return {
+          content: [
+            {
+              type: "text",
+              text: `No reference skill named "${params.name}". Available: ${names.join(", ")}`,
+            },
+          ],
+        };
+      }
+
+      const content = readFileSync(matched, "utf-8");
+      return {
+        content: [{ type: "text", text: content }],
+      };
+    },
+  });
+
   pi.registerTool({
     name: "skill_build",
     label: "Skill Build",
