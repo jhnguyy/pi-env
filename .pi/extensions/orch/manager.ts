@@ -340,15 +340,23 @@ export class OrchestratorManager {
     label: string,
     _interactive: boolean,
   ): Promise<string> {
-    // Split horizontally: new pane to the right of current
-    const result = await this.execFn("tmux", [
+    // Split horizontally: new pane to the right of the pi process's own pane.
+    // Always target TMUX_PANE so the split lands on the same window,
+    // regardless of which window or pane the user has focused.
+    const args = [
       "split-window",
       "-h",   // horizontal split
       "-d",   // don't switch to new pane
       "-P",   // print pane ID on stdout
       "-F", "#{pane_id}",
-      command,
-    ]);
+    ];
+    const callerPane = process.env.TMUX_PANE;
+    if (callerPane) {
+      args.push("-t", callerPane);
+    }
+    args.push(command);
+
+    const result = await this.execFn("tmux", args);
 
     if (result.code !== 0) {
       throw new OrchError(

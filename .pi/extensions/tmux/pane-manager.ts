@@ -69,8 +69,11 @@ function makePaneRecord(opts: {
 
 export class PaneManager {
   private registry: Map<string, PaneRecord> = new Map();
-  /** Ordered list of worker tmux pane IDs, used for layout targeting. */
-  private workerPaneIds: string[] = [];
+  /**
+   * Worker panes organized by column. Column 0 = middle third, column 1 = right third.
+   * Each column is an ordered list of tmux pane IDs (top to bottom).
+   */
+  private columns: [string[], string[]] = [[], []];
 
   constructor(
     private client: ITmuxClient,
@@ -109,40 +112,63 @@ export class PaneManager {
       command = input.command;
     }
 
+    // Orchestrator pane — always anchor splits to the pi process's own pane
+    // so all workers land on the same window regardless of which pane the user
+    // has focused or which window is active.
+    const orchPaneId = process.env.TMUX_PANE ?? "";
+
     // Layout: orchestrator = full-height left column (1/3 width).
     // Workers fill a grid in the remaining 2/3:
     //   col0 (orch) | col1      | col2
     //   full height  | worker 0  | worker 1
     //                | worker 2  | worker 3
     //
-    // Worker 0: split right from orch, new pane gets 67% (orch keeps 33%)
-    // Worker 1: split right from worker 0, 50% of the 67% (two equal worker columns)
-    // Workers 2+: split below existing workers, round-robin across columns
-    const workerIndex = this.workerPaneIds.length;
+    // Column 0 empty → split right from orch (67% to new pane)
+    // Column 1 empty → split right from column 0's first pane (50% each)
+    // Both columns have panes → split below the last pane in the shorter column
     let direction: "right" | "below";
-    let targetPaneId: string | undefined;
+    let targetPaneId: string;
     let sizePercent: number | undefined;
 
-    if (workerIndex === 0) {
+    if (this.columns[0].length === 0) {
+      // First worker: split right from orchestrator pane
       direction = "right";
-      targetPaneId = undefined; // splits from orchestrator (current pane)
-      sizePercent = 67;         // new pane gets 67%, orchestrator keeps 33%
-    } else if (workerIndex === 1) {
+      targetPaneId = orchPaneId;
+      sizePercent = 67; // new pane gets 67%, orchestrator keeps 33%
+    } else if (this.columns[1].length === 0) {
+      // Second worker: split right from column 0's first pane
       direction = "right";
-      targetPaneId = this.workerPaneIds[0]; // split from first worker
-      sizePercent = 50;                      // equal halves of the 67%
+      targetPaneId = this.columns[0][0];
+      sizePercent = 50; // equal halves of the 67%
     } else {
-      // Round-robin below existing worker columns
-      const columnTarget = (workerIndex - 2) % 2;
+      // Subsequent workers: split below the last pane in the shorter column
+      const colIdx = this.columns[0].length <= this.columns[1].length ? 0 : 1;
+      const column = this.columns[colIdx];
       direction = "below";
-      targetPaneId = this.workerPaneIds[columnTarget];
-      sizePercent = undefined; // default 50% vertical split
+      targetPaneId = column[column.length - 1]; // split below the bottom pane
+      sizePercent = undefined;
     }
 
     const tmuxPaneId = await this.client.splitWindow(direction, command, targetPaneId, sizePercent);
-    this.workerPaneIds.push(tmuxPaneId);
+
+    // Track which column this pane belongs to
+    if (direction === "right" && this.columns[0].length === 0) {
+      this.columns[0].push(tmuxPaneId);
+    } else if (direction === "right") {
+      this.columns[1].push(tmuxPaneId);
+    } else {
+      // "below" split — use the target pane to find which column we split into
+      if (this.columns[0].includes(targetPaneId)) {
+        this.columns[0].push(tmuxPaneId);
+      } else {
+        this.columns[1].push(tmuxPaneId);
+      }
+    }
 
     await this.client.setupPane(tmuxPaneId, input.label);
+
+    // Rebalance layout: enforce orch=1/3, equal worker columns, even heights
+    await this.client.rebalanceLayout(orchPaneId, this.columns);
 
     const pane = makePaneRecord({
       id,
@@ -195,10 +221,22 @@ export class PaneManager {
     }
 
     this.registry.delete(paneId);
-    this.workerPaneIds = this.workerPaneIds.filter(id => id !== pane.tmuxPaneId);
+    // Remove from column tracking
+    for (const col of this.columns) {
+      const idx = col.indexOf(pane.tmuxPaneId);
+      if (idx !== -1) {
+        col.splice(idx, 1);
+        break;
+      }
+    }
 
     if (kill) {
       await this.client.killPane(pane.tmuxPaneId);
+      // Rebalance after killing — tmux reclaims space, but widths may drift
+      const orchPaneId = process.env.TMUX_PANE ?? "";
+      if (orchPaneId) {
+        await this.client.rebalanceLayout(orchPaneId, this.columns);
+      }
     }
 
     return { ok: true };
@@ -287,6 +325,6 @@ export class PaneManager {
   cleanup(): void {
     // Clear registry only. Do NOT kill panes — user may want to inspect.
     this.registry.clear();
-    this.workerPaneIds = [];
+    this.columns = [[], []];
   }
 }

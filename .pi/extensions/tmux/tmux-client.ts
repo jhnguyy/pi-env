@@ -78,8 +78,6 @@ export class TmuxClient implements ITmuxClient {
     return { content: result.stdout, alive: true };
   }
 
-  // ─── killPaneAndRebalance ────────────────────────────────────
-
   // ─── killPane ────────────────────────────────────────────────
 
   async killPane(tmuxPaneId: string): Promise<void> {
@@ -104,6 +102,56 @@ export class TmuxClient implements ITmuxClient {
     const result = await this.execFn("tmux", ["select-pane", "-t", tmuxPaneId, "-T", title]);
     if (result.code !== 0) {
       console.error(`[tmux] setPaneTitle failed (ignored): ${result.stderr || result.stdout}`);
+    }
+  }
+
+  // ─── rebalanceLayout ──────────────────────────────────────────
+
+  async rebalanceLayout(orchPaneId: string, columns: string[][]): Promise<void> {
+    const activeColumns = columns.filter(c => c.length > 0);
+    if (activeColumns.length === 0) return; // nothing to rebalance
+
+    // Get window width via the orchestrator pane (always in the correct window)
+    const dimResult = await this.execFn("tmux", [
+      "display-message", "-t", orchPaneId, "-p", "#{window_width} #{window_height}",
+    ]);
+    if (dimResult.code !== 0) return;
+    const parts = dimResult.stdout.trim().split(" ");
+    const windowWidth = parseInt(parts[0], 10);
+    const windowHeight = parseInt(parts[1], 10);
+    if (isNaN(windowWidth) || isNaN(windowHeight)) return;
+
+    // Width: orch = 1/3, worker columns split the remaining 2/3 evenly.
+    // Account for tmux pane borders (1 char each between columns).
+    const numCols = 1 + activeColumns.length; // orch + worker columns
+    const usableWidth = windowWidth - (numCols - 1); // subtract border chars
+    const orchWidth = Math.floor(usableWidth / numCols);
+
+    await this.execFn("tmux", [
+      "resize-pane", "-t", orchPaneId, "-x", String(orchWidth),
+    ]);
+
+    // If two worker columns, resize the first to get equal width with the second.
+    // The second column automatically gets the remainder.
+    if (activeColumns.length === 2) {
+      const workerColWidth = Math.floor((usableWidth - orchWidth - 1) / 2); // -1 for border between cols
+      await this.execFn("tmux", [
+        "resize-pane", "-t", activeColumns[0][0], "-x", String(workerColWidth),
+      ]);
+    }
+
+    // Height: within each column with 2+ panes, distribute height evenly.
+    // Account for tmux pane borders (1 char each between rows).
+    for (const column of activeColumns) {
+      if (column.length <= 1) continue;
+      const usableHeight = windowHeight - (column.length - 1); // subtract borders
+      const paneHeight = Math.floor(usableHeight / column.length);
+      // Resize all but the last pane (last gets the remainder)
+      for (let i = 0; i < column.length - 1; i++) {
+        await this.execFn("tmux", [
+          "resize-pane", "-t", column[i], "-y", String(paneHeight),
+        ]);
+      }
     }
   }
 

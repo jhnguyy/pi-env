@@ -282,6 +282,90 @@ describeIfEnabled("tmux", "TmuxClient", () => {
     });
   });
 
+  // ─── rebalanceLayout ─────────────────────────────────────────
+
+  describe("rebalanceLayout()", () => {
+    it("does nothing when both columns are empty", async () => {
+      const { calls, fn } = captureExec();
+      const client = new TmuxClient(fn);
+      await client.rebalanceLayout("%0", [[], []]);
+      expect(calls.length).toBe(0);
+    });
+
+    it("resizes orchestrator pane to ~1/3 width when one worker column exists", async () => {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const execFn: ExecFn = async (cmd, args) => {
+        calls.push({ cmd, args });
+        // Return window dimensions for the display-message call
+        if (args.includes("display-message")) {
+          return { stdout: "240 60\n", stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      };
+      const client = new TmuxClient(execFn);
+      await client.rebalanceLayout("%0", [["%5"], []]);
+
+      // Should call display-message to get dimensions
+      expect(calls[0].args).toContain("display-message");
+      // Should resize orch pane (1 orch + 1 worker col = 2 cols)
+      // usableWidth = 240 - 1 (border) = 239, orchWidth = floor(239/2) = 119
+      const resizeCall = calls.find(c => c.args.includes("resize-pane") && c.args.includes("%0"));
+      expect(resizeCall).toBeDefined();
+      expect(resizeCall!.args).toContain("-x");
+    });
+
+    it("resizes both orchestrator and first worker column for two worker columns", async () => {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const execFn: ExecFn = async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (args.includes("display-message")) {
+          return { stdout: "240 60\n", stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      };
+      const client = new TmuxClient(execFn);
+      await client.rebalanceLayout("%0", [["%5"], ["%6"]]);
+
+      const resizeCalls = calls.filter(c => c.args.includes("resize-pane"));
+      // Should resize orch and first worker column
+      expect(resizeCalls.length).toBe(2);
+      expect(resizeCalls[0].args).toContain("%0"); // orch
+      expect(resizeCalls[1].args).toContain("%5"); // first worker col
+    });
+
+    it("distributes height evenly within a column with multiple panes", async () => {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const execFn: ExecFn = async (cmd, args) => {
+        calls.push({ cmd, args });
+        if (args.includes("display-message")) {
+          return { stdout: "240 60\n", stderr: "", code: 0 };
+        }
+        return { stdout: "", stderr: "", code: 0 };
+      };
+      const client = new TmuxClient(execFn);
+      await client.rebalanceLayout("%0", [["%5", "%7"], ["%6"]]);
+
+      // Should have height resize for %5 (first pane in 2-pane column)
+      const heightResizes = calls.filter(c =>
+        c.args.includes("resize-pane") && c.args.includes("-y"),
+      );
+      expect(heightResizes.length).toBe(1);
+      // Height = floor((60 - 1) / 2) = 29 for each of 2 panes
+      expect(heightResizes[0].args).toContain("%5");
+      expect(heightResizes[0].args).toContain("29");
+    });
+
+    it("silently handles display-message failure", async () => {
+      const client = new TmuxClient(
+        mockExec({ stdout: "", stderr: "failed", code: 1 }),
+      );
+      // Should not throw
+      await expect(
+        client.rebalanceLayout("%0", [["%5"], ["%6"]]),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   // ─── listPanes ──────────────────────────────────────────────
 
   describe("listPanes()", () => {

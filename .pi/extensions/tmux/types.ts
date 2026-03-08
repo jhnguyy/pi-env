@@ -102,6 +102,14 @@ export interface ITmuxClient {
   isPaneAlive(tmuxPaneId: string): Promise<boolean>;
   capturePaneContent(tmuxPaneId: string): Promise<string>;
 
+  // ── Layout ───────────────────────────────────────────────
+  /**
+   * Rebalance pane layout: orch pane gets 1/3 width, worker columns split
+   * the remaining 2/3 evenly, and panes within each column share height equally.
+   * Best-effort — failures are silently tolerated.
+   */
+  rebalanceLayout(orchPaneId: string, columns: string[][]): Promise<void>;
+
   // ── Orphan detection ──────────────────────────────────────
   /** List every pane visible to tmux across all sessions, with pid and current command. */
   listAllPanes(): Promise<SystemPane[]>;

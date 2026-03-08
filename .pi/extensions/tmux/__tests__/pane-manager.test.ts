@@ -11,23 +11,20 @@ function makeMockClient(overrides: Partial<ITmuxClient> = {}): ITmuxClient & {
   sendKeysCalls: Array<{ paneId: string; text: string }>;
   setupPaneCalls: Array<{ paneId: string; title: string }>;
   capturePaneWithStatusCalls: string[];
-  killPaneAndRebalanceCalls: string[];
-  // granular methods kept for reconstruct / compat
   killPaneCalls: string[];
   setPaneTitleCalls: Array<{ paneId: string; title: string }>;
   capturePaneCalls: string[];
-  rebalanceLayoutCalls: number;
+  rebalanceLayoutCalls: Array<{ orchPaneId: string; columns: string[][] }>;
   alivePanes: Set<string>;
 } {
   const splitWindowCalls: Array<{ direction: string; command: string; targetPaneId?: string }> = [];
   const sendKeysCalls: Array<{ paneId: string; text: string }> = [];
   const setupPaneCalls: Array<{ paneId: string; title: string }> = [];
   const capturePaneWithStatusCalls: string[] = [];
-  const killPaneAndRebalanceCalls: string[] = [];
   const killPaneCalls: string[] = [];
   const setPaneTitleCalls: Array<{ paneId: string; title: string }> = [];
   const capturePaneCalls: string[] = [];
-  let rebalanceLayoutCalls = 0;
+  const rebalanceLayoutCalls: Array<{ orchPaneId: string; columns: string[][] }> = [];
   const alivePanes = new Set<string>(["%5"]);
   let paneCounter = 5;
 
@@ -36,11 +33,10 @@ function makeMockClient(overrides: Partial<ITmuxClient> = {}): ITmuxClient & {
     sendKeysCalls,
     setupPaneCalls,
     capturePaneWithStatusCalls,
-    killPaneAndRebalanceCalls,
     killPaneCalls,
     setPaneTitleCalls,
     capturePaneCalls,
-    get rebalanceLayoutCalls() { return rebalanceLayoutCalls; },
+    rebalanceLayoutCalls,
     alivePanes,
 
     isInTmux: overrides.isInTmux ?? (() => true),
@@ -61,9 +57,8 @@ function makeMockClient(overrides: Partial<ITmuxClient> = {}): ITmuxClient & {
       const alive = alivePanes.has(paneId);
       return { content: alive ? `output from ${paneId}` : "", alive };
     },
-    async killPaneAndRebalance(paneId) {
-      killPaneAndRebalanceCalls.push(paneId);
-      alivePanes.delete(paneId);
+    async rebalanceLayout(orchPaneId, columns) {
+      rebalanceLayoutCalls.push({ orchPaneId, columns: columns.map(c => [...c]) });
     },
     // granular methods — used by reconstruct and tests that exercise them directly
     async killPane(paneId) {
@@ -83,8 +78,8 @@ function makeMockClient(overrides: Partial<ITmuxClient> = {}): ITmuxClient & {
       capturePaneCalls.push(paneId);
       return `output from ${paneId}`;
     },
-    async rebalanceLayout() {
-      rebalanceLayoutCalls++;
+    async listAllPanes() {
+      return [];
     },
     ...overrides,
   };
@@ -101,6 +96,124 @@ describeIfEnabled("tmux", "PaneManager", () => {
   beforeEach(() => {
     client = makeMockClient();
     manager = new PaneManager(client, TEST_CONFIG);
+    // Ensure TMUX_PANE is set for window-anchoring tests
+    process.env.TMUX_PANE = "%0";
+  });
+
+  // ─── run() — window anchoring ──────────────────────────────
+
+  describe("run() window anchoring", () => {
+    it("first worker splits from TMUX_PANE (orchestrator's pane), not from active pane", async () => {
+      process.env.TMUX_PANE = "%42";
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      // First worker must target the orchestrator pane, not undefined
+      expect(client.splitWindowCalls[0].targetPaneId).toBe("%42");
+    });
+
+    it("all workers target panes in the same window as the orchestrator", async () => {
+      process.env.TMUX_PANE = "%10";
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      // Worker 0: targets orch pane
+      expect(client.splitWindowCalls[0].targetPaneId).toBe("%10");
+      // Worker 1: targets worker 0 (which is in the same window)
+      expect(client.splitWindowCalls[1].targetPaneId).toBeDefined();
+      // Worker 2: targets a worker pane (below split in same window)
+      expect(client.splitWindowCalls[2].targetPaneId).toBeDefined();
+      // None should be undefined
+      for (const call of client.splitWindowCalls) {
+        expect(call.targetPaneId).not.toBeUndefined();
+      }
+    });
+  });
+
+  // ─── run() — column layout ─────────────────────────────────
+
+  describe("run() column layout", () => {
+    it("places first two workers in separate columns (both split right)", async () => {
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      expect(client.splitWindowCalls[0].direction).toBe("right");
+      expect(client.splitWindowCalls[1].direction).toBe("right");
+    });
+
+    it("third worker splits below in the shorter column", async () => {
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      expect(client.splitWindowCalls[2].direction).toBe("below");
+    });
+
+    it("fourth worker splits below in the other column to balance", async () => {
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      await manager.run({ action: "run", command: "echo d", label: "d" });
+      // Workers 2 and 3 both split below, targeting different columns
+      expect(client.splitWindowCalls[2].direction).toBe("below");
+      expect(client.splitWindowCalls[3].direction).toBe("below");
+      // They should target different panes (one in each column)
+      expect(client.splitWindowCalls[2].targetPaneId).not.toBe(
+        client.splitWindowCalls[3].targetPaneId,
+      );
+    });
+
+    it("rebalanceLayout is called after each spawn", async () => {
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      expect(client.rebalanceLayoutCalls.length).toBe(1);
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      expect(client.rebalanceLayoutCalls.length).toBe(2);
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      expect(client.rebalanceLayoutCalls.length).toBe(3);
+    });
+
+    it("rebalanceLayout receives correct column structure", async () => {
+      await manager.run({ action: "run", command: "echo a", label: "a" });
+      const call1 = client.rebalanceLayoutCalls[0];
+      expect(call1.columns[0].length).toBe(1); // col 0 has 1 pane
+      expect(call1.columns[1].length).toBe(0); // col 1 empty
+
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      const call2 = client.rebalanceLayoutCalls[1];
+      expect(call2.columns[0].length).toBe(1);
+      expect(call2.columns[1].length).toBe(1);
+
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      const call3 = client.rebalanceLayoutCalls[2];
+      // Third worker goes to the shorter column (both have 1, so col 0)
+      expect(call3.columns[0].length).toBe(2);
+      expect(call3.columns[1].length).toBe(1);
+    });
+
+    it("closing a pane removes it from column tracking", async () => {
+      const r1 = await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+      const rebalanceBefore = client.rebalanceLayoutCalls.length;
+
+      await manager.close(r1.paneId, true);
+
+      // Should have rebalanced after close
+      expect(client.rebalanceLayoutCalls.length).toBeGreaterThan(rebalanceBefore);
+      // The column that had r1 should now be empty
+      const lastRebalance = client.rebalanceLayoutCalls[client.rebalanceLayoutCalls.length - 1];
+      const totalPanes = lastRebalance.columns[0].length + lastRebalance.columns[1].length;
+      expect(totalPanes).toBe(1); // only "b" remains
+    });
+
+    it("after closing col 0 pane, new worker re-fills col 0", async () => {
+      const r1 = await manager.run({ action: "run", command: "echo a", label: "a" });
+      await manager.run({ action: "run", command: "echo b", label: "b" });
+
+      // Close worker in col 0
+      await manager.close(r1.paneId, true);
+
+      // Spawn a new worker — should go to the empty col 0
+      await manager.run({ action: "run", command: "echo c", label: "c" });
+      const lastCall = client.splitWindowCalls[client.splitWindowCalls.length - 1];
+      // Should split right (refilling the empty column), not below
+      expect(lastCall.direction).toBe("right");
+    });
   });
 
   // ─── run() ──────────────────────────────────────────────────
@@ -477,29 +590,32 @@ describeIfEnabled("tmux", "PaneManager", () => {
       });
       await manager.close(result.paneId);
       expect(manager.getActivePanes().length).toBe(0);
-      expect(client.killPaneAndRebalanceCalls.length).toBe(0);
+      expect(client.killPaneCalls.length).toBe(0);
     });
 
-    it("calls killPaneAndRebalance and deregisters when kill=true", async () => {
+    it("kills pane and rebalances when kill=true", async () => {
       const result = await manager.run({
         action: "run",
         command: "echo hi",
         label: "test",
       });
       const tmuxPaneId = result.tmuxPaneId;
+      const rebalanceBefore = client.rebalanceLayoutCalls.length;
       await manager.close(result.paneId, true);
       expect(manager.getActivePanes().length).toBe(0);
       expect(client.killPaneCalls).toContain(tmuxPaneId);
+      // Rebalance is called after kill
+      expect(client.rebalanceLayoutCalls.length).toBeGreaterThan(rebalanceBefore);
     });
 
-    it("does not call killPaneAndRebalance when kill=false", async () => {
+    it("does not kill pane when kill=false", async () => {
       const result = await manager.run({
         action: "run",
         command: "echo hi",
         label: "test",
       });
       await manager.close(result.paneId, false);
-      expect(client.killPaneAndRebalanceCalls.length).toBe(0);
+      expect(client.killPaneCalls.length).toBe(0);
     });
   });
 
