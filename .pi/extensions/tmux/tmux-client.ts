@@ -128,9 +128,11 @@ export class TmuxClient implements ITmuxClient {
   // ─── listAllPanes ─────────────────────────────────────────────
 
   async listAllPanes(): Promise<import("./types").SystemPane[]> {
+    // Scope to the current window only (omit -a) so panes from other tmux
+    // windows — e.g. separate pi sessions the user has open — are not
+    // mistakenly surfaced as unregistered orphans.
     const result = await this.execFn("tmux", [
       "list-panes",
-      "-a",
       "-F",
       "#{pane_id} #{pane_pid} #{pane_current_command}",
     ]);
