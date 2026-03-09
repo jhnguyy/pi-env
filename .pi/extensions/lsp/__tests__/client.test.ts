@@ -70,7 +70,7 @@ describeIfEnabled("lsp", "LspClient", () => {
   describe("request", () => {
     it("sends request and receives response", async () => {
       const statusResult: StatusResult = {
-        action: "status", running: true, pid: 999, projects: [], watchedFiles: 0, idleMs: 100,
+        action: "status", running: true, pid: 999, projects: [], openFiles: [], watchedFiles: 0, idleMs: 100,
       };
 
       await startMockServer((req, sock) => {
@@ -101,7 +101,7 @@ describeIfEnabled("lsp", "LspClient", () => {
     it("assigns unique ids to concurrent requests", async () => {
       const received: number[] = [];
       const statusResult: StatusResult = {
-        action: "status", running: true, projects: [], watchedFiles: 0, idleMs: 0,
+        action: "status", running: true, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
 
       await startMockServer((req, sock) => {
@@ -128,7 +128,7 @@ describeIfEnabled("lsp", "LspClient", () => {
   describe("call", () => {
     it("unwraps result on success", async () => {
       const statusResult: StatusResult = {
-        action: "status", running: true, projects: ["/proj"], watchedFiles: 2, idleMs: 500,
+        action: "status", running: true, projects: ["/proj"], openFiles: [], watchedFiles: 2, idleMs: 500,
       };
 
       await startMockServer((req, sock) => {
@@ -158,7 +158,7 @@ describeIfEnabled("lsp", "LspClient", () => {
   describe("connection retry", () => {
     it("connects after server starts with delay", async () => {
       const statusResult: StatusResult = {
-        action: "status", running: true, projects: [], watchedFiles: 0, idleMs: 0,
+        action: "status", running: true, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
 
       // Start server 300ms after client tries to connect
