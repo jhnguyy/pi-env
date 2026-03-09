@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
+import { isTypeScript } from "./filetypes";
 
 // ─── Position Conversion ─────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export function uriToPath(uri: string): string {
  * Returns null if none found.
  */
 export function findProjectRoot(filePath: string): string | null {
-  let dir = existsSync(filePath) && !filePath.endsWith(".ts") && !filePath.endsWith(".tsx")
+  let dir = existsSync(filePath) && !isTypeScript(filePath)
     ? filePath
     : dirname(filePath);
 

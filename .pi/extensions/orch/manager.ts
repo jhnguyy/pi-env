@@ -44,6 +44,8 @@ function validateLabel(label: string): void {
 // Note: `--tools` filters built-in tools only (read, bash, edit, write, grep, find, ls).
 // Extension tools (bus, orch, etc.) are auto-discovered regardless of this flag.
 
+const BUILT_IN_TOOLS = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+
 export function buildPiCommand(opts: {
   model?: string;
   tools?: string[];
@@ -54,6 +56,14 @@ export function buildPiCommand(opts: {
   const parts = ["pi", "--no-session", "--print"];
   if (opts.model) parts.push("--model", opts.model);
   if (opts.tools && opts.tools.length > 0) {
+    const unknown = opts.tools.filter((t) => !BUILT_IN_TOOLS.has(t));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Unknown built-in tool(s): ${unknown.join(", ")}. ` +
+          `Only built-in tools are accepted: ${[...BUILT_IN_TOOLS].join(", ")}. ` +
+          `Extension tools (lsp, bus, etc.) auto-load from ~/.pi/agent/extensions/ — no need to list them.`,
+      );
+    }
     parts.push("--tools", opts.tools.join(","));
   }
   if (opts.brief) parts.push(`@${opts.brief}`);

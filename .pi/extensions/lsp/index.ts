@@ -12,9 +12,14 @@ import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderLspCall, renderLspResult } from "./renderers";
 import type { DiagnosticsResult, LspAction } from "./protocol";
+import { isLspSupported } from "./filetypes";
+import { createHintState, resetHintState, detectLspHint } from "./hints";
 
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
+  const hintState = createHintState();
+
+  pi.on("session_start", () => resetHintState(hintState));
 
   // ─── lsp tool ───────────────────────────────────────────────────────────
 
@@ -93,39 +98,46 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ─── Auto-diagnostics hook ───────────────────────────────────────────────
+  // ─── Auto-diagnostics + hint hook ───────────────────────────────────────
 
   pi.on("tool_result", async (event) => {
     const { toolName, input } = event;
-
-    // Only for edit/write tools on TypeScript files
-    if (toolName !== "edit" && toolName !== "write") return;
-
     const inp = input as Record<string, unknown> | null | undefined;
-    const path: string | undefined =
-      typeof inp?.path === "string" ? inp.path :
-      typeof inp?.file_path === "string" ? inp.file_path :
-      undefined;
 
-    if (!path) return;
-    const isBashFile = path.endsWith(".sh") || path.endsWith(".bash") || path.endsWith(".zsh") || path.endsWith(".ksh");
-    if (!path.endsWith(".ts") && !path.endsWith(".tsx") && !isBashFile) return;
-    if (event.isError) return;
+    // ─── Auto-diagnostics (edit/write only) ─────────────────────────────
+    if ((toolName === "edit" || toolName === "write") && !event.isError) {
+      const path: string | undefined =
+        typeof inp?.path === "string" ? inp.path :
+        typeof inp?.file_path === "string" ? inp.file_path :
+        undefined;
 
-    try {
-      const result = await client.call({ action: "diagnostics", path });
-      const diags = result as DiagnosticsResult;
-      const summary = formatDiagnosticsSummary(diags, 5);
+      if (path && isLspSupported(path)) {
+        try {
+          const result = await client.call({ action: "diagnostics", path });
+          const diags = result as DiagnosticsResult;
+          const summary = formatDiagnosticsSummary(diags, 5);
 
-      if (summary) {
-        const first = event.content?.[0];
-        const existing = first?.type === "text" ? first.text : "";
-        return {
-          content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
-        };
+          if (summary) {
+            const first = event.content?.[0];
+            const existing = first?.type === "text" ? first.text : "";
+            return {
+              content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
+            };
+          }
+        } catch {
+          // Non-fatal — diagnostics are best-effort
+        }
       }
-    } catch {
-      // Non-fatal — diagnostics are best-effort
+    }
+
+    // ─── LSP hint detection (all tools) ─────────────────────────────────
+    const hint = detectLspHint(toolName, inp, hintState);
+    if (hint) {
+      const first = event.content?.[0];
+      const existing = first?.type === "text" ? first.text : "";
+      return {
+        content: [{ type: "text", text: existing ? `${existing}\n\n${hint}` : hint }],
+      };
     }
   });
 }
