@@ -621,6 +621,26 @@ describe("buildPiCommand — command construction", () => {
     expect(cmd).toContain("@/tmp/brief.md");
     expect(cmd).not.toContain("undefined");
   });
+
+  it("throws on unknown tool names", () => {
+    expect(() => buildPiCommand({ tools: ["read", "lsp"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*lsp/,
+    );
+  });
+
+  it("throws listing all unknown tools", () => {
+    expect(() => buildPiCommand({ tools: ["lsp", "bus", "bash"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*lsp, bus/,
+    );
+  });
+
+  it("accepts all valid built-in tools", () => {
+    const cmd = buildPiCommand({
+      tools: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+      prompt: "do work",
+    });
+    expect(cmd).toContain("--tools read,bash,edit,write,grep,find,ls");
+  });
 });
 
 // ─── Pi spawner validation tests ─────────────────────────────
