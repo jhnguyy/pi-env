@@ -13,7 +13,7 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 
 import { PaneManager } from "../pane-manager";
 import { TmuxError } from "../types";
-import type { ITmuxClient, TmuxConfig, RunDetails } from "../types";
+import type { ITmuxClient, TmuxConfig, RunDetails, SystemPane } from "../types";
 
 // ─── Mock Client (same pattern as pane-manager.test.ts) ──────
 
@@ -37,13 +37,13 @@ function makeMockClient(overrides: Partial<ITmuxClient> = {}): ITmuxClient & {
       const alive = alivePanes.has(paneId);
       return { content: alive ? `output from ${paneId}` : "", alive };
     },
-    async killPaneAndRebalance(paneId) { alivePanes.delete(paneId); },
-    async killPane(paneId) { alivePanes.delete(paneId); },
+    async killPane(paneId: string) { alivePanes.delete(paneId); },
     async setPaneTitle(_paneId, _title) {},
     async listPanes() { return Array.from(alivePanes); },
     async isPaneAlive(paneId) { return alivePanes.has(paneId); },
     async capturePaneContent(paneId) { return `output from ${paneId}`; },
-    async rebalanceLayout() {},
+    async rebalanceLayout(_orchPaneId: string, _columns: string[][]) {},
+    async listAllPanes(): Promise<SystemPane[]> { return []; },
     ...overrides,
   };
 }
@@ -56,7 +56,8 @@ function err(msg: string) {
   return { content: [{ type: "text" as const, text: msg }], isError: true };
 }
 
-async function execute(manager: PaneManager, params: Record<string, unknown>) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function execute(manager: PaneManager, params: Record<string, unknown>): Promise<any> {
   try {
     switch (params.action) {
       case "run": {

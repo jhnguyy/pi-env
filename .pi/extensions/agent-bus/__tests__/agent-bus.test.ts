@@ -161,7 +161,7 @@ describeIfEnabled("agent-bus", "BusClient", () => {
     const transport = new FsTransport();
     const fresh = new BusClient(transport, { agentId: null, sessionId: null });
     const sid = fresh.start(undefined, "test-agent");
-    expect(process.env.PI_AGENT_ID).toBe("test-agent");
+    expect(process.env.PI_AGENT_ID as unknown as string).toBe("test-agent");
     rmSync(`/tmp/pi-bus-${sid}`, { recursive: true, force: true });
   });
 

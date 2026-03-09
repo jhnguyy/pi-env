@@ -10,8 +10,8 @@ const mockTheme: RenderTheme = {
   bold: (text: string) => `**${text}**`,
 };
 
-function text(rendered: { text: string }): string {
-  return rendered.text;
+function text(rendered: unknown): string {
+  return (rendered as any).text as string;
 }
 
 describeIfEnabled("lsp", "Renderers", () => {
@@ -159,7 +159,7 @@ describeIfEnabled("lsp", "Renderers", () => {
     it("renders status running", () => {
       const r: StatusResult = {
         action: "status", running: true, pid: 1234,
-        projects: [], watchedFiles: 0, idleMs: 100,
+        projects: [], openFiles: [], watchedFiles: 0, idleMs: 100,
       };
       const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("running");
@@ -168,7 +168,7 @@ describeIfEnabled("lsp", "Renderers", () => {
 
     it("renders status stopped", () => {
       const r: StatusResult = {
-        action: "status", running: false, projects: [], watchedFiles: 0, idleMs: 0,
+        action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
       const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("stopped");

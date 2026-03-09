@@ -18,10 +18,11 @@
     "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@sinclair/typebox": "^0.34.48",
-    "@mariozechner/pi-coding-agent": "^0.57.1",
     "@mariozechner/pi-ai": "^0.57.1",
-    "@mariozechner/pi-tui": "^0.57.1"
+    "@mariozechner/pi-coding-agent": "^0.57.1",
+    "@mariozechner/pi-tui": "^0.57.1",
+    "@sinclair/typebox": "^0.34.48",
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
   }
 }
