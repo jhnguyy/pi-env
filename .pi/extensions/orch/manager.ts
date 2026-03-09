@@ -100,6 +100,9 @@ function buildWorkerCommand(opts: {
     `PI_AGENT_ID=${label}`,
     `ORCH_DIR=${orchDir}`,
   );
+  if (busChannel) {
+    envParts.push(`ORCH_BUS_CHANNEL=${busChannel}`);
+  }
 
   return `${envParts.join(" ")} bash -c '${safeCmd}${suffix}'`;
 }

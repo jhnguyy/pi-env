@@ -1,10 +1,12 @@
-import { expect, it, beforeEach, afterEach } from "bun:test";
+import { expect, it, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { rmSync } from "node:fs";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { FsTransport } from "../transport";
 import { BusClient } from "../bus-client";
 import type { BusConfig } from "../types";
 import { BusError, CHANNEL_PATTERN } from "../types";
+import extensionFactory from "../index";
+import { initBusService } from "../bus-service";
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -315,5 +317,107 @@ describeIfEnabled("agent-bus", "CHANNEL_PATTERN", () => {
     for (const ch of ["", "UPPER", "has space", "!bang", "-leading-dash"]) {
       expect(CHANNEL_PATTERN.test(ch)).toBe(false);
     }
+  });
+});
+
+// ─── agent_end hook ──────────────────────────────────────────
+//
+// Tests for the auto-publish-on-agent_end feature.
+// Strategy: invoke the extension factory with a minimal mock pi that captures
+// registered event handlers, then fire them directly and inspect the published
+// message via the real FsTransport (same singleton the hook uses internally).
+//
+// Singleton note: initBusService() caches config.sessionId at first-call time.
+// We use beforeAll/afterAll with a single long-lived session so the singleton
+// never points to a deleted session between tests.
+
+describeIfEnabled("agent-bus", "agent_end hook", () => {
+  let sessionId: string;
+  let transport: FsTransport;
+
+  /**
+   * Minimal mock of ExtensionAPI — captures `on` handlers and no-ops `registerTool`.
+   * Returns the mock and a helper to retrieve captured handlers.
+   */
+  function makeMockPi() {
+    const handlers: Record<string, (...args: unknown[]) => unknown> = {};
+    const mockPi = {
+      on(event: string, fn: (...args: unknown[]) => unknown) {
+        handlers[event] = fn;
+      },
+      // Extension also calls registerTool — no-op it
+      registerTool() {},
+    } as unknown as Parameters<typeof extensionFactory>[0];
+    return { mockPi, getHandler: (event: string) => handlers[event] };
+  }
+
+  // Use a single session across all hook tests.
+  // This ensures the bus singleton's cached sessionId stays valid for
+  // every test — we only clean up in afterAll.
+  beforeAll(() => {
+    transport = new FsTransport();
+    sessionId = `agehook-${Date.now()}`;
+    transport.ensureSession(sessionId);
+    process.env.PI_BUS_SESSION = sessionId;
+    process.env.PI_AGENT_ID = "test-worker";
+    // Pin singleton to this session before any test fires extensionFactory
+    initBusService();
+  });
+
+  afterAll(() => {
+    transport.deleteSession(sessionId);
+    delete process.env.PI_BUS_SESSION;
+    delete process.env.PI_AGENT_ID;
+    delete process.env.ORCH_BUS_CHANNEL;
+  });
+
+  beforeEach(() => {
+    delete process.env.ORCH_BUS_CHANNEL;
+  });
+
+  it("publishes to ORCH_BUS_CHANNEL when set on agent_end", async () => {
+    process.env.ORCH_BUS_CHANNEL = "workers:foo";
+    const since = Date.now() - 1;
+    const { mockPi, getHandler } = makeMockPi();
+    extensionFactory(mockPi);
+
+    const handler = getHandler("agent_end");
+    expect(handler).toBeDefined();
+    await handler({ type: "agent_end", messages: [] }, {} as never);
+
+    const msgs = transport.readMessages(sessionId, "workers:foo", since);
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].message).toBe("agent_end");
+    expect(msgs[0].sender).toBe("test-worker");
+    expect(msgs[0].data?.signal).toBe("agent_end");
+  });
+
+  it("does not publish when ORCH_BUS_CHANNEL is not set", async () => {
+    // ORCH_BUS_CHANNEL not set (cleared in beforeEach)
+    const since = Date.now() - 1;
+    const { mockPi, getHandler } = makeMockPi();
+    extensionFactory(mockPi);
+
+    const handler = getHandler("agent_end");
+    await handler({ type: "agent_end", messages: [] }, {} as never);
+
+    // Use a dedicated channel that should never have been written to
+    const msgs = transport.readMessages(sessionId, "workers:nopub", since);
+    expect(msgs).toHaveLength(0);
+  });
+
+  it("guards against double-publish on repeated agent_end fires", async () => {
+    process.env.ORCH_BUS_CHANNEL = "workers:bar";
+    const since = Date.now() - 1;
+    const { mockPi, getHandler } = makeMockPi();
+    extensionFactory(mockPi);
+
+    const handler = getHandler("agent_end");
+    // Fire twice — only one publish should land (hasPublished guard)
+    await handler({ type: "agent_end", messages: [] }, {} as never);
+    await handler({ type: "agent_end", messages: [] }, {} as never);
+
+    const msgs = transport.readMessages(sessionId, "workers:bar", since);
+    expect(msgs).toHaveLength(1);
   });
 });
