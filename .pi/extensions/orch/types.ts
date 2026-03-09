@@ -58,7 +58,9 @@ export type OrchErrorCode =
   | "WORKTREE_CREATE_FAILED"
   | "SPAWN_FAILED"
   | "INVALID_LABEL"
-  | "NO_BUS_CHANNELS";
+  | "NO_BUS_CHANNELS"
+  | "BRIEF_NOT_FOUND"
+  | "AMBIGUOUS_SPAWN";
 
 export class OrchError extends Error {
   constructor(
