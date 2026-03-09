@@ -95,7 +95,7 @@ export default function (pi: ExtensionAPI) {
       const { branch, dirty } = getGitStatus(repoPath);
       if (!branch) continue;
       const name = repoPath.split("/").pop() ?? repoPath;
-      const warn = config.protectedBranches.includes(branch) ? " ⚠️" : "";
+      const warn = config.protectedBranches.includes(branch) ? " (⚠️ protected branch)" : "";
       const dirtyNote = dirty > 0 ? ` (${dirty} uncommitted)` : "";
       parts.push(`${name}: ${branch}${warn}${dirtyNote}`);
     }
