@@ -25,8 +25,8 @@ export default function (pi: ExtensionAPI) {
   // ~15 tokens when active, zero tokens when idle.
   pi.on("before_agent_start", async (_event, _ctx) => {
     // Zero-cost guard: bail fast when missing prerequisites
-    const agentId = config.agentId ?? process.env.PI_AGENT_ID ?? null;
-    const sessionId = config.sessionId ?? process.env.PI_BUS_SESSION ?? null;
+    const agentId = process.env.PI_AGENT_ID ?? null;
+    const sessionId = process.env.PI_BUS_SESSION ?? null;
     if (!agentId || !sessionId) return {};
     if (!transport.sessionExists(sessionId)) return {};
 
