@@ -61,7 +61,15 @@ export default function (pi: ExtensionAPI) {
       "            git worktree isolation per worker (separate branch per pane, no commits collide).",
       "            Returns: runId, orchDir, busSession.",
       "",
-      "  spawn   — Spawn one worker pane. Required: label (a-z, 0-9, hyphens), command.",
+      "  spawn   — Spawn one worker pane. Required: label (a-z, 0-9, hyphens).",
+      "            Two modes:",
+      "            • Raw: provide command (full shell command string).",
+      "            • Pi spawner: provide model/tools/brief/prompt — orch builds the pi command.",
+      "              model: model ID (e.g. 'claude-sonnet-4-6')",
+      "              tools: built-in tool whitelist (e.g. ['read','bash']). Bus always auto-loaded.",
+      "              brief: path to brief file (injected as @file into pi prompt).",
+      "              prompt: inline prompt string for the worker.",
+      "            Cannot mix command and pi-spawner params. Need command OR prompt/brief.",
       "            Automatically injects PI_BUS_SESSION, PI_AGENT_ID, and ORCH_DIR into worker env.",
       "            Workers can write output to $ORCH_DIR/<label>.json — orchestrator reads from there.",
       "            If repo was set on start: creates worktree at ORCH_DIR/<label> on branch",
@@ -113,7 +121,28 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       command: Type.Optional(
-        Type.String({ description: "Full command to run in the worker pane." }),
+        Type.String({ description: "Full command to run in the worker pane. Mutually exclusive with pi-spawner params." }),
+      ),
+      // Pi spawner params — build pi command automatically
+      model: Type.Optional(
+        Type.String({
+          description: "Model for the worker (e.g. 'claude-sonnet-4-6'). Pi spawner mode only.",
+        }),
+      ),
+      tools: Type.Optional(
+        Type.Array(Type.String(), {
+          description: "Built-in tool whitelist for the worker (e.g. ['read','bash']). Bus extension always auto-loaded. Pi spawner mode only.",
+        }),
+      ),
+      brief: Type.Optional(
+        Type.String({
+          description: "Absolute path to brief file. Injected as @file into the pi prompt. Must exist. Pi spawner mode only.",
+        }),
+      ),
+      prompt: Type.Optional(
+        Type.String({
+          description: "Inline prompt string for the worker. Pi spawner mode only.",
+        }),
       ),
       interactive: Type.Optional(
         Type.Boolean({
@@ -152,12 +181,16 @@ export default function (pi: ExtensionAPI) {
           }
 
           case "spawn": {
-            if (!params.label || !params.command) {
-              return err("spawn requires label and command");
+            if (!params.label) {
+              return err("spawn requires label");
             }
             const result = await manager.spawn({
               label: params.label,
               command: params.command,
+              model: params.model,
+              tools: params.tools,
+              brief: params.brief,
+              prompt: params.prompt,
               interactive: params.interactive,
               busChannel: params.busChannel,
             });

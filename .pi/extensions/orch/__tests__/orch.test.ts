@@ -11,8 +11,9 @@
 
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync } from "node:fs";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { OrchestratorManager } from "../manager";
+import { OrchestratorManager, buildPiCommand } from "../manager";
 import { OrchError } from "../types";
 import type { ExecFn } from "../types";
 
@@ -541,5 +542,276 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
     // Should not throw despite kill-pane failing
     await expect(mgr.cleanup()).resolves.toBeDefined();
     expect(existsSync(orchDir)).toBe(false);
+  });
+});
+
+// ─── buildPiCommand unit tests ───────────────────────────────
+
+describe("buildPiCommand — command construction", () => {
+  it("includes --no-session and --print always", () => {
+    const cmd = buildPiCommand({ prompt: "do work" });
+    expect(cmd).toContain("--no-session");
+    expect(cmd).toContain("--print");
+  });
+
+  it("starts with 'pi'", () => {
+    const cmd = buildPiCommand({ prompt: "hello" });
+    expect(cmd.startsWith("pi ")).toBe(true);
+  });
+
+  it("includes --model when provided", () => {
+    const cmd = buildPiCommand({ model: "claude-sonnet-4-6", prompt: "do work" });
+    expect(cmd).toContain("--model claude-sonnet-4-6");
+  });
+
+  it("does not include --model when omitted", () => {
+    const cmd = buildPiCommand({ prompt: "do work" });
+    expect(cmd).not.toContain("--model");
+  });
+
+  it("includes --tools as comma-separated list", () => {
+    const cmd = buildPiCommand({ tools: ["read", "bash"], prompt: "do work" });
+    expect(cmd).toContain("--tools read,bash");
+  });
+
+  it("does not include --tools when array is empty", () => {
+    const cmd = buildPiCommand({ tools: [], prompt: "do work" });
+    expect(cmd).not.toContain("--tools");
+  });
+
+  it("does not include --tools when omitted", () => {
+    const cmd = buildPiCommand({ prompt: "do work" });
+    expect(cmd).not.toContain("--tools");
+  });
+
+  it("includes @brief path when provided", () => {
+    const cmd = buildPiCommand({ brief: "/tmp/brief.md", prompt: "do work" });
+    expect(cmd).toContain("@/tmp/brief.md");
+  });
+
+  it("does not include @brief when omitted", () => {
+    const cmd = buildPiCommand({ prompt: "do work" });
+    expect(cmd).not.toContain("@");
+  });
+
+  it("includes JSON-encoded prompt", () => {
+    const cmd = buildPiCommand({ prompt: "do the work" });
+    expect(cmd).toContain('"do the work"');
+  });
+
+  it("JSON-encodes prompts with special characters", () => {
+    const cmd = buildPiCommand({ prompt: 'say "hello" world' });
+    expect(cmd).toContain('\\"hello\\"');
+  });
+
+  it("builds full command with all options", () => {
+    const cmd = buildPiCommand({
+      model: "claude-haiku-4-5",
+      tools: ["read", "bash"],
+      brief: "/tmp/my-brief.md",
+      prompt: "Do the task",
+    });
+    expect(cmd).toBe(
+      'pi --no-session --print --model claude-haiku-4-5 --tools read,bash @/tmp/my-brief.md "Do the task"',
+    );
+  });
+
+  it("builds command with only brief (no prompt)", () => {
+    const cmd = buildPiCommand({ brief: "/tmp/brief.md" });
+    expect(cmd).toContain("@/tmp/brief.md");
+    expect(cmd).not.toContain("undefined");
+  });
+});
+
+// ─── Pi spawner validation tests ─────────────────────────────
+
+describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () => {
+  let saved: Record<string, string | undefined>;
+  let orchDirs: string[] = [];
+  let busSessions: string[] = [];
+  let tmpDirs: string[] = [];
+
+  beforeEach(() => {
+    saved = captureEnv();
+    orchDirs = [];
+    busSessions = [];
+    tmpDirs = [];
+    process.env.TMUX = "test-session,0,0";
+  });
+
+  afterEach(() => {
+    for (const dir of orchDirs) rmSync(dir, { recursive: true, force: true });
+    for (const sid of busSessions) rmSync(`/tmp/pi-bus-${sid}`, { recursive: true, force: true });
+    for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+    restoreEnv(saved);
+  });
+
+  async function withRun(
+    fn: (mgr: OrchestratorManager) => Promise<void>,
+  ): Promise<void> {
+    const mgr = new OrchestratorManager(makeMockExec());
+    const { orchDir, busSession } = mgr.start();
+    orchDirs.push(orchDir);
+    busSessions.push(busSession);
+    await fn(mgr);
+  }
+
+  it("errors when command AND prompt both provided (AMBIGUOUS_SPAWN)", async () => {
+    await withRun(async (mgr) => {
+      await expect(
+        mgr.spawn({ label: "worker", command: "echo hi", prompt: "do work" }),
+      ).rejects.toThrow(OrchError);
+      try {
+        await mgr.spawn({ label: "worker", command: "echo hi", prompt: "do work" });
+      } catch (e) {
+        expect((e as OrchError).code).toBe("AMBIGUOUS_SPAWN");
+      }
+    });
+  });
+
+  it("errors when command AND brief both provided (AMBIGUOUS_SPAWN)", async () => {
+    await withRun(async (mgr) => {
+      const tmpDir = mkdtempSync("/tmp/orch-test-");
+      tmpDirs.push(tmpDir);
+      const briefPath = `${tmpDir}/brief.md`;
+      writeFileSync(briefPath, "# Brief");
+
+      await expect(
+        mgr.spawn({ label: "worker", command: "echo hi", brief: briefPath }),
+      ).rejects.toThrow(OrchError);
+      try {
+        await mgr.spawn({ label: "worker2", command: "echo hi", brief: briefPath });
+      } catch (e) {
+        expect((e as OrchError).code).toBe("AMBIGUOUS_SPAWN");
+      }
+    });
+  });
+
+  it("errors when command AND model both provided (AMBIGUOUS_SPAWN)", async () => {
+    await withRun(async (mgr) => {
+      await expect(
+        mgr.spawn({ label: "worker", command: "echo hi", model: "claude-sonnet-4-6" }),
+      ).rejects.toThrow(OrchError);
+    });
+  });
+
+  it("errors when neither command nor prompt/brief provided (AMBIGUOUS_SPAWN)", async () => {
+    await withRun(async (mgr) => {
+      await expect(
+        mgr.spawn({ label: "worker" }),
+      ).rejects.toThrow(OrchError);
+      try {
+        await mgr.spawn({ label: "worker" });
+      } catch (e) {
+        expect((e as OrchError).code).toBe("AMBIGUOUS_SPAWN");
+      }
+    });
+  });
+
+  it("errors when only model provided (no command, prompt, or brief)", async () => {
+    await withRun(async (mgr) => {
+      await expect(
+        mgr.spawn({ label: "worker", model: "claude-sonnet-4-6" }),
+      ).rejects.toThrow(OrchError);
+    });
+  });
+
+  it("errors when brief file does not exist (BRIEF_NOT_FOUND)", async () => {
+    await withRun(async (mgr) => {
+      await expect(
+        mgr.spawn({ label: "worker", brief: "/tmp/nonexistent-brief-99999.md" }),
+      ).rejects.toThrow(OrchError);
+      try {
+        await mgr.spawn({ label: "worker2", brief: "/tmp/nonexistent-brief-99999.md" });
+      } catch (e) {
+        expect((e as OrchError).code).toBe("BRIEF_NOT_FOUND");
+      }
+    });
+  });
+
+  it("spawns successfully with prompt only (no command)", async () => {
+    await withRun(async (mgr) => {
+      const result = await mgr.spawn({ label: "worker", prompt: "Do the work" });
+      expect(result.paneId).toContain("worker");
+    });
+  });
+
+  it("spawns successfully with brief and prompt", async () => {
+    await withRun(async (mgr) => {
+      const tmpDir = mkdtempSync("/tmp/orch-test-");
+      tmpDirs.push(tmpDir);
+      const briefPath = `${tmpDir}/brief.md`;
+      writeFileSync(briefPath, "# Do the work");
+
+      const result = await mgr.spawn({ label: "worker", brief: briefPath, prompt: "execute" });
+      expect(result.paneId).toContain("worker");
+    });
+  });
+
+  it("spawns with full pi-spawner params (model, tools, brief, prompt)", async () => {
+    await withRun(async (mgr) => {
+      const tmpDir = mkdtempSync("/tmp/orch-test-");
+      tmpDirs.push(tmpDir);
+      const briefPath = `${tmpDir}/brief.md`;
+      writeFileSync(briefPath, "# Worker brief");
+
+      const result = await mgr.spawn({
+        label: "worker",
+        model: "claude-haiku-4-5",
+        tools: ["read", "bash"],
+        brief: briefPath,
+        prompt: "Do the task",
+      });
+      expect(result.paneId).toContain("worker");
+    });
+  });
+
+  it("pi-spawner command contains expected pi flags in spawned command", async () => {
+    // Capture the command passed to tmux split-window to verify pi command construction
+    let capturedCommand = "";
+    const captureExec: ExecFn = async (cmd, args) => {
+      if (cmd === "tmux" && args.includes("split-window")) {
+        // The command is the last arg in split-window
+        capturedCommand = args[args.length - 1];
+        return { stdout: "%42\n", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const mgr = new OrchestratorManager(captureExec);
+    const { orchDir, busSession } = mgr.start();
+    orchDirs.push(orchDir);
+    busSessions.push(busSession);
+
+    await mgr.spawn({
+      label: "worker",
+      model: "claude-sonnet-4-6",
+      tools: ["read", "bash"],
+      prompt: "Do the work",
+    });
+
+    // capturedCommand is the full env-wrapped shell command
+    expect(capturedCommand).toContain("pi --no-session --print");
+    expect(capturedCommand).toContain("--model claude-sonnet-4-6");
+    expect(capturedCommand).toContain("--tools read,bash");
+    expect(capturedCommand).toContain('"Do the work"');
+  });
+
+  it("pi-spawner command injects PI_BUS_SESSION into env", async () => {
+    let capturedCommand = "";
+    const captureExec: ExecFn = async (cmd, args) => {
+      if (cmd === "tmux" && args.includes("split-window")) {
+        capturedCommand = args[args.length - 1];
+        return { stdout: "%42\n", stderr: "", code: 0 };
+      }
+      return { stdout: "", stderr: "", code: 0 };
+    };
+    const mgr = new OrchestratorManager(captureExec);
+    const { orchDir, busSession } = mgr.start();
+    orchDirs.push(orchDir);
+    busSessions.push(busSession);
+
+    await mgr.spawn({ label: "worker", prompt: "Do the work" });
+
+    expect(capturedCommand).toContain(`PI_BUS_SESSION=${busSession}`);
   });
 });

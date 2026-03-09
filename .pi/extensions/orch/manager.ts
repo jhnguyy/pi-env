@@ -11,7 +11,7 @@
  * One active run per manager instance (one run per pi session).
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
@@ -34,6 +34,31 @@ function validateLabel(label: string): void {
       "INVALID_LABEL",
     );
   }
+}
+
+// ─── Pi command builder ──────────────────────────────────────
+//
+// Builds a `pi --no-session --print ...` command from structured spawn params.
+// Used when the caller provides model/tools/brief/prompt instead of a raw command.
+//
+// Note: `--tools` filters built-in tools only (read, bash, edit, write, grep, find, ls).
+// Extension tools (bus, orch, etc.) are auto-discovered regardless of this flag.
+
+export function buildPiCommand(opts: {
+  model?: string;
+  tools?: string[];
+  brief?: string;
+  prompt?: string;
+}): string {
+  // --print ensures non-interactive execution: process prompt and exit.
+  const parts = ["pi", "--no-session", "--print"];
+  if (opts.model) parts.push("--model", opts.model);
+  if (opts.tools && opts.tools.length > 0) {
+    parts.push("--tools", opts.tools.join(","));
+  }
+  if (opts.brief) parts.push(`@${opts.brief}`);
+  if (opts.prompt) parts.push(JSON.stringify(opts.prompt));
+  return parts.join(" ");
 }
 
 // ─── Command builder ─────────────────────────────────────────
@@ -141,7 +166,13 @@ export class OrchestratorManager {
 
   async spawn(opts: {
     label: string;
-    command: string;
+    command?: string;
+    // Structured pi-spawner params — build pi command automatically when provided.
+    // Mutually exclusive with `command`. At least one of command/prompt/brief required.
+    model?: string;
+    tools?: string[];
+    brief?: string;
+    prompt?: string;
     interactive?: boolean;
     busChannel?: string;
   }): Promise<{ paneId: string; branch?: string; worktreePath?: string }> {
@@ -156,7 +187,44 @@ export class OrchestratorManager {
       throw new OrchError("Not running inside a tmux session", "NOT_IN_TMUX");
     }
 
-    const { label, command, interactive = true, busChannel } = opts;
+    const { label, interactive = true, busChannel } = opts;
+
+    // ─── Structured vs raw command validation ────────────────────
+    const hasStructuredParams =
+      opts.model !== undefined ||
+      opts.tools !== undefined ||
+      opts.brief !== undefined ||
+      opts.prompt !== undefined;
+
+    if (opts.command !== undefined && hasStructuredParams) {
+      throw new OrchError(
+        "Provide either command or structured params (model/tools/brief/prompt), not both",
+        "AMBIGUOUS_SPAWN",
+      );
+    }
+
+    if (opts.command === undefined && !opts.brief && !opts.prompt) {
+      throw new OrchError(
+        "spawn requires command, or at least one of: prompt, brief",
+        "AMBIGUOUS_SPAWN",
+      );
+    }
+
+    // ─── Brief file existence check ──────────────────────────────
+    if (opts.brief && !existsSync(opts.brief)) {
+      throw new OrchError(
+        `Brief file not found: ${opts.brief}`,
+        "BRIEF_NOT_FOUND",
+      );
+    }
+
+    // ─── Resolve final command ────────────────────────────────────
+    const command = opts.command ?? buildPiCommand({
+      model: opts.model,
+      tools: opts.tools,
+      brief: opts.brief,
+      prompt: opts.prompt,
+    });
     const { runId, orchDir, busSession, repo } = this.state;
 
     validateLabel(label);
