@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { findProjectRoot, pathToUri } from "./utils";
+import { getLanguageId } from "./filetypes";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,12 +165,4 @@ export class DocumentManager {
   }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function getLanguageId(path: string): string {
-  if (path.endsWith(".tsx")) return "typescriptreact";
-  if (path.endsWith(".jsx")) return "javascriptreact";
-  if (path.endsWith(".ts") || path.endsWith(".mts") || path.endsWith(".cts")) return "typescript";
-  if (path.endsWith(".sh") || path.endsWith(".bash") || path.endsWith(".zsh") || path.endsWith(".ksh")) return "shellscript";
-  return "javascript";
-}
+// getLanguageId is imported from ./filetypes

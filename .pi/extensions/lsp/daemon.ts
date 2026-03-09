@@ -22,6 +22,7 @@ import { extname, resolve as resolvePath } from "node:path";
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
 import { DocumentManager } from "./document-manager";
 import { FileWatcher } from "./file-watcher";
+import { TS_EXTENSIONS, BASH_EXTENSIONS } from "./filetypes";
 import { pathToUri, uriToPath, toZeroBased, toOneBased, relativePath, extractLines, getFileLine, expandToBlock, symbolKindLabel, severityLabel, truncateMessage } from "./utils";
 import {
   parseRequest, serializeResponse, errorResponse, okResponse,
@@ -333,7 +334,7 @@ export class LspDaemon {
       "typescript",
       "typescript-language-server",
       ["--stdio"],
-      new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]),
+      TS_EXTENSIONS,
       STANDARD_CAPABILITIES,
       "TS",
     );
@@ -342,7 +343,7 @@ export class LspDaemon {
       "bash",
       "bash-language-server",
       ["start"],
-      new Set([".sh", ".bash", ".zsh", ".ksh"]),
+      BASH_EXTENSIONS,
       STANDARD_CAPABILITIES,
       "",  // shellcheck codes are already prefixed (SC2034) or numeric
     );

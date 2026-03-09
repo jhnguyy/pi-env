@@ -7,12 +7,13 @@
 
 import { watch, type FSWatcher } from "node:fs";
 import { extname, basename, resolve, relative } from "node:path";
+import { TS_EXTENSIONS } from "./filetypes";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type ChangeCallback = (absolutePath: string) => void;
 
-const WATCHED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+const WATCHED_EXTENSIONS = TS_EXTENSIONS;
 
 const IGNORED_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "out", ".cache", ".turbo", "coverage",
