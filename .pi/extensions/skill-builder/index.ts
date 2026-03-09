@@ -31,10 +31,11 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
 
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       if (!existsSync(REFERENCE_DIR)) {
         return {
           content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }],
+          details: null,
         };
       }
 
@@ -50,6 +51,7 @@ export default function (pi: ExtensionAPI) {
               text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}`,
             },
           ],
+          details: null,
         };
       }
 
@@ -78,12 +80,14 @@ export default function (pi: ExtensionAPI) {
               text: `No reference skill named "${params.name}". Available: ${names.join(", ")}`,
             },
           ],
+          details: null,
         };
       }
 
       const content = readFileSync(matched, "utf-8");
       return {
         content: [{ type: "text", text: content }],
+        details: null,
       };
     },
   });

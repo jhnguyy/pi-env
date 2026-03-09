@@ -34,7 +34,7 @@ describeIfEnabled("lsp", "DocumentManager", () => {
   describe("open", () => {
     it("returns didOpen for a new file", () => {
       const p = mkFile("a.ts", "const x = 1;");
-      const result = dm.open(p);
+      const result = (dm as any).open(p);
       expect(result).not.toBeNull();
       expect(result!.notification).toBe("didOpen");
       expect(result!.params).toMatchObject({
@@ -44,16 +44,16 @@ describeIfEnabled("lsp", "DocumentManager", () => {
 
     it("returns null for unchanged file", () => {
       const p = mkFile("a.ts", "const x = 1;");
-      dm.open(p);
-      const result2 = dm.open(p);
+      (dm as any).open(p);
+      const result2 = (dm as any).open(p);
       expect(result2).toBeNull();
     });
 
     it("returns didChange after content update", () => {
       const p = mkFile("a.ts", "const x = 1;");
-      dm.open(p);
+      (dm as any).open(p);
       writeFileSync(p, "const x = 2;", "utf8");
-      const result = dm.open(p);
+      const result = (dm as any).open(p);
       expect(result).not.toBeNull();
       expect(result!.notification).toBe("didChange");
       expect(result!.params).toMatchObject({
@@ -63,14 +63,14 @@ describeIfEnabled("lsp", "DocumentManager", () => {
     });
 
     it("returns null for non-existent file", () => {
-      const result = dm.open("/nonexistent/path/foo.ts");
+      const result = (dm as any).open("/nonexistent/path/foo.ts");
       expect(result).toBeNull();
     });
 
     it("marks isNewRoot=true for first file in a project", () => {
       mkTsconfig();
       const p = mkFile("a.ts", "const x = 1;");
-      const result = dm.open(p);
+      const result = (dm as any).open(p);
       expect(result!.isNewRoot).toBe(true);
     });
 
@@ -78,8 +78,8 @@ describeIfEnabled("lsp", "DocumentManager", () => {
       mkTsconfig();
       const p1 = mkFile("a.ts", "const x = 1;");
       const p2 = mkFile("b.ts", "const y = 2;");
-      dm.open(p1);
-      const result = dm.open(p2);
+      (dm as any).open(p1);
+      const result = (dm as any).open(p2);
       expect(result!.isNewRoot).toBe(false);
     });
   });
@@ -120,7 +120,7 @@ describeIfEnabled("lsp", "DocumentManager", () => {
     for (const [filename, expectedId] of cases) {
       it(`${filename} → ${expectedId}`, () => {
         const p = mkFile(filename, "// hello");
-        const result = dm.open(p);
+        const result = (dm as any).open(p);
         expect(result).not.toBeNull();
         expect((result!.params as any).textDocument.languageId).toBe(expectedId);
       });
@@ -161,13 +161,13 @@ describeIfEnabled("lsp", "DocumentManager", () => {
   describe("state tracking", () => {
     it("tracks open URIs", () => {
       const p = mkFile("a.ts", "const a = 1;");
-      dm.open(p);
+      (dm as any).open(p);
       expect(dm.openUris.length).toBe(1);
     });
 
     it("clear() resets state", () => {
       const p = mkFile("a.ts", "const a = 1;");
-      dm.open(p);
+      (dm as any).open(p);
       dm.clear();
       expect(dm.openUris.length).toBe(0);
       expect(dm.projectRoots.length).toBe(0);

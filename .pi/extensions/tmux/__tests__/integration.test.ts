@@ -77,8 +77,8 @@ describeE2E("tmux integration (TMUX_E2E=1)", () => {
     // Wait for command to complete
     await sleep(500);
 
-    const content = await manager.read(result.paneId);
-    expect(content).toContain("hello from read test");
+    const readResult = await manager.read(result.paneId);
+    expect(readResult.content).toContain("hello from read test");
   });
 
   it("sends keys to a running interactive pane", async () => {
@@ -95,8 +95,8 @@ describeE2E("tmux integration (TMUX_E2E=1)", () => {
     expect(sendResult.ok).toBe(true);
 
     await sleep(300);
-    const content = await manager.read(result.paneId);
-    expect(content).toContain("sent via send-keys");
+    const readResult2 = await manager.read(result.paneId);
+    expect(readResult2.content).toContain("sent via send-keys");
   });
 
   it("close with kill removes the pane from tmux", async () => {
