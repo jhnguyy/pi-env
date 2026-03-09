@@ -21,6 +21,25 @@ export default function (pi: ExtensionAPI) {
   // BusClient instance, cursor file, and session ID.
   const { client, transport } = initBusService();
 
+  // ─── agent_end Hook: Auto-publish bus signal ─────────────────
+  // When ORCH_BUS_CHANNEL is set (injected by orch spawn), publish a completion
+  // message on that channel after the first agent_end. This allows orch wait to
+  // receive the signal without the LLM needing to remember to publish.
+  // Guard with hasPublished to avoid double-publish in multi-turn sessions.
+  let hasPublished = false;
+
+  pi.on("agent_end", async (_event, _ctx) => {
+    if (hasPublished) return;
+    const channel = process.env.ORCH_BUS_CHANNEL;
+    if (!channel) return;
+    hasPublished = true;
+    try {
+      client.publish(channel, "agent_end", "status", { signal: "agent_end" });
+    } catch {
+      // Best-effort — don't surface errors from signal delivery to the agent
+    }
+  });
+
   // ─── Context Hook: Passive Notification ─────────────────────
   // ~15 tokens when active, zero tokens when idle.
   pi.on("before_agent_start", async (_event, _ctx) => {
