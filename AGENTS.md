@@ -5,15 +5,11 @@
 - **Prefer retrieval-led reasoning over pre-training-led reasoning.** When unsure, read the source — don't reason from what you already know. This applies to code, config, and personal notes equally.
 - **Understand the system before optimizing the parts.** Before planning implementation, state: what is this change's intended impact? What other components does it touch? What assumptions does it rest on? Context gathering serves this — it's not just finding the right files, but understanding how they relate. When execution reveals new system dynamics, pause and re-orient before continuing down an outdated plan.
 - Prefer reversible operations. Commit before multi-file changes.
-- Before any code change, create a git worktree on a new branch named for the task. Do not edit directly on the main/master branch.
-- Before any change touching 3+ files, write a numbered step list first.
-- When a branch merges, delete any handoff that tracked that work. Handoffs are launch
-  pads, not trackers — tasks.md is the source of truth for open work.
-- **Gather context through scouts.** The orchestrator's primary capability is routing: dispatch cheap read-only scouts to extract file paths and distilled summaries, then synthesize that context into focused worker briefs. Scouts handle source reading; orchestrators handle context routing. This preserves your context budget for orchestration logic, not source files.
+- Before changes that alter system behavior across multiple components, write a numbered step list. Mechanical refactors (renames, import updates) don't need one.
 
 ## Clarify Before Exploring
 
-Before running exploratory commands to resolve missing context, **ask the user first**. State what's missing and why. Only explore autonomously when the answer is clearly self-contained (e.g., a file that should exist, a running service).
+For ambiguous or open-ended requests, state your interpretation and planned approach before executing.
 
 ## Safety
 
@@ -21,18 +17,6 @@ Before running exploratory commands to resolve missing context, **ask the user f
 - Never commit secrets. If a secret appears unexpectedly in output or context, stop and flag it — do not use it.
 - Scope edits to the working tree unless told otherwise.
 
-## Session Tasks
+## Subagent Model Selection
 
-At the start of each user request, add tasks with `/todo <description>` before beginning work.
-Mark complete with `/todo done <n>` as you finish each one.
-This gives the user a live view of progress within the session.
-
-## Attribution
-
-Workers tag all commits with `Agent-Id` trailers in the format `Agent-Id: <label>/<session>`. Orchestrators can query these trailers to audit which agent made which changes:
-
-```bash
-git log --format="%s%n%b" origin/main..HEAD | grep "Agent-Id:"
-```
-
-Workers spawned via `orch spawn` receive `PI_AGENT_ID` and `PI_BUS_SESSION` automatically. The commit-msg hook reads `PI_AGENT_ID` for trailer injection.
+Match model to task. `subagent()` inherits the parent model by default — override it. Read-heavy gathering, file summarization, and mechanical edits should use a cheap model (`anthropic/claude-haiku-4-5`). Reserve the parent model for tasks requiring judgment, adversarial thinking, or subtle tradeoff analysis.
