@@ -18,8 +18,12 @@ import { createHintState, resetHintState, detectLspHint } from "./hints";
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
   const hintState = createHintState();
+  let pendingHint: string | null = null;
 
-  pi.on("session_start", () => resetHintState(hintState));
+  pi.on("session_start", () => {
+    resetHintState(hintState);
+    pendingHint = null;
+  });
 
   // ─── lsp tool ───────────────────────────────────────────────────────────
 
@@ -131,13 +135,25 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ─── LSP hint detection (all tools) ─────────────────────────────────
+    // Queue hint for delivery at the next decision boundary (before_agent_start)
+    // instead of appending to tool output where it gets buried.
     const hint = detectLspHint(toolName, inp, hintState);
     if (hint) {
-      const first = event.content?.[0];
-      const existing = first?.type === "text" ? first.text : "";
-      return {
-        content: [{ type: "text", text: existing ? `${existing}\n\n${hint}` : hint }],
-      };
+      pendingHint = hint;
     }
+  });
+
+  // ─── Deliver queued LSP hints at the decision boundary ────────────────
+  pi.on("before_agent_start", async () => {
+    if (!pendingHint) return {};
+    const hint = pendingHint;
+    pendingHint = null;
+    return {
+      message: {
+        customType: "lsp-hint",
+        content: hint,
+        display: false,
+      },
+    };
   });
 }
