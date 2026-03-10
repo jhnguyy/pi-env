@@ -6,7 +6,7 @@
  *   2. Handoff cleanup    — deletes handoffs when their branch merges (tool_result hook)
  *   3. Context injection  — injects git branch + dirty status before root agent turns
  *   4. /handoff command   — write session handoff + retro
- *   5. /todo command      — in-memory session task list
+ *   5. todo tool          — agent-managed session task list
  *   6. read_session tool  — extract high-signal content from session JSONL files
  *   7. /review-retros     — review past retros and propose behavioral improvements
  *
@@ -173,65 +173,76 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerCommand("todo", {
-    description: [
-      "Session task list. Usage:",
-      "  /todo <task>       — add a task",
-      "  /todo done <n>     — mark task n complete (by id or partial text)",
-      "  /todo rm <n>       — remove a task",
-      "  /todo clear        — clear all tasks",
-      "  /todo              — show current list",
-    ].join("\n"),
+  pi.registerTool({
+    name: "todo",
+    label: "Todo",
+    description:
+      "Manage your session task list. Use to track multi-step plans, mark progress, " +
+      "and keep yourself organized across turns. The list is visible in context every turn.",
+    parameters: Type.Object({
+      action: Type.Union(
+        [
+          Type.Literal("add"),
+          Type.Literal("done"),
+          Type.Literal("rm"),
+          Type.Literal("list"),
+          Type.Literal("clear"),
+        ],
+        { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" },
+      ),
+      text: Type.Optional(
+        Type.String({ description: "Task text (for add) or task id number (for done/rm)" }),
+      ),
+    }),
 
-    handler: async (args, ctx) => {
-      const trimmed = args?.trim() ?? "";
+    async execute(_id, params, _signal, _onUpdate, ctx: any) {
+      const { action, text } = params;
 
-      // /todo — show list
-      if (!trimmed) {
-        ctx.ui.notify(store.render(), "info");
-        return;
+      if (action === "list") {
+        return { content: [{ type: "text" as const, text: store.render() }], details: {} };
       }
 
-      // /todo clear
-      if (trimmed === "clear") {
+      if (action === "clear") {
         store.clear();
         refreshTodoWidget(ctx);
-        ctx.ui.notify("Cleared.", "info");
-        return;
+        return { content: [{ type: "text" as const, text: "Cleared all tasks." }], details: {} };
       }
 
-      // /todo done <ref>
-      if (trimmed.startsWith("done ")) {
-        const ref = trimmed.slice(5).trim();
-        const n = parseInt(ref, 10);
-        const item = store.complete(isNaN(n) ? ref : n);
-        if (item) {
-          refreshTodoWidget(ctx);
-          ctx.ui.notify(`✅ (${item.id}) ${item.text}`, "info");
-        } else {
-          ctx.ui.notify(`No matching task: ${ref}`, "warning");
-        }
-        return;
+      if (action === "add") {
+        if (!text) throw new Error("text is required for add");
+        const item = store.add(text);
+        refreshTodoWidget(ctx);
+        return {
+          content: [{ type: "text" as const, text: `Added: □ (${item.id}) ${item.text}` }],
+          details: { id: item.id },
+        };
       }
 
-      // /todo rm <ref>
-      if (trimmed.startsWith("rm ")) {
-        const ref = trimmed.slice(3).trim();
-        const n = parseInt(ref, 10);
-        const ok = store.remove(isNaN(n) ? ref : n);
-        if (ok) {
-          refreshTodoWidget(ctx);
-          ctx.ui.notify("Removed.", "info");
-        } else {
-          ctx.ui.notify(`No matching task: ${ref}`, "warning");
-        }
-        return;
+      if (action === "done") {
+        if (!text) throw new Error("text is required for done (pass task id)");
+        const n = parseInt(text, 10);
+        const item = store.complete(isNaN(n) ? text : n);
+        if (!item) throw new Error(`No matching open task: ${text}`);
+        refreshTodoWidget(ctx);
+        return {
+          content: [{ type: "text" as const, text: `Completed: ✅ (${item.id}) ${item.text}` }],
+          details: { id: item.id },
+        };
       }
 
-      // /todo <task> — add
-      const item = store.add(trimmed);
-      refreshTodoWidget(ctx);
-      ctx.ui.notify(`□ (${item.id}) ${item.text}`, "info");
+      if (action === "rm") {
+        if (!text) throw new Error("text is required for rm (pass task id)");
+        const n = parseInt(text, 10);
+        const ok = store.remove(isNaN(n) ? text : n);
+        if (!ok) throw new Error(`No matching task: ${text}`);
+        refreshTodoWidget(ctx);
+        return {
+          content: [{ type: "text" as const, text: `Removed task ${text}.` }],
+          details: {},
+        };
+      }
+
+      throw new Error(`Unknown action: ${action}`);
     },
   });
 
