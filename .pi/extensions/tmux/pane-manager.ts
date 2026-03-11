@@ -18,7 +18,7 @@ import type {
 } from "./types";
 import { TmuxError } from "./types";
 import type { SessionEntry } from "@mariozechner/pi-coding-agent";
-import { ensureExitShim, SHIM_PATH } from "../agent-bus/exit-shim";
+import { ensureExitShim, SHIM_PATH } from "../_shared/exit-shim";
 
 // ─────────────────────────────────────────────────────────────
 

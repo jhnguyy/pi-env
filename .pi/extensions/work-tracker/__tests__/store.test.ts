@@ -133,6 +133,11 @@ describe("TodoStore", () => {
     expect(store.render()).toBe("[session-todos] No tasks yet.");
   });
 
+  it("render() formats a single open task correctly", () => {
+    store.add("slim work-tracker extension");
+    expect(store.render()).toBe("[session-todos]\n□ (1) slim work-tracker extension");
+  });
+
   it("render() shows □ for open, ✅ for done", () => {
     store.add("open task");
     store.add("done task");
