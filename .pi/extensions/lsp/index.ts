@@ -72,9 +72,10 @@ export default function (pi: ExtensionAPI) {
             details: result,
           };
         } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "LSP error";
           return {
-            content: [{ type: "text", text: err instanceof Error ? err.message : "LSP error" }],
-            details: null,
+            content: [{ type: "text", text: msg }],
+            details: { error: msg },
           };
         }
       },
