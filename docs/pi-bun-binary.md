@@ -16,24 +16,35 @@ modules with `tryNative: false` — it handles all imports itself instead of
 delegating to Node's native loader, which is where the format-detection error
 originates. The compiled binary avoids this class of CJS/ESM conflict entirely.
 
-## Required Assets Next to the Binary
+## Asset Layout
 
-When running as a Bun binary, pi resolves all assets relative to
-`dirname(process.execPath)` — the directory containing the binary. The
-following must exist adjacent to it:
+pi's official release tarballs ship a self-contained directory: the binary sits
+alongside its assets. When `isBunBinary=true`, pi resolves `theme/` and
+`export-html/` via `dirname(process.execPath)`, and `package.json` via
+`getPackageDir()` (which also defaults to `dirname(process.execPath)`).
 
-| File/Dir       | Required for                      |
-|----------------|-----------------------------------|
-| `package.json` | Startup (version, app name)       |
-| `theme/`       | Interactive mode (built-in themes)|
-| `export-html/` | `/export` command                 |
+`setup/install-bun-pi.sh` reproduces this layout by symlinking the assets from
+node\_modules into the binary's directory:
 
-`setup/install-bun-pi.sh` symlinks all three from the npm package directory.
-When pi is updated via npm, the symlinks continue to point at the correct
-assets — only the binary itself needs recompilation.
+```
+~/.local/bin/
+├── pi              ← compiled Bun binary
+├── package.json    → <repo>/node_modules/@mariozechner/.../package.json
+├── theme/          → <repo>/node_modules/@mariozechner/.../dist/.../theme/
+└── export-html/    → <repo>/node_modules/@mariozechner/.../dist/.../export-html/
+```
 
-The `PI_PACKAGE_DIR` env var overrides this lookup. Useful in environments
-where you can't control the binary's parent directory.
+When pi is updated via `bun install`, the symlinks continue to point at the
+correct (updated) assets — only the binary itself needs recompilation.
+
+### `PI_PACKAGE_DIR` Override
+
+The `PI_PACKAGE_DIR` env var overrides `getPackageDir()`, which controls where
+pi looks for `package.json`, `README.md`, `docs/`, `examples/`, and
+`CHANGELOG.md`. It does **not** affect `theme/` or `export-html/` — those
+always resolve next to the binary. This is useful in environments like Nix/Guix
+where the binary lives in a read-only store path separate from the package
+metadata.
 
 ## The ZFS `bun --compile` Bug
 
@@ -44,7 +55,7 @@ successfully but fails at runtime with `Exec format error`.
 Diagnose with:
 
 ```bash
-od -A x -t x1z ~/.pi/bin/pi | head -2
+od -A x -t x1z ~/.local/bin/pi | head -2
 # Corrupt: 00 00 00 00 ...
 # Valid:   7f 45 4c 46 ...  (ELF magic bytes)
 ```
@@ -61,15 +72,3 @@ is the single source of truth for the pi version.
 
 To update pi: bump the version in `package.json`, run `bun install` (updates the
 lockfile), then re-run `./setup.sh` to recompile the binary.
-
-## The `~/.pi/bin/` Layout
-
-After running `./setup.sh` (or `setup/install-bun-pi.sh` directly):
-
-```
-~/.pi/bin/
-├── pi              ← compiled Bun binary
-├── package.json    → <repo>/node_modules/@mariozechner/.../package.json
-├── theme/          → <repo>/node_modules/@mariozechner/.../dist/.../theme/
-└── export-html/    → <repo>/node_modules/@mariozechner/.../dist/.../export-html/
-```

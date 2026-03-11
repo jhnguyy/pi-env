@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to ~/.pi/agent/settings.json. Customize: defaultModel, enabledModels (add/remove per machine), permissionLevel, theme. Add ollama or other local models in enabledModels only if running locally — see models.template.json.",
+  "_comment": "Copy to ~/.pi/agent/settings.json, then run setup.sh to register pi-env as a package. Customize: defaultModel, enabledModels (add/remove per machine), permissionLevel, theme. Add ollama or other local models in enabledModels only if running locally — see models.template.json.",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-6",
   "defaultThinkingLevel": "high",
