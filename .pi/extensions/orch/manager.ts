@@ -20,7 +20,7 @@ import { writeManifest, writeReceipt } from "./manifest";
 import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
 import { initBusService, getBusService } from "../agent-bus/bus-service";
-import { ensureExitShim, SHIM_PATH } from "../agent-bus/exit-shim";
+import { ensureExitShim, SHIM_PATH } from "../_shared/exit-shim";
 import type { BusMessage } from "../agent-bus/types";
 
 // ─── Label validation ─────────────────────────────────────────
