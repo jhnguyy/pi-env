@@ -2,6 +2,8 @@
  * Shared types for the orch extension.
  */
 
+import { BaseExtensionError } from "../_shared/errors";
+
 // ─── Worker Record ────────────────────────────────────────────
 
 export interface WorkerRecord {
@@ -62,15 +64,7 @@ export type OrchErrorCode =
   | "BRIEF_NOT_FOUND"
   | "AMBIGUOUS_SPAWN";
 
-export class OrchError extends Error {
-  constructor(
-    message: string,
-    public code: OrchErrorCode,
-  ) {
-    super(message);
-    this.name = "OrchError";
-  }
-}
+export class OrchError extends BaseExtensionError<OrchErrorCode> {}
 
 // ─── ExecFn (matches pi.exec signature) ──────────────────────
 

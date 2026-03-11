@@ -3,6 +3,8 @@
  * This is the "dictionary" for the entire extension — start here.
  */
 
+import { BaseExtensionError } from "../_shared/errors";
+
 // ─── Message Format ───────────────────────────────────────────
 
 export type MessageType = "status" | "result" | "error" | "command";
@@ -86,12 +88,4 @@ export type BusErrorCode =
   | "INVALID_CHANNEL"
   | "FS_ERROR";
 
-export class BusError extends Error {
-  constructor(
-    message: string,
-    public code: BusErrorCode
-  ) {
-    super(message);
-    this.name = "BusError";
-  }
-}
+export class BusError extends BaseExtensionError<BusErrorCode> {}

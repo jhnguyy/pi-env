@@ -23,6 +23,7 @@ import { Text } from "@mariozechner/pi-tui";
 
 import { OrchestratorManager } from "./manager";
 import { OrchError } from "./types";
+import { txt, ok, err } from "../_shared/result";
 
 export default function (pi: ExtensionAPI) {
   const exec = pi.exec.bind(pi);
@@ -298,15 +299,4 @@ export default function (pi: ExtensionAPI) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
-
-function txt(text: string): { type: "text"; text: string } {
-  return { type: "text", text };
-}
-
-function ok(text: string) {
-  return { content: [txt(text)], details: {} };
-}
-
-function err(msg: string) {
-  return { content: [txt(msg)], details: { error: msg } };
-}
+// txt / ok / err imported from ../_shared/result

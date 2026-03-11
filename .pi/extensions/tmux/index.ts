@@ -16,6 +16,7 @@ import { TmuxClient } from "./tmux-client";
 import { PaneManager } from "./pane-manager";
 import type { RunDetails, TmuxConfig } from "./types";
 import { DEFAULT_CONFIG, TmuxError } from "./types";
+import { txt, err } from "../_shared/result";
 
 export default function (pi: ExtensionAPI) {
   // ─── Config ─────────────────────────────────────────────────
@@ -254,10 +255,4 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-function txt(text: string): { type: "text"; text: string } {
-  return { type: "text", text };
-}
-
-function err(msg: string) {
-  return { content: [txt(msg)], details: { error: msg } };
-}
+// txt / err imported from ../_shared/result

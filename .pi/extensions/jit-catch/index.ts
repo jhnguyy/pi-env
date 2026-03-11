@@ -22,6 +22,7 @@ import { Text } from "@mariozechner/pi-tui";
 
 import { parseDiff } from "./parser";
 import { captureDiff, runForExtension } from "./runner";
+import { err } from "../_shared/result";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -195,9 +196,4 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-function err(msg: string) {
-  return {
-    content: [{ type: "text" as const, text: msg }],
-    details: { error: msg },
-  };
-}
+// err imported from ../_shared/result

@@ -3,6 +3,8 @@
  * This is the "dictionary" for the entire extension — start here.
  */
 
+import { BaseExtensionError } from "../_shared/errors";
+
 // ─── Tool Input (discriminated union) ─────────────────────────
 
 export interface TmuxRunInput {
@@ -148,12 +150,4 @@ export type TmuxErrorCode =
   | "KILL_FAILED"
   | "CAPTURE_FAILED";
 
-export class TmuxError extends Error {
-  constructor(
-    message: string,
-    public code: TmuxErrorCode
-  ) {
-    super(message);
-    this.name = "TmuxError";
-  }
-}
+export class TmuxError extends BaseExtensionError<TmuxErrorCode> {}
