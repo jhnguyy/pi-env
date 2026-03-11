@@ -13,16 +13,24 @@
 #   - Compiles it with bun build --compile → ~/.local/bin/pi
 #   - Symlinks required assets (package.json, theme/, export-html/) next to binary
 #
+# Asset layout:
+#   pi's official release tarballs ship a self-contained directory with the binary
+#   and its assets side by side. When running as a bun binary, getThemesDir() and
+#   getExportTemplateDir() resolve relative to dirname(process.execPath). We
+#   reproduce that layout via symlinks pointing into node_modules.
+#
+#   ~/.local/bin/
+#   ├── pi              ← compiled Bun binary
+#   ├── package.json    → <repo>/node_modules/@mariozechner/.../package.json
+#   ├── theme/          → <repo>/node_modules/@mariozechner/.../dist/.../theme/
+#   └── export-html/    → <repo>/node_modules/@mariozechner/.../dist/.../export-html/
+#
 # ~/.local/bin is the XDG standard user binary dir, auto-added to PATH by most
 # Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
 #
-# Asset resolution (package.json, theme/, export-html/) is handled by the
-# PI_PACKAGE_DIR environment variable pointing at pi-env's node_modules —
-# no symlinks next to the binary are needed.
-#
 # Idempotent — re-run after `bun install` picks up a new pi version:
-#   cd /mnt/tank/code/pi-env && bun install && ./setup/install-bun-pi.sh
-#   (or just run ./setup.sh, which calls this automatically)
+#   bun install && ./setup/install-bun-pi.sh
+#   (or just run ./setup.sh from the repo root, which calls this automatically)
 
 set -euo pipefail
 
@@ -64,6 +72,29 @@ cp "$TMP_BIN" "$BIN_DIR/pi"
 chmod +x "$BIN_DIR/pi"
 
 ok "Binary: $BIN_DIR/pi"
+
+# ── Asset symlinks ───────────────────────────────────────────────────────────
+# pi resolves theme/ and export-html/ relative to the binary when isBunBinary=true.
+# Symlink them from node_modules so they track the installed pi version.
+
+link_asset() {
+  local src="$1" target="$2" label="$3"
+  if [ -L "$target" ] && [ "$(readlink "$target")" = "$src" ]; then
+    ok "$label"
+  else
+    ln -sfn "$src" "$target"
+    ok "$label (linked)"
+  fi
+}
+
+link_asset "$PI_PKG/package.json" \
+  "$BIN_DIR/package.json" "package.json → node_modules"
+
+link_asset "$PI_PKG/dist/modes/interactive/theme" \
+  "$BIN_DIR/theme" "theme/ → node_modules"
+
+link_asset "$PI_PKG/dist/core/export-html" \
+  "$BIN_DIR/export-html" "export-html/ → node_modules"
 
 # ── PATH check ───────────────────────────────────────────────────────────────
 

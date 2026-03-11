@@ -8,21 +8,25 @@ pi is an interactive CLI coding agent. It reads, edits, and executes code via a 
 
 ```
 pi-env/
-├── .agents/skills/           # Auto-discovered skills (symlinked per-skill)
+├── .agents/skills/           # Skills (loaded by pi's package manager)
 │   └── reference/            # Reference skills (manually loaded, not auto-discovered)
-├── .pi/extensions/           # Extensions (symlinked per-extension)
+├── .pi/extensions/           # Extensions (loaded by pi's package manager)
 ├── AGENTS.md                 # Portable agent principles (symlinked to ~/.pi/agent/AGENTS.md)
-├── setup/                    # Per-machine config templates
-└── setup.sh                  # Idempotent linker — run once, re-run after git pull
+├── setup/                    # Per-machine config templates + install script
+└── setup.sh                  # Idempotent setup — run once, re-run after git pull
 ```
 
-`setup.sh` creates per-item symlinks:
-- `~/.agents/skills/<name>` → repo's `.agents/skills/<name>` (one per skill)
-- `~/.agents/skills/reference` → repo's `.agents/skills/reference` (whole directory)
-- `~/.pi/agent/extensions/<name>` → repo's `.pi/extensions/<name>`
-- `~/.pi/agent/AGENTS.md` → repo's `AGENTS.md`
+pi-env is registered as a [pi package](https://github.com/mariozechner/pi#pi-packages) via `settings.json`. Pi's package manager reads the `pi` manifest in `package.json` and loads extensions and skills directly from the repo — no per-item symlinks needed.
 
-Existing local directories/files are never overwritten — setup.sh skips anything that already exists as a real path.
+`setup.sh` handles:
+- `bun install` (frozen lockfile)
+- Compiling the pi binary + symlinking assets (`setup/install-bun-pi.sh`)
+- Registering pi-env in `settings.json` `packages`
+- `~/.pi/agent/AGENTS.md` → repo's `AGENTS.md`
+- `~/.agents/roles` → repo's `.agents/roles`
+- Git post-merge hook
+
+Local extensions in `~/.pi/agent/extensions/` coexist cleanly — pi auto-discovers them independently of packages.
 
 > **Agent context:** `AGENTS.md` (repo root) is the global principles file — never add project-specific content here. Project-scoped agent context lives in `.pi/AGENTS.md`.
 
@@ -33,12 +37,14 @@ Existing local directories/files are never overwritten — setup.sh skips anythi
 | Extension | What it adds |
 |---|---|
 | `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. Replaces sleep-poll loops with event-driven blocking. |
-| `handoff` | `/handoff` command — writes a structured session handoff and prints the resume prompt. |
 | `jit-catch` | `jit_catch` tool — spawns a subagent to write ephemeral catching tests for a diff, runs them with `bun test`, auto-discards on pass. |
 | `lsp` | `lsp` tool — TypeScript language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. |
+| `orch` | Orchestration lifecycle manager — branch isolation, temp dir cleanup, run receipts. |
 | `security` | Permission engine — intercepts tool calls, evaluates rules, prompts for approval. Scans tool results for credential leakage and redacts. `/permissions` command. |
 | `skill-builder` | `skill_build` tool — scaffold, validate, and evaluate pi skills in one call. |
+| `subagent` | In-process subagent via `agentLoop()` — delegate focused tasks without subprocess overhead. |
 | `tmux` | `tmux` tool — spawn panes, send keystrokes, read output, close. Designed for parallel subagent work and long-running services. |
+| `work-tracker` | Branch guard + handoff tracking — enforces branch conventions, manages session state. |
 
 **Skills** — agent instructions loaded on demand:
 
@@ -75,14 +81,15 @@ curl -fsSL https://bun.sh/install | bash
 git clone https://github.com/<you>/pi-env.git ~/pi-env
 cd ~/pi-env
 
-# 2. Add ~/.pi/bin to PATH (once — add to ~/.profile or ~/.bashrc)
-export PATH="$HOME/.pi/bin:$PATH"
+# 2. Add ~/.local/bin to PATH (once — add to ~/.profile or ~/.bashrc)
+export PATH="$HOME/.local/bin:$PATH"
 
-# 3. Run setup — installs deps, compiles pi binary, links dotfiles
+# 3. Run setup — installs deps, compiles pi binary, registers package
 ./setup.sh
 
 # 4. Copy settings template and customize
 cp setup/settings.template.json ~/.pi/agent/settings.json
+# Then re-run ./setup.sh to register pi-env in the new settings.json
 # Key settings to review: defaultModel, permissionLevel ("none"/"warn"/"block"), theme
 # Optional: cp setup/models.template.json ~/.pi/agent/models.json  (add local/ollama models)
 
@@ -103,7 +110,7 @@ pi "say hello"          # quick smoke test — should get a response
 ```bash
 cd ~/pi-env
 git pull
-./setup.sh    # re-installs deps, recompiles binary if pi version changed, re-links dotfiles
+./setup.sh    # re-installs deps, recompiles binary if pi version changed
 ```
 
 ## Local-only extensions and skills
@@ -112,7 +119,7 @@ Extensions and skills not in this repo go directly in their local directories:
 - `~/.pi/agent/extensions/<name>/` — local-only extensions
 - `~/.agents/skills/<name>/` — local-only skills
 
-`setup.sh` skips any path that already exists as a real directory, so local and repo-managed items coexist cleanly.
+Pi auto-discovers these independently of packages. They coexist cleanly with pi-env's package-managed resources.
 
 If you have a local `~/.pi/agent/AGENTS.md` with machine-specific context (environment, mounts, etc.), it takes precedence over the repo symlink — remove it to switch to the linked version.
 

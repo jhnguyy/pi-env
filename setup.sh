@@ -4,15 +4,20 @@
 # Idempotent. Re-run after git pull to pick up new extensions/skills.
 #
 # What it does:
-#   ~/.agents/skills/<name>              → repo/.agents/skills/<name>  (per-skill, skips local dirs)
-#   ~/.agents/roles                      → repo/.agents/roles          (entire directory, no local override)
-#   ~/.pi/agent/extensions/<name>        → repo/.pi/extensions/<name>  (per-extension, skips local dirs)
-#   ~/.pi/agent/AGENTS.md               → repo/AGENTS.md              (skips if local file exists)
+#   1. bun install (frozen lockfile)
+#   2. Compile pi binary + symlink assets (setup/install-bun-pi.sh)
+#   3. Register pi-env as a pi package in settings.json
+#   4. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
+#   5. Symlink roles → ~/.agents/roles
+#   6. Install git post-merge hook
+#
+# Extensions and skills are loaded by pi's package manager from the repo
+# directory — no per-extension or per-skill symlinks needed. Local extensions
+# in ~/.pi/agent/extensions/ coexist via pi's auto-discovery.
 #
 # What stays local (never touched):
 #   ~/.pi/agent/auth.json, settings.json, models.json, sessions/
-#   ~/.pi/agent/extensions/my-extension/ (or any other local extension)
-#   ~/.agents/skills/my-skill/ (or any other local skill)
+#   ~/.pi/agent/extensions/my-extension/ (local-only extensions)
 
 set -euo pipefail
 
@@ -47,22 +52,39 @@ link_path() {
   fi
 }
 
-# ── Skills (per-skill, mirrors extension pattern) ────────────────────────────
+# ── Package registration ────────────────────────────────────────────────────
+# Register pi-env as a local pi package so pi's package manager discovers
+# extensions and skills directly from the repo. No per-item symlinks needed.
 
-echo "Skills"
-echo "------"
-mkdir -p "$AGENTS_DIR/skills"
-for skill in "$REPO/.agents/skills/"/*/; do
-  [ -d "$skill" ] || continue
-  name="$(basename "${skill%/}")"
-  [[ "$name" == "reference" ]] && continue  # linked as a directory below
-  link_path "${skill%/}" "$AGENTS_DIR/skills/$name" "~/.agents/skills/$name"
-done
-
-# Reference skills linked as a directory (manually loaded, not auto-discovered)
-link_path "$REPO/.agents/skills/reference" "$AGENTS_DIR/skills/reference" "~/.agents/skills/reference"
+echo ""
+echo "Package registration"
+echo "--------------------"
+SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
+if [ -f "$SETTINGS_FILE" ]; then
+  # Check if pi-env repo path is already in the packages array
+  if bun -e "
+    const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
+    const pkgs = s.packages || [];
+    process.exit(pkgs.some(p => (typeof p === 'string' ? p : p.source) === '$REPO') ? 0 : 1);
+  " 2>/dev/null; then
+    ok "pi-env registered in settings.json packages"
+  else
+    # Add the repo path to the packages array
+    bun -e "
+      const fs = require('fs');
+      const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
+      s.packages = s.packages || [];
+      s.packages.push('$REPO');
+      fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
+    " 2>/dev/null
+    linked "pi-env added to settings.json packages"
+  fi
+else
+  skip "settings.json not found — copy setup/settings.template.json first"
+fi
 
 # ── Roles (entire directory, no local override) ──────────────────────────────
+# Roles are a pi-env concept (not a pi primitive), so they still need symlinking.
 
 echo ""
 echo "Roles"
@@ -70,18 +92,13 @@ echo "-----"
 mkdir -p "$AGENTS_DIR"
 link_path "$REPO/.agents/roles" "$AGENTS_DIR/roles" "~/.agents/roles"
 
-# ── Extensions (per-extension) ───────────────────────────────────────────────
+# ── AGENTS.md ────────────────────────────────────────────────────────────────
+# pi doesn't load AGENTS.md from packages, so this still needs symlinking.
 
 echo ""
-echo "Extensions"
-echo "----------"
-mkdir -p "$PI_AGENT_DIR/extensions"
-for ext in "$REPO/.pi/extensions/"/*/; do
-  [ -d "$ext" ] || continue
-  name="$(basename "${ext%/}")"
-  [[ "$name" == __tests__ || "$name" == node_modules || "$name" == docs ]] && continue
-  link_path "${ext%/}" "$PI_AGENT_DIR/extensions/$name" "~/.pi/agent/extensions/$name"
-done
+echo "AGENTS.md"
+echo "---------"
+link_path "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md" "~/.pi/agent/AGENTS.md"
 
 # ── Test utilities ───────────────────────────────────────────────────────────
 
@@ -97,13 +114,6 @@ link_path \
   "$REPO/.pi/extensions/__tests__/loader.test.ts" \
   "$PI_AGENT_DIR/extensions/__tests__/loader.test.ts" \
   "~/.pi/agent/extensions/__tests__/loader.test.ts"
-
-# ── AGENTS.md ────────────────────────────────────────────────────────────────
-
-echo ""
-echo "AGENTS.md"
-echo "---------"
-link_path "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md" "~/.pi/agent/AGENTS.md"
 
 # ── Git hooks ────────────────────────────────────────────────────────────────
 # Install post-merge hook so setup auto-runs after git pull
@@ -124,7 +134,7 @@ else
 fi
 
 # ── Pi binary ────────────────────────────────────────────────────────────────
-# Compile pi from the repo-local node_modules into ~/.pi/bin/pi
+# Compile pi from the repo-local node_modules into ~/.local/bin/pi
 
 echo ""
 "$REPO/setup/install-bun-pi.sh"
