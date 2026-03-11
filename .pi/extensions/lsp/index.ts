@@ -33,8 +33,8 @@ export default function (pi: ExtensionAPI) {
     description:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
       "find-references, document/workspace symbols. Communicates with a shared daemon that " +
-      "manages typescript-language-server (for .ts/.tsx/.js) and bash-language-server " +
-      "(for .sh/.bash/.zsh/.ksh), spawning each on first use.",
+      "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
+      "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.",
 
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
@@ -48,6 +48,7 @@ export default function (pi: ExtensionAPI) {
       "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
       "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
       "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
+      "After editing a .nix file, lsp diagnostics surfaces nil errors automatically (requires nil on PATH).",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
       "lsp uses 1-indexed lines and characters, matching read tool output.",
     ],

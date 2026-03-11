@@ -6,7 +6,8 @@
 
 export const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 export const BASH_EXTENSIONS = new Set([".sh", ".bash", ".zsh", ".ksh"]);
-export const ALL_LSP_EXTENSIONS = new Set([...TS_EXTENSIONS, ...BASH_EXTENSIONS]);
+export const NIX_EXTENSIONS = new Set([".nix"]);
+export const ALL_LSP_EXTENSIONS = new Set([...TS_EXTENSIONS, ...BASH_EXTENSIONS, ...NIX_EXTENSIONS]);
 
 export function isLspSupported(path: string): boolean {
   return [...ALL_LSP_EXTENSIONS].some(ext => path.endsWith(ext));
@@ -20,10 +21,15 @@ export function isBashScript(path: string): boolean {
   return [...BASH_EXTENSIONS].some(ext => path.endsWith(ext));
 }
 
+export function isNix(path: string): boolean {
+  return path.endsWith(".nix");
+}
+
 export function getLanguageId(path: string): string {
   if (path.endsWith(".tsx")) return "typescriptreact";
   if (path.endsWith(".jsx")) return "javascriptreact";
   if ([".ts", ".mts", ".cts"].some(e => path.endsWith(e))) return "typescript";
   if (isBashScript(path)) return "shellscript";
+  if (isNix(path)) return "nix";
   return "javascript";
 }

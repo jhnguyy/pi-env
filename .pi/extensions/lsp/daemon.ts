@@ -22,7 +22,7 @@ import { extname, resolve as resolvePath } from "node:path";
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
 import { DocumentManager } from "./document-manager";
 import { FileWatcher } from "./file-watcher";
-import { TS_EXTENSIONS, BASH_EXTENSIONS } from "./filetypes";
+import { TS_EXTENSIONS, BASH_EXTENSIONS, NIX_EXTENSIONS } from "./filetypes";
 import { pathToUri, uriToPath, toZeroBased, toOneBased, relativePath, extractLines, getFileLine, expandToBlock, symbolKindLabel, severityLabel, truncateMessage } from "./utils";
 import {
   parseRequest, serializeResponse, errorResponse, okResponse,
@@ -81,6 +81,8 @@ class LspBackend {
 
   private started = false;
   private startPromise: Promise<void> | null = null;
+  /** Cached unavailability reason — set when binary not found; prevents repeated PATH scans. */
+  private unavailable: string | null = null;
 
   constructor(
     /** Display name, e.g. "typescript" or "bash" */
@@ -112,6 +114,8 @@ class LspBackend {
 
   async ensureStarted(): Promise<void> {
     if (this.started) return;
+    // Fail fast — binary was already found to be missing; no point re-scanning PATH.
+    if (this.unavailable) throw new Error(this.unavailable);
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.doStart()
       .then(() => { this.started = true; })
@@ -121,7 +125,13 @@ class LspBackend {
 
   private async doStart(): Promise<void> {
     const bin = await findBinary(this.binaryName);
-    if (!bin) throw new Error(`${this.binaryName} not found in PATH or local node_modules`);
+    if (!bin) {
+      this.unavailable = `${this.name} language server (${this.binaryName}) is not installed — ` +
+        `.${this.extensions.values().next().value?.slice(1) ?? this.name} language intelligence unavailable`;
+      // Warn once so the operator knows; don't crash the daemon.
+      console.warn(`[lsp-daemon] WARNING: ${this.unavailable}`);
+      throw new Error(this.unavailable);
+    }
 
     this.lsp = spawn(bin, this.binaryArgs, { stdio: ["pipe", "pipe", "pipe"] });
 
@@ -348,7 +358,16 @@ export class LspDaemon {
       "",  // shellcheck codes are already prefixed (SC2034) or numeric
     );
 
-    this.backends = [this.tsBackend, bashBackend];
+    const nilBackend = new LspBackend(
+      "nil",
+      "nil",
+      [],   // nil uses stdio with no args (unlike typescript-language-server --stdio)
+      NIX_EXTENSIONS,
+      STANDARD_CAPABILITIES,
+      "",   // nil diagnostic codes have no standard prefix
+    );
+
+    this.backends = [this.tsBackend, bashBackend, nilBackend];
   }
 
   /** Return the backend that handles this file, falling back to TypeScript. */
