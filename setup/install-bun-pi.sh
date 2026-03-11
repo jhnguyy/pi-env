@@ -29,8 +29,8 @@
 # Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
 #
 # Idempotent — re-run after `bun install` picks up a new pi version:
-#   cd /mnt/tank/code/pi-env && bun install && ./setup/install-bun-pi.sh
-#   (or just run ./setup.sh, which calls this automatically)
+#   bun install && ./setup/install-bun-pi.sh
+#   (or just run ./setup.sh from the repo root, which calls this automatically)
 
 set -euo pipefail
 
