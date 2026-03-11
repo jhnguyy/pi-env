@@ -835,3 +835,104 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
     expect(capturedCommand).toContain(`PI_BUS_SESSION=${busSession}`);
   });
 });
+
+// ─── prepareWorktree ─────────────────────────────────────────
+
+import { prepareWorktree } from "../git";
+import { readdirSync, lstatSync } from "node:fs";
+
+describe("prepareWorktree", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync("/tmp/orch-test-wt-");
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("symlinks top-level node_modules from repo into worktree", () => {
+    // Arrange: source repo has node_modules/, worktree does not
+    const repoDir = mkdtempSync("/tmp/orch-test-repo-");
+    const repoNM = `${repoDir}/node_modules`;
+    mkdirSync(repoNM);
+
+    try {
+      prepareWorktree(repoDir, tmpDir);
+
+      // Assert: symlink created at worktree/node_modules pointing to repo/node_modules
+      const wtNM = `${tmpDir}/node_modules`;
+      expect(existsSync(wtNM)).toBe(true);
+      const stat = lstatSync(wtNM);
+      expect(stat.isSymbolicLink()).toBe(true);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("symlinks per-extension node_modules for extensions that have them", () => {
+    const repoDir = mkdtempSync("/tmp/orch-test-repo-");
+
+    try {
+      // Arrange: repo has .pi/extensions/lsp/node_modules/, worktree has the dir but no node_modules
+      const repoLspNM = `${repoDir}/.pi/extensions/lsp/node_modules`;
+      mkdirSync(repoLspNM, { recursive: true });
+
+      const wtLspDir = `${tmpDir}/.pi/extensions/lsp`;
+      mkdirSync(wtLspDir, { recursive: true });
+
+      prepareWorktree(repoDir, tmpDir);
+
+      const wtLspNM = `${tmpDir}/.pi/extensions/lsp/node_modules`;
+      expect(existsSync(wtLspNM)).toBe(true);
+      const stat = lstatSync(wtLspNM);
+      expect(stat.isSymbolicLink()).toBe(true);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("skips extension dirs where repo has no node_modules", () => {
+    const repoDir = mkdtempSync("/tmp/orch-test-repo-");
+
+    try {
+      // Arrange: repo has extension dir but no node_modules inside it
+      mkdirSync(`${repoDir}/.pi/extensions/bus`, { recursive: true });
+      mkdirSync(`${tmpDir}/.pi/extensions/bus`, { recursive: true });
+
+      prepareWorktree(repoDir, tmpDir);
+
+      // No symlink created — bus extension has no local deps
+      expect(existsSync(`${tmpDir}/.pi/extensions/bus/node_modules`)).toBe(false);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("is idempotent — does not throw if symlink already exists", () => {
+    const repoDir = mkdtempSync("/tmp/orch-test-repo-");
+
+    try {
+      mkdirSync(`${repoDir}/node_modules`);
+
+      // Call twice — second call should be a no-op
+      prepareWorktree(repoDir, tmpDir);
+      expect(() => prepareWorktree(repoDir, tmpDir)).not.toThrow();
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does nothing when repo has no node_modules", () => {
+    const repoDir = mkdtempSync("/tmp/orch-test-repo-");
+
+    try {
+      // No node_modules in repo — prepareWorktree should silently skip
+      prepareWorktree(repoDir, tmpDir);
+      expect(existsSync(`${tmpDir}/node_modules`)).toBe(false);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+});

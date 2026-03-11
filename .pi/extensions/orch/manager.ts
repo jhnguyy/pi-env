@@ -15,7 +15,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
-import { createWorktree, removeWorktree, pruneWorktrees } from "./git";
+import { createWorktree, prepareWorktree, removeWorktree, pruneWorktrees } from "./git";
 import { writeManifest, writeReceipt } from "./manifest";
 import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
@@ -259,6 +259,7 @@ export class OrchestratorManager {
       branch = `orch/${runId}/${label}`;
       worktreePath = `${orchDir}/${label}`;
       createWorktree(repo, worktreePath, branch);
+      prepareWorktree(repo, worktreePath);
 
       // Install commit-msg hook for automatic Agent-Id trailer injection.
       // Workers don't need to remember — automation handles attribution.
