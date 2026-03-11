@@ -9,6 +9,12 @@
  * - Abort propagates automatically via AbortSignal
  * - Live progress streams to parent TUI via onUpdate
  * - No extra context window cost for system prompt re-init
+ *
+ * Two modes:
+ * 1. Agent file: subagent({ agent: "scout", task: "..." })
+ *    — tools/model/prompt loaded from ~/.pi/agent/agents/<name>.md
+ * 2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" })
+ *    — explicit config, no defaults applied
  */
 
 import { agentLoop } from "@mariozechner/pi-agent-core";
@@ -36,14 +42,11 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { discoverAgents, type AgentConfig } from "./agents";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const MAX_TURNS = 20;
-
-const DEFAULT_SYSTEM_PROMPT =
-  "You are a focused subagent. Complete the task using only the tools provided. " +
-  "Be concise and direct. Return your findings as clear, structured text.";
 
 // ─── Tool factory map ────────────────────────────────────────────────────────
 
@@ -70,6 +73,7 @@ interface UsageStats {
 
 interface SubagentDetails {
   task: string;
+  agent?: string;
   toolNames: string[];
   modelOverride: string | undefined;
   finalOutput: string;
@@ -118,6 +122,15 @@ function getFinalOutput(messages: AgentMessage[]): string {
 // ─── Extension ───────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
+  // ── Extension tool registration ──────────────────────────────────────────
+  // Collect AgentTool instances from other extensions at load time.
+  // Providers emit on "agent-tools:register" during session_start.
+  const registeredExtTools = new Map<string, AgentTool<any, any>>();
+  pi.events.on("agent-tools:register", (data: unknown) => {
+    const tool = data as AgentTool<any, any>;
+    registeredExtTools.set(tool.name, tool);
+  });
+
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
@@ -127,91 +140,155 @@ export default function (pi: ExtensionAPI) {
       "The subagent runs inside the parent tool call — abort propagates automatically,",
       "progress streams live to the TUI. No subprocess overhead.",
       "",
-      "Usage:",
-      '  subagent({ task: "Read src/auth/ and summarize the auth flow" })',
-      '  subagent({ task: "Find all TODO comments", tools: ["read", "bash"] })',
-      '  subagent({ task: "Analyze the schema", model: "anthropic/claude-haiku-4-5" })',
+      "Two modes:",
+      '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
+      '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
       "",
-      "Available tools: read, bash, edit, write, grep, find, ls. Default: read, bash.",
-      "Model override: 'provider/model-id' format.",
+      "Available built-in tools: read, bash, edit, write, grep, find, ls.",
+      "Extension tools (lsp, notes, etc.) are available when registered.",
+      "Model: 'provider/model-id' format. Required — no default.",
     ].join("\n"),
 
     parameters: Type.Object({
+      agent: Type.Optional(
+        Type.String({
+          description:
+            "Agent name — resolves to an agent definition file with tools/model/system prompt configured",
+        }),
+      ),
       task: Type.String({ description: "Task to delegate to the subagent" }),
       tools: Type.Optional(
         Type.Array(Type.String(), {
-          description:
-            "Tool whitelist. Available: read, bash, edit, write, grep, find, ls. Default: [read, bash]",
+          description: "Tool whitelist. Required when not using an agent file.",
         }),
       ),
       model: Type.Optional(
         Type.String({
-          description: "Model override as 'provider/model-id'. Default: inherit parent model",
+          description: "Model as 'provider/model-id'. Required when not using an agent file.",
         }),
       ),
       system_prompt: Type.Optional(
         Type.String({
-          description: "System prompt override. Default: minimal task-focused prompt",
+          description:
+            "System prompt override. Optional — agent files provide this, or a minimal default is used.",
         }),
       ),
     }),
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      // ── 1. Resolve tools ────────────────────────────────────────────────
-      const toolNames = params.tools ?? ["read", "bash"];
-      const unknownTools = toolNames.filter((t: string) => !(t in TOOL_FACTORIES));
-      if (unknownTools.length > 0) {
+      // ── 1. Resolve agent file if specified ─────────────────────────────
+      let agentConfig: AgentConfig | undefined;
+      if (params.agent) {
+        const discovery = discoverAgents(ctx.cwd, "both");
+        agentConfig = discovery.agents.find((a) => a.name === params.agent);
+        if (!agentConfig) {
+          const available = discovery.agents.map((a) => a.name).join(", ") || "none";
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Agent not found: "${params.agent}". Available: ${available}`,
+              },
+            ],
+            details: buildErrorDetails(params.task, [], params.model, "agent_not_found"),
+          };
+        }
+      }
+
+      // ── 2. Resolve tools ────────────────────────────────────────────────
+      // Agent file → inline param → error (no defaults)
+      const rawToolNames: string[] | undefined = agentConfig?.tools ?? params.tools;
+      if (!rawToolNames || rawToolNames.length === 0) {
         return {
           content: [
             {
               type: "text",
-              text: `Unknown tools: ${unknownTools.join(", ")}. Available: ${Object.keys(TOOL_FACTORIES).join(", ")}`,
+              text: "No tools specified. Provide tools in the agent file or pass the tools parameter.",
             },
           ],
-          details: buildErrorDetails(params.task, toolNames, params.model, "invalid_tools"),
+          details: buildErrorDetails(params.task, [], params.model, "no_tools"),
         };
       }
-      const resolvedTools: AgentTool<any, any>[] = toolNames.map((t: string) => TOOL_FACTORIES[t](ctx.cwd));
 
-      // ── 2. Resolve model ────────────────────────────────────────────────
-      let resolvedModel = ctx.model;
-      if (params.model) {
-        const slashIdx = params.model.indexOf("/");
-        if (slashIdx === -1) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Invalid model format: "${params.model}". Use "provider/model-id".`,
-              },
-            ],
-            details: buildErrorDetails(params.task, toolNames, params.model, "invalid_model_format"),
-          };
+      const resolvedTools: AgentTool<any, any>[] = [];
+      const unknownTools: string[] = [];
+      for (const name of rawToolNames) {
+        if (name in TOOL_FACTORIES) {
+          resolvedTools.push(TOOL_FACTORIES[name](ctx.cwd));
+        } else if (registeredExtTools.has(name)) {
+          resolvedTools.push(registeredExtTools.get(name)!);
+        } else {
+          unknownTools.push(name);
         }
-        const provider = params.model.slice(0, slashIdx);
-        const modelId = params.model.slice(slashIdx + 1);
-        resolvedModel = ctx.modelRegistry.find(provider, modelId);
-        if (!resolvedModel) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Model not found: "${params.model}". Check the model ID and provider name.`,
-              },
-            ],
-            details: buildErrorDetails(params.task, toolNames, params.model, "model_not_found"),
-          };
-        }
+      }
+      if (unknownTools.length > 0) {
+        const available = [
+          ...Object.keys(TOOL_FACTORIES),
+          ...registeredExtTools.keys(),
+        ].join(", ");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unknown tools: ${unknownTools.join(", ")}. Available: ${available}`,
+            },
+          ],
+          details: buildErrorDetails(params.task, rawToolNames, params.model, "invalid_tools"),
+        };
+      }
+
+      // ── 3. Resolve model ────────────────────────────────────────────────
+      // Agent file → inline param → error (no fallback to parent model)
+      const modelStr: string | undefined = params.model ?? agentConfig?.model;
+      if (!modelStr) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No model specified. Provide model in the agent file or pass the model parameter.",
+            },
+          ],
+          details: buildErrorDetails(params.task, rawToolNames, params.model, "no_model"),
+        };
+      }
+
+      let resolvedModel;
+      const slashIdx = modelStr.indexOf("/");
+      if (slashIdx !== -1) {
+        // provider/model-id format — exact lookup
+        resolvedModel = ctx.modelRegistry.find(
+          modelStr.slice(0, slashIdx),
+          modelStr.slice(slashIdx + 1),
+        );
+      } else {
+        // Bare model name (e.g. from agent file) — search across all providers
+        const available = ctx.modelRegistry.getAvailable
+          ? ctx.modelRegistry.getAvailable()
+          : [];
+        resolvedModel = available.find(
+          (m: any) => m.id === modelStr || m.id.includes(modelStr),
+        );
       }
 
       if (!resolvedModel) {
         return {
-          content: [{ type: "text", text: "No model available. Select a model first." }],
-          details: buildErrorDetails(params.task, toolNames, params.model, "no_model"),
+          content: [
+            {
+              type: "text",
+              text: `Model not found: "${modelStr}". Check the model ID and provider name.`,
+            },
+          ],
+          details: buildErrorDetails(params.task, rawToolNames, modelStr, "model_not_found"),
         };
       }
 
-      // ── 3. Build config ─────────────────────────────────────────────────
+      // ── 4. Build system prompt ──────────────────────────────────────────
+      const systemPrompt =
+        params.system_prompt ??
+        agentConfig?.systemPrompt ??
+        "Complete the task using only the tools provided. Be concise and direct.";
+
+      // ── 5. Build config ─────────────────────────────────────────────────
       const config: AgentLoopConfig = {
         model: resolvedModel,
         convertToLlm,
@@ -219,9 +296,9 @@ export default function (pi: ExtensionAPI) {
         headers: { "X-Initiator": "agent" },
       };
 
-      // ── 4. Build context + prompts ──────────────────────────────────────
+      // ── 6. Build context + prompts ──────────────────────────────────────
       const agentContext: AgentContext = {
-        systemPrompt: params.system_prompt ?? DEFAULT_SYSTEM_PROMPT,
+        systemPrompt,
         messages: [],
         tools: resolvedTools,
       };
@@ -234,7 +311,7 @@ export default function (pi: ExtensionAPI) {
         } as any,
       ];
 
-      // ── 5. Track state ──────────────────────────────────────────────────
+      // ── 7. Track state ──────────────────────────────────────────────────
       const usage: UsageStats = {
         input: 0,
         output: 0,
@@ -257,7 +334,8 @@ export default function (pi: ExtensionAPI) {
           content: [{ type: "text", text: output }],
           details: {
             task: params.task,
-            toolNames,
+            agent: params.agent,
+            toolNames: rawToolNames,
             modelOverride: params.model,
             finalOutput: output,
             toolCallCount,
@@ -271,7 +349,7 @@ export default function (pi: ExtensionAPI) {
         (onUpdate as AgentToolUpdateCallback<SubagentDetails>)(partial);
       };
 
-      // ── 6. Run agentLoop ────────────────────────────────────────────────
+      // ── 8. Run agentLoop ────────────────────────────────────────────────
       try {
         const stream = agentLoop(prompts, agentContext, config, signal);
 
@@ -320,7 +398,8 @@ export default function (pi: ExtensionAPI) {
             content: [{ type: "text", text: "Subagent aborted." }],
             details: {
               task: params.task,
-              toolNames,
+              agent: params.agent,
+              toolNames: rawToolNames,
               modelOverride: params.model,
               finalOutput: getFinalOutput(agentContext.messages),
               toolCallCount,
@@ -337,7 +416,8 @@ export default function (pi: ExtensionAPI) {
           content: [{ type: "text", text: `Subagent error: ${msg}` }],
           details: {
             task: params.task,
-            toolNames,
+            agent: params.agent,
+            toolNames: rawToolNames,
             modelOverride: params.model,
             finalOutput: "",
             toolCallCount,
@@ -350,8 +430,10 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // ── 7. Extract result ───────────────────────────────────────────────
-      const output = getFinalOutput(finalMessages.length > 0 ? finalMessages : agentContext.messages);
+      // ── 9. Extract result ───────────────────────────────────────────────
+      const output = getFinalOutput(
+        finalMessages.length > 0 ? finalMessages : agentContext.messages,
+      );
 
       const isError =
         lastStopReason === "error" ||
@@ -367,7 +449,8 @@ export default function (pi: ExtensionAPI) {
         content: [{ type: "text", text: resultText }],
         details: {
           task: params.task,
-          toolNames,
+          agent: params.agent,
+          toolNames: rawToolNames,
           modelOverride: params.model,
           finalOutput: resultText,
           toolCallCount,
@@ -385,11 +468,16 @@ export default function (pi: ExtensionAPI) {
     renderCall(args, theme) {
       const task = args.task ?? "";
       const preview = task.length > 70 ? `${task.slice(0, 70)}...` : task;
-      const tools = (args.tools as string[] | undefined) ?? ["read", "bash"];
+      const agentStr = args.agent
+        ? theme.fg("accent", args.agent as string) + " "
+        : "";
+      const tools = args.tools as string[] | undefined;
+      const toolsStr = tools ? `[${tools.join(", ")}]` : "";
       const modelStr = args.model ? ` (${args.model})` : "";
       const text =
         theme.fg("toolTitle", theme.bold("subagent ")) +
-        theme.fg("dim", `[${tools.join(", ")}]${modelStr}`) +
+        agentStr +
+        theme.fg("dim", `${toolsStr}${modelStr}`) +
         "\n  " +
         theme.fg("toolOutput", preview);
       return new Text(text, 0, 0);
@@ -422,6 +510,9 @@ export default function (pi: ExtensionAPI) {
 
         // Header
         let header = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
+        if (details.agent) {
+          header += ` ${theme.fg("accent", details.agent)}`;
+        }
         if (details.isError && details.stopReason) {
           header += ` ${theme.fg("error", `[${details.stopReason}]`)}`;
         }
@@ -469,6 +560,9 @@ export default function (pi: ExtensionAPI) {
         details.task.length > 60 ? `${details.task.slice(0, 60)}...` : details.task;
 
       let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
+      if (details.agent) {
+        text += ` ${theme.fg("accent", details.agent)}`;
+      }
       if (details.isError) {
         const msg = details.errorMessage || details.stopReason || "error";
         text += ` ${theme.fg("error", `[${msg}]`)}`;
