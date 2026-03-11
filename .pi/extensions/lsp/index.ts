@@ -5,6 +5,7 @@
  * The daemon is spawned on first use (managed by client.ts).
  */
 
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -20,21 +21,72 @@ export default function (pi: ExtensionAPI) {
   const hintState = createHintState();
   let pendingHint: string | null = null;
 
+  // ─── lsp tool ───────────────────────────────────────────────────────────
+
+  const lspDescription =
+    "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
+    "find-references, document/workspace symbols. Communicates with a shared daemon that " +
+    "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
+    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.";
+
+  const lspParameters = Type.Object({
+    action: StringEnum(
+      ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
+      { description: "Action to perform" },
+    ),
+    path: Type.Optional(Type.String({
+      description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
+    })),
+    line: Type.Optional(Type.Number({
+      description: "Line number (1-indexed). Required for hover, definition, references.",
+    })),
+    character: Type.Optional(Type.Number({
+      description: "Column number (1-indexed). Required for hover, definition, references.",
+    })),
+    query: Type.Optional(Type.String({
+      description: "Search query for workspace symbols (action=symbols without path).",
+    })),
+  });
+
   pi.on("session_start", () => {
     resetHintState(hintState);
     pendingHint = null;
-  });
 
-  // ─── lsp tool ───────────────────────────────────────────────────────────
+    // Register lsp as an AgentTool so subagents can use it
+    const lspAgentTool: AgentTool<any, any> = {
+      name: "lsp",
+      label: "LSP",
+      description: lspDescription,
+      parameters: lspParameters,
+      execute: async (_toolCallId, params) => {
+        try {
+          const result = await client.call({
+            action: params.action as LspAction,
+            path: params.path,
+            line: params.line,
+            character: params.character,
+            query: params.query,
+          });
+          return {
+            content: [{ type: "text", text: formatResult(result) }],
+            details: result,
+          };
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "LSP error";
+          return {
+            content: [{ type: "text", text: msg }],
+            details: { error: msg },
+          };
+        }
+      },
+    };
+    pi.events.emit("agent-tools:register", lspAgentTool);
+  });
 
   pi.registerTool({
     name: "lsp",
     label: "LSP",
-    description:
-      "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
-      "find-references, document/workspace symbols. Communicates with a shared daemon that " +
-      "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
-      "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.",
+    description: lspDescription,
 
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
@@ -53,24 +105,7 @@ export default function (pi: ExtensionAPI) {
       "lsp uses 1-indexed lines and characters, matching read tool output.",
     ],
 
-    parameters: Type.Object({
-      action: StringEnum(
-        ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
-        { description: "Action to perform" },
-      ),
-      path: Type.Optional(Type.String({
-        description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
-      })),
-      line: Type.Optional(Type.Number({
-        description: "Line number (1-indexed). Required for hover, definition, references.",
-      })),
-      character: Type.Optional(Type.Number({
-        description: "Column number (1-indexed). Required for hover, definition, references.",
-      })),
-      query: Type.Optional(Type.String({
-        description: "Search query for workspace symbols (action=symbols without path).",
-      })),
-    }),
+    parameters: lspParameters,
 
     async execute(_toolCallId, params, _signal) {
       try {
