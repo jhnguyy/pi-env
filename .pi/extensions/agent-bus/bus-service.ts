@@ -6,7 +6,16 @@
  * bus operations share one client instance, one cursor file, and one
  * session ID regardless of which extension initiates the session.
  *
- * Pattern mirrors tmux/pane-service.ts (PR #33).
+ * @stable — This is a cross-extension API. The exported function signatures
+ * (initBusService, getBusService) and the BusService shape must not change
+ * without updating orch/manager.ts.
+ *
+ * Known consumers (direct import via ../agent-bus/bus-service):
+ *   - agent-bus/index.ts  — calls initBusService() at extension load
+ *   - orch/manager.ts     — calls getBusService() to share the same client
+ *
+ * Why not _shared/? bus-service depends on BusClient + FsTransport which
+ * are agent-bus internals. Keeping it here avoids a circular topology.
  */
 
 import { BusClient } from "./bus-client";
