@@ -14,6 +14,7 @@ import { Text } from "@mariozechner/pi-tui";
 
 import { initBusService } from "./bus-service";
 import { BusError } from "./types";
+import { txt, ok, err } from "../_shared/result";
 
 export default function (pi: ExtensionAPI) {
   // ─── Components (DI wiring) ─────────────────────────────────
@@ -272,15 +273,4 @@ export default function (pi: ExtensionAPI) {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
-
-function txt(text: string): { type: "text"; text: string } {
-  return { type: "text", text };
-}
-
-function ok(text: string) {
-  return { content: [txt(text)], details: {} };
-}
-
-function err(msg: string) {
-  return { content: [txt(msg)], details: { error: msg } };
-}
+// txt / ok / err imported from ../_shared/result
