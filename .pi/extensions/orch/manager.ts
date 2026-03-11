@@ -12,9 +12,9 @@
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
+import { gitSync, isGitRepo } from "../_shared/git";
 import { createWorktree, prepareWorktree, removeWorktree, pruneWorktrees } from "./git";
 import { writeManifest, writeReceipt } from "./manifest";
 import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
@@ -136,11 +136,7 @@ export class OrchestratorManager {
 
     // Validate repo is a git repository before committing to the run
     if (repo) {
-      const check = spawnSync("git", ["-C", repo, "rev-parse", "--git-dir"], {
-        encoding: "utf8",
-        timeout: 5_000,
-      });
-      if (check.status !== 0) {
+      if (!isGitRepo(repo)) {
         throw new OrchError(`Not a git repository: ${repo}`, "INVALID_REPO");
       }
     }
@@ -266,11 +262,7 @@ export class OrchestratorManager {
       const hooksDir = `${worktreePath}/.git-hooks`;
       mkdirSync(hooksDir, { recursive: true });
 
-      spawnSync(
-        "git",
-        ["-C", worktreePath, "config", "--local", "core.hooksPath", hooksDir],
-        { encoding: "utf8", timeout: 5_000 },
-      );
+      gitSync(worktreePath, ["config", "--local", "core.hooksPath", hooksDir]);
 
       const hookScript = [
         "#!/usr/bin/env bash",

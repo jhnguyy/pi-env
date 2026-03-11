@@ -7,8 +7,8 @@
  *   before_agent_start   — context injection (git status + todo list)
  */
 
-import { spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getMergedBranches } from "../_shared/git";
 
 import type { BranchGuard } from "./branch-guard";
 import { buildStatusLine, getGitStatus, refreshTodoWidget } from "./context";
@@ -16,7 +16,6 @@ import {
   cleanupHandoffs,
   detectMergedBranch,
   isGitPull,
-  parseMergedBranches,
 } from "./handoff-cleanup";
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
@@ -78,14 +77,7 @@ export function registerHooks(
       const { branch: current } = getGitStatus(repoPath);
       if (!current || !config.protectedBranches.includes(current)) continue;
 
-      const result = spawnSync(
-        "git",
-        ["-C", repoPath, "branch", "--merged", "HEAD"],
-        { encoding: "utf8", timeout: 3000 },
-      );
-      if (result.status !== 0 || !result.stdout) continue;
-
-      for (const branch of parseMergedBranches(result.stdout)) {
+      for (const branch of getMergedBranches(repoPath)) {
         if (!config.protectedBranches.includes(branch)) {
           allMerged.add(branch);
         }

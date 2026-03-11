@@ -1,13 +1,13 @@
 /**
  * Git worktree operations for orch.
  *
- * All git I/O lives here. Uses spawnSync — worktree operations are
+ * All git I/O lives here. Uses gitSync from _shared — worktree operations are
  * short-lived and don't benefit from async. Errors on create (throw),
  * best-effort on remove (log + continue) to never block cleanup.
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, symlinkSync } from "node:fs";
+import { gitSync } from "../_shared/git";
 import { OrchError } from "./types";
 
 // ─── createWorktree ──────────────────────────────────────────
@@ -22,11 +22,7 @@ export function createWorktree(
   worktreePath: string,
   branch: string,
 ): void {
-  const result = spawnSync(
-    "git",
-    ["-C", repo, "worktree", "add", worktreePath, "-b", branch],
-    { encoding: "utf8", timeout: 15_000 },
-  );
+  const result = gitSync(repo, ["worktree", "add", worktreePath, "-b", branch], 15_000);
 
   if (result.status !== 0) {
     throw new OrchError(
@@ -44,11 +40,7 @@ export function createWorktree(
  * (branches are preserved regardless — only the directory is removed).
  */
 export function removeWorktree(repo: string, worktreePath: string): void {
-  const result = spawnSync(
-    "git",
-    ["-C", repo, "worktree", "remove", worktreePath, "--force"],
-    { encoding: "utf8", timeout: 10_000 },
-  );
+  const result = gitSync(repo, ["worktree", "remove", worktreePath, "--force"], 10_000);
 
   if (result.status !== 0) {
     console.error(
@@ -64,10 +56,7 @@ export function removeWorktree(repo: string, worktreePath: string): void {
  * Called after all removes — best-effort, never throws.
  */
 export function pruneWorktrees(repo: string): void {
-  spawnSync("git", ["-C", repo, "worktree", "prune"], {
-    encoding: "utf8",
-    timeout: 5_000,
-  });
+  gitSync(repo, ["worktree", "prune"], 5_000);
 }
 
 // ─── prepareWorktree ─────────────────────────────────────────

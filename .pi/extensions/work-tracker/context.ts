@@ -6,9 +6,9 @@
  * helper that updates the TUI session-todos widget.
  */
 
-import { spawnSync } from "node:child_process";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 
+import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount } from "../_shared/git";
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
@@ -29,31 +29,15 @@ export function loadConfig(): WorkTrackerConfig {
 // ─── Git status ───────────────────────────────────────────────────────────────
 
 export function getGitStatus(repoPath: string): { branch: string | null; dirty: number } {
-  let branch: string | null = null;
-  let dirty = 0;
-  try {
-    const b = spawnSync("git", ["-C", repoPath, "branch", "--show-current"], {
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    if (b.status === 0 && b.stdout) branch = b.stdout.trim() || null;
-
-    const s = spawnSync("git", ["-C", repoPath, "status", "--porcelain"], {
-      encoding: "utf8",
-      timeout: 3000,
-    });
-    if (s.status === 0 && s.stdout) {
-      dirty = s.stdout.trim().split("\n").filter(Boolean).length;
-    }
-  } catch {
-    // Ignore — repo may not exist
-  }
-  return { branch, dirty };
+  return {
+    branch: gitGetCurrentBranch(repoPath),
+    dirty: getDirtyCount(repoPath),
+  };
 }
 
 /** Get the branch of the current working directory. */
 export function getCurrentBranch(): string | null {
-  return getGitStatus(process.cwd()).branch;
+  return gitGetCurrentBranch(process.cwd());
 }
 
 // ─── Status line ──────────────────────────────────────────────────────────────
