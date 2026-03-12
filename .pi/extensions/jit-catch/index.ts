@@ -34,8 +34,7 @@ export default function (pi: ExtensionAPI) {
       "Never commits test files.",
       "",
       "## Taxonomy",
-      "Hardening tests: committed, validate requirements that must never regress.",
-      "Catching tests: ephemeral, verify this specific diff once, then discarded.",
+      "Hardening tests: committed, never-regress. Catching tests: ephemeral, verify this diff once, then discarded.",
       "",
       "## When to use",
       "Use jit_catch for changes to extension files with NO existing hardening test coverage.",
@@ -55,9 +54,8 @@ export default function (pi: ExtensionAPI) {
       "If any .catching.test.ts appears, `git restore` it before committing.",
       "",
       "## On failure",
-      "Fix code, then re-run jit_catch (auto-discards on pass) or edit the kept test file",
-      "at ~/.pi/agent/extensions/<ext-name>/__tests__/<ext-name>.catching.test.ts, then",
-      "`bun test` and `rm` it. Use the jit-catch skill for promoting criteria.",
+      "Fix code, re-run jit_catch (auto-discards on pass) or edit kept test at",
+      "~/.pi/agent/extensions/<ext-name>/__tests__/<ext-name>.catching.test.ts, then `bun test` and `rm` it.",
     ].join("\n"),
 
     parameters: Type.Object({

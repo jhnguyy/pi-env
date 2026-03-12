@@ -10,9 +10,7 @@ import type { AgentConfig } from "./agents";
 // ─── Static description (shown before session_start enrichment) ───────────────
 
 export const STATIC_DESCRIPTION = [
-  "Delegate a focused task to an in-process subagent running via agentLoop().",
-  "The subagent runs inside the parent tool call — abort propagates automatically,",
-  "progress streams live to the TUI. No subprocess overhead.",
+  "Delegate a focused task to an in-process subagent (abort propagates, progress streams live, no subprocess overhead).",
   "",
   "Two modes:",
   '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
@@ -31,9 +29,7 @@ export function buildDynamicDescription(
   agents: AgentConfig[],
 ): string {
   const lines = [
-    "Delegate a focused task to an in-process subagent running via agentLoop().",
-    "The subagent runs inside the parent tool call — abort propagates automatically,",
-    "progress streams live to the TUI. No subprocess overhead.",
+    "Delegate a focused task to an in-process subagent (abort propagates, progress streams live, no subprocess overhead).",
     "",
     "Two modes:",
     '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',

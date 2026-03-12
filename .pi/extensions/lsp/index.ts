@@ -24,10 +24,8 @@ export default function (pi: ExtensionAPI) {
   // ─── lsp tool ───────────────────────────────────────────────────────────
 
   const lspDescription =
-    "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
-    "find-references, document/workspace symbols. Communicates with a shared daemon that " +
-    "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
-    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.";
+    "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, document/workspace symbols. " +
+    "Supports .ts/.tsx/.js (typescript-language-server), .sh/.bash/.zsh/.ksh (bash-language-server), .nix (nil).";
 
   const lspParameters = Type.Object({
     action: StringEnum(
@@ -93,14 +91,9 @@ export default function (pi: ExtensionAPI) {
       "Use instead of grep chains for type-aware or shell-aware code navigation.",
 
     promptGuidelines: [
-      "When working in a TypeScript codebase, reach for lsp before grep or read for any symbol-level task.",
-      "To find where a symbol is defined: lsp definition — not grep + read.",
-      "To find all call sites of a function, type, or variable: lsp references — not grep -r.",
-      "To understand a type, signature, or overload at a usage site: lsp hover — not reading the declaration file.",
-      "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
-      "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
-      "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
-      "After editing a .nix file, lsp diagnostics surfaces nil errors automatically (requires nil on PATH).",
+      "In TypeScript codebases, use lsp for any symbol-level task: definition (not grep+read), references (not grep -r), symbols (not top-to-bottom reading).",
+      "Use lsp hover to understand types, signatures, and overloads — not reading declaration files.",
+      "After editing .ts/.tsx/.js, .sh/.bash/.zsh/.ksh, or .nix files, lsp diagnostics runs automatically — check before proceeding.",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
       "lsp uses 1-indexed lines and characters, matching read tool output.",
     ],

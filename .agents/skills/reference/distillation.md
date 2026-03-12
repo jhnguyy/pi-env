@@ -5,68 +5,49 @@ description: Compress verbose design docs, worklogs, and notes into dense, curre
 
 # Distillation
 
-**Documents only — not sessions.** For session context management, use the handoff skill.
-
----
+**Documents only — not sessions.** For session context, use the handoff skill.
 
 ## What to Keep vs Drop
 
 | Keep | Drop |
 |------|------|
-| Spec decisions and the reasoning that makes them non-obvious | Planning rationale for decisions already made |
+| Spec decisions and non-obvious reasoning | Planning rationale for settled decisions |
 | Current-state facts | Historical state (what was true during build) |
-| Lessons that generalize beyond the project | Session-specific bug narratives once fixed |
-| Open items not yet resolved | Completed open items, done TODOs |
-| Failure modes and their fixes | Narrative of how the fix was found |
-| Conventions and constraints that still apply | Agent topology / execution plans for done work |
-
----
+| Lessons that generalize | Session-specific bug narratives once fixed |
+| Open items not yet resolved | Completed items, done TODOs |
+| Failure modes and their fixes | Narrative of how fixes were found |
+| Active conventions and constraints | Agent topology / execution plans for done work |
 
 ## Process
 
 1. **Read the source** — retrieve and read the actual doc; never distill from memory
-2. **Identify the audience** — agent-facing (skill/doc) vs human-facing (note/worklog)
-3. **Audit each section** — label it: planning, historical, current-state, or lessons
-4. **Distill** — keep durable content, drop transient content, correct stale claims
-5. **Verify facts** — cross-check claims against current file/code state before writing
-6. **Write once** — produce the final artifact; don't preserve a "before" alongside the "after"
-
----
+2. **Identify audience** — agent-facing (skill/doc) vs human-facing (note/worklog)
+3. **Audit each section** — label: planning, historical, current-state, or lessons
+4. **Distill** — keep durable content, drop transient, correct stale claims against current code/file state
+5. **Write once** — produce the final artifact; don't preserve a "before" alongside "after"
 
 ## Primary Artifact: Index, Not Summary
 
-The best distillation output is an **index** — a dense navigational map — not a prose summary. Test: can someone locate a specific fact without reading the original? If they'd need the original anyway, the summary lost too much.
-
-Extract key facts and patterns, not narrative. Detailed examples and full specs belong in reference files the index points to.
-
----
+The best output is an **index** — a dense navigational map. Test: can someone locate a specific fact without reading the original? Extract key facts and patterns; detailed specs belong in reference files the index points to.
 
 ## Output Formats
 
 **Reference doc** (replaces a planning doc):
-- Lead with current-state facts, not project history
+- Lead with current-state facts, not history
 - Tables, code blocks, bullets — minimal prose
-- No "Phase N" structure unless phases are ongoing
-- Add "Implementation Notes" for post-build learnings
+- No "Phase N" unless phases are ongoing
 
 **Lessons doc** (extracted from a worklog):
 - Named learnings, not session numbers
 - Each lesson: what + why + where it applies
-- Drop timestamps, sequential narrative, debugging play-by-play
 
-**Skill update** (promotes an open item to first-class):
-- Add the pattern as primary content, not an appendix
-- Remove "TODO", "Open Item", "Proposed" qualifiers
-- Update examples to reflect current patterns
-
----
+**Skill update** (promotes an open item):
+- Add pattern as primary content, not appendix
+- Remove "TODO"/"Proposed" qualifiers; update examples
 
 ## Common Patterns
 
-**Planning doc → Reference doc:** Strip phase numbers, rationale for settled decisions, agent topology for already-built work. Keep the spec (types, interfaces, layouts, conventions), implementation notes, known gotchas.
-
-**Worklog → Lessons:** Strip session numbers, sequential narrative, transient bugs. Keep architectural decisions and why they stuck, failure modes and fixes, patterns that changed the design.
-
-**Stale claim correction:** Read the actual source (file, extension, binary), compare to the claim, update inline. Do not propagate the stale version anywhere.
-
-**Open item → First-class content:** Move it to the most relevant section as a primary rule/example. Delete the "Open Items" entry.
+- **Planning doc → Reference:** Strip phase numbers, settled rationale, done agent topology. Keep spec, implementation notes, gotchas.
+- **Worklog → Lessons:** Strip sequential narrative, transient bugs. Keep architectural decisions, failure modes, design-changing patterns.
+- **Stale claims:** Read actual source, compare, update inline.
+- **Open item → First-class:** Move to most relevant section as primary rule. Delete the open item entry.

@@ -2,21 +2,21 @@
 
 ## Principles
 
-- **Prefer retrieval-led reasoning over pre-training-led reasoning.** When unsure, read the source — don't reason from what you already know. This applies to code, config, and personal notes equally.
-- **Understand the system before optimizing the parts.** Before planning implementation, state: what is this change's intended impact? What other components does it touch? What assumptions does it rest on? Context gathering serves this — it's not just finding the right files, but understanding how they relate. When execution reveals new system dynamics, pause and re-orient before continuing down an outdated plan.
+- **Retrieval over pre-training.** When unsure, read the source — don't reason from what you already know. Code, config, and notes equally.
+- **System before parts.** Before implementing, state: intended impact, components touched, assumptions. When execution reveals new dynamics, re-orient before continuing.
 - Prefer reversible operations. Commit before multi-file changes.
-- Before changes that alter system behavior across multiple components, write a numbered step list. Mechanical refactors (renames, import updates) don't need one.
+- Cross-component behavioral changes: write a numbered step list. Mechanical refactors don't need one.
 
 ## Clarify Before Exploring
 
-For ambiguous or open-ended requests, state your interpretation and planned approach before executing.
+Ambiguous or open-ended requests: state interpretation and plan first.
 
 ## Safety
 
 - High-risk ops (bulk deletes, force pushes, DB mutations, prod config): state intent, scope, and undo path — then wait for confirmation.
-- Never commit secrets. If a secret appears unexpectedly in output or context, stop and flag it — do not use it.
+- Never commit secrets. If a secret appears, stop and flag it.
 - Scope edits to the working tree unless told otherwise.
 
 ## Subagent Model Selection
 
-Match model to task. `subagent()` inherits the parent model by default — override it. Read-heavy gathering, file summarization, and mechanical edits should use a cheap model (`anthropic/claude-haiku-4-5`). Reserve the parent model for tasks requiring judgment, adversarial thinking, or subtle tradeoff analysis.
+Match model to task. `subagent()` inherits the parent model — override it. Read-heavy gathering and mechanical edits: `anthropic/claude-haiku-4-5`. Reserve the parent model for judgment, adversarial thinking, or subtle tradeoffs.
