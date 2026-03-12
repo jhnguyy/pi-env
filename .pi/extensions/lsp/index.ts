@@ -13,8 +13,30 @@ import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderLspCall, renderLspResult } from "./renderers";
 import type { DiagnosticsResult, LspAction } from "./protocol";
-import { isLspSupported } from "./filetypes";
+import { isLspSupported, isHcl } from "./filetypes";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 import { createHintState, resetHintState, detectLspHint } from "./hints";
+
+// ─── hclfmt check ───────────────────────────────────────────────────────────
+// Runs `hclfmt -check <path>` after editing .hcl files. Exit 0 = already
+// formatted (silent). Non-zero = formatting diff or syntax error (reported).
+// ENOENT (hclfmt not installed) is silently ignored.
+async function runHclfmtCheck(filePath: string): Promise<string | null> {
+  try {
+    await execFileAsync("hclfmt", ["-check", filePath]);
+    return null; // formatted correctly
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+    if (e.code === "ENOENT") return null; // hclfmt not installed — skip
+    const output = (e.stderr ?? e.stdout ?? "").trim();
+    return output
+      ? `⚠ hclfmt:\n${output}`
+      : "⚠ hclfmt: file needs formatting — run hclfmt to fix";
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
@@ -27,7 +49,8 @@ export default function (pi: ExtensionAPI) {
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
     "find-references, document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
-    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.";
+    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
+    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH).";
 
   const lspParameters = Type.Object({
     action: StringEnum(
@@ -101,6 +124,7 @@ export default function (pi: ExtensionAPI) {
       "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
       "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
       "After editing a .nix file, lsp diagnostics surfaces nil errors automatically (requires nil on PATH).",
+      "After editing a .hcl file, hclfmt -check runs automatically if hclfmt is on PATH — formatting issues are reported.",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
       "lsp uses 1-indexed lines and characters, matching read tool output.",
     ],
@@ -144,13 +168,14 @@ export default function (pi: ExtensionAPI) {
     const { toolName, input } = event;
     const inp = input as Record<string, unknown> | null | undefined;
 
-    // ─── Auto-diagnostics (edit/write only) ─────────────────────────────
+    // ─── Post-edit checks (edit/write only) ─────────────────────────────
     if ((toolName === "edit" || toolName === "write") && !event.isError) {
       const path: string | undefined =
         typeof inp?.path === "string" ? inp.path :
         typeof inp?.file_path === "string" ? inp.file_path :
         undefined;
 
+      // ─── LSP diagnostics (.ts, .sh, .nix, …) ───────────────────────
       if (path && isLspSupported(path)) {
         try {
           const result = await client.call({ action: "diagnostics", path });
@@ -166,6 +191,22 @@ export default function (pi: ExtensionAPI) {
           }
         } catch {
           // Non-fatal — diagnostics are best-effort
+        }
+      }
+
+      // ─── hclfmt check (.hcl) ────────────────────────────────────────
+      if (path && isHcl(path)) {
+        try {
+          const msg = await runHclfmtCheck(path);
+          if (msg) {
+            const first = event.content?.[0];
+            const existing = first?.type === "text" ? first.text : "";
+            return {
+              content: [{ type: "text", text: existing ? `${existing}\n\n${msg}` : msg }],
+            };
+          }
+        } catch {
+          // Non-fatal
         }
       }
     }
