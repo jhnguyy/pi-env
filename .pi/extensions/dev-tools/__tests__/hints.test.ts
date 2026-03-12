@@ -12,7 +12,7 @@ import {
 import {
   createHintState,
   resetHintState,
-  detectLspHint,
+  detectDevToolsHint,
   MAX_HINTS,
   COOLDOWN,
   type HintState,
@@ -141,63 +141,63 @@ describe("hints detection", () => {
   });
 
   it("read on .ts file without offset → hint", () => {
-    const hint = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint).toContain("[dev-tools]");
     expect(hint).toContain("dev-tools symbols");
     expect(hint).toContain("/src/foo.ts");
   });
 
   it("read on .ts file with offset → no hint", () => {
-    const hint = detectLspHint("read", { path: "/src/foo.ts", offset: 10 }, state);
+    const hint = detectDevToolsHint("read", { path: "/src/foo.ts", offset: 10 }, state);
     expect(hint).toBeNull();
   });
 
   it("read on .ts file with limit → no hint", () => {
-    const hint = detectLspHint("read", { path: "/src/foo.ts", limit: 50 }, state);
+    const hint = detectDevToolsHint("read", { path: "/src/foo.ts", limit: 50 }, state);
     expect(hint).toBeNull();
   });
 
   it("read on .js file without offset → hint (now covered)", () => {
-    const hint = detectLspHint("read", { path: "/src/foo.js" }, state);
+    const hint = detectDevToolsHint("read", { path: "/src/foo.js" }, state);
     expect(hint).toContain("[dev-tools]");
     expect(hint).toContain("dev-tools symbols");
   });
 
   it("read on .md file → no hint", () => {
-    const hint = detectLspHint("read", { path: "/docs/README.md" }, state);
+    const hint = detectDevToolsHint("read", { path: "/docs/README.md" }, state);
     expect(hint).toBeNull();
   });
 
   it("bash with grep -rn → hint", () => {
-    const hint = detectLspHint("bash", { command: 'grep -rn "Symbol" src/' }, state);
+    const hint = detectDevToolsHint("bash", { command: 'grep -rn "Symbol" src/' }, state);
     expect(hint).toContain("[dev-tools]");
     expect(hint).toContain("dev-tools references");
   });
 
   it("bash with rg and -t ts → hint", () => {
-    const hint = detectLspHint("bash", { command: 'rg "Type" -t ts' }, state);
+    const hint = detectDevToolsHint("bash", { command: 'rg "Type" -t ts' }, state);
     expect(hint).toContain("[dev-tools]");
     expect(hint).toContain("dev-tools references");
   });
 
   it("bash with cat foo.ts → hint (symbols)", () => {
-    const hint = detectLspHint("bash", { command: "cat foo.ts" }, state);
+    const hint = detectDevToolsHint("bash", { command: "cat foo.ts" }, state);
     expect(hint).toContain("[dev-tools]");
     expect(hint).toContain("dev-tools symbols");
   });
 
   it("bash with cat foo.md → no hint", () => {
-    const hint = detectLspHint("bash", { command: "cat README.md" }, state);
+    const hint = detectDevToolsHint("bash", { command: "cat README.md" }, state);
     expect(hint).toBeNull();
   });
 
   it("bash with non-grep command → no hint", () => {
-    const hint = detectLspHint("bash", { command: "npm install" }, state);
+    const hint = detectDevToolsHint("bash", { command: "npm install" }, state);
     expect(hint).toBeNull();
   });
 
   it("edit tool → no hint", () => {
-    const hint = detectLspHint("edit", { path: "/src/foo.ts" }, state);
+    const hint = detectDevToolsHint("edit", { path: "/src/foo.ts" }, state);
     expect(hint).toBeNull();
   });
 });
@@ -219,9 +219,9 @@ describe("hints stateful behavior", () => {
     for (const file of files) {
       // Advance currentIndex past cooldown between hints
       for (let i = 0; i < COOLDOWN; i++) {
-        detectLspHint("bash", { command: "npm install" }, state);
+        detectDevToolsHint("bash", { command: "npm install" }, state);
       }
-      results.push(detectLspHint("read", { path: file }, state));
+      results.push(detectDevToolsHint("read", { path: file }, state));
     }
 
     // First MAX_HINTS should be non-null
@@ -233,44 +233,44 @@ describe("hints stateful behavior", () => {
   });
 
   it("dedup: same file hinted twice → hint only once", () => {
-    const hint1 = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint1 = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint1).not.toBeNull();
 
     // Advance past cooldown
     for (let i = 0; i < COOLDOWN; i++) {
-      detectLspHint("bash", { command: "npm install" }, state);
+      detectDevToolsHint("bash", { command: "npm install" }, state);
     }
 
-    const hint2 = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint2 = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint2).toBeNull();
   });
 
   it("cooldown: consecutive hints within COOLDOWN → no hint", () => {
     // First hint should fire
-    const hint1 = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint1 = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint1).not.toBeNull();
 
     // Next call immediately (within cooldown) → no hint even for different file
-    const hint2 = detectLspHint("read", { path: "/src/bar.ts" }, state);
+    const hint2 = detectDevToolsHint("read", { path: "/src/bar.ts" }, state);
     expect(hint2).toBeNull();
 
     // Still within cooldown
-    const hint3 = detectLspHint("read", { path: "/src/baz.ts" }, state);
+    const hint3 = detectDevToolsHint("read", { path: "/src/baz.ts" }, state);
     expect(hint3).toBeNull();
   });
 
   it("cooldown: hint fires again after COOLDOWN calls", () => {
     // First hint
-    const hint1 = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint1 = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint1).not.toBeNull();
 
     // Exhaust cooldown with neutral calls
     for (let i = 0; i < COOLDOWN - 1; i++) {
-      detectLspHint("bash", { command: "npm install" }, state);
+      detectDevToolsHint("bash", { command: "npm install" }, state);
     }
 
     // Should still be in cooldown (lastHintIndex=1, currentIndex=1+COOLDOWN-1, diff=COOLDOWN-1 < COOLDOWN)
-    const hint2 = detectLspHint("read", { path: "/src/bar.ts" }, state);
+    const hint2 = detectDevToolsHint("read", { path: "/src/bar.ts" }, state);
     // After exactly COOLDOWN neutral calls, diff = COOLDOWN >= COOLDOWN → hint fires
     // But we only did COOLDOWN-1 neutral calls above + this read = COOLDOWN calls total → diff = COOLDOWN
     expect(hint2).not.toBeNull();
@@ -278,8 +278,8 @@ describe("hints stateful behavior", () => {
 
   it("resetHintState clears all state", () => {
     // Trigger some hints
-    detectLspHint("read", { path: "/src/foo.ts" }, state);
-    detectLspHint("read", { path: "/src/bar.ts" }, state);
+    detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
+    detectDevToolsHint("read", { path: "/src/bar.ts" }, state);
     expect(state.hintCount).toBeGreaterThan(0);
 
     resetHintState(state);
@@ -289,7 +289,7 @@ describe("hints stateful behavior", () => {
     expect(state.currentIndex).toBe(0);
 
     // Should be able to hint same file again after reset
-    const hint = detectLspHint("read", { path: "/src/foo.ts" }, state);
+    const hint = detectDevToolsHint("read", { path: "/src/foo.ts" }, state);
     expect(hint).not.toBeNull();
   });
 

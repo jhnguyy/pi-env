@@ -11,14 +11,14 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
-import { renderLspCall, renderLspResult } from "./renderers";
+import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DiagnosticsResult, LspAction } from "./protocol";
 import { isLspSupported, isHcl } from "./filetypes";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
-import { createHintState, resetHintState, detectLspHint } from "./hints";
+import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
 
 // ─── hclfmt check ───────────────────────────────────────────────────────────
 // Runs `hclfmt -check <path>` after editing .hcl files. Exit 0 = already
@@ -45,14 +45,14 @@ export default function (pi: ExtensionAPI) {
 
   // ─── dev-tools tool ─────────────────────────────────────────────────────
 
-  const lspDescription =
+  const description =
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
     "find-references, document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH).";
 
-  const lspParameters = Type.Object({
+  const toolParameters = Type.Object({
     action: StringEnum(
       ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
       { description: "Action to perform" },
@@ -76,11 +76,11 @@ export default function (pi: ExtensionAPI) {
     pendingHint = null;
 
     // Register dev-tools as an AgentTool so subagents can use it
-    const lspAgentTool: AgentTool<any, any> = {
+    const agentTool: AgentTool<any, any> = {
       name: "dev-tools",
       label: "Dev Tools",
-      description: lspDescription,
-      parameters: lspParameters,
+      description: description,
+      parameters: toolParameters,
       execute: async (_toolCallId, params) => {
         try {
           const result = await client.call({
@@ -103,13 +103,13 @@ export default function (pi: ExtensionAPI) {
         }
       },
     };
-    pi.events.emit("agent-tools:register", lspAgentTool);
+    pi.events.emit("agent-tools:register", agentTool);
   });
 
   pi.registerTool({
     name: "dev-tools",
     label: "Dev Tools",
-    description: lspDescription,
+    description: description,
 
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
@@ -129,7 +129,7 @@ export default function (pi: ExtensionAPI) {
       "dev-tools uses 1-indexed lines and characters, matching read tool output.",
     ],
 
-    parameters: lspParameters,
+    parameters: toolParameters,
 
     async execute(_toolCallId, params, _signal) {
       try {
@@ -154,11 +154,11 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderCall(args, theme) {
-      return renderLspCall(args, theme);
+      return renderDevToolsCall(args, theme);
     },
 
     renderResult(result, opts, theme) {
-      return renderLspResult(result, opts, theme);
+      return renderDevToolsResult(result, opts, theme);
     },
   });
 
@@ -214,7 +214,7 @@ export default function (pi: ExtensionAPI) {
     // ─── LSP hint detection (all tools) ─────────────────────────────────
     // Queue hint for delivery at the next decision boundary (before_agent_start)
     // instead of appending to tool output where it gets buried.
-    const hint = detectLspHint(toolName, inp, hintState);
+    const hint = detectDevToolsHint(toolName, inp, hintState);
     if (hint) {
       pendingHint = hint;
     }

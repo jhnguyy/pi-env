@@ -38,7 +38,7 @@ export const COOLDOWN = 3;
  * Detect if the given tool call warrants a dev-tools hint.
  * Returns a hint string or null. Mutates state when a hint is emitted.
  */
-export function detectLspHint(
+export function detectDevToolsHint(
   toolName: string,
   input: Record<string, unknown> | null | undefined,
   state: HintState,
