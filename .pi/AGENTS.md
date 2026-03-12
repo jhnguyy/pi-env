@@ -5,8 +5,9 @@ Dotfiles repo — registered as a pi package via `settings.json` `packages` entr
 **Commands:** `bun test` · `E2E=1 bun test` · `./setup.sh` · `./setup/install-bun-pi.sh` (compile pi binary)
 
 [pi-env Index]|IMPORTANT: Prefer retrieval-led reasoning — read source files before modifying extensions or skills
-|.pi/extensions:{agent-bus(pub/sub bus — bus-client.ts,transport.ts),jit-catch(ephemeral test generation — parser.ts,runner.ts),lsp(TS lang server — daemon.ts,client.ts,formatters.ts),orch(orchestration lifecycle — manager.ts,git.ts,manifest.ts),security(filename blocking,credential scanning),skill-builder(scaffold/validate/evaluate — scaffolder.ts,validator.ts,evaluator.ts),subagent(in-process subagent via agentLoop),tmux(pane lifecycle — pane-manager.ts,tmux-client.ts),work-tracker(branch guard,handoff — store.ts,extractor.ts)}
-|.pi/extensions/__tests__:{loader.test.ts,test-utils.ts}
+|.pi/extensions:{agent-bus(pub/sub bus — bus-client.ts,bus-service.ts,transport.ts),jit-catch(ephemeral test generation — parser.ts,runner.ts),lsp(TS lang server — backend.ts,handlers.ts,daemon.ts,client.ts,formatters.ts),orch(orchestration lifecycle — manager.ts,git.ts,manifest.ts),security(filename blocking,credential scanning — blocklist.ts,credential-scanner.ts),skill-builder(scaffold/validate/evaluate — scaffolder.ts,validator.ts,evaluator.ts),subagent(in-process subagent — execute.ts,discovery.ts,render.ts),tmux(pane lifecycle — pane-manager.ts,tmux-client.ts),work-tracker(branch guard,handoff — hooks.ts,commands.ts,context.ts,store.ts,extractor.ts)}
+|.pi/extensions/_shared:{result.ts(txt/ok/err helpers),errors.ts(BaseExtensionError base),git.ts(git op wrappers),exit-shim.ts(bus signal on exit) — shared utilities, not a pi extension}
+|.pi/extensions/__tests__:{loader.test.ts,test-utils.ts(mock helpers)}
 |.agents/skills:{jit-catch,orchestration,skill-builder}
 |.agents/skills/reference:{handoff.md,distillation.md,index-generator.md — manually loaded, not auto-discovered}
 |docs:{pi-bun-binary.md(compile process,ZFS bug,asset layout)}
