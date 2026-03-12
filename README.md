@@ -47,7 +47,7 @@ Extensions are TypeScript modules that register **tools** (new capabilities the 
 |---|---|
 | `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. The messaging backbone for multi-agent coordination. |
 | `jit-catch` | `jit_catch` tool — spawns a subagent to write ephemeral catching tests for a diff, runs them with `bun test`, auto-discards on pass. |
-| `dev-tools` | `lsp` tool — TypeScript, Bash, and Nix language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. Runs `hclfmt -check` automatically after editing `.hcl` files. |
+| `dev-tools` | `dev-tools` tool — TypeScript, Bash, and Nix language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. Runs `hclfmt -check` automatically after editing `.hcl` files. |
 | `orch` | `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. Coordinates `tmux` panes and `bus` channels. |
 | `security` | Hook-based permission engine — intercepts tool calls via blocklist rules, scans results for credential leakage and redacts. `/permissions` command. |
 | `skill-builder` | `skill_build` tool — scaffold, validate, and evaluate pi skills in one call. |

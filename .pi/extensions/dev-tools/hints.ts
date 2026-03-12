@@ -1,6 +1,6 @@
 /**
- * LSP preference hints — nudge the agent toward lsp when it uses read/grep
- * on lsp-supported files.
+ * dev-tools preference hints — nudge the agent toward dev-tools when it uses read/grep
+ * on supported files.
  *
  * Pure functions — no side effects, no imports from pi SDK.
  */
@@ -35,7 +35,7 @@ export const COOLDOWN = 3;
 // ─── Detection ────────────────────────────────────────────────────────────────
 
 /**
- * Detect if the given tool call warrants an LSP hint.
+ * Detect if the given tool call warrants a dev-tools hint.
  * Returns a hint string or null. Mutates state when a hint is emitted.
  */
 export function detectLspHint(
@@ -60,7 +60,7 @@ export function detectLspHint(
       if (input?.offset != null || input?.limit != null) return null;
       if (state.hintedFiles.has(path)) return null;
       state.hintedFiles.add(path);
-      hint = `[lsp] To map this file's structure, try: lsp symbols { path: "${path}" }`;
+      hint = `[dev-tools] To map this file's structure, try: dev-tools symbols { path: "${path}" }`;
     }
   } else if (toolName === "bash") {
     const command = typeof input?.command === "string" ? input.command : undefined;
@@ -68,10 +68,10 @@ export function detectLspHint(
       // Pattern 3: cat on lsp-supported file (check before grep to avoid over-triggering)
       const catMatch = command.match(/\bcat\s+(\S+)/);
       if (catMatch && isLspSupported(catMatch[1]!)) {
-        hint = `[lsp] To map this file's structure, try: lsp symbols { path: "${catMatch[1]}" }`;
+        hint = `[dev-tools] To map this file's structure, try: dev-tools symbols { path: "${catMatch[1]}" }`;
       } else if (/\bgrep\b|\brg\b/.test(command)) {
         // Pattern 2: grep/rg (symbol lookups in code)
-        hint = `[lsp] For symbol lookups in code, try: lsp references (call sites) or lsp symbols { query: "..." } (workspace search)`;
+        hint = `[dev-tools] For symbol lookups in code, try: dev-tools references (call sites) or dev-tools symbols { query: "..." } (workspace search)`;
       }
     }
   }

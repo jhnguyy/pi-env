@@ -142,8 +142,8 @@ describe("hints detection", () => {
 
   it("read on .ts file without offset → hint", () => {
     const hint = detectLspHint("read", { path: "/src/foo.ts" }, state);
-    expect(hint).toContain("[lsp]");
-    expect(hint).toContain("lsp symbols");
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("dev-tools symbols");
     expect(hint).toContain("/src/foo.ts");
   });
 
@@ -159,8 +159,8 @@ describe("hints detection", () => {
 
   it("read on .js file without offset → hint (now covered)", () => {
     const hint = detectLspHint("read", { path: "/src/foo.js" }, state);
-    expect(hint).toContain("[lsp]");
-    expect(hint).toContain("lsp symbols");
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("dev-tools symbols");
   });
 
   it("read on .md file → no hint", () => {
@@ -170,20 +170,20 @@ describe("hints detection", () => {
 
   it("bash with grep -rn → hint", () => {
     const hint = detectLspHint("bash", { command: 'grep -rn "Symbol" src/' }, state);
-    expect(hint).toContain("[lsp]");
-    expect(hint).toContain("lsp references");
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("dev-tools references");
   });
 
   it("bash with rg and -t ts → hint", () => {
     const hint = detectLspHint("bash", { command: 'rg "Type" -t ts' }, state);
-    expect(hint).toContain("[lsp]");
-    expect(hint).toContain("lsp references");
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("dev-tools references");
   });
 
   it("bash with cat foo.ts → hint (symbols)", () => {
     const hint = detectLspHint("bash", { command: "cat foo.ts" }, state);
-    expect(hint).toContain("[lsp]");
-    expect(hint).toContain("lsp symbols");
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("dev-tools symbols");
   });
 
   it("bash with cat foo.md → no hint", () => {

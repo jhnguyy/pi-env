@@ -15,7 +15,7 @@ import type {
   ReferencesResult, SymbolsResult, StatusResult,
 } from "../protocol";
 
-describeIfEnabled("lsp", "Formatters", () => {
+describeIfEnabled("dev-tools", "Formatters", () => {
   // ─── formatDiagnostics ─────────────────────────────────────────────────────
 
   describe("formatDiagnostics", () => {
@@ -93,7 +93,7 @@ describeIfEnabled("lsp", "Formatters", () => {
       }));
       const r: DiagnosticsResult = { action: "diagnostics", path: "/a.ts", errorCount: 8, warnCount: 0, items };
       const text = formatDiagnosticsSummary(r, 5);
-      expect(text).toContain("... 3 more — use lsp diagnostics for full list");
+      expect(text).toContain("... 3 more — use dev-tools diagnostics for full list");
       const lineCount = text.split("\n").length;
       expect(lineCount).toBe(7); // header + 5 items + truncation line
     });

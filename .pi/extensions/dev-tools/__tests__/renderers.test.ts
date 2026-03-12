@@ -14,13 +14,13 @@ function text(rendered: unknown): string {
   return (rendered as any).text as string;
 }
 
-describeIfEnabled("lsp", "Renderers", () => {
+describeIfEnabled("dev-tools", "Renderers", () => {
   // ─── renderLspCall ───────────────────────────────────────────────────────
 
   describe("renderLspCall", () => {
     it("includes tool title and action", () => {
       const t = text(renderLspCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
-      expect(t).toContain("lsp");
+      expect(t).toContain("dev-tools");
       expect(t).toContain("diagnostics");
     });
 

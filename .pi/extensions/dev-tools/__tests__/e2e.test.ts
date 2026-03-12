@@ -3,7 +3,7 @@
  *
  * Gated behind E2E=1 environment variable.
  *
- * Run with: E2E=1 bun test lsp/__tests__/e2e.test.ts
+ * Run with: E2E=1 bun test dev-tools/__tests__/e2e.test.ts
  * Or from extensions root: E2E=1 bun test
  *
  * These tests spawn a real LspDaemon with a real typescript-language-server

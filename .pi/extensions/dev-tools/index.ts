@@ -1,5 +1,5 @@
 /**
- * LSP Extension — registers the `lsp` tool and hooks auto-diagnostics.
+ * dev-tools extension — registers the `dev-tools` tool and hooks auto-diagnostics.
  *
  * Wires together: LspClient, formatters, renderers.
  * The daemon is spawned on first use (managed by client.ts).
@@ -43,7 +43,7 @@ export default function (pi: ExtensionAPI) {
   const hintState = createHintState();
   let pendingHint: string | null = null;
 
-  // ─── lsp tool ───────────────────────────────────────────────────────────
+  // ─── dev-tools tool ─────────────────────────────────────────────────────
 
   const lspDescription =
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
@@ -75,10 +75,10 @@ export default function (pi: ExtensionAPI) {
     resetHintState(hintState);
     pendingHint = null;
 
-    // Register lsp as an AgentTool so subagents can use it
+    // Register dev-tools as an AgentTool so subagents can use it
     const lspAgentTool: AgentTool<any, any> = {
-      name: "lsp",
-      label: "LSP",
+      name: "dev-tools",
+      label: "Dev Tools",
       description: lspDescription,
       parameters: lspParameters,
       execute: async (_toolCallId, params) => {
@@ -107,8 +107,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "lsp",
-    label: "LSP",
+    name: "dev-tools",
+    label: "Dev Tools",
     description: lspDescription,
 
     promptSnippet:
@@ -116,17 +116,17 @@ export default function (pi: ExtensionAPI) {
       "Use instead of grep chains for type-aware or shell-aware code navigation.",
 
     promptGuidelines: [
-      "When working in a TypeScript codebase, reach for lsp before grep or read for any symbol-level task.",
-      "To find where a symbol is defined: lsp definition — not grep + read.",
-      "To find all call sites of a function, type, or variable: lsp references — not grep -r.",
-      "To understand a type, signature, or overload at a usage site: lsp hover — not reading the declaration file.",
-      "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
-      "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
-      "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
-      "After editing a .nix file, lsp diagnostics surfaces nil errors automatically (requires nil on PATH).",
+      "When working in a TypeScript codebase, reach for dev-tools before grep or read for any symbol-level task.",
+      "To find where a symbol is defined: dev-tools definition — not grep + read.",
+      "To find all call sites of a function, type, or variable: dev-tools references — not grep -r.",
+      "To understand a type, signature, or overload at a usage site: dev-tools hover — not reading the declaration file.",
+      "To orient in an unfamiliar file: dev-tools symbols — not reading top-to-bottom.",
+      "After editing a .ts file, dev-tools diagnostics runs automatically — check it before proceeding.",
+      "After editing a .sh/.bash file, dev-tools diagnostics surfaces shellcheck warnings automatically.",
+      "After editing a .nix file, dev-tools diagnostics surfaces nil errors automatically (requires nil on PATH).",
       "After editing a .hcl file, hclfmt -check runs automatically if hclfmt is on PATH — formatting issues are reported.",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
-      "lsp uses 1-indexed lines and characters, matching read tool output.",
+      "dev-tools uses 1-indexed lines and characters, matching read tool output.",
     ],
 
     parameters: lspParameters,
@@ -227,7 +227,7 @@ export default function (pi: ExtensionAPI) {
     pendingHint = null;
     return {
       message: {
-        customType: "lsp-hint",
+        customType: "dev-tools-hint",
         content: hint,
         display: false,
       },

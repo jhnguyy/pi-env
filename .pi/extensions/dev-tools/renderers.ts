@@ -52,13 +52,13 @@ export function renderLspResult(
 // ─── renderCall ───────────────────────────────────────────────────────────────
 
 /**
- * Render an lsp tool call for human TUI display.
+ * Render a dev-tools tool call for human TUI display.
  */
 export function renderLspCall(
   args: { action: string; path?: string; line?: number; character?: number; query?: string },
   theme: RenderTheme,
 ): Text {
-  let text = theme.fg("toolTitle", theme.bold("lsp"));
+  let text = theme.fg("toolTitle", theme.bold("dev-tools"));
   text += " " + theme.fg("accent", args.action);
 
   if (args.path) {

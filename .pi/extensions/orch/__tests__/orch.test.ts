@@ -623,14 +623,14 @@ describe("buildPiCommand — command construction", () => {
   });
 
   it("throws on unknown tool names", () => {
-    expect(() => buildPiCommand({ tools: ["read", "lsp"], prompt: "do work" })).toThrow(
-      /Unknown built-in tool.*lsp/,
+    expect(() => buildPiCommand({ tools: ["read", "dev-tools"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*dev-tools/,
     );
   });
 
   it("throws listing all unknown tools", () => {
-    expect(() => buildPiCommand({ tools: ["lsp", "bus", "bash"], prompt: "do work" })).toThrow(
-      /Unknown built-in tool.*lsp, bus/,
+    expect(() => buildPiCommand({ tools: ["dev-tools", "bus", "bash"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*dev-tools, bus/,
     );
   });
 
