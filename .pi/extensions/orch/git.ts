@@ -68,7 +68,7 @@ export function pruneWorktrees(repo: string): void {
  * Git worktrees only contain tracked files — node_modules/ (gitignored)
  * are absent. Pi loads extensions from {cwd}/.pi/extensions/ and resolves
  * imports relative to each extension's own directory via jiti. Extensions
- * with local deps (e.g. lsp with bash-language-server) fail without this.
+ * with local deps (e.g. dev-tools with bash-language-server) fail without this.
  *
  * What we symlink:
  *   - {worktree}/node_modules (top-level project deps)
