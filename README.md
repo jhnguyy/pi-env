@@ -8,11 +8,18 @@ pi is an interactive CLI coding agent. It reads, edits, and executes code via a 
 
 ```
 pi-env/
-├── .agents/skills/           # Skills (loaded by pi's package manager)
-│   └── reference/            # Reference skills (manually loaded, not auto-discovered)
-├── .pi/extensions/           # Extensions (loaded by pi's package manager)
-├── AGENTS.md                 # Portable agent principles (symlinked to ~/.pi/agent/AGENTS.md)
+├── .agents/
+│   ├── roles/                # Behavioral contracts for multi-agent orchestration
+│   └── skills/               # Skills — markdown instructions loaded by pi on demand
+│       └── reference/        # Reference skills (manually loaded, not auto-discovered)
+├── .pi/
+│   ├── AGENTS.md             # Project-scoped agent context (dense index for orientation)
+│   └── extensions/           # Extensions — TypeScript tools and hooks loaded by pi
+│       └── _shared/          # Internal utilities shared across extensions
+├── docs/                     # Additional documentation
 ├── setup/                    # Per-machine config templates + install script
+├── AGENTS.md                 # Portable agent principles (symlinked to ~/.pi/agent/AGENTS.md)
+├── CONTRIBUTING.md           # Branch conventions and workflow
 └── setup.sh                  # Idempotent setup — run once, re-run after git pull
 ```
 
@@ -28,25 +35,33 @@ pi-env is registered as a [pi package](https://github.com/mariozechner/pi#pi-pac
 
 Local extensions in `~/.pi/agent/extensions/` coexist cleanly — pi auto-discovers them independently of packages.
 
-> **Agent context:** `AGENTS.md` (repo root) is the global principles file — never add project-specific content here. Project-scoped agent context lives in `.pi/AGENTS.md`.
+> **Two AGENTS.md files:** `AGENTS.md` (repo root) is the global principles file — portable across projects, symlinked to `~/.pi/agent/AGENTS.md`. `.pi/AGENTS.md` is a project-scoped dense index that helps agents orient to this specific codebase. Don't mix their concerns.
 
 ## What's included
 
-**Extensions** — custom tools registered into pi:
+### Extensions
+
+Extensions are TypeScript modules that register **tools** (new capabilities the agent can invoke) and **hooks** (intercepts on tool calls, session lifecycle, and context injection). Each extension lives in `.pi/extensions/<name>/` with an `index.ts` entry point.
 
 | Extension | What it adds |
 |---|---|
-| `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. Replaces sleep-poll loops with event-driven blocking. |
+| `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. The messaging backbone for multi-agent coordination. |
 | `jit-catch` | `jit_catch` tool — spawns a subagent to write ephemeral catching tests for a diff, runs them with `bun test`, auto-discards on pass. |
-| `lsp` | `lsp` tool — TypeScript language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. |
-| `orch` | Orchestration lifecycle manager — branch isolation, temp dir cleanup, run receipts. |
-| `security` | Permission engine — intercepts tool calls, evaluates rules, prompts for approval. Scans tool results for credential leakage and redacts. `/permissions` command. |
+| `lsp` | `lsp` tool — TypeScript, Bash, and Nix language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. |
+| `orch` | `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. Coordinates `tmux` panes and `bus` channels. |
+| `security` | Hook-based permission engine — intercepts tool calls via blocklist rules, scans results for credential leakage and redacts. `/permissions` command. |
 | `skill-builder` | `skill_build` tool — scaffold, validate, and evaluate pi skills in one call. |
-| `subagent` | In-process subagent via `agentLoop()` — delegate focused tasks without subprocess overhead. |
-| `tmux` | `tmux` tool — spawn panes, send keystrokes, read output, close. Designed for parallel subagent work and long-running services. |
-| `work-tracker` | Branch guard + handoff tracking — enforces branch conventions, manages session state. |
+| `subagent` | `subagent` tool — in-process subagent via `agentLoop()`. Delegates focused tasks without subprocess overhead. Auto-discovers available agents, models, and tools. |
+| `tmux` | `tmux` tool — spawn panes, send keystrokes, read output, close. The execution layer for parallel subagent work and long-running services. |
+| `work-tracker` | Hook-based branch guard + session tracking — enforces branch naming conventions, injects git context on session start, provides `/handoff` and `/review-retros` commands. |
 
-**Skills** — agent instructions loaded on demand:
+**How they compose:** `agent-bus`, `tmux`, and `orch` form the multi-agent stack. `tmux` spawns parallel panes, `agent-bus` provides event-driven messaging between them, and `orch` manages the lifecycle (worktree isolation, cleanup, receipts). `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
+
+`.pi/extensions/_shared/` contains internal utilities used across multiple extensions: `result.ts` (tool result helpers), `errors.ts` (`BaseExtensionError` base class), `git.ts` (git operation wrappers), `exit-shim.ts` (bus signal on process exit). Not a registered extension — imported directly by other extensions.
+
+### Skills
+
+Skills are markdown instruction files (`SKILL.md`) that pi loads on demand when a task matches their description. They contain patterns, decision rules, and workflows — not code. Skills in `.agents/skills/` are auto-discovered; those in `reference/` must be loaded manually.
 
 | Skill | When it's used |
 |---|---|
@@ -57,6 +72,15 @@ Local extensions in `~/.pi/agent/extensions/` coexist cleanly — pi auto-discov
 | `reference/distillation` | Compressing verbose docs and worklogs into dense references |
 | `reference/index-generator` | Producing compressed navigational indexes for files or notes |
 
+### Roles
+
+Roles are behavioral contracts for multi-agent orchestration. Each role (`.agents/roles/*.md`) defines what an agent *should and shouldn't do* when assigned that identity:
+
+- **scout** — read-only recon: reports structure, stack, paths, conventions. Never decides or modifies.
+- **worker** — bounded implementation: executes a brief, reports changes. Doesn't expand scope.
+- **orchestrator** — routing and synthesis: decomposes tasks, dispatches workers, merges results. Doesn't read raw files.
+- **reviewer** — adversarial review: assumes the implementation is wrong until proven otherwise.
+
 ## Usage
 
 The core loop is conversational: open `pi`, describe the task, and let the model plan and implement while you steer.
@@ -65,7 +89,7 @@ The core loop is conversational: open `pi`, describe the task, and let the model
 
 **Design then build** — for larger or less defined tasks, spend a session on design only: talk through the problem, explore tradeoffs, arrive at a plan. Run `/handoff` at the end to serialize context, then open a fresh session to implement. Keeps the implementation context clean and focused.
 
-**Parallel agents** — for tasks that decompose into independent pieces, use `tmux` + `bus` to fan out to subagents and synthesize results. The orchestration skill documents the pattern in detail.
+**Parallel agents** — for tasks that decompose into independent pieces, use `orch` to fan out workers across isolated worktrees. Each worker gets its own branch; `bus wait` blocks until results arrive; the orchestrator synthesizes. The orchestration skill documents the pattern in detail.
 
 ## New machine setup
 
