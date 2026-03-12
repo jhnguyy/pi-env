@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serializeResponse, okResponse, errorResponse, type DaemonResponse, type StatusResult } from "../protocol";
 
-describeIfEnabled("lsp", "LspClient", () => {
+describeIfEnabled("dev-tools", "LspClient", () => {
   let tmpDir: string;
   let socketPath: string;
   let server: Server | null;

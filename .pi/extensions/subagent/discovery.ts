@@ -19,7 +19,7 @@ export const STATIC_DESCRIPTION = [
   '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
   "",
   "Available built-in tools: read, bash, edit, write, grep, find, ls.",
-  "Extension tools (lsp, notes, etc.) are available when registered.",
+  "Extension tools (dev-tools, notes, etc.) are available when registered.",
   "Model: 'provider/model-id' format. Required — no default.",
 ].join("\n");
 
@@ -40,7 +40,7 @@ export function buildDynamicDescription(
     '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
     "",
     "Available built-in tools: read, bash, edit, write, grep, find, ls.",
-    "Extension tools (lsp, notes, etc.) are available when registered.",
+    "Extension tools (dev-tools, notes, etc.) are available when registered.",
   ];
 
   // Intersect enabled list with models that have working auth

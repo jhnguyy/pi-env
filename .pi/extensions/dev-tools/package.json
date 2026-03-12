@@ -1,5 +1,5 @@
 {
-  "name": "pi-extension-lsp",
+  "name": "pi-extension-dev-tools",
   "private": true,
   "scripts": {
     "test": "bun test",

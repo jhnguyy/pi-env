@@ -72,7 +72,7 @@ export function formatDiagnosticsSummary(r: DiagnosticsResult, maxItems = 5): st
 
   const remaining = r.items.length - shown.length;
   if (remaining > 0) {
-    lines.push(`... ${remaining} more — use lsp diagnostics for full list`);
+    lines.push(`... ${remaining} more — use dev-tools diagnostics for full list`);
   }
 
   return lines.join("\n");

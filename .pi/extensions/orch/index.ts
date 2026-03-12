@@ -132,7 +132,7 @@ export default function (pi: ExtensionAPI) {
       ),
       tools: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Built-in tool whitelist for the worker (e.g. ['read','bash']). Only built-in tools: read, bash, edit, write, grep, find, ls. Extension tools (lsp, bus, etc.) auto-load — do not list them here. Pi spawner mode only.",
+          description: "Built-in tool whitelist for the worker (e.g. ['read','bash']). Only built-in tools: read, bash, edit, write, grep, find, ls. Extension tools (dev-tools, bus, etc.) auto-load — do not list them here. Pi spawner mode only.",
         }),
       ),
       brief: Type.Optional(

@@ -7,6 +7,8 @@
 export const TS_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
 export const BASH_EXTENSIONS = new Set([".sh", ".bash", ".zsh", ".ksh"]);
 export const NIX_EXTENSIONS = new Set([".nix"]);
+// HCL is not a language server — hclfmt is invoked directly as a post-edit formatter check.
+export const HCL_EXTENSIONS = new Set([".hcl"]);
 export const ALL_LSP_EXTENSIONS = new Set([...TS_EXTENSIONS, ...BASH_EXTENSIONS, ...NIX_EXTENSIONS]);
 
 export function isLspSupported(path: string): boolean {
@@ -23,6 +25,10 @@ export function isBashScript(path: string): boolean {
 
 export function isNix(path: string): boolean {
   return path.endsWith(".nix");
+}
+
+export function isHcl(path: string): boolean {
+  return [...HCL_EXTENSIONS].some(ext => path.endsWith(ext));
 }
 
 export function getLanguageId(path: string): string {

@@ -131,7 +131,7 @@ export class LspBackend {
     if (!bin) {
       this.unavailable = `${this.name} language server (${this.binaryName}) is not installed — ` +
         `.${this.extensions.values().next().value?.slice(1) ?? this.name} language intelligence unavailable`;
-      console.warn(`[lsp-daemon] WARNING: ${this.unavailable}`);
+      console.warn(`[dev-tools-daemon] WARNING: ${this.unavailable}`);
       throw new Error(this.unavailable);
     }
 

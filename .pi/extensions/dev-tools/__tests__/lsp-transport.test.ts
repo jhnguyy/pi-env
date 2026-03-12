@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "../lsp-transport";
 
-describeIfEnabled("lsp", "LspTransport", () => {
+describeIfEnabled("dev-tools", "LspTransport", () => {
   // ─── serializeMessage ─────────────────────────────────────────────────────
 
   describe("serializeMessage", () => {

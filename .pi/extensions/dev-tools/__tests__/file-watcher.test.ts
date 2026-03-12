@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-describeIfEnabled("lsp", "FileWatcher", () => {
+describeIfEnabled("dev-tools", "FileWatcher", () => {
   // ─── Unit: debounce and filter logic (via real tmpdir) ─────────────────────
 
   describe("watch/unwatch lifecycle", () => {

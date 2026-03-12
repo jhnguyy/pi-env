@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { renderLspResult, renderLspCall, type RenderTheme } from "../renderers";
+import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
 import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, SymbolsResult, StatusResult } from "../protocol";
 
 // ─── Mock theme ──────────────────────────────────────────────────────────────
@@ -14,31 +14,31 @@ function text(rendered: unknown): string {
   return (rendered as any).text as string;
 }
 
-describeIfEnabled("lsp", "Renderers", () => {
-  // ─── renderLspCall ───────────────────────────────────────────────────────
+describeIfEnabled("dev-tools", "Renderers", () => {
+  // ─── renderDevToolsCall ───────────────────────────────────────────────────────
 
-  describe("renderLspCall", () => {
+  describe("renderDevToolsCall", () => {
     it("includes tool title and action", () => {
-      const t = text(renderLspCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
-      expect(t).toContain("lsp");
+      const t = text(renderDevToolsCall({ action: "diagnostics", path: "/project/src/foo.ts" }, mockTheme));
+      expect(t).toContain("dev-tools");
       expect(t).toContain("diagnostics");
     });
 
     it("shows last 2 path segments", () => {
-      const t = text(renderLspCall({ action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 }, mockTheme));
+      const t = text(renderDevToolsCall({ action: "hover", path: "/project/src/foo.ts", line: 5, character: 10 }, mockTheme));
       expect(t).toContain("src/foo.ts");
       expect(t).toContain(":5");
     });
 
     it("shows query for workspace symbols", () => {
-      const t = text(renderLspCall({ action: "symbols", query: "User" }, mockTheme));
+      const t = text(renderDevToolsCall({ action: "symbols", query: "User" }, mockTheme));
       expect(t).toContain('"User"');
     });
   });
 
-  // ─── renderLspResult — diagnostics ──────────────────────────────────────
+  // ─── renderDevToolsResult — diagnostics ──────────────────────────────────────
 
-  describe("renderLspResult diagnostics", () => {
+  describe("renderDevToolsResult diagnostics", () => {
     const noDiags: DiagnosticsResult = {
       action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
     };
@@ -53,19 +53,19 @@ describeIfEnabled("lsp", "Renderers", () => {
     };
 
     it("shows success for no errors", () => {
-      const t = text(renderLspResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
       expect(t).toContain("no errors");
       expect(t).toContain("success");
     });
 
     it("shows error count with error color", () => {
-      const t = text(renderLspResult({ isError: false, content: [], details: withErrors }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: withErrors }, {}, mockTheme));
       expect(t).toContain("error");
       expect(t).toContain("2 errors");
     });
 
     it("expanded=true shows individual diagnostics", () => {
-      const t = text(renderLspResult(
+      const t = text(renderDevToolsResult(
         { isError: false, content: [], details: withErrors },
         { expanded: true },
         mockTheme,
@@ -76,7 +76,7 @@ describeIfEnabled("lsp", "Renderers", () => {
     });
 
     it("expanded=false does not show individual diagnostics", () => {
-      const t = text(renderLspResult(
+      const t = text(renderDevToolsResult(
         { isError: false, content: [], details: withErrors },
         { expanded: false },
         mockTheme,
@@ -89,16 +89,16 @@ describeIfEnabled("lsp", "Renderers", () => {
         { line: 1, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
         { line: 2, character: 1, severity: "warning", code: "TS7006", message: "Implicit any." },
       ]};
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("warning");
     });
   });
 
-  // ─── renderLspResult — error state ───────────────────────────────────────
+  // ─── renderDevToolsResult — error state ───────────────────────────────────────
 
-  describe("renderLspResult error state", () => {
+  describe("renderDevToolsResult error state", () => {
     it("shows error text on tool error", () => {
-      const t = text(renderLspResult({
+      const t = text(renderDevToolsResult({
         isError: true,
         content: [{ type: "text", text: "No hover information" }],
       }, {}, mockTheme));
@@ -107,12 +107,12 @@ describeIfEnabled("lsp", "Renderers", () => {
     });
   });
 
-  // ─── renderLspResult — other actions ────────────────────────────────────
+  // ─── renderDevToolsResult — other actions ────────────────────────────────────
 
-  describe("renderLspResult other actions", () => {
+  describe("renderDevToolsResult other actions", () => {
     it("renders hover success", () => {
       const r: HoverResult = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("hover");
     });
 
@@ -123,7 +123,7 @@ describeIfEnabled("lsp", "Renderers", () => {
           { relativePath: "src/t.ts", absolutePath: "/p/src/t.ts", line: 1, body: "type T = string;" },
         ],
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("1 location");
     });
 
@@ -132,7 +132,7 @@ describeIfEnabled("lsp", "Renderers", () => {
         action: "references", path: "/a.ts", line: 1, character: 1,
         total: 5, items: [], truncated: false,
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("5 reference(s)");
     });
 
@@ -141,7 +141,7 @@ describeIfEnabled("lsp", "Renderers", () => {
         action: "symbols", path: "/project/src/foo.ts",
         total: 7, items: [], truncated: false,
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("7 symbols");
       expect(t).toContain("foo.ts");
     });
@@ -151,7 +151,7 @@ describeIfEnabled("lsp", "Renderers", () => {
         action: "symbols", query: "User",
         total: 3, items: [], truncated: false,
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("3 symbols");
       expect(t).toContain('"User"');
     });
@@ -161,7 +161,7 @@ describeIfEnabled("lsp", "Renderers", () => {
         action: "status", running: true, pid: 1234,
         projects: [], openFiles: [], watchedFiles: 0, idleMs: 100,
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("running");
       expect(t).toContain("1234");
     });
@@ -170,7 +170,7 @@ describeIfEnabled("lsp", "Renderers", () => {
       const r: StatusResult = {
         action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
-      const t = text(renderLspResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("stopped");
     });
   });

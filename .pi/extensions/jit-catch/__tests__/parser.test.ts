@@ -47,8 +47,8 @@ describe("parseDiff", () => {
 
   it("deduplicates files within the same extension", () => {
     const d = diff(
-      ".pi/agent/extensions/lsp/index.ts",
-      ".pi/agent/extensions/lsp/index.ts",
+      ".pi/agent/extensions/dev-tools/index.ts",
+      ".pi/agent/extensions/dev-tools/index.ts",
     );
     expect(result(d).extensions[0].changedFiles).toHaveLength(1);
   });
@@ -84,7 +84,7 @@ describe("parseDiff", () => {
   });
 
   it("returns hasNonExtensionFiles=false when all changes are in extensions", () => {
-    const r = parseDiff(diff(".pi/agent/extensions/lsp/index.ts"));
+    const r = parseDiff(diff(".pi/agent/extensions/dev-tools/index.ts"));
     expect(r.hasNonExtensionFiles).toBe(false);
   });
 
@@ -93,11 +93,11 @@ describe("parseDiff", () => {
   it("extracts multiple extensions from a single diff", () => {
     const d = diff(
       ".pi/agent/extensions/tmux/index.ts",
-      ".pi/agent/extensions/lsp/server.ts",
+      ".pi/agent/extensions/dev-tools/server.ts",
     );
     const r = parseDiff(d);
     const names = r.extensions.map((e) => e.name).sort();
-    expect(names).toEqual(["lsp", "tmux"]);
+    expect(names).toEqual(["dev-tools", "tmux"]);
   });
 
   it("groups multiple files within the same extension", () => {

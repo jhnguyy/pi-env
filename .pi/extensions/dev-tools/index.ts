@@ -1,5 +1,5 @@
 /**
- * LSP Extension — registers the `lsp` tool and hooks auto-diagnostics.
+ * dev-tools extension — registers the `dev-tools` tool and hooks auto-diagnostics.
  *
  * Wires together: LspClient, formatters, renderers.
  * The daemon is spawned on first use (managed by client.ts).
@@ -11,25 +11,48 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
-import { renderLspCall, renderLspResult } from "./renderers";
+import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DiagnosticsResult, LspAction } from "./protocol";
-import { isLspSupported } from "./filetypes";
-import { createHintState, resetHintState, detectLspHint } from "./hints";
+import { isLspSupported, isHcl } from "./filetypes";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
+import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
+
+// ─── hclfmt check ───────────────────────────────────────────────────────────
+// Runs `hclfmt -check <path>` after editing .hcl files. Exit 0 = already
+// formatted (silent). Non-zero = formatting diff or syntax error (reported).
+// ENOENT (hclfmt not installed) is silently ignored.
+async function runHclfmtCheck(filePath: string): Promise<string | null> {
+  try {
+    await execFileAsync("hclfmt", ["-check", filePath]);
+    return null; // formatted correctly
+  } catch (err: unknown) {
+    const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+    if (e.code === "ENOENT") return null; // hclfmt not installed — skip
+    const output = (e.stderr ?? e.stdout ?? "").trim();
+    return output
+      ? `⚠ hclfmt:\n${output}`
+      : "⚠ hclfmt: file needs formatting — run hclfmt to fix";
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
   const hintState = createHintState();
   let pendingHint: string | null = null;
 
-  // ─── lsp tool ───────────────────────────────────────────────────────────
+  // ─── dev-tools tool ─────────────────────────────────────────────────────
 
-  const lspDescription =
+  const description =
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
     "find-references, document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
-    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use.";
+    "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
+    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH).";
 
-  const lspParameters = Type.Object({
+  const toolParameters = Type.Object({
     action: StringEnum(
       ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
       { description: "Action to perform" },
@@ -52,12 +75,12 @@ export default function (pi: ExtensionAPI) {
     resetHintState(hintState);
     pendingHint = null;
 
-    // Register lsp as an AgentTool so subagents can use it
-    const lspAgentTool: AgentTool<any, any> = {
-      name: "lsp",
-      label: "LSP",
-      description: lspDescription,
-      parameters: lspParameters,
+    // Register dev-tools as an AgentTool so subagents can use it
+    const agentTool: AgentTool<any, any> = {
+      name: "dev-tools",
+      label: "Dev Tools",
+      description: description,
+      parameters: toolParameters,
       execute: async (_toolCallId, params) => {
         try {
           const result = await client.call({
@@ -80,32 +103,33 @@ export default function (pi: ExtensionAPI) {
         }
       },
     };
-    pi.events.emit("agent-tools:register", lspAgentTool);
+    pi.events.emit("agent-tools:register", agentTool);
   });
 
   pi.registerTool({
-    name: "lsp",
-    label: "LSP",
-    description: lspDescription,
+    name: "dev-tools",
+    label: "Dev Tools",
+    description: description,
 
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
       "Use instead of grep chains for type-aware or shell-aware code navigation.",
 
     promptGuidelines: [
-      "When working in a TypeScript codebase, reach for lsp before grep or read for any symbol-level task.",
-      "To find where a symbol is defined: lsp definition — not grep + read.",
-      "To find all call sites of a function, type, or variable: lsp references — not grep -r.",
-      "To understand a type, signature, or overload at a usage site: lsp hover — not reading the declaration file.",
-      "To orient in an unfamiliar file: lsp symbols — not reading top-to-bottom.",
-      "After editing a .ts file, lsp diagnostics runs automatically — check it before proceeding.",
-      "After editing a .sh/.bash file, lsp diagnostics surfaces shellcheck warnings automatically.",
-      "After editing a .nix file, lsp diagnostics surfaces nil errors automatically (requires nil on PATH).",
+      "When working in a TypeScript codebase, reach for dev-tools before grep or read for any symbol-level task.",
+      "To find where a symbol is defined: dev-tools definition — not grep + read.",
+      "To find all call sites of a function, type, or variable: dev-tools references — not grep -r.",
+      "To understand a type, signature, or overload at a usage site: dev-tools hover — not reading the declaration file.",
+      "To orient in an unfamiliar file: dev-tools symbols — not reading top-to-bottom.",
+      "After editing a .ts file, dev-tools diagnostics runs automatically — check it before proceeding.",
+      "After editing a .sh/.bash file, dev-tools diagnostics surfaces shellcheck warnings automatically.",
+      "After editing a .nix file, dev-tools diagnostics surfaces nil errors automatically (requires nil on PATH).",
+      "After editing a .hcl file, hclfmt -check runs automatically if hclfmt is on PATH — formatting issues are reported.",
       "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
-      "lsp uses 1-indexed lines and characters, matching read tool output.",
+      "dev-tools uses 1-indexed lines and characters, matching read tool output.",
     ],
 
-    parameters: lspParameters,
+    parameters: toolParameters,
 
     async execute(_toolCallId, params, _signal) {
       try {
@@ -130,11 +154,11 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderCall(args, theme) {
-      return renderLspCall(args, theme);
+      return renderDevToolsCall(args, theme);
     },
 
     renderResult(result, opts, theme) {
-      return renderLspResult(result, opts, theme);
+      return renderDevToolsResult(result, opts, theme);
     },
   });
 
@@ -144,13 +168,14 @@ export default function (pi: ExtensionAPI) {
     const { toolName, input } = event;
     const inp = input as Record<string, unknown> | null | undefined;
 
-    // ─── Auto-diagnostics (edit/write only) ─────────────────────────────
+    // ─── Post-edit checks (edit/write only) ─────────────────────────────
     if ((toolName === "edit" || toolName === "write") && !event.isError) {
       const path: string | undefined =
         typeof inp?.path === "string" ? inp.path :
         typeof inp?.file_path === "string" ? inp.file_path :
         undefined;
 
+      // ─── LSP diagnostics (.ts, .sh, .nix, …) ───────────────────────
       if (path && isLspSupported(path)) {
         try {
           const result = await client.call({ action: "diagnostics", path });
@@ -168,12 +193,28 @@ export default function (pi: ExtensionAPI) {
           // Non-fatal — diagnostics are best-effort
         }
       }
+
+      // ─── hclfmt check (.hcl) ────────────────────────────────────────
+      if (path && isHcl(path)) {
+        try {
+          const msg = await runHclfmtCheck(path);
+          if (msg) {
+            const first = event.content?.[0];
+            const existing = first?.type === "text" ? first.text : "";
+            return {
+              content: [{ type: "text", text: existing ? `${existing}\n\n${msg}` : msg }],
+            };
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
     }
 
     // ─── LSP hint detection (all tools) ─────────────────────────────────
     // Queue hint for delivery at the next decision boundary (before_agent_start)
     // instead of appending to tool output where it gets buried.
-    const hint = detectLspHint(toolName, inp, hintState);
+    const hint = detectDevToolsHint(toolName, inp, hintState);
     if (hint) {
       pendingHint = hint;
     }
@@ -186,7 +227,7 @@ export default function (pi: ExtensionAPI) {
     pendingHint = null;
     return {
       message: {
-        customType: "lsp-hint",
+        customType: "dev-tools-hint",
         content: hint,
         display: false,
       },

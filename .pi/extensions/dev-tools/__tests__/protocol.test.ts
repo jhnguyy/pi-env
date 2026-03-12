@@ -12,7 +12,7 @@ import {
   type DiagnosticsResult,
 } from "../protocol";
 
-describeIfEnabled("lsp", "Protocol", () => {
+describeIfEnabled("dev-tools", "Protocol", () => {
   // ─── serializeRequest ───────────────────────────────────────────────────
 
   describe("serializeRequest", () => {
