@@ -238,7 +238,7 @@ describe("blocklist", () => {
     });
 
     it("custom tools not in any entry are never blocked", () => {
-      expect(blocked("lsp", "command", "rm -rf /")).toBe(false);
+      expect(blocked("dev-tools", "command", "rm -rf /")).toBe(false);
       expect(blocked("tmux", "path", "/etc/hosts")).toBe(false);
     });
   });

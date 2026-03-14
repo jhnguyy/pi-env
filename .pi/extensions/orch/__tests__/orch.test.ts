@@ -623,14 +623,14 @@ describe("buildPiCommand — command construction", () => {
   });
 
   it("throws on unknown tool names", () => {
-    expect(() => buildPiCommand({ tools: ["read", "lsp"], prompt: "do work" })).toThrow(
-      /Unknown built-in tool.*lsp/,
+    expect(() => buildPiCommand({ tools: ["read", "dev-tools"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*dev-tools/,
     );
   });
 
   it("throws listing all unknown tools", () => {
-    expect(() => buildPiCommand({ tools: ["lsp", "bus", "bash"], prompt: "do work" })).toThrow(
-      /Unknown built-in tool.*lsp, bus/,
+    expect(() => buildPiCommand({ tools: ["dev-tools", "bus", "bash"], prompt: "do work" })).toThrow(
+      /Unknown built-in tool.*dev-tools, bus/,
     );
   });
 
@@ -875,18 +875,18 @@ describe("prepareWorktree", () => {
     const repoDir = mkdtempSync("/tmp/orch-test-repo-");
 
     try {
-      // Arrange: repo has .pi/extensions/lsp/node_modules/, worktree has the dir but no node_modules
-      const repoLspNM = `${repoDir}/.pi/extensions/lsp/node_modules`;
-      mkdirSync(repoLspNM, { recursive: true });
+      // Arrange: repo has .pi/extensions/dev-tools/node_modules/, worktree has the dir but no node_modules
+      const repoDevToolsNM = `${repoDir}/.pi/extensions/dev-tools/node_modules`;
+      mkdirSync(repoDevToolsNM, { recursive: true });
 
-      const wtLspDir = `${tmpDir}/.pi/extensions/lsp`;
-      mkdirSync(wtLspDir, { recursive: true });
+      const wtDevToolsDir = `${tmpDir}/.pi/extensions/dev-tools`;
+      mkdirSync(wtDevToolsDir, { recursive: true });
 
       prepareWorktree(repoDir, tmpDir);
 
-      const wtLspNM = `${tmpDir}/.pi/extensions/lsp/node_modules`;
-      expect(existsSync(wtLspNM)).toBe(true);
-      const stat = lstatSync(wtLspNM);
+      const wtDevToolsNM = `${tmpDir}/.pi/extensions/dev-tools/node_modules`;
+      expect(existsSync(wtDevToolsNM)).toBe(true);
+      const stat = lstatSync(wtDevToolsNM);
       expect(stat.isSymbolicLink()).toBe(true);
     } finally {
       rmSync(repoDir, { recursive: true, force: true });

@@ -23,7 +23,7 @@ export interface RenderTheme {
  * @param opts    Render options ({ expanded: boolean }).
  * @param theme   Pi TUI theme.
  */
-export function renderLspResult(
+export function renderDevToolsResult(
   result: { isError?: boolean; content: Array<{ type: string; text?: string }>; details?: LspResult | null },
   opts: { expanded?: boolean },
   theme: RenderTheme,
@@ -52,13 +52,13 @@ export function renderLspResult(
 // ─── renderCall ───────────────────────────────────────────────────────────────
 
 /**
- * Render an lsp tool call for human TUI display.
+ * Render a dev-tools tool call for human TUI display.
  */
-export function renderLspCall(
+export function renderDevToolsCall(
   args: { action: string; path?: string; line?: number; character?: number; query?: string },
   theme: RenderTheme,
 ): Text {
-  let text = theme.fg("toolTitle", theme.bold("lsp"));
+  let text = theme.fg("toolTitle", theme.bold("dev-tools"));
   text += " " + theme.fg("accent", args.action);
 
   if (args.path) {

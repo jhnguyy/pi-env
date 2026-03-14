@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serializeRequest, parseResponse, type DaemonRequest } from "../protocol";
 
-describeIfEnabled("lsp", "LspDaemon", () => {
+describeIfEnabled("dev-tools", "LspDaemon", () => {
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   let tmpDir: string;

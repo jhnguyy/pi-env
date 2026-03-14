@@ -61,7 +61,7 @@ export function buildPiCommand(opts: {
       throw new Error(
         `Unknown built-in tool(s): ${unknown.join(", ")}. ` +
           `Only built-in tools are accepted: ${[...BUILT_IN_TOOLS].join(", ")}. ` +
-          `Extension tools (lsp, bus, etc.) auto-load from ~/.pi/agent/extensions/ — no need to list them.`,
+          `Extension tools (dev-tools, bus, etc.) auto-load from ~/.pi/agent/extensions/ — no need to list them.`,
       );
     }
     parts.push("--tools", opts.tools.join(","));
