@@ -4,6 +4,8 @@
  *   tool_call hook       — branch guard (blocks git push to protected branches)
  *   tool_result hook     — handoff cleanup on merge / git pull
  *   session_start hook   — widget init, todo clear, tool deactivation
+ *   session_switch hook  — todo clear on /new or /resume
+ *   session_shutdown     — todo clear on exit
  *   before_agent_start   — context injection (git status + todo list)
  */
 
@@ -112,7 +114,23 @@ export function registerHooks(
     }
   });
 
-  // ─── 4. Context injection + widget refresh (root sessions only) ─────────────
+  // ─── 4. Session switch (/new, /resume) — clear todos ───────────────────────
+  pi.on("session_switch", async (_event, ctx) => {
+    const open = store.open().length;
+    store.clear();
+    if (process.env.PI_AGENT_ID) return;
+    refreshTodoWidget(store, ctx);
+    if (open > 0) {
+      ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
+    }
+  });
+
+  // ─── 5. Session shutdown (exit) — clear todos ───────────────────────────────
+  pi.on("session_shutdown", async () => {
+    store.clear();
+  });
+
+  // ─── 6. Context injection + widget refresh (root sessions only) ─────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     if (process.env.PI_AGENT_ID) return {};
 
@@ -130,7 +148,7 @@ export function registerHooks(
     };
   });
 
-  // ─── 5. Todo context injection (root sessions only) ─────────────────────────
+  // ─── 7. Todo context injection (root sessions only) ─────────────────────────
   pi.on("before_agent_start", async () => {
     if (process.env.PI_AGENT_ID) return {};
     return {
