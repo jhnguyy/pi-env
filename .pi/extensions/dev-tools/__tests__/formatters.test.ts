@@ -87,7 +87,25 @@ describeIfEnabled("dev-tools", "Formatters", () => {
       expect(text).toContain("⚠ TS (2 errors)");
     });
 
-    it("truncates to maxItems and shows '... N more' suffix", () => {
+    it("shows ⚠ Bash header for bash language", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/a.sh", errorCount: 1, warnCount: 0, language: "bash",
+        items: [{ line: 3, character: 1, severity: "error", code: "SC2034", message: "Unused variable." }],
+      };
+      expect(formatDiagnosticsSummary(r)).toContain("⚠ Bash (1 error)");
+    });
+
+    it("shows ⚠ Nix header for nil language", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/a.nix", errorCount: 1, warnCount: 0, language: "nil",
+        items: [{ line: 5, character: 1, severity: "error", code: "", message: "undefined variable 'pkgs'." }],
+      };
+      const text = formatDiagnosticsSummary(r);
+      expect(text).toContain("⚠ Nix (1 error)");
+      expect(text).not.toContain("⚠ TS");
+    });
+
+        it("truncates to maxItems and shows '... N more' suffix", () => {
       const items = Array.from({ length: 8 }, (_, i) => ({
         line: i + 1, character: 1, severity: "error" as const, code: `TS${i}`, message: `Error ${i}.`,
       }));

@@ -57,7 +57,7 @@ export function formatDiagnostics(r: DiagnosticsResult): string {
 export function formatDiagnosticsSummary(r: DiagnosticsResult, maxItems = 5): string {
   if (r.errorCount === 0 && r.warnCount === 0) return "";
 
-  const lang = r.language === "bash" ? "Bash" : "TS";
+  const lang = r.language === "bash" ? "Bash" : r.language === "nil" ? "Nix" : "TS";
   const label = r.errorCount > 0
     ? `⚠ ${lang} (${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}${r.warnCount ? `, ${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}` : ""})`
     : `⚠ ${lang} (${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""})`;
