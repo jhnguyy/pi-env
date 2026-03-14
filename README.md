@@ -1,6 +1,6 @@
 # pi-env
 
-My personal [pi](https://github.com/mariozechner/pi) environment — extensions, skills, and agent context structured as a dotfiles repo. Shared as a reference; setups are inherently personalized so treat this as inspiration rather than a starter kit.
+My personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, skills, and agent context structured as a dotfiles repo. Shared as a reference; setups are inherently personalized so treat this as inspiration rather than a starter kit.
 
 pi is an interactive CLI coding agent. It reads, edits, and executes code via a set of built-in tools, with an extension system for adding custom tools and behaviors.
 
@@ -23,7 +23,7 @@ pi-env/
 └── setup.sh                  # Idempotent setup — run once, re-run after git pull
 ```
 
-pi-env is registered as a [pi package](https://github.com/mariozechner/pi#pi-packages) via `settings.json`. Pi's package manager reads the `pi` manifest in `package.json` and loads extensions and skills directly from the repo — no per-item symlinks needed.
+pi-env is registered as a [pi package](https://github.com/badlogic/pi-mono#packages) via `settings.json`. Pi's package manager reads the `pi` manifest in `package.json` and loads extensions and skills directly from the repo — no per-item symlinks needed.
 
 `setup.sh` handles:
 - `bun install` (frozen lockfile)
