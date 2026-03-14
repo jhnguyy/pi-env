@@ -9,7 +9,8 @@
 #   3. Register pi-env as a pi package in settings.json
 #   4. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
 #   5. Symlink roles → ~/.agents/roles
-#   6. Install git post-merge hook
+#   6. Source tmux theme from ~/.tmux.conf
+#   7. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
@@ -114,6 +115,26 @@ link_path \
   "$REPO/.pi/extensions/__tests__/loader.test.ts" \
   "$PI_AGENT_DIR/extensions/__tests__/loader.test.ts" \
   "~/.pi/agent/extensions/__tests__/loader.test.ts"
+
+# ── Tmux theme ───────────────────────────────────────────────────────────────
+# Source the Gruvbox tmux theme from ~/.tmux.conf. The theme file lives in the
+# repo so it's version-controlled; ~/.tmux.conf just sources it.
+
+echo ""
+echo "Tmux theme"
+echo "----------"
+TMUX_THEME_SRC="$REPO/setup/tmux-gruvbox.conf"
+TMUX_CONF="$HOME/.tmux.conf"
+SOURCE_LINE="source-file $TMUX_THEME_SRC"
+if [ -f "$TMUX_CONF" ] && grep -qF "$SOURCE_LINE" "$TMUX_CONF"; then
+  ok "tmux-gruvbox.conf sourced from ~/.tmux.conf"
+elif [ -f "$TMUX_CONF" ]; then
+  printf '\n%s\n' "$SOURCE_LINE" >> "$TMUX_CONF"
+  linked "tmux-gruvbox.conf appended to ~/.tmux.conf"
+else
+  printf '%s\n' "$SOURCE_LINE" > "$TMUX_CONF"
+  linked "tmux-gruvbox.conf → new ~/.tmux.conf"
+fi
 
 # ── Git hooks ────────────────────────────────────────────────────────────────
 # Install post-merge hook so setup auto-runs after git pull
