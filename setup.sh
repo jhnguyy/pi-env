@@ -10,7 +10,8 @@
 #   4. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
 #   5. Symlink roles → ~/.agents/roles
 #   6. Source tmux theme from ~/.tmux.conf
-#   7. Install git post-merge hook
+#   7. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
+#   8. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
@@ -135,6 +136,17 @@ else
   printf '%s\n' "$SOURCE_LINE" > "$TMUX_CONF"
   linked "tmux-gruvbox.conf → new ~/.tmux.conf"
 fi
+
+# ── VS Code theme ────────────────────────────────────────────────────────────
+# Symlink the Gruvbox extension into ~/.vscode/extensions so VS Code picks it
+# up automatically. Select "pi-env Gruvbox Dark" in the Color Theme picker.
+
+echo ""
+echo "VS Code theme"
+echo "-------------"
+VSCODE_EXT_DIR="$HOME/.vscode/extensions"
+mkdir -p "$VSCODE_EXT_DIR"
+link_path "$REPO/vscode/pi-env-gruvbox" "$VSCODE_EXT_DIR/pi-env-gruvbox" "~/.vscode/extensions/pi-env-gruvbox"
 
 # ── Git hooks ────────────────────────────────────────────────────────────────
 # Install post-merge hook so setup auto-runs after git pull

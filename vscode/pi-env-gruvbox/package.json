@@ -1,0 +1,18 @@
+{
+  "name": "pi-env-gruvbox",
+  "displayName": "pi-env Gruvbox",
+  "description": "Gruvbox Dark theme — consistent with pi TUI and tmux palette",
+  "version": "1.0.0",
+  "publisher": "pi-env",
+  "engines": { "vscode": "^1.0.0" },
+  "categories": ["Themes"],
+  "contributes": {
+    "themes": [
+      {
+        "label": "pi-env Gruvbox Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/gruvbox-dark.json"
+      }
+    ]
+  }
+}
