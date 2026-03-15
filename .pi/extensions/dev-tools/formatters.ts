@@ -57,7 +57,12 @@ export function formatDiagnostics(r: DiagnosticsResult): string {
 export function formatDiagnosticsSummary(r: DiagnosticsResult, maxItems = 5): string {
   if (r.errorCount === 0 && r.warnCount === 0) return "";
 
-  const lang = r.language === "bash" ? "Bash" : "TS";
+  let lang: string;
+  switch (r.language) {
+    case "bash": lang = "Bash"; break;
+    case "nil":  lang = "Nix";  break;
+    default:     lang = "TS";   break;
+  }
   const label = r.errorCount > 0
     ? `⚠ ${lang} (${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}${r.warnCount ? `, ${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}` : ""})`
     : `⚠ ${lang} (${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""})`;

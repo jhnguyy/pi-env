@@ -113,7 +113,8 @@ export default function (pi: ExtensionAPI) {
 
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, find-references, symbols. " +
-      "Use instead of grep chains for type-aware or shell-aware code navigation.",
+      "Use instead of grep chains for type-aware or shell-aware code navigation. " +
+      "Also supports nil (for .nix files), bash-language-server (for .sh/.bash), and hclfmt (for .hcl).",
 
     promptGuidelines: [
       "When working in a TypeScript codebase, reach for dev-tools before grep or read for any symbol-level task.",
