@@ -62,14 +62,21 @@ mkdir -p "$BIN_DIR"
 # Compile to a temp file first — bun --compile has issues writing directly to
 # some filesystems (e.g. ZFS container roots). Copy to destination after.
 TMP_BIN=$(mktemp /tmp/pi-compile-XXXXXX)
-trap 'rm -f "$TMP_BIN"' EXIT
 
-# Use the shim as the entrypoint instead of cli.js directly.
 # pi-ai@0.59.0 switched provider loading to lazy dynamic imports via a function
 # wrapper (const dynamicImport = (s) => import(s)) which Bun's bundler cannot
-# statically trace. The shim imports all providers explicitly so they are
-# embedded in the binary. See setup/pi-compile-shim.mjs for full explanation.
-bun build "$REPO/setup/pi-compile-shim.mjs" \
+# statically trace. Provider files are excluded from the compiled binary,
+# causing "Cannot find module './anthropic.js'" at runtime.
+#
+# Fix: patch register-builtins.js to use static imports before compilation,
+# then restore the original after. See setup/patch-register-builtins.js.
+PI_AI_DIR="$REPO/node_modules/@mariozechner/pi-ai"
+cleanup() { node "$REPO/setup/patch-register-builtins.js" "$PI_AI_DIR" --restore; rm -f "$TMP_BIN"; }
+trap cleanup EXIT
+
+node "$REPO/setup/patch-register-builtins.js" "$PI_AI_DIR"
+
+bun build "$PI_PKG/dist/cli.js" \
   --compile \
   --outfile "$TMP_BIN"
 
