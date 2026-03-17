@@ -64,7 +64,12 @@ mkdir -p "$BIN_DIR"
 TMP_BIN=$(mktemp /tmp/pi-compile-XXXXXX)
 trap 'rm -f "$TMP_BIN"' EXIT
 
-bun build "$PI_PKG/dist/cli.js" \
+# Use the shim as the entrypoint instead of cli.js directly.
+# pi-ai@0.59.0 switched provider loading to lazy dynamic imports via a function
+# wrapper (const dynamicImport = (s) => import(s)) which Bun's bundler cannot
+# statically trace. The shim imports all providers explicitly so they are
+# embedded in the binary. See setup/pi-compile-shim.mjs for full explanation.
+bun build "$REPO/setup/pi-compile-shim.mjs" \
   --compile \
   --outfile "$TMP_BIN"
 
