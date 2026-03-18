@@ -7,11 +7,12 @@
 #   1. bun install (frozen lockfile)
 #   2. Compile pi binary + symlink assets (setup/install-bun-pi.sh)
 #   3. Register pi-env as a pi package in settings.json
-#   4. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
-#   5. Symlink roles → ~/.agents/roles
-#   6. Source tmux theme from ~/.tmux.conf
-#   7. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
-#   8. Install git post-merge hook
+#   4. Set gruvbox as the pi theme in settings.json
+#   5. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
+#   6. Symlink roles → ~/.agents/roles
+#   7. Source tmux theme from ~/.tmux.conf
+#   8. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
+#   9. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
@@ -80,6 +81,31 @@ if [ -f "$SETTINGS_FILE" ]; then
       fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
     " 2>/dev/null
     linked "pi-env added to settings.json packages"
+  fi
+else
+  skip "settings.json not found — copy setup/settings.template.json first"
+fi
+
+# ── Pi theme ─────────────────────────────────────────────────────────────────
+# Set the gruvbox theme in settings.json so pi uses it on first launch.
+
+echo ""
+echo "Pi theme"
+echo "--------"
+if [ -f "$SETTINGS_FILE" ]; then
+  if bun -e "
+    const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
+    process.exit(s.theme === 'gruvbox' ? 0 : 1);
+  " 2>/dev/null; then
+    ok "theme set to gruvbox in settings.json"
+  else
+    bun -e "
+      const fs = require('fs');
+      const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
+      s.theme = 'gruvbox';
+      fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
+    " 2>/dev/null
+    linked "theme → gruvbox in settings.json"
   fi
 else
   skip "settings.json not found — copy setup/settings.template.json first"
