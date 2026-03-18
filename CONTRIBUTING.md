@@ -16,6 +16,17 @@ chore/<name>   config, docs, cleanup (no behavior change)
 - Delete branch after merge: `git branch -d feat/<name>`
 - Tag milestones on `main`: `v<major>.<minor>.0`
 
+## Pi Version Bumps
+
+After bumping pi packages in `package.json`, regenerate the capability map:
+
+```bash
+bun install
+bash scripts/generate-capability-map.sh
+```
+
+Include the updated `docs/pi-capability-map.md` in the bump commit.
+
 ## Example Workflow
 
 ```bash
