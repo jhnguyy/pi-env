@@ -13,17 +13,17 @@
 #   - Compiles it with bun build --compile → ~/.local/bin/pi
 #   - Symlinks required assets (package.json, theme/, export-html/) next to binary
 #
-# Asset layout:
-#   pi's official release tarballs ship a self-contained directory with the binary
-#   and its assets side by side. When running as a bun binary, getThemesDir() and
-#   getExportTemplateDir() resolve relative to dirname(process.execPath). We
-#   reproduce that layout via symlinks pointing into node_modules.
+# Asset layout (mirrors upstream scripts/build-binaries.sh):
+#   pi resolves assets relative to dirname(process.execPath) when isBunBinary=true.
+#   Upstream ships a self-contained directory; we reproduce it with symlinks into
+#   node_modules so assets automatically track the installed pi version.
 #
 #   ~/.local/bin/
-#   ├── pi              ← compiled Bun binary
-#   ├── package.json    → <repo>/node_modules/@mariozechner/.../package.json
-#   ├── theme/          → <repo>/node_modules/@mariozechner/.../dist/.../theme/
-#   └── export-html/    → <repo>/node_modules/@mariozechner/.../dist/.../export-html/
+#   ├── pi                   ← compiled Bun binary (from dist/bun/cli.js)
+#   ├── package.json         → .../pi-coding-agent/package.json
+#   ├── theme/               → .../pi-coding-agent/dist/modes/interactive/theme/
+#   ├── export-html/         → .../pi-coding-agent/dist/core/export-html/
+#   └── photon_rs_bg.wasm    → .../photon-node/photon_rs_bg.wasm
 #
 # ~/.local/bin is the XDG standard user binary dir, auto-added to PATH by most
 # Linux distros. On NixOS it is added explicitly in hosts/homelab-agent/default.nix.
@@ -54,6 +54,10 @@ PI_VERSION=$(bun -e "console.log(require('$PI_PKG/package.json').version)" 2>/de
 info "Version: $PI_VERSION"
 
 # ── Compile binary ───────────────────────────────────────────────────────────
+# Mirrors upstream: scripts/build-binaries.sh
+#   - Entrypoint: dist/bun/cli.js (bun-specific; handles provider registration
+#     with traceable inline import() literals)
+#   - --external koffi: Windows-only VT input dep, not needed on Linux/macOS
 
 echo ""
 echo "Compiling Bun binary..."
@@ -62,22 +66,11 @@ mkdir -p "$BIN_DIR"
 # Compile to a temp file first — bun --compile has issues writing directly to
 # some filesystems (e.g. ZFS container roots). Copy to destination after.
 TMP_BIN=$(mktemp /tmp/pi-compile-XXXXXX)
+trap 'rm -f "$TMP_BIN"' EXIT
 
-# pi-ai@0.59.0 switched provider loading to lazy dynamic imports via a function
-# wrapper (const dynamicImport = (s) => import(s)) which Bun's bundler cannot
-# statically trace. Provider files are excluded from the compiled binary,
-# causing "Cannot find module './anthropic.js'" at runtime.
-#
-# Fix: patch register-builtins.js to use static imports before compilation,
-# then restore the original after. See setup/patch-register-builtins.js.
-PI_AI_DIR="$REPO/node_modules/@mariozechner/pi-ai"
-cleanup() { node "$REPO/setup/patch-register-builtins.js" "$PI_AI_DIR" --restore; rm -f "$TMP_BIN"; }
-trap cleanup EXIT
-
-node "$REPO/setup/patch-register-builtins.js" "$PI_AI_DIR"
-
-bun build "$PI_PKG/dist/cli.js" \
+bun build "$PI_PKG/dist/bun/cli.js" \
   --compile \
+  --external koffi \
   --outfile "$TMP_BIN"
 
 cp "$TMP_BIN" "$BIN_DIR/pi"
@@ -86,8 +79,16 @@ chmod +x "$BIN_DIR/pi"
 ok "Binary: $BIN_DIR/pi"
 
 # ── Asset symlinks ───────────────────────────────────────────────────────────
-# pi resolves theme/ and export-html/ relative to the binary when isBunBinary=true.
+# pi resolves assets relative to dirname(process.execPath) when isBunBinary=true.
 # Symlink them from node_modules so they track the installed pi version.
+#
+# Mirrors the asset layout from upstream scripts/build-binaries.sh:
+#   package.json         — pi version metadata
+#   theme/               — interactive mode themes
+#   export-html/         — HTML export templates
+#   photon_rs_bg.wasm    — WebAssembly image processing (photon-node)
+#                          photon.js patches fs.readFileSync to load from
+#                          dirname(execPath) when the baked-in path fails
 
 link_asset() {
   local src="$1" target="$2" label="$3"
@@ -99,6 +100,8 @@ link_asset() {
   fi
 }
 
+PHOTON_PKG="$REPO/node_modules/@silvia-odwyer/photon-node"
+
 link_asset "$PI_PKG/package.json" \
   "$BIN_DIR/package.json" "package.json → node_modules"
 
@@ -107,6 +110,9 @@ link_asset "$PI_PKG/dist/modes/interactive/theme" \
 
 link_asset "$PI_PKG/dist/core/export-html" \
   "$BIN_DIR/export-html" "export-html/ → node_modules"
+
+link_asset "$PHOTON_PKG/photon_rs_bg.wasm" \
+  "$BIN_DIR/photon_rs_bg.wasm" "photon_rs_bg.wasm → node_modules"
 
 # ── PATH check ───────────────────────────────────────────────────────────────
 
