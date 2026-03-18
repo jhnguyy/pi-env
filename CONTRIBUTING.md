@@ -27,6 +27,17 @@ bash scripts/generate-capability-map.sh
 
 Include the updated `docs/pi-capability-map.md` in the bump commit.
 
+## Worktree Isolation
+
+When the repo may already be open in another session (concurrent agent, editor), use a git worktree to avoid index collisions:
+
+```bash
+git worktree add /tmp/pi-env-<branch> -b <branch>
+cd /tmp/pi-env-<branch>
+```
+
+Clean up after merge: `git worktree remove /tmp/pi-env-<branch>`
+
 ## Example Workflow
 
 ```bash

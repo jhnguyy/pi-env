@@ -7,6 +7,10 @@
 - Prefer reversible operations. Commit before multi-file changes.
 - Before changes that alter system behavior across multiple components, write a numbered step list. Mechanical refactors (renames, import updates) don't need one.
 
+## Workflow
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before making any changes.
+
 ## Clarify Before Exploring
 
 For ambiguous or open-ended requests, state your interpretation and planned approach before executing.
