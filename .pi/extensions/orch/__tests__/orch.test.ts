@@ -588,10 +588,10 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
 // ─── buildPiCommand unit tests ───────────────────────────────
 
 describe("buildPiCommand — command construction", () => {
-  it("includes --no-session and worker-bridge (no --print)", () => {
+  it("includes worker-bridge and session persistence (no --print, no --no-session)", () => {
     const cmd = buildPiCommand({ prompt: "do work" });
-    expect(cmd).toContain("--no-session");
     expect(cmd).not.toContain("--print");
+    expect(cmd).not.toContain("--no-session");
     expect(cmd).toContain("-e");
     expect(cmd).toContain("worker-bridge.ts");
     expect(cmd).toContain("--append-system-prompt");
@@ -656,7 +656,9 @@ describe("buildPiCommand — command construction", () => {
       prompt: "Do the task",
     });
     // Workers run in interactive mode with worker-bridge extension
-    expect(cmd).toContain("pi --no-session");
+    // Sessions are persisted for audit — no --no-session
+    expect(cmd).not.toContain("--no-session");
+    expect(cmd).not.toContain("--print");
     expect(cmd).toContain("-e");
     expect(cmd).toContain("worker-bridge.ts");
     expect(cmd).toContain("--append-system-prompt");
@@ -665,7 +667,6 @@ describe("buildPiCommand — command construction", () => {
     expect(cmd).toContain("--tools read,bash");
     expect(cmd).toContain("@/tmp/my-brief.md");
     expect(cmd).toContain('"Do the task"');
-    expect(cmd).not.toContain("--print");
   });
 
   it("builds command with only brief (no prompt)", () => {
@@ -870,7 +871,8 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
 
     // capturedCommand is the full env-wrapped shell command
     // Workers run in interactive mode (no --print), with worker-bridge extension
-    expect(capturedCommand).toContain("pi --no-session");
+    // Sessions persisted for audit — no --no-session or --print
+    expect(capturedCommand).not.toContain("--no-session");
     expect(capturedCommand).not.toContain("--print");
     expect(capturedCommand).toContain("-e");
     expect(capturedCommand).toContain("worker-bridge.ts");

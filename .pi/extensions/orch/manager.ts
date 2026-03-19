@@ -39,8 +39,9 @@ function validateLabel(label: string): void {
 
 // ─── Pi command builder ──────────────────────────────────────
 //
-// Builds a `pi --no-session -e worker-bridge.ts ...` command from structured spawn params.
+// Builds a `pi -e worker-bridge.ts ...` command from structured spawn params.
 // Workers run in interactive mode with full TUI visible in the tmux pane.
+// Sessions are persisted (no --no-session) so worker history is available for audit.
 // The worker-bridge extension handles bus-driven follow-up messages and clean shutdown.
 //
 // Note: `--tools` filters built-in tools only (read, bash, edit, write, grep, find, ls).
@@ -61,7 +62,6 @@ export function buildPiCommand(opts: {
 
   const parts = [
     "pi",
-    "--no-session",
     "-e", bridgePath,
     "--append-system-prompt", workerMdPath,
   ];
