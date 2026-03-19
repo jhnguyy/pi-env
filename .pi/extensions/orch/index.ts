@@ -26,8 +26,7 @@ import { OrchError } from "./types";
 import { txt, ok, err } from "../_shared/result";
 
 export default function (pi: ExtensionAPI) {
-  const exec = pi.exec.bind(pi);
-  const manager = new OrchestratorManager(exec);
+  const manager = new OrchestratorManager();
 
   // ─── session_shutdown hook ───────────────────────────────────
   //
@@ -66,10 +65,13 @@ export default function (pi: ExtensionAPI) {
       "            Two modes:",
       "            • Raw: provide command (full shell command string).",
       "            • Pi spawner: provide model/tools/brief/prompt — orch builds the pi command.",
+      "              Workers run in full interactive mode (streaming TUI visible in tmux pane).",
       "              model: model ID (e.g. 'claude-sonnet-4-6')",
       "              tools: built-in tool whitelist (e.g. ['read','bash']). Bus always auto-loaded.",
       "              brief: path to brief file (injected as @file into pi prompt).",
       "              prompt: inline prompt string for the worker.",
+      "            Follow-up messages: publish to worker:<label>:inbox via bus.",
+      "            Workers write results to $ORCH_DIR/<label>.json.",
       "            Cannot mix command and pi-spawner params. Need command OR prompt/brief.",
       "            Automatically injects PI_BUS_SESSION, PI_AGENT_ID, and ORCH_DIR into worker env.",
       "            Workers can write output to $ORCH_DIR/<label>.json — orchestrator reads from there.",
@@ -143,12 +145,6 @@ export default function (pi: ExtensionAPI) {
       prompt: Type.Optional(
         Type.String({
           description: "Inline prompt string for the worker. Pi spawner mode only.",
-        }),
-      ),
-      interactive: Type.Optional(
-        Type.Boolean({
-          description:
-            "Whether the pane is interactive (default: true for pi subagents).",
         }),
       ),
       busChannel: Type.Optional(

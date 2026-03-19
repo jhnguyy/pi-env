@@ -30,10 +30,15 @@ export default function (pi: ExtensionAPI) {
   let hasPublished = false;
 
   pi.on("agent_end", async (_event, _ctx) => {
-    if (hasPublished) return;
     const channel = process.env.ORCH_BUS_CHANNEL;
     if (!channel) return;
-    hasPublished = true;
+    // Interactive workers publish agent_end on every turn — the orchestrator
+    // decides when to send shutdown. Non-interactive (legacy) workers publish
+    // once and exit. The hasPublished guard only applies to non-interactive.
+    if (process.env.ORCH_INTERACTIVE !== "1") {
+      if (hasPublished) return;
+      hasPublished = true;
+    }
     try {
       client.publish(channel, "agent_end", "status", { signal: "agent_end" });
     } catch {
