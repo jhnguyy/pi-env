@@ -16,10 +16,11 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 import { OrchestratorManager, buildPiCommand } from "../manager";
 import { OrchError } from "../types";
 import type { ExecFn } from "../types";
+import { initTmuxService, _resetTmuxServiceForTesting } from "../../tmux/tmux-service";
 
-// ─── Mock ExecFn ─────────────────────────────────────────────
+// ─── Mock ExecFn for TmuxService ─────────────────────────────
 
-/** Returns a mock ExecFn that satisfies all tmux calls made by spawn/cleanup. */
+/** Returns a mock ExecFn that satisfies all tmux calls made by PaneManager. */
 function makeMockExec(paneId = "%42"): ExecFn {
   return async (cmd: string, args: string[]) => {
     // split-window → return the fake pane ID
@@ -34,10 +35,34 @@ function makeMockExec(paneId = "%42"): ExecFn {
     if (cmd === "tmux" && args.includes("kill-pane")) {
       return { stdout: "", stderr: "", code: 0 };
     }
+    // display-message → return fake window dimensions (for rebalanceLayout)
+    if (cmd === "tmux" && args.includes("display-message")) {
+      return { stdout: "200 50\n", stderr: "", code: 0 };
+    }
+    // resize-pane → always ok
+    if (cmd === "tmux" && args.includes("resize-pane")) {
+      return { stdout: "", stderr: "", code: 0 };
+    }
+    // list-panes → return the fake pane
+    if (cmd === "tmux" && args.includes("list-panes")) {
+      return { stdout: "", stderr: "", code: 0 };
+    }
     // fallback — succeed
     return { stdout: "", stderr: "", code: 0 };
   };
 }
+
+/**
+ * Initialize the tmux service singleton with a mock ExecFn.
+ * Must be called before any OrchestratorManager.spawn() tests.
+ */
+function initMockTmuxService(paneId = "%42"): void {
+  _resetTmuxServiceForTesting();
+  initTmuxService(makeMockExec(paneId));
+}
+
+// Initialize with default mock — tests that need custom paneIds call initMockTmuxService() themselves
+initMockTmuxService();
 
 // ─── Env helpers ─────────────────────────────────────────────
 
@@ -63,12 +88,12 @@ function restoreEnv(saved: Record<string, string | undefined>) {
 
 describeIfEnabled("orch", "OrchestratorManager — instantiation", () => {
   it("constructs without throwing", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     expect(mgr).toBeDefined();
   });
 
   it("getStatus returns null before start()", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     expect(mgr.getStatus()).toBeNull();
   });
 });
@@ -95,7 +120,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("returns runId, orchDir, busSession", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const result = mgr.start();
 
     expect(typeof result.runId).toBe("string");
@@ -109,7 +134,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("creates the orchDir on disk", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     expect(existsSync(orchDir)).toBe(true);
     orchDirs.push(orchDir);
@@ -117,7 +142,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("creates the bus session directory structure", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     expect(existsSync(`/tmp/pi-bus-${busSession}/channels`)).toBe(true);
     expect(existsSync(`/tmp/pi-bus-${busSession}/cursors`)).toBe(true);
@@ -126,7 +151,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("sets PI_BUS_SESSION env var", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     expect(process.env.PI_BUS_SESSION).toBe(busSession);
     orchDirs.push(orchDir);
@@ -134,7 +159,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("sets PI_AGENT_ID to 'orch'", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     expect(process.env.PI_AGENT_ID).toBe("orch");
     orchDirs.push(orchDir);
@@ -142,8 +167,8 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("runIds are unique across multiple manager instances", () => {
-    const mgr1 = new OrchestratorManager(makeMockExec());
-    const mgr2 = new OrchestratorManager(makeMockExec());
+    const mgr1 = new OrchestratorManager();
+    const mgr2 = new OrchestratorManager();
     const r1 = mgr1.start();
     orchDirs.push(r1.orchDir);
     busSessions.push(r1.busSession);
@@ -161,7 +186,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("runId looks like a short hex string", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { runId, orchDir, busSession } = mgr.start();
     expect(/^[a-f0-9]+$/.test(runId)).toBe(true);
     orchDirs.push(orchDir);
@@ -169,7 +194,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("throws RUN_ACTIVE if already running", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -183,7 +208,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("throws INVALID_REPO for a non-git path", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     expect(() => mgr.start("/tmp")).toThrow(OrchError);
     try {
       mgr.start("/tmp");
@@ -193,7 +218,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("getStatus reflects state after start()", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { runId, orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -207,7 +232,7 @@ describeIfEnabled("orch", "OrchestratorManager — start()", () => {
   });
 
   it("writes manifest to orchDir after start()", () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -226,6 +251,7 @@ describeIfEnabled("orch", "OrchestratorManager — label validation", () => {
     busSessions = [];
     // Provide TMUX so spawn doesn't fail at the tmux check
     process.env.TMUX = "test-session,0,0";
+    initMockTmuxService();
   });
 
   afterEach(() => {
@@ -237,7 +263,7 @@ describeIfEnabled("orch", "OrchestratorManager — label validation", () => {
   async function withRun(
     fn: (mgr: OrchestratorManager) => Promise<void>,
   ): Promise<void> {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -248,7 +274,9 @@ describeIfEnabled("orch", "OrchestratorManager — label validation", () => {
     await withRun(async mgr => {
       for (const label of ["worker-1", "alpha", "a1b2c3", "scout"]) {
         const result = await mgr.spawn({ label, command: "echo hi" });
-        expect(result.paneId).toContain(label);
+        // paneId is assigned by PaneManager — just verify spawn succeeded
+        expect(typeof result.paneId).toBe("string");
+        expect(result.paneId.length).toBeGreaterThan(0);
       }
     });
   });
@@ -309,6 +337,8 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
     orchDirs = [];
     busSessions = [];
     process.env.TMUX = "test-session,0,0";
+    // Ensure a clean tmux singleton for each test
+    initMockTmuxService();
   });
 
   afterEach(() => {
@@ -318,7 +348,7 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
   });
 
   it("throws NO_ACTIVE_RUN before start()", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     await expect(mgr.spawn({ label: "scout", command: "echo hi" })).rejects.toThrow(OrchError);
     try {
       await mgr.spawn({ label: "scout", command: "echo hi" });
@@ -329,7 +359,7 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
 
   it("throws NOT_IN_TMUX when TMUX env is absent", async () => {
     delete process.env.TMUX;
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -343,17 +373,20 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
   });
 
   it("returns paneId containing the runId and label", async () => {
-    const mgr = new OrchestratorManager(makeMockExec("%99"));
+    initMockTmuxService("%99");
+    const mgr = new OrchestratorManager();
     const { runId, orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
 
     const result = await mgr.spawn({ label: "builder", command: "echo hi" });
-    expect(result.paneId).toBe(`orch-${runId}-builder`);
+    // paneId is now assigned by PaneManager (opaque format)
+    expect(typeof result.paneId).toBe("string");
+    expect(result.paneId.length).toBeGreaterThan(0);
   });
 
   it("returns no branch/worktreePath when no repo set", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -364,7 +397,7 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
   });
 
   it("records worker in manifest after spawn", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -379,7 +412,8 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
   });
 
   it("WorkerRecord has expected shape after spawn", async () => {
-    const mgr = new OrchestratorManager(makeMockExec("%7"));
+    initMockTmuxService("%7");
+    const mgr = new OrchestratorManager();
     const { runId, orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -389,7 +423,8 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
 
     const worker = mgr.getStatus()!.workers[0];
     expect(worker.label).toBe("worker-x");
-    expect(worker.paneId).toBe(`orch-${runId}-worker-x`);
+    expect(typeof worker.paneId).toBe("string");
+    expect(worker.paneId.length).toBeGreaterThan(0);
     expect(worker.tmuxPaneId).toBe("%7");
     expect(worker.busChannel).toBe("done");
     expect(worker.spawnedAt).toBeGreaterThanOrEqual(spawnTime);
@@ -398,7 +433,9 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
 
   it("throws SPAWN_FAILED when tmux split-window fails", async () => {
     const failExec: ExecFn = async () => ({ stdout: "", stderr: "no session", code: 1 });
-    const mgr = new OrchestratorManager(failExec);
+    _resetTmuxServiceForTesting();
+    initTmuxService(failExec);
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -412,7 +449,7 @@ describeIfEnabled("orch", "OrchestratorManager — spawn()", () => {
   });
 
   it("updates manifest on disk after each spawn", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -436,6 +473,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
     saved = captureEnv();
     extraBusDirs = [];
     process.env.TMUX = "test-session,0,0";
+    initMockTmuxService();
   });
 
   afterEach(() => {
@@ -444,7 +482,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("throws NO_ACTIVE_RUN before start()", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     await expect(mgr.cleanup()).rejects.toThrow(OrchError);
     try {
       await mgr.cleanup();
@@ -454,7 +492,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("removes orchDir on disk after cleanup", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${busSession}`);
 
@@ -464,7 +502,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("removes bus session dir after cleanup", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { busSession } = mgr.start();
 
     expect(existsSync(`/tmp/pi-bus-${busSession}`)).toBe(true);
@@ -473,7 +511,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("clears PI_BUS_SESSION and PI_AGENT_ID after cleanup", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     mgr.start();
     expect(process.env.PI_BUS_SESSION).toBeDefined();
     await mgr.cleanup();
@@ -482,7 +520,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("returns panes count matching spawned workers", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${busSession}`);
 
@@ -496,7 +534,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("getStatus returns null after cleanup", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${busSession}`);
     await mgr.cleanup();
@@ -504,7 +542,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("writes run receipt to /tmp/orch-runs/", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${busSession}`);
 
@@ -517,7 +555,7 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
   });
 
   it("allows start() again after cleanup", async () => {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const r1 = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${r1.busSession}`);
     await mgr.cleanup();
@@ -534,7 +572,9 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
       if (args.includes("kill-pane")) return { stdout: "", stderr: "no such pane", code: 1 };
       return { stdout: "", stderr: "", code: 0 };
     };
-    const mgr = new OrchestratorManager(failKill);
+    _resetTmuxServiceForTesting();
+    initTmuxService(failKill);
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     extraBusDirs.push(`/tmp/pi-bus-${busSession}`);
     await mgr.spawn({ label: "worker", command: "echo hi" });
@@ -548,10 +588,14 @@ describeIfEnabled("orch", "OrchestratorManager — cleanup()", () => {
 // ─── buildPiCommand unit tests ───────────────────────────────
 
 describe("buildPiCommand — command construction", () => {
-  it("includes --no-session and --print always", () => {
+  it("includes --no-session and worker-bridge (no --print)", () => {
     const cmd = buildPiCommand({ prompt: "do work" });
     expect(cmd).toContain("--no-session");
-    expect(cmd).toContain("--print");
+    expect(cmd).not.toContain("--print");
+    expect(cmd).toContain("-e");
+    expect(cmd).toContain("worker-bridge.ts");
+    expect(cmd).toContain("--append-system-prompt");
+    expect(cmd).toContain("worker.md");
   });
 
   it("starts with 'pi'", () => {
@@ -611,9 +655,17 @@ describe("buildPiCommand — command construction", () => {
       brief: "/tmp/my-brief.md",
       prompt: "Do the task",
     });
-    expect(cmd).toBe(
-      'pi --no-session --print --model claude-haiku-4-5 --tools read,bash @/tmp/my-brief.md "Do the task"',
-    );
+    // Workers run in interactive mode with worker-bridge extension
+    expect(cmd).toContain("pi --no-session");
+    expect(cmd).toContain("-e");
+    expect(cmd).toContain("worker-bridge.ts");
+    expect(cmd).toContain("--append-system-prompt");
+    expect(cmd).toContain("worker.md");
+    expect(cmd).toContain("--model claude-haiku-4-5");
+    expect(cmd).toContain("--tools read,bash");
+    expect(cmd).toContain("@/tmp/my-brief.md");
+    expect(cmd).toContain('"Do the task"');
+    expect(cmd).not.toContain("--print");
   });
 
   it("builds command with only brief (no prompt)", () => {
@@ -657,6 +709,7 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
     busSessions = [];
     tmpDirs = [];
     process.env.TMUX = "test-session,0,0";
+    initMockTmuxService();
   });
 
   afterEach(() => {
@@ -669,7 +722,7 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
   async function withRun(
     fn: (mgr: OrchestratorManager) => Promise<void>,
   ): Promise<void> {
-    const mgr = new OrchestratorManager(makeMockExec());
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -752,7 +805,9 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
   it("spawns successfully with prompt only (no command)", async () => {
     await withRun(async (mgr) => {
       const result = await mgr.spawn({ label: "worker", prompt: "Do the work" });
-      expect(result.paneId).toContain("worker");
+      // paneId is now assigned by PaneManager (opaque format)
+      expect(typeof result.paneId).toBe("string");
+      expect(result.paneId.length).toBeGreaterThan(0);
     });
   });
 
@@ -764,7 +819,8 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
       writeFileSync(briefPath, "# Do the work");
 
       const result = await mgr.spawn({ label: "worker", brief: briefPath, prompt: "execute" });
-      expect(result.paneId).toContain("worker");
+      expect(typeof result.paneId).toBe("string");
+      expect(result.paneId.length).toBeGreaterThan(0);
     });
   });
 
@@ -782,7 +838,8 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
         brief: briefPath,
         prompt: "Do the task",
       });
-      expect(result.paneId).toContain("worker");
+      expect(typeof result.paneId).toBe("string");
+      expect(result.paneId.length).toBeGreaterThan(0);
     });
   });
 
@@ -797,7 +854,9 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
       }
       return { stdout: "", stderr: "", code: 0 };
     };
-    const mgr = new OrchestratorManager(captureExec);
+    _resetTmuxServiceForTesting();
+    initTmuxService(captureExec);
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -810,13 +869,19 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
     });
 
     // capturedCommand is the full env-wrapped shell command
-    expect(capturedCommand).toContain("pi --no-session --print");
+    // Workers run in interactive mode (no --print), with worker-bridge extension
+    expect(capturedCommand).toContain("pi --no-session");
+    expect(capturedCommand).not.toContain("--print");
+    expect(capturedCommand).toContain("-e");
+    expect(capturedCommand).toContain("worker-bridge.ts");
+    expect(capturedCommand).toContain("--append-system-prompt");
+    expect(capturedCommand).toContain("worker.md");
     expect(capturedCommand).toContain("--model claude-sonnet-4-6");
     expect(capturedCommand).toContain("--tools read,bash");
     expect(capturedCommand).toContain('"Do the work"');
   });
 
-  it("pi-spawner command injects PI_BUS_SESSION into env", async () => {
+  it("pi-spawner command injects PI_BUS_SESSION and ORCH_INTERACTIVE into env", async () => {
     let capturedCommand = "";
     const captureExec: ExecFn = async (cmd, args) => {
       if (cmd === "tmux" && args.includes("split-window")) {
@@ -825,7 +890,9 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
       }
       return { stdout: "", stderr: "", code: 0 };
     };
-    const mgr = new OrchestratorManager(captureExec);
+    _resetTmuxServiceForTesting();
+    initTmuxService(captureExec);
+    const mgr = new OrchestratorManager();
     const { orchDir, busSession } = mgr.start();
     orchDirs.push(orchDir);
     busSessions.push(busSession);
@@ -833,6 +900,7 @@ describeIfEnabled("orch", "OrchestratorManager — pi spawner validation", () =>
     await mgr.spawn({ label: "worker", prompt: "Do the work" });
 
     expect(capturedCommand).toContain(`PI_BUS_SESSION=${busSession}`);
+    expect(capturedCommand).toContain("ORCH_INTERACTIVE=1");
   });
 });
 

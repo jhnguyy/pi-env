@@ -17,10 +17,11 @@ import { randomBytes } from "node:crypto";
 import { gitSync, isGitRepo } from "../_shared/git";
 import { createWorktree, prepareWorktree, removeWorktree, pruneWorktrees } from "./git";
 import { writeManifest, writeReceipt } from "./manifest";
-import type { ExecFn, OrchManifest, RunReceipt, WorkerRecord } from "./types";
+import type { OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
 import { initBusService, getBusService } from "../agent-bus/bus-service";
-import { ensureExitShim, SHIM_PATH } from "../_shared/exit-shim";
+import { getTmuxService } from "../tmux/tmux-service";
+import { TmuxError } from "../tmux/types";
 import type { BusMessage } from "../agent-bus/types";
 
 // ─── Label validation ─────────────────────────────────────────
@@ -38,8 +39,9 @@ function validateLabel(label: string): void {
 
 // ─── Pi command builder ──────────────────────────────────────
 //
-// Builds a `pi --no-session --print ...` command from structured spawn params.
-// Used when the caller provides model/tools/brief/prompt instead of a raw command.
+// Builds a `pi --no-session -e worker-bridge.ts ...` command from structured spawn params.
+// Workers run in interactive mode with full TUI visible in the tmux pane.
+// The worker-bridge extension handles bus-driven follow-up messages and clean shutdown.
 //
 // Note: `--tools` filters built-in tools only (read, bash, edit, write, grep, find, ls).
 // Extension tools (bus, orch, etc.) are auto-discovered regardless of this flag.
@@ -52,8 +54,17 @@ export function buildPiCommand(opts: {
   brief?: string;
   prompt?: string;
 }): string {
-  // --print ensures non-interactive execution: process prompt and exit.
-  const parts = ["pi", "--no-session", "--print"];
+  // Workers run in interactive mode with the worker-bridge extension
+  // for bus-driven follow-up messages and clean shutdown.
+  const bridgePath = new URL("./worker-bridge.ts", import.meta.url).pathname;
+  const workerMdPath = new URL("./worker.md", import.meta.url).pathname;
+
+  const parts = [
+    "pi",
+    "--no-session",
+    "-e", bridgePath,
+    "--append-system-prompt", workerMdPath,
+  ];
   if (opts.model) parts.push("--model", opts.model);
   if (opts.tools && opts.tools.length > 0) {
     const unknown = opts.tools.filter((t) => !BUILT_IN_TOOLS.has(t));
@@ -73,8 +84,8 @@ export function buildPiCommand(opts: {
 
 // ─── Command builder ─────────────────────────────────────────
 //
-// Injects PI_BUS_SESSION + PI_AGENT_ID into the worker environment,
-// optionally sets cwd to the worktree, and appends the bus exit shim.
+// Injects PI_BUS_SESSION, PI_AGENT_ID, ORCH_DIR, and ORCH_INTERACTIVE into
+// the worker environment, optionally sets cwd to the worktree.
 //
 // Uses `env -C <cwd>` (GNU coreutils 8.28+, standard on modern Linux)
 // instead of nested `bash -c 'cd ... && ...'` to avoid shell quoting issues.
@@ -85,19 +96,11 @@ function buildWorkerCommand(opts: {
   orchDir: string;
   label: string;
   worktreePath?: string;
-  busChannel?: string;
 }): string {
-  const { command, busSession, orchDir, label, worktreePath, busChannel } = opts;
+  const { command, busSession, orchDir, label, worktreePath } = opts;
 
   // Escape single quotes in user command for bash -c embedding
   const safeCmd = command.replace(/'/g, "'\\''");
-
-  // Build suffix for bus exit shim (crash-safe completion signaling)
-  let suffix = "";
-  if (busChannel) {
-    ensureExitShim();
-    suffix = `; ${SHIM_PATH} ${busChannel}`;
-  }
 
   // `env -C <path>` changes the working directory before exec.
   // `env <KEY=val>` injects env vars without a subshell.
@@ -109,12 +112,10 @@ function buildWorkerCommand(opts: {
     `PI_BUS_SESSION=${busSession}`,
     `PI_AGENT_ID=${label}`,
     `ORCH_DIR=${orchDir}`,
+    `ORCH_INTERACTIVE=1`,
   );
-  if (busChannel) {
-    envParts.push(`ORCH_BUS_CHANNEL=${busChannel}`);
-  }
 
-  return `${envParts.join(" ")} bash -c '${safeCmd}${suffix}'`;
+  return `${envParts.join(" ")} bash -c '${safeCmd}'`;
 }
 
 // ─── OrchestratorManager ─────────────────────────────────────
@@ -122,7 +123,7 @@ function buildWorkerCommand(opts: {
 export class OrchestratorManager {
   private state: OrchManifest | null = null;
 
-  constructor(private execFn: ExecFn) {}
+  constructor() {}
 
   // ─── start ─────────────────────────────────────────────────
 
@@ -182,7 +183,6 @@ export class OrchestratorManager {
     tools?: string[];
     brief?: string;
     prompt?: string;
-    interactive?: boolean;
     busChannel?: string;
   }): Promise<{ paneId: string; branch?: string; worktreePath?: string }> {
     if (!this.state) {
@@ -196,7 +196,7 @@ export class OrchestratorManager {
       throw new OrchError("Not running inside a tmux session", "NOT_IN_TMUX");
     }
 
-    const { label, interactive = true, busChannel } = opts;
+    const { label, busChannel } = opts;
 
     // ─── Structured vs raw command validation ────────────────────
     const hasStructuredParams =
@@ -283,12 +283,32 @@ export class OrchestratorManager {
       orchDir,
       label,
       worktreePath,
-      busChannel,
     });
 
-    // Spawn tmux pane
-    const tmuxPaneId = await this.spawnTmuxPane(finalCommand, label, interactive);
-    const paneId = `orch-${runId}-${label}`;
+    // Spawn via shared tmux PaneManager — gets grid layout + rebalancing for free.
+    // PaneManager handles the exit shim (busChannel wrapping) internally.
+    let paneId: string;
+    let tmuxPaneId: string;
+    try {
+      const tmuxSvc = getTmuxService();
+      const tmuxResult = await tmuxSvc.manager.run({
+        action: "run",
+        command: finalCommand,
+        label,
+        interactive: true,
+        busChannel,
+      });
+      paneId = tmuxResult.paneId;
+      tmuxPaneId = tmuxResult.tmuxPaneId;
+    } catch (e) {
+      if (e instanceof TmuxError) {
+        throw new OrchError(
+          `tmux spawn failed: ${e.message}`,
+          "SPAWN_FAILED",
+        );
+      }
+      throw e;
+    }
 
     // Record in manifest
     const worker: WorkerRecord = {
@@ -326,13 +346,14 @@ export class OrchestratorManager {
     let worktreesRemoved = 0;
     const preservedBranches: string[] = [];
 
-    // Kill all panes — best-effort (pane may already be dead)
+    // Kill all panes via PaneManager — best-effort (pane may already be dead)
+    const tmuxSvc = getTmuxService();
     for (const worker of workers) {
       try {
-        const result = await this.execFn("tmux", ["kill-pane", "-t", worker.tmuxPaneId]);
-        if (result.code === 0) panesKilled++;
+        await tmuxSvc.manager.close(worker.paneId, true);
+        panesKilled++;
       } catch {
-        // Already dead — don't block cleanup
+        // Already dead or not found — don't block cleanup
       }
     }
 
@@ -417,45 +438,5 @@ export class OrchestratorManager {
     return this.state;
   }
 
-  // ─── Private: spawn tmux pane ──────────────────────────────
-
-  private async spawnTmuxPane(
-    command: string,
-    label: string,
-    _interactive: boolean,
-  ): Promise<string> {
-    // Split horizontally: new pane to the right of the pi process's own pane.
-    // Always target TMUX_PANE so the split lands on the same window,
-    // regardless of which window or pane the user has focused.
-    const args = [
-      "split-window",
-      "-h",   // horizontal split
-      "-d",   // don't switch to new pane
-      "-P",   // print pane ID on stdout
-      "-F", "#{pane_id}",
-    ];
-    const callerPane = process.env.TMUX_PANE;
-    if (callerPane) {
-      args.push("-t", callerPane);
-    }
-    args.push(command);
-
-    const result = await this.execFn("tmux", args);
-
-    if (result.code !== 0) {
-      throw new OrchError(
-        `tmux split-window failed: ${(result.stderr || result.stdout || "").trim()}`,
-        "SPAWN_FAILED",
-      );
-    }
-
-    const tmuxPaneId = result.stdout.trim();
-
-    // Set pane title — best-effort cosmetic
-    await this.execFn("tmux", [
-      "select-pane", "-t", tmuxPaneId, "-T", label,
-    ]).catch(() => {});
-
-    return tmuxPaneId;
-  }
 }
+

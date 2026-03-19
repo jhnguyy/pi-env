@@ -63,3 +63,11 @@ export function getTmuxService(): TmuxService {
   }
   return _instance;
 }
+
+/**
+ * Reset the singleton for testing. NOT for production use.
+ * Allows tests to re-initialize with a different ExecFn.
+ */
+export function _resetTmuxServiceForTesting(): void {
+  _instance = null;
+}

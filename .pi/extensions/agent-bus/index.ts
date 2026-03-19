@@ -31,6 +31,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, _ctx) => {
     if (hasPublished) return;
+    // Interactive workers use the exit shim for completion signaling —
+    // agent_end fires every turn, not just the final one.
+    if (process.env.ORCH_INTERACTIVE === "1") return;
     const channel = process.env.ORCH_BUS_CHANNEL;
     if (!channel) return;
     hasPublished = true;
