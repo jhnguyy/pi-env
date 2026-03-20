@@ -7,7 +7,7 @@ description: Subagent spawning, scoping, and context gathering. Use when decompo
 
 ## Mental Model
 
-**Goal:** Route context to scoped workers, wait for completion signals, and synthesize results into a coherent output. Workers do bounded work and report back. Workers can coordinate directly with each other when the exchange is well-scoped and self-contained — route through the orchestrator when its output determines what gets spawned next, or when you need to filter before passing downstream.
+**Goal:** Route context to scoped workers, wait for completion signals, synthesize results. Workers report back. Workers can coordinate directly when the scope is clear — route through the orchestrator when its output determines what gets spawned next, or when you need to filter before forwarding.
 
 `gather context → dispatch workers (parallel or coordinating) → wait → synthesize → cleanup → commit`
 
@@ -24,7 +24,7 @@ description: Subagent spawning, scoping, and context gathering. Use when decompo
 
 > **Anti-pattern:** `sleep 30 && tmux read ...` — polling. Use `bus wait` instead.
 
-> **This skill is a living document.** When you discover a pattern that works better — update it.
+> When you find a better pattern — update this.
 
 ---
 
@@ -118,7 +118,7 @@ Workers also publish from inside their prompt: `"When done, publish to channel '
 
 ## Data Flow
 
-**Files carry data. Bus carries signals.** Workers write results to `$ORCH_DIR/<label>.json` and publish completion to their bus channel. Read files for content; wait on bus for timing. Synthesize before passing downstream — never relay verbatim.
+**Files carry data. Bus carries signals.** Workers write results to `$ORCH_DIR/<label>.json` and publish completion to their bus channel. Read files for content; wait on bus for timing. Synthesize; never relay verbatim.
 
 ---
 
@@ -179,7 +179,7 @@ Extract: stack → skills to load; commands → pass verbatim to workers; paths 
 
 For design decisions requiring genuine back-and-forth. Spawn agents on a shared bus channel and let them exchange positions. No persona prompts — give each agent the same material and different context emphasis.
 
-What makes it work: agents reason with evidence, stay on one topic until resolved, surface disagreement explicitly. If two exchanges don't produce movement, bring both positions to the human — persistent disagreement is usually about values, not facts.
+What makes it work: agents reason with evidence, stay on one topic until resolved, state disagreement directly. If two exchanges don't produce movement, bring both positions to the human — persistent disagreement is usually about values, not facts.
 
 **Model selection:** Sonnet ↔ Sonnet for known solution space; Sonnet ↔ Opus for genuine uncertainty or high-stakes architecture.
 

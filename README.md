@@ -77,7 +77,7 @@ Skills are markdown instruction files (`SKILL.md`) that pi loads on demand when 
 Roles are behavioral contracts for multi-agent orchestration. Each role (`.agents/roles/*.md`) defines what an agent *should and shouldn't do* when assigned that identity:
 
 - **scout** — read-only recon: reports structure, stack, paths, conventions. Never decides or modifies.
-- **worker** — bounded implementation: executes a brief, reports changes. Doesn't expand scope.
+- **worker** — executes a brief, reports changes. Doesn't expand scope.
 - **orchestrator** — routing and synthesis: decomposes tasks, dispatches workers, merges results. Doesn't read raw files.
 - **reviewer** — adversarial review: assumes the implementation is wrong until proven otherwise.
 

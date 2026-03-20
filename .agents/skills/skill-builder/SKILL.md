@@ -49,7 +49,7 @@ skill_build({ path: "...", diff: "<unified diff>" })
 
 - **Index > embed.** Keep SKILL.md as a compressed navigational map. Move detailed docs to `references/`.
 - **Progressive disclosure.** Description loads by default. Full SKILL.md loads on-demand. Reference files load only when needed. Each layer must justify its token cost.
-- **Finite instruction budget.** Every directive competes with the system prompt and AGENTS.md. Prefer fewer, more precise instructions over comprehensive coverage.
+- **Finite instruction budget.** Every directive competes with the system prompt and AGENTS.md. Prefer fewer, precise instructions over broad coverage.
 - **Retrieval-led > pre-training-led.** For domains with evolving specs or APIs, include the instruction to prefer retrieval over memory.
 
 ## After Editing Extension Files

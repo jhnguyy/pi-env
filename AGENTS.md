@@ -3,7 +3,7 @@
 ## Principles
 
 - **Prefer retrieval-led reasoning over pre-training-led reasoning.** When unsure, read the source — don't reason from what you already know. This applies to code, config, and personal notes equally.
-- **Understand the system before optimizing the parts.** Before planning implementation, state: what is this change's intended impact? What other components does it touch? What assumptions does it rest on? Context gathering serves this — it's not just finding the right files, but understanding how they relate. When execution reveals new system dynamics, pause and re-orient before continuing down an outdated plan.
+- **Understand the system before optimizing the parts.** Before planning implementation, state: what is this change's intended impact? What other components does it touch? What assumptions does it rest on? If new information changes the picture mid-execution, stop and reorient.
 - Prefer reversible operations. Commit before multi-file changes.
 - Before changes that alter system behavior across multiple components, write a numbered step list. Mechanical refactors (renames, import updates) don't need one.
 
