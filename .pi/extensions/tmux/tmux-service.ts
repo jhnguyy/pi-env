@@ -18,7 +18,7 @@
  * are tmux internals. Keeping it here avoids a circular topology.
  */
 
-import { randomBytes } from "node:crypto";
+import { generateId } from "../_shared/id";
 import { TmuxClient } from "./tmux-client";
 import { PaneManager } from "./pane-manager";
 import type { TmuxConfig, ExecFn } from "./types";
@@ -43,7 +43,7 @@ export function initTmuxService(execFn: ExecFn): TmuxService {
   const client = new TmuxClient(execFn);
   const config: TmuxConfig = {
     ...DEFAULT_CONFIG,
-    sessionPrefix: randomBytes(2).toString("hex"),
+    sessionPrefix: generateId(2),
   };
   const manager = new PaneManager(client, config);
   _instance = { manager, client };

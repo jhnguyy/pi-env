@@ -8,8 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { randomBytes } from "node:crypto";
-
+import { generateId } from "../_shared/id";
 import type { BusMessage, CursorRecord } from "./types";
 
 // ─── Interface ────────────────────────────────────────────────
@@ -101,7 +100,7 @@ export class FsTransport implements BusTransport {
     // Filename: <timestamp>-<sender>-<random4hex>.json
     // Random suffix prevents collision on same-ms publishes from same sender.
     const safe = msg.sender.replace(/[^a-zA-Z0-9_-]/g, "-");
-    const rand = randomBytes(2).toString("hex");
+    const rand = generateId(2);
     const filename = `${msg.timestamp}-${safe}-${rand}.json`;
     const filePath = path.join(dir, filename);
     const tmpPath = filePath + ".tmp";

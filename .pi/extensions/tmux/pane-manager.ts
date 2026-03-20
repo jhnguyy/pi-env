@@ -4,7 +4,7 @@
  * Creates, tracks, and removes panes. No file I/O — delegates to TmuxClient.
  */
 
-import { randomBytes } from "node:crypto";
+import { generateId } from "../_shared/id";
 import type {
   CloseResult,
   ITmuxClient,
@@ -65,7 +65,7 @@ export class PaneManager {
       );
     }
 
-    const id = `${this.config.sessionPrefix}-${randomBytes(2).toString("hex")}`;
+    const id = `${this.config.sessionPrefix}-${generateId(2)}`;
 
     // Build command — wrap for busChannel and/or waitOnExit; otherwise pass directly.
     // All hooks appended in a single bash -c '...' to avoid double-wrapping.

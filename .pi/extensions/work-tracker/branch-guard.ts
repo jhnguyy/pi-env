@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { getCurrentBranch as gitGetCurrentBranch } from "../_shared/git";
 import type { BranchGuardResult, WorkTrackerConfig } from "./types";
 
 /**
@@ -64,19 +64,7 @@ export class BranchGuard {
   }
 
   getCurrentBranch(repoPath: string): string | null {
-    try {
-      const result = spawnSync(
-        "git",
-        ["-C", repoPath, "branch", "--show-current"],
-        { encoding: "utf8", timeout: 3000 }
-      );
-      if (result.status === 0 && result.stdout) {
-        return result.stdout.trim() || null;
-      }
-    } catch {
-      // Repo may not exist or git not available — ignore
-    }
-    return null;
+    return gitGetCurrentBranch(repoPath);
   }
 
   /**
