@@ -15,6 +15,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { initBusService } from "./bus-service";
 import { BusError } from "./types";
 import { txt, ok, err } from "../_shared/result";
+import { defaultRenderResult } from "../_shared/render";
 
 export default function (pi: ExtensionAPI) {
   // ─── Components (DI wiring) ─────────────────────────────────
@@ -263,19 +264,11 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderResult(result, _opts, theme) {
-      const first = result.content[0];
-      const text = first?.type === "text" ? first.text : "";
-      const isError =
-        result.details != null &&
-        typeof result.details === "object" &&
-        "error" in result.details;
-      if (isError) {
-        return new Text(theme.fg("error", text || "error"), 0, 0);
-      }
-      return new Text(theme.fg("success", "✓ " + text), 0, 0);
+      return defaultRenderResult(result, theme);
     },
   });
 }
 
 // ─── Helpers ────────────────────────────────────────────────
 // txt / ok / err imported from ../_shared/result
+// defaultRenderResult imported from ../_shared/render

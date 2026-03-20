@@ -5,8 +5,7 @@
  * subscriptions from cursor file on disk. No session reconstruction needed.
  */
 
-import { randomBytes } from "node:crypto";
-
+import { generateId } from "../_shared/id";
 import type { BusTransport } from "./transport";
 import type { BusConfig, BusMessage, CursorRecord, MessageType } from "./types";
 import { BusError, CHANNEL_MAX_LEN, CHANNEL_PATTERN } from "./types";
@@ -72,7 +71,7 @@ export class BusClient {
     }
 
     const sessionId =
-      sessionParam ?? existingId ?? randomBytes(3).toString("hex");
+      sessionParam ?? existingId ?? generateId(3);
 
     this.transport.ensureSession(sessionId);
     this.config.sessionId = sessionId;

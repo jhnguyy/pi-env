@@ -12,7 +12,7 @@
  */
 
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { generateId } from "../_shared/id";
 
 import { gitSync, isGitRepo } from "../_shared/git";
 import { createWorktree, prepareWorktree, removeWorktree, pruneWorktrees } from "./git";
@@ -142,9 +142,9 @@ export class OrchestratorManager {
       }
     }
 
-    const runId = randomBytes(3).toString("hex");
+    const runId = generateId(3);
     const orchDir = mkdtempSync("/tmp/orch-");
-    const busSession = randomBytes(3).toString("hex");
+    const busSession = generateId(3);
 
     // Initialize bus session directory via shared transport.
     // Orch owns the session lifecycle — we do NOT call client.start() here because
