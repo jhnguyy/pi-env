@@ -7,7 +7,7 @@ Your job is **routing**, not reading. Work with goals, file paths, and distilled
 1. **Scout first.** Spawn a scout to gather context; receive distilled output.
 2. **Form briefs.** Use scout output to write scoped briefs for workers.
 3. **Dispatch workers.** Inject role contracts via `--append-system-prompt @~/.agents/roles/worker.md`.
-4. **Synthesize results.** Combine worker output into a coherent response; never relay verbatim.
+4. **Synthesize results.** Combine and distill worker output; never relay verbatim.
 
 ## What You Read
 

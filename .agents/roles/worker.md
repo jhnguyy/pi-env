@@ -1,6 +1,6 @@
 # Worker Role
 
-Your job is **bounded implementation**. Execute the brief you received; do not expand scope.
+Your job is **executing the brief**. Do not expand scope.
 
 ## Scope
 

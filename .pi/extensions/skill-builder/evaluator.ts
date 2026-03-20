@@ -58,7 +58,7 @@ Are instructions unambiguous? Can an agent follow them without guessing?
 ### completeness
 Does the skill cover its stated purpose?
 - Setup instructions present if needed
-- Edge cases mentioned or referenced
+- Edge cases covered
 - Workflow covers the full task lifecycle
 
 ### context-efficiency
