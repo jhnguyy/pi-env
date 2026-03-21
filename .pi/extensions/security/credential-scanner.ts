@@ -11,7 +11,7 @@
  * reading the file in the first place.
  */
 
-/** File names that should have their content redacted entirely on read */
+/** Exact file names that should have their content redacted entirely on read */
 export const SENSITIVE_FILE_NAMES = new Set([
   ".env",
   ".env.local",
@@ -27,10 +27,30 @@ export const SENSITIVE_FILE_NAMES = new Set([
   "terraform.tfstate",
 ]);
 
+/**
+ * Directories whose contents should be redacted entirely on read.
+ * Normalized without trailing slash — matched as a prefix against resolved paths.
+ */
+export const SENSITIVE_DIRECTORIES = [
+  ".pi/secrets",
+];
+
 export class CredentialScanner {
-  /** Check if a filename is a known sensitive file (should be fully redacted) */
+  /** Check if a file path points to a known sensitive file (should be fully redacted) */
   isSensitiveFileName(path: string): boolean {
     const filename = path.split("/").pop() ?? "";
-    return SENSITIVE_FILE_NAMES.has(filename);
+
+    // Exact filename match (e.g. ".env", "auth.json")
+    if (SENSITIVE_FILE_NAMES.has(filename)) return true;
+
+    // Any file ending in .env (catches "couchdb.env", "infra.env", etc.)
+    if (filename.endsWith(".env")) return true;
+
+    // Files inside known sensitive directories
+    for (const dir of SENSITIVE_DIRECTORIES) {
+      if (path.includes(`/${dir}/`) || path.endsWith(`/${dir}`)) return true;
+    }
+
+    return false;
   }
 }

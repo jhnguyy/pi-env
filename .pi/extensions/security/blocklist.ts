@@ -27,6 +27,18 @@ export interface BlockEntry {
 }
 
 export const BLOCKLIST: BlockEntry[] = [
+  // ── Secrets directory ─────────────────────────────────────────────────────
+  // Block bash commands that read from known secrets paths. Not exhaustive
+  // (bash has infinite ways to read files), but catches the common patterns
+  // that an LLM generates: cat, less, head, tail, source, grep on secrets.
+  {
+    id: "bash-read-secrets",
+    tools: ["bash"],
+    field: "command",
+    pattern: /(?:cat|less|more|head|tail|source|grep|awk|sed|strings)\b.*\.pi\/secrets\//,
+    reason: "Reading from .pi/secrets/ blocked — use credentials through the appropriate extension",
+  },
+
   // ── Destructive ───────────────────────────────────────────────────────────
   // Recursive deletion is unrecoverable. Hard stop regardless of target path.
   {
