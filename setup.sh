@@ -121,12 +121,19 @@ mkdir -p "$AGENTS_DIR"
 link_path "$REPO/.agents/roles" "$AGENTS_DIR/roles" "~/.agents/roles"
 
 # ── AGENTS.md ────────────────────────────────────────────────────────────────
-# pi doesn't load AGENTS.md from packages, so this still needs symlinking.
+# ~/.pi/agent/AGENTS.md is managed independently — global behavioral rules
+# that apply across all repos, not just pi-env. Not symlinked here.
+# pi-env/AGENTS.md loads as project context when cwd is the pi-env repo.
 
 echo ""
 echo "AGENTS.md"
 echo "---------"
-link_path "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md" "~/.pi/agent/AGENTS.md"
+if [ -e "$PI_AGENT_DIR/AGENTS.md" ]; then
+  ok "~/.pi/agent/AGENTS.md (exists — not overwritten)"
+else
+  cp "$REPO/AGENTS.md" "$PI_AGENT_DIR/AGENTS.md"
+  ok "~/.pi/agent/AGENTS.md (bootstrapped from repo — customize for your environment)"
+fi
 
 # ── Test utilities ───────────────────────────────────────────────────────────
 
