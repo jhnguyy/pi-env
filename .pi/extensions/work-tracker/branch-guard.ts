@@ -22,6 +22,10 @@ export class BranchGuard {
   }
 
   check(command: string): BranchGuardResult {
+    // ── Checkout guard: block branch creation in the main working tree ──
+    const checkoutResult = this.checkCheckout(command);
+    if (checkoutResult.shouldBlock) return checkoutResult;
+
     if (!this.isGitPush(command)) {
       return { shouldBlock: false };
     }
@@ -76,6 +80,57 @@ export class BranchGuard {
     return m ? m[1] : null;
   }
 
+  /**
+   * Detects `git checkout -b` or `git switch -c` in the main working tree of a
+   * guarded repo and blocks with a worktree suggestion. Concurrent sessions share
+   * the main tree's HEAD, index, and working files — checking out a branch there
+   * causes cross-session collisions.
+   */
+  private checkCheckout(command: string): BranchGuardResult {
+    if (!this.isNewBranchCheckout(command)) return { shouldBlock: false };
+
+    // If the command has -C <path>, check if that path is a guarded repo
+    const explicitRepo = this.extractRepoCFlag(command);
+    if (explicitRepo !== null) {
+      const isGuarded = this.guardedRepos.some(
+        (r) => resolve(r) === resolve(explicitRepo),
+      );
+      if (!isGuarded) return { shouldBlock: false };
+    }
+
+    // Extract the branch name from the command
+    const branch = this.extractNewBranchName(command);
+    const branchSlug = branch ?? "<branch>";
+
+    return {
+      shouldBlock: true,
+      targetBranch: branch ?? undefined,
+      reason: [
+        "⛔ Don't checkout branches in the main working tree — concurrent sessions collide.",
+        "",
+        "Use a worktree instead:",
+        `  git worktree add /tmp/pi-env-${branchSlug} -b ${branchSlug}`,
+        `  cd /tmp/pi-env-${branchSlug}`,
+        "",
+        "See CONTRIBUTING.md § Worktree Isolation for details.",
+      ].join("\n"),
+    };
+  }
+
+  /** Matches `git checkout -b <name>` and `git switch -c/-C <name>` */
+  private isNewBranchCheckout(command: string): boolean {
+    return (
+      /\bgit\b.*\bcheckout\b.*\s-b\b/.test(command) ||
+      /\bgit\b.*\bswitch\b.*\s-[cC]\b/.test(command)
+    );
+  }
+
+  /** Extracts the branch name from a checkout -b or switch -c command */
+  private extractNewBranchName(command: string): string | null {
+    const m = command.match(/\b(?:checkout\s+-b|switch\s+-[cC])\s+(\S+)/);
+    return m ? m[1] : null;
+  }
+
   private isGitPush(command: string): boolean {
     // Match both `git push` and `git -C <path> push` (flags may appear before push)
     return /\bgit\b.*\bpush\b/.test(command);
@@ -117,12 +172,13 @@ export class BranchGuard {
     return [
       `⛔ Direct push to \`${branch}\`${repoHint} is blocked.`,
       "",
-      "Work on a feature branch instead:",
-      `  git checkout -b feat/<name>`,
+      "Use a worktree for branch work:",
+      `  git worktree add /tmp/pi-env-<name> -b feat/<name>`,
+      `  cd /tmp/pi-env-<name>`,
       `  git push -u origin feat/<name>`,
       "",
       "Merge back when ready:",
-      `  git checkout ${branch} && git merge --no-ff feat/<name>`,
+      `  cd /mnt/tank/code/pi-env && git merge --no-ff feat/<name>`,
     ].join("\n");
   }
 

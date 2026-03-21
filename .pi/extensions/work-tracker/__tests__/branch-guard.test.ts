@@ -58,9 +58,9 @@ describe("BranchGuard", () => {
     expect(r.reason).toContain("`main`");
   });
 
-  it("reason suggests a feature branch workflow", () => {
+  it("reason suggests a worktree workflow", () => {
     const r = guard.check("git push origin main");
-    expect(r.reason).toContain("git checkout -b");
+    expect(r.reason).toContain("git worktree add");
     expect(r.reason).toContain("git push -u origin feat/<name>");
   });
 
@@ -158,6 +158,53 @@ describe("BranchGuard", () => {
       const g = new BranchGuard(guardedConfig);
       const r = g.check("git push origin main");
       expect(r.shouldBlock).toBe(true);
+    });
+  });
+
+  // ─── Checkout guard (worktree enforcement) ──────────────────────
+
+  describe("checkout guard", () => {
+    it("blocks git checkout -b in guarded repo", () => {
+      const r = guard.check("git checkout -b feat/new-tool");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.reason).toContain("worktree");
+    });
+
+    it("blocks git switch -c in guarded repo", () => {
+      const r = guard.check("git switch -c fix/bug");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.reason).toContain("worktree");
+    });
+
+    it("blocks git switch -C (force create)", () => {
+      const r = guard.check("git switch -C feat/reset");
+      expect(r.shouldBlock).toBe(true);
+    });
+
+    it("includes branch name in worktree suggestion", () => {
+      const r = guard.check("git checkout -b feat/my-feature");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.reason).toContain("feat/my-feature");
+    });
+
+    it("allows checkout without -b (switching existing branches)", () => {
+      const r = guard.check("git checkout main");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("allows checkout of files", () => {
+      const r = guard.check("git checkout -- src/index.ts");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("allows git checkout -b in unguarded repo via -C", () => {
+      const guardedConfig: WorkTrackerConfig = {
+        guardedRepos: ["/tank/code/pi-env"],
+        protectedBranches: ["main"],
+      };
+      const g = new BranchGuard(guardedConfig);
+      const r = g.check("git -C /tank/code/credential-proxy checkout -b feat/new");
+      expect(r.shouldBlock).toBe(false);
     });
   });
 });
