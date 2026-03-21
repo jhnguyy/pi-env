@@ -9,6 +9,7 @@
  */
 
 import { Text } from "@mariozechner/pi-tui";
+import type { Theme } from "@mariozechner/pi-coding-agent";
 
 // ─── defaultRenderResult ─────────────────────────────────────────────────────
 
@@ -22,8 +23,7 @@ import { Text } from "@mariozechner/pi-tui";
  */
 export function defaultRenderResult(
   result: { content: Array<{ type: string; text?: string }>; details?: unknown },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  theme: any,
+  theme: Theme,
   opts?: { truncateToFirstLine?: boolean },
 ): Text {
   const first = result.content[0];
