@@ -53,6 +53,27 @@ ok "Package: $PI_PKG"
 PI_VERSION=$(bun -e "console.log(require('$PI_PKG/package.json').version)" 2>/dev/null || echo "unknown")
 info "Version: $PI_VERSION"
 
+# ── Pre-compile patches ─────────────────────────────────────────────────────
+# Applied to the dist files in node_modules before bun build --compile bakes
+# them into the binary. Patches are idempotent — safe to re-run, and become
+# no-ops once upstream fixes land (the old string simply won't match).
+#
+# To remove a patch: delete its sed line. The next `bun install` restores the
+# original file, and the next `./setup.sh` compiles without it.
+
+SYSTEM_PROMPT_JS="$PI_PKG/dist/core/system-prompt.js"
+
+# Fix: system prompt date uses UTC (toISOString) instead of local timezone.
+# getFullYear/getMonth/getDate return local-timezone values — no locale dependency.
+# Upstream issue: https://github.com/badlogic/pi-mono/issues/1873
+if grep -q 'toISOString().slice(0, 10)' "$SYSTEM_PROMPT_JS" 2>/dev/null; then
+  sed -i 's|new Date().toISOString().slice(0, 10)|((d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`)(new Date())|' \
+    "$SYSTEM_PROMPT_JS"
+  ok "Patched system-prompt.js: local timezone date"
+else
+  info "system-prompt.js: local date patch not needed (already patched or upstream fixed)"
+fi
+
 # ── Compile binary ───────────────────────────────────────────────────────────
 # Mirrors upstream: scripts/build-binaries.sh
 #   - Entrypoint: dist/bun/cli.js (bun-specific; handles provider registration
