@@ -9,7 +9,7 @@
  *   before_agent_start   — context injection (git status + todo list)
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
 
 import type { BranchGuard } from "./branch-guard";
@@ -30,13 +30,12 @@ export function registerHooks(
 ): void {
   // ─── 1. Branch Guard ────────────────────────────────────────────────────────
   pi.on("tool_call", async (event, _ctx) => {
-    if (event.toolName !== "bash") return undefined;
+    if (event.toolName !== "bash") return;
     const command = (event.input as Record<string, string>).command ?? "";
     const result = guard.check(command);
     if (result.shouldBlock) {
-      return { block: true, reason: result.reason };
+      return { block: true, reason: result.reason } satisfies ToolCallEventResult;
     }
-    return undefined;
   });
 
   // ─── 2. Handoff cleanup on merge ────────────────────────────────────────────

@@ -1,11 +1,13 @@
 /**
- * exit-shim — shared bus exit signal shim.
+ * @module _shared/exit-shim
+ * @purpose Bus exit-signal shell shim. Use when spawning a pane with busChannel.
  *
- * Written lazily to /tmp on first busChannel use. Pure bash — no external deps.
- * Invoked as: pi-bus-exit-shim <channel>
- * Reads PI_BUS_SESSION from environment, writes atomic exit signal to bus channel dir.
+ * Lazily writes a bash script to /tmp that publishes a bus exit signal.
+ * Called by tmux pane teardown so the orchestrator gets notified even if
+ * the worker process crashes.
  *
- * Consumers: agent-bus, orch, tmux.
+ * @example
+ *   ensureExitShim();  // idempotent — writes /tmp/pi-bus-exit-shim once
  */
 
 import { writeFileSync, existsSync } from "node:fs";

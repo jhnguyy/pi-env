@@ -1,14 +1,15 @@
 /**
- * render.ts — shared TUI rendering helpers.
+ * @module _shared/render
+ * @purpose TUI renderResult helper. Use in any tool's renderResult callback.
  *
- * Provides the standard error/success renderResult pattern used by
- * agent-bus, tmux, orch, and jit-catch. All four were duplicating the
- * same 10-line block verbatim.
- *
- * Consumers: agent-bus/index.ts, tmux/index.ts, orch/index.ts, jit-catch/index.ts.
+ * @example
+ *   renderResult(result, _opts, theme) {
+ *     return defaultRenderResult(result, theme);
+ *   }
  */
 
 import { Text } from "@mariozechner/pi-tui";
+import type { Theme } from "@mariozechner/pi-coding-agent";
 
 // ─── defaultRenderResult ─────────────────────────────────────────────────────
 
@@ -22,8 +23,7 @@ import { Text } from "@mariozechner/pi-tui";
  */
 export function defaultRenderResult(
   result: { content: Array<{ type: string; text?: string }>; details?: unknown },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  theme: any,
+  theme: Theme,
   opts?: { truncateToFirstLine?: boolean },
 ): Text {
   const first = result.content[0];

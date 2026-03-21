@@ -7,7 +7,7 @@
  * No prompts. No rule engine. No session modes. Block means block.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
 import { BLOCKLIST } from "./blocklist";
 import { CredentialScanner } from "./credential-scanner";
 
@@ -23,11 +23,9 @@ export default function (pi: ExtensionAPI) {
       if (!entry.tools.includes(event.toolName)) continue;
       const value = input[entry.field] ?? "";
       if (entry.pattern.test(value)) {
-        return { block: true, reason: entry.reason };
+        return { block: true, reason: entry.reason } satisfies ToolCallEventResult;
       }
     }
-
-    return undefined;
   });
 
   // ── Redact sensitive file reads before content reaches the model ───────────
