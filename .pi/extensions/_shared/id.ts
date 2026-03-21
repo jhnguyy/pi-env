@@ -1,11 +1,10 @@
 /**
- * id.ts — shared random ID generation.
+ * @module _shared/id
+ * @purpose Random hex ID generation. Use for pane IDs, bus sessions, request IDs.
  *
- * Wraps `randomBytes(n).toString("hex")` into a named helper so callers
- * don't need to import `node:crypto` themselves.
- *
- * Consumers: agent-bus/bus-client, agent-bus/transport, orch/manager,
- *            tmux/tmux-service, tmux/pane-manager.
+ * @example
+ *   const id = generateId();    // "a3f1c2" (6-char hex, 3 bytes)
+ *   const id = generateId(8);   // 16-char hex
  */
 
 import { randomBytes } from "node:crypto";

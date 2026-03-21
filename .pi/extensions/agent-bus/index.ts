@@ -13,8 +13,8 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 
 import { initBusService } from "./bus-service";
-import { BusError } from "./types";
 import { txt, ok, err } from "../_shared/result";
+import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
 
 export default function (pi: ExtensionAPI) {
@@ -241,9 +241,7 @@ export default function (pi: ExtensionAPI) {
             return err(`Unknown action: ${(params as { action: string }).action}`);
         }
       } catch (e) {
-        const msg =
-          e instanceof BusError ? e.message : `unexpected error: ${e}`;
-        return err(msg);
+        return err(formatError(e, "bus"));
       }
     },
 

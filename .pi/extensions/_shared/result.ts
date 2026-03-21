@@ -1,8 +1,11 @@
 /**
- * result.ts — shared tool result helpers.
+ * @module _shared/result
+ * @purpose Tool execute return values. Use for every success/error return in a tool.
  *
- * Used by agent-bus, orch, tmux, jit-catch (and any future extension).
- * Keeps the content/details shape consistent across all tool implementations.
+ * @example
+ *   return ok("3 files changed");            // success — green ✓ in TUI
+ *   return err("file not found");             // error — red in TUI
+ *   return { content: [txt(body)], details }; // custom details for renderResult
  */
 
 export function txt(text: string): { type: "text"; text: string } {

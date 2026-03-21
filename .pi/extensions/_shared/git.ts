@@ -1,14 +1,10 @@
 /**
- * git.ts — shared git subprocess utilities.
+ * @module _shared/git
+ * @purpose Synchronous git subprocess primitives. Use for any git operation in an extension.
  *
- * Provides a consistent synchronous git invocation primitive (gitSync) and
- * common high-level operations used across multiple extensions.
- *
- * All operations are synchronous — git commands are short-lived and don't
- * benefit from async. Use the timeout parameter for safety.
- *
- * Consumers: orch/git.ts, orch/manager.ts, work-tracker/context.ts,
- *            work-tracker/hooks.ts
+ * @example
+ *   const { status, stdout } = gitSync("/path/to/repo", ["log", "--oneline", "-5"]);
+ *   const branch = getCurrentBranch("/path/to/repo"); // "main" | null
  */
 
 import { spawnSync } from "node:child_process";

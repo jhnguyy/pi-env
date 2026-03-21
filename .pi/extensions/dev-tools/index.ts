@@ -16,6 +16,8 @@ import type { DiagnosticsResult, LspAction } from "./protocol";
 import { isLspSupported, isHcl } from "./filetypes";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { txt, err } from "../_shared/result";
+import { formatError } from "../_shared/errors";
 
 const execFileAsync = promisify(execFile);
 import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
@@ -90,16 +92,9 @@ export default function (pi: ExtensionAPI) {
             character: params.character,
             query: params.query,
           });
-          return {
-            content: [{ type: "text", text: formatResult(result) }],
-            details: result,
-          };
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : "LSP error";
-          return {
-            content: [{ type: "text", text: msg }],
-            details: { error: msg },
-          };
+          return { content: [txt(formatResult(result))], details: result };
+        } catch (e) {
+          return err(formatError(e));
         }
       },
     };
@@ -141,16 +136,10 @@ export default function (pi: ExtensionAPI) {
           character: params.character,
           query: params.query,
         });
-
-        return {
-          content: [{ type: "text", text: formatResult(result) }],
-          details: result,
-        };
-      } catch (err: unknown) {
-        return {
-          content: [{ type: "text", text: err instanceof Error ? err.message : "LSP error" }],
-          details: null,
-        };
+        return { content: [txt(formatResult(result))], details: result };
+      } catch (e) {
+        // Explicit shape — details must stay LspResult-compatible for renderDevToolsResult.
+        return { content: [txt(formatError(e))], details: null };
       }
     },
 

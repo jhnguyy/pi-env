@@ -22,8 +22,8 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 
 import { OrchestratorManager } from "./manager";
-import { OrchError } from "./types";
 import { txt, ok, err } from "../_shared/result";
+import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
 
 export default function (pi: ExtensionAPI) {
@@ -263,11 +263,7 @@ export default function (pi: ExtensionAPI) {
             return err(`Unknown action: ${params.action}`);
         }
       } catch (e) {
-        const msg =
-          e instanceof OrchError
-            ? `orch error [${e.code}]: ${e.message}`
-            : `unexpected error: ${e}`;
-        return err(msg);
+        return err(formatError(e, "orch"));
       }
     },
 

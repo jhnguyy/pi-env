@@ -12,8 +12,8 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { initTmuxService } from "./tmux-service";
 import type { RunDetails } from "./types";
-import { TmuxError } from "./types";
 import { txt, err } from "../_shared/result";
+import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
 
 export default function (pi: ExtensionAPI) {
@@ -215,10 +215,7 @@ export default function (pi: ExtensionAPI) {
             return err(`Unknown action: ${params.action}`);
         }
       } catch (e) {
-        const msg = e instanceof TmuxError
-          ? `tmux error [${e.code}]: ${e.message}`
-          : `unexpected error: ${e}`;
-        return err(msg);
+        return err(formatError(e, "tmux"));
       }
     },
 
