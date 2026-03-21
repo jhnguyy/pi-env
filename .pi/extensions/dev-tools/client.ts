@@ -43,20 +43,51 @@ export class LspClient {
 
   /** Send a request to the daemon, auto-spawning if needed. */
   async request(req: Omit<DaemonRequest, "id">): Promise<DaemonResponse> {
+    return this.doRequest(req, false);
+  }
+
+  /**
+   * Internal: send with one automatic retry on timeout.
+   *
+   * On timeout the running daemon is unresponsive (stale after a rebuild or
+   * crash). We tear down the socket so the next ensureConnected() reconnects,
+   * remove the stale socket file so the retry spawns a fresh daemon, then try
+   * once more.
+   */
+  private async doRequest(
+    req: Omit<DaemonRequest, "id">,
+    isRetry: boolean,
+  ): Promise<DaemonResponse> {
     await this.ensureConnected();
 
     const id = this.nextId++;
     const fullReq: DaemonRequest = { id, ...req };
 
-    return new Promise<DaemonResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`LSP request timed out: ${req.action}`));
-      }, REQUEST_TIMEOUT_MS);
+    try {
+      return await new Promise<DaemonResponse>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingRequests.delete(id);
+          // Tear down so the next ensureConnected() forces a fresh spawn.
+          this.socket?.destroy();
+          this.socket = null;
+          reject(new Error(`LSP request timed out: ${req.action}`));
+        }, REQUEST_TIMEOUT_MS);
 
-      this.pendingRequests.set(id, { resolve, reject, timer });
-      this.socket!.write(serializeRequest(fullReq));
-    });
+        this.pendingRequests.set(id, { resolve, reject, timer });
+        this.socket!.write(serializeRequest(fullReq));
+      });
+    } catch (err) {
+      if (
+        !isRetry &&
+        err instanceof Error &&
+        err.message.startsWith("LSP request timed out")
+      ) {
+        // Remove stale socket so doConnect() spawns a fresh daemon.
+        try { unlinkSync(this.socketPath); } catch {}
+        return this.doRequest(req, true);
+      }
+      throw err;
+    }
   }
 
   /** Convenience: send an action and unwrap the result or throw on error. */

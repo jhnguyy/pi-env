@@ -10,7 +10,8 @@
     "themes": ["themes"]
   },
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "postinstall": "sh scripts/restart-lsp-daemon.sh"
   },
   "peerDependencies": {
     "@sinclair/typebox": "*",
