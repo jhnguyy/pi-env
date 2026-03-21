@@ -112,15 +112,10 @@ export default function (pi: ExtensionAPI) {
       "Set PI_AGENT_ID env var or pass agentId to bus start to identify yourself on the bus.",
     ].join("\n"),
 
-    // promptSnippet and promptGuidelines are valid at runtime but missing from local (outdated) types.
-    // They are present in the global @mariozechner/pi-coding-agent type definitions.
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
     promptSnippet:
       "Inter-agent message bus. Publish/subscribe on named channels across pi processes.\n" +
       "Use bus wait for event-driven orchestration instead of sleep-poll loops.",
 
-    // @ts-ignore
     promptGuidelines: [
       "Start orchestration with bus start { agentId: 'orch' }. Pass returned session ID as PI_BUS_SESSION env var when spawning agents.",
       "Prefer bus wait over check-sleep loops for event-driven orchestration.",

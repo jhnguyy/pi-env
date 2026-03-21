@@ -189,7 +189,6 @@ export default function (pi: ExtensionAPI) {
               tools: params.tools,
               brief: params.brief,
               prompt: params.prompt,
-              interactive: params.interactive,
               busChannel: params.busChannel,
             });
             const lines = [`Worker '${params.label}' spawned.`, `Pane: ${result.paneId}`];
