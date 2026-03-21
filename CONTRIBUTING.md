@@ -39,7 +39,7 @@ cd /tmp/pi-env-<branch>
 # Do work, commit, push ...
 
 # Merge (from the main working tree)
-cd /mnt/tank/code/pi-env
+cd <repo-root>
 git merge --no-ff <branch>
 git push origin main
 
@@ -63,7 +63,7 @@ Worktrees give each session its own HEAD, index, and working tree. The main tree
 git worktree add /tmp/pi-env-notes -b feat/notes-patch
 cd /tmp/pi-env-notes
 # ... do work, commit, push ...
-cd /mnt/tank/code/pi-env
+cd <repo-root>
 git merge --no-ff feat/notes-patch
 git push origin main
 git worktree remove /tmp/pi-env-notes

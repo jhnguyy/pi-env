@@ -187,6 +187,17 @@ describe("BranchGuard", () => {
       expect(r.reason).toContain("feat/my-feature");
     });
 
+    it("derives worktree path from guarded repo name, not hardcoded", () => {
+      const g = new BranchGuard({
+        guardedRepos: ["/some/path/myrepo"],
+        protectedBranches: ["main"],
+      });
+      const r = g.check("git checkout -b feat/thing");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.reason).toContain("myrepo");
+      expect(r.reason).not.toContain("/some/path");
+    });
+
     it("allows checkout without -b (switching existing branches)", () => {
       const r = guard.check("git checkout main");
       expect(r.shouldBlock).toBe(false);

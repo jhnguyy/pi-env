@@ -102,6 +102,11 @@ export class BranchGuard {
     const branch = this.extractNewBranchName(command);
     const branchSlug = branch ?? "<branch>";
 
+    // Derive a worktree path suggestion from the relevant repo
+    const repoPath = explicitRepo ?? this.guardedRepos[0];
+    const repoName = repoPath ? resolve(repoPath).split("/").pop() ?? "repo" : "repo";
+    const tmpPath = `/tmp/${repoName}-${branchSlug}`;
+
     return {
       shouldBlock: true,
       targetBranch: branch ?? undefined,
@@ -109,8 +114,8 @@ export class BranchGuard {
         "⛔ Don't checkout branches in the main working tree — concurrent sessions collide.",
         "",
         "Use a worktree instead:",
-        `  git worktree add /tmp/pi-env-${branchSlug} -b ${branchSlug}`,
-        `  cd /tmp/pi-env-${branchSlug}`,
+        `  git worktree add ${tmpPath} -b ${branchSlug}`,
+        `  cd ${tmpPath}`,
         "",
         "See CONTRIBUTING.md § Worktree Isolation for details.",
       ].join("\n"),
@@ -168,17 +173,21 @@ export class BranchGuard {
   }
 
   private buildReason(branch: string, repoPath?: string): string {
-    const repoHint = repoPath ? ` (${repoPath.split("/").pop()})` : "";
+    const resolvedPath = repoPath ? resolve(repoPath) : undefined;
+    const repoName = resolvedPath ? (resolvedPath.split("/").pop() ?? "repo") : "repo";
+    const repoHint = repoPath ? ` (${repoName})` : "";
+    const tmpPath = `/tmp/${repoName}-<name>`;
+    const absPath = resolvedPath ?? "<repo-root>";
     return [
       `⛔ Direct push to \`${branch}\`${repoHint} is blocked.`,
       "",
       "Use a worktree for branch work:",
-      `  git worktree add /tmp/pi-env-<name> -b feat/<name>`,
-      `  cd /tmp/pi-env-<name>`,
+      `  git worktree add ${tmpPath} -b feat/<name>`,
+      `  cd ${tmpPath}`,
       `  git push -u origin feat/<name>`,
       "",
       "Merge back when ready:",
-      `  cd /mnt/tank/code/pi-env && git merge --no-ff feat/<name>`,
+      `  cd ${absPath} && git merge --no-ff feat/<name>`,
     ].join("\n");
   }
 
