@@ -26,20 +26,25 @@ import { isHeadless } from "./context.js";
 
 // ─── Slot registry ────────────────────────────────────────────────────────────
 
-export type SlotPlacement = "belowEditor" | "status";
+export type SlotPlacement = "aboveEditor" | "belowEditor" | "status";
 
 interface SlotDef {
-  readonly order: number;       // belowEditor: lower = closer to top
+  readonly order: number;       // aboveEditor/belowEditor: lower = closer to top within group
   readonly placement: SlotPlacement;
 }
 
 /**
- * Registered UI slots. order controls top-to-bottom render position for
- * belowEditor slots. status slots are independent (rendered in the footer).
+ * Registered UI slots. Placement determines which area of the TUI the slot
+ * renders in:
+ *   aboveEditor — between chat messages and the input editor (persistent context)
+ *   belowEditor — between the input editor and the footer (transient git/status info)
+ *   status      — inside the footer bar, one line per slot key
+ *
+ * order controls top-to-bottom position within aboveEditor and belowEditor groups.
  */
 export const SLOTS = {
-  "session-todos": { order: 1,  placement: "belowEditor" },
-  "work-tracker":  { order: 2,  placement: "belowEditor" },
+  "session-todos": { order: 1,  placement: "aboveEditor" },
+  "work-tracker":  { order: 1,  placement: "belowEditor" },
   "usage-bar":     { order: 10, placement: "status"      },
 } as const satisfies Record<string, SlotDef>;
 
@@ -96,14 +101,15 @@ export function flush(ctx: ExtensionContext): void {
   if (isHeadless(ctx)) return;
   const { content } = getState();
 
-  // belowEditor: always render in ascending order so Map insertion order
-  // in pi's widget container matches desired top-to-bottom layout.
-  const belowEditor = (Object.entries(SLOTS) as [SlotKey, SlotDef][])
-    .filter(([, d]) => d.placement === "belowEditor")
-    .sort((a, b) => a[1].order - b[1].order);
-
-  for (const [key, def] of belowEditor) {
-    ctx.ui.setWidget(key, content.get(key), { placement: def.placement as "belowEditor" });
+  // aboveEditor + belowEditor: render each group in ascending order so Map
+  // insertion order in pi's widget containers matches top-to-bottom layout.
+  for (const placement of ["aboveEditor", "belowEditor"] as const) {
+    const group = (Object.entries(SLOTS) as [SlotKey, SlotDef][])
+      .filter(([, d]) => d.placement === placement)
+      .sort((a, b) => a[1].order - b[1].order);
+    for (const [key] of group) {
+      ctx.ui.setWidget(key, content.get(key), { placement });
+    }
   }
 
   // status: independent per key, no ordering concern
