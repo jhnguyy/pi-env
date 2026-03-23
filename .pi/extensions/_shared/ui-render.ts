@@ -26,21 +26,31 @@ import { isHeadless } from "./context.js";
 
 // ─── Slot registry ────────────────────────────────────────────────────────────
 
-export type SlotPlacement = "belowEditor" | "status";
+export type SlotPlacement = "aboveEditor" | "belowEditor" | "status";
 
 interface SlotDef {
-  readonly order: number;       // belowEditor: lower = closer to top
+  readonly order: number;  // lower = closer to top within each placement group
   readonly placement: SlotPlacement;
 }
 
 /**
- * Registered UI slots. order controls top-to-bottom render position for
- * belowEditor slots. status slots are independent (rendered in the footer).
+ * Registered UI slots.
+ *
+ *   aboveEditor — above the input editor, below chat messages (persistent context)
+ *   belowEditor — below the input editor, above the footer (transient status)
+ *   status      — inside the footer; all status slots join on one line (avoid >1)
+ *
+ * Layout:
+ *   [session-todos]   aboveEditor  — todo list visible above where you type
+ *   ── input editor ──
+ *   [work-tracker]    belowEditor  — git branch/dirty state
+ *   [usage-bar]       belowEditor  — API quota, below work-tracker
+ *   ── footer: token stats · model ──
  */
 export const SLOTS = {
-  "session-todos": { order: 1,  placement: "belowEditor" },
-  "work-tracker":  { order: 2,  placement: "belowEditor" },
-  "usage-bar":     { order: 10, placement: "status"      },
+  "session-todos": { order: 1, placement: "aboveEditor" },
+  "work-tracker":  { order: 1, placement: "belowEditor" },
+  "usage-bar":     { order: 2, placement: "belowEditor" },
 } as const satisfies Record<string, SlotDef>;
 
 export type SlotKey = keyof typeof SLOTS;
@@ -96,17 +106,19 @@ export function flush(ctx: ExtensionContext): void {
   if (isHeadless(ctx)) return;
   const { content } = getState();
 
-  // belowEditor: always render in ascending order so Map insertion order
-  // in pi's widget container matches desired top-to-bottom layout.
-  const belowEditor = (Object.entries(SLOTS) as [SlotKey, SlotDef][])
-    .filter(([, d]) => d.placement === "belowEditor")
-    .sort((a, b) => a[1].order - b[1].order);
-
-  for (const [key, def] of belowEditor) {
-    ctx.ui.setWidget(key, content.get(key), { placement: def.placement as "belowEditor" });
+  // aboveEditor + belowEditor: render each group in ascending order.
+  // setWidget always removes + re-inserts, so calling in order means
+  // Map insertion order = top-to-bottom render order within each group.
+  for (const placement of ["aboveEditor", "belowEditor"] as const) {
+    const group = (Object.entries(SLOTS) as [SlotKey, SlotDef][])
+      .filter(([, d]) => d.placement === placement)
+      .sort((a, b) => a[1].order - b[1].order);
+    for (const [key] of group) {
+      ctx.ui.setWidget(key, content.get(key), { placement });
+    }
   }
 
-  // status: independent per key, no ordering concern
+  // status: all keys join on one line — only use for a single slot
   for (const [key, def] of Object.entries(SLOTS) as [SlotKey, SlotDef][]) {
     if (def.placement !== "status") continue;
     ctx.ui.setStatus(key, content.get(key)?.[0]);
