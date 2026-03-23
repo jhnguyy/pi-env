@@ -137,7 +137,16 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (process.env.PI_AGENT_ID) return;
     if (!ctx.hasUI) return;
-    await refresh(ctx);
+
+    if (ctx.model) {
+      await refresh(ctx);
+    } else {
+      // model_select with source="restore" fires before extensions load;
+      // ctx.model may be undefined at session_start. Retry once after a tick.
+      setTimeout(async () => {
+        if (ctx.model) await refresh(ctx);
+      }, 500);
+    }
   });
 
   pi.on("model_select", async (_event, ctx) => {
