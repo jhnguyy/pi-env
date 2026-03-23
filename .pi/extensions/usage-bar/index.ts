@@ -5,10 +5,12 @@
  * Auto-detects the active provider from ctx.model?.provider and fetches only
  * that provider's usage. Refreshes on session_start and model_select.
  *
- * Subagent detection: if PI_AGENT_ID is set, rendering is skipped entirely
- * (subagents don't need usage display).
+ * Subagent detection: ctx.hasUI is false in non-interactive (RPC/print) mode,
+ * which covers headless subagent processes. PI_AGENT_ID is NOT checked here
+ * because the main session may have it set for bus/orchestration purposes.
  *
- * Credentials: read from ~/.pi/agent/auth.json (same format pi uses).
+ * Credentials: resolved via ctx.modelRegistry.getApiKeyForProvider() — same
+ * pipeline pi uses for the active model (OAuth, env vars, custom providers).
  * Error handling: silent on missing credentials; brief "fetch failed" on errors.
  */
 
@@ -135,14 +137,13 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return;
     if (!ctx.hasUI) return;
 
     if (ctx.model) {
       await refresh(ctx);
     } else {
-      // model_select with source="restore" fires before extensions load;
-      // ctx.model may be undefined at session_start. Retry once after a tick.
+      // ctx.model may be undefined at session_start if the model restore event
+      // fired before extensions were loaded. Retry once after a short delay.
       setTimeout(async () => {
         if (ctx.model) await refresh(ctx);
       }, 500);
@@ -150,7 +151,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return;
     if (!ctx.hasUI) return;
     await refresh(ctx);
   });
