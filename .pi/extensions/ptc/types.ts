@@ -1,13 +1,29 @@
 /**
  * @module ptc/types
- * @purpose Shared constants and RPC message types for Programmatic Tool Calling.
+ * @purpose Shared constants, utilities, and RPC message types for Programmatic Tool Calling.
  */
+
+import type { ChildProcess } from "child_process";
 
 // ─── Execution limits ─────────────────────────────────────────────────────────
 
 export const MAX_TIMEOUT_MS = 120_000;   // 2 minutes
 export const MAX_TOOL_CALLS = 100;       // per execution
 export const MAX_OUTPUT_BYTES = 50_000;  // matches pi's DEFAULT_MAX_BYTES
+export const MAX_STDERR_BYTES = 10_000;  // cap stderr accumulation in RpcBridge
+
+// ─── Process utilities ────────────────────────────────────────────────────────
+
+/**
+ * Send SIGTERM to a child process, then SIGKILL after a grace period if it
+ * hasn't exited yet. Shared by executor.ts (timeout) and rpc-bridge.ts (abort).
+ */
+export function killGracefully(proc: ChildProcess, gracePeriodMs = 5_000): void {
+  proc.kill("SIGTERM");
+  setTimeout(() => {
+    if (proc.exitCode === null) proc.kill("SIGKILL");
+  }, gracePeriodMs);
+}
 
 // ─── Blocklist ────────────────────────────────────────────────────────────────
 

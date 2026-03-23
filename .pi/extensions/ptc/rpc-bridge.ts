@@ -12,7 +12,9 @@
 import { createInterface } from "readline";
 import type { ChildProcess } from "child_process";
 import type { ExtensionContext, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import { formatError } from "../_shared/errors";
 import type { ToolRegistry } from "./tool-registry";
+import { killGracefully, MAX_STDERR_BYTES } from "./types";
 import type { RpcOutbound, RpcInbound } from "./types";
 
 export class RpcBridge {
@@ -41,9 +43,23 @@ export class RpcBridge {
     const rl = createInterface({ input: proc.stdout!, terminal: false });
     rl.on("line", (line) => void this.handleLine(line));
 
-    // Capture stderr for error diagnostics
+    // Fallback settlement: fires when stdout closes (subprocess exits).
+    // Handles the case where the subprocess exits with code 0 without ever
+    // sending a { type: "complete" } message (e.g. user code calls
+    // process.exit(0) directly). If the promise has already settled via
+    // "complete" or "error", this resolve() call is a no-op.
+    rl.on("close", () => {
+      this.completionResolve(this.userOutput.join("\n"));
+    });
+
+    // Capture stderr for error diagnostics — capped to avoid unbounded growth.
     proc.stderr?.on("data", (chunk: Buffer) => {
-      this.stderr += chunk.toString();
+      if (this.stderr.length < MAX_STDERR_BYTES) {
+        this.stderr += chunk.toString();
+        if (this.stderr.length > MAX_STDERR_BYTES) {
+          this.stderr = this.stderr.slice(0, MAX_STDERR_BYTES) + "\n[stderr truncated]";
+        }
+      }
     });
 
     // Handle unexpected exit
@@ -63,10 +79,7 @@ export class RpcBridge {
       signal.addEventListener(
         "abort",
         () => {
-          proc.kill("SIGTERM");
-          setTimeout(() => {
-            if (proc.exitCode === null) proc.kill("SIGKILL");
-          }, 5_000);
+          killGracefully(proc);
           this.completionReject(new Error("PTC execution cancelled"));
         },
         { once: true },
@@ -133,8 +146,7 @@ export class RpcBridge {
       );
       this.send({ type: "tool_result", id: msg.id, result });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.send({ type: "tool_error", id: msg.id, error: message });
+      this.send({ type: "tool_error", id: msg.id, error: formatError(err, "ptc") });
     }
   }
 

@@ -47,6 +47,7 @@ import {
   createReadToolDefinition,
   createWriteToolDefinition,
 } from "@mariozechner/pi-coding-agent";
+import { generateId } from "../_shared/id";
 import { BLOCKED_TOOLS } from "./types";
 
 type ExecuteFn = (
@@ -62,9 +63,16 @@ const BUILTIN_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", 
 export class ToolRegistry {
   /**
    * Execute functions for extension tools captured via registerTool intercept.
-   * Built-ins are NOT stored here — they're created fresh via factory functions.
+   * Built-ins are NOT stored here — they're created via factory functions.
    */
   private extensionTools = new Map<string, ExecuteFn>();
+
+  /**
+   * Cache of built-in ToolDefinitions keyed by `${cwd}:${toolName}`.
+   * Factory functions are cheap closures but get called up to 100 times/execution,
+   * so we cache to avoid redundant object creation.
+   */
+  private builtinCache = new Map<string, NonNullable<ReturnType<typeof createBuiltinDefinition>>>();
 
   constructor(pi: ExtensionAPI) {
     this.installRegisterToolIntercept(pi);
@@ -136,12 +144,18 @@ export class ToolRegistry {
     signal: AbortSignal | undefined,
     ctx: ExtensionContext,
   ): Promise<string> {
-    const toolCallId = `ptc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const toolCallId = `ptc_${generateId()}`;
     let result: AgentToolResult<unknown>;
 
     if (BUILTIN_NAMES.has(toolName)) {
-      const def = createBuiltinDefinition(toolName, cwd);
-      if (!def) throw new Error(`[ptc] Unknown built-in tool: ${toolName}`);
+      const cacheKey = `${cwd}:${toolName}`;
+      let def = this.builtinCache.get(cacheKey);
+      if (!def) {
+        const created = createBuiltinDefinition(toolName, cwd);
+        if (!created) throw new Error(`[ptc] Unknown built-in tool: ${toolName}`);
+        this.builtinCache.set(cacheKey, created);
+        def = created;
+      }
       result = await def.execute(toolCallId, params as any, signal, undefined, ctx);
     } else {
       const execute = this.extensionTools.get(toolName);

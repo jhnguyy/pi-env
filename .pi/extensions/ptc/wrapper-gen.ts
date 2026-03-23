@@ -44,6 +44,10 @@ export function generateWrappers(tools: ToolInfo[]): {
   code: string;
   available: Array<{ name: string; identifier: string; description: string }>;
 } {
+  // Intentional double-filter: callers (getAvailableTools) already strip blocked
+  // tools, but generateWrappers is a pure code-gen function that must be safe to
+  // call with any ToolInfo[] slice. The extra filter is defence-in-depth, not a
+  // bug — it costs O(n) and prevents accidental wrapper generation for blocked tools.
   const available = tools.filter((t) => !BLOCKED_TOOLS.has(t.name));
 
   const code = available

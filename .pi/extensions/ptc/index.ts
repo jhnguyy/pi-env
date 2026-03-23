@@ -1,9 +1,9 @@
 /**
  * ptc — Programmatic Tool Calling extension for pi-env
  *
- * Lets Claude write TypeScript code that calls tools as async functions in a
- * single LLM round-trip. Only console.log() output and return values reach the
- * context window — intermediate results stay in subprocess memory.
+ * Lets the model write a TypeScript script that calls tools as async functions
+ * in a single round-trip. Only console.log() output and return values reach the
+ * context window — intermediate tool results stay in subprocess memory.
  *
  * Design: see projects/homelab/ptc_extension_design.md in vault
  *
@@ -24,7 +24,6 @@ import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
-import { generateWrappers } from "./wrapper-gen";
 import { BLOCKED_TOOLS } from "./types";
 
 export default function ptcExtension(pi: ExtensionAPI) {
@@ -37,21 +36,17 @@ export default function ptcExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "ptc",
     label: "Programmatic Tool Calling",
-    description: buildDescription(pi, registry),
+    description: DESCRIPTION,
     promptSnippet:
-      "Execute TypeScript code that calls multiple tools in one round-trip, keeping intermediate results out of context",
+      "Run a TypeScript script that calls tools as async functions — intermediate results stay out of context",
     promptGuidelines: [
-      "Use ptc when you need to call the same tool many times (>3) or want to filter/aggregate results before returning.",
-      "Only console.log() output and return values reach the context — intermediate tool results are invisible.",
-      "Blocked tools (use directly instead): " + [...BLOCKED_TOOLS].join(", "),
+      "Prefer ptc over sequential tool calls when you need the same tool more than twice or want to filter results before they enter context.",
+      "ptc is best for aggregation, loops, and conditional branching over tool output.",
+      "Avoid ptc for one-off tool calls — the overhead is not worth it.",
     ],
     parameters: Type.Object({
       code: Type.String({
-        description: [
-          "TypeScript code to execute. Available tools are async functions.",
-          "Use console.log() to output results. Hyphens in tool names become underscores (e.g. dev-tools → dev_tools).",
-          "The code runs inside an async function — top-level await is supported.",
-        ].join(" "),
+        description: PARAM_DESCRIPTION,
       }),
     }),
 
@@ -89,45 +84,60 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_shutdown", async () => {
-    // No persistent subprocess or resources to clean up
-  });
 }
 
-// ─── Description builder ──────────────────────────────────────────────────────
+// ─── Description and parameter description ───────────────────────────────────
+//
+// DESIGN RULE: both constants must be fully self-contained.
+// Any model (Claude, GPT, Gemini, local) should be able to write correct ptc
+// code from description + param_description alone, without relying on the
+// system prompt's Guidelines section or any model-specific intuition.
+//
+// Tool list is intentionally NOT embedded: this runs at extension load time,
+// before other extensions have called registerTool(). The system prompt's
+// "Available tools" section lists them — no duplication needed.
 
-function buildDescription(pi: ExtensionAPI, registry: ToolRegistry): string {
-  const { available } = generateWrappers(registry.getAvailableTools(pi));
+/** Tool description: execution contract + example. Self-contained for any model. */
+const DESCRIPTION = [
+  "Run a TypeScript/JavaScript script where every available tool is an async function.",
+  "Only console.log() output and explicit return values are returned to you.",
+  "Intermediate tool results stay in the script's memory — they do NOT enter the context window.",
+  "",
+  "CALLING TOOLS:",
+  "  Each tool is a function named after the tool, with hyphens replaced by underscores.",
+  "  Pass a single object argument with the tool's named parameters.",
+  "  All calls must be awaited.",
+  "  Example: await read({ path: 'src/index.ts' })",
+  "  Example: await bash({ command: 'git log --oneline -5' })",
+  "  Example: await dev_tools({ action: 'diagnostics', path: '/abs/path.ts' })",
+  "",
+  "OUTPUT:",
+  "  Use console.log() to emit results — each call appends a line to the output.",
+  "  Alternatively, return a value from the script body; it becomes the output.",
+  "  Nothing else reaches you — all other computation is invisible.",
+  "",
+  "EXAMPLE:",
+  "  const raw = await grep({ pattern: 'TODO', path: 'src/' });",
+  "  const hits = raw.split('\\n').filter(l => l.trim().length > 0 && !l.includes('.test.'));",
+  "  console.log(hits.length + ' TODOs in non-test files');",
+  "  for (const h of hits.slice(0, 5)) console.log(h);",
+  "",
+  "LIMITS:",
+  "  Timeout: 120 s | Max output: 50 KB | Max tool calls per run: 100",
+  "",
+  "BLOCKED TOOLS (must be called directly, not inside ptc):",
+  "  " + [...BLOCKED_TOOLS].join(", "),
+].join("\n");
 
-  const toolList = available
-    .map((t) => {
-      const alias = t.identifier !== t.name ? ` (call as \`${t.identifier}\`)` : "";
-      return `  ${t.name}${alias} — ${t.description}`;
-    })
-    .join("\n");
-
-  return [
-    "Execute TypeScript code that calls tools as async functions in a single LLM round-trip.",
-    "",
-    "Use when you need to:",
-    "  - Call the same tool many times (read 20 files, grep across many paths)",
-    "  - Filter or aggregate results before reporting",
-    "  - Conditional logic based on intermediate results",
-    "  - Avoid token waste from intermediate results entering context",
-    "",
-    "Each tool is an async function. console.log() output and return values reach the context.",
-    "Hyphens in tool names become underscores (dev-tools → dev_tools).",
-    "",
-    "Example:",
-    "  const raw = await grep({ pattern: 'TODO', path: 'src/', recursive: true });",
-    "  const lines = raw.split('\\n').filter(l => !l.includes('.test.'));",
-    "  console.log(`${lines.length} TODOs in non-test files:\\n${lines.slice(0, 10).join('\\n')}`);",
-    "",
-    `Limits: ${Math.round(120)} s timeout · 50 KB max output · 100 tool calls max`,
-    "",
-    "Blocked tools (use directly, not via ptc): " + [...BLOCKED_TOOLS].join(", "),
-    "",
-    "Available tools:",
-    toolList || "  (none — check extension load order)",
-  ].join("\n");
-}
+/** Parameter description: syntax contract. Tells any model exactly what to write. */
+const PARAM_DESCRIPTION = [
+  "The script body to execute. Write it as if it is the body of an async function:",
+  "top-level await is supported, variables declared at the top level persist for the whole script.",
+  "",
+  "Tool names: hyphens become underscores (dev-tools → dev_tools).",
+  "Each tool accepts a single object argument: await toolName({ param1: val1, param2: val2 }).",
+  "All tool calls must be awaited — tools are async.",
+  "",
+  "Return a string to set the output, or use console.log(). Both are captured.",
+  "Throwing an error marks the result as failed.",
+].join("\n");
