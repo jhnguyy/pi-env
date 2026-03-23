@@ -3,17 +3,19 @@
  *
  *   tool_call hook       — branch guard (blocks git push to protected branches)
  *   tool_result hook     — handoff cleanup on merge / git pull
- *   session_start hook   — widget init, todo clear, tool deactivation
+ *   session_start hook   — slot init, todo clear, tool deactivation
  *   session_switch hook  — todo clear on /new or /resume
- *   session_shutdown     — todo clear on exit
+ *   session_shutdown     — todo clear + slot state reset
  *   before_agent_start   — context injection (git status + todo list)
  */
 
 import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
+import { isOrchWorker } from "../_shared/context";
+import { setSlot, resetSlots } from "../_shared/ui-render";
 
 import type { BranchGuard } from "./branch-guard";
-import { buildStatusLine, getGitStatus, refreshTodoWidget } from "./context";
+import { buildStatusLine, buildStatusLineThemed, getGitStatus } from "./context";
 import {
   cleanupHandoffs,
   detectMergedBranch,
@@ -39,15 +41,6 @@ export function registerHooks(
   });
 
   // ─── 2. Handoff cleanup on merge ────────────────────────────────────────────
-  //
-  // Path A — local git merge (fast-forward or merge commit):
-  //   Fires when the agent runs `git merge <branch>` directly.
-  //
-  // Path B — git pull on a protected branch (GitHub PR merge workflow):
-  //   After any git pull, checks each guarded repo. If we're on a protected
-  //   branch, collects all locally-known merged branches and cleans up their
-  //   handoffs. This covers the common flow: PR merges on GitHub → agent runs
-  //   `git checkout main && git pull`.
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "bash" || event.isError) return;
 
@@ -57,7 +50,7 @@ export function registerHooks(
       .map((c) => c.text ?? "")
       .join("");
 
-    // ── Path A: local git merge ────────────────────────────────────
+    // Path A: local git merge
     const mergedBranch = detectMergedBranch(command, output);
     if (mergedBranch) {
       const deleted = cleanupHandoffs(mergedBranch);
@@ -70,23 +63,19 @@ export function registerHooks(
       return;
     }
 
-    // ── Path B: git pull on a protected branch ─────────────────────
+    // Path B: git pull on a protected branch
     if (!isGitPull(command)) return;
 
     const allMerged = new Set<string>();
     for (const repoPath of config.guardedRepos) {
       const { branch: current } = getGitStatus(repoPath);
       if (!current || !config.protectedBranches.includes(current)) continue;
-
       for (const branch of getMergedBranches(repoPath)) {
-        if (!config.protectedBranches.includes(branch)) {
-          allMerged.add(branch);
-        }
+        if (!config.protectedBranches.includes(branch)) allMerged.add(branch);
       }
     }
 
     if (allMerged.size === 0) return;
-
     const deleted = cleanupHandoffs(allMerged);
     if (deleted.length > 0) {
       ctx.ui.notify(
@@ -96,16 +85,11 @@ export function registerHooks(
     }
   });
 
-  // ─── 3. Session start — widget init, todo clear, tool deactivation ──────────
+  // ─── 3. Session start ───────────────────────────────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     store.clear();
-
-    if (process.env.PI_AGENT_ID) return;
-
-    const line = buildStatusLine(config);
-    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
-
-    refreshTodoWidget(store, ctx);
+    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
 
     // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it active.
     if (!process.env.PI_SESSION_READER) {
@@ -117,45 +101,33 @@ export function registerHooks(
   pi.on("session_switch", async (_event, ctx) => {
     const open = store.open().length;
     store.clear();
-    if (process.env.PI_AGENT_ID) return;
-    refreshTodoWidget(store, ctx);
+    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
     if (open > 0) {
       ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
     }
   });
 
-  // ─── 5. Session shutdown (exit) — clear todos ───────────────────────────────
+  // ─── 5. Session shutdown — clear todos + slot state ─────────────────────────
   pi.on("session_shutdown", async () => {
     store.clear();
+    resetSlots();
   });
 
-  // ─── 6. Context injection + widget refresh (root sessions only) ─────────────
+  // ─── 6. Widget refresh + context injection (root sessions only) ──────────────
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return {};
+    if (isOrchWorker()) return {};
+    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
 
-    const line = buildStatusLine(config);
-    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
-    refreshTodoWidget(store, ctx);
-
+    const line = buildStatusLine(config); // plain text for LLM
     if (!line) return {};
-    return {
-      message: {
-        customType: "work-tracker",
-        content: line,
-        display: false,
-      },
-    };
+    return { message: { customType: "work-tracker", content: line, display: false } };
   });
 
   // ─── 7. Todo context injection (root sessions only) ─────────────────────────
   pi.on("before_agent_start", async () => {
-    if (process.env.PI_AGENT_ID) return {};
-    return {
-      message: {
-        customType: "session-todos",
-        content: store.render(),
-        display: false,
-      },
-    };
+    if (isOrchWorker()) return {};
+    return { message: { customType: "session-todos", content: store.render(), display: false } };
   });
 }

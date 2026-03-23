@@ -28,7 +28,8 @@ import { homedir } from "node:os";
 
 import { BranchGuard } from "./branch-guard";
 import { registerCommands } from "./commands";
-import { loadConfig, refreshTodoWidget } from "./context";
+import { loadConfig } from "./context";
+import { setSlot } from "../_shared/ui-render";
 import { registerHooks } from "./hooks";
 import { TodoStore } from "./store";
 import { extractSession, formatSummary } from "./extractor";
@@ -75,14 +76,14 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "clear") {
         store.clear();
-        refreshTodoWidget(store, ctx);
+        setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         return { content: [{ type: "text" as const, text: "Cleared all tasks." }], details: {} };
       }
 
       if (action === "add") {
         if (!text) throw new Error("text is required for add");
         const item = store.add(text);
-        refreshTodoWidget(store, ctx);
+        setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         return {
           content: [{ type: "text" as const, text: `Added: □ (${item.id}) ${item.text}` }],
           details: { id: item.id },
@@ -94,7 +95,7 @@ export default function (pi: ExtensionAPI) {
         const n = parseInt(text, 10);
         const item = store.complete(isNaN(n) ? text : n);
         if (!item) throw new Error(`No matching open task: ${text}`);
-        refreshTodoWidget(store, ctx);
+        setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         return {
           content: [{ type: "text" as const, text: `Completed: ✅ (${item.id}) ${item.text}` }],
           details: { id: item.id },
@@ -106,7 +107,7 @@ export default function (pi: ExtensionAPI) {
         const n = parseInt(text, 10);
         const ok = store.remove(isNaN(n) ? text : n);
         if (!ok) throw new Error(`No matching task: ${text}`);
-        refreshTodoWidget(store, ctx);
+        setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         return {
           content: [{ type: "text" as const, text: `Removed task ${text}.` }],
           details: {},

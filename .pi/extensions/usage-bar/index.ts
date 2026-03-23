@@ -5,10 +5,12 @@
  * Auto-detects the active provider from ctx.model?.provider and fetches only
  * that provider's usage. Refreshes on session_start and model_select.
  *
- * Subagent detection: if PI_AGENT_ID is set, rendering is skipped entirely
- * (subagents don't need usage display).
+ * Subagent detection: uses isHeadless(ctx) from _shared/context — false in
+ * non-interactive (RPC/print) mode. See _shared/context.ts for rationale on
+ * why PI_AGENT_ID is not used.
  *
- * Credentials: read from ~/.pi/agent/auth.json (same format pi uses).
+ * Credentials: resolved via ctx.modelRegistry.getApiKeyForProvider() — same
+ * pipeline pi uses for the active model (OAuth, env vars, custom providers).
  * Error handling: silent on missing credentials; brief "fetch failed" on errors.
  */
 
@@ -16,8 +18,8 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { AnthropicUsage, CopilotUsage } from "./types.js";
 import { fetchAnthropicUsage, fetchCopilotUsage } from "./providers.js";
-
-const STATUS_KEY = "usage-bar";
+import { isHeadless } from "../_shared/context.js";
+import { setSlot, clearSlot } from "../_shared/ui-render.js";
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
 
@@ -73,7 +75,8 @@ function formatAnthropicStatus(theme: Theme, usage: AnthropicUsage): string {
   const weekStr = colorByPct(theme, weekPct, `${weekPct}%`);
   const resetStr = theme.fg("muted", `Resets ${formatResetIn(dominant.resets_at)}`);
 
-  return `Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
+  const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
+  return `${label} Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
 }
 
 function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
@@ -86,7 +89,8 @@ function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
   const reqStr = theme.fg("muted", `${snap.remaining}/${snap.entitlement} reqs`);
   const resetStr = theme.fg("muted", `Resets ${formatShortDate(usage.quota_reset_date_utc)}`);
 
-  return `Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
+  const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
+  return `${label} Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
 }
 
 // ─── Provider → usage API mapping ─────────────────────────────────────────────
@@ -106,28 +110,22 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
 async function refresh(ctx: ExtensionContext): Promise<void> {
   const provider = ctx.model?.provider;
   if (!provider || !(provider in PROVIDER_FETCHERS)) {
-    ctx.ui.setStatus(STATUS_KEY, undefined);
+    clearSlot("usage-bar", ctx);
     return;
   }
 
   try {
     // Resolve token through pi's auth pipeline — same credentials as the active model
     const token = await ctx.modelRegistry.getApiKeyForProvider(provider);
-    if (!token) {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-      return;
-    }
+    if (!token) { clearSlot("usage-bar", ctx); return; }
 
     const usage = await PROVIDER_FETCHERS[provider](token);
-    if (!usage) {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-      return;
-    }
+    if (!usage) { clearSlot("usage-bar", ctx); return; }
 
-    ctx.ui.setStatus(STATUS_KEY, PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage));
+    setSlot("usage-bar", PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage), ctx);
   } catch {
-    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("error", "Usage: fetch failed"));
-    setTimeout(() => ctx.ui.setStatus(STATUS_KEY, undefined), 4_000);
+    setSlot("usage-bar", ctx.ui.theme.fg("error", "Usage: fetch failed"), ctx);
+    setTimeout(() => clearSlot("usage-bar", ctx), 4_000);
   }
 }
 
@@ -135,14 +133,21 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return;
-    if (!ctx.hasUI) return;
-    await refresh(ctx);
+    if (isHeadless(ctx)) return;
+
+    if (ctx.model) {
+      await refresh(ctx);
+    } else {
+      // ctx.model may be undefined at session_start if the model restore event
+      // fired before extensions were loaded. Retry once after a short delay.
+      setTimeout(async () => {
+        if (ctx.model) await refresh(ctx);
+      }, 500);
+    }
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return;
-    if (!ctx.hasUI) return;
+    if (isHeadless(ctx)) return;
     await refresh(ctx);
   });
 }

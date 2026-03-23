@@ -6,10 +6,9 @@
  * helper that updates the TUI session-todos widget.
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { Theme } from "@mariozechner/pi-coding-agent";
 
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount } from "../_shared/git";
-import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -42,6 +41,7 @@ export function getCurrentBranch(): string | null {
 
 // ─── Status line ──────────────────────────────────────────────────────────────
 
+/** Plain-text status line for LLM context injection. */
 export function buildStatusLine(config: WorkTrackerConfig): string | null {
   const parts: string[] = [];
   for (const repoPath of config.guardedRepos) {
@@ -55,9 +55,24 @@ export function buildStatusLine(config: WorkTrackerConfig): string | null {
   return parts.length > 0 ? `[work-tracker] ${parts.join(" | ")}` : null;
 }
 
-// ─── Widget refresh ───────────────────────────────────────────────────────────
-
-export function refreshTodoWidget(store: TodoStore, ctx: ExtensionContext): void {
-  if (process.env.PI_AGENT_ID) return;
-  ctx.ui.setWidget("session-todos", [store.render()], { placement: "belowEditor" });
+/**
+ * Themed status line for the TUI widget.
+ * Label uses customMessageLabel + bold; branch uses accent; warnings use warning color.
+ */
+export function buildStatusLineThemed(config: WorkTrackerConfig, theme: Theme): string | null {
+  const parts: string[] = [];
+  for (const repoPath of config.guardedRepos) {
+    const { branch, dirty } = getGitStatus(repoPath);
+    if (!branch) continue;
+    const name = repoPath.split("/").pop() ?? repoPath;
+    const isProtected = config.protectedBranches.includes(branch);
+    const warn = isProtected ? ` ${theme.fg("warning", "(⚠️ protected branch)")}` : "";
+    const dirtyNote = dirty > 0 ? ` ${theme.fg("warning", `(${dirty} uncommitted)`)}` : "";
+    parts.push(`${name}: ${theme.fg("accent", branch)}${warn}${dirtyNote}`);
+  }
+  if (parts.length === 0) return null;
+  const label = theme.fg("customMessageLabel", "\x1b[1m[work-tracker]\x1b[22m");
+  return `${label} ${parts.join(" | ")}`;
 }
+
+

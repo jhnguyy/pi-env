@@ -84,8 +84,13 @@ export function buildPiCommand(opts: {
 
 // ─── Command builder ─────────────────────────────────────────
 //
-// Injects PI_BUS_SESSION, PI_AGENT_ID, ORCH_DIR, and ORCH_INTERACTIVE into
-// the worker environment, optionally sets cwd to the worktree.
+// Injects PI_BUS_SESSION, PI_AGENT_ID, PI_ORCH_WORKER, ORCH_DIR, and
+// ORCH_INTERACTIVE into the worker environment, optionally sets cwd to the
+// worktree.
+//
+// PI_ORCH_WORKER is set exclusively on spawned worker processes so extensions
+// can distinguish "I am a worker" from "the parent used bus.start()". Never
+// use PI_AGENT_ID for this — orch.start() also sets it on the parent process.
 //
 // Uses `env -C <cwd>` (GNU coreutils 8.28+, standard on modern Linux)
 // instead of nested `bash -c 'cd ... && ...'` to avoid shell quoting issues.
@@ -111,6 +116,7 @@ function buildWorkerCommand(opts: {
   envParts.push(
     `PI_BUS_SESSION=${busSession}`,
     `PI_AGENT_ID=${label}`,
+    `PI_ORCH_WORKER=${label}`,
     `ORCH_DIR=${orchDir}`,
     `ORCH_INTERACTIVE=1`,
   );
