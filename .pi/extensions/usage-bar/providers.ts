@@ -6,19 +6,25 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 
 import type { AnthropicUsage, AuthJson, CopilotUsage } from "./types.js";
 
-const AUTH_PATH = resolve(homedir(), ".pi/agent/auth.json");
+/** Resolve the agent directory — respects PI_CODING_AGENT_DIR if set. */
+function agentDir(): string {
+  const envDir = process.env.PI_CODING_AGENT_DIR;
+  if (envDir) return envDir.startsWith("~/") ? join(homedir(), envDir.slice(2)) : envDir;
+  return join(homedir(), ".pi", "agent");
+}
+
 const FETCH_TIMEOUT_MS = 5_000;
 
 // ─── Auth ────────────────────────────────────────────────────────────────────
 
 function readAuth(): AuthJson | null {
   try {
-    const raw = readFileSync(AUTH_PATH, "utf-8");
+    const raw = readFileSync(join(agentDir(), "auth.json"), "utf-8");
     return JSON.parse(raw) as AuthJson;
   } catch {
     return null;
@@ -59,7 +65,6 @@ export async function fetchAnthropicUsage(): Promise<AnthropicUsage | null> {
 
 export async function fetchCopilotUsage(): Promise<CopilotUsage | null> {
   const auth = readAuth();
-  // Prefer the access token, fall back to refresh token
   // Prefer refresh token (GitHub PAT) for GitHub API endpoints
   const token = auth?.["github-copilot"]?.refresh ?? auth?.["github-copilot"]?.access;
   if (!token) return null;

@@ -29,11 +29,11 @@ function progressBar(pct: number): string {
   return `▐${bar}▌`;
 }
 
-/** Color text based on utilization percentage using the theme. */
+/** Color text based on utilization percentage using theme semantic colors. */
 function colorByPct(theme: Theme, pct: number, text: string): string {
   if (pct >= 80) return theme.fg("error", text);
   if (pct >= 50) return theme.fg("warning", text);
-  return theme.fg("accent", text);
+  return theme.fg("success", text);
 }
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
