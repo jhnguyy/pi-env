@@ -40,6 +40,7 @@ export function formatUsageStats(
 export function renderSubagentCall(
   args: { agent?: string; task?: string; tools?: string[]; model?: string },
   theme: any,
+  _ctx?: unknown,
 ) {
   const task = args.task ?? "";
   const preview = task.length > 70 ? `${task.slice(0, 70)}...` : task;
@@ -64,6 +65,7 @@ export function renderSubagentResult(
   result: AgentToolResult<SubagentDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
+  _ctx?: unknown,
 ) {
   const details = result.details as SubagentDetails | undefined;
 
