@@ -19,8 +19,7 @@ import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { AnthropicUsage, CopilotUsage } from "./types.js";
 import { fetchAnthropicUsage, fetchCopilotUsage } from "./providers.js";
 import { isHeadless } from "../_shared/context.js";
-
-const STATUS_KEY = "usage-bar";
+import { setSlot, clearSlot } from "../_shared/ui-render.js";
 
 // ─── Progress bar ─────────────────────────────────────────────────────────────
 
@@ -111,28 +110,22 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
 async function refresh(ctx: ExtensionContext): Promise<void> {
   const provider = ctx.model?.provider;
   if (!provider || !(provider in PROVIDER_FETCHERS)) {
-    ctx.ui.setStatus(STATUS_KEY, undefined);
+    clearSlot("usage-bar", ctx);
     return;
   }
 
   try {
     // Resolve token through pi's auth pipeline — same credentials as the active model
     const token = await ctx.modelRegistry.getApiKeyForProvider(provider);
-    if (!token) {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-      return;
-    }
+    if (!token) { clearSlot("usage-bar", ctx); return; }
 
     const usage = await PROVIDER_FETCHERS[provider](token);
-    if (!usage) {
-      ctx.ui.setStatus(STATUS_KEY, undefined);
-      return;
-    }
+    if (!usage) { clearSlot("usage-bar", ctx); return; }
 
-    ctx.ui.setStatus(STATUS_KEY, PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage));
+    setSlot("usage-bar", PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage), ctx);
   } catch {
-    ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("error", "Usage: fetch failed"));
-    setTimeout(() => ctx.ui.setStatus(STATUS_KEY, undefined), 4_000);
+    setSlot("usage-bar", ctx.ui.theme.fg("error", "Usage: fetch failed"), ctx);
+    setTimeout(() => clearSlot("usage-bar", ctx), 4_000);
   }
 }
 

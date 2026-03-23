@@ -6,11 +6,9 @@
  * helper that updates the TUI session-todos widget.
  */
 
-import type { ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
+import type { Theme } from "@mariozechner/pi-coding-agent";
 
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount } from "../_shared/git";
-import { isHeadless } from "../_shared/context";
-import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -77,9 +75,4 @@ export function buildStatusLineThemed(config: WorkTrackerConfig, theme: Theme): 
   return `${label} ${parts.join(" | ")}`;
 }
 
-// ─── Widget refresh ───────────────────────────────────────────────────────────
 
-export function refreshTodoWidget(store: TodoStore, ctx: ExtensionContext): void {
-  if (isHeadless(ctx)) return;
-  ctx.ui.setWidget("session-todos", store.renderWidget(ctx.ui.theme), { placement: "belowEditor" });
-}

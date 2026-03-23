@@ -19,6 +19,10 @@ Grep for `@purpose` in the source files for per-module context.
 | Ensure bus exit-signal shim exists        | `ensureExitShim()`                    | exit-shim.ts |
 | Guard widget/status rendering             | `isHeadless(ctx)`                     | context.ts   |
 | Guard LLM context injection in workers   | `isOrchWorker()`                      | context.ts   |
+| Set a named UI slot (widget or status)   | `setSlot(key, content, ctx)`          | ui-render.ts |
+| Clear a named UI slot                    | `clearSlot(key, ctx)`                 | ui-render.ts |
+| Re-render all slots from current state   | `flush(ctx)`                          | ui-render.ts |
+| Reset slot state on session shutdown     | `resetSlots()`                        | ui-render.ts |
 
 ## Conventions
 
