@@ -14,7 +14,7 @@ import { getMergedBranches } from "../_shared/git";
 import { isHeadless, isOrchWorker } from "../_shared/context";
 
 import type { BranchGuard } from "./branch-guard";
-import { buildStatusLine, getGitStatus, refreshTodoWidget } from "./context";
+import { buildStatusLine, buildStatusLineThemed, getGitStatus, refreshTodoWidget } from "./context";
 import {
   cleanupHandoffs,
   detectMergedBranch,
@@ -103,10 +103,11 @@ export function registerHooks(
 
     if (isHeadless(ctx)) return;
 
-    const line = buildStatusLine(config);
-    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
-
+    // session-todos set first → renders on top; work-tracker set second → renders below.
+    // (Map insertion order determines top-to-bottom widget order.)
     refreshTodoWidget(store, ctx);
+    const line = buildStatusLineThemed(config, ctx.ui.theme);
+    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
 
     // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it active.
     if (!process.env.PI_SESSION_READER) {
@@ -120,6 +121,8 @@ export function registerHooks(
     store.clear();
     if (isHeadless(ctx)) return;
     refreshTodoWidget(store, ctx);
+    const line = buildStatusLineThemed(config, ctx.ui.theme);
+    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
     if (open > 0) {
       ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
     }
@@ -134,9 +137,13 @@ export function registerHooks(
   pi.on("before_agent_start", async (_event, ctx) => {
     if (isOrchWorker()) return {};
 
-    const line = buildStatusLine(config);
-    if (!isHeadless(ctx) && line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
+    // Refresh widgets: todos first (top), work-tracker second (below).
     if (!isHeadless(ctx)) refreshTodoWidget(store, ctx);
+    const line = buildStatusLine(config);
+    if (!isHeadless(ctx)) {
+      const themed = buildStatusLineThemed(config, ctx.ui.theme);
+      if (themed) ctx.ui.setWidget("work-tracker", [themed], { placement: "belowEditor" });
+    }
 
     if (!line) return {};
     return {
