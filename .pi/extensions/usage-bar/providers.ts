@@ -1,35 +1,15 @@
 /**
  * providers.ts — Anthropic + Copilot usage fetchers for the usage-bar extension.
  *
- * Reads credentials from ~/.pi/agent/auth.json (same format pi uses).
- * Uses native fetch with a 5-second timeout. No external dependencies.
+ * Each fetcher accepts a pre-resolved API token (resolved by the caller via
+ * ctx.modelRegistry.getApiKeyForProvider()). This ensures the extension uses
+ * the same credentials as the active model — including OAuth-refreshed tokens,
+ * env vars, and custom provider overrides.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
-import type { AnthropicUsage, AuthJson, CopilotUsage } from "./types.js";
-
-/** Resolve the agent directory — respects PI_CODING_AGENT_DIR if set. */
-function agentDir(): string {
-  const envDir = process.env.PI_CODING_AGENT_DIR;
-  if (envDir) return envDir.startsWith("~/") ? join(homedir(), envDir.slice(2)) : envDir;
-  return join(homedir(), ".pi", "agent");
-}
+import type { AnthropicUsage, CopilotUsage } from "./types.js";
 
 const FETCH_TIMEOUT_MS = 5_000;
-
-// ─── Auth ────────────────────────────────────────────────────────────────────
-
-function readAuth(): AuthJson | null {
-  try {
-    const raw = readFileSync(join(agentDir(), "auth.json"), "utf-8");
-    return JSON.parse(raw) as AuthJson;
-  } catch {
-    return null;
-  }
-}
 
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
@@ -45,11 +25,7 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
 
 // ─── Anthropic ────────────────────────────────────────────────────────────────
 
-export async function fetchAnthropicUsage(): Promise<AnthropicUsage | null> {
-  const auth = readAuth();
-  const token = auth?.anthropic?.access;
-  if (!token) return null;
-
+export async function fetchAnthropicUsage(token: string): Promise<AnthropicUsage | null> {
   const res = await fetchWithTimeout("https://api.anthropic.com/api/oauth/usage", {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -63,12 +39,7 @@ export async function fetchAnthropicUsage(): Promise<AnthropicUsage | null> {
 
 // ─── Copilot ──────────────────────────────────────────────────────────────────
 
-export async function fetchCopilotUsage(): Promise<CopilotUsage | null> {
-  const auth = readAuth();
-  // Prefer refresh token (GitHub PAT) for GitHub API endpoints
-  const token = auth?.["github-copilot"]?.refresh ?? auth?.["github-copilot"]?.access;
-  if (!token) return null;
-
+export async function fetchCopilotUsage(token: string): Promise<CopilotUsage | null> {
   const res = await fetchWithTimeout("https://api.github.com/copilot_internal/user", {
     headers: {
       Authorization: `token ${token}`,

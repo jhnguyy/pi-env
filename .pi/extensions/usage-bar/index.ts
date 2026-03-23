@@ -89,33 +89,44 @@ function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
   return `Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
 }
 
+// ─── Provider → usage API mapping ─────────────────────────────────────────────
+
+const PROVIDER_FETCHERS: Record<string, (token: string) => Promise<unknown>> = {
+  anthropic: fetchAnthropicUsage,
+  "github-copilot": fetchCopilotUsage,
+};
+
+const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> = {
+  anthropic: formatAnthropicStatus,
+  "github-copilot": formatCopilotStatus,
+};
+
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 
 async function refresh(ctx: ExtensionContext): Promise<void> {
   const provider = ctx.model?.provider;
+  if (!provider || !(provider in PROVIDER_FETCHERS)) {
+    ctx.ui.setStatus(STATUS_KEY, undefined);
+    return;
+  }
 
   try {
-    if (provider === "anthropic") {
-      const usage = await fetchAnthropicUsage();
-      if (!usage) {
-        ctx.ui.setStatus(STATUS_KEY, undefined);
-        return;
-      }
-      ctx.ui.setStatus(STATUS_KEY, formatAnthropicStatus(ctx.ui.theme, usage));
-    } else if (provider === "github-copilot") {
-      const usage = await fetchCopilotUsage();
-      if (!usage) {
-        ctx.ui.setStatus(STATUS_KEY, undefined);
-        return;
-      }
-      ctx.ui.setStatus(STATUS_KEY, formatCopilotStatus(ctx.ui.theme, usage));
-    } else {
-      // Unknown or unsupported provider — clear status
+    // Resolve token through pi's auth pipeline — same credentials as the active model
+    const token = await ctx.modelRegistry.getApiKeyForProvider(provider);
+    if (!token) {
       ctx.ui.setStatus(STATUS_KEY, undefined);
+      return;
     }
+
+    const usage = await PROVIDER_FETCHERS[provider](token);
+    if (!usage) {
+      ctx.ui.setStatus(STATUS_KEY, undefined);
+      return;
+    }
+
+    ctx.ui.setStatus(STATUS_KEY, PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage));
   } catch {
     ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("error", "Usage: fetch failed"));
-    // Clear after 4 seconds
     setTimeout(() => ctx.ui.setStatus(STATUS_KEY, undefined), 4_000);
   }
 }

@@ -29,14 +29,3 @@ export interface CopilotUsage {
     };
   };
 }
-
-export interface AuthJson {
-  anthropic?: {
-    access?: string;
-    refresh?: string;
-  };
-  "github-copilot"?: {
-    access?: string;
-    refresh?: string;
-  };
-}
