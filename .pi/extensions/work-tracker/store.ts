@@ -1,3 +1,4 @@
+import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { TodoItem } from "./types";
 
 export class TodoStore {
@@ -53,7 +54,7 @@ export class TodoStore {
     return this.items.filter((i) => !i.done);
   }
 
-  /** Formatted string for context injection. */
+  /** Plain-text string for LLM context injection. */
   render(): string {
     if (this.items.length === 0) return "[session-todos] No tasks yet.";
     const lines = this.items.map((i) => {
@@ -61,6 +62,26 @@ export class TodoStore {
       return `${icon} (${i.id}) ${i.text}`;
     });
     return `[session-todos]\n${lines.join("\n")}`;
+  }
+
+  /**
+   * Themed string array for the TUI widget (one element per line).
+   * Label uses customMessageLabel + bold to match pi's [compaction]/[skill] style.
+   */
+  renderWidget(theme: Theme): string[] {
+    const label = theme.fg("customMessageLabel", "\x1b[1m[session-todos]\x1b[22m");
+    if (this.items.length === 0) {
+      return [`${label} ${theme.fg("muted", "No tasks yet.")}`];
+    }
+    const lines: string[] = [label];
+    for (const item of this.items) {
+      if (item.done) {
+        lines.push(theme.fg("muted", `✅ (${item.id}) ${item.text}`));
+      } else {
+        lines.push(`□ (${item.id}) ${item.text}`);
+      }
+    }
+    return lines;
   }
 
   private _find(ref: number | string): TodoItem | null {

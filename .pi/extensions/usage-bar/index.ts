@@ -76,7 +76,8 @@ function formatAnthropicStatus(theme: Theme, usage: AnthropicUsage): string {
   const weekStr = colorByPct(theme, weekPct, `${weekPct}%`);
   const resetStr = theme.fg("muted", `Resets ${formatResetIn(dominant.resets_at)}`);
 
-  return `[usage] Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
+  const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
+  return `${label} Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
 }
 
 function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
@@ -89,7 +90,8 @@ function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
   const reqStr = theme.fg("muted", `${snap.remaining}/${snap.entitlement} reqs`);
   const resetStr = theme.fg("muted", `Resets ${formatShortDate(usage.quota_reset_date_utc)}`);
 
-  return `[usage] Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
+  const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
+  return `${label} Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
 }
 
 // ─── Provider → usage API mapping ─────────────────────────────────────────────
