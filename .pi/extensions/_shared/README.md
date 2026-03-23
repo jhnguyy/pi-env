@@ -14,9 +14,11 @@ Grep for `@purpose` in the source files for per-module context.
 | Define a typed extension error class      | `extends BaseExtensionError<Code>`    | errors.ts    |
 | Render success/error in the TUI           | `defaultRenderResult(result, theme)`  | render.ts    |
 | Run a git command synchronously           | `gitSync(cwd, args)`                  | git.ts       |
-| Get current branch / dirty count          | `getCurrentBranch()`, `getDirtyCount()` | git.ts    |
+| Get current branch / dirty count         | `getCurrentBranch()`, `getDirtyCount()` | git.ts    |
 | Generate a random hex ID                  | `generateId()`                        | id.ts        |
 | Ensure bus exit-signal shim exists        | `ensureExitShim()`                    | exit-shim.ts |
+| Guard widget/status rendering             | `isHeadless(ctx)`                     | context.ts   |
+| Guard LLM context injection in workers   | `isOrchWorker()`                      | context.ts   |
 
 ## Conventions
 

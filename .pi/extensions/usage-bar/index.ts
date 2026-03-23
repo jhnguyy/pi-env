@@ -5,9 +5,9 @@
  * Auto-detects the active provider from ctx.model?.provider and fetches only
  * that provider's usage. Refreshes on session_start and model_select.
  *
- * Subagent detection: ctx.hasUI is false in non-interactive (RPC/print) mode,
- * which covers headless subagent processes. PI_AGENT_ID is NOT checked here
- * because the main session may have it set for bus/orchestration purposes.
+ * Subagent detection: uses isHeadless(ctx) from _shared/context — false in
+ * non-interactive (RPC/print) mode. See _shared/context.ts for rationale on
+ * why PI_AGENT_ID is not used.
  *
  * Credentials: resolved via ctx.modelRegistry.getApiKeyForProvider() — same
  * pipeline pi uses for the active model (OAuth, env vars, custom providers).
@@ -18,6 +18,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import type { Theme } from "@mariozechner/pi-coding-agent";
 import type { AnthropicUsage, CopilotUsage } from "./types.js";
 import { fetchAnthropicUsage, fetchCopilotUsage } from "./providers.js";
+import { isHeadless } from "../_shared/context.js";
 
 const STATUS_KEY = "usage-bar";
 
@@ -75,7 +76,7 @@ function formatAnthropicStatus(theme: Theme, usage: AnthropicUsage): string {
   const weekStr = colorByPct(theme, weekPct, `${weekPct}%`);
   const resetStr = theme.fg("muted", `Resets ${formatResetIn(dominant.resets_at)}`);
 
-  return `Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
+  return `[usage] Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
 }
 
 function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
@@ -88,7 +89,7 @@ function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
   const reqStr = theme.fg("muted", `${snap.remaining}/${snap.entitlement} reqs`);
   const resetStr = theme.fg("muted", `Resets ${formatShortDate(usage.quota_reset_date_utc)}`);
 
-  return `Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
+  return `[usage] Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
 }
 
 // ─── Provider → usage API mapping ─────────────────────────────────────────────
@@ -137,7 +138,7 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
-    if (!ctx.hasUI) return;
+    if (isHeadless(ctx)) return;
 
     if (ctx.model) {
       await refresh(ctx);
@@ -151,7 +152,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("model_select", async (_event, ctx) => {
-    if (!ctx.hasUI) return;
+    if (isHeadless(ctx)) return;
     await refresh(ctx);
   });
 }
