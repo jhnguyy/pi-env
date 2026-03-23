@@ -11,6 +11,7 @@
 
 import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
+import { isHeadless, isOrchWorker } from "../_shared/context";
 
 import type { BranchGuard } from "./branch-guard";
 import { buildStatusLine, getGitStatus, refreshTodoWidget } from "./context";
@@ -100,7 +101,7 @@ export function registerHooks(
   pi.on("session_start", async (_event, ctx) => {
     store.clear();
 
-    if (process.env.PI_AGENT_ID) return;
+    if (isHeadless(ctx)) return;
 
     const line = buildStatusLine(config);
     if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
@@ -117,7 +118,7 @@ export function registerHooks(
   pi.on("session_switch", async (_event, ctx) => {
     const open = store.open().length;
     store.clear();
-    if (process.env.PI_AGENT_ID) return;
+    if (isHeadless(ctx)) return;
     refreshTodoWidget(store, ctx);
     if (open > 0) {
       ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
@@ -131,11 +132,11 @@ export function registerHooks(
 
   // ─── 6. Context injection + widget refresh (root sessions only) ─────────────
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (process.env.PI_AGENT_ID) return {};
+    if (isOrchWorker()) return {};
 
     const line = buildStatusLine(config);
-    if (line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
-    refreshTodoWidget(store, ctx);
+    if (!isHeadless(ctx) && line) ctx.ui.setWidget("work-tracker", [line], { placement: "belowEditor" });
+    if (!isHeadless(ctx)) refreshTodoWidget(store, ctx);
 
     if (!line) return {};
     return {
@@ -149,7 +150,7 @@ export function registerHooks(
 
   // ─── 7. Todo context injection (root sessions only) ─────────────────────────
   pi.on("before_agent_start", async () => {
-    if (process.env.PI_AGENT_ID) return {};
+    if (isOrchWorker()) return {};
     return {
       message: {
         customType: "session-todos",

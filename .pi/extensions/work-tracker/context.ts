@@ -9,6 +9,7 @@
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount } from "../_shared/git";
+import { isHeadless } from "../_shared/context";
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
@@ -58,6 +59,6 @@ export function buildStatusLine(config: WorkTrackerConfig): string | null {
 // ─── Widget refresh ───────────────────────────────────────────────────────────
 
 export function refreshTodoWidget(store: TodoStore, ctx: ExtensionContext): void {
-  if (process.env.PI_AGENT_ID) return;
+  if (isHeadless(ctx)) return;
   ctx.ui.setWidget("session-todos", [store.render()], { placement: "belowEditor" });
 }
