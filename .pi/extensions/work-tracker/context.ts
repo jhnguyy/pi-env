@@ -16,7 +16,7 @@ import type { WorkTrackerConfig } from "./types";
 export function loadConfig(): WorkTrackerConfig {
   const guardedRepos = process.env.WORK_TRACKER_REPOS
     ? process.env.WORK_TRACKER_REPOS.split(",").map((s) => s.trim())
-    : ["/mnt/tank/code/pi-env"];
+    : [process.cwd()];
 
   const protectedBranches = process.env.WORK_TRACKER_PROTECTED
     ? process.env.WORK_TRACKER_PROTECTED.split(",").map((s) => s.trim())
