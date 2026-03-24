@@ -2,8 +2,8 @@
  * @module ptc/rpc-bridge
  * @purpose Parent-side RPC handler for the PTC subprocess.
  *
- * Reads stdout from the subprocess line-by-line:
- *   - JSON lines → dispatch to ToolRegistry, write result to stdin
+ * Reads subprocess stdout line-by-line:
+ *   - JSON lines → dispatch tool call, write result to stdin
  *   - Plain lines → accumulate as user output (console.log)
  *
  * Writes tool results to subprocess stdin as JSON lines.
@@ -11,11 +11,10 @@
 
 import { createInterface } from "readline";
 import type { ChildProcess } from "child_process";
-import type { ExtensionContext, AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import type { AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
 import { formatError } from "../_shared/errors";
-import type { ToolRegistry } from "./tool-registry";
 import { killGracefully, MAX_STDERR_BYTES } from "./types";
-import type { RpcOutbound, RpcInbound } from "./types";
+import type { DispatchFn, RpcOutbound, RpcInbound } from "./types";
 
 export class RpcBridge {
   private userOutput: string[] = [];
@@ -28,9 +27,7 @@ export class RpcBridge {
 
   constructor(
     private proc: ChildProcess,
-    private registry: ToolRegistry,
-    private cwd: string,
-    private ctx: ExtensionContext,
+    private dispatch: DispatchFn,
     signal?: AbortSignal,
     private onUpdate?: AgentToolUpdateCallback<unknown>,
   ) {
@@ -44,15 +41,14 @@ export class RpcBridge {
     rl.on("line", (line) => void this.handleLine(line));
 
     // Fallback settlement: fires when stdout closes (subprocess exits).
-    // Handles the case where the subprocess exits with code 0 without ever
-    // sending a { type: "complete" } message (e.g. user code calls
-    // process.exit(0) directly). If the promise has already settled via
-    // "complete" or "error", this resolve() call is a no-op.
+    // Handles the case where subprocess exits with code 0 without sending
+    // "complete" (e.g. user code calls process.exit(0) directly).
+    // If the promise is already settled, this resolve() is a no-op.
     rl.on("close", () => {
       this.completionResolve(this.userOutput.join("\n"));
     });
 
-    // Capture stderr for error diagnostics — capped to avoid unbounded growth.
+    // Capture stderr for diagnostics — capped to avoid unbounded growth.
     proc.stderr?.on("data", (chunk: Buffer) => {
       if (this.stderr.length < MAX_STDERR_BYTES) {
         this.stderr += chunk.toString();
@@ -62,7 +58,6 @@ export class RpcBridge {
       }
     });
 
-    // Handle unexpected exit
     proc.on("exit", (code) => {
       if (code !== 0 && code !== null) {
         const msg = this.stderr.trim() || `PTC subprocess exited with code ${code}`;
@@ -74,7 +69,6 @@ export class RpcBridge {
       this.completionReject(new Error(`PTC spawn error: ${err.message}`));
     });
 
-    // Forward abort signal
     if (signal) {
       signal.addEventListener(
         "abort",
@@ -106,7 +100,6 @@ export class RpcBridge {
         break;
 
       case "complete": {
-        // Combine console.log lines + explicit return value
         const parts: string[] = [];
         if (this.userOutput.length > 0) parts.push(this.userOutput.join("\n"));
         if (msg.output) parts.push(msg.output);
@@ -129,21 +122,14 @@ export class RpcBridge {
     params: Record<string, unknown>;
   }): Promise<void> {
     this.toolCallCount++;
-    const label = `${msg.tool} #${this.toolCallCount}`;
 
     this.onUpdate?.({
-      content: [{ type: "text", text: `→ ${label}` }],
+      content: [{ type: "text", text: `→ ${msg.tool} #${this.toolCallCount}` }],
       details: undefined,
     });
 
     try {
-      const result = await this.registry.dispatch(
-        msg.tool,
-        msg.params,
-        this.cwd,
-        undefined, // signal: tool calls inside PTC are not individually cancellable
-        this.ctx,
-      );
+      const result = await this.dispatch(msg.tool, msg.params);
       this.send({ type: "tool_result", id: msg.id, result });
     } catch (err: unknown) {
       this.send({ type: "tool_error", id: msg.id, error: formatError(err, "ptc") });

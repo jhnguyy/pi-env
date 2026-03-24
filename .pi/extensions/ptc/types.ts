@@ -25,6 +25,48 @@ export function killGracefully(proc: ChildProcess, gracePeriodMs = 5_000): void 
   }, gracePeriodMs);
 }
 
+/**
+ * Build the environment for the PTC subprocess.
+ *
+ * Only vars needed by the bun runtime are forwarded. Secrets (API keys, tokens)
+ * are intentionally excluded — tool calls run in the parent process via RPC, so
+ * tools still have full env access; only the subprocess's own direct operations
+ * are restricted.
+ */
+export function buildSubprocessEnv(): Record<string, string | undefined> {
+  const SAFE_VARS = [
+    "PATH",            // find executables (bun, git, etc.)
+    "HOME",            // bun module cache + node_modules resolution
+    "USER",
+    "SHELL",
+    "TMPDIR",          // temp file paths
+    "TEMP",            // Windows compat
+    "TMP",             // Windows compat
+    "BUN_INSTALL",     // bun's install prefix
+    "BUN_DIR",         // bun's data dir (alt env var)
+    "NODE_ENV",        // may affect module behaviour
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "LANG",            // string encoding
+    "LC_ALL",
+    "LC_CTYPE",
+  ] as const;
+
+  const env: Record<string, string | undefined> = {};
+  for (const key of SAFE_VARS) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return env;
+}
+
+/**
+ * Function signature for dispatching a tool call inside PTC.
+ * Abstracts ToolRegistry away from RpcBridge — the bridge only needs to call
+ * a named tool with params and get a string result back.
+ */
+export type DispatchFn = (tool: string, params: Record<string, unknown>) => Promise<string>;
+
 // ─── Blocklist ────────────────────────────────────────────────────────────────
 
 /**

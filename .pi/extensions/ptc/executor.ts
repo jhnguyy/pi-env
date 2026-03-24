@@ -4,8 +4,8 @@
  *
  * Flow:
  *   1. Get available tools from registry
- *   2. Generate wrapper functions + preamble
- *   3. Compose full TypeScript program
+ *   2. Generate wrapper functions
+ *   3. Compose full TypeScript program (imports subprocess-preamble.ts at its absolute path)
  *   4. Write to a temp .ts file (enables Bun's native TS execution)
  *   5. Spawn `bun run <tmpfile>`
  *   6. Drive RpcBridge until completion or timeout
@@ -24,10 +24,13 @@ import type {
 import { DEFAULT_MAX_LINES, truncateHead } from "@mariozechner/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { RpcBridge } from "./rpc-bridge";
-import { buildRpcPreamble } from "./rpc-client";
 import { generateWrappers } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
-import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, killGracefully } from "./types";
+import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv, killGracefully } from "./types";
+
+// Absolute path to the preamble file so the generated subprocess script can import it.
+// Using import.meta.url ensures correctness regardless of process.cwd().
+const PREAMBLE_PATH = new URL("./subprocess-preamble.ts", import.meta.url).pathname;
 
 export class PtcExecutor {
   constructor(
@@ -42,10 +45,8 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
   ): Promise<string> {
     const tools = this.registry.getAvailableTools(this.pi);
-    const { code: wrappers } = generateWrappers(tools);
-    const preamble = buildRpcPreamble();
-
-    const fullCode = buildSubprocessCode(preamble, wrappers, userCode);
+    const wrappers = generateWrappers(tools);
+    const fullCode = buildSubprocessCode(PREAMBLE_PATH, wrappers, userCode);
 
     // Write to temp .ts file — bun run natively handles TypeScript
     const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.ts`);
@@ -71,14 +72,15 @@ export class PtcExecutor {
     const proc = spawn("bun", ["run", scriptPath], {
       cwd: ctx.cwd,
       stdio: ["pipe", "pipe", "pipe"],
-      // Allowlist env vars: subprocess must not inherit secrets (API keys, tokens).
-      // Tool calls run in the parent process via RPC, not in the subprocess, so
-      // tools have full access to the parent env regardless of this restriction.
       env: buildSubprocessEnv(),
     });
 
-    const bridge = new RpcBridge(proc, this.registry, ctx.cwd, ctx, signal, onUpdate);
+    // Pre-bind registry.dispatch to this execution's cwd + ctx so RpcBridge
+    // only needs (tool, params) — it has no knowledge of ToolRegistry.
+    const dispatch = (tool: string, params: Record<string, unknown>) =>
+      this.registry.dispatch(tool, params, ctx.cwd, undefined, ctx);
 
+    const bridge = new RpcBridge(proc, dispatch, signal, onUpdate);
     const timeoutId = setTimeout(() => killGracefully(proc), MAX_TIMEOUT_MS);
 
     try {
@@ -98,20 +100,19 @@ export class PtcExecutor {
  * Compose the full TypeScript program injected into the subprocess.
  *
  * Structure:
- *   1. RPC client preamble (readline setup + __rpc_call)
+ *   1. Import __rpc_call from subprocess-preamble.ts (RPC + readline setup)
  *   2. Tool wrapper functions (async function read(params) { ... })
  *   3. User code wrapped in async __user_main()
  *   4. Execution harness (run + send complete/error message)
  */
-function buildSubprocessCode(preamble: string, wrappers: string, userCode: string): string {
+function buildSubprocessCode(preamblePath: string, wrappers: string, userCode: string): string {
   const indented = userCode
     .split("\n")
     .map((l) => "  " + l)
     .join("\n");
 
   return [
-    "// --- RPC client preamble ---",
-    preamble,
+    `import { __rpc_call } from ${JSON.stringify(preamblePath)};`,
     "",
     "// --- tool wrappers ---",
     wrappers,
@@ -135,41 +136,6 @@ function buildSubprocessCode(preamble: string, wrappers: string, userCode: strin
     "    process.exit(1);",
     "  });",
   ].join("\n");
-}
-
-/**
- * Build the environment for the PTC subprocess.
- *
- * Only the vars needed by the bun runtime are forwarded. Secrets (API keys,
- * tokens) are intentionally excluded — tool calls run in the parent process
- * via RPC, so tools still have full env access; only the subprocess's own
- * direct operations are restricted.
- */
-function buildSubprocessEnv(): NodeJS.ProcessEnv {
-  const SAFE_VARS = [
-    "PATH",           // find executables (bun, git, etc.)
-    "HOME",           // bun module cache + node_modules resolution
-    "USER",           // some tools use this
-    "SHELL",          // shell for bash tool inside subprocess (if used directly)
-    "TMPDIR",         // temp file paths
-    "TEMP",           // Windows compat
-    "TMP",            // Windows compat
-    "BUN_INSTALL",    // bun's install prefix
-    "BUN_DIR",        // bun's data dir (alt env var)
-    "NODE_ENV",       // may affect module behaviour
-    "XDG_CONFIG_HOME",
-    "XDG_DATA_HOME",
-    "XDG_CACHE_HOME",
-    "LANG",           // string encoding
-    "LC_ALL",
-    "LC_CTYPE",
-  ] as const;
-
-  const env: NodeJS.ProcessEnv = {};
-  for (const key of SAFE_VARS) {
-    if (process.env[key] !== undefined) env[key] = process.env[key];
-  }
-  return env;
 }
 
 function truncateOutput(output: string): string {

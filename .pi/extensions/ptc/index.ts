@@ -12,7 +12,7 @@
  *   tool-registry.ts — registerTool intercept + createXxxToolDefinition dispatch
  *   executor.ts     — temp file + Bun subprocess lifecycle
  *   rpc-bridge.ts   — parent-side JSON-over-stdio RPC dispatcher
- *   rpc-client.ts   — builds the preamble injected into subprocess
+ *   subprocess-preamble.ts — RPC client code running inside the subprocess
  *   wrapper-gen.ts  — generates async wrapper functions from ToolInfo[]
  *   types.ts        — constants, blocklist, RPC message types
  */

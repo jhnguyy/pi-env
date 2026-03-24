@@ -21,6 +21,7 @@ export function toIdentifier(name: string): string {
 /**
  * Generate a single async wrapper function for a tool.
  * The wrapper delegates to __rpc_call with the original tool name.
+ * __rpc_call is imported by the generated file from subprocess-preamble.ts.
  */
 function generateWrapper(tool: ToolInfo): string {
   const fnName = toIdentifier(tool.name);
@@ -35,31 +36,14 @@ function generateWrapper(tool: ToolInfo): string {
 
 /**
  * Generate all tool wrapper functions for injection into the subprocess.
- * Filters out blocked tools and tools without a known execute function.
  *
- * Returns both the generated code string and the list of tools included
- * (for the tool description shown to Claude).
+ * Intentional double-filter on BLOCKED_TOOLS: callers (getAvailableTools) already
+ * strip blocked tools, but this is a pure code-gen function that must be safe to
+ * call with any ToolInfo[] slice — defence-in-depth at negligible cost.
  */
-export function generateWrappers(tools: ToolInfo[]): {
-  code: string;
-  available: Array<{ name: string; identifier: string; description: string }>;
-} {
-  // Intentional double-filter: callers (getAvailableTools) already strip blocked
-  // tools, but generateWrappers is a pure code-gen function that must be safe to
-  // call with any ToolInfo[] slice. The extra filter is defence-in-depth, not a
-  // bug — it costs O(n) and prevents accidental wrapper generation for blocked tools.
-  const available = tools.filter((t) => !BLOCKED_TOOLS.has(t.name));
-
-  const code = available
+export function generateWrappers(tools: ToolInfo[]): string {
+  return tools
+    .filter((t) => !BLOCKED_TOOLS.has(t.name))
     .map((t) => generateWrapper(t))
     .join("\n\n");
-
-  return {
-    code,
-    available: available.map((t) => ({
-      name: t.name,
-      identifier: toIdentifier(t.name),
-      description: t.description.split("\n")[0].substring(0, 80),
-    })),
-  };
 }

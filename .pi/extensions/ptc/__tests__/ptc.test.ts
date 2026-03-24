@@ -3,15 +3,16 @@
  *
  * Tests core logic that can be verified without a running pi instance:
  *   - toIdentifier: hyphen→underscore normalisation
- *   - generateWrappers: blocklist filtering, code shape
- *   - buildRpcPreamble: sanity check the generated code
- *   - buildSubprocessCode (via executor internals): structure checks
+ *   - generateWrappers: blocklist filtering, generated code shape
+ *   - subprocess-preamble.ts: key structural checks on the real file
+ *   - BLOCKED_TOOLS: blocklist completeness
  */
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { toIdentifier, generateWrappers } from "../wrapper-gen";
-import { buildRpcPreamble } from "../rpc-client";
-import { BLOCKED_TOOLS, MAX_TOOL_CALLS } from "../types";
+import { BLOCKED_TOOLS } from "../types";
 
 // ─── toIdentifier ─────────────────────────────────────────────────────────────
 
@@ -47,77 +48,69 @@ const SAMPLE_TOOLS = [
 
 describe("generateWrappers", () => {
   it("filters out all blocked tools", () => {
-    const { available } = generateWrappers(SAMPLE_TOOLS);
-    const names = available.map((t) => t.name);
+    const code = generateWrappers(SAMPLE_TOOLS);
     for (const blocked of BLOCKED_TOOLS) {
-      expect(names).not.toContain(blocked);
+      // Should not appear as a function definition
+      expect(code).not.toContain(`async function ${blocked}(`);
+      expect(code).not.toContain(`async function ${toIdentifier(blocked)}(`);
     }
   });
 
-  it("includes non-blocked tools", () => {
-    const { available } = generateWrappers(SAMPLE_TOOLS);
-    const names = available.map((t) => t.name);
-    expect(names).toContain("read");
-    expect(names).toContain("bash");
-    expect(names).toContain("dev-tools");
-  });
-
-  it("maps hyphen names to underscore identifiers", () => {
-    const { available } = generateWrappers(SAMPLE_TOOLS);
-    const devTools = available.find((t) => t.name === "dev-tools");
-    expect(devTools?.identifier).toBe("dev_tools");
-  });
-
-  it("generates valid async function code for each tool", () => {
-    const { code } = generateWrappers(SAMPLE_TOOLS);
+  it("generates valid async function code for each non-blocked tool", () => {
+    const code = generateWrappers(SAMPLE_TOOLS);
     expect(code).toContain("async function read(");
     expect(code).toContain("async function bash(");
     expect(code).toContain("async function dev_tools(");
-    // Blocked tools must not appear as function definitions
-    expect(code).not.toContain("async function ptc(");
-    expect(code).not.toContain("async function orch(");
   });
 
   it("generated wrappers call __rpc_call with original tool name", () => {
-    const { code } = generateWrappers(SAMPLE_TOOLS);
-    // dev-tools wrapper must pass the original name "dev-tools" to __rpc_call
+    const code = generateWrappers(SAMPLE_TOOLS);
+    // dev-tools wrapper must use the original hyphenated name for RPC dispatch
     expect(code).toContain(`__rpc_call("dev-tools"`);
   });
 
-  it("generates empty code when all tools are blocked", () => {
-    const { code, available } = generateWrappers(
+  it("returns empty string when all tools are blocked", () => {
+    const code = generateWrappers(
       SAMPLE_TOOLS.filter((t) => BLOCKED_TOOLS.has(t.name)),
     );
-    expect(available).toHaveLength(0);
     expect(code.trim()).toBe("");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(generateWrappers([]).trim()).toBe("");
   });
 });
 
-// ─── buildRpcPreamble ─────────────────────────────────────────────────────────
+// ─── subprocess-preamble.ts ───────────────────────────────────────────────────
+//
+// Verify the real preamble file's structure without importing it (it has side
+// effects — sets up readline on process.stdin). Read-as-text checks are enough
+// to catch accidental protocol or API breakage.
 
-describe("buildRpcPreamble", () => {
-  const preamble = buildRpcPreamble();
+describe("subprocess-preamble.ts", () => {
+  const content = readFileSync(join(import.meta.dir, "../subprocess-preamble.ts"), "utf-8");
+
+  it("exports __rpc_call as an async function", () => {
+    expect(content).toContain("export async function __rpc_call(");
+  });
 
   it("imports readline", () => {
-    expect(preamble).toContain('from "readline"');
+    expect(content).toContain('from "readline"');
   });
 
-  it("defines __rpc_call async function", () => {
-    expect(preamble).toContain("async function __rpc_call(");
+  it("enforces tool call limit via MAX_TOOL_CALLS", () => {
+    expect(content).toContain("MAX_TOOL_CALLS");
   });
 
-  it("embeds the MAX_TOOL_CALLS limit", () => {
-    expect(preamble).toContain(String(MAX_TOOL_CALLS));
+  it("writes tool_call messages to process.stdout", () => {
+    expect(content).toContain("process.stdout.write");
+    expect(content).toContain('"tool_call"');
   });
 
-  it("uses process.stdout.write for tool_call messages", () => {
-    expect(preamble).toContain("process.stdout.write");
-    expect(preamble).toContain('"tool_call"');
-  });
-
-  it("reads responses from process.stdin via readline", () => {
-    expect(preamble).toContain("process.stdin");
-    expect(preamble).toContain('"tool_result"');
+  it("reads tool_result / tool_error responses from process.stdin", () => {
+    expect(content).toContain("process.stdin");
+    expect(content).toContain('"tool_result"');
+    expect(content).toContain('"tool_error"');
   });
 });
 

@@ -1,41 +1,24 @@
 /**
  * @module ptc/tool-registry
- * @purpose Manages access to tool execute functions for PTC dispatch.
+ * @purpose Manages tool execute functions for PTC dispatch.
  *
- * ## Strategy
+ * Built-in tools (read, bash, etc.) are resolved via createXxxToolDefinition(cwd)
+ * from pi 0.62.0+. Extension tools are captured via a registerTool() intercept
+ * installed at construction time — the only viable approach until pi exposes
+ * pi.executeTool() upstream (see TODO below).
  *
- * pi's ExtensionAPI.getAllTools() returns metadata only (name, description,
- * parameters) — no execute functions. To actually call tools from PTC, we need
- * two sources:
+ * Load-order note: extensions that load BEFORE ptc will have already called
+ * registerTool() before the intercept is installed, so their execute functions
+ * won't be captured. They are excluded from the available-tool list.
  *
- * 1. Built-in tools (read, bash, edit, write, grep, find, ls):
- *    Use createXxxToolDefinition(cwd) from @mariozechner/pi-coding-agent 0.62.0+.
- *    These return ToolDefinition with the full 5-arg execute() signature.
- *
- * 2. Extension tools (dev-tools, bus, notes, proxmox, etc.):
- *    Intercept pi.registerTool() at load time to capture execute functions.
- *    This is the only viable approach until pi exposes pi.executeTool() upstream.
- *
- * ## Long-term path
- *
- * When pi adds `pi.executeTool(name, params, ctx): Promise<AgentToolResult>` to
- * ExtensionAPI, the intercept in installRegisterToolIntercept() can be removed.
- * The dispatch() method signature already mirrors that future API. Swap the
- * implementation bodies and delete the extensionTools map.
- *
- * ## Load order note
- *
- * The intercept is installed when ToolRegistry is constructed. Extensions that
- * load BEFORE ptc register their tools before the intercept is installed, so
- * their execute functions won't be captured. At dispatch time, unknown extension
- * tools (not built-ins, not captured) are excluded from the wrapper list and
- * result in a clear error message.
+ * Design doc: projects/homelab/ptc_extension_design.md
  */
 
 import type {
   ExtensionAPI,
   ExtensionContext,
   AgentToolResult,
+  ToolDefinition,
   ToolInfo,
 } from "@mariozechner/pi-coding-agent";
 import {
@@ -58,21 +41,32 @@ type ExecuteFn = (
   ctx: ExtensionContext,
 ) => Promise<AgentToolResult<unknown>>;
 
-const BUILTIN_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls"]);
+// Single source of truth for built-in tools: name → factory function.
+// BUILTIN_NAMES is derived so both stay in sync automatically.
+// Cast required: each factory has distinct generic ToolDefinition return types.
+const BUILTIN_FACTORIES = {
+  read:  createReadToolDefinition,
+  bash:  createBashToolDefinition,
+  edit:  createEditToolDefinition,
+  write: createWriteToolDefinition,
+  grep:  createGrepToolDefinition,
+  find:  createFindToolDefinition,
+  ls:    createLsToolDefinition,
+} as Record<string, (cwd: string) => ToolDefinition<any, any, any>>;  // eslint-disable-line @typescript-eslint/no-explicit-any
+const BUILTIN_NAMES = new Set(Object.keys(BUILTIN_FACTORIES));
 
 export class ToolRegistry {
   /**
    * Execute functions for extension tools captured via registerTool intercept.
-   * Built-ins are NOT stored here — they're created via factory functions.
+   * Built-ins are NOT stored here — they're resolved via BUILTIN_FACTORIES.
    */
   private extensionTools = new Map<string, ExecuteFn>();
 
   /**
    * Cache of built-in ToolDefinitions keyed by `${cwd}:${toolName}`.
-   * Factory functions are cheap closures but get called up to 100 times/execution,
-   * so we cache to avoid redundant object creation.
+   * Avoids recreating closures on each of up to 100 dispatch() calls/execution.
    */
-  private builtinCache = new Map<string, NonNullable<ReturnType<typeof createBuiltinDefinition>>>();
+  private builtinCache = new Map<string, ToolDefinition<any, any, any>>();  // eslint-disable-line @typescript-eslint/no-explicit-any
 
   constructor(pi: ExtensionAPI) {
     this.installRegisterToolIntercept(pi);
@@ -80,10 +74,11 @@ export class ToolRegistry {
 
   /**
    * Intercept pi.registerTool() to capture execute functions for extension tools.
+   * Calls through to the original immediately — pi's tool registration is unaffected.
    *
-   * This is a targeted intercept: we call-through to the original immediately,
-   * so pi's normal tool registration is unaffected. We only store the execute
-   * function reference for later use in dispatch().
+   * TODO(upstream): remove this intercept when pi exposes
+   * pi.executeTool(name, params, ctx): Promise<AgentToolResult>. The dispatch()
+   * signature already mirrors that future API.
    */
   private installRegisterToolIntercept(pi: ExtensionAPI): void {
     const original = (pi.registerTool as Function).bind(pi);
@@ -93,7 +88,6 @@ export class ToolRegistry {
       execute: ExecuteFn;
       [key: string]: unknown;
     }) => {
-      // Capture execute for non-blocked, non-builtin tools
       if (!BLOCKED_TOOLS.has(tool.name) && !BUILTIN_NAMES.has(tool.name)) {
         this.extensionTools.set(tool.name, tool.execute);
       }
@@ -102,12 +96,8 @@ export class ToolRegistry {
   }
 
   /**
-   * Get the list of tools available inside PTC.
-   * Used by wrapper-gen to generate function stubs and by index.ts for the description.
-   *
-   * A tool is available if:
-   *   - It's a built-in (always available)
-   *   - It's an extension tool whose execute was captured via the intercept
+   * Returns the tools available inside PTC: built-ins always, extension tools
+   * only if their execute was captured via the intercept (i.e. loaded after ptc).
    */
   getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
     const allTools = pi.getAllTools();
@@ -117,14 +107,13 @@ export class ToolRegistry {
       if (BLOCKED_TOOLS.has(t.name)) return false;
       if (BUILTIN_NAMES.has(t.name)) return true;
       if (this.extensionTools.has(t.name)) return true;
-      // Extension tool that loaded before ptc — log once
       unavailable.push(t.name);
       return false;
     });
 
     if (unavailable.length > 0) {
       console.warn(
-        `[ptc] The following tools are unavailable in PTC (loaded before ptc extension): ${unavailable.join(", ")}`,
+        `[ptc] Tools unavailable in PTC (loaded before ptc extension): ${unavailable.join(", ")}`,
       );
     }
 
@@ -132,10 +121,8 @@ export class ToolRegistry {
   }
 
   /**
-   * Dispatch a tool call by name and return its text output.
-   *
-   * This is the single dispatch path for all tool types (built-in + extension).
-   * Both use the same 5-arg ToolDefinition.execute() signature as of pi 0.62.0.
+   * Dispatch a tool call and return its concatenated text output.
+   * Single path for built-ins and extension tools — both use the 5-arg execute() signature.
    */
   async dispatch(
     toolName: string,
@@ -151,10 +138,9 @@ export class ToolRegistry {
       const cacheKey = `${cwd}:${toolName}`;
       let def = this.builtinCache.get(cacheKey);
       if (!def) {
-        const created = createBuiltinDefinition(toolName, cwd);
-        if (!created) throw new Error(`[ptc] Unknown built-in tool: ${toolName}`);
-        this.builtinCache.set(cacheKey, created);
-        def = created;
+        const factory = BUILTIN_FACTORIES[toolName];
+        def = factory(cwd);
+        this.builtinCache.set(cacheKey, def);
       }
       result = await def.execute(toolCallId, params as any, signal, undefined, ctx);
     } else {
@@ -169,22 +155,6 @@ export class ToolRegistry {
     }
 
     return extractText(result);
-  }
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Create a ToolDefinition for a named built-in tool. */
-function createBuiltinDefinition(name: string, cwd: string) {
-  switch (name) {
-    case "read":  return createReadToolDefinition(cwd);
-    case "bash":  return createBashToolDefinition(cwd);
-    case "edit":  return createEditToolDefinition(cwd);
-    case "write": return createWriteToolDefinition(cwd);
-    case "grep":  return createGrepToolDefinition(cwd);
-    case "find":  return createFindToolDefinition(cwd);
-    case "ls":    return createLsToolDefinition(cwd);
-    default:      return null;
   }
 }
 
