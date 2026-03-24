@@ -170,7 +170,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
 
-    renderCall(args, theme) {
+    renderCall(args, theme, _ctx) {
       let text = theme.fg("toolTitle", theme.bold("jit_catch"));
       const source = args.diff ? "raw diff" : (args.diff_source ?? "unstaged");
       text += " " + theme.fg("accent", source);
@@ -179,7 +179,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(text, 0, 0);
     },
 
-    renderResult(result, _opts, theme) {
+    renderResult(result, _opts, theme, _ctx) {
       const details = result.details as { anyFailed?: boolean } | null;
       const failed = details?.anyFailed ?? false;
       const first = result.content[0];

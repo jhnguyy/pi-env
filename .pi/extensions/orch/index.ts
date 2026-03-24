@@ -267,7 +267,7 @@ export default function (pi: ExtensionAPI) {
       }
     },
 
-    renderCall(args, theme) {
+    renderCall(args, theme, _ctx) {
       let text = theme.fg("toolTitle", theme.bold("orch"));
       text += " " + theme.fg("accent", args.action ?? "");
       if (args.label) text += " " + theme.fg("muted", args.label);
@@ -275,7 +275,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(text, 0, 0);
     },
 
-    renderResult(result, _opts, theme) {
+    renderResult(result, _opts, theme, _ctx) {
       return defaultRenderResult(result, theme, { truncateToFirstLine: true });
     },
   });

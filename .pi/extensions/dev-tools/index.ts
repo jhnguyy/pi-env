@@ -143,11 +143,11 @@ export default function (pi: ExtensionAPI) {
       }
     },
 
-    renderCall(args, theme) {
+    renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);
     },
 
-    renderResult(result, opts, theme) {
+    renderResult(result, opts, theme, _ctx) {
       return renderDevToolsResult(result, opts, theme);
     },
   });
