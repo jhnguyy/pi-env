@@ -42,7 +42,9 @@ type ExecuteFn = (
 ) => Promise<AgentToolResult<unknown>>;
 
 // Single source of truth for built-in tools: name → factory function.
-// BUILTIN_NAMES is derived so both stay in sync automatically.
+// Used for dispatch routing (dispatch()) and intercept guarding (installRegisterToolIntercept()).
+// Availability filtering uses sourceInfo.source === "builtin" from pi.getAllTools() instead,
+// so new built-in tools are automatically included without updating this map.
 // Cast required: each factory has distinct generic ToolDefinition return types.
 const BUILTIN_FACTORIES = {
   read:  createReadToolDefinition,
@@ -106,6 +108,9 @@ export class ToolRegistry {
   /**
    * Returns the tools available inside PTC: built-ins always, extension tools
    * only if their execute was captured via the intercept (i.e. loaded after ptc).
+   *
+   * Uses sourceInfo.source === "builtin" (pi 0.62.0+) instead of a hardcoded name
+   * set for built-in detection, so newly added built-ins are included automatically.
    */
   getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
     const allTools = pi.getAllTools();
@@ -113,7 +118,7 @@ export class ToolRegistry {
 
     const available = allTools.filter((t) => {
       if (BLOCKED_TOOLS.has(t.name)) return false;
-      if (BUILTIN_NAMES.has(t.name)) return true;
+      if (t.sourceInfo.source === "builtin") return true;
       if (this.extensionTools.has(t.name)) return true;
       unavailable.push(t.name);
       return false;
