@@ -108,13 +108,10 @@ cd ~/pi-env
 # 2. Add ~/.local/bin to PATH (once — add to ~/.profile or ~/.bashrc)
 export PATH="$HOME/.local/bin:$PATH"
 
-# 3. Run setup — installs deps, compiles pi binary, registers package
+# 3. Run setup — installs deps, compiles pi binary, bootstraps settings, registers package
 ./setup.sh
-
-# 4. Copy settings template and customize
-cp setup/settings.template.json ~/.pi/agent/settings.json
-# Then re-run ./setup.sh to register pi-env in the new settings.json
-# Key settings to review: defaultModel, permissionLevel ("none"/"warn"/"block"), theme
+# setup.sh creates ~/.pi/agent/settings.json from the template on first run.
+# Review and customize it: defaultModel, permissionLevel ("none"/"warn"/"block"), theme.
 # Optional: cp setup/models.template.json ~/.pi/agent/models.json  (add local/ollama models)
 
 # 5. Authenticate — pick one:

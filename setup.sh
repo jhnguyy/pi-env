@@ -6,19 +6,20 @@
 # What it does:
 #   1. bun install (frozen lockfile)
 #   2. Compile pi binary + symlink assets (setup/install-bun-pi.sh)
-#   3. Register pi-env as a pi package in settings.json
-#   4. Set gruvbox as the pi theme in settings.json
-#   5. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
-#   6. Symlink roles → ~/.agents/roles
-#   7. Source tmux theme from ~/.tmux.conf
-#   8. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
-#   9. Install git post-merge hook
+#   3. Bootstrap settings.json from template (only on first run — never overwrites)
+#   4. Register pi-env as a pi package in settings.json
+#   5. Set gruvbox as the pi theme in settings.json
+#   6. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
+#   7. Symlink roles → ~/.agents/roles
+#   8. Source tmux theme from ~/.tmux.conf
+#   9. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
+#  10. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
 # in ~/.pi/agent/extensions/ coexist via pi's auto-discovery.
 #
-# What stays local (never touched):
+# What stays local (never touched after first run):
 #   ~/.pi/agent/auth.json, settings.json, models.json, sessions/
 #   ~/.pi/agent/extensions/my-extension/ (local-only extensions)
 
@@ -55,6 +56,26 @@ link_path() {
   fi
 }
 
+# ── Settings bootstrap ───────────────────────────────────────────────────────
+# Auto-create settings.json from the template when it doesn't exist yet.
+# This makes setup.sh fully one-shot on fresh machines and devcontainers —
+# no need to manually copy the template and re-run.
+#
+# If settings.json already exists (local customizations, auth tokens, etc.)
+# it is never overwritten. The template is only used as a bootstrap.
+
+echo ""
+echo "Settings"
+echo "--------"
+SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
+if [ ! -f "$SETTINGS_FILE" ]; then
+  mkdir -p "$PI_AGENT_DIR"
+  cp "$REPO/setup/settings.template.json" "$SETTINGS_FILE"
+  linked "settings.json ← settings.template.json (review and customize: defaultModel, permissionLevel)"
+else
+  ok "settings.json (exists — not overwritten)"
+fi
+
 # ── Package registration ────────────────────────────────────────────────────
 # Register pi-env as a local pi package so pi's package manager discovers
 # extensions and skills directly from the repo. No per-item symlinks needed.
@@ -62,7 +83,6 @@ link_path() {
 echo ""
 echo "Package registration"
 echo "--------------------"
-SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
 if [ -f "$SETTINGS_FILE" ]; then
   # Check if pi-env repo path is already in the packages array
   if bun -e "
@@ -82,33 +102,29 @@ if [ -f "$SETTINGS_FILE" ]; then
     " 2>/dev/null
     linked "pi-env added to settings.json packages"
   fi
-else
-  skip "settings.json not found — copy setup/settings.template.json first"
 fi
 
 # ── Pi theme ─────────────────────────────────────────────────────────────────
 # Set the gruvbox theme in settings.json so pi uses it on first launch.
+# gruvbox.json ships in this repo's themes/ directory and is loaded by pi
+# via the registered package — requires package registration above to complete.
 
 echo ""
 echo "Pi theme"
 echo "--------"
-if [ -f "$SETTINGS_FILE" ]; then
-  if bun -e "
-    const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
-    process.exit(s.theme === 'gruvbox' ? 0 : 1);
-  " 2>/dev/null; then
-    ok "theme set to gruvbox in settings.json"
-  else
-    bun -e "
-      const fs = require('fs');
-      const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
-      s.theme = 'gruvbox';
-      fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
-    " 2>/dev/null
-    linked "theme → gruvbox in settings.json"
-  fi
+if bun -e "
+  const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
+  process.exit(s.theme === 'gruvbox' ? 0 : 1);
+" 2>/dev/null; then
+  ok "theme set to gruvbox in settings.json"
 else
-  skip "settings.json not found — copy setup/settings.template.json first"
+  bun -e "
+    const fs = require('fs');
+    const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
+    s.theme = 'gruvbox';
+    fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
+  " 2>/dev/null
+  linked "theme → gruvbox in settings.json"
 fi
 
 # ── Roles (entire directory, no local override) ──────────────────────────────
