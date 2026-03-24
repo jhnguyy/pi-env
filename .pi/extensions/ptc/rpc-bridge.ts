@@ -7,21 +7,43 @@
  *   - Plain lines → accumulate as user output (console.log)
  *
  * Writes tool results to subprocess stdin as JSON lines.
+ *
+ * ## Concurrency model
+ *
+ * `handleLine` is async and called with void — readline never awaits it.
+ * Multiple tool_call messages arriving in the same event loop turn each
+ * start their own `handleToolCall` concurrently. This is intentional:
+ * subprocess code using `Promise.all([toolA(...), toolB(...)])` correctly
+ * results in both dispatches running in parallel in the parent.
+ *
+ * ## Settlement ordering
+ *
+ * Both `rl.close` (stdout EOF) and `proc.exit` must fire before the fallback
+ * settlement path runs. This prevents a race where `rl.close` fires first and
+ * spuriously resolves the promise with partial output, silently swallowing a
+ * non-zero exit code. The normal "complete"/"error" message paths settle the
+ * promise immediately without waiting for both events.
  */
 
 import { createInterface } from "readline";
 import type { ChildProcess } from "child_process";
 import type { AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
 import { formatError } from "../_shared/errors";
-import { killGracefully, MAX_STDERR_BYTES } from "./types";
+import { killGracefully, MAX_STDERR_BYTES, MAX_OUTPUT_BYTES } from "./types";
 import type { DispatchFn, RpcOutbound, RpcInbound } from "./types";
 
 export class RpcBridge {
   private userOutput: string[] = [];
+  private userOutputBytes = 0;
+  private outputCapReached = false;
   private completionResolve!: (output: string) => void;
   private completionReject!: (error: Error) => void;
   private stderr = "";
   private toolCallCount = 0;
+
+  // Both must be set before tryFallbackSettle() will act (fix for rl.close/proc.exit race).
+  private stdoutClosed = false;
+  private processExitCode: number | null | undefined = undefined; // undefined = not yet received
 
   readonly completion: Promise<string>;
 
@@ -36,16 +58,17 @@ export class RpcBridge {
       this.completionReject = reject;
     });
 
-    // Read subprocess stdout line-by-line
     const rl = createInterface({ input: proc.stdout!, terminal: false });
     rl.on("line", (line) => void this.handleLine(line));
 
-    // Fallback settlement: fires when stdout closes (subprocess exits).
-    // Handles the case where subprocess exits with code 0 without sending
-    // "complete" (e.g. user code calls process.exit(0) directly).
-    // If the promise is already settled, this resolve() is a no-op.
+    // Fallback settlement: wait for BOTH stdout-close AND proc-exit before
+    // deciding how to settle. This eliminates the race where rl.close fires
+    // before proc.exit for a failing subprocess and resolves with partial output.
+    // If the promise is already settled (via "complete"/"error" message), these
+    // calls are no-ops.
     rl.on("close", () => {
-      this.completionResolve(this.userOutput.join("\n"));
+      this.stdoutClosed = true;
+      this.tryFallbackSettle();
     });
 
     // Capture stderr for diagnostics — capped to avoid unbounded growth.
@@ -59,10 +82,8 @@ export class RpcBridge {
     });
 
     proc.on("exit", (code) => {
-      if (code !== 0 && code !== null) {
-        const msg = this.stderr.trim() || `PTC subprocess exited with code ${code}`;
-        this.completionReject(new Error(msg));
-      }
+      this.processExitCode = code;
+      this.tryFallbackSettle();
     });
 
     proc.on("error", (err) => {
@@ -81,6 +102,19 @@ export class RpcBridge {
     }
   }
 
+  private tryFallbackSettle(): void {
+    if (!this.stdoutClosed || this.processExitCode === undefined) return;
+
+    if (this.processExitCode !== 0 && this.processExitCode !== null) {
+      const msg = this.stderr.trim() || `PTC subprocess exited with code ${this.processExitCode}`;
+      this.completionReject(new Error(msg));
+    } else {
+      // Clean exit (code 0) or signal-kill (null) without a "complete" message —
+      // resolve with whatever console.log output accumulated.
+      this.completionResolve(this.userOutput.join("\n"));
+    }
+  }
+
   private async handleLine(line: string): Promise<void> {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -89,14 +123,23 @@ export class RpcBridge {
     try {
       msg = JSON.parse(trimmed) as RpcOutbound;
     } catch {
-      // Not JSON — user console.log() output
-      this.userOutput.push(line);
+      // Not JSON — user console.log() output. Cap to avoid parent OOM.
+      if (this.userOutputBytes < MAX_OUTPUT_BYTES) {
+        this.userOutput.push(line);
+        this.userOutputBytes += line.length + 1; // +1 for the newline
+      } else if (!this.outputCapReached) {
+        this.outputCapReached = true;
+        this.userOutput.push(`[output truncated — exceeded ${MAX_OUTPUT_BYTES} byte limit mid-execution]`);
+      }
       return;
     }
 
     switch (msg.type) {
       case "tool_call":
-        await this.handleToolCall(msg);
+        // Fire-and-forget: allows concurrent tool_calls to be dispatched
+        // simultaneously. handleToolCall has its own try/catch; errors are
+        // returned to the subprocess as tool_error messages.
+        void this.handleToolCall(msg);
         break;
 
       case "complete": {

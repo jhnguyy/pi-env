@@ -65,6 +65,9 @@ export class ToolRegistry {
   /**
    * Cache of built-in ToolDefinitions keyed by `${cwd}:${toolName}`.
    * Avoids recreating closures on each of up to 100 dispatch() calls/execution.
+   *
+   * Size: bounded by (unique cwds in session) × 7 built-ins. In practice
+   * sessions rarely span more than a handful of cwds, so this stays small.
    */
   private builtinCache = new Map<string, ToolDefinition<any, any, any>>();  // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -93,6 +96,11 @@ export class ToolRegistry {
       }
       return original(tool);
     };
+
+    // Verify the patch landed — pi could seal its API object in a future version.
+    if ((pi as unknown as { registerTool: unknown }).registerTool === original) {
+      console.warn("[ptc] registerTool intercept failed — extension tools will be unavailable in PTC");
+    }
   }
 
   /**
@@ -113,7 +121,9 @@ export class ToolRegistry {
 
     if (unavailable.length > 0) {
       console.warn(
-        `[ptc] Tools unavailable in PTC (loaded before ptc extension): ${unavailable.join(", ")}`,
+        `[ptc] The following tools are unavailable inside PTC because their extensions loaded ` +
+          `before ptc in the extension list: ${unavailable.join(", ")}. ` +
+          `To fix, move ptc earlier in your extension load order.`,
       );
     }
 

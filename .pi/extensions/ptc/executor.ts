@@ -50,7 +50,7 @@ export class PtcExecutor {
 
     // Write to temp .ts file — bun run natively handles TypeScript
     const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.ts`);
-    writeFileSync(tmpPath, fullCode, "utf-8");
+    writeFileSync(tmpPath, fullCode, { encoding: "utf-8", mode: 0o600 }); // owner-only read/write
 
     try {
       return await this.runSubprocess(tmpPath, ctx, signal, onUpdate);

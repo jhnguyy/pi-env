@@ -12,10 +12,13 @@ import { BLOCKED_TOOLS } from "./types";
 
 /**
  * Convert a tool name to a valid JavaScript identifier.
- * "dev-tools" → "dev_tools", "read_pdf" → "read_pdf"
+ * "dev-tools" → "dev_tools", "read_pdf" → "read_pdf", "2fa-tool" → "_2fa_tool"
+ *
+ * Leading digits are invalid in JS identifiers — prefix with "_" when present.
  */
 export function toIdentifier(name: string): string {
-  return name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  const safe = name.replace(/[^a-zA-Z0-9_$]/g, "_");
+  return /^[0-9]/.test(safe) ? `_${safe}` : safe;
 }
 
 /**

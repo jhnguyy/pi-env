@@ -32,6 +32,12 @@ describe("toIdentifier", () => {
     expect(toIdentifier("bash")).toBe("bash");
     expect(toIdentifier("todo")).toBe("todo");
   });
+
+  it("prefixes with _ when name starts with a digit (invalid JS identifier)", () => {
+    expect(toIdentifier("2fa-tool")).toBe("_2fa_tool");
+    expect(toIdentifier("42")).toBe("_42");
+    expect(toIdentifier("1password")).toBe("_1password");
+  });
 });
 
 // ─── generateWrappers ─────────────────────────────────────────────────────────
