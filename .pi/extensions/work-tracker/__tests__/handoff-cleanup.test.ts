@@ -31,7 +31,7 @@ describe("detectMergedBranch", () => {
 	});
 
 	it("returns branch for git -C <path> merge", () => {
-		expect(detectMergedBranch("git -C /mnt/tank/code/pi-env merge feat/x", mergeOutput)).toBe("feat/x");
+		expect(detectMergedBranch("git -C /some/repo merge feat/x", mergeOutput)).toBe("feat/x");
 	});
 
 	it("returns null when output shows conflict (not successful)", () => {
@@ -70,7 +70,7 @@ describe("isGitPull", () => {
 	});
 
 	it("matches git -C /path pull", () => {
-		expect(isGitPull("git -C /mnt/tank/code/pi-env pull")).toBe(true);
+		expect(isGitPull("git -C /some/repo pull")).toBe(true);
 	});
 
 	it("does not match git push", () => {
