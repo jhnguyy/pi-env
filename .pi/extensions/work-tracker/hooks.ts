@@ -118,7 +118,15 @@ export function registerHooks(
     resetSlots();
   });
 
-  // ─── 6. Widget refresh + context injection (root sessions only) ──────────────
+  // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
+  pi.on("turn_end", async (_event, ctx) => {
+    if (isOrchWorker()) return;
+    invalidateGitCache();
+    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+  });
+
+  // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     if (isOrchWorker()) return {};
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
@@ -129,8 +137,8 @@ export function registerHooks(
     return { message: { customType: "work-tracker", content: line, display: false } };
   });
 
-  // ─── 7. Todo context injection (root sessions only) ─────────────────────────
-  // NOTE: Ideally this would be merged with hook 6 above into a single
+  // ─── 8. Todo context injection (root sessions only) ─────────────────────────
+  // NOTE: Ideally this would be merged with hook 7 above into a single
   // before_agent_start handler, but BeforeAgentStartEventResult only supports
   // a single `message?` — not `messages[]`. Two hooks are needed until the
   // upstream pi API adds multi-message support.
