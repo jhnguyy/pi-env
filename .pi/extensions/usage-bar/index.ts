@@ -168,4 +168,9 @@ export default function (pi: ExtensionAPI) {
     if (isHeadless(ctx)) return;
     await refresh(ctx);
   });
+
+  pi.on("turn_end", async (_event, ctx) => {
+    if (isHeadless(ctx)) return;
+    await refresh(ctx);
+  });
 }
