@@ -156,6 +156,58 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     });
   });
 
+  // ─── close ──────────────────────────────────────────────────────────────────
+
+  describe("close", () => {
+    it("returns uri for an open file and removes it", () => {
+      const p = mkFile("a.ts", "const a = 1;");
+      dm.ensure(p);
+      expect(dm.openCount).toBe(1);
+      const uri = dm.close(p);
+      expect(uri).not.toBeNull();
+      expect(uri).toMatch(/^file:\/\//);
+      expect(dm.openCount).toBe(0);
+    });
+
+    it("returns null for a file that is not open", () => {
+      const result = dm.close("/nonexistent/foo.ts");
+      expect(result).toBeNull();
+    });
+
+    it("cleans up project files tracking", () => {
+      mkTsconfig();
+      const p = mkFile("a.ts", "const a = 1;");
+      dm.ensure(p);
+      expect(dm.projectRoots.length).toBe(1);
+      dm.close(p);
+      // Project root should be removed since no files remain
+      expect(dm.projectRoots.length).toBe(0);
+    });
+
+    it("preserves other files in the same project", () => {
+      mkTsconfig();
+      const p1 = mkFile("a.ts", "const a = 1;");
+      const p2 = mkFile("b.ts", "const b = 2;");
+      dm.ensure(p1);
+      dm.ensure(p2);
+      expect(dm.openCount).toBe(2);
+      dm.close(p1);
+      expect(dm.openCount).toBe(1);
+      // Project root should remain since p2 is still open
+      expect(dm.projectRoots.length).toBe(1);
+    });
+
+    it("allows re-opening a closed file", () => {
+      const p = mkFile("a.ts", "const a = 1;");
+      dm.ensure(p);
+      dm.close(p);
+      const result = dm.ensure(p);
+      expect(result.notification).not.toBeNull();
+      expect(result.notification!.type).toBe("didOpen");
+      expect(dm.openCount).toBe(1);
+    });
+  });
+
   // ─── projectRoots / openUris ───────────────────────────────────────────────
 
   describe("state tracking", () => {

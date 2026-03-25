@@ -13,10 +13,109 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 
+import type { BusClient } from "./bus-client";
+import type { MessageType } from "./types";
 import { initBusService } from "./bus-service";
-import { txt, ok, err } from "../_shared/result";
+import { ok, err } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
+
+// ─── Shared execute logic ─────────────────────────────────────────────────────
+// Used by both the registered tool and the subagent AgentTool so the switch
+// logic lives in exactly one place.
+
+interface BusParams {
+  action: string;
+  session?: string;
+  agentId?: string;
+  channel?: string;
+  message?: string;
+  type?: MessageType;
+  data?: Record<string, unknown>;
+  channels?: string[];
+  timeout?: number;
+}
+
+async function executeBus(
+  params: BusParams,
+  client: BusClient,
+  signal?: AbortSignal,
+): Promise<ReturnType<typeof ok | typeof err>> {
+  switch (params.action) {
+    case "start": {
+      const sessionId = client.start(params.session, params.agentId);
+      const agentId = process.env.PI_AGENT_ID;
+      const out = agentId
+        ? `Session: ${sessionId}\nAgent: ${agentId}`
+        : `Session: ${sessionId}`;
+      return ok(out);
+    }
+
+    case "publish": {
+      if (!params.channel || !params.message) {
+        return err("publish requires channel and message");
+      }
+      client.publish(
+        params.channel,
+        params.message,
+        params.type,
+        params.data as Record<string, unknown> | undefined,
+      );
+      return ok(`Published to #${params.channel}`);
+    }
+
+    case "subscribe": {
+      if (!params.channels || params.channels.length === 0) {
+        return err("subscribe requires channels array");
+      }
+      client.subscribe(params.channels);
+      const list = params.channels.map((ch) => `#${ch}`).join(", ");
+      return ok(`Subscribed: ${list}`);
+    }
+
+    case "check": {
+      const counts = client.check();
+      if (Object.keys(counts).length === 0) {
+        return ok("No new messages");
+      }
+      const parts = Object.entries(counts)
+        .map(([ch, n]) => `#${ch}(${n})`)
+        .join(" ");
+      return ok(parts);
+    }
+
+    case "read": {
+      if (!params.channel) {
+        return err("read requires channel");
+      }
+      const messages = client.read(params.channel);
+      if (messages.length === 0) {
+        return ok("No messages");
+      }
+      return ok(client.formatMessages(messages));
+    }
+
+    case "wait": {
+      if (!params.channels || params.channels.length === 0) {
+        return err("wait requires channels array");
+      }
+      const timeoutSecs = params.timeout ?? 300;
+      const { messages, timedOut } = await client.wait(
+        params.channels,
+        timeoutSecs,
+        signal,
+      );
+      if (timedOut) {
+        const list = params.channels.map((ch) => `#${ch}`).join(", ");
+        return ok(`Timeout (${timeoutSecs}s) — no messages on ${list}`);
+      }
+      return ok(client.formatMessages(messages));
+    }
+
+    default:
+      return err(`Unknown action: ${(params as { action: string }).action}`);
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   // ─── Components (DI wiring) ─────────────────────────────────
@@ -167,80 +266,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       try {
-        switch (params.action) {
-          case "start": {
-            const sessionId = client.start(params.session, params.agentId);
-            const agentId = process.env.PI_AGENT_ID;
-            const out = agentId
-              ? `Session: ${sessionId}\nAgent: ${agentId}`
-              : `Session: ${sessionId}`;
-            return ok(out);
-          }
-
-          case "publish": {
-            if (!params.channel || !params.message) {
-              return err("publish requires channel and message");
-            }
-            client.publish(
-              params.channel,
-              params.message,
-              params.type,
-              params.data as Record<string, unknown> | undefined
-            );
-            return ok(`Published to #${params.channel}`);
-          }
-
-          case "subscribe": {
-            if (!params.channels || params.channels.length === 0) {
-              return err("subscribe requires channels array");
-            }
-            client.subscribe(params.channels);
-            const list = params.channels.map((ch) => `#${ch}`).join(", ");
-            return ok(`Subscribed: ${list}`);
-          }
-
-          case "check": {
-            const counts = client.check();
-            if (Object.keys(counts).length === 0) {
-              return ok("No new messages");
-            }
-            const parts = Object.entries(counts)
-              .map(([ch, n]) => `#${ch}(${n})`)
-              .join(" ");
-            return ok(parts);
-          }
-
-          case "read": {
-            if (!params.channel) {
-              return err("read requires channel");
-            }
-            const messages = client.read(params.channel);
-            if (messages.length === 0) {
-              return ok("No messages");
-            }
-            return ok(client.formatMessages(messages));
-          }
-
-          case "wait": {
-            if (!params.channels || params.channels.length === 0) {
-              return err("wait requires channels array");
-            }
-            const timeoutSecs = params.timeout ?? 300;
-            const { messages, timedOut } = await client.wait(
-              params.channels,
-              timeoutSecs,
-              signal ?? undefined
-            );
-            if (timedOut) {
-              const list = params.channels.map((ch) => `#${ch}`).join(", ");
-              return ok(`Timeout (${timeoutSecs}s) — no messages on ${list}`);
-            }
-            return ok(client.formatMessages(messages));
-          }
-
-          default:
-            return err(`Unknown action: ${(params as { action: string }).action}`);
-        }
+        return await executeBus(params, client, signal ?? undefined);
       } catch (e) {
         return err(formatError(e, "bus"));
       }
@@ -285,42 +311,9 @@ export default function (pi: ExtensionAPI) {
         session: Type.Optional(Type.String({ description: "Session ID" })),
         agentId: Type.Optional(Type.String({ description: "Agent ID" })),
       }),
-      execute: async (_toolCallId, params) => {
+      execute: async (_toolCallId, params, signal) => {
         try {
-          switch (params.action) {
-            case "start": {
-              const sessionId = client.start(params.session, params.agentId);
-              const agentId = process.env.PI_AGENT_ID;
-              return ok(agentId ? `Session: ${sessionId}\nAgent: ${agentId}` : `Session: ${sessionId}`);
-            }
-            case "publish": {
-              if (!params.channel || !params.message) return err("publish requires channel and message");
-              client.publish(params.channel, params.message, params.type, params.data as Record<string, unknown> | undefined);
-              return ok(`Published to #${params.channel}`);
-            }
-            case "subscribe": {
-              if (!params.channels?.length) return err("subscribe requires channels array");
-              client.subscribe(params.channels);
-              return ok(`Subscribed: ${params.channels.map((ch: string) => `#${ch}`).join(", ")}`);
-            }
-            case "check": {
-              const counts = client.check();
-              if (Object.keys(counts).length === 0) return ok("No new messages");
-              return ok(Object.entries(counts).map(([ch, n]) => `#${ch}(${n})`).join(" "));
-            }
-            case "read": {
-              if (!params.channel) return err("read requires channel");
-              const messages = client.read(params.channel);
-              return messages.length === 0 ? ok("No messages") : ok(client.formatMessages(messages));
-            }
-            case "wait": {
-              if (!params.channels?.length) return err("wait requires channels array");
-              const { messages, timedOut } = await client.wait(params.channels, params.timeout ?? 300);
-              if (timedOut) return ok(`Timeout — no messages on ${params.channels.map((ch: string) => `#${ch}`).join(", ")}`);
-              return ok(client.formatMessages(messages));
-            }
-            default: return err(`Unknown action: ${params.action}`);
-          }
+          return await executeBus(params, client, signal);
         } catch (e) {
           return err(formatError(e, "bus"));
         }

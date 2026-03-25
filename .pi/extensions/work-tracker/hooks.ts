@@ -130,6 +130,10 @@ export function registerHooks(
   });
 
   // ─── 7. Todo context injection (root sessions only) ─────────────────────────
+  // NOTE: Ideally this would be merged with hook 6 above into a single
+  // before_agent_start handler, but BeforeAgentStartEventResult only supports
+  // a single `message?` — not `messages[]`. Two hooks are needed until the
+  // upstream pi API adds multi-message support.
   pi.on("before_agent_start", async () => {
     if (isOrchWorker()) return {};
     return { message: { customType: "session-todos", content: store.render(), display: false } };
