@@ -105,7 +105,7 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
 
     return okResponse(req.id, {
       action: "diagnostics",
-      path: unique[0],
+      path: "(bulk)",
       files,
       fileErrors: errors.length > 0 ? errors : undefined,
       errorCount: totalErrors,
