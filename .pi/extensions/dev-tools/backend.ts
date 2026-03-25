@@ -14,7 +14,6 @@ import { extname, resolve as resolvePath } from "node:path";
 
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
 import { DocumentManager } from "./document-manager";
-import { FileWatcher } from "./file-watcher";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 
@@ -81,7 +80,6 @@ export class LspBackend {
   private diagReady = new Map<string, Array<() => void>>();
 
   readonly docManager = new DocumentManager();
-  readonly fileWatcher: FileWatcher;
 
   private started = false;
   private startPromise: Promise<void> | null = null;
@@ -101,9 +99,7 @@ export class LspBackend {
     private lspCapabilities: object,
     /** Prefix for diagnostic codes, e.g. "TS" for TypeScript (code 2339 → "TS2339") */
     private codePrefix: string,
-  ) {
-    this.fileWatcher = new FileWatcher((path) => { this.handleFileChange(path).catch(() => {}); });
-  }
+  ) {}
 
   /** Returns true if this backend handles the given file path (by extension). */
   handles(filePath: string): boolean {
@@ -193,7 +189,6 @@ export class LspBackend {
 
     if (isNewRoot) {
       this.addWorkspaceFolder(projectRoot);
-      this.fileWatcher.watch(projectRoot);
     }
 
     if (notification) {
@@ -220,14 +215,6 @@ export class LspBackend {
         },
       },
     });
-  }
-
-  private async handleFileChange(absolutePath: string): Promise<void> {
-    if (!this.started) return;
-    const { notification } = this.docManager.ensure(absolutePath);
-    if (notification) {
-      this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
-    }
   }
 
   // ─── Diagnostics ────────────────────────────────────────────────────────────
@@ -311,7 +298,6 @@ export class LspBackend {
   // ─── Shutdown ────────────────────────────────────────────────────────────────
 
   shutdown(): void {
-    this.fileWatcher.close();
     if (this.lsp) {
       try { this.sendLsp({ jsonrpc: "2.0", id: this.idGen.get(), method: "shutdown", params: null }); } catch {}
       try { this.lsp.kill(); } catch {}
