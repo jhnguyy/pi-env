@@ -1,16 +1,23 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { fetchAnthropicUsage, fetchCopilotUsage } from "../providers";
+import { fetchAnthropicUsage, fetchCopilotUsage, type FetchResult } from "../providers";
 import type { AnthropicUsage, CopilotUsage } from "../types";
 
 // ─── fetch mock helpers ───────────────────────────────────────────────────────
 
 const originalFetch = globalThis.fetch;
 
-function mockFetch(response: { ok: boolean; body?: unknown }): void {
+function mockFetch(response: {
+  ok: boolean;
+  status?: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+}): void {
   globalThis.fetch = async () =>
     ({
       ok: response.ok,
+      status: response.status ?? (response.ok ? 200 : 500),
+      headers: new Headers(response.headers ?? {}),
       json: async () => response.body ?? {},
     }) as Response;
 }
@@ -33,16 +40,30 @@ describeIfEnabled("usage-bar", "fetchAnthropicUsage", () => {
     seven_day: { utilization: 15, resets_at: "2026-03-28T00:00:00Z" },
   };
 
-  it("returns null on non-ok response", async () => {
-    mockFetch({ ok: false });
+  it("returns ok:false on non-ok response", async () => {
+    mockFetch({ ok: false, status: 500 });
     const result = await fetchAnthropicUsage("token");
-    expect(result).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(500);
+      expect(result.retryAfterSecs).toBeUndefined();
+    }
+  });
+
+  it("returns ok:false with retryAfterSecs on 429", async () => {
+    mockFetch({ ok: false, status: 429, headers: { "retry-after": "30" } });
+    const result = await fetchAnthropicUsage("token");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(429);
+      expect(result.retryAfterSecs).toBe(30);
+    }
   });
 
   it("returns parsed usage on ok response", async () => {
     mockFetch({ ok: true, body: validUsage });
     const result = await fetchAnthropicUsage("token");
-    expect(result).toEqual(validUsage);
+    expect(result).toEqual({ ok: true, data: validUsage });
   });
 
   it("propagates fetch errors (e.g. timeout)", async () => {
@@ -56,7 +77,7 @@ describeIfEnabled("usage-bar", "fetchAnthropicUsage", () => {
       capturedHeaders = Object.fromEntries(
         Object.entries((init?.headers as Record<string, string>) ?? {}),
       );
-      return { ok: true, json: async () => validUsage } as Response;
+      return { ok: true, status: 200, headers: new Headers(), json: async () => validUsage } as Response;
     };
     await fetchAnthropicUsage("sk-ant-test");
     expect(capturedHeaders["Authorization"]).toBe("Bearer sk-ant-test");
@@ -75,16 +96,30 @@ describeIfEnabled("usage-bar", "fetchCopilotUsage", () => {
     },
   };
 
-  it("returns null on non-ok response", async () => {
-    mockFetch({ ok: false });
+  it("returns ok:false on non-ok response", async () => {
+    mockFetch({ ok: false, status: 403 });
     const result = await fetchCopilotUsage("token");
-    expect(result).toBeNull();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(403);
+      expect(result.retryAfterSecs).toBeUndefined();
+    }
+  });
+
+  it("returns ok:false with retryAfterSecs on 429", async () => {
+    mockFetch({ ok: false, status: 429, headers: { "retry-after": "15" } });
+    const result = await fetchCopilotUsage("token");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(429);
+      expect(result.retryAfterSecs).toBe(15);
+    }
   });
 
   it("returns parsed usage on ok response", async () => {
     mockFetch({ ok: true, body: validUsage });
     const result = await fetchCopilotUsage("token");
-    expect(result).toEqual(validUsage);
+    expect(result).toEqual({ ok: true, data: validUsage });
   });
 
   it("propagates fetch errors (e.g. timeout)", async () => {
@@ -98,7 +133,7 @@ describeIfEnabled("usage-bar", "fetchCopilotUsage", () => {
       capturedHeaders = Object.fromEntries(
         Object.entries((init?.headers as Record<string, string>) ?? {}),
       );
-      return { ok: true, json: async () => validUsage } as Response;
+      return { ok: true, status: 200, headers: new Headers(), json: async () => validUsage } as Response;
     };
     await fetchCopilotUsage("ghu_test");
     expect(capturedHeaders["Authorization"]).toBe("token ghu_test");
