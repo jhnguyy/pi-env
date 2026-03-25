@@ -18,6 +18,9 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { Theme } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AnthropicUsage, CopilotUsage } from "./types.js";
 import { fetchAnthropicUsage, fetchCopilotUsage, type FetchResult } from "./providers.js";
 import { isHeadless } from "../_shared/context.js";
@@ -118,12 +121,28 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
 /**
  * Per-provider kill-switches for usage-bar API polling. When false, no fetch
  * calls are made for that provider and the status bar slot is cleared.
- * All default to false — flip to true to re-enable a provider's polling.
+ *
+ * Reads from settings.json:
+ *   {
+ *     "usageBar": {
+ *       "polling": {
+ *         "anthropic": true,
+ *         "github-copilot": false
+ *       }
+ *     }
+ *   }
+ *
+ * All providers default to false (disabled). Set to true to enable polling.
  */
-const POLLING_ENABLED: Record<string, boolean> = {
-  anthropic: false,
-  "github-copilot": false,
-};
+function isPollingEnabled(provider: string): boolean {
+  try {
+    const settingsPath = join(getAgentDir(), "settings.json");
+    const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
+    return raw?.usageBar?.polling?.[provider] === true;
+  } catch {
+    return false;
+  }
+}
 
 // ─── Refresh state ────────────────────────────────────────────────────────────
 
@@ -150,7 +169,7 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
   const now = Date.now();
 
   const provider = ctx.model?.provider;
-  if (!provider || !(provider in PROVIDER_FETCHERS) || !POLLING_ENABLED[provider]) {
+  if (!provider || !(provider in PROVIDER_FETCHERS) || !isPollingEnabled(provider)) {
     clearSlot("usage-bar", ctx);
     return;
   }
