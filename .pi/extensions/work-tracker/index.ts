@@ -23,6 +23,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
@@ -33,6 +34,7 @@ import { setSlot } from "../_shared/ui-render";
 import { registerHooks } from "./hooks";
 import { TodoStore } from "./store";
 import { extractSession, formatSummary } from "./extractor";
+import type { ExtToolRegistration } from "../subagent/types";
 
 const SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
@@ -172,4 +174,64 @@ export default function (pi: ExtensionAPI) {
 
   // ─── Hooks ───────────────────────────────────────────────────────────────────
   registerHooks(pi, config, guard, store);
+
+  // ─── Agent tool registration ─────────────────────────────────────────────────
+  // Register todo and read_session as AgentTools so subagents can manage tasks
+  // and access past session context. UI slot updates are skipped in subagent context.
+  pi.on("session_start", () => {
+    const todoAgentTool: AgentTool<any, any> = {
+      name: "todo",
+      label: "Todo",
+      description: "Manage your session task list. Actions: add, done, rm, list, clear.",
+      parameters: Type.Object({
+        action: Type.Union([Type.Literal("add"), Type.Literal("done"), Type.Literal("rm"), Type.Literal("list"), Type.Literal("clear")],
+          { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" }),
+        text: Type.Optional(Type.String({ description: "Task text (for add) or task id number (for done/rm)" })),
+      }),
+      execute: async (_id, params) => {
+        const { action, text } = params;
+        if (action === "list") return { content: [{ type: "text", text: store.render() }], details: {} };
+        if (action === "clear") { store.clear(); return { content: [{ type: "text", text: "Cleared all tasks." }], details: {} }; }
+        if (action === "add") {
+          if (!text) throw new Error("text is required for add");
+          const item = store.add(text);
+          return { content: [{ type: "text", text: `Added: □ (${item.id}) ${item.text}` }], details: { id: item.id } };
+        }
+        if (action === "done") {
+          if (!text) throw new Error("text is required for done");
+          const n = parseInt(text, 10);
+          const item = store.complete(isNaN(n) ? text : n);
+          if (!item) throw new Error(`No matching open task: ${text}`);
+          return { content: [{ type: "text", text: `Completed: ✅ (${item.id}) ${item.text}` }], details: { id: item.id } };
+        }
+        if (action === "rm") {
+          if (!text) throw new Error("text is required for rm");
+          const n = parseInt(text, 10);
+          if (!store.remove(isNaN(n) ? text : n)) throw new Error(`No matching task: ${text}`);
+          return { content: [{ type: "text", text: `Removed task ${text}.` }], details: {} };
+        }
+        throw new Error(`Unknown action: ${action}`);
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: todoAgentTool, capabilities: ["write"] } satisfies ExtToolRegistration);
+
+    const readSessionAgentTool: AgentTool<any, any> = {
+      name: "read_session",
+      label: "Read Session",
+      description: "Extract high-signal content from a pi session JSONL file. Returns user prompts, agent narrative, tool usage counts.",
+      parameters: Type.Object({
+        path: Type.String({ description: "Absolute path to a session .jsonl file under ~/.pi/agent/sessions/" }),
+      }),
+      execute: async (_id, params, signal) => {
+        if (signal?.aborted) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
+        const p = resolve(params.path.replace(/^@/, ""));
+        if (!p.startsWith(SESSION_DIR + "/")) throw new Error(`read_session restricted to ${SESSION_DIR}/`);
+        const summary = extractSession(p);
+        const raw = formatSummary(summary);
+        const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
+        return { content: [{ type: "text", text: trunc.content }], details: { filename: summary.filename, truncated: trunc.truncated } };
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: readSessionAgentTool, capabilities: ["read"] } satisfies ExtToolRegistration);
+  });
 }
