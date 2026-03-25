@@ -9,7 +9,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { extname, resolve as resolvePath } from "node:path";
 
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
