@@ -171,9 +171,9 @@ link_path \
 # repo so it's version-controlled; ~/.tmux.conf just sources it.
 
 echo ""
-echo "Tmux theme"
-echo "----------"
-TMUX_THEME_SRC="$REPO/setup/tmux-gruvbox.conf"
+echo "Tmux"
+echo "----"
+TMUX_THEME_SRC="$REPO/setup/tmux.conf"
 TMUX_CONF="$HOME/.tmux.conf"
 SOURCE_LINE="source-file $TMUX_THEME_SRC"
 if [ -f "$TMUX_CONF" ] && grep -qF "$SOURCE_LINE" "$TMUX_CONF"; then
