@@ -10,7 +10,7 @@
  *     `ls -lt /tmp/orch-runs/` to see recent runs.
  */
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, statSync } from "node:fs";
 import type { OrchManifest, RunReceipt } from "./types";
 
 export const RECEIPT_DIR = "/tmp/orch-runs";
@@ -37,4 +37,63 @@ export function writeReceipt(receipt: RunReceipt): string {
   const path = `${RECEIPT_DIR}/${filename}`;
   writeFileSync(path, JSON.stringify(receipt, null, 2));
   return path;
+}
+
+// ─── Receipt Pruning ──────────────────────────────────────────
+
+/** Maximum number of receipts to keep. Oldest are deleted first. */
+const MAX_RECEIPTS = 100;
+
+/**
+ * Prune old receipts, keeping only the most recent MAX_RECEIPTS.
+ * Filenames sort chronologically (timestamp prefix). Best-effort: ignores errors.
+ */
+export function pruneReceipts(maxKeep: number = MAX_RECEIPTS): number {
+  try {
+    const files = readdirSync(RECEIPT_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .sort(); // ascending by timestamp prefix
+    if (files.length <= maxKeep) return 0;
+    const toDelete = files.slice(0, files.length - maxKeep);
+    let deleted = 0;
+    for (const file of toDelete) {
+      try { unlinkSync(`${RECEIPT_DIR}/${file}`); deleted++; } catch {}
+    }
+    return deleted;
+  } catch {
+    return 0;
+  }
+}
+
+// ─── Orphan Cleanup ───────────────────────────────────────────
+
+/**
+ * Remove orphaned /tmp/orch-* directories that are not the active orchDir.
+ * These are left behind by crashed or improperly cleaned runs.
+ * Best-effort: ignores errors. Skips receipt and shared dirs.
+ */
+export function cleanupOrphanedOrchDirs(activeOrchDir?: string): number {
+  const SKIP = new Set(["orch-runs", "orch-briefs", "orch-results"]);
+  try {
+    const entries = readdirSync("/tmp")
+      .filter((e) => e.startsWith("orch-") && !SKIP.has(e));
+    let cleaned = 0;
+    for (const entry of entries) {
+      const fullPath = `/tmp/${entry}`;
+      if (fullPath === activeOrchDir) continue;
+      try {
+        const stat = statSync(fullPath);
+        if (!stat.isDirectory()) continue;
+        // Only clean dirs older than 1 hour to avoid race with in-progress spawns
+        const ageMs = Date.now() - stat.mtimeMs;
+        if (ageMs < 3_600_000) continue;
+        const { rmSync } = require("node:fs");
+        rmSync(fullPath, { recursive: true, force: true });
+        cleaned++;
+      } catch {}
+    }
+    return cleaned;
+  } catch {
+    return 0;
+  }
 }

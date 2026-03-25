@@ -16,7 +16,7 @@ import { generateId } from "../_shared/id";
 
 import { gitSync, isGitRepo } from "../_shared/git";
 import { createWorktree, prepareWorktree, removeWorktree, pruneWorktrees } from "./git";
-import { writeManifest, writeReceipt } from "./manifest";
+import { writeManifest, writeReceipt, pruneReceipts, cleanupOrphanedOrchDirs } from "./manifest";
 import type { OrchManifest, RunReceipt, WorkerRecord } from "./types";
 import { OrchError } from "./types";
 import { initBusService, getBusService } from "../agent-bus/bus-service";
@@ -408,6 +408,10 @@ export class OrchestratorManager {
     delete process.env.PI_AGENT_ID;
 
     this.state = null;
+
+    // Prune old receipts and orphaned orch dirs — best-effort
+    pruneReceipts();
+    cleanupOrphanedOrchDirs();
 
     return { panes: panesKilled, worktrees: worktreesRemoved, preservedBranches, receiptPath };
   }
