@@ -6,7 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { getAgentDir, parseFrontmatter, SettingsManager } from "@mariozechner/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
 
@@ -84,6 +84,29 @@ function isDirectory(p: string): boolean {
 	}
 }
 
+/**
+ * Load agent definitions from all registered pi packages (settings.json `packages`).
+ * This mirrors how extensions and skills are discovered from packages — enabling
+ * a repo like pi-env to ship agent definitions that are globally available once
+ * the repo is registered as a package, without requiring symlinks or cwd proximity.
+ */
+function loadAgentsFromPackages(cwd: string): AgentConfig[] {
+	const agents: AgentConfig[] = [];
+	try {
+		const settings = SettingsManager.create(cwd);
+		const packages = settings.getPackages();
+		for (const pkg of packages) {
+			const source = typeof pkg === "string" ? pkg : pkg.source;
+			if (!source || !fs.existsSync(source)) continue;
+			const agentsDir = path.join(source, ".pi", "agents");
+			agents.push(...loadAgentsFromDir(agentsDir, "project"));
+		}
+	} catch {
+		// settings.json unavailable or malformed — skip package scanning
+	}
+	return agents;
+}
+
 function findNearestProjectAgentsDir(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
@@ -102,15 +125,20 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	// Package agents: loaded from .pi/agents/ in each registered package (settings.json `packages`).
+	// Priority: user > cwd-project > packages — later entries win, so packages go in first.
+	const packageAgents = scope === "user" ? [] : loadAgentsFromPackages(cwd);
 
 	const agentMap = new Map<string, AgentConfig>();
 
 	if (scope === "both") {
+		for (const agent of packageAgents) agentMap.set(agent.name, agent);
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	} else if (scope === "user") {
 		for (const agent of userAgents) agentMap.set(agent.name, agent);
 	} else {
+		for (const agent of packageAgents) agentMap.set(agent.name, agent);
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	}
 
