@@ -2,16 +2,18 @@
  * context.ts — git status helpers and widget refresh utilities.
  *
  * Pure side-effect-free git utilities (loadConfig, getGitStatus,
- * getCurrentBranch, buildStatusLine) plus a per-repo git status cache
- * that avoids spawning subprocesses on every agent turn.
+ * getCurrentBranch, buildStatusLine) plus per-repo caches for git status
+ * and active worktrees that avoid spawning subprocesses on every agent turn.
  *
  * Cache invalidation: call invalidateGitCache() after any bash command
  * that modifies git state (commit, checkout, merge, push, pull, etc.).
+ * Worktree cache is cleared on the same invalidation since `git worktree`
+ * is already matched by GIT_MUTATING_PATTERN.
  */
 
 import type { Theme } from "@mariozechner/pi-coding-agent";
 
-import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount } from "../_shared/git";
+import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount, gitSync } from "../_shared/git";
 import type { WorkTrackerConfig } from "./types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -38,6 +40,9 @@ interface CachedGitStatus {
 /** Cached git status per repo path. Cleared on git-mutating bash commands. */
 const gitStatusCache = new Map<string, CachedGitStatus>();
 
+/** Cached worktree list per repo path. Cleared alongside gitStatusCache. */
+const worktreeCache = new Map<string, string[]>();
+
 /** Pattern matching bash commands that modify git state. */
 const GIT_MUTATING_PATTERN = /\bgit\b.*\b(commit|checkout|switch|merge|rebase|pull|push|reset|stash|add|restore|cherry-pick|branch\s+-[dDmM]|worktree)\b/;
 
@@ -46,9 +51,10 @@ export function isGitMutating(command: string): boolean {
   return GIT_MUTATING_PATTERN.test(command);
 }
 
-/** Clear the git status cache. Call after git-mutating operations. */
+/** Clear both the git status cache and the worktree cache. */
 export function invalidateGitCache(): void {
   gitStatusCache.clear();
+  worktreeCache.clear();
 }
 
 // ─── Git status ───────────────────────────────────────────────────────────────
@@ -70,6 +76,42 @@ export function getCurrentBranch(): string | null {
   return gitGetCurrentBranch(process.cwd());
 }
 
+// ─── Active worktrees ─────────────────────────────────────────────────────────
+
+/**
+ * Return branch names of all active worktrees in repoPath, excluding the
+ * primary worktree (always first in `git worktree list --porcelain` output).
+ * Returns [] if the repo has no additional worktrees or on any error.
+ */
+export function getActiveWorktrees(repoPath: string): string[] {
+  const cached = worktreeCache.get(repoPath);
+  if (cached) return cached;
+
+  const { status, stdout } = gitSync(repoPath, ["worktree", "list", "--porcelain"]);
+  if (status !== 0 || !stdout.trim()) {
+    worktreeCache.set(repoPath, []);
+    return [];
+  }
+
+  // Each worktree block is separated by a blank line. The first block is the
+  // primary worktree — skip it. Collect branch names from the rest.
+  const blocks = stdout.split(/\n\n+/).filter(Boolean);
+  const branches: string[] = [];
+  for (const block of blocks.slice(1)) {
+    for (const line of block.split("\n")) {
+      if (line.startsWith("branch refs/heads/")) {
+        branches.push(line.slice("branch refs/heads/".length).trim());
+        break;
+      }
+    }
+    // detached HEAD worktrees (no "branch" line) are skipped — they're not
+    // named branches another agent would conflict with.
+  }
+
+  worktreeCache.set(repoPath, branches);
+  return branches;
+}
+
 // ─── Status line ──────────────────────────────────────────────────────────────
 
 /** Plain-text status line for LLM context injection. */
@@ -81,7 +123,13 @@ export function buildStatusLine(config: WorkTrackerConfig): string | null {
     const name = repoPath.split("/").pop() ?? repoPath;
     const warn = config.protectedBranches.includes(branch) ? " (⚠️ protected branch)" : "";
     const dirtyNote = dirty > 0 ? ` (${dirty} uncommitted)` : "";
-    parts.push(`${name}: ${branch}${warn}${dirtyNote}`);
+
+    const worktrees = getActiveWorktrees(repoPath);
+    const worktreeNote = worktrees.length > 0
+      ? ` | other worktrees: ${worktrees.join(", ")}`
+      : "";
+
+    parts.push(`${name}: ${branch}${warn}${dirtyNote}${worktreeNote}`);
   }
   return parts.length > 0 ? `[work-tracker] ${parts.join(" | ")}` : null;
 }
@@ -99,7 +147,13 @@ export function buildStatusLineThemed(config: WorkTrackerConfig, theme: Theme): 
     const isProtected = config.protectedBranches.includes(branch);
     const warn = isProtected ? ` ${theme.fg("warning", "(⚠️ protected branch)")}` : "";
     const dirtyNote = dirty > 0 ? ` ${theme.fg("warning", `(${dirty} uncommitted)`)}` : "";
-    parts.push(`${name}: ${theme.fg("accent", branch)}${warn}${dirtyNote}`);
+
+    const worktrees = getActiveWorktrees(repoPath);
+    const worktreeNote = worktrees.length > 0
+      ? ` ${theme.fg("muted", `| other worktrees: ${worktrees.join(", ")}`)}`
+      : "";
+
+    parts.push(`${name}: ${theme.fg("accent", branch)}${warn}${dirtyNote}${worktreeNote}`);
   }
   if (parts.length === 0) return null;
   const label = theme.fg("customMessageLabel", "\x1b[1m[work-tracker]\x1b[22m");
