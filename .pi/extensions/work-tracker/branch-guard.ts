@@ -3,14 +3,17 @@ import { getCurrentBranch as gitGetCurrentBranch } from "../_shared/git";
 import type { BranchGuardResult, WorkTrackerConfig } from "./types";
 
 /**
- * BranchGuard — detects and blocks git push commands targeting protected branches.
+ * BranchGuard — detects and blocks git operations that would land commits on
+ * protected branches or create branches in the shared main working tree.
  *
  * Handles:
- *   git push origin main               — explicit protected branch
- *   git push origin master             — same for master
- *   git push origin +main              — force push
- *   git push origin HEAD:main          — refspec push
- *   git push / git push origin         — bare push when current branch is protected (runtime check)
+ *   git commit (with -C or cd context)  — block commit to protected branch
+ *   git push origin main                — explicit protected branch
+ *   git push origin master              — same for master
+ *   git push origin +main               — force push
+ *   git push origin HEAD:main           — refspec push
+ *   git push / git push origin          — bare push when current branch is protected (runtime check)
+ *   git checkout -b / git switch -c     — block new branch in shared main working tree
  */
 export class BranchGuard {
   private readonly protectedBranches: string[];
@@ -25,6 +28,10 @@ export class BranchGuard {
     // ── Checkout guard: block branch creation in the main working tree ──
     const checkoutResult = this.checkCheckout(command);
     if (checkoutResult.shouldBlock) return checkoutResult;
+
+    // ── Commit guard: block commits that would land on a protected branch ──
+    const commitResult = this.checkCommit(command);
+    if (commitResult.shouldBlock) return commitResult;
 
     if (!this.isGitPush(command)) {
       return { shouldBlock: false };
@@ -78,6 +85,70 @@ export class BranchGuard {
   private extractRepoCFlag(command: string): string | null {
     const m = command.match(/\bgit\s+-C\s+(\S+)/);
     return m ? m[1] : null;
+  }
+
+  /**
+   * Blocks `git commit` when we can determine it targets a protected branch.
+   *
+   * Two detection paths (bare `git commit` without path context is allowed —
+   * we cannot determine the working directory from the command string alone):
+   *
+   *   git -C <guarded-repo> commit …   — explicit path, runtime branch check
+   *   cd <guarded-repo> … git commit … — cd-then-commit pattern in same command
+   */
+  private checkCommit(command: string): BranchGuardResult {
+    if (!this.isGitCommit(command)) return { shouldBlock: false };
+
+    // Path A: explicit -C <path> flag
+    const explicitRepo = this.extractRepoCFlag(command);
+    if (explicitRepo !== null) {
+      const isGuarded = this.guardedRepos.some((r) => resolve(r) === resolve(explicitRepo));
+      if (isGuarded) {
+        const current = this.getCurrentBranch(explicitRepo);
+        if (current && this.protectedBranches.includes(current)) {
+          return { shouldBlock: true, targetBranch: current, reason: this.buildCommitReason(current) };
+        }
+      }
+      return { shouldBlock: false };
+    }
+
+    // Path B: cd <guarded-repo> … git commit in the same command string
+    for (const repoPath of this.guardedRepos) {
+      if (this.commandCdsToRepo(command, repoPath)) {
+        const current = this.getCurrentBranch(repoPath);
+        if (current && this.protectedBranches.includes(current)) {
+          return { shouldBlock: true, targetBranch: current, reason: this.buildCommitReason(current) };
+        }
+      }
+    }
+
+    return { shouldBlock: false };
+  }
+
+  private isGitCommit(command: string): boolean {
+    // Match git commit but not git commit --allow-empty-message or similar edge cases.
+    // Excludes `git commit-tree` (plumbing) via word-boundary after "commit".
+    return /\bgit\b.*\bcommit\b(?!\s*-tree)/.test(command);
+  }
+
+  /**
+   * Returns true if the command contains a `cd <repoPath>` (or `cd <repoPath>/…`)
+   * before a git commit call — the classic agent pattern for committing in a repo.
+   */
+  private commandCdsToRepo(command: string, repoPath: string): boolean {
+    const escaped = repoPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\bcd\\s+${escaped}(?:/[^\\s]*)?(?:\\s|$|&&|;)`).test(command);
+  }
+
+  private buildCommitReason(branch: string): string {
+    return [
+      `⛔ Direct commit to \`${branch}\` is blocked.`,
+      "",
+      "Commit inside a worktree on a feature branch instead:",
+      "  git worktree add /tmp/repo-<name> -b feat/<name>",
+      "  cd /tmp/repo-<name>",
+      "  # commit there, then merge back when ready",
+    ].join("\n");
   }
 
   /**
