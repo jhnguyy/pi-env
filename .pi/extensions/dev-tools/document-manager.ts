@@ -202,6 +202,25 @@ export class DocumentManager {
     return evictedUris;
   }
 
+  /**
+   * Close a single document and remove it from tracking.
+   * Returns the URI if it was open, null if not found.
+   * Caller is responsible for sending textDocument/didClose to the LSP.
+   */
+  close(absolutePath: string): string | null {
+    const abs = resolve(absolutePath);
+    const uri = pathToUri(abs);
+    const doc = this.openDocs.get(uri);
+    if (!doc) return null;
+    this.openDocs.delete(uri);
+    const projectFiles = this.projectFiles.get(doc.projectRoot);
+    if (projectFiles) {
+      projectFiles.delete(uri);
+      if (projectFiles.size === 0) this.projectFiles.delete(doc.projectRoot);
+    }
+    return uri;
+  }
+
   /** Close all documents. */
   clear(): void {
     this.openDocs.clear();

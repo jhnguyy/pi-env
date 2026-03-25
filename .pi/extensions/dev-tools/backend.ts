@@ -208,6 +208,22 @@ export class LspBackend {
     return uri;
   }
 
+  /**
+   * Close a single file in the LSP. Sends textDocument/didClose and clears its
+   * diagnostic cache. Returns the URI if the file was open, null otherwise.
+   */
+  closeFile(absolutePath: string): string | null {
+    const uri = this.docManager.close(absolutePath);
+    if (!uri) return null;
+    this.sendLsp({
+      jsonrpc: "2.0",
+      method: "textDocument/didClose",
+      params: { textDocument: { uri } },
+    });
+    this.diagCache.delete(uri);
+    return uri;
+  }
+
   /** Ensure the backend is started and ready (without opening a specific file). */
   async ensureReady(): Promise<void> {
     await this.ensureStarted();
