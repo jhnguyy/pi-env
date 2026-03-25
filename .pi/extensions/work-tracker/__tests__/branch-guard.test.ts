@@ -2,6 +2,19 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { BranchGuard } from "../branch-guard";
 import type { WorkTrackerConfig } from "../types";
 
+/** Subclass that returns a fixed branch name — avoids real git subprocess calls. */
+class MockBranchGuard extends BranchGuard {
+  constructor(
+    config: WorkTrackerConfig,
+    private readonly mockBranch: string | null,
+  ) {
+    super(config);
+  }
+  override getCurrentBranch(_repoPath: string): string | null {
+    return this.mockBranch;
+  }
+}
+
 const config: WorkTrackerConfig = {
   guardedRepos: [], // No runtime repo checks in unit tests
   protectedBranches: ["main", "master"],
@@ -85,7 +98,8 @@ describe("BranchGuard", () => {
   });
 
   describe("allows non-push git commands", () => {
-    it("git commit -m 'feat: add thing'", () => {
+    // bare `git commit` with no path context — CWD unknown, cannot block safely
+    it("git commit -m 'feat: add thing' (no path context)", () => {
       expect(guard.check("git commit -m 'feat: add thing'").shouldBlock).toBe(false);
     });
 
@@ -99,6 +113,79 @@ describe("BranchGuard", () => {
 
     it("git merge --no-ff feat/x", () => {
       expect(guard.check("git merge --no-ff feat/x").shouldBlock).toBe(false);
+    });
+  });
+
+  // ─── Commit guard ───────────────────────────────────────────────
+
+  describe("commit guard", () => {
+    const guardedConfig: WorkTrackerConfig = {
+      guardedRepos: ["/tank/code/pi-env"],
+      protectedBranches: ["main", "master"],
+    };
+
+    it("blocks git -C <guarded-repo> commit when on protected branch", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("git -C /tank/code/pi-env commit -m 'oops'");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.targetBranch).toBe("main");
+    });
+
+    it("blocks cd <guarded-repo> && git commit pattern", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("cd /tank/code/pi-env && git add . && git commit -m 'oops'");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.targetBranch).toBe("main");
+    });
+
+    it("blocks cd <guarded-repo>/ (trailing slash) && git commit", () => {
+      const g = new MockBranchGuard(guardedConfig, "master");
+      const r = g.check("cd /tank/code/pi-env/ && git commit -m 'oops'");
+      expect(r.shouldBlock).toBe(true);
+      expect(r.targetBranch).toBe("master");
+    });
+
+    it("allows git -C <guarded-repo> commit when on a feature branch", () => {
+      const g = new MockBranchGuard(guardedConfig, "feat/my-thing");
+      const r = g.check("git -C /tank/code/pi-env commit -m 'good'");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("allows git -C <unguarded-repo> commit even when mock returns main", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("git -C /tank/code/credential-proxy commit -m 'ok'");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("allows bare git commit with no path context (CWD unknown)", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("git commit -m 'no context'");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("allows cd <unguarded-repo> && git commit", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("cd /tank/code/credential-proxy && git commit -m 'ok'");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("does not match git commit-tree (plumbing command)", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("git -C /tank/code/pi-env commit-tree HEAD^{tree}");
+      expect(r.shouldBlock).toBe(false);
+    });
+
+    it("blocks git commit --amend in guarded repo context", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("cd /tank/code/pi-env && git commit --amend --no-edit");
+      expect(r.shouldBlock).toBe(true);
+    });
+
+    it("reason includes blocked branch name and worktree suggestion", () => {
+      const g = new MockBranchGuard(guardedConfig, "main");
+      const r = g.check("cd /tank/code/pi-env && git commit -m 'oops'");
+      expect(r.reason).toContain("`main`");
+      expect(r.reason).toContain("git worktree add");
     });
   });
 
