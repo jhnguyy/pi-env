@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { extname, resolve as resolvePath } from "node:path";
 
 import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
-import { DocumentManager } from "./document-manager";
+import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 
@@ -193,6 +193,16 @@ export class LspBackend {
 
     if (notification) {
       this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
+    }
+
+    // LRU eviction: close stale documents and clear their diagnostic caches
+    const evicted = this.docManager.evict(MAX_OPEN_DOCUMENTS);
+    for (const evictedUri of evicted) {
+      this.sendLsp({
+        jsonrpc: "2.0", method: "textDocument/didClose",
+        params: { textDocument: { uri: evictedUri } },
+      });
+      this.diagCache.delete(evictedUri);
     }
 
     return uri;
