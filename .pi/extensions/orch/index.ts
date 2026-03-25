@@ -19,6 +19,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";
 
 import { OrchestratorManager } from "./manager";
@@ -26,6 +27,7 @@ import { cleanupOrphanedOrchDirs } from "./manifest";
 import { txt, ok, err } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
+import type { ExtToolRegistration } from "../subagent/types";
 
 export default function (pi: ExtensionAPI) {
   const manager = new OrchestratorManager();
@@ -281,6 +283,61 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, _opts, theme, _ctx) {
       return defaultRenderResult(result, theme, { truncateToFirstLine: true });
     },
+  });
+
+  // ─── Agent tool registration ──────────────────────────────────────────────────
+  // Register orch as an AgentTool so orchestrator subagents can manage runs.
+  // The manager is captured via closure — no ctx needed.
+  // Capabilities: read (status), write (cleanup/receipts), execute (start/spawn/wait).
+  pi.on("session_start", () => {
+    const orchAgentTool: AgentTool<any, any> = {
+      name: "orch",
+      label: "Orch",
+      description: "Orchestration lifecycle manager. Actions: start, spawn, cleanup, status, wait.",
+      parameters: Type.Object({
+        action: StringEnum(["start", "spawn", "cleanup", "status", "wait"] as const, { description: "Operation to perform" }),
+        repo: Type.Optional(Type.String({ description: "Absolute path to git repo root. Enables worktree isolation." })),
+        label: Type.Optional(Type.String({ description: "Worker label (a-z, 0-9, hyphens)." })),
+        command: Type.Optional(Type.String({ description: "Full command to run in the worker pane." })),
+        model: Type.Optional(Type.String({ description: "Model for the worker. Pi spawner mode only." })),
+        tools: Type.Optional(Type.Array(Type.String(), { description: "Built-in tool whitelist for the worker." })),
+        brief: Type.Optional(Type.String({ description: "Absolute path to brief file." })),
+        prompt: Type.Optional(Type.String({ description: "Inline prompt string for the worker." })),
+        busChannel: Type.Optional(Type.String({ description: "Auto-publish exit signal to this bus channel." })),
+        timeout: Type.Optional(Type.Number({ description: "Timeout in seconds for orch wait (default: 300)." })),
+      }),
+      execute: async (_toolCallId, params, signal) => {
+        try {
+          // Delegate to the same manager used by the pi tool — shared state
+          switch (params.action) {
+            case "start": {
+              const result = manager.start(params.repo);
+              return { content: [txt(`Run ${result.runId} started. ORCH_DIR: ${result.orchDir}`)], details: result };
+            }
+            case "spawn": {
+              if (!params.label) return err("spawn requires label");
+              if (!params.command && !params.prompt && !params.brief) return err("spawn requires command or prompt/brief");
+              const result = await manager.spawn({ label: params.label, command: params.command, model: params.model, tools: params.tools, brief: params.brief, prompt: params.prompt, busChannel: params.busChannel });
+              return { content: [txt(`Worker "${params.label}" spawned (${result.paneId})`)], details: result };
+            }
+            case "cleanup": {
+              await manager.cleanup();
+              return { content: [txt("Cleanup complete.")], details: {} };
+            }
+            case "status": {
+              const status = manager.getStatus();
+              return { content: [txt(status ? `Run ${status.runId}: ${status.workers.length} worker(s)` : "no active run")], details: status ?? {} };
+            }
+            case "wait": {
+              const result = await manager.wait({ timeout: params.timeout, signal });
+              return { content: [txt(result.timedOut ? "Timed out." : `${result.messages.length} message(s) received.`)], details: result };
+            }
+            default: return err(`Unknown action: ${params.action}`);
+          }
+        } catch (e) { return err(formatError(e, "orch")); }
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: orchAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
   });
 }
 

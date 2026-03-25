@@ -18,11 +18,13 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";
 
 import { parseDiff } from "./parser";
 import { captureDiff, runForExtension } from "./runner";
 import { err } from "../_shared/result";
+import type { ExtToolRegistration } from "../subagent/types";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -193,6 +195,55 @@ export default function (pi: ExtensionAPI) {
       }
       return new Text(theme.fg("success", text), 0, 0);
     },
+  });
+
+  // Register jit_catch as an AgentTool so subagents (e.g. code-review agents) can run catching tests.
+  // Uses process.cwd() for git operations since subagents run in-process and share the same cwd.
+  // Capabilities: write (creates temp test files), execute (runs bun test).
+  pi.on("session_start", () => {
+    const exec = pi.exec.bind(pi);
+    const jitAgentTool: AgentTool<any, any> = {
+      name: "jit_catch",
+      label: "JiT-Catch",
+      description: "Generate and run ephemeral catching tests for a code diff. Tests are written by a subagent, executed with bun test, then auto-discarded on pass.",
+      parameters: Type.Object({
+        diff_source: Type.Optional(StringEnum(["unstaged", "staged", "commit"] as const, { description: "How to acquire the diff. Default: 'unstaged'." })),
+        commit: Type.Optional(Type.String({ description: "Commit SHA — required when diff_source='commit'." })),
+        git_cwd: Type.Optional(Type.String({ description: "Working directory for git commands. Defaults to process.cwd()." })),
+        diff: Type.Optional(Type.String({ description: "Raw unified diff text. When provided, skips git entirely." })),
+        ext_name: Type.Optional(Type.String({ description: "Override auto-detected extension name." })),
+      }),
+      execute: async (_toolCallId, params, signal) => {
+        let diffText: string;
+        try {
+          if (params.diff) {
+            diffText = params.diff;
+          } else {
+            const source = params.diff_source ?? "unstaged";
+            const gitCwd = params.git_cwd ?? process.cwd();
+            diffText = await captureDiff(source, exec, gitCwd, params.commit);
+          }
+        } catch (e) { return err(String(e)); }
+        const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
+        if (extensions.length === 0) return err(hasNonExtensionFiles ? "Diff only touches non-extension files." : "No changed files found.");
+        const targets = params.ext_name ? extensions.filter((e) => e.name === params.ext_name) : extensions;
+        if (targets.length === 0) return err(`Extension '${params.ext_name}' not found. Present: ${extensions.map((e) => e.name).join(", ")}`);
+        const results = [];
+        for (const ext of targets) {
+          const result = await runForExtension(ext, diffText, exec, signal, () => {});
+          results.push(result);
+        }
+        const lines: string[] = [];
+        if (hasNonExtensionFiles) lines.push("Note: diff also contains non-extension files (ignored).\n");
+        let anyFailed = false;
+        for (const r of results) {
+          if (r.passed) { lines.push(`✓ ${r.extName} — tests passed.`); }
+          else { anyFailed = true; lines.push(`✗ ${r.extName} — FAILED.\n${r.testOutput}`); }
+        }
+        return { content: [{ type: "text", text: lines.join("\n") }], details: { results, anyFailed } };
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: jitAgentTool, capabilities: ["write", "execute"] } satisfies ExtToolRegistration);
   });
 }
 

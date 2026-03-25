@@ -155,8 +155,8 @@ For single panes that aren't part of a multi-agent orchestration:
 Before implementation, gather with a cheap read-only scout (does not need `orch`):
 
 ```bash
-pi --no-session --tools read,bash --no-skills --model claude-haiku-4-5 \
-  "Analyze this repo for: [TASK]. Report only:
+pi --no-session --tools read,bash,dev-tools --no-skills --model claude-haiku-4-5 \
+  "Analyze this repo for: [TASK]. For any language with LSP support, use dev-tools (symbols, definition, references) to trace structure — reserve read for config/prose and languages dev-tools doesn't cover. Report only:
    1. Stack and toolchain  2. Exact build/test/lint commands
    3. Files relevant to the task  4. Conventions that constrain implementation
    No summaries. Structured output only. Write to /tmp/scout-context.json."

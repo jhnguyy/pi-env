@@ -13,7 +13,6 @@
  *
  * Design doc: projects/homelab/ptc_extension_design.md
  */
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -40,6 +39,15 @@ type ExecuteFn = (
   onUpdate: undefined,
   ctx: ExtensionContext,
 ) => Promise<AgentToolResult<unknown>>;
+
+/**
+ * Minimal context sufficient for tool dispatch.
+ * Built-in tools only need `cwd`. Extension tools receive the full ctx but
+ * none of the ptc-eligible tools actually use anything beyond cwd (the ones
+ * that do — skill_build, orch, etc. — are in BLOCKED_TOOLS). This allows
+ * ptc to run as a subagent tool where full ExtensionContext isn't available.
+ */
+export type DispatchContext = { cwd: string } | ExtensionContext;
 
 // Single source of truth for built-in tools: name → factory function.
 // Used for dispatch routing (dispatch()) and intercept guarding (installRegisterToolIntercept()).
@@ -87,7 +95,6 @@ export class ToolRegistry {
    */
   private installRegisterToolIntercept(pi: ExtensionAPI): void {
     const original = (pi.registerTool as Function).bind(pi);
-
     (pi as unknown as { registerTool: Function }).registerTool = (tool: {
       name: string;
       execute: ExecuteFn;
@@ -98,7 +105,6 @@ export class ToolRegistry {
       }
       return original(tool);
     };
-
     // Verify the patch landed — pi could seal its API object in a future version.
     if ((pi as unknown as { registerTool: unknown }).registerTool === original) {
       console.warn("[ptc] registerTool intercept failed — extension tools will be unavailable in PTC");
@@ -115,7 +121,6 @@ export class ToolRegistry {
   getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
     const allTools = pi.getAllTools();
     const unavailable: string[] = [];
-
     const available = allTools.filter((t) => {
       if (BLOCKED_TOOLS.has(t.name)) return false;
       if (t.sourceInfo.source === "builtin") return true;
@@ -123,7 +128,6 @@ export class ToolRegistry {
       unavailable.push(t.name);
       return false;
     });
-
     if (unavailable.length > 0) {
       console.warn(
         `[ptc] The following tools are unavailable inside PTC because their extensions loaded ` +
@@ -131,22 +135,28 @@ export class ToolRegistry {
           `To fix, move ptc earlier in your extension load order.`,
       );
     }
-
     return available;
   }
 
   /**
    * Dispatch a tool call and return its concatenated text output.
    * Single path for built-ins and extension tools — both use the 5-arg execute() signature.
+   *
+   * Accepts either a full ExtensionContext or a minimal { cwd } stub. Built-in
+   * tools get cwd from their factory; extension tools receive ctx but ptc-eligible
+   * ones don't use anything beyond cwd (blocked tools are filtered out).
    */
   async dispatch(
     toolName: string,
     params: Record<string, unknown>,
     cwd: string,
     signal: AbortSignal | undefined,
-    ctx: ExtensionContext,
+    ctx?: DispatchContext,
   ): Promise<string> {
     const toolCallId = `ptc_${generateId()}`;
+    // Build a minimal ctx stub when full ExtensionContext isn't available.
+    // Safe because ptc-eligible extension tools don't use ctx beyond cwd.
+    const effectiveCtx = (ctx ?? { cwd }) as ExtensionContext;
     let result: AgentToolResult<unknown>;
 
     if (BUILTIN_NAMES.has(toolName)) {
@@ -157,7 +167,7 @@ export class ToolRegistry {
         def = factory(cwd);
         this.builtinCache.set(cacheKey, def);
       }
-      result = await def.execute(toolCallId, params as any, signal, undefined, ctx);
+      result = await def.execute(toolCallId, params as any, signal, undefined, effectiveCtx);
     } else {
       const execute = this.extensionTools.get(toolName);
       if (!execute) {
@@ -166,7 +176,7 @@ export class ToolRegistry {
             `It may be blocked or loaded before the ptc extension.`,
         );
       }
-      result = await execute(toolCallId, params, signal, undefined, ctx);
+      result = await execute(toolCallId, params, signal, undefined, effectiveCtx);
     }
 
     return extractText(result);

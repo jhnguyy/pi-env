@@ -9,12 +9,14 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";
 import { initTmuxService } from "./tmux-service";
 import type { RunDetails } from "./types";
 import { txt, err } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
+import type { ExtToolRegistration } from "../subagent/types";
 
 export default function (pi: ExtensionAPI) {
   // ─── Components (DI wiring) ─────────────────────────────────
@@ -41,6 +43,56 @@ export default function (pi: ExtensionAPI) {
         );
       }
     }
+    // Register tmux as an AgentTool so in-process subagents can spawn and manage panes.
+    // Capabilities: read (list/read), execute (run/send/close).
+    const tmuxAgentTool: AgentTool<any, any> = {
+      name: "tmux",
+      label: "Tmux",
+      description: "Manage tmux panes for parallel subagent work and service orchestration. Actions: run, send, read, close, list.",
+      parameters: Type.Object({
+        action: StringEnum(["run", "send", "read", "close", "list"] as const, { description: "Operation to perform" }),
+        command: Type.Optional(Type.String({ description: "Full command to run in the pane" })),
+        label: Type.Optional(Type.String({ description: "Short label for pane title and context output" })),
+        interactive: Type.Optional(Type.Boolean({ description: "Whether pane accepts input (default: false)" })),
+        waitOnExit: Type.Optional(Type.Boolean({ description: "Show 'Press Enter to close' after exit (default: false)" })),
+        busChannel: Type.Optional(Type.String({ description: "Auto-publish exit signal to this bus channel when the pane exits" })),
+        paneId: Type.Optional(Type.String({ description: "Target pane ID (returned from run)" })),
+        text: Type.Optional(Type.String({ description: "Text to send to the pane" })),
+        kill: Type.Optional(Type.Boolean({ description: "Kill the pane process (default: false, just deregister)" })),
+      }),
+      execute: async (_toolCallId, params, _signal) => {
+        try {
+          switch (params.action) {
+            case "run": {
+              if (!params.command || !params.label) return err("run requires command and label");
+              const result = await manager.run({ action: "run", command: params.command, label: params.label, interactive: params.interactive, waitOnExit: params.waitOnExit, busChannel: params.busChannel });
+              return { content: [txt(`Pane "${params.label}" spawned (${result.paneId}).`)], details: { paneId: result.paneId } };
+            }
+            case "send": {
+              if (!params.paneId || !params.text) return err("send requires paneId and text");
+              const result = await manager.send(params.paneId, params.text);
+              return { content: [txt(result.warning ? `Sent. Warning: ${result.warning}` : "Sent.")], details: result };
+            }
+            case "read": {
+              if (!params.paneId) return err("read requires paneId");
+              const { content, alive } = await manager.read(params.paneId);
+              return { content: [txt((alive ? "" : "[pane exited]\n") + (content || "(no output)"))], details: { paneId: params.paneId, alive } };
+            }
+            case "close": {
+              if (!params.paneId) return err("close requires paneId");
+              const result = await manager.close(params.paneId, params.kill);
+              return { content: [txt(`Pane ${params.paneId} closed.`)], details: result };
+            }
+            case "list": {
+              const panes = manager.getActivePanes();
+              return { content: [txt(panes.length === 0 ? "No active panes." : panes.map(p => `${p.id} "${p.label}"`).join("\n"))], details: { panes: panes.map(p => ({ id: p.id, label: p.label })) } };
+            }
+            default: return err(`Unknown action: ${params.action}`);
+          }
+        } catch (e) { return err(formatError(e, "tmux")); }
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: tmuxAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
   });
 
   pi.on("session_switch", async (_event, ctx) => rebuildRegistry(ctx));
