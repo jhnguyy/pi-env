@@ -113,6 +113,18 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
   "github-copilot": formatCopilotStatus,
 };
 
+// ─── Feature flags ────────────────────────────────────────────────────────────
+
+/**
+ * Per-provider kill-switches for usage-bar API polling. When false, no fetch
+ * calls are made for that provider and the status bar slot is cleared.
+ * All default to false — flip to true to re-enable a provider's polling.
+ */
+const POLLING_ENABLED: Record<string, boolean> = {
+  anthropic: false,
+  "github-copilot": false,
+};
+
 // ─── Refresh state ────────────────────────────────────────────────────────────
 
 /**
@@ -138,7 +150,7 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
   const now = Date.now();
 
   const provider = ctx.model?.provider;
-  if (!provider || !(provider in PROVIDER_FETCHERS)) {
+  if (!provider || !(provider in PROVIDER_FETCHERS) || !POLLING_ENABLED[provider]) {
     clearSlot("usage-bar", ctx);
     return;
   }
