@@ -42,7 +42,9 @@ function colorByPct(theme: Theme, pct: number, text: string): string {
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
-/** Format ISO8601 reset time as "Xh Ym" from now, or "soon" if < 1 min. */
+/** Format ISO8601 reset time as a compact countdown from now.
+ *  < 1 min → "soon" | < 1 h → "42m" | < 24 h → "5h 30m" | ≥ 24 h → "4d 3h"
+ */
 function formatResetIn(isoDate: string): string {
   const resets = new Date(isoDate).getTime();
   const now = Date.now();
@@ -51,9 +53,12 @@ function formatResetIn(isoDate: string): string {
   const totalMins = Math.round(diffMs / 60_000);
   if (totalMins < 1) return "soon";
   if (totalMins < 60) return `${totalMins}m`;
-  const h = Math.floor(totalMins / 60);
+  const totalHours = Math.floor(totalMins / 60);
   const m = totalMins % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  if (totalHours < 24) return m > 0 ? `${totalHours}h ${m}m` : `${totalHours}h`;
+  const d = Math.floor(totalHours / 24);
+  const h = totalHours % 24;
+  return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
 /** Format a UTC date string (YYYY-MM-DD) as "Apr 1". */
@@ -68,17 +73,18 @@ function formatAnthropicStatus(theme: Theme, usage: AnthropicUsage): string {
   const fiveHrPct = usage.five_hour.utilization;
   const weekPct = usage.seven_day.utilization;
 
-  // Use the higher of the two for the progress bar and reset time
-  const dominant = fiveHrPct >= weekPct ? usage.five_hour : usage.seven_day;
-  const barPct = dominant.utilization;
+  // Progress bar tracks whichever window is more constrained.
+  const barPct = Math.max(fiveHrPct, weekPct);
 
   const bar = colorByPct(theme, barPct, progressBar(barPct));
   const fiveHrStr = colorByPct(theme, fiveHrPct, `${fiveHrPct}%`);
   const weekStr = colorByPct(theme, weekPct, `${weekPct}%`);
-  const resetStr = theme.fg("muted", `Resets ${formatResetIn(dominant.resets_at)}`);
+  // Each window shows its own reset time inline via the ↻ icon.
+  const fiveHrReset = theme.fg("muted", `↻${formatResetIn(usage.five_hour.resets_at)}`);
+  const weekReset = theme.fg("muted", `↻${formatResetIn(usage.seven_day.resets_at)}`);
 
   const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
-  return `${label} Claude ${bar} 5h: ${fiveHrStr} · Week: ${weekStr} · ${resetStr}`;
+  return `${label} Claude ${bar} 5h: ${fiveHrStr} ${fiveHrReset} · Week: ${weekStr} ${weekReset}`;
 }
 
 function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
@@ -89,7 +95,7 @@ function formatCopilotStatus(theme: Theme, usage: CopilotUsage): string {
   const bar = colorByPct(theme, pctUsed, progressBar(pctUsed));
   const pctStr = colorByPct(theme, pctUsed, `${Math.round(pctUsed)}%`);
   const reqStr = theme.fg("muted", `${snap.remaining}/${snap.entitlement} reqs`);
-  const resetStr = theme.fg("muted", `Resets ${formatShortDate(usage.quota_reset_date_utc)}`);
+  const resetStr = theme.fg("muted", `↻${formatShortDate(usage.quota_reset_date_utc)}`);
 
   const label = theme.fg("customMessageLabel", "\x1b[1m[usage]\x1b[22m");
   return `${label} Copilot ${bar} Month: ${pctStr} · ${reqStr} · ${resetStr}`;
