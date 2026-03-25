@@ -32,6 +32,12 @@ export function formatResult(result: LspResult): string {
 // ─── Diagnostics ────────────────────────────────────────────────────────────
 
 export function formatDiagnostics(r: DiagnosticsResult): string {
+  // ── Bulk result (files[] present) ────────────────────────────────────────
+  if (r.files) {
+    return formatBulkDiagnostics(r);
+  }
+
+  // ── Single file ──────────────────────────────────────────────────────────
   if (r.errorCount === 0 && r.warnCount === 0) return "no errors";
 
   const lines: string[] = [];
@@ -51,6 +57,44 @@ export function formatDiagnostics(r: DiagnosticsResult): string {
   }
 
   return lines.join("\n");
+}
+
+function formatBulkDiagnostics(r: DiagnosticsResult): string {
+  const files = r.files!;
+  const n = files.length + (r.fileErrors?.length ?? 0);
+
+  const parts: string[] = [];
+
+  // Summary line
+  if (r.errorCount === 0 && r.warnCount === 0 && !r.fileErrors?.length) {
+    parts.push(`no errors across ${n} file${n !== 1 ? "s" : ""}`);
+  } else {
+    const counts: string[] = [];
+    if (r.errorCount > 0) counts.push(`${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}`);
+    if (r.warnCount > 0) counts.push(`${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}`);
+    if (r.fileErrors?.length) counts.push(`${r.fileErrors.length} failed`);
+    parts.push(`${counts.join(", ")} across ${n} file${n !== 1 ? "s" : ""}`);
+  }
+
+  // Per-file items (only files with issues)
+  for (const file of files) {
+    if (file.errorCount === 0 && file.warnCount === 0) continue;
+    parts.push(`${file.path}:`);
+    for (const item of file.items) {
+      const prefix = item.severity === "error" ? "E" : item.severity === "warning" ? "W" : "I";
+      const code = item.code ? ` ${item.code}` : "";
+      parts.push(`  L${item.line}:${item.character} ${prefix}${code} ${item.message}`);
+    }
+  }
+
+  // File-level errors (not found, etc.)
+  if (r.fileErrors?.length) {
+    for (const err of r.fileErrors) {
+      parts.push(`FAILED: ${err}`);
+    }
+  }
+
+  return parts.join("\n");
 }
 
 /** Compact diagnostic summary for auto-append on edit/write. */
