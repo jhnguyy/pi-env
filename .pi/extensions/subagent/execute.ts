@@ -87,7 +87,10 @@ export function buildErrorDetails(
  * Returns the tool execute function with registeredExtTools injected via closure.
  * Keeps the pi tool signature clean while supporting extension tool injection.
  */
-export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<any, any>>) {
+export function createExecuteSubagent(
+  registeredExtTools: Map<string, AgentTool<any, any>>,
+  registeredExtCaps?: Map<string, ToolCapability[]>,
+) {
   return async function executeSubagent(
     _toolCallId: string,
     params: {
@@ -121,6 +124,9 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
     }
 
     // ── 2. Resolve tools ────────────────────────────────────────────────
+    // Supports both capability categories ("read", "write", "execute") and
+    // specific tool names ("dev-tools", "bash"). Capabilities expand to all
+    // tools that declare that capability. Specific names resolve directly.
     const rawToolNames: string[] | undefined = agentConfig?.tools ?? params.tools;
     if (!rawToolNames || rawToolNames.length === 0) {
       return {
@@ -134,9 +140,31 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
       };
     }
 
+    const CAPABILITIES = new Set<string>(["read", "write", "execute"]);
+    const resolvedToolNames = new Set<string>();
+    const directNames: string[] = [];
+
+    for (const name of rawToolNames) {
+      if (CAPABILITIES.has(name)) {
+        // Expand capability to all matching built-in and extension tools
+        const cap = name as ToolCapability;
+        for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
+          if (def.capabilities.includes(cap)) resolvedToolNames.add(toolName);
+        }
+        if (registeredExtCaps) {
+          for (const [toolName, caps] of registeredExtCaps) {
+            if (caps.includes(cap)) resolvedToolNames.add(toolName);
+          }
+        }
+      } else {
+        directNames.push(name);
+        resolvedToolNames.add(name);
+      }
+    }
+
     const resolvedTools: AgentTool<any, any>[] = [];
     const unknownTools: string[] = [];
-    for (const name of rawToolNames) {
+    for (const name of resolvedToolNames) {
       if (name in BUILT_IN_TOOLS) {
         resolvedTools.push(BUILT_IN_TOOLS[name].factory(ctx.cwd));
       } else if (registeredExtTools.has(name)) {
@@ -145,7 +173,9 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
         unknownTools.push(name);
       }
     }
-    if (unknownTools.length > 0) {
+    // Only report unknowns for explicitly named tools, not capability expansions
+    const realUnknowns = unknownTools.filter((n) => directNames.includes(n));
+    if (realUnknowns.length > 0) {
       const available = [
         ...Object.keys(BUILT_IN_TOOLS),
         ...registeredExtTools.keys(),
@@ -154,7 +184,7 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
         content: [
           {
             type: "text",
-            text: `Unknown tools: ${unknownTools.join(", ")}. Available: ${available}`,
+            text: `Unknown tools: ${realUnknowns.join(", ")}. Available: ${available}`,
           },
         ],
         details: buildErrorDetails(params.task, rawToolNames, params.model, "invalid_tools"),

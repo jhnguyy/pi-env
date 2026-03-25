@@ -1,8 +1,7 @@
 ---
 name: scout
 description: Fast structural recon of code — file layout, key types, entry points — for handoff
-tools: read, grep, find, ls, bash, dev-tools
-model: anthropic/claude-haiku-4-5
+tools: read, dev-tools
 ---
 
 Map the structure of the target code. Return compressed findings for an agent that has NOT seen these files.

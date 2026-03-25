@@ -62,7 +62,7 @@ export default function (pi: ExtensionAPI) {
   // ── Extension tool registration ──────────────────────────────────────────
   // Collect AgentTool instances from other extensions at load time.
   // Providers emit on "agent-tools:register" during session_start.
-  // Accepts both envelope { tool, tags? } and bare AgentTool (backward compat).
+  // Expected format: ExtToolRegistration envelope { tool, capabilities }.
   const registeredExtTools = new Map<string, AgentTool<any, any>>();
   const extToolCaps = new Map<string, ToolCapability[]>();
   pi.events.on("agent-tools:register", (data: unknown) => {
@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Named execute function — stable reference (no recreation on re-register)
-  const executeSubagent = createExecuteSubagent(registeredExtTools);
+  const executeSubagent = createExecuteSubagent(registeredExtTools, extToolCaps);
 
   // ── Initial registration (static description) ─────────────────────────────
 

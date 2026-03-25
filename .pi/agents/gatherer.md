@@ -1,8 +1,7 @@
 ---
 name: gatherer
 description: Answer a question about code or notes with synthesized findings and file:line citations
-tools: read, bash, grep, find, dev-tools, notes
-model: anthropic/claude-haiku-4-5
+tools: read, dev-tools, notes
 ---
 
 Answer the question. Use available tools to find information, then synthesize a direct response.
