@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
         { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" },
       ),
       text: Type.Optional(
-        Type.Array(Type.String(), { description: "Task text(s) for add, or task id(s) for done/rm. All actions operate on every element." }),
+        Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. Ignored for list and clear." }),
       ),
     }),
 
@@ -92,41 +92,43 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "done") {
         if (!text?.length) throw new Error("text is required for done");
-        const completed: string[] = [];
+        const completedItems: Array<{ id: number; text: string }> = [];
         const failed: string[] = [];
         for (const ref of text) {
           const n = parseInt(ref, 10);
           const item = store.complete(isNaN(n) ? ref : n);
-          if (item) completed.push(`✅ (${item.id}) ${item.text}`);
+          if (item) completedItems.push({ id: item.id, text: item.text });
           else failed.push(ref);
         }
+        if (completedItems.length === 0) throw new Error(`No matching open tasks: ${failed.join(", ")}`);
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         const parts: string[] = [];
-        if (completed.length) parts.push(`Completed: ${completed.join(", ")}`);
+        if (completedItems.length) parts.push(`Completed: ${completedItems.map(i => `✅ (${i.id}) ${i.text}`).join(", ")}`);
         if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
         return {
           content: [{ type: "text" as const, text: parts.join("\n") }],
-          details: { completed: completed.length, failed: failed.length },
+          details: { ids: completedItems.map(i => i.id), failed: failed.length },
         };
       }
 
       if (action === "rm") {
         if (!text?.length) throw new Error("text is required for rm");
-        const removed: string[] = [];
+        const removedRefs: string[] = [];
         const failed: string[] = [];
         for (const ref of text) {
           const n = parseInt(ref, 10);
           const ok = store.remove(isNaN(n) ? ref : n);
-          if (ok) removed.push(ref);
+          if (ok) removedRefs.push(ref);
           else failed.push(ref);
         }
+        if (removedRefs.length === 0) throw new Error(`No matching tasks: ${failed.join(", ")}`);
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         const parts: string[] = [];
-        if (removed.length) parts.push(`Removed: ${removed.join(", ")}`);
+        if (removedRefs.length) parts.push(`Removed: ${removedRefs.join(", ")}`);
         if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
         return {
           content: [{ type: "text" as const, text: parts.join("\n") }],
-          details: { removed: removed.length, failed: failed.length },
+          details: { removed: removedRefs.length, failed: failed.length },
         };
       }
 
