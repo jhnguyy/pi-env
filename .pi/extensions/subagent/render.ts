@@ -138,9 +138,7 @@ export function renderSubagentResult(
   }
 
   // Collapsed view
-  const taskPreview =
-    details.task.length > 60 ? `${details.task.slice(0, 60)}...` : details.task;
-
+  // Note: task preview is omitted here — renderSubagentCall already shows it above.
   let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
   if (details.agent) {
     text += ` ${theme.fg("accent", details.agent)}`;
@@ -152,7 +150,6 @@ export function renderSubagentResult(
   if (details.turnLimitExceeded) {
     text += ` ${theme.fg("warning", "[turn limit]")}`;
   }
-  text += `\n  ${theme.fg("dim", taskPreview)}`;
 
   // Output preview (first 3 lines)
   if (details.finalOutput && details.finalOutput !== "(no output)") {
