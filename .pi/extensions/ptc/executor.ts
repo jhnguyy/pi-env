@@ -18,6 +18,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type {
   ExtensionAPI,
+  ExtensionContext,
   AgentToolUpdateCallback,
 } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_LINES, truncateHead } from "@mariozechner/pi-coding-agent";
@@ -42,6 +43,7 @@ export class PtcExecutor {
     cwd: string,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
+    ctx?: ExtensionContext,
   ): Promise<string> {
     const tools = this.registry.getAvailableTools(this.pi);
     const wrappers = generateWrappers(tools);
@@ -52,7 +54,7 @@ export class PtcExecutor {
     writeFileSync(tmpPath, fullCode, { encoding: "utf-8", mode: 0o600 }); // owner-only read/write
 
     try {
-      return await this.runSubprocess(tmpPath, cwd, signal, onUpdate);
+      return await this.runSubprocess(tmpPath, cwd, signal, onUpdate, ctx);
     } finally {
       try {
         unlinkSync(tmpPath);
@@ -67,6 +69,7 @@ export class PtcExecutor {
     cwd: string,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
+    ctx?: ExtensionContext,
   ): Promise<string> {
     const proc = spawn("bun", ["run", scriptPath], {
       cwd,
@@ -74,10 +77,14 @@ export class PtcExecutor {
       env: buildSubprocessEnv(),
     });
 
-    // Pre-bind registry.dispatch to this execution's cwd so RpcBridge
+    // Pre-bind registry.dispatch to this execution's cwd + ctx so RpcBridge
     // only needs (tool, params) — it has no knowledge of ToolRegistry.
+    // When ctx is available (pi tool path), extension tools get the real
+    // ExtensionContext. When ctx is undefined (subagent path), dispatch
+    // creates a minimal { cwd } stub — safe because ptc-eligible extension
+    // tools don't use ctx beyond cwd.
     const dispatch = (tool: string, params: Record<string, unknown>) =>
-      this.registry.dispatch(tool, params, cwd, undefined);
+      this.registry.dispatch(tool, params, cwd, undefined, ctx);
 
     const bridge = new RpcBridge(proc, dispatch, signal, onUpdate);
     const timeoutId = setTimeout(() => killGracefully(proc), MAX_TIMEOUT_MS);

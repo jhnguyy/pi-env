@@ -43,12 +43,11 @@ export const STATIC_DESCRIPTION = [
   "progress streams live to the TUI. No subprocess overhead.",
   "",
   "Two modes:",
-  '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
+  '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
   '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
   "",
   ...formatToolList(),
   "Extension tools are available when registered.",
-  "Model: 'provider/model-id' format. Required — no default.",
 ].join("\n");
 
 // ─── Dynamic description builder ──────────────────────────────────────────────
@@ -66,7 +65,7 @@ export function buildDynamicDescription(
     "progress streams live to the TUI. No subprocess overhead.",
     "",
     "Two modes:",
-    '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
+    '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
     '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
     "",
     ...formatToolList(extToolNames, extToolCaps),
@@ -91,7 +90,13 @@ export function buildDynamicDescription(
   if (agents.length > 0) {
     lines.push("", "Available agents:");
     for (const a of agents) {
-      lines.push(`  ${a.name} (${a.source}): ${a.description}`);
+      const parts = [`${a.name} (${a.source}): ${a.description}`];
+      const meta: string[] = [];
+      if (a.capabilities?.length) meta.push(`capabilities: ${a.capabilities.join(", ")}`);
+      if (a.tools?.length) meta.push(`tools: ${a.tools.join(", ")}`);
+      if (a.model) meta.push(`model: ${a.model}`);
+      if (meta.length > 0) parts.push(`[${meta.join(" | ")}]`);
+      lines.push(`  ${parts.join(" ")}`);
     }
   }
 

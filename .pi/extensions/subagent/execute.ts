@@ -124,42 +124,50 @@ export function createExecuteSubagent(
     }
 
     // ── 2. Resolve tools ────────────────────────────────────────────────
-    // Supports both capability categories ("read", "write", "execute") and
-    // specific tool names ("dev-tools", "bash"). Capabilities expand to all
-    // tools that declare that capability. Specific names resolve directly.
+    // Two mechanisms, unioned when both present:
+    //   capabilities: ["read"] — include all tools whose capability tags are
+    //     a SUBSET of the requested set. "read" gets tools tagged ["read"]
+    //     only, not ["read","write"]. This keeps read-only agents safe.
+    //   tools: ["dev-tools","bash"] — include specific tools by name.
+    const requestedCaps = agentConfig?.capabilities;
     const rawToolNames: string[] | undefined = agentConfig?.tools ?? params.tools;
-    if (!rawToolNames || rawToolNames.length === 0) {
+
+    if ((!rawToolNames || rawToolNames.length === 0) && (!requestedCaps || requestedCaps.length === 0)) {
       return {
         content: [
           {
             type: "text",
-            text: "No tools specified. Provide tools in the agent file or pass the tools parameter.",
+            text: "No tools or capabilities specified. Provide tools/capabilities in the agent file or pass the tools parameter.",
           },
         ],
         details: buildErrorDetails(params.task, [], params.model, "no_tools"),
       };
     }
 
-    const CAPABILITIES = new Set<string>(["read", "write", "execute"]);
     const resolvedToolNames = new Set<string>();
-    const directNames: string[] = [];
 
-    for (const name of rawToolNames) {
-      if (CAPABILITIES.has(name)) {
-        // Expand capability to all matching built-in and extension tools
-        const cap = name as ToolCapability;
-        for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
-          if (def.capabilities.includes(cap)) resolvedToolNames.add(toolName);
+    // Capability-based resolution: subset matching
+    if (requestedCaps && requestedCaps.length > 0) {
+      const capSet = new Set(requestedCaps);
+      // Built-in tools
+      for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
+        if (def.capabilities.every((c) => capSet.has(c))) {
+          resolvedToolNames.add(toolName);
         }
-        if (registeredExtCaps) {
-          for (const [toolName, caps] of registeredExtCaps) {
-            if (caps.includes(cap)) resolvedToolNames.add(toolName);
+      }
+      // Extension tools
+      if (registeredExtCaps) {
+        for (const [toolName, caps] of registeredExtCaps) {
+          if (caps.every((c) => capSet.has(c))) {
+            resolvedToolNames.add(toolName);
           }
         }
-      } else {
-        directNames.push(name);
-        resolvedToolNames.add(name);
       }
+    }
+
+    // Explicit tool names: union with capability-resolved tools
+    if (rawToolNames) {
+      for (const name of rawToolNames) resolvedToolNames.add(name);
     }
 
     const resolvedTools: AgentTool<any, any>[] = [];
@@ -173,9 +181,11 @@ export function createExecuteSubagent(
         unknownTools.push(name);
       }
     }
-    // Only report unknowns for explicitly named tools, not capability expansions
-    const realUnknowns = unknownTools.filter((n) => directNames.includes(n));
-    if (realUnknowns.length > 0) {
+    // Canonical tool name list for details/reporting — always string[]
+    const toolNames = [...resolvedToolNames];
+    // Only report unknowns for explicitly named tools, not capability matches
+    const explicitUnknowns = unknownTools.filter((n) => rawToolNames?.includes(n));
+    if (explicitUnknowns.length > 0) {
       const available = [
         ...Object.keys(BUILT_IN_TOOLS),
         ...registeredExtTools.keys(),
@@ -184,10 +194,10 @@ export function createExecuteSubagent(
         content: [
           {
             type: "text",
-            text: `Unknown tools: ${realUnknowns.join(", ")}. Available: ${available}`,
+            text: `Unknown tools: ${explicitUnknowns.join(", ")}. Available: ${available}`,
           },
         ],
-        details: buildErrorDetails(params.task, rawToolNames, params.model, "invalid_tools"),
+        details: buildErrorDetails(params.task, rawToolNames ?? [], params.model, "invalid_tools"),
       };
     }
 
@@ -201,7 +211,7 @@ export function createExecuteSubagent(
             text: "No model specified. Provide model in the agent file or pass the model parameter.",
           },
         ],
-        details: buildErrorDetails(params.task, rawToolNames, params.model, "no_model"),
+        details: buildErrorDetails(params.task, toolNames, params.model, "no_model"),
       };
     }
 
@@ -229,7 +239,7 @@ export function createExecuteSubagent(
             text: `Model not found: "${modelStr}". Check the model ID and provider name.`,
           },
         ],
-        details: buildErrorDetails(params.task, rawToolNames, modelStr, "model_not_found"),
+        details: buildErrorDetails(params.task, toolNames, modelStr, "model_not_found"),
       };
     }
 
@@ -286,7 +296,7 @@ export function createExecuteSubagent(
         details: {
           task: params.task,
           agent: params.agent,
-          toolNames: rawToolNames,
+          toolNames: toolNames,
           modelOverride: params.model,
           finalOutput: output,
           toolCallCount,
@@ -349,7 +359,7 @@ export function createExecuteSubagent(
           details: {
             task: params.task,
             agent: params.agent,
-            toolNames: rawToolNames,
+            toolNames: toolNames,
             modelOverride: params.model,
             finalOutput: getFinalOutput(agentContext.messages),
             toolCallCount,
@@ -367,7 +377,7 @@ export function createExecuteSubagent(
         details: {
           task: params.task,
           agent: params.agent,
-          toolNames: rawToolNames,
+          toolNames: toolNames,
           modelOverride: params.model,
           finalOutput: "",
           toolCallCount,
@@ -400,7 +410,7 @@ export function createExecuteSubagent(
       details: {
         task: params.task,
         agent: params.agent,
-        toolNames: rawToolNames,
+        toolNames: toolNames,
         modelOverride: params.model,
         finalOutput: resultText,
         toolCallCount,

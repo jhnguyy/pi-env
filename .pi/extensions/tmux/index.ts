@@ -92,7 +92,7 @@ export default function (pi: ExtensionAPI) {
         } catch (e) { return err(formatError(e, "tmux")); }
       },
     };
-    pi.events.emit("agent-tools:register", { tool: tmuxAgentTool, capabilities: ["read", "execute"] } satisfies ExtToolRegistration);
+    pi.events.emit("agent-tools:register", { tool: tmuxAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
   });
 
   pi.on("session_switch", async (_event, ctx) => rebuildRegistry(ctx));

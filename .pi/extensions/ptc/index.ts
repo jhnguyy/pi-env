@@ -54,7 +54,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, { code }, signal, onUpdate, ctx) {
       try {
-        const output = await executor.execute(code, ctx.cwd, signal, onUpdate);
+        const output = await executor.execute(code, ctx.cwd, signal, onUpdate, ctx);
         return { content: [txt(output || "(no output)")], details: {} };
       } catch (e: unknown) {
         // Throw so pi marks it isError: true and reports to the LLM
@@ -88,8 +88,12 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
   // ─── Agent tool registration ──────────────────────────────────────────────────
   // Register ptc as an AgentTool so subagents can run multi-tool scripts.
-  // Uses process.cwd() since subagents run in-process and share the same cwd.
-  pi.on("session_start", () => {
+  // Captures cwd at session_start — subagents run in-process within the same
+  // session, so this is the correct project directory. No ctx available in the
+  // AgentTool execute signature, so extension tools called from ptc subagent
+  // scripts get a { cwd } stub (safe: ptc-eligible ext tools don't use ctx).
+  pi.on("session_start", (_event, ctx) => {
+    const sessionCwd = ctx.cwd;
     const ptcAgentTool: AgentTool<any, any> = {
       name: "ptc",
       label: "Programmatic Tool Calling",
@@ -99,7 +103,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
       }),
       execute: async (_toolCallId, { code }, signal, onUpdate) => {
         try {
-          const output = await executor.execute(code, process.cwd(), signal, onUpdate);
+          const output = await executor.execute(code, sessionCwd, signal, onUpdate);
           return { content: [txt(output || "(no output)")], details: {} };
         } catch (e: unknown) {
           throw new Error(formatError(e, "ptc"));

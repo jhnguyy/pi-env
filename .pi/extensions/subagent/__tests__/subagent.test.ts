@@ -160,7 +160,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("No tools specified");
+      expect(result.content[0].text).toContain("No tools or capabilities specified");
       expect(result.details.stopReason).toBe("no_tools");
       expect(result.details.isError).toBe(true);
     });
@@ -173,7 +173,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
         undefined,
         mockCtx,
       );
-      expect(result.content[0].text).toContain("No tools specified");
+      expect(result.content[0].text).toContain("No tools or capabilities specified");
       expect(result.details.stopReason).toBe("no_tools");
     });
 

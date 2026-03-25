@@ -14,6 +14,7 @@ export interface AgentConfig {
 	name: string;
 	description: string;
 	tools?: string[];
+	capabilities?: string[];
 	model?: string;
 	systemPrompt: string;
 	source: "user" | "project";
@@ -62,10 +63,16 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			.map((t: string) => t.trim())
 			.filter(Boolean);
 
+		const capabilities = frontmatter.capabilities
+			?.split(",")
+			.map((c: string) => c.trim())
+			.filter(Boolean);
+
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools && tools.length > 0 ? tools : undefined,
+			capabilities: capabilities && capabilities.length > 0 ? capabilities : undefined,
 			model: frontmatter.model,
 			systemPrompt: body,
 			source,

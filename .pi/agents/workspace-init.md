@@ -1,7 +1,7 @@
 ---
 name: workspace-init
 description: Capture workspace state for a stated intent — produces a focused brief so downstream agents skip re-gathering
-tools: read, dev-tools
+capabilities: read
 ---
 
 Produce a focused context brief for a stated intent in a codebase.
