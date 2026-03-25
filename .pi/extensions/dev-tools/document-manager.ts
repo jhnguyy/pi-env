@@ -22,7 +22,12 @@ export interface OpenDocument {
   languageId: string;
   version: number;
   content: string;
+  /** Monotonic access counter for LRU eviction. */
+  lastAccess: number;
 }
+
+/** Maximum number of documents kept open simultaneously. LRU eviction kicks in above this. */
+export const MAX_OPEN_DOCUMENTS = 50;
 
 // ─── DocumentManager ─────────────────────────────────────────────────────────
 
@@ -35,6 +40,9 @@ export class DocumentManager {
 
   /** project root → set of file URIs open in that project */
   private projectFiles = new Map<string, Set<string>>();
+
+  /** Monotonic counter for LRU tracking. */
+  private accessCounter = 0;
 
   /**
    * Open or refresh a document. If the document is already open with the same
@@ -69,7 +77,10 @@ export class DocumentManager {
 
     if (!existing) {
       // New document
-      const doc: OpenDocument = { uri, absolutePath: abs, projectRoot, languageId, version: 1, content };
+      const doc: OpenDocument = {
+        uri, absolutePath: abs, projectRoot, languageId,
+        version: 1, content, lastAccess: ++this.accessCounter,
+      };
       this.openDocs.set(uri, doc);
       return {
         notification: "didOpen",
@@ -80,6 +91,9 @@ export class DocumentManager {
         projectRoot,
       };
     }
+
+    // Touch for LRU
+    existing.lastAccess = ++this.accessCounter;
 
     if (existing.content === content) {
       return null; // nothing changed
@@ -157,6 +171,37 @@ export class DocumentManager {
     return this.openDocs.get(uri);
   }
 
+  /** Number of currently open documents. */
+  get openCount(): number {
+    return this.openDocs.size;
+  }
+
+  /**
+   * Evict the least-recently-used documents down to the limit.
+   * Returns the URIs that were evicted (caller should send didClose).
+   */
+  evict(maxOpen: number = MAX_OPEN_DOCUMENTS): string[] {
+    if (this.openDocs.size <= maxOpen) return [];
+
+    const sorted = [...this.openDocs.values()]
+      .sort((a, b) => a.lastAccess - b.lastAccess);
+
+    const toEvict = sorted.slice(0, this.openDocs.size - maxOpen);
+    const evictedUris: string[] = [];
+
+    for (const doc of toEvict) {
+      this.openDocs.delete(doc.uri);
+      const projectFiles = this.projectFiles.get(doc.projectRoot);
+      if (projectFiles) {
+        projectFiles.delete(doc.uri);
+        if (projectFiles.size === 0) this.projectFiles.delete(doc.projectRoot);
+      }
+      evictedUris.push(doc.uri);
+    }
+
+    return evictedUris;
+  }
+
   /** Close all documents. */
   clear(): void {
     this.openDocs.clear();
@@ -164,5 +209,3 @@ export class DocumentManager {
     this.projectFiles.clear();
   }
 }
-
-// getLanguageId is imported from ./filetypes

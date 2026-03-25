@@ -26,6 +26,7 @@ import { discoverAgents } from "./agents";
 import { createExecuteSubagent } from "./execute";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentCall, renderSubagentResult } from "./render";
+import type { ExtToolRegistration, ToolCapability } from "./types";
 
 // ─── Parameters schema (stable across re-registrations) ──────────────────────
 
@@ -61,10 +62,13 @@ export default function (pi: ExtensionAPI) {
   // ── Extension tool registration ──────────────────────────────────────────
   // Collect AgentTool instances from other extensions at load time.
   // Providers emit on "agent-tools:register" during session_start.
+  // Accepts both envelope { tool, tags? } and bare AgentTool (backward compat).
   const registeredExtTools = new Map<string, AgentTool<any, any>>();
+  const extToolCaps = new Map<string, ToolCapability[]>();
   pi.events.on("agent-tools:register", (data: unknown) => {
-    const tool = data as AgentTool<any, any>;
-    registeredExtTools.set(tool.name, tool);
+    const reg = data as ExtToolRegistration;
+    registeredExtTools.set(reg.tool.name, reg.tool);
+    extToolCaps.set(reg.tool.name, reg.capabilities);
   });
 
   // Named execute function — stable reference (no recreation on re-register)
@@ -108,8 +112,11 @@ export default function (pi: ExtensionAPI) {
     // 3. Discover agents
     const { agents } = discoverAgents(ctx.cwd, "both");
 
-    // 4. Re-register with enriched description
-    const description = buildDynamicDescription(enabledModelIds, availableModels, agents);
+    // 4. Re-register with enriched description (including registered extension tools)
+    const extToolNames = [...registeredExtTools.keys()];
+    const description = buildDynamicDescription(
+      enabledModelIds, availableModels, agents, extToolNames, extToolCaps,
+    );
     pi.registerTool({
       name: "subagent",
       label: "Subagent",

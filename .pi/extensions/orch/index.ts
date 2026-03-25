@@ -22,6 +22,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 
 import { OrchestratorManager } from "./manager";
+import { cleanupOrphanedOrchDirs } from "./manifest";
 import { txt, ok, err } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { defaultRenderResult } from "../_shared/render";
@@ -37,14 +38,16 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     const status = manager.getStatus();
-    if (!status) return;
-
-    console.error(
-      `[orch] WARNING: session ended with active run ${status.runId} — ` +
-      `${status.workers.length} workers were not cleaned up. ` +
-      `Branches: ${status.workers.map(w => w.branch).filter(Boolean).join(", ") || "none"}. ` +
-      `ORCH_DIR: ${status.orchDir} (may still exist on disk).`,
-    );
+    if (status) {
+      console.error(
+        `[orch] WARNING: session ended with active run ${status.runId} — ` +
+        `${status.workers.length} workers were not cleaned up. ` +
+        `Branches: ${status.workers.map(w => w.branch).filter(Boolean).join(", ") || "none"}. ` +
+        `ORCH_DIR: ${status.orchDir} (may still exist on disk).`,
+      );
+    }
+    // Best-effort cleanup of orphaned orch dirs from crashed runs
+    cleanupOrphanedOrchDirs(status?.orchDir);
   });
 
   // ─── orch tool ───────────────────────────────────────────────

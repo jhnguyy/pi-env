@@ -8,19 +8,34 @@
  */
 
 import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
-import { BLOCKLIST } from "./blocklist";
+import { BLOCKLIST, type BlockEntry } from "./blocklist";
 import { CredentialScanner } from "./credential-scanner";
+
+// Pre-index blocklist by tool name for O(1) lookup instead of full scan
+function buildBlockIndex(list: BlockEntry[]): Map<string, BlockEntry[]> {
+  const index = new Map<string, BlockEntry[]>();
+  for (const entry of list) {
+    for (const tool of entry.tools) {
+      const arr = index.get(tool);
+      if (arr) arr.push(entry);
+      else index.set(tool, [entry]);
+    }
+  }
+  return index;
+}
 
 export default function (pi: ExtensionAPI) {
   const scanner = new CredentialScanner();
+  const blockIndex = buildBlockIndex(BLOCKLIST);
 
   // ── Hard block dangerous operations ────────────────────────────────────────
 
   pi.on("tool_call", async (event) => {
+    const entries = blockIndex.get(event.toolName);
+    if (!entries) return;
     const input = event.input as Record<string, string>;
 
-    for (const entry of BLOCKLIST) {
-      if (!entry.tools.includes(event.toolName)) continue;
+    for (const entry of entries) {
       const value = input[entry.field] ?? "";
       if (entry.pattern.test(value)) {
         return { block: true, reason: entry.reason } satisfies ToolCallEventResult;

@@ -2,8 +2,11 @@
  * context.ts — git status helpers and widget refresh utilities.
  *
  * Pure side-effect-free git utilities (loadConfig, getGitStatus,
- * getCurrentBranch, buildStatusLine) plus the refreshTodoWidget
- * helper that updates the TUI session-todos widget.
+ * getCurrentBranch, buildStatusLine) plus a per-repo git status cache
+ * that avoids spawning subprocesses on every agent turn.
+ *
+ * Cache invalidation: call invalidateGitCache() after any bash command
+ * that modifies git state (commit, checkout, merge, push, pull, etc.).
  */
 
 import type { Theme } from "@mariozechner/pi-coding-agent";
@@ -25,13 +28,41 @@ export function loadConfig(): WorkTrackerConfig {
   return { guardedRepos, protectedBranches };
 }
 
+// ─── Git status cache ─────────────────────────────────────────────────────────
+
+interface CachedGitStatus {
+  branch: string | null;
+  dirty: number;
+}
+
+/** Cached git status per repo path. Cleared on git-mutating bash commands. */
+const gitStatusCache = new Map<string, CachedGitStatus>();
+
+/** Pattern matching bash commands that modify git state. */
+const GIT_MUTATING_PATTERN = /\bgit\b.*\b(commit|checkout|switch|merge|rebase|pull|push|reset|stash|add|restore|cherry-pick|branch\s+-[dDmM]|worktree)\b/;
+
+/** Returns true if a bash command could modify git state. */
+export function isGitMutating(command: string): boolean {
+  return GIT_MUTATING_PATTERN.test(command);
+}
+
+/** Clear the git status cache. Call after git-mutating operations. */
+export function invalidateGitCache(): void {
+  gitStatusCache.clear();
+}
+
 // ─── Git status ───────────────────────────────────────────────────────────────
 
 export function getGitStatus(repoPath: string): { branch: string | null; dirty: number } {
-  return {
+  const cached = gitStatusCache.get(repoPath);
+  if (cached) return cached;
+
+  const status = {
     branch: gitGetCurrentBranch(repoPath),
     dirty: getDirtyCount(repoPath),
   };
+  gitStatusCache.set(repoPath, status);
+  return status;
 }
 
 /** Get the branch of the current working directory. */
@@ -74,5 +105,3 @@ export function buildStatusLineThemed(config: WorkTrackerConfig, theme: Theme): 
   const label = theme.fg("customMessageLabel", "\x1b[1m[work-tracker]\x1b[22m");
   return `${label} ${parts.join(" | ")}`;
 }
-
-

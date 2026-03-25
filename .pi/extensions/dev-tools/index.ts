@@ -98,7 +98,7 @@ export default function (pi: ExtensionAPI) {
         }
       },
     };
-    pi.events.emit("agent-tools:register", agentTool);
+    pi.events.emit("agent-tools:register", { tool: agentTool, capabilities: ["read"] });
   });
 
   pi.registerTool({
@@ -166,18 +166,26 @@ export default function (pi: ExtensionAPI) {
         undefined;
 
       // ─── LSP diagnostics (.ts, .sh, .nix, …) ───────────────────────
+      // Race the daemon call against a short timeout. If the LSP responds
+      // quickly (diagnostics already cached), results are appended inline.
+      // Otherwise skip — the cache will be warm for the next explicit call.
       if (path && isLspSupported(path)) {
         try {
-          const result = await client.call({ action: "diagnostics", path });
-          const diags = result as DiagnosticsResult;
-          const summary = formatDiagnosticsSummary(diags, 5);
-
-          if (summary) {
-            const first = event.content?.[0];
-            const existing = first?.type === "text" ? first.text : "";
-            return {
-              content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
-            };
+          const AUTO_DIAG_TIMEOUT_MS = 300;
+          const result = await Promise.race([
+            client.call({ action: "diagnostics", path }),
+            new Promise<null>((r) => setTimeout(() => r(null), AUTO_DIAG_TIMEOUT_MS)),
+          ]);
+          if (result) {
+            const diags = result as DiagnosticsResult;
+            const summary = formatDiagnosticsSummary(diags, 5);
+            if (summary) {
+              const first = event.content?.[0];
+              const existing = first?.type === "text" ? first.text : "";
+              return {
+                content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
+              };
+            }
           }
         } catch {
           // Non-fatal — diagnostics are best-effort

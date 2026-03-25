@@ -15,7 +15,7 @@ import { isOrchWorker } from "../_shared/context";
 import { setSlot, resetSlots } from "../_shared/ui-render";
 
 import type { BranchGuard } from "./branch-guard";
-import { buildStatusLine, buildStatusLineThemed, getGitStatus } from "./context";
+import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache } from "./context";
 import {
   cleanupHandoffs,
   detectMergedBranch,
@@ -45,6 +45,9 @@ export function registerHooks(
     if (event.toolName !== "bash" || event.isError) return;
 
     const command = (event.input as Record<string, string>).command ?? "";
+
+    // Invalidate git status cache when bash commands modify git state
+    if (isGitMutating(command)) invalidateGitCache();
     const output = (event.content as Array<{ type: string; text?: string }>)
       .filter((c) => c.type === "text")
       .map((c) => c.text ?? "")
@@ -88,6 +91,7 @@ export function registerHooks(
   // ─── 3. Session start ───────────────────────────────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     store.clear();
+    invalidateGitCache();
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
     setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
 
