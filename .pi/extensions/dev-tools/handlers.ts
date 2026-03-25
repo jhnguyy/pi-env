@@ -6,6 +6,7 @@
  * LspDaemon so the socket server wiring doesn't obscure the LSP semantics.
  */
 
+import { existsSync } from "node:fs";
 import {
   uriToPath, toZeroBased, relativePath, extractLines,
   getFileLine, expandToBlock, symbolKindLabel,
@@ -31,25 +32,91 @@ export interface HandlerDeps {
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
-  if (!req.path) return errorResponse(req.id, "path required for diagnostics");
+/** Max concurrent LSP operations to avoid overwhelming the language server. */
+const BULK_CONCURRENCY = 8;
 
-  const backend = deps.getBackend(req.path);
-  const uri = await backend.ensureFile(req.path);
+/** Fetch diagnostics for a single file path (shared by single and bulk paths). */
+async function diagForPath(path: string, deps: HandlerDeps): Promise<DiagnosticsResult> {
+  if (!existsSync(path)) throw new Error(`File not found: ${path}`);
+  const backend = deps.getBackend(path);
+  const uri = await backend.ensureFile(path);
   await backend.waitForFirstDiagnostics(uri);
-
   const items = backend.getDiagnostics(uri);
   const errors = items.filter((d) => d.severity === "error");
   const warns = items.filter((d) => d.severity === "warning");
-
-  return okResponse(req.id, {
+  return {
     action: "diagnostics",
-    path: req.path,
+    path,
     errorCount: errors.length,
     warnCount: warns.length,
     items,
     language: backend.name,
-  } as DiagnosticsResult);
+  };
+}
+
+/**
+ * Run async tasks with bounded concurrency.
+ * Returns results in the same order as the input array.
+ */
+async function mapConcurrent<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const idx = next++;
+      try {
+        results[idx] = { status: "fulfilled", value: await fn(items[idx]) };
+      } catch (e) {
+        results[idx] = { status: "rejected", reason: e };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return results;
+}
+
+export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  // ── Bulk: paths[] ────────────────────────────────────────────────────────
+  if (req.paths && req.paths.length > 0) {
+    const unique = [...new Set(req.paths)];
+    const settled = await mapConcurrent(unique, BULK_CONCURRENCY, (p) => diagForPath(p, deps));
+
+    const files: DiagnosticsResult[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < settled.length; i++) {
+      const r = settled[i];
+      if (r.status === "fulfilled") {
+        files.push(r.value);
+      } else {
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        errors.push(`${unique[i]}: ${msg}`);
+      }
+    }
+
+    const totalErrors = files.reduce((s, f) => s + f.errorCount, 0);
+    const totalWarns  = files.reduce((s, f) => s + f.warnCount,  0);
+
+    return okResponse(req.id, {
+      action: "diagnostics",
+      path: "(bulk)",
+      files,
+      fileErrors: errors.length > 0 ? errors : undefined,
+      errorCount: totalErrors,
+      warnCount: totalWarns,
+      items: [],
+    } as DiagnosticsResult);
+  }
+
+  // ── Single: path ─────────────────────────────────────────────────────────
+  if (!req.path) return errorResponse(req.id, "path or paths required for diagnostics");
+  return okResponse(req.id, await diagForPath(req.path, deps));
 }
 
 export async function handleHover(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {

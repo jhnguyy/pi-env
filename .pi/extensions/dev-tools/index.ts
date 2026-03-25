@@ -52,15 +52,18 @@ export default function (pi: ExtensionAPI) {
     "find-references, document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH).";
+    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH). " +
+    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = Type.Object({
     action: StringEnum(
       ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
       { description: "Action to perform" },
     ),
-    path: Type.Optional(Type.String({
-      description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
+    path: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], {
+      description:
+        "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols. " +
+        "For diagnostics, pass an array to check multiple files in one call.",
     })),
     line: Type.Optional(Type.Number({
       description: "Line number (1-indexed). Required for hover, definition, references.",
@@ -77,6 +80,31 @@ export default function (pi: ExtensionAPI) {
     resetHintState(hintState);
     pendingHint = null;
 
+    /**
+     * Shared request builder for both execute paths.
+     * Normalises path (string | string[] | undefined) → daemon wire format.
+     * - diagnostics: array → paths[], scalar/single → paths[] (always bulk for consistent format)
+     * - hover/definition/references/symbols: require exactly one path; error on multi-path
+     */
+    function buildClientRequest(params: Record<string, unknown>): Parameters<typeof client.call>[0] {
+      const action = params.action as LspAction;
+      const rawPath = params.path as string | string[] | undefined;
+      const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
+
+      if (action === "diagnostics") {
+        // Always use the bulk path for consistent output format regardless of array length.
+        return { action, paths, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+      }
+
+      if (["hover", "definition", "references", "symbols"].includes(action)) {
+        if (paths.length > 1) throw new Error(`${action} requires a single path — ${paths.length} were provided`);
+        return { action, path: paths[0], line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+      }
+
+      // status and others: no path needed
+      return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+    }
+
     // Register dev-tools as an AgentTool so subagents can use it
     const agentTool: AgentTool<any, any> = {
       name: "dev-tools",
@@ -85,13 +113,7 @@ export default function (pi: ExtensionAPI) {
       parameters: toolParameters,
       execute: async (_toolCallId, params) => {
         try {
-          const result = await client.call({
-            action: params.action as LspAction,
-            path: params.path,
-            line: params.line,
-            character: params.character,
-            query: params.query,
-          });
+          const result = await client.call(buildClientRequest(params));
           return { content: [txt(formatResult(result))], details: result };
         } catch (e) {
           return err(formatError(e));
@@ -129,13 +151,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, _signal) {
       try {
-        const result = await client.call({
-          action: params.action as LspAction,
-          path: params.path,
-          line: params.line,
-          character: params.character,
-          query: params.query,
-        });
+        const result = await client.call(buildClientRequest(params));
         return { content: [txt(formatResult(result))], details: result };
       } catch (e) {
         // Explicit shape — details must stay LspResult-compatible for renderDevToolsResult.
