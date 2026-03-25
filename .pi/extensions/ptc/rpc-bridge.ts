@@ -167,7 +167,7 @@ export class RpcBridge {
     this.toolCallCount++;
 
     this.onUpdate?.({
-      content: [{ type: "text", text: `→ ${msg.tool} #${this.toolCallCount}` }],
+      content: [{ type: "text", text: formatCallLabel(msg.tool, msg.params, this.toolCallCount) }],
       details: undefined,
     });
 
@@ -184,4 +184,37 @@ export class RpcBridge {
       this.proc.stdin.write(JSON.stringify(msg) + "\n");
     }
   }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Format a compact one-line label for a tool call update.
+ * Renders the first 1–2 params as key="value" pairs so the user can see
+ * what's being invoked inside the ptc black box.
+ *
+ * Examples:
+ *   → read(path="src/index.ts") #1
+ *   → bash(command="git log --oneline -5") #2
+ *   → grep(pattern="TODO", path="src/") #3
+ *   → dev_tools(action="diagnostics", path="/abs/f.ts") #4  +1
+ */
+function formatCallLabel(tool: string, params: Record<string, unknown>, n: number): string {
+  const MAX_VAL = 45;
+  const entries = Object.entries(params);
+  if (entries.length === 0) return `→ ${tool} #${n}`;
+
+  const shown = entries.slice(0, 2).map(([k, v]) => {
+    let val: string;
+    if (typeof v === "string") {
+      val = `"${v.length > MAX_VAL ? v.substring(0, MAX_VAL) + "…" : v}"`;
+    } else {
+      const s = JSON.stringify(v);
+      val = s.length > MAX_VAL ? s.substring(0, MAX_VAL) + "…" : s;
+    }
+    return `${k}=${val}`;
+  });
+
+  const overflow = entries.length > 2 ? `  +${entries.length - 2}` : "";
+  return `→ ${tool}(${shown.join(", ")})${overflow} #${n}`;
 }
