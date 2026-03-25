@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
         { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" },
       ),
       text: Type.Optional(
-        Type.String({ description: "Task text (for add) or task id number (for done/rm)" }),
+        Type.Array(Type.String(), { description: "Task text(s) for add, or task id(s) for done/rm. All actions operate on every element." }),
       ),
     }),
 
@@ -81,36 +81,52 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (action === "add") {
-        if (!text) throw new Error("text is required for add");
-        const item = store.add(text);
+        if (!text?.length) throw new Error("text is required for add");
+        const added = text.map((t: string) => store.add(t));
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         return {
-          content: [{ type: "text" as const, text: `Added: □ (${item.id}) ${item.text}` }],
-          details: { id: item.id },
+          content: [{ type: "text" as const, text: added.map((i: any) => `Added: □ (${i.id}) ${i.text}`).join("\n") }],
+          details: { ids: added.map((i: any) => i.id) },
         };
       }
 
       if (action === "done") {
-        if (!text) throw new Error("text is required for done (pass task id)");
-        const n = parseInt(text, 10);
-        const item = store.complete(isNaN(n) ? text : n);
-        if (!item) throw new Error(`No matching open task: ${text}`);
+        if (!text?.length) throw new Error("text is required for done");
+        const completed: string[] = [];
+        const failed: string[] = [];
+        for (const ref of text) {
+          const n = parseInt(ref, 10);
+          const item = store.complete(isNaN(n) ? ref : n);
+          if (item) completed.push(`✅ (${item.id}) ${item.text}`);
+          else failed.push(ref);
+        }
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+        const parts: string[] = [];
+        if (completed.length) parts.push(`Completed: ${completed.join(", ")}`);
+        if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
         return {
-          content: [{ type: "text" as const, text: `Completed: ✅ (${item.id}) ${item.text}` }],
-          details: { id: item.id },
+          content: [{ type: "text" as const, text: parts.join("\n") }],
+          details: { completed: completed.length, failed: failed.length },
         };
       }
 
       if (action === "rm") {
-        if (!text) throw new Error("text is required for rm (pass task id)");
-        const n = parseInt(text, 10);
-        const ok = store.remove(isNaN(n) ? text : n);
-        if (!ok) throw new Error(`No matching task: ${text}`);
+        if (!text?.length) throw new Error("text is required for rm");
+        const removed: string[] = [];
+        const failed: string[] = [];
+        for (const ref of text) {
+          const n = parseInt(ref, 10);
+          const ok = store.remove(isNaN(n) ? ref : n);
+          if (ok) removed.push(ref);
+          else failed.push(ref);
+        }
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+        const parts: string[] = [];
+        if (removed.length) parts.push(`Removed: ${removed.join(", ")}`);
+        if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
         return {
-          content: [{ type: "text" as const, text: `Removed task ${text}.` }],
-          details: {},
+          content: [{ type: "text" as const, text: parts.join("\n") }],
+          details: { removed: removed.length, failed: failed.length },
         };
       }
 
