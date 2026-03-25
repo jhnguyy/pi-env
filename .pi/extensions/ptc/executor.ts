@@ -18,7 +18,6 @@ import { tmpdir } from "os";
 import { join } from "path";
 import type {
   ExtensionAPI,
-  ExtensionContext,
   AgentToolUpdateCallback,
 } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_LINES, truncateHead } from "@mariozechner/pi-coding-agent";
@@ -40,7 +39,7 @@ export class PtcExecutor {
 
   async execute(
     userCode: string,
-    ctx: ExtensionContext,
+    cwd: string,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
   ): Promise<string> {
@@ -53,7 +52,7 @@ export class PtcExecutor {
     writeFileSync(tmpPath, fullCode, { encoding: "utf-8", mode: 0o600 }); // owner-only read/write
 
     try {
-      return await this.runSubprocess(tmpPath, ctx, signal, onUpdate);
+      return await this.runSubprocess(tmpPath, cwd, signal, onUpdate);
     } finally {
       try {
         unlinkSync(tmpPath);
@@ -65,20 +64,20 @@ export class PtcExecutor {
 
   private async runSubprocess(
     scriptPath: string,
-    ctx: ExtensionContext,
+    cwd: string,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
   ): Promise<string> {
     const proc = spawn("bun", ["run", scriptPath], {
-      cwd: ctx.cwd,
+      cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: buildSubprocessEnv(),
     });
 
-    // Pre-bind registry.dispatch to this execution's cwd + ctx so RpcBridge
+    // Pre-bind registry.dispatch to this execution's cwd so RpcBridge
     // only needs (tool, params) — it has no knowledge of ToolRegistry.
     const dispatch = (tool: string, params: Record<string, unknown>) =>
-      this.registry.dispatch(tool, params, ctx.cwd, undefined, ctx);
+      this.registry.dispatch(tool, params, cwd, undefined);
 
     const bridge = new RpcBridge(proc, dispatch, signal, onUpdate);
     const timeoutId = setTimeout(() => killGracefully(proc), MAX_TIMEOUT_MS);

@@ -19,12 +19,14 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
 import { BLOCKED_TOOLS } from "./types";
+import type { ExtToolRegistration } from "../subagent/types";
 
 export default function ptcExtension(pi: ExtensionAPI) {
   // ToolRegistry installs the registerTool intercept immediately — before any
@@ -52,7 +54,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, { code }, signal, onUpdate, ctx) {
       try {
-        const output = await executor.execute(code, ctx, signal, onUpdate);
+        const output = await executor.execute(code, ctx.cwd, signal, onUpdate);
         return { content: [txt(output || "(no output)")], details: {} };
       } catch (e: unknown) {
         // Throw so pi marks it isError: true and reports to the LLM
@@ -84,6 +86,28 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
   });
 
+  // ─── Agent tool registration ──────────────────────────────────────────────────
+  // Register ptc as an AgentTool so subagents can run multi-tool scripts.
+  // Uses process.cwd() since subagents run in-process and share the same cwd.
+  pi.on("session_start", () => {
+    const ptcAgentTool: AgentTool<any, any> = {
+      name: "ptc",
+      label: "Programmatic Tool Calling",
+      description: DESCRIPTION,
+      parameters: Type.Object({
+        code: Type.String({ description: PARAM_DESCRIPTION }),
+      }),
+      execute: async (_toolCallId, { code }, signal, onUpdate) => {
+        try {
+          const output = await executor.execute(code, process.cwd(), signal, onUpdate);
+          return { content: [txt(output || "(no output)")], details: {} };
+        } catch (e: unknown) {
+          throw new Error(formatError(e, "ptc"));
+        }
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: ptcAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
+  });
 }
 
 // ─── Description and parameter description ───────────────────────────────────
