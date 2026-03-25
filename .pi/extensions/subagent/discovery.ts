@@ -6,6 +6,34 @@
  */
 
 import type { AgentConfig } from "./agents";
+import { BUILT_IN_TOOLS } from "./execute";
+import type { ToolCapability } from "./types";
+import { formatCapabilities } from "./types";
+
+// ─── Tool listing with capabilities ───────────────────────────────────────────
+
+function formatToolList(
+  extToolNames?: string[],
+  extToolCaps?: Map<string, ToolCapability[]>,
+): string[] {
+  const lines: string[] = [];
+
+  // Built-in tools with capabilities
+  const builtInParts = Object.entries(BUILT_IN_TOOLS)
+    .map(([name, def]) => `${name} (${formatCapabilities(def.capabilities)})`);
+  lines.push(`Built-in tools: ${builtInParts.join(", ")}.`);
+
+  // Extension tools (dynamically registered)
+  if (extToolNames && extToolNames.length > 0) {
+    const extParts = extToolNames.map((name) => {
+      const caps = extToolCaps?.get(name) ?? [];
+      return caps.length ? `${name} (${formatCapabilities(caps)})` : name;
+    });
+    lines.push(`Extension tools: ${extParts.join(", ")}.`);
+  }
+
+  return lines;
+}
 
 // ─── Static description (shown before session_start enrichment) ───────────────
 
@@ -18,8 +46,8 @@ export const STATIC_DESCRIPTION = [
   '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
   '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
   "",
-  "Available built-in tools: read, bash, edit, write, grep, find, ls.",
-  "Extension tools (dev-tools, notes, etc.) are available when registered.",
+  ...formatToolList(),
+  "Extension tools are available when registered.",
   "Model: 'provider/model-id' format. Required — no default.",
 ].join("\n");
 
@@ -29,6 +57,8 @@ export function buildDynamicDescription(
   enabledModelIds: string[],
   availableModels: Array<{ provider: string; id: string; name: string }>,
   agents: AgentConfig[],
+  extToolNames?: string[],
+  extToolCaps?: Map<string, ToolCapability[]>,
 ): string {
   const lines = [
     "Delegate a focused task to an in-process subagent running via agentLoop().",
@@ -39,8 +69,7 @@ export function buildDynamicDescription(
     '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/model/prompt from the agent definition',
     '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
     "",
-    "Available built-in tools: read, bash, edit, write, grep, find, ls.",
-    "Extension tools (dev-tools, notes, etc.) are available when registered.",
+    ...formatToolList(extToolNames, extToolCaps),
   ];
 
   // Intersect enabled list with models that have working auth

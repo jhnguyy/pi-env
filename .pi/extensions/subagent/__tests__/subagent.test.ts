@@ -117,7 +117,10 @@ describeIfEnabled("subagent", "subagent extension", () => {
         parameters: {},
         execute: async () => ({ content: [{ type: "text", text: "ok" }], details: null }),
       };
-      mockPi.events.emit("agent-tools:register", mockExtTool);
+      mockPi.events.emit("agent-tools:register", {
+        tool: mockExtTool,
+        capabilities: ["read", "write"],
+      });
 
       // Verify: using it in tools param succeeds tool resolution (fails at model, not tools)
       const result = await registeredTool.execute(

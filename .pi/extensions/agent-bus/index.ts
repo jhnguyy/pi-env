@@ -7,6 +7,7 @@
  * Headline feature: bus wait — event-driven blocking that replaces sleep-poll loops.
  */
 
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
@@ -259,6 +260,73 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, _opts, theme, _ctx) {
       return defaultRenderResult(result, theme);
     },
+  });
+
+  // ─── Subagent Registration ──────────────────────────────────
+  // Make bus available to in-process subagents for inter-agent coordination.
+  pi.on("session_start", () => {
+    const busAgentTool: AgentTool<any, any> = {
+      name: "bus",
+      label: "Bus",
+      description: "Inter-agent message bus. Publish/subscribe on named channels across pi processes.",
+      parameters: Type.Object({
+        action: StringEnum(
+          ["start", "publish", "subscribe", "check", "read", "wait"] as const,
+          { description: "Operation to perform" },
+        ),
+        channel: Type.Optional(Type.String({ description: "Channel name" })),
+        message: Type.Optional(Type.String({ description: "Message content" })),
+        type: Type.Optional(
+          StringEnum(["status", "result", "error", "command"] as const, { description: "Message type" }),
+        ),
+        data: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Structured payload" })),
+        channels: Type.Optional(Type.Array(Type.String(), { description: "Channel names" })),
+        timeout: Type.Optional(Type.Number({ description: "Timeout in seconds" })),
+        session: Type.Optional(Type.String({ description: "Session ID" })),
+        agentId: Type.Optional(Type.String({ description: "Agent ID" })),
+      }),
+      execute: async (_toolCallId, params) => {
+        try {
+          switch (params.action) {
+            case "start": {
+              const sessionId = client.start(params.session, params.agentId);
+              const agentId = process.env.PI_AGENT_ID;
+              return ok(agentId ? `Session: ${sessionId}\nAgent: ${agentId}` : `Session: ${sessionId}`);
+            }
+            case "publish": {
+              if (!params.channel || !params.message) return err("publish requires channel and message");
+              client.publish(params.channel, params.message, params.type, params.data as Record<string, unknown> | undefined);
+              return ok(`Published to #${params.channel}`);
+            }
+            case "subscribe": {
+              if (!params.channels?.length) return err("subscribe requires channels array");
+              client.subscribe(params.channels);
+              return ok(`Subscribed: ${params.channels.map((ch: string) => `#${ch}`).join(", ")}`);
+            }
+            case "check": {
+              const counts = client.check();
+              if (Object.keys(counts).length === 0) return ok("No new messages");
+              return ok(Object.entries(counts).map(([ch, n]) => `#${ch}(${n})`).join(" "));
+            }
+            case "read": {
+              if (!params.channel) return err("read requires channel");
+              const messages = client.read(params.channel);
+              return messages.length === 0 ? ok("No messages") : ok(client.formatMessages(messages));
+            }
+            case "wait": {
+              if (!params.channels?.length) return err("wait requires channels array");
+              const { messages, timedOut } = await client.wait(params.channels, params.timeout ?? 300);
+              if (timedOut) return ok(`Timeout — no messages on ${params.channels.map((ch: string) => `#${ch}`).join(", ")}`);
+              return ok(client.formatMessages(messages));
+            }
+            default: return err(`Unknown action: ${params.action}`);
+          }
+        } catch (e) {
+          return err(formatError(e, "bus"));
+        }
+      },
+    };
+    pi.events.emit("agent-tools:register", { tool: busAgentTool, capabilities: ["read", "write", "execute"] });
   });
 }
 

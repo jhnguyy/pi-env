@@ -98,7 +98,7 @@ export default function (pi: ExtensionAPI) {
         }
       },
     };
-    pi.events.emit("agent-tools:register", agentTool);
+    pi.events.emit("agent-tools:register", { tool: agentTool, capabilities: ["read"] });
   });
 
   pi.registerTool({

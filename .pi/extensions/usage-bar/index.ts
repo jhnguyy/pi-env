@@ -9,8 +9,10 @@
  * non-interactive (RPC/print) mode. See _shared/context.ts for rationale on
  * why PI_AGENT_ID is not used.
  *
- * Credentials: resolved via ctx.modelRegistry.getApiKeyForProvider() — same
- * pipeline pi uses for the active model (OAuth, env vars, custom providers).
+ * Credentials: Anthropic uses ctx.modelRegistry.getApiKeyForProvider(). For
+ * github-copilot, credentials.refresh (the GitHub OAuth token) is used instead
+ * of credentials.access (the short-lived Copilot API token) because the usage
+ * endpoint (api.github.com) requires the GitHub token, not the Copilot token.
  * Error handling: silent on missing credentials; brief "fetch failed" on errors.
  */
 
@@ -115,8 +117,18 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
   }
 
   try {
-    // Resolve token through pi's auth pipeline — same credentials as the active model
-    const token = await ctx.modelRegistry.getApiKeyForProvider(provider);
+    // Resolve token for usage API.
+    // github-copilot: the usage endpoint (api.github.com/copilot_internal/user)
+    // requires the GitHub OAuth token — stored in credentials.refresh.
+    // getApiKeyForProvider() returns credentials.access (the short-lived Copilot
+    // API token for *.githubcopilot.com), which is wrong for this endpoint.
+    let token: string | undefined;
+    if (provider === "github-copilot") {
+      const cred = ctx.modelRegistry.authStorage.get("github-copilot");
+      token = cred?.type === "oauth" ? (cred as any).refresh : undefined;
+    } else {
+      token = await ctx.modelRegistry.getApiKeyForProvider(provider);
+    }
     if (!token) { clearSlot("usage-bar", ctx); return; }
 
     const usage = await PROVIDER_FETCHERS[provider](token);

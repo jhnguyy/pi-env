@@ -29,18 +29,23 @@ import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 
 import { discoverAgents } from "./agents";
-import { MAX_TURNS, type SubagentDetails, type UsageStats } from "./types";
+import { MAX_TURNS, type SubagentDetails, type UsageStats, type ToolCapability } from "./types";
 
 // ─── Tool factory map ─────────────────────────────────────────────────────────
 
-export const TOOL_FACTORIES: Record<string, (cwd: string) => AgentTool<any, any>> = {
-  read: (cwd) => createReadTool(cwd) as AgentTool<any, any>,
-  bash: (cwd) => createBashTool(cwd) as AgentTool<any, any>,
-  edit: (cwd) => createEditTool(cwd) as AgentTool<any, any>,
-  write: (cwd) => createWriteTool(cwd) as AgentTool<any, any>,
-  grep: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,
-  find: (cwd) => createFindTool(cwd) as AgentTool<any, any>,
-  ls: (cwd) => createLsTool(cwd) as AgentTool<any, any>,
+export interface ToolDef {
+  factory: (cwd: string) => AgentTool<any, any>;
+  capabilities: ToolCapability[];
+}
+
+export const BUILT_IN_TOOLS: Record<string, ToolDef> = {
+  read:  { factory: (cwd) => createReadTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
+  bash:  { factory: (cwd) => createBashTool(cwd) as AgentTool<any, any>,  capabilities: ["read", "write", "execute"] },
+  edit:  { factory: (cwd) => createEditTool(cwd) as AgentTool<any, any>,  capabilities: ["write"] },
+  write: { factory: (cwd) => createWriteTool(cwd) as AgentTool<any, any>, capabilities: ["write"] },
+  grep:  { factory: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
+  find:  { factory: (cwd) => createFindTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
+  ls:    { factory: (cwd) => createLsTool(cwd) as AgentTool<any, any>,    capabilities: ["read"] },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -132,8 +137,8 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
     const resolvedTools: AgentTool<any, any>[] = [];
     const unknownTools: string[] = [];
     for (const name of rawToolNames) {
-      if (name in TOOL_FACTORIES) {
-        resolvedTools.push(TOOL_FACTORIES[name](ctx.cwd));
+      if (name in BUILT_IN_TOOLS) {
+        resolvedTools.push(BUILT_IN_TOOLS[name].factory(ctx.cwd));
       } else if (registeredExtTools.has(name)) {
         resolvedTools.push(registeredExtTools.get(name)!);
       } else {
@@ -142,7 +147,7 @@ export function createExecuteSubagent(registeredExtTools: Map<string, AgentTool<
     }
     if (unknownTools.length > 0) {
       const available = [
-        ...Object.keys(TOOL_FACTORIES),
+        ...Object.keys(BUILT_IN_TOOLS),
         ...registeredExtTools.keys(),
       ].join(", ");
       return {
