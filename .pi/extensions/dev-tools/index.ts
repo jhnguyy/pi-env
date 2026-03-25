@@ -53,18 +53,15 @@ export default function (pi: ExtensionAPI) {
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH). " +
-    "Diagnostics supports bulk checks: pass paths[] instead of path to check multiple files in one call.";
+    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = Type.Object({
     action: StringEnum(
       ["diagnostics", "hover", "definition", "references", "symbols", "status"] as const,
       { description: "Action to perform" },
     ),
-    path: Type.Optional(Type.String({
-      description: "Absolute path to the file. Required for hover, definition, references, and document symbols. For diagnostics, provide either path or paths.",
-    })),
-    paths: Type.Optional(Type.Array(Type.String(), {
-      description: "Absolute paths for bulk diagnostics (action=diagnostics only). Must be non-empty. Mutually exclusive with path for diagnostics.",
+    path: Type.Optional(Type.Array(Type.String(), {
+      description: "Absolute path(s). Required for diagnostics, hover, definition, references, and document symbols. Diagnostics checks all paths in parallel; other actions use the first path.",
     })),
     line: Type.Optional(Type.Number({
       description: "Line number (1-indexed). Required for hover, definition, references.",
@@ -89,10 +86,12 @@ export default function (pi: ExtensionAPI) {
       parameters: toolParameters,
       execute: async (_toolCallId, params) => {
         try {
+          const p = params.path as string[] | undefined;
           const result = await client.call({
             action: params.action as LspAction,
-            path: params.path,
-            paths: params.paths,
+            ...(p && p.length > 1 && params.action === "diagnostics"
+              ? { paths: p }
+              : { path: p?.[0] }),
             line: params.line,
             character: params.character,
             query: params.query,
@@ -134,10 +133,12 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, _signal) {
       try {
+        const p = params.path as string[] | undefined;
         const result = await client.call({
           action: params.action as LspAction,
-          path: params.path,
-          paths: params.paths,
+          ...(p && p.length > 1 && params.action === "diagnostics"
+            ? { paths: p }
+            : { path: p?.[0] }),
           line: params.line,
           character: params.character,
           query: params.query,
