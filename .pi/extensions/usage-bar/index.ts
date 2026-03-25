@@ -115,7 +115,19 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
 
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 
-async function refresh(ctx: ExtensionContext): Promise<void> {
+/** Minimum ms between automatic (non-forced) refreshes — avoids rate-limiting. */
+const REFRESH_COOLDOWN_MS = 5 * 60_000; // 5 minutes
+
+let lastRefreshMs = 0;
+
+/**
+ * Refresh the usage bar.
+ * @param force — bypass the cooldown (session_start, model_select)
+ */
+async function refresh(ctx: ExtensionContext, force = false): Promise<void> {
+  const now = Date.now();
+  if (!force && now - lastRefreshMs < REFRESH_COOLDOWN_MS) return;
+
   const provider = ctx.model?.provider;
   if (!provider || !(provider in PROVIDER_FETCHERS)) {
     clearSlot("usage-bar", ctx);
@@ -138,12 +150,22 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
     if (!token) { clearSlot("usage-bar", ctx); return; }
 
     const usage = await PROVIDER_FETCHERS[provider](token);
-    if (!usage) { clearSlot("usage-bar", ctx); return; }
+    if (!usage) {
+      // Transient failure (rate-limit, network hiccup): keep showing stale data.
+      // Only clear on forced refreshes where we know credentials are missing.
+      if (force) clearSlot("usage-bar", ctx);
+      return;
+    }
 
+    lastRefreshMs = now;
     setSlot("usage-bar", PROVIDER_FORMATTERS[provider](ctx.ui.theme, usage), ctx);
   } catch {
-    setSlot("usage-bar", ctx.ui.theme.fg("error", "Usage: fetch failed"), ctx);
-    setTimeout(() => clearSlot("usage-bar", ctx), 4_000);
+    // Keep stale data on error rather than clearing — transient failures shouldn't
+    // blank the bar. A force-refresh (session_start) shows the error briefly.
+    if (force) {
+      setSlot("usage-bar", ctx.ui.theme.fg("error", "Usage: fetch failed"), ctx);
+      setTimeout(() => clearSlot("usage-bar", ctx), 4_000);
+    }
   }
 }
 
@@ -154,23 +176,23 @@ export default function (pi: ExtensionAPI) {
     if (isHeadless(ctx)) return;
 
     if (ctx.model) {
-      await refresh(ctx);
+      await refresh(ctx, true);
     } else {
       // ctx.model may be undefined at session_start if the model restore event
       // fired before extensions were loaded. Retry once after a short delay.
       setTimeout(async () => {
-        if (ctx.model) await refresh(ctx);
+        if (ctx.model) await refresh(ctx, true);
       }, 500);
     }
   });
 
   pi.on("model_select", async (_event, ctx) => {
     if (isHeadless(ctx)) return;
-    await refresh(ctx);
+    await refresh(ctx, true);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
     if (isHeadless(ctx)) return;
-    await refresh(ctx);
+    await refresh(ctx); // respects REFRESH_COOLDOWN_MS
   });
 }
