@@ -168,7 +168,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       sock.destroy();
 
       expect(res.ok).toBe(false);
-      expect(res.error).toMatch(/path required/);
+      expect(res.error).toMatch(/path or paths required/);
     });
   });
 

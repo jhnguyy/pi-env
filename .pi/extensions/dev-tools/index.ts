@@ -52,7 +52,8 @@ export default function (pi: ExtensionAPI) {
     "find-references, document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH).";
+    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH). " +
+    "Diagnostics supports bulk checks: pass paths[] instead of path to check multiple files in one call.";
 
   const toolParameters = Type.Object({
     action: StringEnum(
@@ -61,6 +62,9 @@ export default function (pi: ExtensionAPI) {
     ),
     path: Type.Optional(Type.String({
       description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
+    })),
+    paths: Type.Optional(Type.Array(Type.String(), {
+      description: "Absolute paths for bulk diagnostics (action=diagnostics only). When provided, 'path' is ignored and all files are checked in parallel.",
     })),
     line: Type.Optional(Type.Number({
       description: "Line number (1-indexed). Required for hover, definition, references.",
@@ -88,6 +92,7 @@ export default function (pi: ExtensionAPI) {
           const result = await client.call({
             action: params.action as LspAction,
             path: params.path,
+            paths: params.paths,
             line: params.line,
             character: params.character,
             query: params.query,
@@ -132,6 +137,7 @@ export default function (pi: ExtensionAPI) {
         const result = await client.call({
           action: params.action as LspAction,
           path: params.path,
+          paths: params.paths,
           line: params.line,
           character: params.character,
           query: params.query,

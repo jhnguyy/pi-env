@@ -29,6 +29,8 @@ export interface DaemonRequest {
   action: LspAction;
   /** Absolute path to the file. Required for most actions. */
   path?: string;
+  /** Absolute paths for bulk diagnostics (action=diagnostics). When provided, 'path' is ignored. */
+  paths?: string[];
   /** Line number (1-indexed). Required for hover, definition, references. */
   line?: number;
   /** Column number (1-indexed). Required for hover, definition, references. */
@@ -48,6 +50,7 @@ export interface DaemonResponse {
 
 export type LspResult =
   | DiagnosticsResult
+  | BulkDiagnosticsResult
   | HoverResult
   | DefinitionResult
   | ReferencesResult
@@ -74,6 +77,14 @@ export interface DiagnosticsResult {
   items: DiagnosticItem[];
   /** Language server backend name, e.g. "typescript" or "bash" */
   language?: string;
+}
+
+export interface BulkDiagnosticsResult {
+  action: "bulk_diagnostics";
+  /** Per-file diagnostics in the same order as the requested paths. */
+  files: DiagnosticsResult[];
+  totalErrors: number;
+  totalWarns: number;
 }
 
 export interface HoverResult {

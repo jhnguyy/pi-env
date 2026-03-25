@@ -8,6 +8,7 @@
 import type {
   LspResult,
   DiagnosticsResult,
+  BulkDiagnosticsResult,
   HoverResult,
   DefinitionResult,
   ReferencesResult,
@@ -20,12 +21,13 @@ import type {
 /** Format an LSP result to a dense text string for LLM consumption. */
 export function formatResult(result: LspResult): string {
   switch (result.action) {
-    case "diagnostics":  return formatDiagnostics(result);
-    case "hover":        return formatHover(result);
-    case "definition":   return formatDefinition(result);
-    case "references":   return formatReferences(result);
-    case "symbols":      return formatSymbols(result);
-    case "status":       return formatStatus(result);
+    case "diagnostics":       return formatDiagnostics(result);
+    case "bulk_diagnostics":  return formatBulkDiagnostics(result);
+    case "hover":             return formatHover(result);
+    case "definition":        return formatDefinition(result);
+    case "references":        return formatReferences(result);
+    case "symbols":           return formatSymbols(result);
+    case "status":            return formatStatus(result);
   }
 }
 
@@ -51,6 +53,33 @@ export function formatDiagnostics(r: DiagnosticsResult): string {
   }
 
   return lines.join("\n");
+}
+
+export function formatBulkDiagnostics(r: BulkDiagnosticsResult): string {
+  const n = r.files.length;
+  if (r.totalErrors === 0 && r.totalWarns === 0) {
+    return `no errors across ${n} file${n !== 1 ? "s" : ""}`;
+  }
+
+  const summary =
+    r.totalErrors > 0
+      ? `${r.totalErrors} error${r.totalErrors !== 1 ? "s" : ""}` +
+        (r.totalWarns ? `, ${r.totalWarns} warning${r.totalWarns !== 1 ? "s" : ""}` : "") +
+        ` across ${n} file${n !== 1 ? "s" : ""}`
+      : `${r.totalWarns} warning${r.totalWarns !== 1 ? "s" : ""} across ${n} file${n !== 1 ? "s" : ""}`;
+
+  const parts: string[] = [summary];
+  for (const file of r.files) {
+    if (file.errorCount === 0 && file.warnCount === 0) continue;
+    parts.push(`\n${file.path}:`);
+    const detail = formatDiagnostics(file)
+      .split("\n")
+      .map((l) => "  " + l)
+      .join("\n");
+    parts.push(detail);
+  }
+
+  return parts.join("\n");
 }
 
 /** Compact diagnostic summary for auto-append on edit/write. */

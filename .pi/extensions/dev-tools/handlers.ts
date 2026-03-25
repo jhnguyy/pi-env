@@ -13,7 +13,7 @@ import {
 import { okResponse, errorResponse } from "./protocol";
 import type {
   DaemonRequest, DaemonResponse,
-  DiagnosticsResult, HoverResult,
+  DiagnosticsResult, BulkDiagnosticsResult, HoverResult,
   DefinitionLocation, DefinitionResult,
   ReferenceItem, ReferencesResult,
   SymbolItem, SymbolsResult, StatusResult,
@@ -31,25 +31,41 @@ export interface HandlerDeps {
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
-  if (!req.path) return errorResponse(req.id, "path required for diagnostics");
-
-  const backend = deps.getBackend(req.path);
-  const uri = await backend.ensureFile(req.path);
+/** Fetch diagnostics for a single file path (shared by single and bulk paths). */
+async function diagForPath(path: string, deps: HandlerDeps): Promise<DiagnosticsResult> {
+  const backend = deps.getBackend(path);
+  const uri = await backend.ensureFile(path);
   await backend.waitForFirstDiagnostics(uri);
-
   const items = backend.getDiagnostics(uri);
   const errors = items.filter((d) => d.severity === "error");
   const warns = items.filter((d) => d.severity === "warning");
-
-  return okResponse(req.id, {
+  return {
     action: "diagnostics",
-    path: req.path,
+    path,
     errorCount: errors.length,
     warnCount: warns.length,
     items,
     language: backend.name,
-  } as DiagnosticsResult);
+  };
+}
+
+export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  // ── Bulk: paths[] ────────────────────────────────────────────────────────
+  if (req.paths && req.paths.length > 0) {
+    const files = await Promise.all(req.paths.map((p) => diagForPath(p, deps)));
+    const totalErrors = files.reduce((s, f) => s + f.errorCount, 0);
+    const totalWarns  = files.reduce((s, f) => s + f.warnCount,  0);
+    return okResponse(req.id, {
+      action: "bulk_diagnostics",
+      files,
+      totalErrors,
+      totalWarns,
+    } as BulkDiagnosticsResult);
+  }
+
+  // ── Single: path ─────────────────────────────────────────────────────────
+  if (!req.path) return errorResponse(req.id, "path or paths required for diagnostics");
+  return okResponse(req.id, await diagForPath(req.path, deps));
 }
 
 export async function handleHover(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
