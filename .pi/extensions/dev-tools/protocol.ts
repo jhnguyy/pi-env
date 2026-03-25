@@ -50,7 +50,6 @@ export interface DaemonResponse {
 
 export type LspResult =
   | DiagnosticsResult
-  | BulkDiagnosticsResult
   | HoverResult
   | DefinitionResult
   | ReferencesResult
@@ -77,14 +76,10 @@ export interface DiagnosticsResult {
   items: DiagnosticItem[];
   /** Language server backend name, e.g. "typescript" or "bash" */
   language?: string;
-}
-
-export interface BulkDiagnosticsResult {
-  action: "bulk_diagnostics";
-  /** Per-file diagnostics in the same order as the requested paths. */
-  files: DiagnosticsResult[];
-  totalErrors: number;
-  totalWarns: number;
+  /** Per-file results when bulk paths[] was requested. Present only for bulk calls. */
+  files?: DiagnosticsResult[];
+  /** Per-file errors for paths that failed (e.g. not found). Present only when some paths errored. */
+  fileErrors?: string[];
 }
 
 export interface HoverResult {

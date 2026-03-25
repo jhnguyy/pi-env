@@ -67,6 +67,71 @@ describeIfEnabled("dev-tools", "Formatters", () => {
     });
   });
 
+  // ─── formatDiagnostics (bulk) ────────────────────────────────────────────────
+
+  describe("formatDiagnostics (bulk)", () => {
+    const cleanFile: DiagnosticsResult = {
+      action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
+    };
+    const errorFile: DiagnosticsResult = {
+      action: "diagnostics", path: "/b.ts", errorCount: 1, warnCount: 0,
+      items: [{ line: 5, character: 3, severity: "error", code: "TS2339", message: "Missing prop." }],
+    };
+    const warnFile: DiagnosticsResult = {
+      action: "diagnostics", path: "/c.ts", errorCount: 0, warnCount: 1,
+      items: [{ line: 10, character: 1, severity: "warning", code: "TS7017", message: "Any type." }],
+    };
+
+    it("returns 'no errors across N files' when all clean", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0,
+        items: [], files: [cleanFile, { ...cleanFile, path: "/d.ts" }],
+      };
+      expect(formatDiagnostics(r)).toBe("no errors across 2 files");
+    });
+
+    it("shows aggregate summary with per-file items", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/b.ts", errorCount: 1, warnCount: 1,
+        items: [], files: [cleanFile, errorFile, warnFile],
+      };
+      const text = formatDiagnostics(r);
+      expect(text).toContain("1 error, 1 warning across 3 files");
+      expect(text).toContain("/b.ts:");
+      expect(text).toContain("  L5:3 E TS2339 Missing prop.");
+      expect(text).toContain("/c.ts:");
+      expect(text).not.toContain("/a.ts:"); // clean file omitted
+    });
+
+    it("omits clean files from item listing", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/a.ts", errorCount: 1, warnCount: 0,
+        items: [], files: [cleanFile, errorFile],
+      };
+      const lines = formatDiagnostics(r).split("\n");
+      expect(lines.some(l => l.includes("/a.ts:"))).toBe(false);
+    });
+
+    it("includes fileErrors in summary and output", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/b.ts", errorCount: 1, warnCount: 0,
+        items: [], files: [errorFile], fileErrors: ["/missing.ts: File not found: /missing.ts"],
+      };
+      const text = formatDiagnostics(r);
+      expect(text).toContain("1 failed");
+      expect(text).toContain("across 2 files");
+      expect(text).toContain("FAILED: /missing.ts: File not found");
+    });
+
+    it("dispatches bulk through formatResult", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0,
+        items: [], files: [cleanFile],
+      };
+      expect(formatResult(r)).toBe("no errors across 1 file");
+    });
+  });
+
   // ─── formatDiagnosticsSummary ──────────────────────────────────────────────
 
   describe("formatDiagnosticsSummary", () => {

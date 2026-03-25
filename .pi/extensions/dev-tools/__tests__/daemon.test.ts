@@ -170,6 +170,64 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/path or paths required/);
     });
+
+    it("bulk: returns aggregated results for multiple paths", async () => {
+      const fileA = join(tmpDir, "a.ts");
+      const fileB = join(tmpDir, "b.ts");
+      writeFileSync(fileA, "const x: string = 42;", "utf8");
+      writeFileSync(fileB, "const y = 1;", "utf8");
+
+      const uriA = `file://${resolve(fileA)}`;
+      const diagA = [
+        { line: 1, character: 7, severity: "error", code: "TS2322", message: "Bad type." },
+      ];
+      daemon = createMockedDaemon(new Map(), new Map([[uriA, diagA]]));
+
+      const sock = await startAndConnect(daemon);
+      const res = await send(sock, { id: 5, action: "diagnostics", paths: [fileA, fileB] });
+      sock.destroy();
+
+      expect(res.ok).toBe(true);
+      const r = res.result as any;
+      expect(r.action).toBe("diagnostics");
+      expect(r.files).toHaveLength(2);
+      expect(r.files[0].errorCount).toBe(1);
+      expect(r.files[1].errorCount).toBe(0);
+      expect(r.errorCount).toBe(1);
+      expect(r.warnCount).toBe(0);
+    });
+
+    it("bulk: deduplicates paths", async () => {
+      const fileA = join(tmpDir, "dup.ts");
+      writeFileSync(fileA, "const x = 1;", "utf8");
+      daemon = createMockedDaemon();
+
+      const sock = await startAndConnect(daemon);
+      const res = await send(sock, { id: 6, action: "diagnostics", paths: [fileA, fileA, fileA] });
+      sock.destroy();
+
+      expect(res.ok).toBe(true);
+      expect((res.result as any).files).toHaveLength(1);
+    });
+
+    it("bulk: reports fileErrors for non-existent paths without losing valid results", async () => {
+      const fileA = join(tmpDir, "exists.ts");
+      writeFileSync(fileA, "const x = 1;", "utf8");
+      daemon = createMockedDaemon();
+
+      const sock = await startAndConnect(daemon);
+      const res = await send(sock, {
+        id: 7, action: "diagnostics",
+        paths: [fileA, join(tmpDir, "nope.ts")],
+      });
+      sock.destroy();
+
+      expect(res.ok).toBe(true);
+      const r = res.result as any;
+      expect(r.files).toHaveLength(1);
+      expect(r.fileErrors).toHaveLength(1);
+      expect(r.fileErrors[0]).toContain("File not found");
+    });
   });
 
   // ─── Hover ────────────────────────────────────────────────────────────────

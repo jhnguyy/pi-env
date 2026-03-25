@@ -61,10 +61,10 @@ export default function (pi: ExtensionAPI) {
       { description: "Action to perform" },
     ),
     path: Type.Optional(Type.String({
-      description: "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols.",
+      description: "Absolute path to the file. Required for hover, definition, references, and document symbols. For diagnostics, provide either path or paths.",
     })),
     paths: Type.Optional(Type.Array(Type.String(), {
-      description: "Absolute paths for bulk diagnostics (action=diagnostics only). When provided, 'path' is ignored and all files are checked in parallel.",
+      description: "Absolute paths for bulk diagnostics (action=diagnostics only). Must be non-empty. Mutually exclusive with path for diagnostics.",
     })),
     line: Type.Optional(Type.Number({
       description: "Line number (1-indexed). Required for hover, definition, references.",
