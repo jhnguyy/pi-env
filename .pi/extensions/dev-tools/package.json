@@ -1,5 +1,6 @@
 {
-  "name": "pi-extension-dev-tools",
+  "name": "@pi-env/dev-tools",
+  "type": "module",
   "private": true,
   "scripts": {
     "test": "bun test",

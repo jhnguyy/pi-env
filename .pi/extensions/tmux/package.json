@@ -1,5 +1,5 @@
 {
-  "name": "tmux",
+  "name": "@pi-env/tmux",
   "type": "module",
   "private": true
 }

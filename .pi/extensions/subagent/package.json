@@ -1,0 +1,8 @@
+{
+  "name": "@pi-env/subagent",
+  "type": "module",
+  "private": true,
+  "peerDependencies": {
+    "@mariozechner/pi-agent-core": "*"
+  }
+}

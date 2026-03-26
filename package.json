@@ -4,14 +4,18 @@
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],
+  "workspaces": [
+    ".pi/extensions/*"
+  ],
   "pi": {
-    "extensions": [".pi/extensions"],
+    "extensions": [".pi/extensions/*/dist"],
     "skills": [".agents/skills"],
     "themes": ["themes"]
   },
   "scripts": {
+    "build": "bash scripts/build-extensions.sh",
     "test": "bun test",
-    "postinstall": "sh scripts/restart-lsp-daemon.sh"
+    "postinstall": "sh scripts/restart-lsp-daemon.sh && bash scripts/build-extensions.sh"
   },
   "peerDependencies": {
     "@sinclair/typebox": "*",
