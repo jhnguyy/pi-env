@@ -16,6 +16,44 @@ chore/<name>   config, docs, cleanup (no behavior change)
 - Delete branch after merge: `git branch -d feat/<name>`
 - Tag milestones on `main`: `v<major>.<minor>.0`
 
+## Extension Development
+
+Extensions compile to `dist/index.js` bundles (Bun, ESM) for fast load times. Source files in `.pi/extensions/*/` are never loaded directly by pi at runtime.
+
+**After any extension source change:**
+
+```bash
+bun run build
+```
+
+**Or rebuild a single extension:**
+
+```bash
+bun build .pi/extensions/<name>/index.ts \
+  --outfile .pi/extensions/<name>/dist/index.js \
+  --target bun --format esm \
+  --external @mariozechner/pi-coding-agent \
+  --external @mariozechner/pi-ai \
+  --external @mariozechner/pi-tui \
+  --external @mariozechner/pi-agent-core \
+  --external @sinclair/typebox
+```
+
+The build runs automatically on `bun install` via `postinstall`.
+
+### Adding a new extension
+
+1. Create `.pi/extensions/<name>/index.ts` with the default export
+2. Add `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
+3. Add `<name>` to the `EXTENSIONS` array in `scripts/build-extensions.sh`
+4. Run `bun run build`
+
+### Cross-extension singletons
+
+If a service is shared between extensions (like `tmux-service` and `bus-service`), store
+the singleton on `globalThis` (see `tmux/tmux-service.ts`). Module-level variables are
+per-bundle; `globalThis` is process-wide, so all bundles share the same live instance.
+
 ## Pi Version Bumps
 
 After bumping pi packages in `package.json`, regenerate the capability map:

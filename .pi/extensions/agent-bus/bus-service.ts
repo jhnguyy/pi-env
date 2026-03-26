@@ -29,7 +29,15 @@ interface BusService {
   transport: FsTransport;
 }
 
-let _instance: BusService | null = null;
+/**
+ * globalThis key for the BusService singleton.
+ *
+ * Using globalThis instead of a module-level variable ensures that when
+ * this file is bundled into multiple extension bundles (e.g. agent-bus
+ * and orch each bundle it inline), all copies share the same live instance.
+ * Module-level variables are per-bundle; globalThis is process-wide.
+ */
+const BUS_SERVICE_KEY = "__pi_bus_service__";
 
 /**
  * Initialize (or return existing) bus service.
@@ -38,7 +46,8 @@ let _instance: BusService | null = null;
  * made after construction (e.g. by bus start or orch start) are picked up.
  */
 export function initBusService(): BusService {
-  if (_instance) return _instance;
+  const existing = (globalThis as Record<string, unknown>)[BUS_SERVICE_KEY] as BusService | undefined;
+  if (existing) return existing;
 
   const config: BusConfig = {
     sessionId: process.env.PI_BUS_SESSION ?? null,
@@ -46,8 +55,9 @@ export function initBusService(): BusService {
   };
   const transport = new FsTransport();
   const client = new BusClient(transport, config);
-  _instance = { client, transport };
-  return _instance;
+  const instance: BusService = { client, transport };
+  (globalThis as Record<string, unknown>)[BUS_SERVICE_KEY] = instance;
+  return instance;
 }
 
 /**

@@ -1,5 +1,5 @@
 {
-  "name": "jit-catch",
+  "name": "@pi-env/jit-catch",
   "type": "module",
   "private": true
 }

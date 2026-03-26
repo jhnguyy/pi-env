@@ -47,15 +47,15 @@ Extensions are TypeScript modules that register **tools** (new capabilities the 
 |---|---|
 | `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. The messaging backbone for multi-agent coordination. |
 | `jit-catch` | `jit_catch` tool — spawns a subagent to write ephemeral catching tests for a diff, runs them with `bun test`, auto-discards on pass. |
-| `dev-tools` | `dev-tools` tool — TypeScript, Bash, and Nix language intelligence: diagnostics, hover, go-to-definition, find-references, document/workspace symbols via a shared daemon. Runs `hclfmt -check` automatically after editing `.hcl` files. |
-| `orch` | `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. Coordinates `tmux` panes and `bus` channels. |
+| `dev-tools` | `dev-tools` tool — language intelligence via a shared LSP daemon: diagnostics, hover, go-to-definition, find-references, document/workspace symbols. Backends and coverage: `typescript-language-server` (`.ts .tsx .js .jsx .mts .cts .mjs .cjs` — bundled), `bash-language-server` (`.sh .bash .zsh .ksh` — bundled), `nil` (`.nix` — install separately). Also runs `hclfmt -check` after `.hcl` edits (install separately). |
+| `orch` | *(disabled — depends on tmux)* `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. |
 | `security` | Hook-based permission engine — intercepts tool calls via blocklist rules, scans results for credential leakage and redacts. `/permissions` command. |
 | `skill-builder` | `skill_build` tool — scaffold, validate, and evaluate pi skills in one call. |
 | `subagent` | `subagent` tool — in-process subagent via `agentLoop()`. Delegates focused tasks without subprocess overhead. Auto-discovers available agents, models, and tools. |
-| `tmux` | `tmux` tool — spawn panes, send keystrokes, read output, close. The execution layer for parallel subagent work and long-running services. |
+| `tmux` | *(disabled — architecture under review)* `tmux` tool — spawn panes, send keystrokes, read output, close. Execution layer for parallel subagent work and long-running services. |
 | `work-tracker` | Hook-based branch guard + session tracking — enforces branch naming conventions, injects git context on session start, provides `/handoff` and `/review-retros` commands. |
 
-**How they compose:** `agent-bus`, `tmux`, and `orch` form the multi-agent stack. `tmux` spawns parallel panes, `agent-bus` provides event-driven messaging between them, and `orch` manages the lifecycle (worktree isolation, cleanup, receipts). `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
+**How they compose:** `agent-bus` handles inter-process messaging. `tmux` and `orch` are currently disabled (architecture under review) — they form the multi-agent execution layer when active. `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
 
 `.pi/extensions/_shared/` contains internal utilities used across multiple extensions: `result.ts` (tool result helpers), `errors.ts` (`BaseExtensionError` base class), `git.ts` (git operation wrappers), `exit-shim.ts` (bus signal on process exit). Not a registered extension — imported directly by other extensions.
 
@@ -94,6 +94,10 @@ The core loop is conversational: open `pi`, describe the task, and let the model
 ## New machine setup
 
 **Prerequisites:** `git` and [bun](https://bun.sh) (≥1.3) — no npm or node required.
+
+**Optional tools** (dev-tools uses these if present on PATH):
+- `nil` — Nix LSP, required for `.nix` diagnostics/hover/symbols. Install via your package manager (e.g. `nix-env -iA nixpkgs.nil`, `brew install nil`, or `apt install nil`).
+- `hclfmt` — HCL formatter, required for `.hcl` post-edit format checks. Install from [hashicorp/hcl](https://github.com/hashicorp/hcl) or via `brew install hclfmt`.
 
 ```bash
 # Install bun if needed:

@@ -1,5 +1,5 @@
 {
-  "name": "@pi-env/work-tracker",
+  "name": "@pi-env/agent-bus",
   "type": "module",
   "private": true
 }

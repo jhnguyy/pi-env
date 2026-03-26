@@ -1,5 +1,5 @@
 {
-  "name": "skill-builder",
+  "name": "@pi-env/skill-builder",
   "type": "module",
   "private": true
 }
