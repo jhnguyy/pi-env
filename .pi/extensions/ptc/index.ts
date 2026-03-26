@@ -63,11 +63,20 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
 
     renderCall(args, theme, _ctx) {
-      const firstLine = args.code.split("\n")[0].trim();
-      const preview =
-        firstLine.length > 70 ? firstLine.substring(0, 70) + "…" : firstLine;
+      const lines = args.code.split("\n");
+      const lineCount = lines.filter((l) => l.trim().length > 0).length;
+      // Find first meaningful line — skip blanks and comments.
+      // Template literals start with a newline so [0] is always "".
+      const firstCodeLine =
+        lines.find((l) => {
+          const t = l.trim();
+          return t.length > 0 && !t.startsWith("//") && !t.startsWith("/*") && !t.startsWith("*");
+        })?.trim() ?? "";
+      const preview = firstCodeLine.length > 72 ? firstCodeLine.substring(0, 72) + "…" : firstCodeLine;
       return new Text(
-        theme.fg("toolTitle", theme.bold("ptc ")) + theme.fg("muted", preview),
+        theme.fg("toolTitle", theme.bold("ptc")) +
+          theme.fg("muted", ` ${lineCount}L`) +
+          (preview ? "  " + theme.fg("text", preview) : ""),
         0,
         0,
       );
@@ -78,9 +87,9 @@ export default function ptcExtension(pi: ExtensionAPI) {
       const first = result.content[0];
       const text = first?.type === "text" ? (first.text ?? "") : "";
 
-      // isError is provided via ctx, not embedded in result (result only has content + details)
+      // isError is provided via ctx, not embedded in result
       if (ctx.isError) {
-        return new Text(theme.fg("error", text || "error"), 0, 0);
+        return new Text(theme.fg("error", "✗ ") + theme.fg("error", text || "error"), 0, 0);
       }
 
       if (isPartial) {
@@ -90,8 +99,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
         if (!ctx.state.callChain) ctx.state.callChain = [];
         const chain: string[] = ctx.state.callChain;
         const lastLabel = chain[chain.length - 1];
-        // Guard against duplicate pushes when updateDisplay() fires multiple times for the
-        // same onUpdate result (e.g. window resize between two onUpdate calls).
         if (text && lastLabel !== text) {
           chain.push(text);
         }
@@ -99,15 +106,37 @@ export default function ptcExtension(pi: ExtensionAPI) {
         return new Text(theme.fg("muted", lines), 0, 0);
       }
 
-      // Final result — show first line of output + how many sub-calls were made
-      const preview = text.split("\n")[0].substring(0, 80);
+      // Final result
+      const outputLines = text.split("\n").filter((l) => l.trim().length > 0);
+      const lineCount = outputLines.length;
+      const countLabel = `${lineCount} line${lineCount !== 1 ? "s" : ""}`;
       const callCount = (ctx.state.callChain as string[] | undefined)?.length ?? 0;
       const callSuffix =
         callCount > 0
           ? theme.fg("dim", ` · ${callCount} call${callCount !== 1 ? "s" : ""}`)
           : "";
+
+      if (opts.expanded) {
+        // Expanded: show the code invocation, then the output
+        const code = ctx.args?.code ?? "";
+        const codeBlock = code.trim()
+          ? theme.fg("muted", "─── script ───") + "\n" + code.trim() + "\n" + theme.fg("muted", "─── output ───")
+          : "";
+        return new Text(
+          theme.fg("success", "✓ ") + theme.fg("muted", countLabel) + callSuffix +
+            (codeBlock ? "\n" + codeBlock : "") +
+            "\n" + (text || "(no output)"),
+          0,
+          0,
+        );
+      }
+
+      // Collapsed: icon + line count + call count + first non-empty output line
+      const firstLine = outputLines[0]?.substring(0, 72) ?? "";
       return new Text(
-        theme.fg("success", "✓ ") + theme.fg("text", preview) + callSuffix,
+        theme.fg("success", "✓ ") +
+          theme.fg("muted", countLabel) + callSuffix +
+          (firstLine ? "  " + theme.fg("text", firstLine) : ""),
         0,
         0,
       );
