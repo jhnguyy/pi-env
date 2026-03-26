@@ -6,13 +6,17 @@ import {
   formatDiagnosticsSummary,
   formatHover,
   formatDefinition,
+  formatImplementation,
   formatReferences,
+  formatIncomingCalls,
+  formatOutgoingCalls,
   formatSymbols,
   formatStatus,
 } from "../formatters";
 import type {
-  DiagnosticsResult, HoverResult, DefinitionResult,
-  ReferencesResult, SymbolsResult, StatusResult,
+  DiagnosticsResult, HoverResult, DefinitionResult, ImplementationResult,
+  ReferencesResult, IncomingCallsResult, OutgoingCallsResult,
+  SymbolsResult, StatusResult,
 } from "../protocol";
 
 describeIfEnabled("dev-tools", "Formatters", () => {
@@ -388,14 +392,127 @@ describeIfEnabled("dev-tools", "Formatters", () => {
     });
   });
 
+  // ─── formatImplementation ────────────────────────────────────────────────────
+
+  describe("formatImplementation", () => {
+    it("returns 'No implementations found' for empty locations", () => {
+      const r: ImplementationResult = {
+        action: "implementation", path: "/a.ts", line: 1, character: 5, locations: [],
+      };
+      expect(formatImplementation(r)).toBe("No implementations found");
+    });
+
+    it("formats implementation locations with count header", () => {
+      const r: ImplementationResult = {
+        action: "implementation", path: "/a.ts", line: 1, character: 5,
+        locations: [
+          { relativePath: "src/impl.ts", absolutePath: "/p/src/impl.ts", line: 10, body: "class FooImpl implements Foo {" },
+          { relativePath: "src/impl2.ts", absolutePath: "/p/src/impl2.ts", line: 20, body: "class BarImpl implements Foo {" },
+        ],
+      };
+      const text = formatImplementation(r);
+      expect(text).toContain("2 implementations");
+      expect(text).toContain("src/impl.ts:10");
+      expect(text).toContain("class FooImpl implements Foo");
+      expect(text).toContain("src/impl2.ts:20");
+    });
+  });
+
+  // ─── formatIncomingCalls ───────────────────────────────────────────────────
+
+  describe("formatIncomingCalls", () => {
+    it("returns 'no callers' for empty results", () => {
+      const r: IncomingCallsResult = {
+        action: "incoming-calls", path: "/a.ts", line: 5, character: 3,
+        symbol: "doStuff", total: 0, items: [], truncated: false,
+      };
+      expect(formatIncomingCalls(r)).toBe("no callers of doStuff");
+    });
+
+    it("formats callers with count and items", () => {
+      const r: IncomingCallsResult = {
+        action: "incoming-calls", path: "/a.ts", line: 5, character: 3,
+        symbol: "doStuff", total: 2, truncated: false,
+        items: [
+          { name: "main", kind: "function", relativePath: "src/index.ts", absolutePath: "/p/src/index.ts", line: 42, content: "doStuff(args)" },
+          { name: "handleRequest", kind: "method", relativePath: "src/handler.ts", absolutePath: "/p/src/handler.ts", line: 15, content: "this.doStuff(req)" },
+        ],
+      };
+      const text = formatIncomingCalls(r);
+      expect(text).toContain("2 callers of doStuff");
+      expect(text).toContain("src/index.ts:42 function main");
+      expect(text).toContain("src/handler.ts:15 method handleRequest");
+    });
+
+    it("shows truncation note", () => {
+      const r: IncomingCallsResult = {
+        action: "incoming-calls", path: "/a.ts", line: 5, character: 3,
+        symbol: "doStuff", total: 35, truncated: true,
+        items: [{ name: "a", kind: "function", relativePath: "a.ts", absolutePath: "/a.ts", line: 1, content: "a()" }],
+      };
+      const text = formatIncomingCalls(r);
+      expect(text).toContain("... 34 more");
+    });
+  });
+
+  // ─── formatOutgoingCalls ──────────────────────────────────────────────────
+
+  describe("formatOutgoingCalls", () => {
+    it("returns 'makes no calls' for empty results", () => {
+      const r: OutgoingCallsResult = {
+        action: "outgoing-calls", path: "/a.ts", line: 5, character: 3,
+        symbol: "init", total: 0, items: [], truncated: false,
+      };
+      expect(formatOutgoingCalls(r)).toBe("init makes no calls");
+    });
+
+    it("formats callees with count and items", () => {
+      const r: OutgoingCallsResult = {
+        action: "outgoing-calls", path: "/a.ts", line: 5, character: 3,
+        symbol: "init", total: 2, truncated: false,
+        items: [
+          { name: "loadConfig", kind: "function", relativePath: "src/config.ts", absolutePath: "/p/src/config.ts", line: 8, content: "export function loadConfig()" },
+          { name: "connect", kind: "function", relativePath: "src/db.ts", absolutePath: "/p/src/db.ts", line: 22, content: "export async function connect()" },
+        ],
+      };
+      const text = formatOutgoingCalls(r);
+      expect(text).toContain("init calls 2 functions");
+      expect(text).toContain("src/config.ts:8 function loadConfig");
+      expect(text).toContain("src/db.ts:22 function connect");
+    });
+  });
+
   // ─── formatResult dispatch ─────────────────────────────────────────────────
 
   describe("formatResult", () => {
-    it("dispatches to correct formatter", () => {
+    it("dispatches diagnostics", () => {
       const r: DiagnosticsResult = {
         action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
       };
       expect(formatResult(r)).toBe("no errors");
+    });
+
+    it("dispatches implementation", () => {
+      const r: ImplementationResult = {
+        action: "implementation", path: "/a.ts", line: 1, character: 5, locations: [],
+      };
+      expect(formatResult(r)).toBe("No implementations found");
+    });
+
+    it("dispatches incoming-calls", () => {
+      const r: IncomingCallsResult = {
+        action: "incoming-calls", path: "/a.ts", line: 1, character: 1,
+        symbol: "foo", total: 0, items: [], truncated: false,
+      };
+      expect(formatResult(r)).toBe("no callers of foo");
+    });
+
+    it("dispatches outgoing-calls", () => {
+      const r: OutgoingCallsResult = {
+        action: "outgoing-calls", path: "/a.ts", line: 1, character: 1,
+        symbol: "bar", total: 0, items: [], truncated: false,
+      };
+      expect(formatResult(r)).toBe("bar makes no calls");
     });
   });
 });

@@ -10,7 +10,10 @@ import type {
   DiagnosticsResult,
   HoverResult,
   DefinitionResult,
+  ImplementationResult,
   ReferencesResult,
+  IncomingCallsResult,
+  OutgoingCallsResult,
   SymbolsResult,
   StatusResult,
 } from "./protocol";
@@ -20,12 +23,15 @@ import type {
 /** Format an LSP result to a dense text string for LLM consumption. */
 export function formatResult(result: LspResult): string {
   switch (result.action) {
-    case "diagnostics":  return formatDiagnostics(result);
-    case "hover":        return formatHover(result);
-    case "definition":   return formatDefinition(result);
-    case "references":   return formatReferences(result);
-    case "symbols":      return formatSymbols(result);
-    case "status":       return formatStatus(result);
+    case "diagnostics":    return formatDiagnostics(result);
+    case "hover":          return formatHover(result);
+    case "definition":     return formatDefinition(result);
+    case "implementation": return formatImplementation(result);
+    case "references":     return formatReferences(result);
+    case "incoming-calls": return formatIncomingCalls(result);
+    case "outgoing-calls": return formatOutgoingCalls(result);
+    case "symbols":        return formatSymbols(result);
+    case "status":         return formatStatus(result);
   }
 }
 
@@ -150,6 +156,61 @@ export function formatDefinition(r: DefinitionResult): string {
   }
 
   return parts.join("\n\n");
+}
+
+// ─── Implementation ─────────────────────────────────────────────────────────
+
+export function formatImplementation(r: ImplementationResult): string {
+  if (r.locations.length === 0) return "No implementations found";
+
+  const parts: string[] = [];
+  parts.push(`${r.locations.length} implementation${r.locations.length !== 1 ? "s" : ""}`);
+  for (const loc of r.locations) {
+    const header = `${loc.relativePath}:${loc.line}`;
+    let body = loc.body;
+    if (loc.truncatedLines && loc.truncatedLines > 0) {
+      body += `\n... (${loc.truncatedLines} more lines)`;
+    }
+    parts.push(`${header}\n${body}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+// ─── Call Hierarchy ─────────────────────────────────────────────────────────
+
+export function formatIncomingCalls(r: IncomingCallsResult): string {
+  if (r.total === 0) return `no callers of ${r.symbol}`;
+
+  const lines: string[] = [];
+  lines.push(`${r.total} caller${r.total !== 1 ? "s" : ""} of ${r.symbol}`);
+
+  for (const item of r.items) {
+    lines.push(`${item.relativePath}:${item.line} ${item.kind} ${item.name} — ${item.content}`);
+  }
+
+  if (r.truncated) {
+    lines.push(`... ${r.total - r.items.length} more`);
+  }
+
+  return lines.join("\n");
+}
+
+export function formatOutgoingCalls(r: OutgoingCallsResult): string {
+  if (r.total === 0) return `${r.symbol} makes no calls`;
+
+  const lines: string[] = [];
+  lines.push(`${r.symbol} calls ${r.total} function${r.total !== 1 ? "s" : ""}`);
+
+  for (const item of r.items) {
+    lines.push(`${item.relativePath}:${item.line} ${item.kind} ${item.name} — ${item.content}`);
+  }
+
+  if (r.truncated) {
+    lines.push(`... ${r.total - r.items.length} more`);
+  }
+
+  return lines.join("\n");
 }
 
 // ─── References ─────────────────────────────────────────────────────────────

@@ -71,7 +71,14 @@ export function detectDevToolsHint(
         hint = `[dev-tools] To map this file's structure, try: dev-tools symbols { path: "${catMatch[1]}" }`;
       } else if (/\bgrep\b|\brg\b/.test(command)) {
         // Pattern 2: grep/rg (symbol lookups in code)
-        hint = `[dev-tools] For symbol lookups in code, try: dev-tools references (call sites) or dev-tools symbols { query: "..." } (workspace search)`;
+        // Detect if grepping for a specific function/class name (PascalCase or camelCase)
+        // Requires at least one lowercase char to exclude ALL_CAPS constants (TODO, FIXME, etc.)
+        const symbolMatch = command.match(/(?:grep|rg)\s+(?:-[^\s]+\s+)*["']?([A-Z][a-zA-Z0-9]*[a-z][a-zA-Z0-9]*|[a-z][a-zA-Z0-9]*[A-Z][a-zA-Z0-9]*)["']?/);
+        if (symbolMatch) {
+          hint = `[dev-tools] For "${symbolMatch[1]}", try: dev-tools references (all usages), dev-tools incoming-calls (what calls it), or dev-tools symbols { query: "${symbolMatch[1]}" } (find definition)`;
+        } else {
+          hint = `[dev-tools] For symbol lookups in code, try: dev-tools references (call sites), dev-tools incoming-calls/outgoing-calls (call hierarchy), or dev-tools symbols { query: "..." } (workspace search)`;
+        }
       }
     }
   }

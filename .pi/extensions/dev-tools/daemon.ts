@@ -24,8 +24,9 @@ import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 import { LspBackend, STANDARD_CAPABILITIES } from "./backend";
 import {
-  handleDiagnostics, handleHover, handleDefinition,
-  handleReferences, handleSymbols, handleStatus,
+  handleDiagnostics, handleHover, handleDefinition, handleImplementation,
+  handleReferences, handleIncomingCalls, handleOutgoingCalls,
+  handleSymbols, handleStatus,
   type HandlerDeps,
 } from "./handlers";
 import { TS_EXTENSIONS, BASH_EXTENSIONS, NIX_EXTENSIONS } from "./filetypes";
@@ -142,12 +143,15 @@ export class LspDaemon {
     };
 
     switch (req.action) {
-      case "diagnostics": return handleDiagnostics(req, deps);
-      case "hover":       return handleHover(req, deps);
-      case "definition":  return handleDefinition(req, deps);
-      case "references":  return handleReferences(req, deps);
-      case "symbols":     return handleSymbols(req, deps);
-      case "status":      return handleStatus(req, deps);
+      case "diagnostics":    return handleDiagnostics(req, deps);
+      case "hover":          return handleHover(req, deps);
+      case "definition":     return handleDefinition(req, deps);
+      case "implementation": return handleImplementation(req, deps);
+      case "references":     return handleReferences(req, deps);
+      case "incoming-calls": return handleIncomingCalls(req, deps);
+      case "outgoing-calls": return handleOutgoingCalls(req, deps);
+      case "symbols":        return handleSymbols(req, deps);
+      case "status":         return handleStatus(req, deps);
       case "shutdown":
         this.shutdown();
         return okResponse(req.id, {

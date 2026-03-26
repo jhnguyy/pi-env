@@ -17,7 +17,10 @@ export type LspAction =
   | "diagnostics"
   | "hover"
   | "definition"
+  | "implementation"
   | "references"
+  | "incoming-calls"
+  | "outgoing-calls"
   | "symbols"
   | "status"
   | "shutdown";
@@ -52,7 +55,10 @@ export type LspResult =
   | DiagnosticsResult
   | HoverResult
   | DefinitionResult
+  | ImplementationResult
   | ReferencesResult
+  | IncomingCallsResult
+  | OutgoingCallsResult
   | SymbolsResult
   | StatusResult;
 
@@ -112,6 +118,53 @@ export interface DefinitionResult {
   line: number;
   character: number;
   locations: DefinitionLocation[];
+}
+
+export interface ImplementationResult {
+  action: "implementation";
+  path: string;
+  line: number;
+  character: number;
+  locations: DefinitionLocation[];
+}
+
+export interface CallHierarchyItem {
+  /** Symbol name */
+  name: string;
+  /** Kind label, e.g. "function", "method" */
+  kind: string;
+  /** Relative path from project root */
+  relativePath: string;
+  /** Absolute path */
+  absolutePath: string;
+  /** 1-indexed line */
+  line: number;
+  /** Trimmed line content at the call site */
+  content: string;
+}
+
+export interface IncomingCallsResult {
+  action: "incoming-calls";
+  path: string;
+  line: number;
+  character: number;
+  /** The symbol whose callers were queried */
+  symbol: string;
+  total: number;
+  items: CallHierarchyItem[];
+  truncated: boolean;
+}
+
+export interface OutgoingCallsResult {
+  action: "outgoing-calls";
+  path: string;
+  line: number;
+  character: number;
+  /** The symbol whose callees were queried */
+  symbol: string;
+  total: number;
+  items: CallHierarchyItem[];
+  truncated: boolean;
 }
 
 export interface ReferenceItem {

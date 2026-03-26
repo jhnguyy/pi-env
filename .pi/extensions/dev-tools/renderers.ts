@@ -6,7 +6,7 @@
  */
 
 import { Text } from "@mariozechner/pi-tui";
-import type { LspResult, DiagnosticsResult, SymbolsResult, StatusResult } from "./protocol";
+import type { LspResult, DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, SymbolsResult, StatusResult } from "./protocol";
 
 // ─── Theme interface (minimal, matches pi-tui theme API) ─────────────────────
 
@@ -41,8 +41,11 @@ export function renderDevToolsResult(
   switch (details.action) {
     case "diagnostics":  return renderDiagnostics(details, opts, theme);
     case "hover":        return new Text(theme.fg("success", "✓ hover"), 0, 0);
-    case "definition":   return new Text(theme.fg("success", `✓ ${details.locations.length} location(s)`), 0, 0);
-    case "references":   return new Text(theme.fg("success", `✓ ${details.total} reference(s)`), 0, 0);
+    case "definition":     return new Text(theme.fg("success", `✓ ${details.locations.length} location(s)`), 0, 0);
+    case "implementation": return new Text(theme.fg("success", `✓ ${details.locations.length} implementation(s)`), 0, 0);
+    case "references":     return new Text(theme.fg("success", `✓ ${details.total} reference(s)`), 0, 0);
+    case "incoming-calls": return renderCallHierarchySummary(details, theme);
+    case "outgoing-calls": return renderCallHierarchySummary(details, theme);
     case "symbols":      return renderSymbolsSummary(details, theme);
     case "status":       return renderStatusSummary(details, theme);
     default:             return new Text(result.content[0]?.text ?? "", 0, 0);
@@ -75,6 +78,20 @@ export function renderDevToolsCall(
     text += " " + theme.fg("muted", `"${args.query}"`);
   }
 
+  return new Text(text, 0, 0);
+}
+
+// ─── Call Hierarchy ──────────────────────────────────────────────────────────
+
+function renderCallHierarchySummary(
+  d: IncomingCallsResult | OutgoingCallsResult,
+  theme: RenderTheme,
+): Text {
+  const direction = d.action === "incoming-calls" ? "caller" : "callee";
+  const text = d.total === 0
+    ? theme.fg("muted", `— no ${direction}s`)
+    : theme.fg("success", `✓ ${d.total} ${direction}${d.total !== 1 ? "s" : ""}`) +
+      ` ${theme.fg("muted", `of ${d.symbol}`)}`;
   return new Text(text, 0, 0);
 }
 

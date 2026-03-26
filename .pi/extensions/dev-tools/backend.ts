@@ -29,7 +29,9 @@ export const STANDARD_CAPABILITIES = {
   textDocument: {
     hover: { contentFormat: ["plaintext"] },
     definition: {},
+    implementation: {},
     references: {},
+    callHierarchy: { dynamicRegistration: false },
     documentSymbol: { hierarchicalDocumentSymbolSupport: false },
     publishDiagnostics: { relatedInformation: false },
   },
