@@ -4,5 +4,8 @@
   "private": true,
   "peerDependencies": {
     "@mariozechner/pi-agent-core": "*"
+  },
+  "pi": {
+    "extensions": ["./dist/index.js"]
   }
 }

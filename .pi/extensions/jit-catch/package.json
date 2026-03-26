@@ -1,5 +1,8 @@
 {
   "name": "@pi-env/jit-catch",
   "type": "module",
-  "private": true
+  "private": true,
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  }
 }

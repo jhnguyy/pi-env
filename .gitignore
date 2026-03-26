@@ -12,3 +12,4 @@ sessions/
 .pi/handoffs/
 permissions.json
 permissions-audit.jsonl
+node_modules

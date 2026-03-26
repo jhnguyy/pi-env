@@ -1,5 +1,8 @@
 {
   "name": "@pi-env/tmux",
   "type": "module",
-  "private": true
+  "private": true,
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  }
 }
