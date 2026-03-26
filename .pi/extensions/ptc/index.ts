@@ -73,16 +73,44 @@ export default function ptcExtension(pi: ExtensionAPI) {
       );
     },
 
-    renderResult(result, _opts, theme, _ctx) {
+    renderResult(result, opts, theme, ctx) {
+      const { isPartial } = opts;
       const first = result.content[0];
       const text = first?.type === "text" ? (first.text ?? "") : "";
-      // pi adds isError at runtime; cast to access it
-      const isError = (result as unknown as { isError?: boolean }).isError;
-      if (isError) {
+
+      // isError is provided via ctx, not embedded in result (result only has content + details)
+      if (ctx.isError) {
         return new Text(theme.fg("error", text || "error"), 0, 0);
       }
+
+      if (isPartial) {
+        // Accumulate each tool-call label into a persistent chain stored in renderer state.
+        // Each onUpdate() replaces this.result in ToolExecutionComponent, so only the latest
+        // label would be visible without this accumulation.
+        if (!ctx.state.callChain) ctx.state.callChain = [];
+        const chain: string[] = ctx.state.callChain;
+        const lastLabel = chain[chain.length - 1];
+        // Guard against duplicate pushes when updateDisplay() fires multiple times for the
+        // same onUpdate result (e.g. window resize between two onUpdate calls).
+        if (text && lastLabel !== text) {
+          chain.push(text);
+        }
+        const lines = chain.length > 0 ? chain.join("\n") : "running…";
+        return new Text(theme.fg("muted", lines), 0, 0);
+      }
+
+      // Final result — show first line of output + how many sub-calls were made
       const preview = text.split("\n")[0].substring(0, 80);
-      return new Text(theme.fg("success", "✓ ") + theme.fg("text", preview), 0, 0);
+      const callCount = (ctx.state.callChain as string[] | undefined)?.length ?? 0;
+      const callSuffix =
+        callCount > 0
+          ? theme.fg("dim", ` · ${callCount} call${callCount !== 1 ? "s" : ""}`)
+          : "";
+      return new Text(
+        theme.fg("success", "✓ ") + theme.fg("text", preview) + callSuffix,
+        0,
+        0,
+      );
     },
   });
 
