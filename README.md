@@ -55,6 +55,11 @@ Extensions are TypeScript modules that register **tools** (new capabilities the 
 | `tmux` | *(disabled — architecture under review)* `tmux` tool — spawn panes, send keystrokes, read output, close. Execution layer for parallel subagent work and long-running services. |
 | `work-tracker` | Hook-based branch guard + session tracking — enforces branch naming conventions, injects git context on session start, provides `/handoff` and `/review-retros` commands. |
 
+> **work-tracker on slow or network mounts:** git status is computed lazily on the first agent turn (not at session start) to avoid blocking. If repos are on slow or NFS mounts:
+> - Set `WORK_TRACKER_GIT_TIMEOUT=2000` to halve the per-command timeout (default 5 000 ms).
+> - Only configure repos in `workTracker.repos` that are reliably accessible — unreachable repos are skipped for the rest of the session after the first failed probe.
+> - Git operations are cached per-turn; the first turn may be marginally slower while the cache warms.
+
 **How they compose:** `agent-bus` handles inter-process messaging. `tmux` and `orch` are currently disabled (architecture under review) — they form the multi-agent execution layer when active. `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
 
 `.pi/extensions/_shared/` contains internal utilities used across multiple extensions: `result.ts` (tool result helpers), `errors.ts` (`BaseExtensionError` base class), `git.ts` (git operation wrappers), `exit-shim.ts` (bus signal on process exit). Not a registered extension — imported directly by other extensions.

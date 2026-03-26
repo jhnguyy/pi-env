@@ -87,6 +87,16 @@ const gitStatusCache = new Map<string, CachedGitStatus>();
 /** Cached worktree list per repo path. Cleared alongside gitStatusCache. */
 const worktreeCache = new Map<string, string[]>();
 
+/**
+ * Repos whose last git query returned a non-zero exit code (e.g. mount
+ * unavailable). NOT cleared by invalidateGitCache() — failures persist for
+ * the lifetime of the session so we don't spawn git subprocesses against an
+ * unavailable mount on every turn. Cleared by resetGitFailureCache() which is
+ * called on session_start / session_switch / session_shutdown so each new
+ * session gets a fresh attempt.
+ */
+const gitFailureCache = new Map<string, CachedGitStatus>();
+
 /** Pattern matching bash commands that modify git state. */
 const GIT_MUTATING_PATTERN = /\bgit\b.*\b(commit|checkout|switch|merge|rebase|pull|push|reset|stash|add|restore|cherry-pick|branch\s+-[dDmM]|worktree)\b/;
 
@@ -95,20 +105,44 @@ export function isGitMutating(command: string): boolean {
   return GIT_MUTATING_PATTERN.test(command);
 }
 
-/** Clear both the git status cache and the worktree cache. */
+/** Clear both the per-turn git status cache and the worktree cache. */
 export function invalidateGitCache(): void {
   gitStatusCache.clear();
   worktreeCache.clear();
 }
 
+/**
+ * Clear the failure cache so previously-unreachable repos are retried.
+ * Call on session lifecycle boundaries (start / switch / shutdown).
+ */
+export function resetGitFailureCache(): void {
+  gitFailureCache.clear();
+}
+
 // ─── Git status ───────────────────────────────────────────────────────────────
 
 export function getGitStatus(repoPath: string): { branch: string | null; dirty: number } {
+  // If this repo failed on a previous turn, don't retry until the session resets.
+  const failed = gitFailureCache.get(repoPath);
+  if (failed) return failed;
+
   const cached = gitStatusCache.get(repoPath);
   if (cached) return cached;
 
-  const status = {
-    branch: gitGetCurrentBranch(repoPath),
+  // Run git branch --show-current directly so we can inspect the exit code.
+  // getCurrentBranch() collapses non-zero and detached-HEAD into the same null;
+  // we need to distinguish "command failed" (mount/repo unavailable) from
+  // "detached HEAD" (zero exit, empty stdout) to avoid false failure-cache hits.
+  const branchResult = gitSync(repoPath, ["branch", "--show-current"]);
+  if (branchResult.status !== 0) {
+    // Mount or repo unavailable — remember this so we skip future turns.
+    const empty: CachedGitStatus = { branch: null, dirty: 0 };
+    gitFailureCache.set(repoPath, empty);
+    return empty;
+  }
+
+  const status: CachedGitStatus = {
+    branch: branchResult.stdout.trim() || null,
     dirty: getDirtyCount(repoPath),
   };
   gitStatusCache.set(repoPath, status);
