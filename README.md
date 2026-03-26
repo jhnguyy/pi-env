@@ -48,14 +48,14 @@ Extensions are TypeScript modules that register **tools** (new capabilities the 
 | `agent-bus` | Filesystem-backed pub/sub between pi processes — `bus start/publish/subscribe/wait/read`. The messaging backbone for multi-agent coordination. |
 | `jit-catch` | `jit_catch` tool — spawns a subagent to write ephemeral catching tests for a diff, runs them with `bun test`, auto-discards on pass. |
 | `dev-tools` | `dev-tools` tool — language intelligence via a shared LSP daemon: diagnostics, hover, go-to-definition, find-references, document/workspace symbols. Backends and coverage: `typescript-language-server` (`.ts .tsx .js .jsx .mts .cts .mjs .cjs` — bundled), `bash-language-server` (`.sh .bash .zsh .ksh` — bundled), `nil` (`.nix` — install separately). Also runs `hclfmt -check` after `.hcl` edits (install separately). |
-| `orch` | `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. Coordinates `agent-bus` channels. `spawn` requires `tmux` extension (currently disabled — see below). |
+| `orch` | *(disabled — depends on tmux)* `orch` tool — orchestration lifecycle manager: worktree-isolated branches per worker, temp dir cleanup, run receipts. |
 | `security` | Hook-based permission engine — intercepts tool calls via blocklist rules, scans results for credential leakage and redacts. `/permissions` command. |
 | `skill-builder` | `skill_build` tool — scaffold, validate, and evaluate pi skills in one call. |
 | `subagent` | `subagent` tool — in-process subagent via `agentLoop()`. Delegates focused tasks without subprocess overhead. Auto-discovers available agents, models, and tools. |
 | `tmux` | *(disabled — architecture under review)* `tmux` tool — spawn panes, send keystrokes, read output, close. Execution layer for parallel subagent work and long-running services. |
 | `work-tracker` | Hook-based branch guard + session tracking — enforces branch naming conventions, injects git context on session start, provides `/handoff` and `/review-retros` commands. |
 
-**How they compose:** `agent-bus` and `orch` handle multi-agent coordination — `agent-bus` provides event-driven messaging and `orch` manages worktree isolation and run lifecycle. `tmux`-based pane spawning is currently disabled; `orch status/cleanup` and bus operations work without it. `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
+**How they compose:** `agent-bus` handles inter-process messaging. `tmux` and `orch` are currently disabled (architecture under review) — they form the multi-agent execution layer when active. `security` and `work-tracker` operate via hooks — they intercept tool calls transparently rather than exposing their own tools.
 
 `.pi/extensions/_shared/` contains internal utilities used across multiple extensions: `result.ts` (tool result helpers), `errors.ts` (`BaseExtensionError` base class), `git.ts` (git operation wrappers), `exit-shim.ts` (bus signal on process exit). Not a registered extension — imported directly by other extensions.
 
