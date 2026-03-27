@@ -24,9 +24,9 @@
     "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "0.62.0",
-    "@mariozechner/pi-coding-agent": "0.62.0",
-    "@mariozechner/pi-tui": "0.62.0",
+    "@mariozechner/pi-ai": "0.63.1",
+    "@mariozechner/pi-coding-agent": "0.63.1",
+    "@mariozechner/pi-tui": "0.63.1",
     "@sinclair/typebox": "^0.34.48",
     "@types/bun": "latest",
     "typescript": "^5.9.3"
