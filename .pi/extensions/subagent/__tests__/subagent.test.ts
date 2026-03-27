@@ -524,7 +524,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result instanceof Text).toBe(true);
     });
 
-    it("shows task preview", () => {
+    it("omits task preview (shown in renderCall instead)", () => {
       const t = extractText(
         registeredTool.renderResult(
           { content: [], details: successDetails },
@@ -532,7 +532,9 @@ describeIfEnabled("subagent", "subagent extension", () => {
           mockTheme,
         ),
       );
-      expect(t).toContain("Read the auth flow");
+      // Task preview is intentionally omitted from collapsed renderResult
+      // because renderCall already displays it above the result block.
+      expect(t).not.toContain("Read the auth flow");
     });
 
     it("shows output preview (first 3 lines)", () => {

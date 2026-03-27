@@ -1,6 +1,6 @@
 # Pi Capability Map
 
-> Auto-generated from pi v0.61.0. Regenerate: `bash scripts/generate-capability-map.sh`
+> Auto-generated from pi v0.63.1. Regenerate: `bash scripts/generate-capability-map.sh`
 > Navigation aid — not a replacement for docs. Follow doc paths for full details.
 > IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for pi topics. Read the linked doc before implementing.
 
@@ -79,7 +79,7 @@
 
 ## Settings
 
-|42 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
+|43 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
 |locations:{~/.pi/agent/settings.json(global),.pi/settings.json(project overrides global)}
 |doc:docs/settings.md
 
