@@ -39,23 +39,16 @@ export function registerAction(
   registry.set(action, entry);
 }
 
-export function getHandler(action: LspAction): ActionHandler | undefined {
-  return registry.get(action)?.handler;
-}
-
-export function getFormatter(action: LspAction): ResultFormatter | undefined {
-  return registry.get(action)?.formatter;
-}
-
-export function getRenderer(action: LspAction): ResultRenderer | undefined {
-  return registry.get(action)?.renderer;
+/** Look up all three dispatch functions for an action in one call. */
+export function getAction(action: LspAction): ActionEntry | undefined {
+  return registry.get(action);
 }
 
 /** Format any LspResult by dispatching to the registered formatter. */
 export function formatResult(result: LspResult): string {
-  const formatter = getFormatter(result.action as LspAction);
-  if (!formatter) return JSON.stringify(result);
-  return formatter(result);
+  const entry = registry.get(result.action as LspAction);
+  if (!entry) return JSON.stringify(result);
+  return entry.formatter(result);
 }
 
 /** Get all registered action names (for building tool parameter enums). */

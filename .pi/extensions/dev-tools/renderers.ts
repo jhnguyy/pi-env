@@ -10,7 +10,7 @@
 
 import { Text } from "@mariozechner/pi-tui";
 import type { LspResult, LspAction } from "./protocol";
-import { getRenderer } from "./action-registry";
+import { getAction } from "./action-registry";
 
 // ─── Theme interface (minimal, matches pi-tui theme API) ─────────────────────
 
@@ -40,8 +40,8 @@ export function renderDevToolsResult(
     return new Text(theme.fg("muted", result.content[0]?.text ?? ""), 0, 0);
   }
 
-  const renderer = getRenderer(details.action as LspAction);
-  if (renderer) return renderer(details, opts, theme);
+  const entry = getAction(details.action as LspAction);
+  if (entry) return entry.renderer(details, opts, theme);
 
   // Fallback for unknown action types
   return new Text(result.content[0]?.text ?? "", 0, 0);

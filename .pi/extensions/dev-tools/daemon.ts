@@ -25,13 +25,8 @@ import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 import { LspBackend, STANDARD_CAPABILITIES } from "./backend";
 import { FileCache } from "./file-cache";
-import {
-  handleDiagnostics, handleHover, handleDefinition, handleImplementation,
-  handleReferences, handleIncomingCalls, handleOutgoingCalls,
-  handleSymbols, handleStatus,
-  type HandlerDeps,
-} from "./handlers";
-import { getHandler } from "./action-registry";
+import { type HandlerDeps } from "./handlers";
+import { getAction } from "./action-registry";
 import "./register-actions"; // side-effect: populates the action registry
 import { TS_EXTENSIONS, BASH_EXTENSIONS, NIX_EXTENSIONS } from "./filetypes";
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
@@ -206,8 +201,8 @@ export class LspDaemon {
     }
 
     // Try the registry first
-    const handler = getHandler(req.action);
-    if (handler) return handler(req, deps);
+    const action = getAction(req.action);
+    if (action) return action.handler(req, deps);
 
     return errorResponse(req.id, `Unknown action: ${req.action}`);
   }
