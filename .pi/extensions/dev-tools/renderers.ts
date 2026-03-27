@@ -3,10 +3,14 @@
  *
  * Transforms structured `details` into themed Text components for pi TUI.
  * LLM never sees this — it's purely for human display.
+ *
+ * Individual action renderers are registered in register-actions.ts.
+ * This file provides the top-level renderDevToolsResult + renderDevToolsCall.
  */
 
 import { Text } from "@mariozechner/pi-tui";
-import type { LspResult, DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, SymbolsResult, StatusResult } from "./protocol";
+import type { LspResult, LspAction } from "./protocol";
+import { getRenderer } from "./action-registry";
 
 // ─── Theme interface (minimal, matches pi-tui theme API) ─────────────────────
 
@@ -19,9 +23,7 @@ export interface RenderTheme {
 
 /**
  * Render an LSP tool result for human TUI display.
- * @param result  The tool result object (has content and details).
- * @param opts    Render options ({ expanded: boolean }).
- * @param theme   Pi TUI theme.
+ * Dispatches to per-action renderers via the action registry.
  */
 export function renderDevToolsResult(
   result: { isError?: boolean; content: Array<{ type: string; text?: string }>; details?: LspResult | null },
@@ -38,18 +40,11 @@ export function renderDevToolsResult(
     return new Text(theme.fg("muted", result.content[0]?.text ?? ""), 0, 0);
   }
 
-  switch (details.action) {
-    case "diagnostics":  return renderDiagnostics(details, opts, theme);
-    case "hover":        return new Text(theme.fg("success", "✓ hover"), 0, 0);
-    case "definition":     return new Text(theme.fg("success", `✓ ${details.locations.length} location(s)`), 0, 0);
-    case "implementation": return new Text(theme.fg("success", `✓ ${details.locations.length} implementation(s)`), 0, 0);
-    case "references":     return new Text(theme.fg("success", `✓ ${details.total} reference(s)`), 0, 0);
-    case "incoming-calls": return renderCallHierarchySummary(details, theme);
-    case "outgoing-calls": return renderCallHierarchySummary(details, theme);
-    case "symbols":      return renderSymbolsSummary(details, theme);
-    case "status":       return renderStatusSummary(details, theme);
-    default:             return new Text(result.content[0]?.text ?? "", 0, 0);
-  }
+  const renderer = getRenderer(details.action as LspAction);
+  if (renderer) return renderer(details, opts, theme);
+
+  // Fallback for unknown action types
+  return new Text(result.content[0]?.text ?? "", 0, 0);
 }
 
 // ─── renderCall ───────────────────────────────────────────────────────────────
@@ -78,70 +73,5 @@ export function renderDevToolsCall(
     text += " " + theme.fg("muted", `"${args.query}"`);
   }
 
-  return new Text(text, 0, 0);
-}
-
-// ─── Call Hierarchy ──────────────────────────────────────────────────────────
-
-function renderCallHierarchySummary(
-  d: IncomingCallsResult | OutgoingCallsResult,
-  theme: RenderTheme,
-): Text {
-  const direction = d.action === "incoming-calls" ? "caller" : "callee";
-  const text = d.total === 0
-    ? theme.fg("muted", `— no ${direction}s`)
-    : theme.fg("success", `✓ ${d.total} ${direction}${d.total !== 1 ? "s" : ""}`) +
-      ` ${theme.fg("muted", `of ${d.symbol}`)}`;
-  return new Text(text, 0, 0);
-}
-
-// ─── Diagnostics ─────────────────────────────────────────────────────────────
-
-function renderDiagnostics(
-  d: DiagnosticsResult,
-  opts: { expanded?: boolean },
-  theme: RenderTheme,
-): Text {
-  let text: string;
-
-  if (d.errorCount === 0 && d.warnCount === 0) {
-    text = theme.fg("success", "✓ no errors");
-  } else {
-    const parts: string[] = [];
-    if (d.errorCount > 0) parts.push(theme.fg("error", `✗ ${d.errorCount} error${d.errorCount !== 1 ? "s" : ""}`));
-    if (d.warnCount > 0) parts.push(theme.fg("warning", `⚠ ${d.warnCount} warning${d.warnCount !== 1 ? "s" : ""}`));
-    text = parts.join(" ");
-  }
-
-  if (opts.expanded && d.items.length > 0) {
-    for (const item of d.items) {
-      const sev = item.severity === "error"
-        ? theme.fg("error", "E")
-        : item.severity === "warning"
-        ? theme.fg("warning", "W")
-        : theme.fg("muted", "I");
-      const code = item.code ? ` ${item.code}` : "";
-      text += `\n  ${sev} L${item.line}:${item.character}${code} ${item.message}`;
-    }
-  }
-
-  return new Text(text, 0, 0);
-}
-
-// ─── Symbols ─────────────────────────────────────────────────────────────────
-
-function renderSymbolsSummary(d: SymbolsResult, theme: RenderTheme): Text {
-  const label = d.query ? `"${d.query}"` : d.path?.split("/").pop() ?? "";
-  const text = theme.fg("success", `✓ ${d.total} symbol${d.total !== 1 ? "s" : ""}`) +
-    (label ? ` ${theme.fg("muted", label)}` : "");
-  return new Text(text, 0, 0);
-}
-
-// ─── Status ───────────────────────────────────────────────────────────────────
-
-function renderStatusSummary(d: StatusResult, theme: RenderTheme): Text {
-  const text = d.running
-    ? theme.fg("success", "✓ daemon running") + theme.fg("muted", ` PID:${d.pid ?? "?"}`)
-    : theme.fg("muted", "— daemon stopped");
   return new Text(text, 0, 0);
 }

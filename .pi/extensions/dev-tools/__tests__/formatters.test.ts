@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
+import "../register-actions"; // populate action registry for formatResult
 import {
   formatResult,
   formatDiagnostics,

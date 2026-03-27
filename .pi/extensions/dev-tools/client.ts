@@ -49,10 +49,12 @@ export class LspClient {
   /**
    * Internal: send with one automatic retry on timeout.
    *
-   * On timeout the running daemon is unresponsive (stale after a rebuild or
-   * crash). We tear down the socket so the next ensureConnected() reconnects,
-   * remove the stale socket file so the retry spawns a fresh daemon, then try
-   * once more.
+   * First attempt: timeout rejects only this request (no socket teardown).
+   * Other in-flight requests continue normally.
+   *
+   * Retry: tears down the socket, removes the socket file, spawns a fresh
+   * daemon, then tries once more. If the daemon was truly unresponsive
+   * (stale after rebuild/crash), the reconnect fixes it.
    */
   private async doRequest(
     req: Omit<DaemonRequest, "id">,
@@ -67,9 +69,11 @@ export class LspClient {
       return await new Promise<DaemonResponse>((resolve, reject) => {
         const timer = setTimeout(() => {
           this.pendingRequests.delete(id);
-          // Tear down so the next ensureConnected() forces a fresh spawn.
-          this.socket?.destroy();
-          this.socket = null;
+          if (isRetry) {
+            // On retry, tear down the socket — daemon is truly unresponsive.
+            this.socket?.destroy();
+            this.socket = null;
+          }
           reject(new Error(`LSP request timed out: ${req.action}`));
         }, REQUEST_TIMEOUT_MS);
 
@@ -84,6 +88,9 @@ export class LspClient {
       ) {
         // Remove stale socket so doConnect() spawns a fresh daemon.
         try { unlinkSync(this.socketPath); } catch {}
+        // Tear down for reconnect on retry path
+        this.socket?.destroy();
+        this.socket = null;
         return this.doRequest(req, true);
       }
       throw err;

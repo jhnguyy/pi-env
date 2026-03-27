@@ -8,9 +8,9 @@
 
 import { existsSync } from "node:fs";
 import {
-  uriToPath, toZeroBased, relativePath, extractLines,
-  getFileLine, expandToBlock, symbolKindLabel,
+  uriToPath, toZeroBased, relativePath, symbolKindLabel,
 } from "./utils";
+import type { FileCache } from "./file-cache";
 import { okResponse, errorResponse } from "./protocol";
 import type {
   DaemonRequest, DaemonResponse,
@@ -28,7 +28,9 @@ export interface HandlerDeps {
   getBackend: (filePath: string) => LspBackend;
   tsBackend: LspBackend;
   backends: LspBackend[];
-  lastActivity: number;
+  fileCache: FileCache;
+  /** Returns ms since last activity *before* the current request. */
+  getIdleMs: () => number;
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -173,8 +175,8 @@ export async function handleDefinition(req: DaemonRequest, deps: HandlerDeps): P
     const defPath = uriToPath(loc.uri);
     const startLine = loc.range.start.line;
     const endLine = loc.range.end.line;
-    const expandedEnd = expandToBlock(defPath, startLine, endLine, 30);
-    const body = extractLines(defPath, startLine, expandedEnd) ?? "";
+    const expandedEnd = await deps.fileCache.expandToBlock(defPath, startLine, endLine, 30);
+    const body = await deps.fileCache.extractLines(defPath, startLine, expandedEnd) ?? "";
     const bodyLines = body.split("\n");
     const truncated = bodyLines.length > 30 ? bodyLines.length - 30 : 0;
 
@@ -222,8 +224,8 @@ export async function handleImplementation(req: DaemonRequest, deps: HandlerDeps
     const defPath = uriToPath(loc.uri);
     const startLine = loc.range.start.line;
     const endLine = loc.range.end.line;
-    const expandedEnd = expandToBlock(defPath, startLine, endLine, 30);
-    const body = extractLines(defPath, startLine, expandedEnd) ?? "";
+    const expandedEnd = await deps.fileCache.expandToBlock(defPath, startLine, endLine, 30);
+    const body = await deps.fileCache.extractLines(defPath, startLine, expandedEnd) ?? "";
     const bodyLines = body.split("\n");
     const truncated = bodyLines.length > 30 ? bodyLines.length - 30 : 0;
 
@@ -288,19 +290,21 @@ export async function handleIncomingCalls(req: DaemonRequest, deps: HandlerDeps)
 
   const MAX = 30;
   const all = callsRes.result as Array<{ from: any; fromRanges: any[] }>;
-  const items: CallHierarchyItem[] = all.slice(0, MAX).map((call) => {
-    const caller = call.from;
-    const callerPath = uriToPath(caller.uri);
-    const callerLine = caller.selectionRange?.start?.line ?? caller.range?.start?.line ?? 0;
-    return {
-      name: caller.name,
-      kind: symbolKindLabel(caller.kind),
-      relativePath: relativePath(projectRoot, callerPath),
-      absolutePath: callerPath,
-      line: callerLine + 1,
-      content: getFileLine(callerPath, callerLine + 1),
-    };
-  });
+  const items: CallHierarchyItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (call) => {
+      const caller = call.from;
+      const callerPath = uriToPath(caller.uri);
+      const callerLine = caller.selectionRange?.start?.line ?? caller.range?.start?.line ?? 0;
+      return {
+        name: caller.name,
+        kind: symbolKindLabel(caller.kind),
+        relativePath: relativePath(projectRoot, callerPath),
+        absolutePath: callerPath,
+        line: callerLine + 1,
+        content: await deps.fileCache.getLine(callerPath, callerLine + 1),
+      };
+    }),
+  );
 
   return okResponse(req.id, {
     action: "incoming-calls",
@@ -355,19 +359,21 @@ export async function handleOutgoingCalls(req: DaemonRequest, deps: HandlerDeps)
 
   const MAX = 30;
   const all = callsRes.result as Array<{ to: any; fromRanges: any[] }>;
-  const items: CallHierarchyItem[] = all.slice(0, MAX).map((call) => {
-    const callee = call.to;
-    const calleePath = uriToPath(callee.uri);
-    const calleeLine = callee.selectionRange?.start?.line ?? callee.range?.start?.line ?? 0;
-    return {
-      name: callee.name,
-      kind: symbolKindLabel(callee.kind),
-      relativePath: relativePath(projectRoot, calleePath),
-      absolutePath: calleePath,
-      line: calleeLine + 1,
-      content: getFileLine(calleePath, calleeLine + 1),
-    };
-  });
+  const items: CallHierarchyItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (call) => {
+      const callee = call.to;
+      const calleePath = uriToPath(callee.uri);
+      const calleeLine = callee.selectionRange?.start?.line ?? callee.range?.start?.line ?? 0;
+      return {
+        name: callee.name,
+        kind: symbolKindLabel(callee.kind),
+        relativePath: relativePath(projectRoot, calleePath),
+        absolutePath: calleePath,
+        line: calleeLine + 1,
+        content: await deps.fileCache.getLine(calleePath, calleeLine + 1),
+      };
+    }),
+  );
 
   return okResponse(req.id, {
     action: "outgoing-calls",
@@ -406,15 +412,17 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
 
   const all = lspRes.result as Array<{ uri: string; range: any }>;
   const MAX = 20;
-  const items: ReferenceItem[] = all.slice(0, MAX).map((ref) => {
-    const refPath = uriToPath(ref.uri);
-    return {
-      relativePath: relativePath(projectRoot, refPath),
-      absolutePath: refPath,
-      line: ref.range.start.line + 1,
-      content: getFileLine(refPath, ref.range.start.line + 1),
-    };
-  });
+  const items: ReferenceItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (ref) => {
+      const refPath = uriToPath(ref.uri);
+      return {
+        relativePath: relativePath(projectRoot, refPath),
+        absolutePath: refPath,
+        line: ref.range.start.line + 1,
+        content: await deps.fileCache.getLine(refPath, ref.range.start.line + 1),
+      };
+    }),
+  );
 
   return okResponse(req.id, {
     action: "references",
@@ -491,7 +499,7 @@ export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonRespo
     projects: allProjects,
     openFiles: allOpenFiles,
     watchedFiles: allOpenFiles.length,
-    idleMs: Date.now() - deps.lastActivity,
+    idleMs: deps.getIdleMs(),
   } as StatusResult);
 }
 

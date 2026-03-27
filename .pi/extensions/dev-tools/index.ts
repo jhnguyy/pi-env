@@ -12,15 +12,43 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DiagnosticsResult, SymbolsResult, LspAction } from "./protocol";
+import type { DaemonRequest, DiagnosticsResult, SymbolsResult, LspAction } from "./protocol";
 import { isLspSupported, isTypeScript, isHcl } from "./filetypes";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { txt, err } from "../_shared/result";
+import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 
 const execFileAsync = promisify(execFile);
 import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
+
+// ─── Actions that require exactly one path ──────────────────────────────────
+const SINGLE_PATH_ACTIONS = new Set<string>([
+  "hover", "definition", "implementation", "references",
+  "incoming-calls", "outgoing-calls", "symbols",
+]);
+
+/**
+ * Shared request builder — normalises tool params → daemon wire format.
+ * Pure function, no closure dependencies.
+ */
+function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest, "id"> {
+  const action = params.action as LspAction;
+  const rawPath = params.path as string | string[] | undefined;
+  const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
+
+  if (action === "diagnostics") {
+    return { action, paths, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+  }
+
+  if (SINGLE_PATH_ACTIONS.has(action)) {
+    if (paths.length > 1) throw new Error(`${action} requires a single path — ${paths.length} were provided`);
+    return { action, path: paths[0], line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+  }
+
+  // status and others: no path needed
+  return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+}
 
 // ─── hclfmt check ───────────────────────────────────────────────────────────
 // Runs `hclfmt -check <path>` after editing .hcl files. Exit 0 = already
@@ -77,34 +105,19 @@ export default function (pi: ExtensionAPI) {
     })),
   });
 
+  /** Shared execute — used by both registerTool and AgentTool registration. */
+  async function executeDevTools(_toolCallId: string, params: Record<string, unknown>) {
+    try {
+      const result = await client.call(buildClientRequest(params));
+      return { content: [txt(formatResult(result))], details: result };
+    } catch (e) {
+      return { content: [txt(formatError(e))], details: null };
+    }
+  }
+
   pi.on("session_start", () => {
     resetHintState(hintState);
     pendingHint = null;
-
-    /**
-     * Shared request builder for both execute paths.
-     * Normalises path (string | string[] | undefined) → daemon wire format.
-     * - diagnostics: array → paths[], scalar/single → paths[] (always bulk for consistent format)
-     * - hover/definition/references/symbols: require exactly one path; error on multi-path
-     */
-    function buildClientRequest(params: Record<string, unknown>): Parameters<typeof client.call>[0] {
-      const action = params.action as LspAction;
-      const rawPath = params.path as string | string[] | undefined;
-      const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
-
-      if (action === "diagnostics") {
-        // Always use the bulk path for consistent output format regardless of array length.
-        return { action, paths, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
-      }
-
-      if (["hover", "definition", "implementation", "references", "incoming-calls", "outgoing-calls", "symbols"].includes(action)) {
-        if (paths.length > 1) throw new Error(`${action} requires a single path — ${paths.length} were provided`);
-        return { action, path: paths[0], line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
-      }
-
-      // status and others: no path needed
-      return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
-    }
 
     // Register dev-tools as an AgentTool so subagents can use it
     const agentTool: AgentTool<any, any> = {
@@ -112,14 +125,7 @@ export default function (pi: ExtensionAPI) {
       label: "Dev Tools",
       description: description,
       parameters: toolParameters,
-      execute: async (_toolCallId, params) => {
-        try {
-          const result = await client.call(buildClientRequest(params));
-          return { content: [txt(formatResult(result))], details: result };
-        } catch (e) {
-          return err(formatError(e));
-        }
-      },
+      execute: executeDevTools,
     };
     pi.events.emit("agent-tools:register", { tool: agentTool, capabilities: ["read"] });
   });
@@ -156,14 +162,8 @@ export default function (pi: ExtensionAPI) {
 
     parameters: toolParameters,
 
-    async execute(_toolCallId, params, _signal) {
-      try {
-        const result = await client.call(buildClientRequest(params));
-        return { content: [txt(formatResult(result))], details: result };
-      } catch (e) {
-        // Explicit shape — details must stay LspResult-compatible for renderDevToolsResult.
-        return { content: [txt(formatError(e))], details: null };
-      }
+    async execute(toolCallId, params, _signal) {
+      return executeDevTools(toolCallId, params as Record<string, unknown>);
     },
 
     renderCall(args, theme, _ctx) {

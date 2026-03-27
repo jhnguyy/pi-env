@@ -12,8 +12,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { extname, resolve as resolvePath } from "node:path";
 
-import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "./lsp-transport";
+import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
+import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 
@@ -21,7 +22,6 @@ import type { DiagnosticItem } from "./protocol";
 
 export const LSP_INIT_TIMEOUT_MS = 10_000;
 export const LSP_REQUEST_TIMEOUT_MS = 5_000;
-export const DIAG_WAIT_TIMEOUT_MS = 1_500;
 
 // ─── LSP Capabilities ─────────────────────────────────────────────────────────
 
@@ -71,16 +71,12 @@ export class LspBackend {
   private lsp: ChildProcess | null = null;
   private lspReady = false;
   private lspReadyResolvers: Array<() => void> = [];
-  private idGen = new LspIdGenerator();
+  private nextLspId = 1;
 
   // Pending LSP requests: id → { resolve, reject }
   private pendingLsp = new Map<number, { resolve: (msg: LspMessage) => void; reject: (err: Error) => void }>();
 
-  // Diagnostics cache: uri → DiagnosticItem[]
-  private diagCache = new Map<string, DiagnosticItem[]>();
-  // Pending waiters for first diagnostics publish: uri → resolvers
-  private diagReady = new Map<string, Array<() => void>>();
-
+  readonly diagnostics = new DiagnosticsCache();
   readonly docManager = new DocumentManager();
 
   private started = false;
@@ -145,7 +141,7 @@ export class LspBackend {
     });
 
     // Send initialize request
-    const initId = this.idGen.get();
+    const initId = this.nextLspId++;
     const initPromise = new Promise<LspMessage>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pendingLsp.delete(initId);
@@ -204,7 +200,7 @@ export class LspBackend {
         jsonrpc: "2.0", method: "textDocument/didClose",
         params: { textDocument: { uri: evictedUri } },
       });
-      this.diagCache.delete(evictedUri);
+      this.diagnostics.delete(evictedUri);
     }
 
     return uri;
@@ -222,7 +218,7 @@ export class LspBackend {
       method: "textDocument/didClose",
       params: { textDocument: { uri } },
     });
-    this.diagCache.delete(uri);
+    this.diagnostics.delete(uri);
     return uri;
   }
 
@@ -249,17 +245,11 @@ export class LspBackend {
 
   /** Wait for the first diagnostics publish for this URI (with timeout). */
   async waitForFirstDiagnostics(uri: string): Promise<void> {
-    if (this.diagCache.has(uri)) return;
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, DIAG_WAIT_TIMEOUT_MS);
-      const waiters = this.diagReady.get(uri) ?? [];
-      waiters.push(() => { clearTimeout(timeout); resolve(); });
-      this.diagReady.set(uri, waiters);
-    });
+    return this.diagnostics.waitForFirst(uri);
   }
 
   getDiagnostics(uri: string): DiagnosticItem[] {
-    return this.diagCache.get(uri) ?? [];
+    return this.diagnostics.get(uri);
   }
 
   // ─── LSP Transport ──────────────────────────────────────────────────────────
@@ -267,7 +257,7 @@ export class LspBackend {
   lspRequest(method: string, params: unknown): Promise<LspMessage | null> {
     return new Promise((resolve) => {
       if (!this.lsp || !this.lspReady) { resolve(null); return; }
-      const id = this.idGen.get();
+      const id = this.nextLspId++;
       const timer = setTimeout(() => {
         this.pendingLsp.delete(id);
         resolve(null);
@@ -310,12 +300,7 @@ export class LspBackend {
         message: truncateMessage(d.message),
       };
     });
-    this.diagCache.set(params.uri, items);
-    const waiters = this.diagReady.get(params.uri);
-    if (waiters) {
-      this.diagReady.delete(params.uri);
-      for (const w of waiters) w();
-    }
+    this.diagnostics.publish(params.uri, items);
   }
 
   private sendLsp(msg: LspMessage): void {
@@ -327,7 +312,7 @@ export class LspBackend {
 
   shutdown(): void {
     if (this.lsp) {
-      try { this.sendLsp({ jsonrpc: "2.0", id: this.idGen.get(), method: "shutdown", params: null }); } catch {}
+      try { this.sendLsp({ jsonrpc: "2.0", id: this.nextLspId++, method: "shutdown", params: null }); } catch {}
       try { this.lsp.kill(); } catch {}
       this.lsp = null;
     }

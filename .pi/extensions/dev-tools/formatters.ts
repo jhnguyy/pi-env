@@ -20,20 +20,11 @@ import type {
 
 // ─── Main entry ─────────────────────────────────────────────────────────────
 
-/** Format an LSP result to a dense text string for LLM consumption. */
-export function formatResult(result: LspResult): string {
-  switch (result.action) {
-    case "diagnostics":    return formatDiagnostics(result);
-    case "hover":          return formatHover(result);
-    case "definition":     return formatDefinition(result);
-    case "implementation": return formatImplementation(result);
-    case "references":     return formatReferences(result);
-    case "incoming-calls": return formatIncomingCalls(result);
-    case "outgoing-calls": return formatOutgoingCalls(result);
-    case "symbols":        return formatSymbols(result);
-    case "status":         return formatStatus(result);
-  }
-}
+/**
+ * Format an LSP result to a dense text string for LLM consumption.
+ * Delegates to the action registry if available, falls back to per-type formatters.
+ */
+export { formatResult } from "./action-registry";
 
 // ─── Diagnostics ────────────────────────────────────────────────────────────
 
