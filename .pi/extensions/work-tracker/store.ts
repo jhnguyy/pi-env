@@ -44,15 +44,6 @@ export class TodoStore {
     this.nextId = 1;
   }
 
-  /**
-   * Remove all completed tasks. Returns the count removed.
-   */
-  purgeCompleted(): number {
-    const before = this.items.length;
-    this.items = this.items.filter((i) => !i.done);
-    return before - this.items.length;
-  }
-
   /** All items in insertion order. */
   list(): TodoItem[] {
     return [...this.items];

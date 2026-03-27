@@ -136,7 +136,6 @@ export function registerHooks(
   // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     if (isOrchWorker()) return {};
-    store.purgeCompleted();
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
     setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
 
