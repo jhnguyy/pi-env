@@ -8,14 +8,15 @@
 
 import { existsSync } from "node:fs";
 import {
-  uriToPath, toZeroBased, relativePath, extractLines,
-  getFileLine, expandToBlock, symbolKindLabel,
+  uriToPath, toZeroBased, relativePath, symbolKindLabel,
 } from "./utils";
+import type { FileCache } from "./file-cache";
 import { okResponse, errorResponse } from "./protocol";
 import type {
   DaemonRequest, DaemonResponse,
   DiagnosticsResult, HoverResult,
-  DefinitionLocation, DefinitionResult,
+  DefinitionLocation, DefinitionResult, ImplementationResult,
+  CallHierarchyItem, IncomingCallsResult, OutgoingCallsResult,
   ReferenceItem, ReferencesResult,
   SymbolItem, SymbolsResult, StatusResult,
 } from "./protocol";
@@ -27,7 +28,9 @@ export interface HandlerDeps {
   getBackend: (filePath: string) => LspBackend;
   tsBackend: LspBackend;
   backends: LspBackend[];
-  lastActivity: number;
+  fileCache: FileCache;
+  /** Returns ms since last activity *before* the current request. */
+  getIdleMs: () => number;
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -172,8 +175,8 @@ export async function handleDefinition(req: DaemonRequest, deps: HandlerDeps): P
     const defPath = uriToPath(loc.uri);
     const startLine = loc.range.start.line;
     const endLine = loc.range.end.line;
-    const expandedEnd = expandToBlock(defPath, startLine, endLine, 30);
-    const body = extractLines(defPath, startLine, expandedEnd) ?? "";
+    const expandedEnd = await deps.fileCache.expandToBlock(defPath, startLine, endLine, 30);
+    const body = await deps.fileCache.extractLines(defPath, startLine, expandedEnd) ?? "";
     const bodyLines = body.split("\n");
     const truncated = bodyLines.length > 30 ? bodyLines.length - 30 : 0;
 
@@ -195,6 +198,193 @@ export async function handleDefinition(req: DaemonRequest, deps: HandlerDeps): P
     character: req.character,
     locations,
   } as DefinitionResult);
+}
+
+export async function handleImplementation(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  if (!req.path || req.line == null || req.character == null) {
+    return errorResponse(req.id, "path, line, and character required for implementation");
+  }
+
+  const backend = deps.getBackend(req.path);
+  const uri = await backend.ensureFile(req.path);
+  const pos = toZeroBased(req.line, req.character);
+  const projectRoot = backend.docManager.getProjectRoot(req.path);
+
+  const lspRes = await backend.lspRequest("textDocument/implementation", {
+    textDocument: { uri },
+    position: pos,
+  });
+
+  if (!lspRes?.result) return errorResponse(req.id, "No implementations found");
+
+  const rawLocations = Array.isArray(lspRes.result) ? lspRes.result : [lspRes.result];
+  const locations: DefinitionLocation[] = [];
+
+  for (const loc of rawLocations.slice(0, 5)) {
+    const defPath = uriToPath(loc.uri);
+    const startLine = loc.range.start.line;
+    const endLine = loc.range.end.line;
+    const expandedEnd = await deps.fileCache.expandToBlock(defPath, startLine, endLine, 30);
+    const body = await deps.fileCache.extractLines(defPath, startLine, expandedEnd) ?? "";
+    const bodyLines = body.split("\n");
+    const truncated = bodyLines.length > 30 ? bodyLines.length - 30 : 0;
+
+    locations.push({
+      relativePath: relativePath(projectRoot, defPath),
+      absolutePath: defPath,
+      line: startLine + 1,
+      body: bodyLines.slice(0, 30).join("\n"),
+      ...(truncated > 0 ? { truncatedLines: truncated } : {}),
+    });
+  }
+
+  if (locations.length === 0) return errorResponse(req.id, "No implementations found");
+
+  return okResponse(req.id, {
+    action: "implementation",
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    locations,
+  } as ImplementationResult);
+}
+
+export async function handleIncomingCalls(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  if (!req.path || req.line == null || req.character == null) {
+    return errorResponse(req.id, "path, line, and character required for incoming-calls");
+  }
+
+  const backend = deps.getBackend(req.path);
+  const uri = await backend.ensureFile(req.path);
+  const pos = toZeroBased(req.line, req.character);
+  const projectRoot = backend.docManager.getProjectRoot(req.path);
+
+  // Step 1: prepare call hierarchy item at position
+  const prepareRes = await backend.lspRequest("textDocument/prepareCallHierarchy", {
+    textDocument: { uri },
+    position: pos,
+  });
+
+  if (!prepareRes?.result || !Array.isArray(prepareRes.result) || prepareRes.result.length === 0) {
+    return errorResponse(req.id, "No call hierarchy item at this position");
+  }
+
+  const item = prepareRes.result[0];
+  const symbolName = item.name ?? "unknown";
+
+  // Step 2: get incoming calls
+  const callsRes = await backend.lspRequest("callHierarchy/incomingCalls", { item });
+
+  if (!callsRes?.result || !Array.isArray(callsRes.result)) {
+    return okResponse(req.id, {
+      action: "incoming-calls",
+      path: req.path,
+      line: req.line,
+      character: req.character,
+      symbol: symbolName,
+      total: 0,
+      items: [],
+      truncated: false,
+    } as IncomingCallsResult);
+  }
+
+  const MAX = 30;
+  const all = callsRes.result as Array<{ from: any; fromRanges: any[] }>;
+  const items: CallHierarchyItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (call) => {
+      const caller = call.from;
+      const callerPath = uriToPath(caller.uri);
+      const callerLine = caller.selectionRange?.start?.line ?? caller.range?.start?.line ?? 0;
+      return {
+        name: caller.name,
+        kind: symbolKindLabel(caller.kind),
+        relativePath: relativePath(projectRoot, callerPath),
+        absolutePath: callerPath,
+        line: callerLine + 1,
+        content: await deps.fileCache.getLine(callerPath, callerLine + 1),
+      };
+    }),
+  );
+
+  return okResponse(req.id, {
+    action: "incoming-calls",
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    symbol: symbolName,
+    total: all.length,
+    items,
+    truncated: all.length > MAX,
+  } as IncomingCallsResult);
+}
+
+export async function handleOutgoingCalls(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  if (!req.path || req.line == null || req.character == null) {
+    return errorResponse(req.id, "path, line, and character required for outgoing-calls");
+  }
+
+  const backend = deps.getBackend(req.path);
+  const uri = await backend.ensureFile(req.path);
+  const pos = toZeroBased(req.line, req.character);
+  const projectRoot = backend.docManager.getProjectRoot(req.path);
+
+  // Step 1: prepare call hierarchy item at position
+  const prepareRes = await backend.lspRequest("textDocument/prepareCallHierarchy", {
+    textDocument: { uri },
+    position: pos,
+  });
+
+  if (!prepareRes?.result || !Array.isArray(prepareRes.result) || prepareRes.result.length === 0) {
+    return errorResponse(req.id, "No call hierarchy item at this position");
+  }
+
+  const item = prepareRes.result[0];
+  const symbolName = item.name ?? "unknown";
+
+  // Step 2: get outgoing calls
+  const callsRes = await backend.lspRequest("callHierarchy/outgoingCalls", { item });
+
+  if (!callsRes?.result || !Array.isArray(callsRes.result)) {
+    return okResponse(req.id, {
+      action: "outgoing-calls",
+      path: req.path,
+      line: req.line,
+      character: req.character,
+      symbol: symbolName,
+      total: 0,
+      items: [],
+      truncated: false,
+    } as OutgoingCallsResult);
+  }
+
+  const MAX = 30;
+  const all = callsRes.result as Array<{ to: any; fromRanges: any[] }>;
+  const items: CallHierarchyItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (call) => {
+      const callee = call.to;
+      const calleePath = uriToPath(callee.uri);
+      const calleeLine = callee.selectionRange?.start?.line ?? callee.range?.start?.line ?? 0;
+      return {
+        name: callee.name,
+        kind: symbolKindLabel(callee.kind),
+        relativePath: relativePath(projectRoot, calleePath),
+        absolutePath: calleePath,
+        line: calleeLine + 1,
+        content: await deps.fileCache.getLine(calleePath, calleeLine + 1),
+      };
+    }),
+  );
+
+  return okResponse(req.id, {
+    action: "outgoing-calls",
+    path: req.path,
+    line: req.line,
+    character: req.character,
+    symbol: symbolName,
+    total: all.length,
+    items,
+    truncated: all.length > MAX,
+  } as OutgoingCallsResult);
 }
 
 export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
@@ -222,15 +412,17 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
 
   const all = lspRes.result as Array<{ uri: string; range: any }>;
   const MAX = 20;
-  const items: ReferenceItem[] = all.slice(0, MAX).map((ref) => {
-    const refPath = uriToPath(ref.uri);
-    return {
-      relativePath: relativePath(projectRoot, refPath),
-      absolutePath: refPath,
-      line: ref.range.start.line + 1,
-      content: getFileLine(refPath, ref.range.start.line + 1),
-    };
-  });
+  const items: ReferenceItem[] = await Promise.all(
+    all.slice(0, MAX).map(async (ref) => {
+      const refPath = uriToPath(ref.uri);
+      return {
+        relativePath: relativePath(projectRoot, refPath),
+        absolutePath: refPath,
+        line: ref.range.start.line + 1,
+        content: await deps.fileCache.getLine(refPath, ref.range.start.line + 1),
+      };
+    }),
+  );
 
   return okResponse(req.id, {
     action: "references",
@@ -307,7 +499,7 @@ export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonRespo
     projects: allProjects,
     openFiles: allOpenFiles,
     watchedFiles: allOpenFiles.length,
-    idleMs: Date.now() - deps.lastActivity,
+    idleMs: deps.getIdleMs(),
   } as StatusResult);
 }
 

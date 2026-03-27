@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
+import "../register-actions"; // populate action registry for daemon dispatch
 import { LspDaemon } from "../daemon";
 import { connect, type Socket } from "node:net";
 import { mkdtempSync, rmSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
@@ -73,7 +74,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
     // Pre-populate diagnostics cache
     for (const [uri, diags] of diagsByUri) {
-      tsBackend.diagCache.set(uri, diags);
+      tsBackend.diagnostics.publish(uri, diags);
     }
 
     return d;
@@ -458,7 +459,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
         ],
       });
 
-      const cached = tsBackend.diagCache.get(uri) as any[];
+      const cached = tsBackend.diagnostics.get(uri) as any[];
       expect(cached).toHaveLength(2);
       expect(cached[0].severity).toBe("error");
       expect(cached[0].code).toBe("TS2339");
@@ -480,7 +481,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
         ],
       });
 
-      const cached = tsBackend.diagCache.get(uri) as any[];
+      const cached = tsBackend.diagnostics.get(uri) as any[];
       expect(cached[0].message).toBe("A".repeat(200) + "…");
     });
 
@@ -497,7 +498,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
         ],
       });
 
-      const cached = tsBackend.diagCache.get(uri) as any[];
+      const cached = tsBackend.diagnostics.get(uri) as any[];
       expect(cached[0].message).toBe(msg);
     });
   });

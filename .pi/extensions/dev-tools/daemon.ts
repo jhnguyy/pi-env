@@ -9,6 +9,7 @@
  * Business logic lives in:
  *   - backend.ts   — LspBackend: per-language-server subprocess manager
  *   - handlers.ts  — LSP action handlers (diagnostics, hover, definition, etc.)
+ *   - action-registry.ts — handler/formatter/renderer dispatch (no switch chains)
  *
  * Lifecycle:
  *   - Spawned by client.ts if socket not available
@@ -23,18 +24,58 @@ import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 import { LspBackend, STANDARD_CAPABILITIES } from "./backend";
-import {
-  handleDiagnostics, handleHover, handleDefinition,
-  handleReferences, handleSymbols, handleStatus,
-  type HandlerDeps,
-} from "./handlers";
+import { FileCache } from "./file-cache";
+import { type HandlerDeps } from "./handlers";
+import { getAction } from "./action-registry";
+import "./register-actions"; // side-effect: populates the action registry
 import { TS_EXTENSIONS, BASH_EXTENSIONS, NIX_EXTENSIONS } from "./filetypes";
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
-import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
+import type { DaemonRequest, DaemonResponse, LspAction, StatusResult } from "./protocol";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+/** Max bytes to buffer per connection before disconnecting. Prevents OOM from malformed clients. */
+const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
+
+// ─── Per-backend LSP capabilities ─────────────────────────────────────────────
+
+const TS_CAPABILITIES = {
+  ...STANDARD_CAPABILITIES,
+  textDocument: {
+    ...STANDARD_CAPABILITIES.textDocument,
+    implementation: {},
+    callHierarchy: { dynamicRegistration: false },
+  },
+};
+
+// Bash and Nix servers don't support call hierarchy or implementation
+const BASH_CAPABILITIES = {
+  textDocument: {
+    hover: { contentFormat: ["plaintext"] },
+    definition: {},
+    references: {},
+    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
+    publishDiagnostics: { relatedInformation: false },
+  },
+  workspace: {
+    workspaceFolders: true,
+  },
+};
+
+const NIX_CAPABILITIES = {
+  textDocument: {
+    hover: { contentFormat: ["plaintext"] },
+    definition: {},
+    references: {},
+    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
+    publishDiagnostics: { relatedInformation: false },
+  },
+  workspace: {
+    workspaceFolders: true,
+    symbol: {},
+  },
+};
 
 // ─── LspDaemon ───────────────────────────────────────────────────────────────
 
@@ -43,7 +84,10 @@ export class LspDaemon {
   /** TypeScript backend — also handles workspace/symbol queries */
   private tsBackend: LspBackend;
   private server: Server | null = null;
+  private fileCache = new FileCache();
 
+  /** Timestamp of the activity *before* the current request. Used for accurate idle reporting. */
+  private previousActivity = Date.now();
   private lastActivity = Date.now();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -54,15 +98,15 @@ export class LspDaemon {
   ) {
     this.tsBackend = new LspBackend(
       "typescript", "typescript-language-server", ["--stdio"],
-      TS_EXTENSIONS, STANDARD_CAPABILITIES, "TS",
+      TS_EXTENSIONS, TS_CAPABILITIES, "TS",
     );
     const bashBackend = new LspBackend(
       "bash", "bash-language-server", ["start"],
-      BASH_EXTENSIONS, STANDARD_CAPABILITIES, "",
+      BASH_EXTENSIONS, BASH_CAPABILITIES, "",
     );
     const nilBackend = new LspBackend(
       "nil", "nil", [],
-      NIX_EXTENSIONS, STANDARD_CAPABILITIES, "",
+      NIX_EXTENSIONS, NIX_CAPABILITIES, "",
     );
     this.backends = [this.tsBackend, bashBackend, nilBackend];
   }
@@ -101,6 +145,11 @@ export class LspDaemon {
 
     socket.on("data", (chunk: string) => {
       buf += chunk;
+      // Guard against unbounded buffer from malformed clients
+      if (buf.length > MAX_BUFFER_BYTES) {
+        socket.destroy();
+        return;
+      }
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
@@ -112,6 +161,7 @@ export class LspDaemon {
   }
 
   private async handleRequest(socket: Socket, line: string): Promise<void> {
+    this.previousActivity = this.lastActivity;
     this.lastActivity = Date.now();
     this.resetIdleTimer();
 
@@ -138,24 +188,23 @@ export class LspDaemon {
       getBackend: (p) => this.getBackend(p),
       tsBackend: this.tsBackend,
       backends: this.backends,
-      lastActivity: this.lastActivity,
+      fileCache: this.fileCache,
+      getIdleMs: () => Date.now() - this.previousActivity,
     };
 
-    switch (req.action) {
-      case "diagnostics": return handleDiagnostics(req, deps);
-      case "hover":       return handleHover(req, deps);
-      case "definition":  return handleDefinition(req, deps);
-      case "references":  return handleReferences(req, deps);
-      case "symbols":     return handleSymbols(req, deps);
-      case "status":      return handleStatus(req, deps);
-      case "shutdown":
-        this.shutdown();
-        return okResponse(req.id, {
-          action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
-        } as StatusResult);
-      default:
-        return errorResponse(req.id, `Unknown action: ${(req as any).action}`);
+    // Shutdown is handled inline — not a registered action
+    if (req.action === "shutdown") {
+      this.shutdown();
+      return okResponse(req.id, {
+        action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
+      } as StatusResult);
     }
+
+    // Try the registry first
+    const action = getAction(req.action);
+    if (action) return action.handler(req, deps);
+
+    return errorResponse(req.id, `Unknown action: ${req.action}`);
   }
 
   // ─── Idle / Shutdown ─────────────────────────────────────────────────────────

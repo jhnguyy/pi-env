@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { serializeMessage, LspParser, LspIdGenerator, type LspMessage } from "../lsp-transport";
+import { serializeMessage, LspParser, type LspMessage } from "../lsp-transport";
 
 describeIfEnabled("dev-tools", "LspTransport", () => {
   // ─── serializeMessage ─────────────────────────────────────────────────────
@@ -123,26 +123,4 @@ describeIfEnabled("dev-tools", "LspTransport", () => {
     });
   });
 
-  // ─── LspIdGenerator ──────────────────────────────────────────────────────
-
-  describe("LspIdGenerator", () => {
-    it("starts at 1", () => {
-      const gen = new LspIdGenerator();
-      expect(gen.get()).toBe(1);
-    });
-
-    it("increments on each call", () => {
-      const gen = new LspIdGenerator();
-      expect(gen.get()).toBe(1);
-      expect(gen.get()).toBe(2);
-      expect(gen.get()).toBe(3);
-    });
-
-    it("each generator is independent", () => {
-      const a = new LspIdGenerator();
-      const b = new LspIdGenerator();
-      a.get(); a.get();
-      expect(b.get()).toBe(1);
-    });
-  });
 });

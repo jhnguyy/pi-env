@@ -168,16 +168,25 @@ describe("hints detection", () => {
     expect(hint).toBeNull();
   });
 
-  it("bash with grep -rn → hint", () => {
-    const hint = detectDevToolsHint("bash", { command: 'grep -rn "Symbol" src/' }, state);
+  it("bash with grep for PascalCase symbol → targeted hint with symbol name", () => {
+    const hint = detectDevToolsHint("bash", { command: 'grep -rn "LspClient" src/' }, state);
     expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain('"LspClient"');
     expect(hint).toContain("dev-tools references");
+    expect(hint).toContain("dev-tools incoming-calls");
   });
 
-  it("bash with rg and -t ts → hint", () => {
-    const hint = detectDevToolsHint("bash", { command: 'rg "Type" -t ts' }, state);
+  it("bash with rg for camelCase symbol → targeted hint with symbol name", () => {
+    const hint = detectDevToolsHint("bash", { command: 'rg "handleRequest" -t ts' }, state);
     expect(hint).toContain("[dev-tools]");
-    expect(hint).toContain("dev-tools references");
+    expect(hint).toContain('"handleRequest"');
+    expect(hint).toContain("dev-tools incoming-calls");
+  });
+
+  it("bash with grep for non-symbol pattern → generic hint", () => {
+    const hint = detectDevToolsHint("bash", { command: 'grep -rn "TODO" src/' }, state);
+    expect(hint).toContain("[dev-tools]");
+    expect(hint).toContain("incoming-calls/outgoing-calls");
   });
 
   it("bash with cat foo.ts → hint (symbols)", () => {

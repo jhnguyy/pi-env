@@ -118,12 +118,3 @@ function parseContentLength(header: string): number | null {
   return null;
 }
 
-// ─── ID counter ───────────────────────────────────────────────────────────────
-
-/** Simple incrementing LSP message ID generator. */
-export class LspIdGenerator {
-  private next = 1;
-  get(): number {
-    return this.next++;
-  }
-}
