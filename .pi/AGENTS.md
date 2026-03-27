@@ -9,7 +9,7 @@ Dotfiles repo — registered as a pi package via `settings.json` `packages` entr
 |.pi/extensions/_shared:{result.ts(txt/ok/err helpers),errors.ts(BaseExtensionError base),git.ts(git op wrappers),exit-shim.ts(bus signal on exit) — shared utilities, not a pi extension}
 |.pi/extensions/__tests__:{loader.test.ts,test-utils.ts(mock helpers)}
 |.pi/agents:{scout(structural recon),gatherer(question answering with citations),workspace-init(intent-driven context assembly)}
-|.agents/skills:{jit-catch,orchestration,skill-builder}
+|.agents/skills:{jit-catch,orchestration,skill-builder,index-practices}
 |.agents/skills/reference:{handoff.md,distillation.md,index-generator.md — manually loaded, not auto-discovered}
 |docs:{pi-bun-binary.md(compile process,ZFS bug,asset layout)}
 |setup:{install-bun-pi.sh,settings.template.json,models.template.json}

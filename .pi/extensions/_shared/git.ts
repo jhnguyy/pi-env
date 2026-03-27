@@ -20,11 +20,18 @@ export interface GitResult {
 /**
  * Run a git command synchronously in a given directory.
  * Returns raw stdout/stderr and exit status. Never throws.
+ *
+ * Timeout defaults to 5 000 ms. Override globally with the
+ * `WORK_TRACKER_GIT_TIMEOUT` environment variable (milliseconds):
+ *
+ *   WORK_TRACKER_GIT_TIMEOUT=2000 pi   # recommended for slow/NFS mounts
+ *
+ * A per-call `timeout` argument takes precedence over the env var.
  */
 export function gitSync(
   cwd: string,
   args: string[],
-  timeout = 5_000,
+  timeout = Number(process.env.WORK_TRACKER_GIT_TIMEOUT) || 5_000,
 ): GitResult {
   const result = spawnSync("git", ["-C", cwd, ...args], {
     encoding: "utf8",

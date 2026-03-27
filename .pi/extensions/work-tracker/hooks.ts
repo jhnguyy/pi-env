@@ -15,7 +15,7 @@ import { isOrchWorker } from "../_shared/context";
 import { setSlot, resetSlots } from "../_shared/ui-render";
 
 import type { BranchGuard } from "./branch-guard";
-import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache } from "./context";
+import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
 import {
   cleanupHandoffs,
   detectMergedBranch,
@@ -92,8 +92,12 @@ export function registerHooks(
   pi.on("session_start", async (_event, ctx) => {
     store.clear();
     invalidateGitCache();
+    resetGitFailureCache(); // give repos a fresh chance each session
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    // Skip git status here — spawning git subprocesses synchronously at
+    // session_start blocks in environments with many or slow mount points.
+    // The widget is populated lazily on the first before_agent_start call.
+    setSlot("work-tracker", undefined, ctx);
 
     // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it active.
     if (!process.env.PI_SESSION_READER) {
@@ -105,6 +109,8 @@ export function registerHooks(
   pi.on("session_switch", async (_event, ctx) => {
     const open = store.open().length;
     store.clear();
+    invalidateGitCache();
+    resetGitFailureCache(); // allow repos to be retried after a session switch
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
     setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
     if (open > 0) {
@@ -115,6 +121,7 @@ export function registerHooks(
   // ─── 5. Session shutdown — clear todos + slot state ─────────────────────────
   pi.on("session_shutdown", async () => {
     store.clear();
+    resetGitFailureCache();
     resetSlots();
   });
 

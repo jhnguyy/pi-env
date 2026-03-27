@@ -8,7 +8,7 @@
     ".pi/extensions/*"
   ],
   "pi": {
-    "extensions": [".pi/extensions/*/dist", "!.pi/extensions/tmux/dist", "!.pi/extensions/orch/dist"],
+    "extensions": [".pi/extensions", "!.pi/extensions/tmux/**", "!.pi/extensions/orch/**"],
     "skills": [".agents/skills"],
     "themes": ["themes"]
   },

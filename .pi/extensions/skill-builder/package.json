@@ -1,5 +1,8 @@
 {
   "name": "@pi-env/skill-builder",
   "type": "module",
-  "private": true
+  "private": true,
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  }
 }
