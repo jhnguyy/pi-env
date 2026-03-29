@@ -63,13 +63,11 @@ export class TodoStore {
     return this.items.filter((i) => !i.done);
   }
 
-  /** Plain-text string for LLM context injection. */
+  /** Plain-text string for LLM context injection. Only shows open tasks. */
   render(): string {
-    if (this.items.length === 0) return "[session-todos] No tasks yet.";
-    const lines = this.items.map((i) => {
-      const icon = i.done ? "✅" : "□";
-      return `${icon} (${i.id}) ${i.text}`;
-    });
+    const open = this.items.filter((i) => !i.done);
+    if (open.length === 0) return "[session-todos] No tasks yet.";
+    const lines = open.map((i) => `□ (${i.id}) ${i.text}`);
     return `[session-todos]\n${lines.join("\n")}`;
   }
 
