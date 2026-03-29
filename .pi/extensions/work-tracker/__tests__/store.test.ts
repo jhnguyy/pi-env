@@ -138,13 +138,14 @@ describe("TodoStore", () => {
     expect(store.render()).toBe("[session-todos]\n□ (1) slim work-tracker extension");
   });
 
-  it("render() shows □ for open, ✅ for done", () => {
+  it("render() shows only open tasks — done tasks are excluded", () => {
     store.add("open task");
     store.add("done task");
     store.complete(2);
     const output = store.render();
     expect(output).toContain("□ (1) open task");
-    expect(output).toContain("✅ (2) done task");
+    expect(output).not.toContain("done task");
+    expect(output).not.toContain("✅");
     expect(output.startsWith("[session-todos]")).toBe(true);
   });
 
