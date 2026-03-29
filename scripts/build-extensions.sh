@@ -57,6 +57,11 @@ for ext in "${EXTENSIONS[@]}"; do
     --target bun \
     --format esm \
     "${PEER_EXTERNALS[@]}" 2>&1; then
+    # ptc: copy subprocess-preamble.ts into dist/ so that the bundled executor
+    # (which resolves paths relative to import.meta.url = dist/index.js) can find it.
+    if [ "$ext" = "ptc" ]; then
+      cp "$EXT_DIR/ptc/subprocess-preamble.ts" "$outdir/subprocess-preamble.ts"
+    fi
     echo "  built $ext"
     ok=$((ok + 1))
   else
