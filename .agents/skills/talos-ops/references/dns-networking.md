@@ -13,46 +13,29 @@ OPNsense Unbound is configured with split DHCP registration:
 ### Workflow: Adding a New Infrastructure Hostname
 
 1. **Add DHCP static reservation** in OPNsense: MAC → IP + hostname
-2. **Restart Unbound** (Services → Unbound DNS → Restart) — it does not pick up new static maps without a restart
-3. **Verify resolution** from a node using the same DNS server:
+2. **Restart Unbound** (Services → Unbound DNS → Restart) — does not pick up new static maps without restart
+3. **Verify resolution:**
    ```bash
    getent hosts <hostname>.jnguy.dev
    ```
 
-**Critical:** For Talos nodes, hostname resolution must succeed *before* applying the machine config. Talos controllers use the endpoint hostname immediately after bootstrap (see [gotchas.md](gotchas.md) #3).
+**Critical:** For Talos nodes, hostname resolution must succeed *before* applying the machine config. Talos controllers use the endpoint hostname immediately after bootstrap.
 
 ### NXDOMAIN Cache Gotcha
 
-`systemd-resolved` (used by Talos and other nodes) caches NXDOMAIN responses. If a hostname was queried before the DNS entry existed, the negative cache persists even after Unbound is restarted. Wait for TTL expiry, or restart the resolver on the affected node:
-
-```bash
-# On a standard Linux host:
-sudo systemctl restart systemd-resolved
-
-# On Talos — no direct way; wait for TTL or reboot the node
-```
+`systemd-resolved` caches NXDOMAIN responses. If a hostname was queried before the DNS entry existed, the negative cache persists after Unbound is restarted. Wait for TTL expiry or restart the resolver on the affected host.
 
 ---
 
 ## Proxmox VM Hygiene
 
-### ISO Detachment
+### ISO Detachment (pending for VM 200)
 
-After successful Talos installation to disk, detach the ISO and fix the boot order. Leaving the ISO attached is low risk while the VM is running, but a hard reset could boot into maintenance mode instead of the installed OS.
+After Talos installation to disk, detach the ISO. Leaving it attached is low risk while running, but a hard reset could boot into maintenance mode.
 
 **Run on Cronus:**
 ```bash
 sudo qm set 200 --ide2 none --boot order=scsi0
-```
-
-This:
-- Removes the ISO from `ide2`
-- Sets boot order to `scsi0` only (the installed disk)
-
-Verify in Proxmox config:
-```
-boot: order=scsi0    ← correct
-# ide2 should no longer appear
 ```
 
 ### VM 200 Expected Config
@@ -66,34 +49,40 @@ boot: order=scsi0    ← correct
 | Network | virtio on vmbr0, MAC BC:24:11:A9:D0:38 |
 | BIOS | OVMF (UEFI) |
 | Machine | q35 |
-| Display | serial0 (no VGA — Talos uses serial console) |
 | Boot | order=scsi0 (after ISO detach) |
 
 ---
 
 ## Registry Mirror Configuration
 
-The machine config has registry mirrors pre-configured for a local container registry (not yet deployed):
+Talos machine config has mirrors for the local registry on NodePort **30500** (not 5000 — that is the container-internal port).
 
 ```yaml
-registries:
-  mirrors:
-    192.168.10.210:5000:
-      endpoints:
-        - http://192.168.10.210:5000
-    registry.home.jnguy.dev:5000:
-      endpoints:
-        - http://192.168.10.210:5000
+machine:
+  registries:
+    mirrors:
+      "192.168.10.210:30500":
+        endpoints:
+          - "http://192.168.10.210:30500"
+      "talos-node-0.jnguy.dev:30500":
+        endpoints:
+          - "http://192.168.10.210:30500"
+    config:
+      "192.168.10.210:30500":
+        tls:
+          insecureSkipVerify: true
 ```
 
-This is a no-op until a registry (Harbor/Zot) is deployed at `192.168.10.210:5000`. Talos falls back to the original registry if the mirror is unreachable — existing workloads are not affected.
+**Important:** Stale entries for port 5000 may remain in the live config from Phase 1. They are harmless (nothing uses them) but the live config diverges from `talos-controlplane.yaml`. Use `talosctl get mc -n 192.168.10.210 -o yaml` for the authoritative config.
+
+When pulling an image referenced as `192.168.10.210:30500/myimage:tag`, containerd looks up `192.168.10.210:30500` in the mirrors list and uses the configured endpoint with `insecureSkipVerify: true`. The mirror key **must match the registry hostname:port in the image reference exactly**.
 
 ---
 
 ## IPC Channel (Agent ↔ Cronus)
 
-Phase 0 established `/tank/ipc/` as the IPC channel between LXC 302 and Cronus:
-- Cronus path: `/tank/ipc/`
-- LXC 302 path: `/mnt/tank/ipc/` (bind mount mp4, mode 1777)
+`/tank/ipc/` on Cronus = `/mnt/tank/ipc/` on LXC 302 (bind mount mp4, mode 1777).
 
-Use this for Cronus-side scripts following the standard agent-request pattern in AGENTS.md.
+Scripts written by agent → run by user on Cronus → result file written back → agent reads result.
+
+See AGENTS.md Cronus Communication section for full protocol.

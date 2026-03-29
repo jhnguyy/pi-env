@@ -2,105 +2,97 @@
 
 ## Binaries
 
-Installed to `/tmp/` — **not persistent across reboots of LXC 302**. Not yet in PATH — use full paths.
+| Binary | Path | Persistent? | Version |
+|---|---|---|---|
+| flux | `~/.nix-profile/bin/flux` | ✅ Yes (nix profile) | v2.7.5 |
+| sops | `~/.nix-profile/bin/sops` | ✅ Yes (nix profile) | v3.12.1 |
+| age / age-keygen | `~/.nix-profile/bin/` | ✅ Yes (nix profile) | v1.3.1 |
+| kubectl | `/tmp/kubectl` | ⚠️ Lost on LXC reboot | v1.35.3 |
+| talosctl | `/tmp/talosctl` | ⚠️ Lost on LXC reboot | v1.12.6 |
+| cilium CLI | `/tmp/cilium` | ⚠️ Lost on LXC reboot | v1.19.1 |
 
-| Binary | Path | Version |
-|---|---|---|
-| talosctl | `/tmp/talosctl` | v1.12.6 |
-| kubectl | `/tmp/kubectl` | (matches k8s v1.35.2) |
-| cilium CLI | `/tmp/cilium` | v1.19.1 |
-
-**Open item:** Permanent install to `/usr/local/bin/` or `~/bin/` pending.
-
-**If binaries are missing (e.g., after LXC reboot), re-download:**
+**Always set PATH before running commands:**
 ```bash
-# talosctl
-curl -sL https://github.com/siderolabs/talos/releases/download/v1.12.6/talosctl-linux-amd64 \
-  -o /tmp/talosctl && chmod +x /tmp/talosctl
-
-# kubectl
-curl -sL "https://dl.k8s.io/release/v1.35.2/bin/linux/amd64/kubectl" \
-  -o /tmp/kubectl && chmod +x /tmp/kubectl
-
-# cilium CLI (v1.19.1 — match helm chart version, not Cilium image version)
-curl -sL https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz \
-  | tar xz -C /tmp
-```
-
----
-
-## Credentials
-
-All in `~/talos/` (agent home, LXC 302):
-
-| File | Contents |
-|---|---|
-| `~/talos/talosconfig` | talosctl context — endpoint `192.168.10.210`, node `192.168.10.210` |
-| `~/talos/kubeconfig` | kubectl context for the cluster |
-| `~/talos/talos-controlplane.yaml` | Applied machine config (source of truth for node config) |
-
-**Always set env vars before running commands:**
-```bash
+export PATH="$HOME/.nix-profile/bin:/tmp:$PATH"
 export TALOSCONFIG=~/talos/talosconfig
 export KUBECONFIG=~/talos/kubeconfig
 ```
+
+**If kubectl/talosctl/cilium are missing (after LXC reboot):**
+```bash
+# kubectl
+curl -sL "https://dl.k8s.io/release/v1.35.2/bin/linux/amd64/kubectl" -o /tmp/kubectl && chmod +x /tmp/kubectl
+
+# talosctl
+curl -sL https://github.com/siderolabs/talos/releases/download/v1.12.6/talosctl-linux-amd64 -o /tmp/talosctl && chmod +x /tmp/talosctl
+
+# cilium CLI
+curl -sL https://github.com/cilium/cilium-cli/releases/latest/download/cilium-linux-amd64.tar.gz | tar xz -C /tmp
+```
+
+**Open item:** Add `kubectl` and `talosctl` to LXC 302 NixOS config permanently.
+
+---
+
+## Credentials (all in `~/talos/`)
+
+| File | Contents |
+|---|---|
+| `talosconfig` | talosctl context — endpoint + node 192.168.10.210 |
+| `kubeconfig` | kubectl admin context |
+| `talos-controlplane.yaml` | Applied machine config (may lag live config — use `talosctl get mc` for ground truth) |
+| `flux-age-key.txt` | Flux age private key — also loaded as `sops-age` Secret in `flux-system` |
 
 ---
 
 ## talosconfig Setup
 
-The generated `talosconfig` has empty `endpoints` and `nodes` by default. Without them, `talosctl` errors with "failed to determine endpoints". Fix once after generation:
-
+The generated `talosconfig` has empty `endpoints` and `nodes` by default. Fix once after generation:
 ```bash
-/tmp/talosctl --talosconfig ~/talos/talosconfig config endpoint 192.168.10.210
-/tmp/talosctl --talosconfig ~/talos/talosconfig config node 192.168.10.210
+talosctl --talosconfig ~/talos/talosconfig config endpoint 192.168.10.210
+talosctl --talosconfig ~/talos/talosconfig config node 192.168.10.210
 ```
-
 After this, `talosctl health` and other commands work without `--endpoints`/`--nodes` flags.
 
 ---
 
 ## Cluster Inventory
 
-| Component | Version | Location |
+| Component | Version | Status |
 |---|---|---|
-| Talos Linux | v1.12.6 + iscsi-tools | VM 200 (talos-node-0) on Cronus |
-| Kubernetes | v1.35.2 | Single-node control plane |
-| Cilium | v1.19.1 | kube-proxy replacement, DaemonSet 1/1 |
-| CoreDNS | (bundled) | 2/2 pods |
-| etcd | (bundled) | Single member, healthy |
+| Talos Linux | v1.12.6 + iscsi-tools | VM 200, running |
+| Kubernetes | v1.35.2 | Single-node control plane, Ready |
+| Cilium | v1.19.1 | kube-proxy replacement, 1/1 |
+| CoreDNS | bundled | 2/2 |
+| Flux controllers | v2.7.5 | 4/4 in flux-system |
+| registry:2 | latest | 1/1 in registry namespace |
+| sops-age Secret | — | Loaded in flux-system |
 
 **VM 200 (talos-node-0):** 8 vCPU / 12 GB RAM / 32 GB disk (tank-vms), UEFI q35, vmbr0
 **LAN IP:** `192.168.10.210` (DHCP static reservation, MAC BC:24:11:A9:D0:38)
 **Cluster endpoint:** `talos-node-0.jnguy.dev:6443`
+**Registry endpoint:** `192.168.10.210:30500` (NodePort, HTTP, no TLS)
 
 ---
 
 ## Cert SANs
 
-The machine config sets cert SANs for both hostname and IP:
-- `talos-node-0.jnguy.dev`
-- `192.168.10.210`
+Machine config sets SANs: `talos-node-0.jnguy.dev` + `192.168.10.210`.
 
-If the IP changes (e.g., during a network restructure), SANs must be rotated:
+If IP changes during network restructure, rotate via:
 ```bash
-# Edit ~/talos/talos-controlplane.yaml to update certSANs, then:
-/tmp/talosctl --talosconfig ~/talos/talosconfig apply-config \
-  --nodes 192.168.10.210 \
-  --file ~/talos/talos-controlplane.yaml
+# Edit certSANs in ~/talos/talos-controlplane.yaml, then:
+talosctl apply-config --nodes 192.168.10.210 --file ~/talos/talos-controlplane.yaml
 ```
 
 ---
 
 ## NFS Exports (Cronus → talos-node-0)
 
-Configured on Cronus `/etc/exports`:
 ```
 /tank/services       talos-node-0.jnguy.dev(rw,sync,no_subtree_check,no_root_squash)
 /tank/shares/photos  talos-node-0.jnguy.dev(rw,sync,no_subtree_check,no_root_squash)
 ```
-
-Uses hostname-based client spec (not IP) — consistent with DHCP-as-source-of-truth principle.
 
 ---
 
@@ -108,23 +100,44 @@ Uses hostname-based client spec (not IP) — consistent with DHCP-as-source-of-t
 
 ```bash
 # Health check
-/tmp/talosctl health
+talosctl health
 
 # Node status
-/tmp/kubectl get nodes -o wide
+kubectl get nodes -o wide
 
 # All pods
-/tmp/kubectl get pods -A
+kubectl get pods -A
+
+# Flux status (once GitOps source attached)
+flux get all
+
+# Registry test
+curl -s http://192.168.10.210:30500/v2/_catalog
 
 # Cilium status
 /tmp/cilium status
 
 # etcd members
-/tmp/talosctl etcd members
+talosctl etcd members
 
-# Node diagnostics (should be empty)
-/tmp/talosctl get diagnostics
+# Live machine config (ground truth)
+talosctl get mc -n 192.168.10.210 -o yaml
+```
 
-# Talos/k8s versions
-/tmp/talosctl version
+---
+
+## homelab-k8s Repo
+
+Currently at `/tmp/homelab-k8s` — **lost on LXC reboot**.
+
+Pending: run `cronus-p2-mkdirs.sh` on Cronus to create `/tank/code/homelab-k8s/`, then move the repo there.
+
+Structure:
+```
+.sops.yaml              ← flux public key set, manager key TODO
+apps/
+  registry/             ← deployed ✅
+  test/secrets.yaml     ← sops test (deployed manually for validation)
+clusters/homelab/
+  apps.yaml             ← Flux Kustomization (active once Forgejo wired)
 ```
