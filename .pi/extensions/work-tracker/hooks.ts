@@ -129,6 +129,7 @@ export function registerHooks(
   pi.on("turn_end", async (_event, ctx) => {
     if (isOrchWorker()) return;
     invalidateGitCache();
+    store.purgeCompleted();
     setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
     setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
   });
