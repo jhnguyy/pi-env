@@ -57,6 +57,31 @@ for ext in "${EXTENSIONS[@]}"; do
     --target bun \
     --format esm \
     "${PEER_EXTERNALS[@]}" 2>&1; then
+    # Some extensions reference additional files at runtime via import.meta.url-
+    # relative paths. Since import.meta.url points to dist/index.js after bundling,
+    # those files must exist inside dist/. We bundle each as a standalone ESM file
+    # (so local imports get inlined) rather than a plain copy (which would leave
+    # relative imports broken).
+    #
+    # ptc: subprocess-preamble.ts is loaded by the generated subprocess script.
+    #   Imports MAX_TOOL_CALLS from ./types — bundle to inline it.
+    if [ "$ext" = "ptc" ]; then
+      bun build "$EXT_DIR/ptc/subprocess-preamble.ts" \
+        --outfile "$outdir/subprocess-preamble.ts" \
+        --target bun \
+        --format esm 2>&1
+    fi
+    # orch: worker-bridge.ts is loaded by spawned worker pi processes via -e flag.
+    #   Imports from ../agent-bus/bus-service — bundle to inline it.
+    #   worker.md is read as plain text — copy verbatim.
+    if [ "$ext" = "orch" ]; then
+      bun build "$EXT_DIR/orch/worker-bridge.ts" \
+        --outfile "$outdir/worker-bridge.ts" \
+        --target bun \
+        --format esm \
+        "${PEER_EXTERNALS[@]}" 2>&1
+      cp "$EXT_DIR/orch/worker.md" "$outdir/worker.md"
+    fi
     echo "  built $ext"
     ok=$((ok + 1))
   else
