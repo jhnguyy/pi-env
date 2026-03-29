@@ -128,9 +128,7 @@ talosctl get mc -n 192.168.10.210 -o yaml
 
 ## homelab-k8s Repo
 
-Currently at `/tmp/homelab-k8s` — **lost on LXC reboot**.
-
-Pending: run `cronus-p2-mkdirs.sh` on Cronus to create `/tank/code/homelab-k8s/`, then move the repo there.
+Permanent location: `/mnt/tank/code/homelab-k8s/` (on ZFS pool, persists across reboots).
 
 Structure:
 ```

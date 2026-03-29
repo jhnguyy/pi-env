@@ -52,7 +52,7 @@ clusters/homelab/
 **Apply manually (until Forgejo wired):**
 ```bash
 export KUBECONFIG=~/talos/kubeconfig
-kubectl apply -k /tmp/homelab-k8s/apps/<service>/
+kubectl apply -k /mnt/tank/code/homelab-k8s/apps/<service>/
 ```
 
 ---
@@ -67,7 +67,7 @@ Encrypted files must be named `secrets.yaml` under `apps/` or `k8s/` to match `.
 
 ### Encrypt a new secret
 ```bash
-cd /tmp/homelab-k8s   # or /mnt/tank/code/homelab-k8s when moved
+cd /mnt/tank/code/homelab-k8s
 
 # Write plaintext (DO NOT COMMIT — will be replaced):
 cat > apps/<service>/secrets.yaml << 'EOF'
