@@ -147,7 +147,7 @@ echo "----------------"
 if [ -e "$PI_AGENT_DIR/APPEND_SYSTEM.md" ]; then
   ok "~/.pi/agent/APPEND_SYSTEM.md (exists — not overwritten)"
 else
-  cp "$REPO/APPEND_SYSTEM.md" "$PI_AGENT_DIR/APPEND_SYSTEM.md"
+  cp "$REPO/.pi/agent/APPEND_SYSTEM.md" "$PI_AGENT_DIR/APPEND_SYSTEM.md"
   ok "~/.pi/agent/APPEND_SYSTEM.md (bootstrapped from repo)"
 fi
 
