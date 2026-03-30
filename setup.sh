@@ -139,16 +139,25 @@ link_path "$REPO/.agents/roles" "$AGENTS_DIR/roles" "~/.agents/roles"
 
 # ── APPEND_SYSTEM.md ────────────────────────────────────────────────────────
 # ~/.pi/agent/APPEND_SYSTEM.md appends to the system prompt on every session.
-# Bootstrapped once — customize locally, never overwritten by setup.
+# The local file may have user-managed content. Setup appends the repo block
+# idempotently — skips if the marker is already present.
 
 echo ""
 echo "APPEND_SYSTEM.md"
 echo "----------------"
-if [ -e "$PI_AGENT_DIR/APPEND_SYSTEM.md" ]; then
-  ok "~/.pi/agent/APPEND_SYSTEM.md (exists — not overwritten)"
+APPEND_SRC="$REPO/.pi/agent/APPEND_SYSTEM.md"
+APPEND_DST="$PI_AGENT_DIR/APPEND_SYSTEM.md"
+MARKER="<!-- pi-env:append-system -->"
+if [ ! -e "$APPEND_DST" ]; then
+  printf '%s\n' "$MARKER" > "$APPEND_DST"
+  cat "$APPEND_SRC" >> "$APPEND_DST"
+  ok "~/.pi/agent/APPEND_SYSTEM.md (created with repo block)"
+elif grep -qF "$MARKER" "$APPEND_DST"; then
+  ok "~/.pi/agent/APPEND_SYSTEM.md (repo block already present)"
 else
-  cp "$REPO/APPEND_SYSTEM.md" "$PI_AGENT_DIR/APPEND_SYSTEM.md"
-  ok "~/.pi/agent/APPEND_SYSTEM.md (bootstrapped from repo)"
+  printf '\n%s\n' "$MARKER" >> "$APPEND_DST"
+  cat "$APPEND_SRC" >> "$APPEND_DST"
+  ok "~/.pi/agent/APPEND_SYSTEM.md (appended repo block)"
 fi
 
 # ── AGENTS.md ────────────────────────────────────────────────────────────────
