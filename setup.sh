@@ -9,11 +9,12 @@
 #   3. Bootstrap settings.json from template (only on first run — never overwrites)
 #   4. Register pi-env as a pi package in settings.json
 #   5. Set gruvbox as the pi theme in settings.json
-#   6. Symlink AGENTS.md → ~/.pi/agent/AGENTS.md
-#   7. Symlink roles → ~/.agents/roles
-#   8. Source tmux theme from ~/.tmux.conf
-#   9. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
-#  10. Install git post-merge hook
+#   6. Bootstrap APPEND_SYSTEM.md → ~/.pi/agent/APPEND_SYSTEM.md
+#   7. Bootstrap AGENTS.md → ~/.pi/agent/AGENTS.md
+#   8. Symlink roles → ~/.agents/roles
+#   9. Source tmux theme from ~/.tmux.conf
+#  10. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
+#  11. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
@@ -135,6 +136,20 @@ echo "Roles"
 echo "-----"
 mkdir -p "$AGENTS_DIR"
 link_path "$REPO/.agents/roles" "$AGENTS_DIR/roles" "~/.agents/roles"
+
+# ── APPEND_SYSTEM.md ────────────────────────────────────────────────────────
+# ~/.pi/agent/APPEND_SYSTEM.md appends to the system prompt on every session.
+# Bootstrapped once — customize locally, never overwritten by setup.
+
+echo ""
+echo "APPEND_SYSTEM.md"
+echo "----------------"
+if [ -e "$PI_AGENT_DIR/APPEND_SYSTEM.md" ]; then
+  ok "~/.pi/agent/APPEND_SYSTEM.md (exists — not overwritten)"
+else
+  cp "$REPO/APPEND_SYSTEM.md" "$PI_AGENT_DIR/APPEND_SYSTEM.md"
+  ok "~/.pi/agent/APPEND_SYSTEM.md (bootstrapped from repo)"
+fi
 
 # ── AGENTS.md ────────────────────────────────────────────────────────────────
 # ~/.pi/agent/AGENTS.md is managed independently — global behavioral rules
