@@ -1,6 +1,6 @@
 # Pi Capability Map
 
-> Auto-generated from pi v0.63.1. Regenerate: `bash scripts/generate-capability-map.sh`
+> Auto-generated from pi v0.64.0. Regenerate: `bash scripts/generate-capability-map.sh`
 > Navigation aid — not a replacement for docs. Follow doc paths for full details.
 > IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for pi topics. Read the linked doc before implementing.
 
@@ -22,9 +22,9 @@
 ## Customization — four resource types, all shareable via Pi Packages (docs/packages.md)
 
 ### Extensions — TypeScript modules extending pi at runtime
-|capabilities:{custom-tools(pi.registerTool),event-interception(~56 event types · block/modify tool calls, inject context, customize compaction),custom-commands(pi.registerCommand),custom-shortcuts(pi.registerShortcut),custom-ui(TUI components, widgets, overlays, status lines, footers, custom editors → docs/tui.md),session-persistence(pi.appendEntry),custom-rendering(tool calls/results display),custom-providers(pi.registerProvider · OAuth support → docs/custom-provider.md),dynamic-tools(register/unregister at runtime · toggle active set),remote-execution(pluggable ops for SSH, containers, sandboxes),custom-compaction(replace summarization strategy),input-transformation(rewrite user input before processing),inter-extension-events(pi.events shared bus)}
+|capabilities:{custom-tools(pi.registerTool),event-interception(~57 event types · block/modify tool calls, inject context, customize compaction),custom-commands(pi.registerCommand),custom-shortcuts(pi.registerShortcut),custom-ui(TUI components, widgets, overlays, status lines, footers, custom editors → docs/tui.md),session-persistence(pi.appendEntry),custom-rendering(tool calls/results display),custom-providers(pi.registerProvider · OAuth support → docs/custom-provider.md),dynamic-tools(register/unregister at runtime · toggle active set),remote-execution(pluggable ops for SSH, containers, sandboxes),custom-compaction(replace summarization strategy),input-transformation(rewrite user input before processing),inter-extension-events(pi.events shared bus)}
 |locations:{~/.pi/agent/extensions/(global),.pi/extensions/(project),settings.json,CLI -e}
-|doc:docs/extensions.md|examples:66 in examples/extensions/
+|doc:docs/extensions.md|examples:67 in examples/extensions/
 
 ### Skills — on-demand instruction packages (Agent Skills standard · agentskills.io)
 |progressive disclosure: descriptions always in context, full SKILL.md loaded on demand

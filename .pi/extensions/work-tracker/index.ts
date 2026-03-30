@@ -68,6 +68,16 @@ export default function (pi: ExtensionAPI) {
         Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. Ignored for list and clear." }),
       ),
     }),
+    // Compatibility shim: old sessions stored text as a bare string before the
+    // schema changed to Array<string> in pi-env #93. Wrap it so resumed sessions
+    // don't fail schema validation.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    prepareArguments(args: unknown): any {
+      if (!args || typeof args !== "object") return args;
+      const a = args as Record<string, unknown>;
+      if (typeof a.text === "string") return { ...a, text: [a.text] };
+      return args;
+    },
 
     async execute(_id, params, _signal, _onUpdate, ctx: any) {
       const { action, text } = params;
