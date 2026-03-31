@@ -1,6 +1,6 @@
 For files with LSP support, prefer LSP tooling for exploration and navigation over `read` or `bash`.
 
-`ptc` keeps intermediate results out of context; `bash` streams everything back. Use `ptc` for multi-step work, `bash` for single commands.
+`ptc` keeps intermediate results out of context; `bash` streams everything back. Use `ptc` when making 2+ tool calls to gather information — multi-file reads, grep → read chains, explore-before-edit. Use `bash` for single commands.
 
 Never read secrets files (`.env`, credentials, keys) directly into context. Pipe values where needed via `bash`/`ptc` without surfacing them.
 
