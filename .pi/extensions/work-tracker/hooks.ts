@@ -9,12 +9,11 @@
  *   before_agent_start   — context injection (git status + todo list)
  */
 
-import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
 import { isOrchWorker } from "../_shared/context";
 import { setSlot, resetSlots } from "../_shared/ui-render";
 
-import type { BranchGuard } from "./branch-guard";
 import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
 import {
   cleanupHandoffs,
@@ -27,20 +26,9 @@ import type { WorkTrackerConfig } from "./types";
 export function registerHooks(
   pi: ExtensionAPI,
   config: WorkTrackerConfig,
-  guard: BranchGuard,
   store: TodoStore,
 ): void {
-  // ─── 1. Branch Guard ────────────────────────────────────────────────────────
-  pi.on("tool_call", async (event, _ctx) => {
-    if (event.toolName !== "bash") return;
-    const command = (event.input as Record<string, string>).command ?? "";
-    const result = guard.check(command);
-    if (result.shouldBlock) {
-      return { block: true, reason: result.reason } satisfies ToolCallEventResult;
-    }
-  });
-
-  // ─── 2. Handoff cleanup on merge ────────────────────────────────────────────
+  // ─── 1. Handoff cleanup on merge ────────────────────────────────────────────
   pi.on("tool_result", async (event, ctx) => {
     if (event.toolName !== "bash" || event.isError) return;
 

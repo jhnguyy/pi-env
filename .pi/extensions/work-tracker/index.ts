@@ -27,7 +27,6 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 
-import { BranchGuard } from "./branch-guard";
 import { registerCommands } from "./commands";
 import { loadConfig } from "./context";
 import { setSlot } from "../_shared/ui-render";
@@ -40,7 +39,6 @@ const SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
-  const guard = new BranchGuard(config);
   const store = new TodoStore();
 
   // ─── Commands ────────────────────────────────────────────────────────────────
@@ -201,7 +199,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── Hooks ───────────────────────────────────────────────────────────────────
-  registerHooks(pi, config, guard, store);
+  registerHooks(pi, config, store);
 
   // ─── Agent tool registration ─────────────────────────────────────────────────
   // Register todo and read_session as AgentTools so subagents can manage tasks
