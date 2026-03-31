@@ -65,7 +65,7 @@ export default function (pi: ExtensionAPI) {
         { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" },
       ),
       text: Type.Optional(
-        Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. Ignored for list and clear." }),
+        Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. ALWAYS pass as a JSON array — even for a single item. Examples: add [\"my task\"], done [\"1\"], rm [\"2\"]. Ignored for list and clear." }),
       ),
     }),
     // Compatibility shim: old sessions stored text as a bare string before the
@@ -214,29 +214,28 @@ export default function (pi: ExtensionAPI) {
       parameters: Type.Object({
         action: Type.Union([Type.Literal("add"), Type.Literal("done"), Type.Literal("rm"), Type.Literal("list"), Type.Literal("clear")],
           { description: "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset" }),
-        text: Type.Optional(Type.String({ description: "Task text (for add) or task id number (for done/rm)" })),
+        text: Type.Optional(Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. ALWAYS pass as a JSON array — even for a single item. Examples: add [\"my task\"], done [\"1\"]. Ignored for list and clear." })),
       }),
       execute: async (_id, params) => {
         const { action, text } = params;
         if (action === "list") return { content: [{ type: "text", text: store.render() }], details: {} };
         if (action === "clear") { store.clear(); return { content: [{ type: "text", text: "Cleared all tasks." }], details: {} }; }
         if (action === "add") {
-          if (!text) throw new Error("text is required for add");
-          const item = store.add(text);
-          return { content: [{ type: "text", text: `Added: □ (${item.id}) ${item.text}` }], details: { id: item.id } };
+          if (!text?.length) throw new Error("text is required for add");
+          const items = text.map((t: string) => store.add(t));
+          return { content: [{ type: "text", text: items.map((i: any) => `Added: □ (${i.id}) ${i.text}`).join("\n") }], details: { ids: items.map((i: any) => i.id) } };
         }
         if (action === "done") {
-          if (!text) throw new Error("text is required for done");
-          const n = parseInt(text, 10);
-          const item = store.complete(isNaN(n) ? text : n);
-          if (!item) throw new Error(`No matching open task: ${text}`);
-          return { content: [{ type: "text", text: `Completed: ✅ (${item.id}) ${item.text}` }], details: { id: item.id } };
+          if (!text?.length) throw new Error("text is required for done");
+          const completed = text.map((t: string) => { const n = parseInt(t, 10); return store.complete(isNaN(n) ? t : n); }).filter(Boolean);
+          if (!completed.length) throw new Error(`No matching open tasks: ${text.join(", ")}`);
+          return { content: [{ type: "text", text: completed.map((i: any) => `Completed: ✅ (${i.id}) ${i.text}`).join("\n") }], details: { ids: completed.map((i: any) => i.id) } };
         }
         if (action === "rm") {
-          if (!text) throw new Error("text is required for rm");
-          const n = parseInt(text, 10);
-          if (!store.remove(isNaN(n) ? text : n)) throw new Error(`No matching task: ${text}`);
-          return { content: [{ type: "text", text: `Removed task ${text}.` }], details: {} };
+          if (!text?.length) throw new Error("text is required for rm");
+          const removed = text.filter((t: string) => { const n = parseInt(t, 10); return store.remove(isNaN(n) ? t : n); });
+          if (!removed.length) throw new Error(`No matching tasks: ${text.join(", ")}`);
+          return { content: [{ type: "text", text: `Removed task(s): ${removed.join(", ")}.` }], details: {} };
         }
         throw new Error(`Unknown action: ${action}`);
       },
