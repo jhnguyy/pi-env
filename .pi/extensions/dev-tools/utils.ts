@@ -2,7 +2,6 @@
  * Utility functions — position conversion, path normalization, text extraction.
  */
 
-import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 // ─── Position Conversion ─────────────────────────────────────────────────────
@@ -40,74 +39,6 @@ export function relativePath(projectRoot: string, filePath: string): string {
   return rel;
 }
 
-// ─── Text Extraction ─────────────────────────────────────────────────────────
-
-/**
- * Extract lines from a file given a 0-indexed start line and end line (inclusive).
- * Returns null if file cannot be read.
- */
-export function extractLines(
-  filePath: string,
-  startLine: number, // 0-indexed
-  endLine: number,   // 0-indexed, inclusive
-): string | null {
-  try {
-    const content = readFileSync(filePath, "utf8");
-    const lines = content.split("\n");
-    return lines.slice(startLine, endLine + 1).join("\n");
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get a single trimmed line from a file. Returns empty string on error.
- * lineNumber is 1-indexed.
- */
-export function getFileLine(filePath: string, lineNumber: number): string {
-  try {
-    const content = readFileSync(filePath, "utf8");
-    const lines = content.split("\n");
-    return (lines[lineNumber - 1] ?? "").trim();
-  } catch {
-    return "";
-  }
-}
-
-/**
- * Expand a range to include the full declaration block.
- * Starting from startLine (0-indexed), finds a reasonable end by looking for
- * matching braces or end of block. Returns the final 0-indexed end line.
- */
-export function expandToBlock(
-  filePath: string,
-  startLine: number, // 0-indexed
-  givenEndLine: number, // 0-indexed, from LSP
-  maxLines: number = 30,
-): number {
-  try {
-    const content = readFileSync(filePath, "utf8");
-    const lines = content.split("\n");
-
-    // If already multi-line and the LSP gave us a meaningful range, trust it
-    if (givenEndLine > startLine) return Math.min(givenEndLine, startLine + maxLines - 1);
-
-    // Single-line: look for opening brace and match it
-    let depth = 0;
-    let foundOpen = false;
-    for (let i = startLine; i < lines.length && i < startLine + maxLines; i++) {
-      for (const ch of lines[i]!) {
-        if (ch === "{") { depth++; foundOpen = true; }
-        if (ch === "}") { depth--; }
-      }
-      if (foundOpen && depth === 0) return i;
-    }
-
-    return Math.min(startLine + maxLines - 1, lines.length - 1);
-  } catch {
-    return givenEndLine;
-  }
-}
 
 // ─── LSP Symbol Kind → Label ─────────────────────────────────────────────────
 

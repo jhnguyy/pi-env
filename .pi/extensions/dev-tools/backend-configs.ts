@@ -5,7 +5,7 @@
  * 1. Add a BackendConfig entry to BACKEND_CONFIGS
  * 2. That's it — daemon constructs the backend, filetypes derives support
  */
-import { STANDARD_CAPABILITIES } from "./backend";
+import { extname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +29,23 @@ export interface BackendConfig {
 }
 
 // ─── Per-backend LSP capabilities ─────────────────────────────────────────────
+
+/** Baseline LSP capabilities shared across most backends. */
+export const STANDARD_CAPABILITIES = {
+  textDocument: {
+    hover: { contentFormat: ["plaintext"] },
+    definition: {},
+    implementation: {},
+    references: {},
+    callHierarchy: { dynamicRegistration: false },
+    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
+    publishDiagnostics: { relatedInformation: false },
+  },
+  workspace: {
+    workspaceFolders: true,
+    symbol: {},
+  },
+};
 
 const TS_CAPABILITIES = {
   ...STANDARD_CAPABILITIES,
@@ -111,14 +128,12 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   },
 ];
 
-// ─── Derived sets (used by filetypes.ts for client-side gate) ─────────────────
+// ─── Derived sets (client-side gate) ──────────────────────────────────────────
 
 /** All file extensions supported by any backend. */
 export const ALL_SUPPORTED_EXTENSIONS = new Set(
   BACKEND_CONFIGS.flatMap(c => [...c.extensions.keys()]),
 );
-
-import { extname } from "node:path";
 
 /** True if any backend can handle this file (LSP diagnostics available). */
 export function isLspSupported(path: string): boolean {

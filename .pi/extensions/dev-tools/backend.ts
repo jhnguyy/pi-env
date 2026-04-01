@@ -24,23 +24,6 @@ import type { BackendConfig } from "./backend-configs";
 export const LSP_INIT_TIMEOUT_MS = 10_000;
 export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 
-// ─── LSP Capabilities ─────────────────────────────────────────────────────────
-
-export const STANDARD_CAPABILITIES = {
-  textDocument: {
-    hover: { contentFormat: ["plaintext"] },
-    definition: {},
-    implementation: {},
-    references: {},
-    callHierarchy: { dynamicRegistration: false },
-    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
-    publishDiagnostics: { relatedInformation: false },
-  },
-  workspace: {
-    workspaceFolders: true,
-    symbol: {},
-  },
-};
 
 // ─── Binary discovery ─────────────────────────────────────────────────────────
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
 import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, SymbolsResult, StatusResult } from "../protocol";
+import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
 
 // ─── Mock theme ──────────────────────────────────────────────────────────────
 
