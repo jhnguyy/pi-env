@@ -45,15 +45,15 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
   // ─── MockedDaemon: replaces LSP subprocess with an in-process mock ────────
 
   /**
-   * Create a LspDaemon with the TypeScript backend's LSP subprocess mocked out.
-   * Patches tsBackend directly since diagnostics, lspRequest, etc. now live there.
+   * Create a LspDaemon with the first backend's LSP subprocess mocked out.
+   * Patches backends[0] (typescript) directly since diagnostics, lspRequest, etc. live there.
    */
   function createMockedDaemon(
     lspResponses: Map<string, any> = new Map(),
     diagsByUri: Map<string, any[]> = new Map(),
   ): LspDaemon {
     const d = new LspDaemon(socketPath, pidPath, 60_000);
-    const tsBackend = (d as any).tsBackend;
+    const tsBackend = (d as any).backends[0];
 
     // Mark TypeScript backend as ready without spawning a real process
     tsBackend.lspReady = true;
@@ -448,7 +448,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
   describe("onDiagnostics (internal)", () => {
     it("caches diagnostics by URI", () => {
       daemon = createMockedDaemon();
-      const tsBackend = (daemon as any).tsBackend;
+      const tsBackend = (daemon as any).backends[0];
       const uri = "file:///test.ts";
 
       (tsBackend as any).onDiagnostics({
@@ -470,7 +470,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
     it("truncates diagnostic message at 200 characters", () => {
       daemon = createMockedDaemon();
-      const tsBackend = (daemon as any).tsBackend;
+      const tsBackend = (daemon as any).backends[0];
       const uri = "file:///test.ts";
       const longMsg = "A".repeat(250);
 
@@ -487,7 +487,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
     it("does not truncate messages under 200 characters", () => {
       daemon = createMockedDaemon();
-      const tsBackend = (daemon as any).tsBackend;
+      const tsBackend = (daemon as any).backends[0];
       const uri = "file:///test2.ts";
       const msg = "Type 'number' is not assignable to type 'string'. Did you mean 'foo'?";
 

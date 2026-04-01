@@ -13,14 +13,9 @@ import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DaemonRequest, DiagnosticsResult, SymbolsResult, LspAction } from "./protocol";
-import { isLspSupported, isTypeScript, isHcl } from "./filetypes";
-import { execFile } from "child_process";
-import { promisify } from "util";
+import { isLspSupported } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
-
-const execFileAsync = promisify(execFile);
-import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
 
 // ─── Actions that require exactly one path ──────────────────────────────────
 const SINGLE_PATH_ACTIONS = new Set<string>([
@@ -50,28 +45,9 @@ function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest
   return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
 }
 
-// ─── hclfmt check ───────────────────────────────────────────────────────────
-// Runs `hclfmt -check <path>` after editing .hcl files. Exit 0 = already
-// formatted (silent). Non-zero = formatting diff or syntax error (reported).
-// ENOENT (hclfmt not installed) is silently ignored.
-async function runHclfmtCheck(filePath: string): Promise<string | null> {
-  try {
-    await execFileAsync("hclfmt", ["-check", filePath]);
-    return null; // formatted correctly
-  } catch (err: unknown) {
-    const e = err as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    if (e.code === "ENOENT") return null; // hclfmt not installed — skip
-    const output = (e.stderr ?? e.stdout ?? "").trim();
-    return output
-      ? `⚠ hclfmt:\n${output}`
-      : "⚠ hclfmt: file needs formatting — run hclfmt to fix";
-  }
-}
-
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
-  const hintState = createHintState();
-  let pendingHint: string | null = null;
+  const pendingValidationFiles = new Set<string>();
 
   // ─── dev-tools tool ─────────────────────────────────────────────────────
 
@@ -81,7 +57,6 @@ export default function (pi: ExtensionAPI) {
     "document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Also runs hclfmt automatically after editing .hcl files (if hclfmt is on PATH). " +
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = Type.Object({
@@ -116,8 +91,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", () => {
-    resetHintState(hintState);
-    pendingHint = null;
+    pendingValidationFiles.clear();
 
     // Register dev-tools as an AgentTool so subagents can use it
     const agentTool: AgentTool<any, any> = {
@@ -139,7 +113,7 @@ export default function (pi: ExtensionAPI) {
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
       "go-to-implementation, find-references, incoming/outgoing call hierarchy, symbols. " +
       "Use instead of grep chains for type-aware or shell-aware code navigation. " +
-      "Also supports nil (for .nix files), bash-language-server (for .sh/.bash), and hclfmt (for .hcl).",
+      "Also supports nil (for .nix files) and bash-language-server (for .sh/.bash).",
 
     promptGuidelines: [
       "Prefer dev-tools over grep/read for ALL code navigation in TypeScript codebases. dev-tools is faster, precise, and avoids reading entire files.",
@@ -151,11 +125,8 @@ export default function (pi: ExtensionAPI) {
       "To understand a type, signature, or overload at a usage site: dev-tools hover — not reading the declaration file.",
       "To orient in an unfamiliar file: dev-tools symbols — not reading top-to-bottom.",
       "Before renaming or changing a function signature, use dev-tools references or incoming-calls to find all call sites first.",
-      "After editing a .ts file, dev-tools diagnostics runs automatically — check it before proceeding.",
-      "After editing a .sh/.bash file, dev-tools diagnostics surfaces shellcheck warnings automatically.",
-      "After editing a .nix file, dev-tools diagnostics surfaces nil errors automatically (requires nil on PATH).",
-      "After editing a .hcl file, hclfmt -check runs automatically if hclfmt is on PATH — formatting issues are reported.",
-      "Diagnostic errors mid-refactor are expected; finish the plan, then fix at the end.",
+      "After the agent finishes, all edited files are automatically checked for diagnostics. If errors are found, the agent is re-engaged to triage.",
+      "Diagnostic errors mid-refactor are expected; finish the plan — diagnostics run at the end.",
       "dev-tools uses 1-indexed lines and characters, matching read tool output.",
       "Use grep/rg only for text/pattern searches (comments, strings, config values) where LSP cannot help.",
     ],
@@ -175,21 +146,21 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ─── Auto-diagnostics + hint hook ───────────────────────────────────────
+  // ─── tool_result hook: symbol enrichment + file accumulation ───────────
 
   pi.on("tool_result", async (event) => {
     const { toolName, input } = event;
     const inp = input as Record<string, unknown> | null | undefined;
 
-    // ─── Symbol-enriched reads (.ts files, full-file only) ──────────────
-    // When reading a TS file without offset/limit, prepend a compact symbol
-    // outline so the model sees the file's structure without a separate call.
+    // ─── Symbol-enriched reads (full-file only) ─────────────────────────
+    // When reading an LSP-supported file without offset/limit, prepend a
+    // compact symbol outline so the model sees file structure at a glance.
     if (toolName === "read" && !event.isError) {
       const path = typeof inp?.path === "string" ? inp.path : undefined;
       const hasOffset = inp?.offset != null;
       const hasLimit = inp?.limit != null;
 
-      if (path && isTypeScript(path) && !hasOffset && !hasLimit) {
+      if (path && isLspSupported(path) && !hasOffset && !hasLimit) {
         try {
           const SYMBOL_TIMEOUT_MS = 500;
           const result = await Promise.race([
@@ -219,77 +190,46 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ─── Post-edit checks (edit/write only) ─────────────────────────────
+    // ─── Accumulate edited files for deferred validation ────────────────
+    // Collect paths during the agent run; validate all at agent_end.
     if ((toolName === "edit" || toolName === "write") && !event.isError) {
       const path: string | undefined =
         typeof inp?.path === "string" ? inp.path :
         typeof inp?.file_path === "string" ? inp.file_path :
         undefined;
 
-      // ─── LSP diagnostics (.ts, .sh, .nix, …) ───────────────────────
-      // Race the daemon call against a short timeout. If the LSP responds
-      // quickly (diagnostics already cached), results are appended inline.
-      // Otherwise skip — the cache will be warm for the next explicit call.
       if (path && isLspSupported(path)) {
-        try {
-          const AUTO_DIAG_TIMEOUT_MS = 300;
-          const result = await Promise.race([
-            client.call({ action: "diagnostics", path }),
-            new Promise<null>((r) => setTimeout(() => r(null), AUTO_DIAG_TIMEOUT_MS)),
-          ]);
-          if (result) {
-            const diags = result as DiagnosticsResult;
-            const summary = formatDiagnosticsSummary(diags, 5);
-            if (summary) {
-              const first = event.content?.[0];
-              const existing = first?.type === "text" ? first.text : "";
-              return {
-                content: [{ type: "text", text: existing ? `${existing}\n\n${summary}` : summary }],
-              };
-            }
-          }
-        } catch {
-          // Non-fatal — diagnostics are best-effort
-        }
+        pendingValidationFiles.add(path);
       }
-
-      // ─── hclfmt check (.hcl) ────────────────────────────────────────
-      if (path && isHcl(path)) {
-        try {
-          const msg = await runHclfmtCheck(path);
-          if (msg) {
-            const first = event.content?.[0];
-            const existing = first?.type === "text" ? first.text : "";
-            return {
-              content: [{ type: "text", text: existing ? `${existing}\n\n${msg}` : msg }],
-            };
-          }
-        } catch {
-          // Non-fatal
-        }
-      }
-    }
-
-    // ─── LSP hint detection (all tools) ─────────────────────────────────
-    // Queue hint for delivery at the next decision boundary (before_agent_start)
-    // instead of appending to tool output where it gets buried.
-    const hint = detectDevToolsHint(toolName, inp, hintState);
-    if (hint) {
-      pendingHint = hint;
     }
   });
 
-  // ─── Deliver queued LSP hints at the decision boundary ────────────────
-  pi.on("before_agent_start", async () => {
-    if (!pendingHint) return {};
-    const hint = pendingHint;
-    pendingHint = null;
-    return {
-      message: {
-        customType: "dev-tools-hint",
-        content: hint,
-        display: false,
-      },
-    };
+  // ─── Deferred validation at agent_end ──────────────────────────────────
+  // When the model signals completion, validate all edited files in bulk.
+  // If errors are found, re-engage the model with triggerTurn so it can triage.
+  pi.on("agent_end", async () => {
+    const files = [...pendingValidationFiles];
+    pendingValidationFiles.clear();
+    if (files.length === 0) return;
+
+    try {
+      const result = await client.call({ action: "diagnostics", paths: files });
+      if (result) {
+        const diags = result as DiagnosticsResult;
+        const summary = formatDiagnosticsSummary(diags, 10);
+        if (summary) {
+          pi.sendMessage(
+            {
+              customType: "dev-tools-diagnostics",
+              content: `[post-edit diagnostics]\n${summary}`,
+              display: true,
+            },
+            { triggerTurn: true },
+          );
+        }
+      }
+    } catch {
+      // Non-fatal — diagnostics are best-effort
+    }
   });
 }
