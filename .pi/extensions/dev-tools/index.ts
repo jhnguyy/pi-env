@@ -12,7 +12,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DaemonRequest, DiagnosticsResult, SymbolsResult, LspAction } from "./protocol";
+import type { DaemonRequest, DiagnosticsResult, LspAction } from "./protocol";
 import { isLspSupported } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
@@ -146,49 +146,11 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ─── tool_result hook: symbol enrichment + file accumulation ───────────
+  // ─── tool_result hook: file accumulation ──────────────────────────────────
 
   pi.on("tool_result", async (event) => {
     const { toolName, input } = event;
     const inp = input as Record<string, unknown> | null | undefined;
-
-    // ─── Symbol-enriched reads (full-file only) ─────────────────────────
-    // When reading an LSP-supported file without offset/limit, prepend a
-    // compact symbol outline so the model sees file structure at a glance.
-    if (toolName === "read" && !event.isError) {
-      const path = typeof inp?.path === "string" ? inp.path : undefined;
-      const hasOffset = inp?.offset != null;
-      const hasLimit = inp?.limit != null;
-
-      if (path && isLspSupported(path) && !hasOffset && !hasLimit) {
-        try {
-          const SYMBOL_TIMEOUT_MS = 500;
-          const result = await Promise.race([
-            client.call({ action: "symbols", path }),
-            new Promise<null>((r) => setTimeout(() => r(null), SYMBOL_TIMEOUT_MS)),
-          ]);
-          if (result && result.action === "symbols") {
-            const symbols = result as SymbolsResult;
-            if (symbols.total > 0) {
-              const outline = symbols.items
-                .map((s) => {
-                  const detail = s.detail ? `: ${s.detail}` : "";
-                  return `L${s.line} ${s.kind} ${s.name}${detail}`;
-                })
-                .join("\n");
-              const header = `[${symbols.total} symbols]\n${outline}\n---\n`;
-              const first = event.content?.[0];
-              const existing = first?.type === "text" ? first.text : "";
-              return {
-                content: [{ type: "text", text: `${header}${existing}` }],
-              };
-            }
-          }
-        } catch {
-          // Non-fatal — symbol enrichment is best-effort
-        }
-      }
-    }
 
     // ─── Accumulate edited files for deferred validation ────────────────
     // Collect paths during the agent run; validate all at agent_end.
