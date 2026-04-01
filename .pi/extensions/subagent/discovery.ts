@@ -44,6 +44,7 @@ export const STATIC_DESCRIPTION = [
   "",
   "Two modes:",
   '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
+  '     If the agent file omits model, you MUST pass model explicitly: subagent({ agent: "scout", task: "...", model: "provider/id" })',
   '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
   "",
   ...formatToolList(),
@@ -66,6 +67,7 @@ export function buildDynamicDescription(
     "",
     "Two modes:",
     '  1. Agent file: subagent({ agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
+    '     If the agent file omits model, you MUST pass model explicitly: subagent({ agent: "scout", task: "...", model: "provider/id" })',
     '  2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
     "",
     ...formatToolList(extToolNames, extToolCaps),
@@ -94,7 +96,7 @@ export function buildDynamicDescription(
       const meta: string[] = [];
       if (a.capabilities?.length) meta.push(`capabilities: ${a.capabilities.join(", ")}`);
       if (a.tools?.length) meta.push(`tools: ${a.tools.join(", ")}`);
-      if (a.model) meta.push(`model: ${a.model}`);
+      meta.push(a.model ? `model: ${a.model}` : `model: REQUIRED — pass model param`);
       if (meta.length > 0) parts.push(`[${meta.join(" | ")}]`);
       lines.push(`  ${parts.join(" ")}`);
     }
