@@ -2,9 +2,8 @@
  * Utility functions — position conversion, path normalization, text extraction.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
-import { isTypeScript } from "./filetypes";
+import { readFileSync } from "node:fs";
+import { relative, resolve } from "node:path";
 
 // ─── Position Conversion ─────────────────────────────────────────────────────
 
@@ -28,29 +27,6 @@ export function pathToUri(path: string): string {
 /** Convert a URI to a file path. */
 export function uriToPath(uri: string): string {
   return uri.replace(/^file:\/\//, "");
-}
-
-/**
- * Find the project root for a given file path.
- * Walks up the directory tree looking for tsconfig.json or jsconfig.json.
- * Returns null if none found.
- */
-export function findProjectRoot(filePath: string): string | null {
-  let dir = existsSync(filePath) && !isTypeScript(filePath)
-    ? filePath
-    : dirname(filePath);
-
-  while (true) {
-    if (
-      existsSync(resolve(dir, "tsconfig.json")) ||
-      existsSync(resolve(dir, "jsconfig.json"))
-    ) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return null; // filesystem root
-    dir = parent;
-  }
 }
 
 /**

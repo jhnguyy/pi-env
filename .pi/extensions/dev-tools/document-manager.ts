@@ -8,10 +8,9 @@
  * - Generate textDocument/didOpen, didChange, didClose notifications
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { findProjectRoot, pathToUri } from "./utils";
-import { getLanguageId } from "./filetypes";
+import { pathToUri } from "./utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +43,13 @@ export class DocumentManager {
   /** Monotonic counter for LRU tracking. */
   private accessCounter = 0;
 
+  constructor(
+    /** Resolve a file path to its LSP languageId. Provided by the owning backend. */
+    private resolveLanguageId: (path: string) => string,
+    /** Resolve a file path to its project root, or null. Provided by the owning backend. */
+    private resolveProjectRoot: (path: string) => string | null,
+  ) {}
+
   /**
    * Open or refresh a document. If the document is already open with the same
    * content, returns null (no LSP notification needed). Otherwise returns the
@@ -65,7 +71,7 @@ export class DocumentManager {
 
     const uri = pathToUri(abs);
     const projectRoot = this.getProjectRoot(abs);
-    const languageId = getLanguageId(abs);
+    const languageId = this.resolveLanguageId(abs);
     const existing = this.openDocs.get(uri);
     const isNewRoot = !this.projectFiles.has(projectRoot);
 
@@ -145,7 +151,7 @@ export class DocumentManager {
     const cached = this.rootCache.get(abs);
     if (cached) return cached;
 
-    const root = findProjectRoot(abs) ?? dirname(abs);
+    const root = this.resolveProjectRoot(abs) ?? dirname(abs);
     this.rootCache.set(abs, root);
     return root;
   }

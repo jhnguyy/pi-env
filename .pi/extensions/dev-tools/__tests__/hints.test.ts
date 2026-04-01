@@ -3,12 +3,9 @@
  */
 
 import { describe, expect, it, beforeEach } from "bun:test";
-import {
-  isLspSupported,
-  isTypeScript,
-  isBashScript,
-  getLanguageId,
-} from "../filetypes";
+import { isLspSupported } from "../filetypes";
+import { BACKEND_CONFIGS } from "../backend-configs";
+import { LspBackend } from "../backend";
 import {
   createHintState,
   resetHintState,
@@ -72,61 +69,42 @@ describe("filetypes", () => {
     });
   });
 
-  describe("isTypeScript", () => {
-    it("returns true for .ts", () => expect(isTypeScript("foo.ts")).toBe(true));
-    it("returns true for .tsx", () => expect(isTypeScript("foo.tsx")).toBe(true));
-    it("returns true for .js", () => expect(isTypeScript("foo.js")).toBe(true));
-    it("returns true for .jsx", () => expect(isTypeScript("foo.jsx")).toBe(true));
-    it("returns true for .mts", () => expect(isTypeScript("foo.mts")).toBe(true));
-    it("returns true for .cts", () => expect(isTypeScript("foo.cts")).toBe(true));
-    it("returns true for .mjs", () => expect(isTypeScript("foo.mjs")).toBe(true));
-    it("returns true for .cjs", () => expect(isTypeScript("foo.cjs")).toBe(true));
-    it("returns false for .sh", () => expect(isTypeScript("foo.sh")).toBe(false));
-    it("returns false for .md", () => expect(isTypeScript("foo.md")).toBe(false));
-  });
+  describe("LspBackend.handles and getLanguageId (via configs)", () => {
+    const backends = BACKEND_CONFIGS.map((c) => new LspBackend(c));
+    const getBackend = (path: string) => backends.find((b) => b.handles(path));
 
-  describe("isBashScript", () => {
-    it("returns true for .sh", () => expect(isBashScript("foo.sh")).toBe(true));
-    it("returns true for .bash", () => expect(isBashScript("foo.bash")).toBe(true));
-    it("returns true for .zsh", () => expect(isBashScript("foo.zsh")).toBe(true));
-    it("returns true for .ksh", () => expect(isBashScript("foo.ksh")).toBe(true));
-    it("returns false for .ts", () => expect(isBashScript("foo.ts")).toBe(false));
-    it("returns false for .md", () => expect(isBashScript("foo.md")).toBe(false));
-  });
-
-  describe("getLanguageId", () => {
-    it("returns typescriptreact for .tsx", () => {
-      expect(getLanguageId("foo.tsx")).toBe("typescriptreact");
+    it("typescript backend handles .ts", () => {
+      const b = getBackend("foo.ts");
+      expect(b?.name).toBe("typescript");
+      expect(b?.getLanguageId("foo.ts")).toBe("typescript");
     });
-    it("returns javascriptreact for .jsx", () => {
-      expect(getLanguageId("foo.jsx")).toBe("javascriptreact");
+    it("typescript backend returns typescriptreact for .tsx", () => {
+      expect(getBackend("foo.tsx")?.getLanguageId("foo.tsx")).toBe("typescriptreact");
     });
-    it("returns typescript for .ts", () => {
-      expect(getLanguageId("foo.ts")).toBe("typescript");
+    it("typescript backend returns javascript for .js", () => {
+      expect(getBackend("foo.js")?.getLanguageId("foo.js")).toBe("javascript");
     });
-    it("returns typescript for .mts", () => {
-      expect(getLanguageId("foo.mts")).toBe("typescript");
+    it("typescript backend returns javascriptreact for .jsx", () => {
+      expect(getBackend("foo.jsx")?.getLanguageId("foo.jsx")).toBe("javascriptreact");
     });
-    it("returns typescript for .cts", () => {
-      expect(getLanguageId("foo.cts")).toBe("typescript");
+    it("bash backend handles .sh", () => {
+      const b = getBackend("foo.sh");
+      expect(b?.name).toBe("bash");
+      expect(b?.getLanguageId("foo.sh")).toBe("shellscript");
     });
-    it("returns shellscript for .sh", () => {
-      expect(getLanguageId("foo.sh")).toBe("shellscript");
+    it("bash backend handles .bash", () => {
+      expect(getBackend("foo.bash")?.name).toBe("bash");
     });
-    it("returns shellscript for .bash", () => {
-      expect(getLanguageId("foo.bash")).toBe("shellscript");
+    it("nil backend handles .nix", () => {
+      const b = getBackend("foo.nix");
+      expect(b?.name).toBe("nil");
+      expect(b?.getLanguageId("foo.nix")).toBe("nix");
     });
-    it("returns shellscript for .zsh", () => {
-      expect(getLanguageId("foo.zsh")).toBe("shellscript");
+    it("no backend handles .md", () => {
+      expect(getBackend("foo.md")).toBeUndefined();
     });
-    it("returns javascript for .js", () => {
-      expect(getLanguageId("foo.js")).toBe("javascript");
-    });
-    it("returns javascript for .mjs", () => {
-      expect(getLanguageId("foo.mjs")).toBe("javascript");
-    });
-    it("returns javascript for .cjs", () => {
-      expect(getLanguageId("foo.cjs")).toBe("javascript");
+    it("no backend handles .py", () => {
+      expect(getBackend("foo.py")).toBeUndefined();
     });
   });
 });

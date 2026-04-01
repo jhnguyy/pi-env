@@ -26,7 +26,7 @@ import type { LspBackend } from "./backend";
 
 export interface HandlerDeps {
   getBackend: (filePath: string) => LspBackend;
-  tsBackend: LspBackend;
+  getWorkspaceSymbolBackends: () => LspBackend[];
   backends: LspBackend[];
   fileCache: FileCache;
   /** Returns ms since last activity *before* the current request. */
@@ -159,7 +159,7 @@ export async function handleDefinition(req: DaemonRequest, deps: HandlerDeps): P
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
   const pos = toZeroBased(req.line, req.character);
-  const projectRoot = backend.docManager.getProjectRoot(req.path);
+  const projectRoot = backend.getProjectRoot(req.path);
 
   const lspRes = await backend.lspRequest("textDocument/definition", {
     textDocument: { uri },
@@ -208,7 +208,7 @@ export async function handleImplementation(req: DaemonRequest, deps: HandlerDeps
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
   const pos = toZeroBased(req.line, req.character);
-  const projectRoot = backend.docManager.getProjectRoot(req.path);
+  const projectRoot = backend.getProjectRoot(req.path);
 
   const lspRes = await backend.lspRequest("textDocument/implementation", {
     textDocument: { uri },
@@ -257,7 +257,7 @@ export async function handleIncomingCalls(req: DaemonRequest, deps: HandlerDeps)
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
   const pos = toZeroBased(req.line, req.character);
-  const projectRoot = backend.docManager.getProjectRoot(req.path);
+  const projectRoot = backend.getProjectRoot(req.path);
 
   // Step 1: prepare call hierarchy item at position
   const prepareRes = await backend.lspRequest("textDocument/prepareCallHierarchy", {
@@ -326,7 +326,7 @@ export async function handleOutgoingCalls(req: DaemonRequest, deps: HandlerDeps)
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
   const pos = toZeroBased(req.line, req.character);
-  const projectRoot = backend.docManager.getProjectRoot(req.path);
+  const projectRoot = backend.getProjectRoot(req.path);
 
   // Step 1: prepare call hierarchy item at position
   const prepareRes = await backend.lspRequest("textDocument/prepareCallHierarchy", {
@@ -395,7 +395,7 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
   const pos = toZeroBased(req.line, req.character);
-  const projectRoot = backend.docManager.getProjectRoot(req.path);
+  const projectRoot = backend.getProjectRoot(req.path);
 
   const lspRes = await backend.lspRequest("textDocument/references", {
     textDocument: { uri },
@@ -441,7 +441,7 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
   if (req.path) {
     const backend = deps.getBackend(req.path);
     const uri = await backend.ensureFile(req.path);
-    const projectRoot = backend.docManager.getProjectRoot(req.path);
+    const projectRoot = backend.getProjectRoot(req.path);
 
     const lspRes = await backend.lspRequest("textDocument/documentSymbol", {
       textDocument: { uri },
@@ -460,13 +460,21 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
   }
 
   if (req.query) {
-    await deps.tsBackend.ensureReady();
-    const lspRes = await deps.tsBackend.lspRequest("workspace/symbol", { query: req.query });
-    const raw = (lspRes?.result ?? []) as any[];
+    const wsBackends = deps.getWorkspaceSymbolBackends();
+    if (wsBackends.length === 0) return errorResponse(req.id, "No backends support workspace/symbol");
 
-    const items: SymbolItem[] = raw.slice(0, MAX).map((s) => {
+    // Query all capable backends and merge results
+    const allRaw: any[] = [];
+    for (const b of wsBackends) {
+      await b.ensureReady();
+      const lspRes = await b.lspRequest("workspace/symbol", { query: req.query });
+      allRaw.push(...((lspRes?.result ?? []) as any[]));
+    }
+
+    const items: SymbolItem[] = allRaw.slice(0, MAX).map((s) => {
       const symPath = uriToPath(s.location.uri);
-      const root = deps.tsBackend.docManager.getProjectRoot(symPath);
+      const owningBackend = deps.backends.find((b) => b.handles(symPath)) ?? wsBackends[0];
+      const root = owningBackend.getProjectRoot(symPath);
       return {
         line: s.location.range.start.line + 1,
         name: s.name,
@@ -479,9 +487,9 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
     return okResponse(req.id, {
       action: "symbols",
       query: req.query,
-      total: raw.length,
+      total: allRaw.length,
       items,
-      truncated: raw.length > MAX,
+      truncated: allRaw.length > MAX,
     } as SymbolsResult);
   }
 

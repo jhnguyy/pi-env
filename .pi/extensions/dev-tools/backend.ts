@@ -10,13 +10,14 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { extname, resolve as resolvePath } from "node:path";
+import { dirname, extname, resolve as resolvePath } from "node:path";
 
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
+import type { BackendConfig } from "./backend-configs";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -77,31 +78,69 @@ export class LspBackend {
   private pendingLsp = new Map<number, { resolve: (msg: LspMessage) => void; reject: (err: Error) => void }>();
 
   readonly diagnostics = new DiagnosticsCache();
-  readonly docManager = new DocumentManager();
+  private readonly docManager: DocumentManager;
 
   private started = false;
   private startPromise: Promise<void> | null = null;
   /** Cached unavailability reason — set when binary not found; prevents repeated PATH scans. */
   private unavailable: string | null = null;
 
-  constructor(
-    /** Display name, e.g. "typescript" or "bash" */
-    readonly name: string,
-    /** Binary to find + spawn, e.g. "typescript-language-server" */
-    private binaryName: string,
-    /** Args for the binary, e.g. ["--stdio"] or ["start"] */
-    private binaryArgs: string[],
-    /** File extensions this backend handles, e.g. new Set([".ts", ".tsx"]) */
-    readonly extensions: Set<string>,
-    /** LSP initialize capabilities object */
-    private lspCapabilities: object,
-    /** Prefix for diagnostic codes, e.g. "TS" for TypeScript (code 2339 → "TS2339") */
-    private codePrefix: string,
-  ) {}
+  /** Display name, e.g. "typescript" or "bash" */
+  readonly name: string;
+  private readonly binaryName: string;
+  private readonly binaryArgs: string[];
+  /** File extension → LSP languageId */
+  private readonly extensionMap: Map<string, string>;
+  private readonly lspCapabilities: object;
+  private readonly codePrefix: string;
+  private readonly rootMarkers: string[];
+  readonly supportsWorkspaceSymbols: boolean;
+
+  constructor(config: BackendConfig) {
+    this.name = config.name;
+    this.binaryName = config.binaryName;
+    this.binaryArgs = config.binaryArgs;
+    this.extensionMap = config.extensions;
+    this.lspCapabilities = config.capabilities;
+    this.codePrefix = config.codePrefix;
+    this.rootMarkers = config.rootMarkers;
+    this.supportsWorkspaceSymbols = config.supportsWorkspaceSymbols;
+    this.docManager = new DocumentManager(
+      (path) => this.getLanguageId(path),
+      (path) => this.findProjectRoot(path),
+    );
+  }
 
   /** Returns true if this backend handles the given file path (by extension). */
   handles(filePath: string): boolean {
-    return this.extensions.has(extname(filePath));
+    return this.extensionMap.has(extname(filePath));
+  }
+
+  /** Get the LSP languageId for a file path. */
+  getLanguageId(filePath: string): string {
+    return this.extensionMap.get(extname(filePath)) ?? this.name;
+  }
+
+  /**
+   * Find the project root for a file by walking up the directory tree
+   * looking for this backend's root markers. Returns null if none found.
+   */
+  findProjectRoot(filePath: string): string | null {
+    if (this.rootMarkers.length === 0) return null;
+    let dir = dirname(filePath);
+    while (true) {
+      for (const marker of this.rootMarkers) {
+        if (existsSync(resolvePath(dir, marker))) return dir;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) return null; // filesystem root
+      dir = parent;
+    }
+  }
+
+  /** Get the project root for a file (cached via DocumentManager). */
+  getProjectRoot(filePath: string): string {
+    return this.docManager.getProjectRoot(filePath);
   }
 
   get isRunning(): boolean { return this.lspReady; }
@@ -124,7 +163,7 @@ export class LspBackend {
     const bin = await findBinary(this.binaryName);
     if (!bin) {
       this.unavailable = `${this.name} language server (${this.binaryName}) is not installed — ` +
-        `.${this.extensions.values().next().value?.slice(1) ?? this.name} language intelligence unavailable`;
+        `.${this.extensionMap.keys().next().value?.slice(1) ?? this.name} language intelligence unavailable`;
       console.warn(`[dev-tools-daemon] WARNING: ${this.unavailable}`);
       throw new Error(this.unavailable);
     }

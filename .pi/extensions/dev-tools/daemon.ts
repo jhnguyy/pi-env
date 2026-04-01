@@ -23,14 +23,14 @@
 import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
-import { LspBackend, STANDARD_CAPABILITIES } from "./backend";
+import { LspBackend } from "./backend";
+import { BACKEND_CONFIGS } from "./backend-configs";
 import { FileCache } from "./file-cache";
 import { type HandlerDeps } from "./handlers";
 import { getAction } from "./action-registry";
 import "./register-actions"; // side-effect: populates the action registry
-import { TS_EXTENSIONS, BASH_EXTENSIONS, NIX_EXTENSIONS } from "./filetypes";
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
-import type { DaemonRequest, DaemonResponse, LspAction, StatusResult } from "./protocol";
+import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -40,49 +40,10 @@ const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
 
 // ─── Per-backend LSP capabilities ─────────────────────────────────────────────
 
-const TS_CAPABILITIES = {
-  ...STANDARD_CAPABILITIES,
-  textDocument: {
-    ...STANDARD_CAPABILITIES.textDocument,
-    implementation: {},
-    callHierarchy: { dynamicRegistration: false },
-  },
-};
-
-// Bash and Nix servers don't support call hierarchy or implementation
-const BASH_CAPABILITIES = {
-  textDocument: {
-    hover: { contentFormat: ["plaintext"] },
-    definition: {},
-    references: {},
-    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
-    publishDiagnostics: { relatedInformation: false },
-  },
-  workspace: {
-    workspaceFolders: true,
-  },
-};
-
-const NIX_CAPABILITIES = {
-  textDocument: {
-    hover: { contentFormat: ["plaintext"] },
-    definition: {},
-    references: {},
-    documentSymbol: { hierarchicalDocumentSymbolSupport: false },
-    publishDiagnostics: { relatedInformation: false },
-  },
-  workspace: {
-    workspaceFolders: true,
-    symbol: {},
-  },
-};
-
 // ─── LspDaemon ───────────────────────────────────────────────────────────────
 
 export class LspDaemon {
   private backends: LspBackend[];
-  /** TypeScript backend — also handles workspace/symbol queries */
-  private tsBackend: LspBackend;
   private server: Server | null = null;
   private fileCache = new FileCache();
 
@@ -96,24 +57,19 @@ export class LspDaemon {
     private pidPath = PID_PATH,
     private idleTimeoutMs = IDLE_TIMEOUT_MS,
   ) {
-    this.tsBackend = new LspBackend(
-      "typescript", "typescript-language-server", ["--stdio"],
-      TS_EXTENSIONS, TS_CAPABILITIES, "TS",
-    );
-    const bashBackend = new LspBackend(
-      "bash", "bash-language-server", ["start"],
-      BASH_EXTENSIONS, BASH_CAPABILITIES, "",
-    );
-    const nilBackend = new LspBackend(
-      "nil", "nil", [],
-      NIX_EXTENSIONS, NIX_CAPABILITIES, "",
-    );
-    this.backends = [this.tsBackend, bashBackend, nilBackend];
+    this.backends = BACKEND_CONFIGS.map((config) => new LspBackend(config));
   }
 
-  /** Return the backend that handles this file, falling back to TypeScript. */
+  /** Return the backend that handles this file. Throws if no backend matches. */
   private getBackend(filePath: string): LspBackend {
-    return this.backends.find((b) => b.handles(filePath)) ?? this.tsBackend;
+    const backend = this.backends.find((b) => b.handles(filePath));
+    if (!backend) throw new Error(`No language server configured for: ${filePath}`);
+    return backend;
+  }
+
+  /** Return backends that support workspace/symbol queries. */
+  private getWorkspaceSymbolBackends(): LspBackend[] {
+    return this.backends.filter((b) => b.supportsWorkspaceSymbols);
   }
 
   // ─── Startup ────────────────────────────────────────────────────────────────
@@ -186,7 +142,7 @@ export class LspDaemon {
   private async dispatch(req: DaemonRequest): Promise<DaemonResponse> {
     const deps: HandlerDeps = {
       getBackend: (p) => this.getBackend(p),
-      tsBackend: this.tsBackend,
+      getWorkspaceSymbolBackends: () => this.getWorkspaceSymbolBackends(),
       backends: this.backends,
       fileCache: this.fileCache,
       getIdleMs: () => Date.now() - this.previousActivity,
