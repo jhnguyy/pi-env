@@ -81,7 +81,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     ]),
     capabilities: TS_CAPABILITIES,
     codePrefix: "TS",
-    rootMarkers: ["tsconfig.json", "jsconfig.json"],
+    rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json", "bunfig.toml"],
     supportsWorkspaceSymbols: true,
   },
   {
