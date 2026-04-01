@@ -1,9 +1,38 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { DocumentManager } from "../document-manager";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+
+// ─── Test helpers matching backend-configs.ts behavior ──────────────────────
+const TEST_EXTENSION_MAP = new Map<string, string>([
+  [".ts", "typescript"], [".tsx", "typescriptreact"],
+  [".js", "javascript"], [".jsx", "javascriptreact"],
+  [".mts", "typescript"], [".cts", "typescript"],
+  [".mjs", "javascript"], [".cjs", "javascript"],
+  [".sh", "shellscript"], [".bash", "shellscript"],
+  [".zsh", "shellscript"], [".ksh", "shellscript"],
+  [".nix", "nix"],
+]);
+
+const ROOT_MARKERS = ["tsconfig.json", "jsconfig.json", "package.json", "bunfig.toml"];
+
+function testResolveLanguageId(path: string): string {
+  return TEST_EXTENSION_MAP.get(extname(path)) ?? "unknown";
+}
+
+function testResolveProjectRoot(filePath: string): string | null {
+  let dir = dirname(filePath);
+  while (true) {
+    for (const marker of ROOT_MARKERS) {
+      if (existsSync(join(dir, marker))) return dir;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
 
 describeIfEnabled("dev-tools", "DocumentManager", () => {
   let tmpDir: string;
@@ -11,7 +40,7 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "lsp-dm-"));
-    dm = new DocumentManager();
+    dm = new DocumentManager(testResolveLanguageId, testResolveProjectRoot);
   });
 
   afterEach(() => {
