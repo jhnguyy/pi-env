@@ -117,3 +117,10 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
 export const ALL_SUPPORTED_EXTENSIONS = new Set(
   BACKEND_CONFIGS.flatMap(c => [...c.extensions.keys()]),
 );
+
+import { extname } from "node:path";
+
+/** True if any backend can handle this file (LSP diagnostics available). */
+export function isLspSupported(path: string): boolean {
+  return ALL_SUPPORTED_EXTENSIONS.has(extname(path));
+}

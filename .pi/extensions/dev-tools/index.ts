@@ -13,10 +13,9 @@ import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DaemonRequest, DiagnosticsResult, SymbolsResult, LspAction } from "./protocol";
-import { isLspSupported } from "./filetypes";
+import { isLspSupported } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
-import { createHintState, resetHintState, detectDevToolsHint } from "./hints";
 
 // ─── Actions that require exactly one path ──────────────────────────────────
 const SINGLE_PATH_ACTIONS = new Set<string>([
@@ -46,11 +45,8 @@ function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest
   return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
 }
 
-
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
-  const hintState = createHintState();
-  let pendingHint: string | null = null;
   const pendingValidationFiles = new Set<string>();
 
   // ─── dev-tools tool ─────────────────────────────────────────────────────
@@ -95,8 +91,6 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", () => {
-    resetHintState(hintState);
-    pendingHint = null;
     pendingValidationFiles.clear();
 
     // Register dev-tools as an AgentTool so subagents can use it
@@ -152,15 +146,15 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ─── Auto-diagnostics + hint hook ───────────────────────────────────────
+  // ─── tool_result hook: symbol enrichment + file accumulation ───────────
 
   pi.on("tool_result", async (event) => {
     const { toolName, input } = event;
     const inp = input as Record<string, unknown> | null | undefined;
 
-    // ─── Symbol-enriched reads (.ts files, full-file only) ──────────────
-    // When reading a TS file without offset/limit, prepend a compact symbol
-    // outline so the model sees the file's structure without a separate call.
+    // ─── Symbol-enriched reads (full-file only) ─────────────────────────
+    // When reading an LSP-supported file without offset/limit, prepend a
+    // compact symbol outline so the model sees file structure at a glance.
     if (toolName === "read" && !event.isError) {
       const path = typeof inp?.path === "string" ? inp.path : undefined;
       const hasOffset = inp?.offset != null;
@@ -208,14 +202,6 @@ export default function (pi: ExtensionAPI) {
         pendingValidationFiles.add(path);
       }
     }
-
-    // ─── LSP hint detection (all tools) ─────────────────────────────────
-    // Queue hint for delivery at the next decision boundary (before_agent_start)
-    // instead of appending to tool output where it gets buried.
-    const hint = detectDevToolsHint(toolName, inp, hintState);
-    if (hint) {
-      pendingHint = hint;
-    }
   });
 
   // ─── Deferred validation at agent_end ──────────────────────────────────
@@ -245,19 +231,5 @@ export default function (pi: ExtensionAPI) {
     } catch {
       // Non-fatal — diagnostics are best-effort
     }
-  });
-
-  // ─── Deliver queued LSP hints at the decision boundary ────────────────
-  pi.on("before_agent_start", async () => {
-    if (!pendingHint) return {};
-    const hint = pendingHint;
-    pendingHint = null;
-    return {
-      message: {
-        customType: "dev-tools-hint",
-        content: hint,
-        display: false,
-      },
-    };
   });
 }
