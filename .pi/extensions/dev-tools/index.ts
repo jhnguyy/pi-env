@@ -1,8 +1,13 @@
 /**
- * dev-tools extension — registers the `dev-tools` tool and hooks auto-diagnostics.
+ * dev-tools extension — registers the `dev-tools` tool and hooks agent_end processing.
  *
- * Wires together: LspClient, formatters, renderers.
- * The daemon is spawned on first use (managed by client.ts).
+ * dev-tools is a file-extension engine: at agent_end it dispatches each edited
+ * file to the backend registered for its extension in BACKEND_CONFIGS:
+ *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
+ *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
+ *
+ * The dev-tools interactive tool (hover, definition, symbols, …) routes through
+ * the LSP daemon only — it does not interact with format backends.
  */
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -14,37 +19,9 @@ import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DaemonRequest, DiagnosticsResult, LspAction } from "./protocol";
-import { isLspSupported } from "./backend-configs";
+import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
-
-// ─── HCL / Terraform formatting ───────────────────────────────────────────────
-// Tracked separately from LSP files — hclfmt is a formatter, not a diagnostic.
-// Only runs at agent_end if the relevant binary is available in PATH.
-
-/** Returns true if the path is a HCL or Terraform configuration file. */
-function isHclFile(path: string): boolean {
-  return path.endsWith(".hcl") || path.endsWith(".tf");
-}
-
-// Lazy binary checks — resolved once on first agent_end that has HCL files.
-let _terragruntBin: string | null | undefined = undefined;
-let _terraformBin: string | null | undefined = undefined;
-
-function findBin(name: string): string | null {
-  const r = spawnSync("which", [name], { encoding: "utf8", stdio: "pipe" });
-  return r.status === 0 ? r.stdout.trim() || null : null;
-}
-
-function getTerragrunt(): string | null {
-  if (_terragruntBin === undefined) _terragruntBin = findBin("terragrunt");
-  return _terragruntBin;
-}
-
-function getTerraform(): string | null {
-  if (_terraformBin === undefined) _terraformBin = findBin("terraform");
-  return _terraformBin;
-}
 
 // ─── Actions that require exactly one path ──────────────────────────────────
 const SINGLE_PATH_ACTIONS = new Set<string>([
@@ -74,12 +51,29 @@ function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest
   return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
 }
 
+// ─── Format binary cache ──────────────────────────────────────────────────────
+// Resolved lazily on first agent_end that contains format-backend files.
+// Keyed by binary name so any number of format backends share the same cache.
+const _binCache = new Map<string, string | null>();
+
+function resolveBin(name: string): string | null {
+  if (_binCache.has(name)) return _binCache.get(name)!;
+  const r = spawnSync("which", [name], { encoding: "utf8", stdio: "pipe" });
+  const result = r.status === 0 ? r.stdout.trim() || null : null;
+  _binCache.set(name, result);
+  return result;
+}
+
+// ─── Extension ────────────────────────────────────────────────────────────────
+
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
-  const pendingValidationFiles = new Set<string>();
-  const pendingHclFiles = new Set<string>();
 
-  // ─── dev-tools tool ─────────────────────────────────────────────────────
+  // Single set tracking all supported edited files during the agent run.
+  // Partitioned by backend mode at agent_end, not at collection time.
+  const pendingFiles = new Set<string>();
+
+  // ─── dev-tools tool ───────────────────────────────────────────────────────
 
   const description =
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
@@ -121,8 +115,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", () => {
-    pendingValidationFiles.clear();
-    pendingHclFiles.clear();
+    pendingFiles.clear();
 
     // Register dev-tools as an AgentTool so subagents can use it
     const agentTool: AgentTool<any, any> = {
@@ -139,13 +132,11 @@ export default function (pi: ExtensionAPI) {
     name: "dev-tools",
     label: "Dev Tools",
     description: description,
-
     promptSnippet:
       "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
       "go-to-implementation, find-references, incoming/outgoing call hierarchy, symbols. " +
       "Use instead of grep chains for type-aware or shell-aware code navigation. " +
       "Also supports nil (for .nix files) and bash-language-server (for .sh/.bash).",
-
     promptGuidelines: [
       "Prefer dev-tools over grep/read for ALL code navigation in TypeScript codebases. dev-tools is faster, precise, and avoids reading entire files.",
       "To find where a symbol is defined: dev-tools definition — not grep + read.",
@@ -161,52 +152,56 @@ export default function (pi: ExtensionAPI) {
       "dev-tools uses 1-indexed lines and characters, matching read tool output.",
       "Use grep/rg only for text/pattern searches (comments, strings, config values) where LSP cannot help.",
     ],
-
     parameters: toolParameters,
-
     async execute(toolCallId, params, _signal) {
       return executeDevTools(toolCallId, params as Record<string, unknown>);
     },
-
     renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);
     },
-
     renderResult(result, opts, theme, _ctx) {
       return renderDevToolsResult(result, opts, theme);
     },
   });
 
-  // ─── tool_result hook: file accumulation ──────────────────────────────────
-
+  // ─── tool_result hook: accumulate edited files ────────────────────────────
+  // Collect all edit/write targets into pendingFiles. At agent_end the set is
+  // partitioned by backend mode — we don't need to know mode at collection time.
   pi.on("tool_result", async (event) => {
-    const { toolName, input } = event;
-    const inp = input as Record<string, unknown> | null | undefined;
-
-    // ─── Accumulate edited files for deferred validation ────────────────
-    // Collect paths during the agent run; validate all at agent_end.
-    if ((toolName === "edit" || toolName === "write") && !event.isError) {
-      const path: string | undefined =
-        typeof inp?.path === "string" ? inp.path :
-        typeof inp?.file_path === "string" ? inp.file_path :
-        undefined;
-
-      if (path) {
-        if (isLspSupported(path)) pendingValidationFiles.add(path);
-        if (isHclFile(path)) pendingHclFiles.add(path);
-      }
-    }
+    if ((event.toolName !== "edit" && event.toolName !== "write") || event.isError) return;
+    const inp = event.input as Record<string, unknown> | null | undefined;
+    const path: string | undefined =
+      typeof inp?.path === "string" ? inp.path :
+      typeof inp?.file_path === "string" ? inp.file_path :
+      undefined;
+    if (path && isSupported(path)) pendingFiles.add(path);
   });
 
-
-  // ─── Deferred validation + formatting at agent_end ───────────────────────
-  // When the model signals completion:
-  //   1. Validate all edited LSP files in bulk (re-engages model on errors).
-  //   2. Format all edited HCL/TF files if terragrunt/terraform are in PATH.
+  // ─── agent_end: dispatch by backend mode ──────────────────────────────────
+  // Partition pendingFiles into LSP (diagnostics) and format (one-shot) groups,
+  // then process each. Adding a new backend type requires only a new BACKEND_CONFIGS
+  // entry — no changes needed here.
   pi.on("agent_end", async () => {
-    // ── LSP diagnostics ──────────────────────────────────────────────────────
-    const lspFiles = [...pendingValidationFiles];
-    pendingValidationFiles.clear();
+    const files = [...pendingFiles];
+    pendingFiles.clear();
+    if (files.length === 0) return;
+
+    const lspFiles: string[] = [];
+    const formatFiles: Array<{ file: string; config: FormatBackendConfig }> = [];
+
+    for (const file of files) {
+      const config = getBackendConfig(file);
+      if (!config) continue;
+      if (config.mode === "lsp") {
+        lspFiles.push(file);
+      } else {
+        formatFiles.push({ file, config });
+      }
+    }
+
+    // ── LSP diagnostics ────────────────────────────────────────────────────
+    // Batch all LSP files in a single daemon call. Re-engages the model if
+    // errors are found so it can triage and fix before the session ends.
     if (lspFiles.length > 0) {
       try {
         const result = await client.call({ action: "diagnostics", paths: lspFiles });
@@ -229,37 +224,32 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── HCL / Terraform formatting ───────────────────────────────────────────
-    // Runs after diagnostics. Silent on no-op; notifies the user when files
-    // were reformatted. Does not re-engage the model (triggerTurn not set).
-    const hclFiles = [...pendingHclFiles];
-    pendingHclFiles.clear();
-    if (hclFiles.length > 0) {
-      const tg = getTerragrunt();
-      const tf = getTerraform();
-      if (tg || tf) {
-        const formatted: string[] = [];
-        for (const file of hclFiles) {
-          try {
-            // .hcl → terragrunt hclfmt; .tf → terraform fmt
-            const bin = file.endsWith(".hcl") ? tg : tf;
-            if (!bin) continue;
-            const args = file.endsWith(".hcl")
-              ? ["hclfmt", "--terragrunt-hclfmt-file", file]
-              : ["fmt", file];
-            const r = spawnSync(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 10_000 });
-            if (r.status === 0) formatted.push(file.split("/").pop() ?? file);
-          } catch {
-            // best-effort — binary unavailable or file unreadable
-          }
-        }
-        if (formatted.length > 0) {
-          pi.sendMessage({
-            customType: "dev-tools-hclfmt",
-            content: `[hclfmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
-            display: true,
+    // ── Format backends ────────────────────────────────────────────────────
+    // One-shot per file. Runs after diagnostics so the model is not re-engaged
+    // just for formatting. Silent on no-op; reports names of formatted files.
+    // Binary availability is checked lazily and cached for the process lifetime.
+    if (formatFiles.length > 0) {
+      const formatted: string[] = [];
+      for (const { file, config } of formatFiles) {
+        const bin = resolveBin(config.binaryName);
+        if (!bin) continue;
+        try {
+          const r = spawnSync(bin, config.formatArgs(file), {
+            encoding: "utf8",
+            stdio: "pipe",
+            timeout: 10_000,
           });
+          if (r.status === 0) formatted.push(file.split("/").pop() ?? file);
+        } catch {
+          // best-effort — file unreadable, binary crashed, etc.
         }
+      }
+      if (formatted.length > 0) {
+        pi.sendMessage({
+          customType: "dev-tools-hclfmt",
+          content: `[hclfmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
+          display: true,
+        });
       }
     }
   });
