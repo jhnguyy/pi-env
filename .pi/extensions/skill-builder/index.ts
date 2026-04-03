@@ -17,6 +17,34 @@ import type { ExtToolRegistration } from "../subagent/types";
 
 const REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 
+/**
+ * Lazy per-process index: skillName (lowercased) → absolute file path.
+ * Built on first reference_skill lookup; avoids re-reading all markdown files
+ * on every invocation. Null = not yet built.
+ */
+let _referenceSkillIndex: Map<string, string> | null = null;
+
+function getReferenceSkillIndex(): Map<string, string> {
+  if (_referenceSkillIndex !== null) return _referenceSkillIndex;
+  const index = new Map<string, string>();
+  if (!existsSync(REFERENCE_DIR)) {
+    _referenceSkillIndex = index;
+    return index;
+  }
+  for (const file of readdirSync(REFERENCE_DIR).filter((f) => f.endsWith(".md"))) {
+    const filePath = join(REFERENCE_DIR, file);
+    const content = readFileSync(filePath, "utf-8");
+    const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
+    const skillName = nameMatch ? nameMatch[1].trim().toLowerCase() : file.replace(/\.md$/, "");
+    index.set(skillName, filePath);
+    // Also index by filename so both frontmatter name and filename match.
+    const filenameKey = file.replace(/\.md$/, "").toLowerCase();
+    if (filenameKey !== skillName) index.set(filenameKey, filePath);
+  }
+  _referenceSkillIndex = index;
+  return index;
+}
+
 import { validateSkill } from "./validator";
 import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
@@ -41,11 +69,11 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const files = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md"));
-
-      // List mode
+      // List mode — filenames only, no file reads needed
       if (!params.name) {
-        const names = files.map((f: string) => f.replace(/\.md$/, ""));
+        const names = readdirSync(REFERENCE_DIR)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => f.replace(/\.md$/, ""));
         return {
           content: [
             {
@@ -57,24 +85,15 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // Load mode — fuzzy match on filename or frontmatter name
+      // Load mode — use cached index (built once, avoids re-reading all files)
+      const index = getReferenceSkillIndex();
       const target = params.name.toLowerCase();
-      let matched: string | null = null;
-
-      for (const file of files) {
-        const filePath = join(REFERENCE_DIR, file);
-        const content = readFileSync(filePath, "utf-8");
-        const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
-        const skillName = nameMatch ? nameMatch[1].trim().toLowerCase() : file.replace(/\.md$/, "");
-
-        if (skillName === target || file.replace(/\.md$/, "").toLowerCase() === target) {
-          matched = filePath;
-          break;
-        }
-      }
+      const matched = index.get(target) ?? null;
 
       if (!matched) {
-        const names = files.map((f: string) => f.replace(/\.md$/, ""));
+        const names = readdirSync(REFERENCE_DIR)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => f.replace(/\.md$/, ""));
         return {
           content: [
             {
@@ -281,20 +300,12 @@ export default function (pi: ExtensionAPI) {
       }),
       execute: async (_toolCallId, params) => {
         if (!existsSync(REFERENCE_DIR)) return { content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }], details: null };
-        const files = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md"));
         if (!params.name) {
-          const names = files.map((f: string) => f.replace(/\.md$/, ""));
+          const names = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md")).map((f: string) => f.replace(/\.md$/, ""));
           return { content: [{ type: "text", text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}` }], details: null };
         }
-        const target = params.name.toLowerCase();
-        let matched: string | null = null;
-        for (const file of files) {
-          const fp = join(REFERENCE_DIR, file);
-          const content = readFileSync(fp, "utf-8");
-          const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
-          const skillName = nameMatch ? nameMatch[1].trim().toLowerCase() : file.replace(/\.md$/, "");
-          if (skillName === target || file.replace(/\.md$/, "").toLowerCase() === target) { matched = fp; break; }
-        }
+        const index = getReferenceSkillIndex();
+        const matched = index.get(params.name.toLowerCase()) ?? null;
         if (!matched) return { content: [{ type: "text", text: `No reference skill named "${params.name}".` }], details: null };
         return { content: [{ type: "text", text: readFileSync(matched, "utf-8") }], details: null };
       },
