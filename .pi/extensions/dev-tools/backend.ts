@@ -17,7 +17,7 @@ import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
-import type { BackendConfig } from "./backend-configs";
+import type { LspBackendConfig } from "./backend-configs";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,7 +79,7 @@ export class LspBackend {
   private readonly rootMarkers: string[];
   readonly supportsWorkspaceSymbols: boolean;
 
-  constructor(config: BackendConfig) {
+  constructor(config: LspBackendConfig) {
     this.name = config.name;
     this.binaryName = config.binaryName;
     this.binaryArgs = config.binaryArgs;

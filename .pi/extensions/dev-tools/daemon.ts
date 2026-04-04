@@ -24,7 +24,7 @@ import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 
 import { LspBackend } from "./backend";
-import { BACKEND_CONFIGS } from "./backend-configs";
+import { BACKEND_CONFIGS, type LspBackendConfig } from "./backend-configs";
 import { FileCache } from "./file-cache";
 import { type HandlerDeps } from "./handlers";
 import { getAction } from "./action-registry";
@@ -57,7 +57,8 @@ export class LspDaemon {
     private pidPath = PID_PATH,
     private idleTimeoutMs = IDLE_TIMEOUT_MS,
   ) {
-    this.backends = BACKEND_CONFIGS.map((config) => new LspBackend(config));
+    this.backends = (BACKEND_CONFIGS.filter((c) => c.mode === "lsp") as LspBackendConfig[])
+      .map((config) => new LspBackend(config));
   }
 
   /** Return the backend that handles this file. Throws if no backend matches. */
