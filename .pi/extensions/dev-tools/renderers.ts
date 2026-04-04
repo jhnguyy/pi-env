@@ -53,14 +53,19 @@ export function renderDevToolsResult(
  * Render a dev-tools tool call for human TUI display.
  */
 export function renderDevToolsCall(
-  args: { action: string; path?: string; line?: number; character?: number; query?: string },
+  args: { action: string; path?: string | string[]; line?: number; character?: number; query?: string },
   theme: RenderTheme,
 ): Text {
   let text = theme.fg("toolTitle", theme.bold("dev-tools"));
   text += " " + theme.fg("accent", args.action);
 
   if (args.path) {
-    const short = args.path.split("/").slice(-2).join("/");
+    const pathStr = Array.isArray(args.path)
+      ? args.path.length === 1 ? args.path[0] : `[${args.path.length} files]`
+      : args.path;
+    const short = Array.isArray(args.path) && args.path.length !== 1
+      ? pathStr
+      : pathStr.split("/").slice(-2).join("/");
     text += " " + theme.fg("muted", short);
   }
 
