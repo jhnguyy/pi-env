@@ -13,19 +13,19 @@ function mockFetch(response: {
   body?: unknown;
   headers?: Record<string, string>;
 }): void {
-  globalThis.fetch = async () =>
+  globalThis.fetch = (async () =>
     ({
       ok: response.ok,
       status: response.status ?? (response.ok ? 200 : 500),
       headers: new Headers(response.headers ?? {}),
       json: async () => response.body ?? {},
-    }) as Response;
+    }) as Response) as unknown as typeof fetch;
 }
 
 function mockFetchThrow(error: Error): void {
-  globalThis.fetch = async () => {
+  globalThis.fetch = (async () => {
     throw error;
-  };
+  }) as unknown as typeof fetch;
 }
 
 afterEach(() => {
@@ -73,12 +73,12 @@ describeIfEnabled("usage-bar", "fetchAnthropicUsage", () => {
 
   it("sends Authorization header with Bearer token", async () => {
     let capturedHeaders: Record<string, string> = {};
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit | BunFetchRequestInit) => {
       capturedHeaders = Object.fromEntries(
         Object.entries((init?.headers as Record<string, string>) ?? {}),
       );
       return { ok: true, status: 200, headers: new Headers(), json: async () => validUsage } as Response;
-    };
+    }) as unknown as typeof fetch;
     await fetchAnthropicUsage("sk-ant-test");
     expect(capturedHeaders["Authorization"]).toBe("Bearer sk-ant-test");
   });
@@ -129,12 +129,12 @@ describeIfEnabled("usage-bar", "fetchCopilotUsage", () => {
 
   it("sends Authorization header with token prefix", async () => {
     let capturedHeaders: Record<string, string> = {};
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = (async (_url: RequestInfo | URL, init?: RequestInit | BunFetchRequestInit) => {
       capturedHeaders = Object.fromEntries(
         Object.entries((init?.headers as Record<string, string>) ?? {}),
       );
       return { ok: true, status: 200, headers: new Headers(), json: async () => validUsage } as Response;
-    };
+    }) as unknown as typeof fetch;
     await fetchCopilotUsage("ghu_test");
     expect(capturedHeaders["Authorization"]).toBe("token ghu_test");
   });

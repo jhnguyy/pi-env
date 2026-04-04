@@ -95,8 +95,9 @@ export function registerHooks(
     }
   });
 
-  // ─── 4. Session switch (/new, /resume) — clear todos ───────────────────────
-  pi.on("session_switch", async (_event, ctx) => {
+  // ─── 4. Session switch (/new, /resume, /fork) — clear todos ──────────────────
+  pi.on("session_start", async (event, ctx) => {
+    if (event.reason !== "new" && event.reason !== "resume" && event.reason !== "fork") return;
     const open = store.open().length;
     store.clear();
     invalidateGitCache();

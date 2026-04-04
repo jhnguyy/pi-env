@@ -95,8 +95,9 @@ export default function (pi: ExtensionAPI) {
     pi.events.emit("agent-tools:register", { tool: tmuxAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
   });
 
-  pi.on("session_switch", async (_event, ctx) => rebuildRegistry(ctx));
-  pi.on("session_fork", async (_event, ctx) => rebuildRegistry(ctx));
+  pi.on("session_start", async (event, ctx) => {
+    if (event.reason === "new" || event.reason === "resume" || event.reason === "fork") rebuildRegistry(ctx);
+  });
   pi.on("session_tree", async (_event, ctx) => rebuildRegistry(ctx));
 
   pi.on("session_shutdown", async () => {
