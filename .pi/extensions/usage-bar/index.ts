@@ -133,15 +133,23 @@ const PROVIDER_FORMATTERS: Record<string, (theme: Theme, usage: any) => string> 
  *   }
  *
  * All providers default to false (disabled). Set to true to enable polling.
+ *
+ * Cached per session — reset on session_start so settings changes take effect
+ * on the next session without requiring a process restart.
  */
+let _pollingConfigCache: Record<string, boolean> | null = null;
+
 function isPollingEnabled(provider: string): boolean {
-  try {
-    const settingsPath = join(getAgentDir(), "settings.json");
-    const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
-    return raw?.usageBar?.polling?.[provider] === true;
-  } catch {
-    return false;
+  if (!_pollingConfigCache) {
+    try {
+      const settingsPath = join(getAgentDir(), "settings.json");
+      const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
+      _pollingConfigCache = raw?.usageBar?.polling ?? {};
+    } catch {
+      _pollingConfigCache = {};
+    }
   }
+  return (_pollingConfigCache as Record<string, boolean>)[provider] === true;
 }
 
 // ─── Refresh state ────────────────────────────────────────────────────────────
@@ -219,6 +227,7 @@ async function refresh(ctx: ExtensionContext): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
+    _pollingConfigCache = null; // re-read settings on every new session
     if (isHeadless(ctx)) return;
 
     if (ctx.model) {

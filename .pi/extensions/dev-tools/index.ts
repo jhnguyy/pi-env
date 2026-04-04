@@ -9,6 +9,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
+import { spawnSync } from "node:child_process";
 import { LspClient } from "./client";
 import { formatResult, formatDiagnosticsSummary } from "./formatters";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
@@ -16,6 +17,34 @@ import type { DaemonRequest, DiagnosticsResult, LspAction } from "./protocol";
 import { isLspSupported } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
+
+// ─── HCL / Terraform formatting ───────────────────────────────────────────────
+// Tracked separately from LSP files — hclfmt is a formatter, not a diagnostic.
+// Only runs at agent_end if the relevant binary is available in PATH.
+
+/** Returns true if the path is a HCL or Terraform configuration file. */
+function isHclFile(path: string): boolean {
+  return path.endsWith(".hcl") || path.endsWith(".tf");
+}
+
+// Lazy binary checks — resolved once on first agent_end that has HCL files.
+let _terragruntBin: string | null | undefined = undefined;
+let _terraformBin: string | null | undefined = undefined;
+
+function findBin(name: string): string | null {
+  const r = spawnSync("which", [name], { encoding: "utf8", stdio: "pipe" });
+  return r.status === 0 ? r.stdout.trim() || null : null;
+}
+
+function getTerragrunt(): string | null {
+  if (_terragruntBin === undefined) _terragruntBin = findBin("terragrunt");
+  return _terragruntBin;
+}
+
+function getTerraform(): string | null {
+  if (_terraformBin === undefined) _terraformBin = findBin("terraform");
+  return _terraformBin;
+}
 
 // ─── Actions that require exactly one path ──────────────────────────────────
 const SINGLE_PATH_ACTIONS = new Set<string>([
@@ -48,6 +77,7 @@ function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
   const pendingValidationFiles = new Set<string>();
+  const pendingHclFiles = new Set<string>();
 
   // ─── dev-tools tool ─────────────────────────────────────────────────────
 
@@ -92,6 +122,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", () => {
     pendingValidationFiles.clear();
+    pendingHclFiles.clear();
 
     // Register dev-tools as an AgentTool so subagents can use it
     const agentTool: AgentTool<any, any> = {
@@ -160,38 +191,76 @@ export default function (pi: ExtensionAPI) {
         typeof inp?.file_path === "string" ? inp.file_path :
         undefined;
 
-      if (path && isLspSupported(path)) {
-        pendingValidationFiles.add(path);
+      if (path) {
+        if (isLspSupported(path)) pendingValidationFiles.add(path);
+        if (isHclFile(path)) pendingHclFiles.add(path);
       }
     }
   });
 
-  // ─── Deferred validation at agent_end ──────────────────────────────────
-  // When the model signals completion, validate all edited files in bulk.
-  // If errors are found, re-engage the model with triggerTurn so it can triage.
-  pi.on("agent_end", async () => {
-    const files = [...pendingValidationFiles];
-    pendingValidationFiles.clear();
-    if (files.length === 0) return;
 
-    try {
-      const result = await client.call({ action: "diagnostics", paths: files });
-      if (result) {
-        const diags = result as DiagnosticsResult;
-        const summary = formatDiagnosticsSummary(diags, 10);
-        if (summary) {
-          pi.sendMessage(
-            {
-              customType: "dev-tools-diagnostics",
-              content: `[post-edit diagnostics]\n${summary}`,
-              display: true,
-            },
-            { triggerTurn: true },
-          );
+  // ─── Deferred validation + formatting at agent_end ───────────────────────
+  // When the model signals completion:
+  //   1. Validate all edited LSP files in bulk (re-engages model on errors).
+  //   2. Format all edited HCL/TF files if terragrunt/terraform are in PATH.
+  pi.on("agent_end", async () => {
+    // ── LSP diagnostics ──────────────────────────────────────────────────────
+    const lspFiles = [...pendingValidationFiles];
+    pendingValidationFiles.clear();
+    if (lspFiles.length > 0) {
+      try {
+        const result = await client.call({ action: "diagnostics", paths: lspFiles });
+        if (result) {
+          const diags = result as DiagnosticsResult;
+          const summary = formatDiagnosticsSummary(diags, 10);
+          if (summary) {
+            pi.sendMessage(
+              {
+                customType: "dev-tools-diagnostics",
+                content: `[post-edit diagnostics]\n${summary}`,
+                display: true,
+              },
+              { triggerTurn: true },
+            );
+          }
+        }
+      } catch {
+        // Non-fatal — diagnostics are best-effort
+      }
+    }
+
+    // ── HCL / Terraform formatting ───────────────────────────────────────────
+    // Runs after diagnostics. Silent on no-op; notifies the user when files
+    // were reformatted. Does not re-engage the model (triggerTurn not set).
+    const hclFiles = [...pendingHclFiles];
+    pendingHclFiles.clear();
+    if (hclFiles.length > 0) {
+      const tg = getTerragrunt();
+      const tf = getTerraform();
+      if (tg || tf) {
+        const formatted: string[] = [];
+        for (const file of hclFiles) {
+          try {
+            // .hcl → terragrunt hclfmt; .tf → terraform fmt
+            const bin = file.endsWith(".hcl") ? tg : tf;
+            if (!bin) continue;
+            const args = file.endsWith(".hcl")
+              ? ["hclfmt", "--terragrunt-hclfmt-file", file]
+              : ["fmt", file];
+            const r = spawnSync(bin, args, { encoding: "utf8", stdio: "pipe", timeout: 10_000 });
+            if (r.status === 0) formatted.push(file.split("/").pop() ?? file);
+          } catch {
+            // best-effort — binary unavailable or file unreadable
+          }
+        }
+        if (formatted.length > 0) {
+          pi.sendMessage({
+            customType: "dev-tools-hclfmt",
+            content: `[hclfmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
+            display: true,
+          });
         }
       }
-    } catch {
-      // Non-fatal — diagnostics are best-effort
     }
   });
 }

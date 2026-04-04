@@ -61,11 +61,12 @@ const STATE_KEY = "__piEnv_uiRender_v1";
 
 interface SlotState {
   content: Map<SlotKey, string[] | undefined>;
+  batching: boolean;
 }
 
 function getState(): SlotState {
   const g = globalThis as Record<string, unknown>;
-  if (!g[STATE_KEY]) g[STATE_KEY] = { content: new Map<SlotKey, string[] | undefined>() };
+  if (!g[STATE_KEY]) g[STATE_KEY] = { content: new Map<SlotKey, string[] | undefined>(), batching: false };
   return g[STATE_KEY] as SlotState;
 }
 
@@ -84,9 +85,10 @@ export function setSlot(
   ctx: ExtensionContext,
 ): void {
   if (isHeadless(ctx)) return;
+  const state = getState();
   const lines = typeof content === "string" ? [content] : content;
-  getState().content.set(key, lines);
-  flush(ctx);
+  state.content.set(key, lines);
+  if (!state.batching) flush(ctx);
 }
 
 /**
@@ -94,8 +96,34 @@ export function setSlot(
  */
 export function clearSlot(key: SlotKey, ctx: ExtensionContext): void {
   if (isHeadless(ctx)) return;
-  getState().content.delete(key);
-  flush(ctx);
+  const state = getState();
+  state.content.delete(key);
+  if (!state.batching) flush(ctx);
+}
+
+/**
+ * Batch multiple slot updates into a single flush pass.
+ *
+ * All setSlot/clearSlot calls inside `fn` update the slot map without
+ * triggering intermediate flushes. One flush fires after `fn` returns,
+ * rendering all changes in a single pass.
+ *
+ * @example
+ *   batchSlots(() => {
+ *     setSlot("session-todos", ..., ctx);
+ *     setSlot("work-tracker", ..., ctx);
+ *   }, ctx);
+ */
+export function batchSlots(fn: () => void, ctx: ExtensionContext): void {
+  if (isHeadless(ctx)) return;
+  const state = getState();
+  state.batching = true;
+  try {
+    fn();
+  } finally {
+    state.batching = false;
+    flush(ctx);
+  }
 }
 
 /**

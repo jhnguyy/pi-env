@@ -12,7 +12,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
 import { isOrchWorker } from "../_shared/context";
-import { setSlot, resetSlots } from "../_shared/ui-render";
+import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 
 import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
 import {
@@ -81,11 +81,13 @@ export function registerHooks(
     store.clear();
     invalidateGitCache();
     resetGitFailureCache(); // give repos a fresh chance each session
-    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
     // Skip git status here — spawning git subprocesses synchronously at
     // session_start blocks in environments with many or slow mount points.
     // The widget is populated lazily on the first before_agent_start call.
-    setSlot("work-tracker", undefined, ctx);
+    batchSlots(() => {
+      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+      setSlot("work-tracker", undefined, ctx);
+    }, ctx);
 
     // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it active.
     if (!process.env.PI_SESSION_READER) {
@@ -99,8 +101,10 @@ export function registerHooks(
     store.clear();
     invalidateGitCache();
     resetGitFailureCache(); // allow repos to be retried after a session switch
-    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    batchSlots(() => {
+      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    }, ctx);
     if (open > 0) {
       ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
     }
@@ -117,16 +121,20 @@ export function registerHooks(
   pi.on("turn_end", async (_event, ctx) => {
     if (isOrchWorker()) return;
     invalidateGitCache();
-    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    batchSlots(() => {
+      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    }, ctx);
   });
 
   // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     if (isOrchWorker()) return {};
     store.purgeCompleted();
-    setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-    setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    batchSlots(() => {
+      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
+    }, ctx);
 
     const line = buildStatusLine(config); // plain text for LLM
     if (!line) return {};
