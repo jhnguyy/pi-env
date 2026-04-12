@@ -63,6 +63,17 @@ info "Version: $PI_VERSION"
 
 SYSTEM_PROMPT_JS="$PI_PKG/dist/core/system-prompt.js"
 
+# Guard: dist/cli.js must be a JS source file, not a compiled binary.
+# A prior Bun compile bug could write the binary there instead of the outfile.
+# If it's an ELF binary, restore it from the npm registry before proceeding.
+CLI_JS="$PI_PKG/dist/cli.js"
+if [ -f "$CLI_JS" ] && od -c -N4 "$CLI_JS" 2>/dev/null | grep -q '\\177.*E.*L.*F'; then
+  info "dist/cli.js is a binary — restoring from npm registry"
+  curl -sL "https://registry.npmjs.org/@mariozechner/pi-coding-agent/-/pi-coding-agent-${PI_VERSION}.tgz" \
+    | tar -xz --strip-components=2 -C "$PI_PKG/dist" package/dist/cli.js
+  ok "dist/cli.js restored"
+fi
+
 # Fix: system prompt date uses UTC (toISOString) instead of local timezone.
 # getFullYear/getMonth/getDate return local-timezone values — no locale dependency.
 # Upstream issue: https://github.com/badlogic/pi-mono/issues/1873
