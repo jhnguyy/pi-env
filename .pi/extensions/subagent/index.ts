@@ -89,14 +89,18 @@ export default function (pi: ExtensionAPI) {
   // ── session_start: re-register with dynamic model + agent list ────────────
 
   pi.on("session_start", (_event, ctx) => {
-    // 1. Read enabled models from settings.json
+    // 1. Read enabled models and annotations from settings.json
     let enabledModelIds: string[] = [];
+    let modelAnnotations: Record<string, string[]> = {};
     try {
       const settingsPath = path.join(getAgentDir(), "settings.json");
       const raw = fs.readFileSync(settingsPath, "utf-8");
-      const settings = JSON.parse(raw) as { enabledModels?: string[] };
+      const settings = JSON.parse(raw) as { enabledModels?: string[]; modelAnnotations?: Record<string, string[]> };
       if (Array.isArray(settings.enabledModels)) {
         enabledModelIds = settings.enabledModels;
+      }
+      if (settings.modelAnnotations) {
+        modelAnnotations = settings.modelAnnotations;
       }
     } catch {
       // settings.json missing or malformed — will list all available models
@@ -115,7 +119,7 @@ export default function (pi: ExtensionAPI) {
     // 4. Re-register with enriched description (including registered extension tools)
     const extToolNames = [...registeredExtTools.keys()];
     const description = buildDynamicDescription(
-      enabledModelIds, availableModels, agents, extToolNames, extToolCaps,
+      enabledModelIds, availableModels, agents, extToolNames, extToolCaps, modelAnnotations,
     );
     pi.registerTool({
       name: "subagent",
