@@ -59,6 +59,7 @@ export function buildDynamicDescription(
   agents: AgentConfig[],
   extToolNames?: string[],
   extToolCaps?: Map<string, ToolCapability[]>,
+  modelAnnotations?: Record<string, string[]>,
 ): string {
   const lines = [
     "Delegate a focused task to an in-process subagent running via agentLoop().",
@@ -83,8 +84,18 @@ export function buildDynamicDescription(
   if (listedModels.length > 0) {
     lines.push("", "Available models (use 'provider/model-id' format):");
     for (const m of listedModels) {
-      lines.push(`  ${m.provider}/${m.id} — ${m.name}`);
+      const modelKey = `${m.provider}/${m.id}`;
+      const tags = modelAnnotations?.[modelKey];
+      const tagSuffix = tags && tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+      lines.push(`  ${modelKey} — ${m.name}${tagSuffix}`);
     }
+    lines.push(
+      "",
+      "Model selection: choose based on task complexity and cost.",
+      "  - Models tagged [preferred] are cost-effective — use for gathering, summarization, and mechanical edits.",
+      "  - Reserve heavier models for tasks requiring judgment, adversarial thinking, or subtle reasoning.",
+      "  - Always pass model explicitly — there is no default.",
+    );
   } else {
     lines.push("", "Model: 'provider/model-id' format. Required — no default.");
   }
