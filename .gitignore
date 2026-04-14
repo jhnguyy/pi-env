@@ -13,4 +13,3 @@ sessions/
 permissions.json
 permissions-audit.jsonl
 node_modules
-.pi/extensions/dead-code-report.json
