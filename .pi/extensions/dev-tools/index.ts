@@ -3,8 +3,15 @@
  *
  * dev-tools is a file-extension engine: at agent_end it dispatches each edited
  * file to the backend registered for its extension in BACKEND_CONFIGS:
- *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
  *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
+ *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
+ *
+ * **Ordering invariant**: format backends run BEFORE LSP diagnostics in agent_end.
+ * LSP diagnostics may call sendMessage({ triggerTurn: true }), which enqueues a new
+ * agent turn. Any sendMessage call that happens AFTER triggerTurn appears in the new
+ * turn's context, making it look like it fires at turn start rather than turn end.
+ * Running format first ensures the formatter notification lands at the end of the
+ * current agent turn, before any diagnostics-triggered re-engage.
  *
  * The dev-tools interactive tool (hover, definition, symbols, …) routes through
  * the LSP daemon only — it does not interact with format backends.
@@ -16,7 +23,13 @@ import { Type } from "@sinclair/typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { spawnSync } from "node:child_process";
 import { LspClient } from "./client";
-import { formatResult, formatDiagnosticsSummary } from "./formatters";
+import { formatResult } from "./formatters";
+import {
+  type AgentEndFileResult,
+  diagnosticsToAgentEndResults,
+  renderAgentEndSummary,
+  shouldTriggerTurn,
+} from "./agent-end";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DaemonRequest, DiagnosticsResult, LspAction } from "./protocol";
 import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
@@ -177,10 +190,11 @@ export default function (pi: ExtensionAPI) {
     if (path && isSupported(path)) pendingFiles.add(path);
   });
 
-  // ─── agent_end: dispatch by backend mode ──────────────────────────────────
-  // Partition pendingFiles into LSP (diagnostics) and format (one-shot) groups,
-  // then process each. Adding a new backend type requires only a new BACKEND_CONFIGS
-  // entry — no changes needed here.
+  // ─── agent_end: collect from all backends, render once ─────────────────────
+  // Both format and LSP backends push into allResults (AgentEndFileResult[]).
+  // One sendMessage at the end covers everything. triggerTurn fires only when
+  // LSP results have errors (format errors are informational, no re-engage).
+  // See agent-end.ts for types, mappers, and the renderer.
   pi.on("agent_end", async () => {
     const files = [...pendingFiles];
     pendingFiles.clear();
@@ -192,65 +206,68 @@ export default function (pi: ExtensionAPI) {
     for (const file of files) {
       const config = getBackendConfig(file);
       if (!config) continue;
-      if (config.mode === "lsp") {
-        lspFiles.push(file);
-      } else {
-        formatFiles.push({ file, config });
+      if (config.mode === "lsp") lspFiles.push(file);
+      else formatFiles.push({ file, config });
+    }
+
+    const allResults: AgentEndFileResult[] = [];
+
+    // ── Format backends ──────────────────────────────────────────────────
+    // Sync + best-effort. triggerOnError: false — format errors are shown
+    // but don’t re-engage the model.
+    for (const { file, config } of formatFiles) {
+      const bin = resolveBin(config.binaryName);
+      if (!bin) continue;
+      try {
+        const r = spawnSync(bin, config.formatArgs(file), {
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 10_000,
+        });
+        if (r.status !== 0) {
+          const detail = (r.stderr as string).trim() || `exit ${r.status}`;
+          allResults.push({
+            backend: config.name,
+            filePath: file,
+            fileName: file.split("/").pop() ?? file,
+            issues: [{ severity: "error", message: detail }],
+            triggerOnError: false,
+          });
+        }
+      } catch (e) {
+        allResults.push({
+          backend: config.name,
+          filePath: file,
+          fileName: file.split("/").pop() ?? file,
+          issues: [{ severity: "error", message: e instanceof Error ? e.message : String(e) }],
+          triggerOnError: false,
+        });
       }
     }
 
-    // ── LSP diagnostics ────────────────────────────────────────────────────
-    // Batch all LSP files in a single daemon call. Re-engages the model if
-    // errors are found so it can triage and fix before the session ends.
+    // ── LSP diagnostics ──────────────────────────────────────────────────
+    // Async, batch. triggerOnError: true — LSP errors need the model to fix.
     if (lspFiles.length > 0) {
       try {
         const result = await client.call({ action: "diagnostics", paths: lspFiles });
         if (result) {
-          const diags = result as DiagnosticsResult;
-          const summary = formatDiagnosticsSummary(diags, 10);
-          if (summary) {
-            pi.sendMessage(
-              {
-                customType: "dev-tools-diagnostics",
-                content: `[post-edit diagnostics]\n${summary}`,
-                display: true,
-              },
-              { triggerTurn: true },
-            );
-          }
+          allResults.push(...diagnosticsToAgentEndResults(result as DiagnosticsResult));
         }
       } catch {
         // Non-fatal — diagnostics are best-effort
       }
     }
 
-    // ── Format backends ────────────────────────────────────────────────────
-    // One-shot per file. Runs after diagnostics so the model is not re-engaged
-    // just for formatting. Silent on no-op; reports names of formatted files.
-    // Binary availability is checked lazily and cached for the process lifetime.
-    if (formatFiles.length > 0) {
-      const formatted: string[] = [];
-      for (const { file, config } of formatFiles) {
-        const bin = resolveBin(config.binaryName);
-        if (!bin) continue;
-        try {
-          const r = spawnSync(bin, config.formatArgs(file), {
-            encoding: "utf8",
-            stdio: "pipe",
-            timeout: 10_000,
-          });
-          if (r.status === 0) formatted.push(file.split("/").pop() ?? file);
-        } catch {
-          // best-effort — file unreadable, binary crashed, etc.
-        }
-      }
-      if (formatted.length > 0) {
-        pi.sendMessage({
-          customType: "dev-tools-hclfmt",
-          content: `[hclfmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
-          display: true,
-        });
-      }
+    // ── Unified render + send ──────────────────────────────────────────────
+    // One message, all backends. triggerTurn is disabled for now — the hook
+    // (shouldTriggerTurn) is wired up and ready to re-enable when needed.
+    const summary = renderAgentEndSummary(allResults);
+    if (summary) {
+      pi.sendMessage({
+        customType: "dev-tools-agent-end",
+        content: `[post-edit]\n${summary}`,
+        display: true,
+      });
     }
   });
 }
