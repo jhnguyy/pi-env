@@ -3,8 +3,15 @@
  *
  * dev-tools is a file-extension engine: at agent_end it dispatches each edited
  * file to the backend registered for its extension in BACKEND_CONFIGS:
- *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
  *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
+ *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
+ *
+ * **Ordering invariant**: format backends run BEFORE LSP diagnostics in agent_end.
+ * LSP diagnostics may call sendMessage({ triggerTurn: true }), which enqueues a new
+ * agent turn. Any sendMessage call that happens AFTER triggerTurn appears in the new
+ * turn's context, making it look like it fires at turn start rather than turn end.
+ * Running format first ensures the formatter notification lands at the end of the
+ * current agent turn, before any diagnostics-triggered re-engage.
  *
  * The dev-tools interactive tool (hover, definition, symbols, …) routes through
  * the LSP daemon only — it does not interact with format backends.
@@ -181,6 +188,8 @@ export default function (pi: ExtensionAPI) {
   // Partition pendingFiles into LSP (diagnostics) and format (one-shot) groups,
   // then process each. Adding a new backend type requires only a new BACKEND_CONFIGS
   // entry — no changes needed here.
+  //
+  // ORDER MATTERS: format runs before LSP diagnostics. See module JSDoc.
   pi.on("agent_end", async () => {
     const files = [...pendingFiles];
     pendingFiles.clear();
@@ -199,34 +208,11 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── LSP diagnostics ────────────────────────────────────────────────────
-    // Batch all LSP files in a single daemon call. Re-engages the model if
-    // errors are found so it can triage and fix before the session ends.
-    if (lspFiles.length > 0) {
-      try {
-        const result = await client.call({ action: "diagnostics", paths: lspFiles });
-        if (result) {
-          const diags = result as DiagnosticsResult;
-          const summary = formatDiagnosticsSummary(diags, 10);
-          if (summary) {
-            pi.sendMessage(
-              {
-                customType: "dev-tools-diagnostics",
-                content: `[post-edit diagnostics]\n${summary}`,
-                display: true,
-              },
-              { triggerTurn: true },
-            );
-          }
-        }
-      } catch {
-        // Non-fatal — diagnostics are best-effort
-      }
-    }
-
-    // ── Format backends ────────────────────────────────────────────────────
-    // One-shot per file. Runs after diagnostics so the model is not re-engaged
-    // just for formatting. Silent on no-op; reports names of formatted files.
+    // ── Format backends (FIRST) ────────────────────────────────────────────
+    // Must run before LSP diagnostics: LSP may call sendMessage({ triggerTurn:
+    // true }), and any sendMessage after that appears in the new turn's context
+    // rather than the current turn's end. Running format here keeps the
+    // notification anchored to agent_end of the turn that made the edits.
     // Binary availability is checked lazily and cached for the process lifetime.
     if (formatFiles.length > 0) {
       const formatted: string[] = [];
@@ -246,10 +232,37 @@ export default function (pi: ExtensionAPI) {
       }
       if (formatted.length > 0) {
         pi.sendMessage({
-          customType: "dev-tools-hclfmt",
-          content: `[hclfmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
+          customType: "dev-tools-format",
+          content: `[fmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
           display: true,
         });
+      }
+    }
+
+    // ── LSP diagnostics (SECOND) ───────────────────────────────────────────
+    // Batch all LSP files in a single daemon call. Re-engages the model if
+    // errors are found so it can triage and fix before the session ends.
+    // Runs after format so triggerTurn: true doesn't swallow the format
+    // notification into the next turn's context.
+    if (lspFiles.length > 0) {
+      try {
+        const result = await client.call({ action: "diagnostics", paths: lspFiles });
+        if (result) {
+          const diags = result as DiagnosticsResult;
+          const summary = formatDiagnosticsSummary(diags, 10);
+          if (summary) {
+            pi.sendMessage(
+              {
+                customType: "dev-tools-diagnostics",
+                content: `[post-edit diagnostics]\n${summary}`,
+                display: true,
+              },
+              { triggerTurn: true },
+            );
+          }
+        }
+      } catch {
+        // Non-fatal — diagnostics are best-effort
       }
     }
   });
