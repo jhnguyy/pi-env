@@ -259,17 +259,15 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ── Unified render + send ──────────────────────────────────────────────
-    // One message, all backends. triggerTurn only when LSP errors are present.
+    // One message, all backends. triggerTurn is disabled for now — the hook
+    // (shouldTriggerTurn) is wired up and ready to re-enable when needed.
     const summary = renderAgentEndSummary(allResults);
     if (summary) {
-      pi.sendMessage(
-        {
-          customType: "dev-tools-agent-end",
-          content: `[post-edit]\n${summary}`,
-          display: true,
-        },
-        shouldTriggerTurn(allResults) ? { triggerTurn: true } : undefined,
-      );
+      pi.sendMessage({
+        customType: "dev-tools-agent-end",
+        content: `[post-edit]\n${summary}`,
+        display: true,
+      });
     }
   });
 }
