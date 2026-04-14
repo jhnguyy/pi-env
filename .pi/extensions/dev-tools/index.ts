@@ -209,34 +209,35 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ── Format backends (FIRST) ────────────────────────────────────────────
-    // Must run before LSP diagnostics: LSP may call sendMessage({ triggerTurn:
-    // true }), and any sendMessage after that appears in the new turn's context
-    // rather than the current turn's end. Running format here keeps the
-    // notification anchored to agent_end of the turn that made the edits.
+    // Runs before LSP diagnostics so it completes before any triggerTurn call.
+    // Silent and best-effort — no model re-engage.
+    // Errors are surfaced as a single non-triggering message so the agent can
+    // see what went wrong without starting a new turn.
     // Binary availability is checked lazily and cached for the process lifetime.
-    if (formatFiles.length > 0) {
-      const formatted: string[] = [];
-      for (const { file, config } of formatFiles) {
-        const bin = resolveBin(config.binaryName);
-        if (!bin) continue;
-        try {
-          const r = spawnSync(bin, config.formatArgs(file), {
-            encoding: "utf8",
-            stdio: "pipe",
-            timeout: 10_000,
-          });
-          if (r.status === 0) formatted.push(file.split("/").pop() ?? file);
-        } catch {
-          // best-effort — file unreadable, binary crashed, etc.
-        }
-      }
-      if (formatted.length > 0) {
-        pi.sendMessage({
-          customType: "dev-tools-format",
-          content: `[fmt] Auto-formatted ${formatted.length} file(s): ${formatted.join(", ")}`,
-          display: true,
+    const formatErrors: string[] = [];
+    for (const { file, config } of formatFiles) {
+      const bin = resolveBin(config.binaryName);
+      if (!bin) continue;
+      try {
+        const r = spawnSync(bin, config.formatArgs(file), {
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 10_000,
         });
+        if (r.status !== 0) {
+          const detail = (r.stderr as string).trim() || `exit ${r.status}`;
+          formatErrors.push(`${config.name}: ${file.split("/").pop()} — ${detail}`);
+        }
+      } catch (e) {
+        formatErrors.push(`${config.name}: ${file.split("/").pop()} — ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+    if (formatErrors.length > 0) {
+      pi.sendMessage({
+        customType: "dev-tools-format-error",
+        content: `[fmt] ${formatErrors.length} formatter error(s):\n${formatErrors.join("\n")}`,
+        display: true,
+      });
     }
 
     // ── LSP diagnostics (SECOND) ───────────────────────────────────────────
