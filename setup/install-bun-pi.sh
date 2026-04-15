@@ -105,6 +105,32 @@ bun build "$PI_PKG/dist/bun/cli.js" \
   --external koffi \
   --outfile "$TMP_BIN"
 
+# ── Validate compiled output ─────────────────────────────────────────────────
+# bun --compile can exit 0 yet write an empty or all-zero file on some
+# filesystems (e.g. certain ZFS dataset configurations). Catch this before
+# clobbering any existing working binary at $BIN_DIR/pi.
+COMPILED_SIZE=$(wc -c < "$TMP_BIN" 2>/dev/null || echo 0)
+if [ "$COMPILED_SIZE" -eq 0 ]; then
+  echo "  ✗  bun build --compile wrote 0 bytes — silent compilation failure." >&2
+  echo "     The compiler exited successfully but produced no output." >&2
+  echo "     This is a known Bun bug on some filesystems (e.g. ZFS container roots)." >&2
+  echo "     Run manually to see full build output:" >&2
+  echo "       bun build '$PI_PKG/dist/bun/cli.js' --compile --external koffi --outfile /tmp/pi-test-bin" >&2
+  exit 1
+fi
+# Check for a valid ELF (Linux) or Mach-O (macOS) magic header.
+# An all-zero or truncated output file will not match — this surfaces the
+# silent failure that set -e alone cannot catch (bun exits 0 even then).
+if ! od -c -N4 "$TMP_BIN" 2>/dev/null | grep -qE '\\177.*E.*L.*F|\\312.*\\376|\\317.*\\372'; then
+  echo "  ✗  bun build --compile produced an invalid binary (${COMPILED_SIZE} bytes)." >&2
+  echo "     Expected ELF (Linux) or Mach-O (macOS) magic bytes but got:" >&2
+  od -c -N4 "$TMP_BIN" >&2 || true
+  echo "     This is a known Bun bug on some filesystems. Diagnose with:" >&2
+  echo "       bun build '$PI_PKG/dist/bun/cli.js' --compile --external koffi --outfile /tmp/pi-test-bin" >&2
+  echo "       od -c -N4 /tmp/pi-test-bin" >&2
+  exit 1
+fi
+
 cp "$TMP_BIN" "$BIN_DIR/pi"
 chmod +x "$BIN_DIR/pi"
 
