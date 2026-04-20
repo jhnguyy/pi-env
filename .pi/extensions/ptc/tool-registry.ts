@@ -3,13 +3,21 @@
  * @purpose Manages tool execute functions for PTC dispatch.
  *
  * Built-in tools (read, bash, etc.) are resolved via createXxxToolDefinition(cwd)
- * from pi 0.62.0+. Extension tools are captured via a registerTool() intercept
- * installed at construction time — the only viable approach until pi exposes
- * pi.executeTool() upstream (see TODO below).
+ * from pi 0.62.0+. Extension tools are captured via two complementary paths:
  *
- * Load-order note: extensions that load BEFORE ptc will have already called
- * registerTool() before the intercept is installed, so their execute functions
- * won't be captured. They are excluded from the available-tool list.
+ * Path 1 — registerTool() intercept (installed at construction time):
+ *   Captures execute functions for any extension that calls pi.registerTool()
+ *   AFTER ptc loads. Requires ptc to be listed first in the extension load order
+ *   (see package.json). Any extension loaded before ptc misses this path.
+ *
+ * Path 2 — agent-tools:register channel listener:
+ *   Captures tools emitted at session_start via pi.events.emit("agent-tools:register").
+ *   Load-order independent. Extensions that already emit for subagent availability
+ *   (agent-bus, dev-tools) get ptc availability for free — no extra code needed.
+ *   New extensions should follow this pattern (see agent-bus/index.ts for example).
+ *
+ * Together, Path 1 (intercept) covers the general case and Path 2 (event) covers
+ * the two pi-env extensions that loaded before ptc alphabetically.
  *
  * Design doc: projects/homelab/ptc_extension_design.md
  */
@@ -31,6 +39,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { BLOCKED_TOOLS } from "./types";
+import type { ExtToolRegistration } from "../subagent/types";
 
 type ExecuteFn = (
   toolCallId: string,
@@ -83,6 +92,31 @@ export class ToolRegistry {
 
   constructor(pi: ExtensionAPI) {
     this.installRegisterToolIntercept(pi);
+    this.installAgentToolsListener(pi);
+  }
+
+  /**
+   * Listen on the agent-tools:register channel to capture extension tools that
+   * registered with pi.registerTool() before the intercept was installed (i.e.
+   * extensions that loaded before ptc alphabetically: agent-bus, dev-tools).
+   *
+   * Both dev-tools and agent-bus already emit on this channel at session_start
+   * for subagent availability — ptc gets them for free by listening here.
+   * The intercept remains for any extension that does NOT emit agent-tools:register.
+   *
+   * If a tool was already captured by the intercept, the registration event
+   * overwrites it with the same execute function — harmless, last-write-wins.
+   */
+  private installAgentToolsListener(pi: ExtensionAPI): void {
+    pi.events.on("agent-tools:register", (data: unknown) => {
+      const { tool } = data as ExtToolRegistration;
+      if (BLOCKED_TOOLS.has(tool.name) || BUILTIN_NAMES.has(tool.name)) return;
+      // Adapt AgentTool's 4-arg execute to ExecuteFn's 5-arg shape.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.extensionTools.set(tool.name, (id, params, sig, _upd, _ctx) =>
+        tool.execute(id, params as any, sig, undefined),
+      );
+    });
   }
 
   /**
@@ -130,9 +164,10 @@ export class ToolRegistry {
     });
     if (unavailable.length > 0) {
       console.warn(
-        `[ptc] The following tools are unavailable inside PTC because their extensions loaded ` +
-          `before ptc in the extension list: ${unavailable.join(", ")}. ` +
-          `To fix, move ptc earlier in your extension load order.`,
+        `[ptc] The following tools are unavailable inside PTC: ${unavailable.join(", ")}. ` +
+          `They were loaded before ptc's intercept and do not emit agent-tools:register. ` +
+          `Either move their extensions after ptc in load order, or have them emit ` +
+          `agent-tools:register at session_start (see agent-bus/dev-tools for examples).`,
       );
     }
     return available;
