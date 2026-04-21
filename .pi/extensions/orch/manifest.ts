@@ -10,7 +10,7 @@
  *     `ls -lt /tmp/orch-runs/` to see recent runs.
  */
 
-import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, unlinkSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, readdirSync, rmSync, unlinkSync, statSync } from "node:fs";
 import type { OrchManifest, RunReceipt } from "./types";
 
 export const RECEIPT_DIR = "/tmp/orch-runs";
@@ -87,7 +87,6 @@ export function cleanupOrphanedOrchDirs(activeOrchDir?: string): number {
         // Only clean dirs older than 1 hour to avoid race with in-progress spawns
         const ageMs = Date.now() - stat.mtimeMs;
         if (ageMs < 3_600_000) continue;
-        const { rmSync } = require("node:fs");
         rmSync(fullPath, { recursive: true, force: true });
         cleaned++;
       } catch {}

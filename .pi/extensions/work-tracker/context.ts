@@ -92,7 +92,7 @@ const worktreeCache = new Map<string, string[]>();
  * unavailable). NOT cleared by invalidateGitCache() — failures persist for
  * the lifetime of the session so we don't spawn git subprocesses against an
  * unavailable mount on every turn. Cleared by resetGitFailureCache() which is
- * called on session_start / session_switch / session_shutdown so each new
+ * called on session_start / session_shutdown so each new
  * session gets a fresh attempt.
  */
 const gitFailureCache = new Map<string, CachedGitStatus>();

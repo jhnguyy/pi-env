@@ -5,12 +5,6 @@ export interface WorkTrackerConfig {
   protectedBranches: string[];
 }
 
-export interface BranchGuardResult {
-  shouldBlock: boolean;
-  reason?: string;
-  targetBranch?: string;
-}
-
 export interface TodoItem {
   id: number;
   text: string;

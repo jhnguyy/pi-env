@@ -1,10 +1,9 @@
 /**
  * hooks.ts — pi lifecycle hook registrations for work-tracker.
  *
- *   tool_call hook       — branch guard (blocks git push to protected branches)
  *   tool_result hook     — handoff cleanup on merge / git pull
  *   session_start hook   — slot init, todo clear, tool deactivation
- *   session_switch hook  — todo clear on /new or /resume
+ *   session_start hook   — clear todos on /new, /resume, /fork (reason guard)
  *   session_shutdown     — todo clear + slot state reset
  *   before_agent_start   — context injection (git status + todo list)
  */
@@ -76,7 +75,7 @@ export function registerHooks(
     }
   });
 
-  // ─── 3. Session start ───────────────────────────────────────────────────────
+  // ─── 2. Session start ───────────────────────────────────────────────────────
   pi.on("session_start", async (_event, ctx) => {
     store.clear();
     invalidateGitCache();
@@ -95,7 +94,7 @@ export function registerHooks(
     }
   });
 
-  // ─── 4. Session switch (/new, /resume, /fork) — clear todos ──────────────────
+  // ─── 3. Session switch (/new, /resume, /fork) — clear todos ──────────────────
   pi.on("session_start", async (event, ctx) => {
     if (event.reason !== "new" && event.reason !== "resume" && event.reason !== "fork") return;
     const open = store.open().length;
@@ -111,14 +110,14 @@ export function registerHooks(
     }
   });
 
-  // ─── 5. Session shutdown — clear todos + slot state ─────────────────────────
+  // ─── 4. Session shutdown — clear todos + slot state ─────────────────────────
   pi.on("session_shutdown", async () => {
     store.clear();
     resetGitFailureCache();
     resetSlots();
   });
 
-  // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
+  // ─── 5. Widget refresh on turn_end ──────────────────────────────────────────
   pi.on("turn_end", async (_event, ctx) => {
     if (isOrchWorker()) return;
     invalidateGitCache();
@@ -128,7 +127,7 @@ export function registerHooks(
     }, ctx);
   });
 
-  // ─── 7. Widget refresh + context injection before agent start ───────────────
+  // ─── 6. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     if (isOrchWorker()) return {};
     store.purgeCompleted();
@@ -142,7 +141,7 @@ export function registerHooks(
     return { message: { customType: "work-tracker", content: line, display: false } };
   });
 
-  // ─── 8. Todo context injection (root sessions only) ─────────────────────────
+  // ─── 7. Todo context injection (root sessions only) ─────────────────────────
   // NOTE: Ideally this would be merged with hook 7 above into a single
   // before_agent_start handler, but BeforeAgentStartEventResult only supports
   // a single `message?` — not `messages[]`. Two hooks are needed until the

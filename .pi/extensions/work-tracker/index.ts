@@ -4,8 +4,7 @@
  * Thin wiring only. Business logic lives in:
  *   - context.ts      — git status helpers, widget refresh, config loading
  *   - commands.ts     — /review-retros, /handoff command registrations
- *   - hooks.ts        — tool_call/result + session_start + before_agent_start hooks
- *   - branch-guard.ts — BranchGuard class (protected branch enforcement)
+ *   - hooks.ts        — tool_result + session_start + before_agent_start hooks
  *   - handoff-cleanup — handoff file cleanup on branch merge
  *   - store.ts        — TodoStore (in-memory task list)
  *   - extractor.ts    — session JSONL extraction for read_session tool
