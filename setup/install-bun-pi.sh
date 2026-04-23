@@ -67,7 +67,7 @@ SYSTEM_PROMPT_JS="$PI_PKG/dist/core/system-prompt.js"
 # A prior Bun compile bug could write the binary there instead of the outfile.
 # If it's an ELF binary, restore it from the npm registry before proceeding.
 CLI_JS="$PI_PKG/dist/cli.js"
-if [ -f "$CLI_JS" ] && od -c -N4 "$CLI_JS" 2>/dev/null | grep -q '\\177.*E.*L.*F'; then
+if [ -f "$CLI_JS" ] && od -An -tx1 -N4 "$CLI_JS" 2>/dev/null | grep -q '7f 45 4c 46'; then
   info "dist/cli.js is a binary — restoring from npm registry"
   curl -sL "https://registry.npmjs.org/@mariozechner/pi-coding-agent/-/pi-coding-agent-${PI_VERSION}.tgz" \
     | tar -xz --strip-components=2 -C "$PI_PKG/dist" package/dist/cli.js
@@ -121,13 +121,13 @@ fi
 # Check for a valid ELF (Linux) or Mach-O (macOS) magic header.
 # An all-zero or truncated output file will not match — this surfaces the
 # silent failure that set -e alone cannot catch (bun exits 0 even then).
-if ! od -c -N4 "$TMP_BIN" 2>/dev/null | grep -qE '\\177.*E.*L.*F|\\312.*\\376|\\317.*\\372'; then
+if ! od -An -tx1 -N4 "$TMP_BIN" 2>/dev/null | grep -qE '7f 45 4c 46|ca fe ba be|ce fa ed fe|cf fa ed fe'; then
   echo "  ✗  bun build --compile produced an invalid binary (${COMPILED_SIZE} bytes)." >&2
   echo "     Expected ELF (Linux) or Mach-O (macOS) magic bytes but got:" >&2
-  od -c -N4 "$TMP_BIN" >&2 || true
+  od -An -tx1 -N4 "$TMP_BIN" >&2 || true
   echo "     This is a known Bun bug on some filesystems. Diagnose with:" >&2
   echo "       bun build '$PI_PKG/dist/bun/cli.js' --compile --external koffi --outfile /tmp/pi-test-bin" >&2
-  echo "       od -c -N4 /tmp/pi-test-bin" >&2
+  echo "       od -An -tx1 -N4 /tmp/pi-test-bin" >&2
   exit 1
 fi
 
