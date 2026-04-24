@@ -2,12 +2,12 @@
  * Tmux Extension — entry point.
  *
  * Thin wiring only. Zero business logic. Follows the security and
- * agent-bus patterns: components are instantiated here with DI, hooks
+ * DI pattern: components are instantiated here with DI, hooks
  * and tool are registered, no conditional logic beyond the tool switch/catch.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@mariozechner/pi-tui";

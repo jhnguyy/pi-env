@@ -22,7 +22,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { resolve } from "node:path";
 import { homedir } from "node:os";

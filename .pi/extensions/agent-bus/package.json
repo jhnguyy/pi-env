@@ -1,8 +1,0 @@
-{
-  "name": "@pi-env/agent-bus",
-  "type": "module",
-  "private": true,
-  "pi": {
-    "extensions": ["./dist/index.js"]
-  }
-}

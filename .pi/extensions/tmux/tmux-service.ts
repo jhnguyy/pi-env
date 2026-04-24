@@ -2,17 +2,17 @@
  * tmux-service — module-level PaneManager + TmuxClient singleton.
  *
  * Single source of truth for the TmuxClient + PaneManager pair.
- * Both tmux/index.ts and orch/manager.ts import from here so all
+ * Both tmux/index.ts imports from here so all
  * pane operations share one manager instance and one session prefix
  * regardless of which extension initiates the service.
  *
  * @stable — This is a cross-extension API. The exported function signatures
  * (initTmuxService, getTmuxService) and the TmuxService shape must not change
- * without updating orch/manager.ts.
+ * without updating other consumers.
  *
  * Known consumers (direct import via ../tmux/tmux-service):
  *   - tmux/index.ts   — calls initTmuxService(pi.exec) at extension load
- *   - orch/manager.ts — calls getTmuxService() to share the same PaneManager
+ *   - (no other known consumers)
  *
  * Why not _shared/? tmux-service depends on TmuxClient + PaneManager which
  * are tmux internals. Keeping it here avoids a circular topology.
@@ -35,7 +35,7 @@ interface TmuxService {
  * globalThis key for the TmuxService singleton.
  *
  * Using globalThis instead of a module-level variable ensures that when
- * this file is bundled into multiple extension bundles (e.g. tmux and orch
+ * this file is bundled into the tmux extension bundle (
  * each bundle it inline), all copies share the same live instance.
  * Module-level variables are per-bundle; globalThis is process-wide.
  */
@@ -62,14 +62,14 @@ export function initTmuxService(execFn: ExecFn): TmuxService {
 
 /**
  * Return the existing tmux service.
- * Throws if not yet initialized — orch calls this after tmux extension has
+ * Throws if not yet initialized — call this after tmux extension has loaded.
  * already initialized the singleton.
  */
 export function getTmuxService(): TmuxService {
   const instance = (globalThis as Record<string, unknown>)[TMUX_SERVICE_KEY] as TmuxService | undefined;
   if (!instance) {
     throw new Error(
-      "TmuxService not initialized — tmux extension must load before orch",
+      "TmuxService not initialized — tmux extension must load first",
     );
   }
   return instance;

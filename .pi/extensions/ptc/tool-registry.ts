@@ -13,11 +13,11 @@
  * Path 2 — agent-tools:register channel listener:
  *   Captures tools emitted at session_start via pi.events.emit("agent-tools:register").
  *   Load-order independent. Extensions that already emit for subagent availability
- *   (agent-bus, dev-tools) get ptc availability for free — no extra code needed.
- *   New extensions should follow this pattern (see agent-bus/index.ts for example).
+ *   (dev-tools) get ptc availability for free — no extra code needed.
+ *   New extensions should follow this pattern (see dev-tools/index.ts for example).
  *
  * Together, Path 1 (intercept) covers the general case and Path 2 (event) covers
- * the two pi-env extensions that loaded before ptc alphabetically.
+ * extensions loaded before ptc alphabetically.
  *
  * Design doc: projects/homelab/ptc_extension_design.md
  */
@@ -98,10 +98,10 @@ export class ToolRegistry {
   /**
    * Listen on the agent-tools:register channel to capture extension tools that
    * registered with pi.registerTool() before the intercept was installed (i.e.
-   * extensions that loaded before ptc alphabetically: agent-bus, dev-tools).
+   * extensions that loaded before ptc alphabetically: dev-tools).
    *
-   * Both dev-tools and agent-bus already emit on this channel at session_start
-   * for subagent availability — ptc gets them for free by listening here.
+   * dev-tools already emits on this channel at session_start for subagent
+   * availability — ptc gets them for free by listening here.
    * The intercept remains for any extension that does NOT emit agent-tools:register.
    *
    * If a tool was already captured by the intercept, the registration event
@@ -167,7 +167,7 @@ export class ToolRegistry {
         `[ptc] The following tools are unavailable inside PTC: ${unavailable.join(", ")}. ` +
           `They were loaded before ptc's intercept and do not emit agent-tools:register. ` +
           `Either move their extensions after ptc in load order, or have them emit ` +
-          `agent-tools:register at session_start (see agent-bus/dev-tools for examples).`,
+          `agent-tools:register at session_start (see dev-tools/index.ts for an example).`,
       );
     }
     return available;

@@ -19,7 +19,7 @@
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { spawnSync } from "node:child_process";
 import { LspClient } from "./client";

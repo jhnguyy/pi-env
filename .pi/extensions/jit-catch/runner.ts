@@ -9,7 +9,7 @@
  * - Run `bun test` and return pass/fail + output
  * - Auto-discard on pass
  *
- * ExecFn is injected for testability (same pattern as tmux/agent-bus).
+ * ExecFn is injected for testability (same pattern as tmux).
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
