@@ -17,7 +17,7 @@ export const MAX_TURNS = 20;
  *
  *   "read"    — observes state (queries, lookups, searches). Safe for scouts.
  *   "write"   — modifies state (file edits, note writes, message sends).
- *   "execute" — runs code or spawns processes (bash, tmux, bus session init).
+ *   "execute" — runs code or spawns processes (bash, subagent).
  *
  * A tool can have multiple tags. A read-only tool like dev-tools gets ["read"].
  * A tool like bus that can observe, send messages, and create sessions gets all three.

@@ -8,7 +8,7 @@
 # Pi peer packages are marked external so the runtime copies provided by pi
 # are used instead of bundled duplicates.
 #
-# The cross-extension singleton services (tmux-service) use
+# The cross-extension singleton services use
 # globalThis storage so their bundled copies share the same live instance at runtime.
 set -euo pipefail
 
@@ -32,7 +32,6 @@ EXTENSIONS=(
   security
   skill-builder
   subagent
-  tmux
   usage-bar
   work-tracker
 )

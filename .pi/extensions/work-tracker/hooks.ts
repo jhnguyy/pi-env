@@ -11,7 +11,6 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
-import { isOrchWorker } from "../_shared/context";
 import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 
 import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
@@ -120,7 +119,6 @@ export function registerHooks(
 
   // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
   pi.on("turn_end", async (_event, ctx) => {
-    if (isOrchWorker()) return;
     invalidateGitCache();
     batchSlots(() => {
       setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
@@ -130,7 +128,6 @@ export function registerHooks(
 
   // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
-    if (isOrchWorker()) return {};
     store.purgeCompleted();
     batchSlots(() => {
       setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
@@ -143,12 +140,7 @@ export function registerHooks(
   });
 
   // ─── 8. Todo context injection (root sessions only) ─────────────────────────
-  // NOTE: Ideally this would be merged with hook 7 above into a single
-  // before_agent_start handler, but BeforeAgentStartEventResult only supports
-  // a single `message?` — not `messages[]`. Two hooks are needed until the
-  // upstream pi API adds multi-message support.
   pi.on("before_agent_start", async () => {
-    if (isOrchWorker()) return {};
     return { message: { customType: "session-todos", content: store.render(), display: false } };
   });
 }

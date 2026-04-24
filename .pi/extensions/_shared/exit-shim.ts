@@ -1,10 +1,10 @@
 /**
  * @module _shared/exit-shim
- * @purpose Bus exit-signal shell shim. Use when spawning a pane with busChannel.
+ * @purpose Bus exit-signal shell shim. Use when spawning a process with a busChannel.
  *
  * Lazily writes a bash script to /tmp that publishes a bus exit signal.
- * Called by tmux pane teardown so the orchestrator gets notified even if
- * the worker process crashes.
+ * Provides crash-safe process exit signaling without requiring
+ * the process to explicitly publish before exiting.
  *
  * @example
  *   ensureExitShim();  // idempotent — writes /tmp/pi-bus-exit-shim once

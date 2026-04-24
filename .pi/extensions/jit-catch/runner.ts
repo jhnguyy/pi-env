@@ -9,7 +9,7 @@
  * - Run `bun test` and return pass/fail + output
  * - Auto-discard on pass
  *
- * ExecFn is injected for testability (same pattern as tmux).
+ * ExecFn is injected for testability (same pattern as jit-catch).
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
@@ -103,7 +103,7 @@ export function readSourceFiles(changedFiles: string[]): string {
   let totalBytes = 0;
 
   for (const relPath of changedFiles) {
-    // changedFiles are relative to repo root (e.g. `.pi/agent/extensions/tmux/index.ts`).
+    // changedFiles are relative to repo root (e.g. `.pi/agent/extensions/dev-tools/index.ts`).
     // Resolve against home dir — covers the common `~/.pi/agent/extensions/<ext>/` layout.
     const candidates = [
       join(homedir(), relPath),
