@@ -20,7 +20,7 @@ import * as path from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { discoverAgents } from "./agents";
 import { createExecuteSubagent } from "./execute";

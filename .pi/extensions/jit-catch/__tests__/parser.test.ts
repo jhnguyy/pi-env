@@ -24,11 +24,11 @@ function diff(...files: string[]): string {
 
 describe("parseDiff", () => {
   it("extracts a single extension from a standard git diff path", () => {
-    const result = parseDiff(diff(".pi/agent/extensions/tmux/index.ts"));
+    const result = parseDiff(diff(".pi/agent/extensions/work-tracker/index.ts"));
     expect(result.extensions).toHaveLength(1);
-    expect(result.extensions[0].name).toBe("tmux");
+    expect(result.extensions[0].name).toBe("work-tracker");
     expect(result.extensions[0].changedFiles).toContain(
-      ".pi/agent/extensions/tmux/index.ts",
+      ".pi/agent/extensions/work-tracker/index.ts",
     );
   });
 
@@ -38,11 +38,11 @@ describe("parseDiff", () => {
   });
 
   it("strips the b/ git prefix from file paths", () => {
-    const raw = `diff --git a/extensions/tmux/x.ts b/extensions/tmux/x.ts\n--- a/extensions/tmux/x.ts\n+++ b/extensions/tmux/x.ts\n@@ -1 +1 @@\n-a\n+b`;
+    const raw = `diff --git a/extensions/work-tracker/x.ts b/extensions/work-tracker/x.ts\n--- a/extensions/work-tracker/x.ts\n+++ b/extensions/work-tracker/x.ts\n@@ -1 +1 @@\n-a\n+b`;
     const result = parseDiff(raw);
     // changedFile should have b/ stripped
     expect(result.extensions[0].changedFiles[0]).not.toMatch(/^b\//);
-    expect(result.extensions[0].changedFiles[0]).toBe("extensions/tmux/x.ts");
+    expect(result.extensions[0].changedFiles[0]).toBe("extensions/work-tracker/x.ts");
   });
 
   it("deduplicates files within the same extension", () => {
@@ -57,8 +57,8 @@ describe("parseDiff", () => {
 
   it("ignores __tests__ files — they are not source files", () => {
     const d = diff(
-      ".pi/agent/extensions/tmux/index.ts",
-      ".pi/agent/extensions/tmux/__tests__/tmux.test.ts",
+      ".pi/agent/extensions/work-tracker/index.ts",
+      ".pi/agent/extensions/work-tracker/__tests__/work-tracker.test.ts",
     );
     const r = parseDiff(d);
     expect(r.extensions[0].changedFiles).toHaveLength(1);
@@ -66,7 +66,7 @@ describe("parseDiff", () => {
   });
 
   it("skips an extension entirely if only __tests__ files changed", () => {
-    const d = diff(".pi/agent/extensions/tmux/__tests__/tmux.test.ts");
+    const d = diff(".pi/agent/extensions/work-tracker/__tests__/work-tracker.test.ts");
     const r = parseDiff(d);
     expect(r.extensions).toHaveLength(0);
   });
@@ -75,7 +75,7 @@ describe("parseDiff", () => {
 
   it("flags non-extension files and does not include them in extensions", () => {
     const d = diff(
-      ".pi/agent/extensions/tmux/index.ts",
+      ".pi/agent/extensions/work-tracker/index.ts",
       ".pi/agent/skills/handoff/SKILL.md",
     );
     const r = parseDiff(d);
@@ -92,18 +92,18 @@ describe("parseDiff", () => {
 
   it("extracts multiple extensions from a single diff", () => {
     const d = diff(
-      ".pi/agent/extensions/tmux/index.ts",
+      ".pi/agent/extensions/work-tracker/index.ts",
       ".pi/agent/extensions/dev-tools/server.ts",
     );
     const r = parseDiff(d);
     const names = r.extensions.map((e) => e.name).sort();
-    expect(names).toEqual(["dev-tools", "tmux"]);
+    expect(names).toEqual(["dev-tools", "work-tracker"]);
   });
 
   it("groups multiple files within the same extension", () => {
     const d = diff(
-      ".pi/agent/extensions/tmux/index.ts",
-      ".pi/agent/extensions/tmux/types.ts",
+      ".pi/agent/extensions/work-tracker/index.ts",
+      ".pi/agent/extensions/work-tracker/types.ts",
     );
     const r = parseDiff(d);
     expect(r.extensions).toHaveLength(1);
@@ -119,7 +119,7 @@ describe("parseDiff", () => {
   });
 
   it("ignores /dev/null entries", () => {
-    const d = `diff --git a/ext/tmux/old.ts b/ext/tmux/old.ts\n--- a/ext/tmux/old.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted`;
+    const d = `diff --git a/ext/work-tracker/old.ts b/ext/work-tracker/old.ts\n--- a/ext/work-tracker/old.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted`;
     const r = parseDiff(d);
     // /dev/null should be ignored entirely
     expect(r.extensions).toHaveLength(0);

@@ -47,8 +47,6 @@ const SAMPLE_TOOLS = [
   { name: "bash",      description: "Execute bash commands", parameters: {} as any, sourceInfo: {} as any },
   { name: "dev-tools", description: "LSP diagnostics", parameters: {} as any, sourceInfo: {} as any },
   { name: "ptc",       description: "Programmatic tool calling (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
-  { name: "orch",      description: "Orchestration (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
-  { name: "tmux",      description: "Tmux pane management (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
   { name: "subagent",  description: "Subagent (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
 ];
 
@@ -127,9 +125,7 @@ describe("BLOCKED_TOOLS", () => {
     expect(BLOCKED_TOOLS.has("ptc")).toBe(true);
   });
 
-  it("blocks orchestration tools", () => {
-    expect(BLOCKED_TOOLS.has("orch")).toBe(true);
-    expect(BLOCKED_TOOLS.has("tmux")).toBe(true);
+  it("blocks agent-spawning tools", () => {
     expect(BLOCKED_TOOLS.has("subagent")).toBe(true);
   });
 

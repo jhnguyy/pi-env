@@ -54,8 +54,6 @@ export function buildSubprocessEnv(): Record<string, string | undefined> {
     // ── Agent coordination (not secrets — IDs and paths) ──
     "PI_BUS_SESSION",  // bus session ID for inter-agent messaging
     "PI_AGENT_ID",     // agent identity on the bus
-    "ORCH_DIR",        // orchestration run directory
-    "PI_ORCH_WORKER",  // signals this is an orch worker pane
   ] as const;
 
   const env: Record<string, string | undefined> = {};
@@ -85,8 +83,6 @@ export type DispatchFn = (tool: string, params: Record<string, unknown>) => Prom
  */
 export const BLOCKED_TOOLS = new Set<string>([
   "ptc",          // self — prevent recursion
-  "orch",         // spawns workers, manages worktrees
-  "tmux",         // pane management, interactive sessions
   "subagent",     // in-process agent loops
   "jit_catch",    // spawns a subagent internally
   "skill_build",  // spawns a subagent internally

@@ -1,62 +1,22 @@
 /**
- * Security extension — two concerns, no interaction required:
+ * Security extension — redact sensitive file contents before they reach the model.
  *
- *   1. tool_call  → hard-block a small set of genuinely dangerous operations
- *   2. tool_result → redact sensitive file contents before they reach the model
- *
- * No prompts. No rule engine. No session modes. Block means block.
+ * Intercepts tool_result for the read tool: if the file path matches a known
+ * sensitive file name (.env, auth.json, etc.), replace the content with a
+ * redaction notice. This prevents key material from being serialized into
+ * session history and re-sent to the provider on every API request.
  */
-
-import type { ExtensionAPI, ToolCallEventResult } from "@mariozechner/pi-coding-agent";
-import { BLOCKLIST, type BlockEntry } from "./blocklist";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { CredentialScanner } from "./credential-scanner";
-
-// Pre-index blocklist by tool name for O(1) lookup instead of full scan
-function buildBlockIndex(list: BlockEntry[]): Map<string, BlockEntry[]> {
-  const index = new Map<string, BlockEntry[]>();
-  for (const entry of list) {
-    for (const tool of entry.tools) {
-      const arr = index.get(tool);
-      if (arr) arr.push(entry);
-      else index.set(tool, [entry]);
-    }
-  }
-  return index;
-}
 
 export default function (pi: ExtensionAPI) {
   const scanner = new CredentialScanner();
-  const blockIndex = buildBlockIndex(BLOCKLIST);
-
-  // ── Hard block dangerous operations ────────────────────────────────────────
-
-  pi.on("tool_call", async (event) => {
-    const entries = blockIndex.get(event.toolName);
-    if (!entries) return;
-    const input = event.input as Record<string, string>;
-
-    for (const entry of entries) {
-      const value = input[entry.field] ?? "";
-      if (entry.pattern.test(value)) {
-        return { block: true, reason: entry.reason } satisfies ToolCallEventResult;
-      }
-    }
-  });
-
-  // ── Redact sensitive file reads before content reaches the model ───────────
-  //
-  // Returning { content } from tool_result replaces what gets sent to the model.
-  // This prevents key material (tokens, secrets, SSH keys) from being serialized
-  // into session history and re-sent on every API request.
 
   pi.on("tool_result", async (event) => {
     if (event.toolName !== "read") return undefined;
-
     const path = (event.input as Record<string, unknown>)?.path;
     if (typeof path !== "string") return undefined;
-
     if (!scanner.isSensitiveFileName(path)) return undefined;
-
     const filename = path.split("/").pop() ?? path;
     return {
       content: [

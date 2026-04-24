@@ -8,7 +8,7 @@
     ".pi/extensions/*"
   ],
   "pi": {
-    "extensions": [".pi/extensions/ptc", ".pi/extensions", "!.pi/extensions/tmux/**", "!.pi/extensions/orch/**"],
+    "extensions": [".pi/extensions/ptc", ".pi/extensions"],
     "skills": [".agents/skills"],
     "themes": ["themes"]
   },
@@ -18,16 +18,16 @@
     "postinstall": "sh scripts/restart-lsp-daemon.sh && bash scripts/build-extensions.sh"
   },
   "peerDependencies": {
-    "@sinclair/typebox": "*",
+    "typebox": "*",
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "0.68.0",
-    "@mariozechner/pi-coding-agent": "0.68.0",
-    "@mariozechner/pi-tui": "0.68.0",
-    "@sinclair/typebox": "^0.34.48",
+    "@mariozechner/pi-ai": "0.70.0",
+    "@mariozechner/pi-coding-agent": "0.70.0",
+    "@mariozechner/pi-tui": "0.70.0",
+    "typebox": "^1.1.24",
     "@types/bun": "latest",
     "typescript": "^5.9.3"
   }

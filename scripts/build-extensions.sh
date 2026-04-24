@@ -8,9 +8,8 @@
 # Pi peer packages are marked external so the runtime copies provided by pi
 # are used instead of bundled duplicates.
 #
-# The cross-extension singleton services (tmux-service, bus-service) use
-# globalThis storage so their bundled copies across orch + tmux / orch + agent-bus
-# all share the same live instance at runtime.
+# The cross-extension singleton services use
+# globalThis storage so their bundled copies share the same live instance at runtime.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,19 +21,17 @@ PEER_EXTERNALS=(
   "--external" "@mariozechner/pi-ai"
   "--external" "@mariozechner/pi-tui"
   "--external" "@mariozechner/pi-agent-core"
+  "--external" "typebox"
   "--external" "@sinclair/typebox"
 )
 
 EXTENSIONS=(
-  agent-bus
   dev-tools
   jit-catch
-  orch
   ptc
   security
   skill-builder
   subagent
-  tmux
   usage-bar
   work-tracker
 )
@@ -70,17 +67,6 @@ for ext in "${EXTENSIONS[@]}"; do
         --outfile "$outdir/subprocess-preamble.ts" \
         --target bun \
         --format esm 2>&1
-    fi
-    # orch: worker-bridge.ts is loaded by spawned worker pi processes via -e flag.
-    #   Imports from ../agent-bus/bus-service — bundle to inline it.
-    #   worker.md is read as plain text — copy verbatim.
-    if [ "$ext" = "orch" ]; then
-      bun build "$EXT_DIR/orch/worker-bridge.ts" \
-        --outfile "$outdir/worker-bridge.ts" \
-        --target bun \
-        --format esm \
-        "${PEER_EXTERNALS[@]}" 2>&1
-      cp "$EXT_DIR/orch/worker.md" "$outdir/worker.md"
     fi
     echo "  built $ext"
     ok=$((ok + 1))
