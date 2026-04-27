@@ -142,6 +142,9 @@ ok "Binary: $BIN_DIR/pi"
 #
 # Mirrors the asset layout from upstream scripts/build-binaries.sh:
 #   package.json         — pi version metadata
+#   README.md            — main documentation (pi system prompt references this)
+#   docs/                — feature docs: extensions, themes, skills, sdk, tui, etc.
+#   examples/            — extension and sdk examples
 #   theme/               — interactive mode themes
 #   export-html/         — HTML export templates
 #   photon_rs_bg.wasm    — WebAssembly image processing (photon-node)
@@ -160,14 +163,19 @@ link_asset() {
 
 PHOTON_PKG="$REPO/node_modules/@silvia-odwyer/photon-node"
 
-link_asset "$PI_PKG/package.json" \
-  "$BIN_DIR/package.json" "package.json → node_modules"
-
-link_asset "$PI_PKG/dist/modes/interactive/theme" \
-  "$BIN_DIR/theme" "theme/ → node_modules"
-
-link_asset "$PI_PKG/dist/core/export-html" \
-  "$BIN_DIR/export-html" "export-html/ → node_modules"
+# PI_PKG assets: "<src-relative-to-PI_PKG> <target-name-in-BIN_DIR>"
+PI_PKG_ASSETS=(
+  "package.json                    package.json"
+  "README.md                       README.md"
+  "docs                            docs"
+  "examples                        examples"
+  "dist/modes/interactive/theme    theme"
+  "dist/core/export-html           export-html"
+)
+for entry in "${PI_PKG_ASSETS[@]}"; do
+  read -r src target <<< "$entry"
+  link_asset "$PI_PKG/$src" "$BIN_DIR/$target" "$target → node_modules"
+done
 
 link_asset "$PHOTON_PKG/photon_rs_bg.wasm" \
   "$BIN_DIR/photon_rs_bg.wasm" "photon_rs_bg.wasm → node_modules"
