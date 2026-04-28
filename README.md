@@ -8,28 +8,6 @@ Pi is an interactive CLI coding agent. It reads, edits, and executes code via bu
 
 A **dotfiles repo for AI-assisted work**. The same way shell dotfiles personalize a terminal, pi-env personalizes the agent: what tools it has, how it behaves, what it knows about recurring workflows. It's registered as a [pi package](https://github.com/badlogic/pi-mono#packages) so extensions and skills load directly from the repo — no per-item symlinks.
 
-## Layout
-
-```
-pi-env/
-├── .agents/
-│   ├── roles/            # Behavioral contracts for multi-agent orchestration
-│   └── skills/           # Skills — loaded on demand when task matches description
-│       └── reference/    # Manually-loaded reference skills (not auto-discovered)
-├── .pi/
-│   ├── agent/            # APPEND_SYSTEM.md — appended to system prompt globally
-│   ├── AGENTS.md         # Project-scoped codebase index (for navigating pi-env itself)
-│   └── extensions/       # Extensions — TypeScript tools and hooks loaded by pi
-│       └── _shared/      # Internal utilities shared across extensions (not a pi extension)
-├── docs/                 # Supplementary documentation
-├── setup/                # Per-machine config templates + install helpers
-├── themes/               # Pi TUI themes (gruvbox ships here)
-├── vscode/               # VS Code theme extension
-├── AGENTS.md             # Global agent principles — bootstrapped to ~/.pi/agent/AGENTS.md
-├── CONTRIBUTING.md       # Dev workflow: branches, building extensions, worktrees
-└── setup.sh              # Idempotent setup — run once, re-run after git pull
-```
-
 ## What's included
 
 **Extensions** live in `.pi/extensions/` and are registered via `package.json`. Each is a TypeScript module that registers tools and/or hooks. For the full list and build instructions, see [CONTRIBUTING.md](CONTRIBUTING.md).
