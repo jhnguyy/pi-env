@@ -62,13 +62,3 @@ od -A x -t x1z ~/.local/bin/pi | head -2
 
 **Workaround:** compile to `/tmp` first, then copy. `install-bun-pi.sh` does
 this automatically.
-
-## Package Source
-
-`install-bun-pi.sh` (called by `setup.sh`) uses the `@mariozechner/pi-coding-agent`
-package from the repo's own `node_modules/`, installed by `bun install` from the
-version pinned in `bun.lock`. No global npm install is required — the repo lockfile
-is the single source of truth for the pi version.
-
-To update pi: bump the version in `package.json`, run `bun install` (updates the
-lockfile), then re-run `./setup.sh` to recompile the binary.
