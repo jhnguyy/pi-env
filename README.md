@@ -135,6 +135,23 @@ pi --version            # should print the pi version
 pi "say hello"          # quick smoke test — should get a response
 ```
 
+### Clipboard/paste normalization helper
+
+If your terminal path occasionally pastes newline boundaries as key-sequence
+fragments (for example `"[27;5;106~"` or `"[106;5u"`), use:
+
+```bash
+cat raw.txt | scripts/normalize-terminal-paste.sh > clean.txt
+```
+
+Or from clipboard tools:
+
+```bash
+pbpaste | scripts/normalize-terminal-paste.sh | pbcopy
+# Linux example:
+xclip -o -selection clipboard | scripts/normalize-terminal-paste.sh
+```
+
 ## Updating
 
 ```bash
