@@ -62,6 +62,7 @@ info "Version: $PI_VERSION"
 # original file, and the next `./setup.sh` compiles without it.
 
 SYSTEM_PROMPT_JS="$PI_PKG/dist/core/system-prompt.js"
+LOGIN_DIALOG_JS="$PI_PKG/dist/modes/interactive/components/login-dialog.js"
 
 # Guard: dist/cli.js must be a JS source file, not a compiled binary.
 # A prior Bun compile bug could write the binary there instead of the outfile.
@@ -83,6 +84,35 @@ if grep -q 'toISOString().slice(0, 10)' "$SYSTEM_PROMPT_JS" 2>/dev/null; then
   ok "Patched system-prompt.js: local timezone date"
 else
   info "system-prompt.js: local date patch not needed (already patched or upstream fixed)"
+fi
+
+# Workaround: in Ghostty 1.2.3 on the daily-driver → SSH → tmux path, the
+# visible OAuth URL can render/wrap in a way that breaks plain-text Ctrl+click
+# detection. Make the visible URL itself an OSC 8 hyperlink so Ctrl+click on the
+# URL opens the full target, independent of text wrapping/rendering quirks.
+if grep -q 'new Text(theme.fg("accent", url), 1, 0)' "$LOGIN_DIALOG_JS" 2>/dev/null; then
+  LOGIN_DIALOG_JS="$LOGIN_DIALOG_JS" python3 - <<'PY'
+from pathlib import Path
+import os
+p = Path(os.environ["LOGIN_DIALOG_JS"])
+text = p.read_text()
+old = '''        this.contentContainer.addChild(new Spacer(1));
+        this.contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
+        const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
+        const hyperlink = `\\x1b]8;;${url}\\x07${clickHint}\\x1b]8;;\\x07`;
+        this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));'''
+new = '''        this.contentContainer.addChild(new Spacer(1));
+        const hyperlinkedUrl = `\\x1b]8;;${url}\\x07${url}\\x1b]8;;\\x07`;
+        this.contentContainer.addChild(new Text(theme.fg("accent", hyperlinkedUrl), 1, 0));
+        const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
+        const hyperlink = `\\x1b]8;;${url}\\x07${clickHint}\\x1b]8;;\\x07`;
+        this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));'''
+if old in text:
+    p.write_text(text.replace(old, new))
+PY
+  ok "Patched login-dialog.js: hyperlink visible OAuth URL"
+else
+  info "login-dialog.js: hyperlink URL patch not needed (already patched or upstream fixed)"
 fi
 
 # ── Compile binary ───────────────────────────────────────────────────────────
