@@ -62,6 +62,8 @@ info "Version: $PI_VERSION"
 # original file, and the next `./setup.sh` compiles without it.
 
 SYSTEM_PROMPT_JS="$PI_PKG/dist/core/system-prompt.js"
+LOGIN_DIALOG_JS="$PI_PKG/dist/modes/interactive/components/login-dialog.js"
+LOGIN_DIALOG_PATCH="$REPO/setup/patches/login-dialog-visible-url.patch"
 
 # Guard: dist/cli.js must be a JS source file, not a compiled binary.
 # A prior Bun compile bug could write the binary there instead of the outfile.
@@ -83,6 +85,22 @@ if grep -q 'toISOString().slice(0, 10)' "$SYSTEM_PROMPT_JS" 2>/dev/null; then
   ok "Patched system-prompt.js: local timezone date"
 else
   info "system-prompt.js: local date patch not needed (already patched or upstream fixed)"
+fi
+
+# Workaround: in Ghostty 1.2.3 on the daily-driver → SSH → tmux path, the
+# visible OAuth URL can render/wrap in a way that breaks plain-text Ctrl+click
+# detection. Make the visible URL itself an OSC 8 hyperlink so Ctrl+click on the
+# URL opens the full target, independent of text wrapping/rendering quirks.
+# Applied from a normal patch file so the change stays readable and reviewable.
+if grep -q 'new Text(theme.fg("accent", url), 1, 0)' "$LOGIN_DIALOG_JS" 2>/dev/null; then
+  if git -C "$REPO" apply --check "$LOGIN_DIALOG_PATCH" 2>/dev/null; then
+    git -C "$REPO" apply "$LOGIN_DIALOG_PATCH"
+    ok "Patched login-dialog.js: hyperlink visible OAuth URL"
+  else
+    info "login-dialog.js: patch check failed (upstream changed?)"
+  fi
+else
+  info "login-dialog.js: hyperlink URL patch not needed (already patched or upstream fixed)"
 fi
 
 # ── Compile binary ───────────────────────────────────────────────────────────
