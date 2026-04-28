@@ -1,0 +1,14 @@
+diff --git a/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/login-dialog.js b/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/login-dialog.js
+index b23df66..b4ca457 100644
+--- a/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/login-dialog.js
++++ b/node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/components/login-dialog.js
+@@ -71,7 +71,8 @@ export class LoginDialogComponent extends Container {
+     showAuth(url, instructions) {
+         this.contentContainer.clear();
+         this.contentContainer.addChild(new Spacer(1));
+-        this.contentContainer.addChild(new Text(theme.fg("accent", url), 1, 0));
++        const hyperlinkedUrl = `\x1b]8;;${url}\x07${url}\x1b]8;;\x07`;
++        this.contentContainer.addChild(new Text(theme.fg("accent", hyperlinkedUrl), 1, 0));
+         const clickHint = process.platform === "darwin" ? "Cmd+click to open" : "Ctrl+click to open";
+         const hyperlink = `\x1b]8;;${url}\x07${clickHint}\x1b]8;;\x07`;
+         this.contentContainer.addChild(new Text(theme.fg("dim", hyperlink), 1, 0));
