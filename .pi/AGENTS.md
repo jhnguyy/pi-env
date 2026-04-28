@@ -14,6 +14,6 @@ Dotfiles repo — registered as a pi package via `settings.json` `packages` entr
 |docs:{pi-bun-binary.md(compile process,ZFS bug,asset layout)}
 |setup:{install-bun-pi.sh,settings.template.json,models.template.json}
 
-Root `AGENTS.md` is symlinked as global `~/.pi/agent/AGENTS.md` — keep it principles-only, no project content.
+Root `AGENTS.md` is bootstrapped to `~/.pi/agent/AGENTS.md` on first setup — keep it principles-only, no project content.
 
 **Branches:** `feat/<name>` (new extension/tool/capability) · `fix/<name>` (bug fix) · `chore/<name>` (config, docs, cleanup). See CONTRIBUTING.md.

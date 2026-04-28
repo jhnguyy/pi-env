@@ -24,13 +24,3 @@ Grep for `@purpose` in the source files for per-module context.
 | Re-render all slots from current state   | `flush(ctx)`                          | ui-render.ts |
 | Reset slot state on session shutdown     | `resetSlots()`                        | ui-render.ts |
 
-## Conventions
-
-- **result shape**: Every tool returns `{ content: [{ type: "text", text }], details }`.
-  Use `ok()`/`err()` for the common case; use `txt()` + custom details when you
-  need richer render data.
-- **error detection**: `defaultRenderResult` checks `result.details.error` to decide
-  red vs green. `err()` sets this automatically.
-- **formatError**: Handles `BaseExtensionError` (includes `[code]`), plain `Error`,
-  and unknown. Use in every tool catch block for consistency.
-- **git operations**: Always synchronous, never throw. Caller checks `status === 0`.

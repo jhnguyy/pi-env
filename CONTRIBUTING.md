@@ -50,9 +50,7 @@ The build runs automatically on `bun install` via `postinstall`.
 
 ### Cross-extension singletons
 
-If a service is shared between extensions (like `tmux-service` and `bus-service`), store
-the singleton on `globalThis` (see `tmux/tmux-service.ts`). Module-level variables are
-per-bundle; `globalThis` is process-wide, so all bundles share the same live instance.
+Store shared services on `globalThis`, not at module level — module-level variables are per-bundle; `globalThis` is process-wide.
 
 ## Pi Version Bumps
 
@@ -86,26 +84,8 @@ git worktree remove /tmp/pi-env-<branch>
 git branch -d <branch>
 ```
 
-### Why not checkout in the main tree?
+Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
 
-Multiple pi sessions, editors, and background tools (LSP daemon, file watchers) share `/mnt/tank/code/pi-env`. A `git checkout` changes HEAD, index, and working tree for **all** of them simultaneously. This causes:
-- Commits landing on the wrong branch (session A checks out branch X, session B commits thinking it's on main)
-- Uncommitted changes from one session appearing as dirty files in another
-- LSP daemon reindexing on every checkout, slowing all sessions
 
-Worktrees give each session its own HEAD, index, and working tree. The main tree stays on `main` as a stable reference point.
-
-## Example Workflow
-
-```bash
-git worktree add /tmp/pi-env-notes -b feat/notes-patch
-cd /tmp/pi-env-notes
-# ... do work, commit, push ...
-cd <repo-root>
-git merge --no-ff feat/notes-patch
-git push origin main
-git worktree remove /tmp/pi-env-notes
-git branch -d feat/notes-patch
-```
 
 
