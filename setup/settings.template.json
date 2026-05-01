@@ -1,23 +1,98 @@
 {
-  "_comment": "Copy to ~/.pi/agent/settings.json, then run setup.sh to register pi-env as a package. Customize: defaultModel, enabledModels (add/remove per machine), permissionLevel, theme. Add ollama or other local models in enabledModels only if running locally — see models.template.json.",
-  "defaultProvider": "anthropic",
-  "defaultModel": "claude-opus-4-6",
-  "defaultThinkingLevel": "high",
+  "_comment": "Copy to ~/.pi/agent/settings.json, then run setup.sh to register pi-env as a package. Defaults favor flat-rate OpenAI Codex/Copilot usage; Anthropic models are available for tasks where they outperform. Customize enabledModels, permissionLevel, theme, and local model entries per machine.",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.4-mini",
+  "defaultThinkingLevel": "medium",
   "hideThinkingBlock": false,
   "steeringMode": "one-at-a-time",
   "enabledModels": [
+    "openai-codex/gpt-5.4-mini",
+    "openai-codex/gpt-5.5",
+    "github-copilot/gpt-5-mini",
+    "github-copilot/gpt-5.4-mini",
+    "github-copilot/gpt-5.5",
+    "github-copilot/gpt-5.3-codex",
+    "github-copilot/claude-haiku-4.5",
+    "github-copilot/claude-sonnet-4.6",
+    "github-copilot/claude-opus-4.7",
     "anthropic/claude-haiku-4-5",
-    "anthropic/claude-opus-4-6",
-    "anthropic/claude-sonnet-4-6"
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-opus-4-7",
+    "ollama/llama3.1",
+    "llama-cpp/Qwen3-Coder-Next-Q2_K.gguf"
   ],
   "images": {
     "blockImages": true
   },
-  "transport": "sse",
+  "transport": "websocket-cached",
+  "npmCommand": [
+    "bun"
+  ],
   "localExtensions": [],
   "packages": [],
   "permissionLevel": "none",
   "theme": "dark",
   "extensions": [],
-  "skills": []
+  "skills": [],
+  "modelAnnotations": {
+    "openai-codex/gpt-5.4-mini": [
+      "preferred",
+      "pro"
+    ],
+    "openai-codex/gpt-5.5": [
+      "pro",
+      "heavy"
+    ],
+    "github-copilot/gpt-5-mini": [
+      "preferred",
+      "copilot"
+    ],
+    "github-copilot/gpt-5.4-mini": [
+      "copilot"
+    ],
+    "github-copilot/gpt-5.5": [
+      "copilot",
+      "heavy"
+    ],
+    "github-copilot/claude-haiku-4.5": [
+      "copilot",
+      "claude",
+      "fast"
+    ],
+    "github-copilot/claude-sonnet-4.6": [
+      "copilot",
+      "claude"
+    ],
+    "github-copilot/claude-opus-4.7": [
+      "copilot",
+      "claude",
+      "heavy"
+    ],
+    "anthropic/claude-haiku-4-5": [
+      "preferred",
+      "paid",
+      "claude"
+    ],
+    "anthropic/claude-sonnet-4-6": [
+      "paid",
+      "claude"
+    ],
+    "anthropic/claude-opus-4-7": [
+      "paid",
+      "claude",
+      "heavy"
+    ],
+    "ollama/llama3.1": [
+      "local",
+      "free"
+    ],
+    "llama-cpp/Qwen3-Coder-Next-Q2_K.gguf": [
+      "local",
+      "free"
+    ],
+    "github-copilot/gpt-5.3-codex": [
+      "copilot",
+      "codex"
+    ]
+  }
 }
