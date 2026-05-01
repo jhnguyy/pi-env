@@ -86,6 +86,3 @@ git branch -d <branch>
 
 Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
 
-
-
-

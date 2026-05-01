@@ -13,7 +13,11 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 ./setup.sh
 ```
 
-`setup.sh` is self-documenting — its header lists everything it does and what it leaves alone.
+`setup.sh` is self-documenting — its header lists everything it does and what it leaves alone. In short, it installs the `pi` CLI with Bun into a user-local prefix, installs repo dependencies, builds extension bundles, and registers pi-env as a package.
+
+## Pi CLI install
+
+`setup.sh` installs `@mariozechner/pi-coding-agent` with Bun into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Bun entrypoint, so setup stays Node-free while still using a normal package-manager install rather than a custom compiled binary.
 
 ## Further reading
 

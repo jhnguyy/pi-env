@@ -8,7 +8,16 @@
     ".pi/extensions/*"
   ],
   "pi": {
-    "extensions": [".pi/extensions/ptc", ".pi/extensions"],
+    "extensions": [
+      ".pi/extensions/ptc",
+      ".pi/extensions/dev-tools",
+      ".pi/extensions/jit-catch",
+      ".pi/extensions/security",
+      ".pi/extensions/skill-builder",
+      ".pi/extensions/subagent",
+      ".pi/extensions/usage-bar",
+      ".pi/extensions/work-tracker"
+    ],
     "skills": [".agents/skills"],
     "themes": ["themes"]
   },
@@ -24,9 +33,9 @@
     "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
-    "@mariozechner/pi-ai": "0.70.6",
-    "@mariozechner/pi-coding-agent": "0.70.6",
-    "@mariozechner/pi-tui": "0.70.6",
+    "@mariozechner/pi-ai": "0.71.1",
+    "@mariozechner/pi-coding-agent": "0.71.1",
+    "@mariozechner/pi-tui": "0.71.1",
     "@types/bun": "latest",
     "typebox": "^1.1.24",
     "typescript": "^5.9.3"

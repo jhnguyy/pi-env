@@ -4,8 +4,8 @@
 # Idempotent. Re-run after git pull to pick up new extensions/skills.
 #
 # What it does:
-#   1. bun install (frozen lockfile)
-#   2. Compile pi binary + symlink assets (setup/install-bun-pi.sh)
+#   1. bun install (frozen lockfile; postinstall builds extensions)
+#   2. Install pi CLI with Bun into a user-local prefix + ~/.local/bin/pi
 #   3. Bootstrap settings.json from template (only on first run — never overwrites)
 #   4. Register pi-env as a pi package in settings.json
 #   5. Set gruvbox as the pi theme in settings.json
@@ -38,12 +38,39 @@ relink() { echo "  ↺  $1 (relinked)"; }
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 # bun install downloads @mariozechner/pi-coding-agent at the version pinned in
-# bun.lock. install-bun-pi.sh then compiles the binary from that local copy.
+# bun.lock and postinstall builds extension bundles. The Pi CLI install below
+# uses Bun's package manager too, but into a separate user-local prefix.
 
 echo "Dependencies"
 echo "------------"
 (cd "$REPO" && bun install --frozen-lockfile)
 ok "node_modules up to date"
+
+# ── Pi CLI ──────────────────────────────────────────────────────────────────
+# Install the CLI with Bun into an isolated user-local prefix, then expose a
+# stable ~/.local/bin/pi command. The wrapper intentionally runs Pi's Bun
+# entrypoint so machines do not need a separate Node install just to launch pi.
+
+echo ""
+echo "Pi CLI"
+echo "------"
+PI_VERSION=$(bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@mariozechner/pi-coding-agent']);" 2>/dev/null)
+PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
+PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
+PI_PKG_SPEC="@mariozechner/pi-coding-agent@$PI_VERSION"
+mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
+BUN_INSTALL="$PI_CLI_ROOT" bun install -g "$PI_PKG_SPEC"
+PI_ENTRY="$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent/dist/bun/cli.js"
+[ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
+cat > "$PI_BIN_DIR/pi" <<EOF
+#!/usr/bin/env sh
+exec bun "$PI_ENTRY" "\$@"
+EOF
+chmod +x "$PI_BIN_DIR/pi"
+ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
+if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$PI_BIN_DIR"; then
+  echo "  —  $PI_BIN_DIR is not in PATH yet; add it to your shell profile."
+fi
 
 link_path() {
   local src="$1" target="$2" label="$3"
@@ -228,24 +255,26 @@ echo ""
 echo "Git hooks"
 echo "---------"
 HOOK_SRC="$REPO/setup/post-merge"
-HOOK_DST="$REPO/.git/hooks/post-merge"
-if [ -L "$HOOK_DST" ] && [ "$(readlink "$HOOK_DST")" = "$HOOK_SRC" ]; then
-  ok "post-merge hook"
-elif [ -e "$HOOK_DST" ] && [ ! -L "$HOOK_DST" ]; then
-  skip "post-merge hook (custom hook already exists at .git/hooks/post-merge)"
+GIT_DIR="$(git -C "$REPO" rev-parse --git-dir)"
+GIT_COMMON_DIR="$(git -C "$REPO" rev-parse --git-common-dir)"
+if [ "$GIT_DIR" != "$GIT_COMMON_DIR" ]; then
+  skip "post-merge hook (worktree checkout — run setup.sh in the primary checkout to update shared hooks)"
 else
-  ln -sfn "$HOOK_SRC" "$HOOK_DST"
-  chmod +x "$HOOK_SRC"
-  linked "post-merge hook → setup/post-merge"
+  HOOK_DST="$GIT_COMMON_DIR/hooks/post-merge"
+  mkdir -p "$(dirname "$HOOK_DST")"
+  if [ -L "$HOOK_DST" ] && [ "$(readlink "$HOOK_DST")" = "$HOOK_SRC" ]; then
+    ok "post-merge hook"
+  elif [ -e "$HOOK_DST" ] && [ ! -L "$HOOK_DST" ]; then
+    skip "post-merge hook (custom hook already exists at .git/hooks/post-merge)"
+  else
+    ln -sfn "$HOOK_SRC" "$HOOK_DST"
+    chmod +x "$HOOK_SRC"
+    linked "post-merge hook → setup/post-merge"
+  fi
 fi
-
-# ── Pi binary ────────────────────────────────────────────────────────────────
-# Compile pi from the repo-local node_modules into ~/.local/bin/pi
-
-echo ""
-"$REPO/setup/install-bun-pi.sh"
 
 echo ""
 echo "Done."
+echo "  Pi CLI:         $PI_BIN_DIR/pi"
 echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
 echo "  Tests:          cd $REPO && bun test"
