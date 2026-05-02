@@ -214,20 +214,27 @@ export default function (pi: ExtensionAPI) {
         ext_name: Type.Optional(Type.String({ description: "Override auto-detected extension name." })),
       }),
       execute: async (_toolCallId, params, signal) => {
+        const args = params as {
+          diff?: string;
+          diff_source?: "unstaged" | "staged" | "commit";
+          git_cwd?: string;
+          commit?: string;
+          ext_name?: string;
+        };
         let diffText: string;
         try {
-          if (params.diff) {
-            diffText = params.diff;
+          if (args.diff) {
+            diffText = args.diff;
           } else {
-            const source = params.diff_source ?? "unstaged";
-            const gitCwd = params.git_cwd ?? process.cwd();
-            diffText = await captureDiff(source, exec, gitCwd, params.commit);
+            const source = args.diff_source ?? "unstaged";
+            const gitCwd = args.git_cwd ?? process.cwd();
+            diffText = await captureDiff(source, exec, gitCwd, args.commit);
           }
         } catch (e) { return err(String(e)); }
         const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
         if (extensions.length === 0) return err(hasNonExtensionFiles ? "Diff only touches non-extension files." : "No changed files found.");
-        const targets = params.ext_name ? extensions.filter((e) => e.name === params.ext_name) : extensions;
-        if (targets.length === 0) return err(`Extension '${params.ext_name}' not found. Present: ${extensions.map((e) => e.name).join(", ")}`);
+        const targets = args.ext_name ? extensions.filter((e) => e.name === args.ext_name) : extensions;
+        if (targets.length === 0) return err(`Extension '${args.ext_name}' not found. Present: ${extensions.map((e) => e.name).join(", ")}`);
         const results = [];
         for (const ext of targets) {
           const result = await runForExtension(ext, diffText, exec, signal, () => {});

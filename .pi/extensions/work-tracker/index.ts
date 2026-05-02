@@ -215,7 +215,7 @@ export default function (pi: ExtensionAPI) {
         text: Type.Optional(Type.Array(Type.String(), { description: "Task text(s) for add; task id(s) for done/rm. ALWAYS pass as a JSON array — even for a single item. Examples: add [\"my task\"], done [\"1\"]. Ignored for list and clear." })),
       }),
       execute: async (_id, params) => {
-        const { action, text } = params;
+        const { action, text } = params as { action: "add" | "done" | "rm" | "list" | "clear"; text?: string[] };
         if (action === "list") return { content: [{ type: "text", text: store.render() }], details: {} };
         if (action === "clear") { store.clear(); return { content: [{ type: "text", text: "Cleared all tasks." }], details: {} }; }
         if (action === "add") {
@@ -248,8 +248,9 @@ export default function (pi: ExtensionAPI) {
         path: Type.String({ description: "Absolute path to a session .jsonl file under ~/.pi/agent/sessions/" }),
       }),
       execute: async (_id, params, signal) => {
+        const args = params as { path: string };
         if (signal?.aborted) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
-        const p = resolve(params.path.replace(/^@/, ""));
+        const p = resolve(args.path.replace(/^@/, ""));
         if (!p.startsWith(SESSION_DIR + "/")) throw new Error(`read_session restricted to ${SESSION_DIR}/`);
         const summary = extractSession(p);
         const raw = formatSummary(summary);

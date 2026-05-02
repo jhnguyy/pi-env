@@ -299,14 +299,15 @@ export default function (pi: ExtensionAPI) {
         name: Type.Optional(Type.String({ description: "Skill name to load. Omit to list available skills." })),
       }),
       execute: async (_toolCallId, params) => {
+        const args = params as { name?: string };
         if (!existsSync(REFERENCE_DIR)) return { content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }], details: null };
-        if (!params.name) {
+        if (!args.name) {
           const names = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md")).map((f: string) => f.replace(/\.md$/, ""));
           return { content: [{ type: "text", text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}` }], details: null };
         }
         const index = getReferenceSkillIndex();
-        const matched = index.get(params.name.toLowerCase()) ?? null;
-        if (!matched) return { content: [{ type: "text", text: `No reference skill named "${params.name}".` }], details: null };
+        const matched = index.get(args.name.toLowerCase()) ?? null;
+        if (!matched) return { content: [{ type: "text", text: `No reference skill named "${args.name}".` }], details: null };
         return { content: [{ type: "text", text: readFileSync(matched, "utf-8") }], details: null };
       },
     };
@@ -325,21 +326,29 @@ export default function (pi: ExtensionAPI) {
         diff: Type.Optional(Type.String({ description: "Unified diff to focus evaluation on." })),
       }),
       execute: async (_toolCallId, params, signal) => {
+        const args = params as {
+          name?: string;
+          description?: string;
+          template?: "basic" | "with-scripts" | "with-index";
+          targetDir?: string;
+          path?: string;
+          diff?: string;
+        };
         const cwd = process.cwd();
-        const creating = !!params.name;
-        const reviewing = !!params.path;
+        const creating = !!args.name;
+        const reviewing = !!args.path;
         if (!creating && !reviewing) return { content: [{ type: "text", text: "✗ Provide name+description+template to create, or path to review." }], details: null };
         if (creating && reviewing) return { content: [{ type: "text", text: "✗ Provide either name (create) or path (review), not both." }], details: null };
         const lines: string[] = [];
         let skillDir: string;
         if (creating) {
-          if (!params.description || !params.template) return { content: [{ type: "text", text: "✗ Create mode requires name, description, and template." }], details: null };
-          const scaffold = scaffoldSkill({ name: params.name!, description: params.description, template: params.template, targetDir: params.targetDir ? resolve(cwd, params.targetDir) : undefined });
+          if (!args.description || !args.template || !args.name) return { content: [{ type: "text", text: "✗ Create mode requires name, description, and template." }], details: null };
+          const scaffold = scaffoldSkill({ name: args.name, description: args.description, template: args.template, targetDir: args.targetDir ? resolve(cwd, args.targetDir) : undefined });
           if (!scaffold.success) return { content: [{ type: "text", text: `✗ Scaffold failed: ${scaffold.error}` }], details: null };
           skillDir = scaffold.skillDir;
-          lines.push(`✓ Scaffolded "${params.name}" at ${scaffold.skillDir}`);
+          lines.push(`✓ Scaffolded "${args.name}" at ${scaffold.skillDir}`);
         } else {
-          skillDir = resolve(cwd, params.path!);
+          skillDir = resolve(cwd, args.path!);
         }
         const validation = validateSkill(skillDir);
         const errCount = validation.issues.filter((i: any) => i.severity === "error").length;
@@ -349,8 +358,8 @@ export default function (pi: ExtensionAPI) {
         const skillMdPath = join(skillDir, "SKILL.md");
         if (!existsSync(skillMdPath)) return { content: [{ type: "text", text: lines.join("\n") }], details: { skillDir, validation } };
         const skillContent = readFileSync(skillMdPath, "utf-8");
-        const skillName = skillContent.match(/^name:\s*(.+)$/m)?.[1]?.trim() || params.name || basename(skillDir);
-        const evalPrompt = buildEvalPrompt(skillContent, skillName, params.diff);
+        const skillName = skillContent.match(/^name:\s*(.+)$/m)?.[1]?.trim() || args.name || basename(skillDir);
+        const evalPrompt = buildEvalPrompt(skillContent, skillName, args.diff);
         const result = await pi.exec("pi", ["-p", "--no-session", "--no-skills", "--no-extensions", "--tools", "", evalPrompt], { signal, timeout: 60000 });
         lines.push("");
         if (result.code !== 0) {
