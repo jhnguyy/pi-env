@@ -54,17 +54,33 @@ ok "node_modules up to date"
 echo ""
 echo "Pi CLI"
 echo "------"
-PI_VERSION=$(bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@mariozechner/pi-coding-agent']);" 2>/dev/null)
+PI_VERSION=$(cd "$REPO" && bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@mariozechner/pi-coding-agent'] ?? pkg.default.dependencies?.['@mariozechner/pi-coding-agent']);" 2>/dev/null)
 PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
 PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 PI_PKG_SPEC="@mariozechner/pi-coding-agent@$PI_VERSION"
 mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
 BUN_INSTALL="$PI_CLI_ROOT" bun install -g "$PI_PKG_SPEC"
-PI_ENTRY="$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent/dist/bun/cli.js"
+PI_PACKAGE_DIR="$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent"
+PI_ENTRY="$PI_PACKAGE_DIR/dist/bun/cli.js"
+[ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
 [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
+PI_CLI_ROOT_LITERAL=$(printf '%s' "$PI_CLI_ROOT" | sed "s/'/'\\\\''/g")
 cat > "$PI_BIN_DIR/pi" <<EOF
 #!/usr/bin/env sh
-exec bun "$PI_ENTRY" "\$@"
+set -eu
+
+DEFAULT_PI_CLI_ROOT='$PI_CLI_ROOT_LITERAL'
+PI_CLI_ROOT="\${PI_CLI_ROOT:-\$DEFAULT_PI_CLI_ROOT}"
+PI_PACKAGE_DIR="\$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent"
+PI_ENTRY="\$PI_PACKAGE_DIR/dist/bun/cli.js"
+
+if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
+  echo "pi-env: missing pi package install at \$PI_PACKAGE_DIR" >&2
+  echo "pi-env: rerun setup.sh, or set PI_CLI_ROOT to the install prefix." >&2
+  exit 127
+fi
+
+exec bun "\$PI_ENTRY" "\$@"
 EOF
 chmod +x "$PI_BIN_DIR/pi"
 ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
@@ -245,8 +261,11 @@ echo ""
 echo "VS Code theme"
 echo "-------------"
 VSCODE_EXT_DIR="$HOME/.vscode/extensions"
-mkdir -p "$VSCODE_EXT_DIR"
-link_path "$REPO/vscode/pi-env-gruvbox" "$VSCODE_EXT_DIR/pi-env-gruvbox" "~/.vscode/extensions/pi-env-gruvbox"
+if mkdir -p "$VSCODE_EXT_DIR" 2>/dev/null; then
+  link_path "$REPO/vscode/pi-env-gruvbox" "$VSCODE_EXT_DIR/pi-env-gruvbox" "~/.vscode/extensions/pi-env-gruvbox"
+else
+  skip "~/.vscode/extensions/pi-env-gruvbox (cannot create $VSCODE_EXT_DIR)"
+fi
 
 # ── Git hooks ────────────────────────────────────────────────────────────────
 # Install post-merge hook so setup auto-runs after git pull
@@ -255,8 +274,8 @@ echo ""
 echo "Git hooks"
 echo "---------"
 HOOK_SRC="$REPO/setup/post-merge"
-GIT_DIR="$(git -C "$REPO" rev-parse --git-dir)"
-GIT_COMMON_DIR="$(git -C "$REPO" rev-parse --git-common-dir)"
+GIT_DIR="$(git -C "$REPO" rev-parse --absolute-git-dir)"
+GIT_COMMON_DIR="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)"
 if [ "$GIT_DIR" != "$GIT_COMMON_DIR" ]; then
   skip "post-merge hook (worktree checkout — run setup.sh in the primary checkout to update shared hooks)"
 else
