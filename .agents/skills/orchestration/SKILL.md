@@ -82,7 +82,17 @@ orch cleanup {}
 
 **Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona. For complex tasks, write a brief (`write { path: '$ORCH_DIR/brief-a.md' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context.
 
-**Model selection** — run `pi --list-models` for current IDs; pass full ID, not alias. Match capability to what the task genuinely requires.
+**Model selection** — pass full `provider/model-id`, not alias. The **`subagent` tool description** (regenerated each `session_start`) is the live source of truth for available models and their tags; its underlying SSOT is `~/.pi/agent/settings.json` → `modelAnnotations`. Route by tag intent:
+
+| Intent | Tag query | Typical pick |
+|---|---|---|
+| Cheap gathering / mechanical edits | `preferred` | `github-copilot/gpt-5-mini`, `anthropic/claude-haiku-4-5` |
+| Fast read-only scout | `fast` | `github-copilot/claude-haiku-4.5` |
+| Code-shaped reasoning | `codex` | `openai-codex/gpt-5.4-mini` (cheap), `openai-codex/gpt-5.5` (hard) |
+| Heavy judgment / adversarial review | `heavy` | `anthropic/claude-opus-4-7`, `github-copilot/gpt-5.5` |
+| Offline / no-cost iteration | `local` + `free` | `llama-cpp/Qwen3-Coder-Next-Q2_K.gguf` |
+
+**Tag axes** (defined in `settings.json`): *tier* (`preferred` / `pro` / `heavy`) · *family* (`claude` / `gpt` / `codex`) · *backend* (`paid` / `copilot` / `local` / `free`) · *form* (`fast` / `mini`). Combine to filter — e.g. "a fast claude" → `[claude, fast]`. Run `pi --list-models` only when you need a model not currently enabled. To change available models or tags, edit `settings.json` — the table above is illustrative, not authoritative.
 
 **Env vars:** `orch spawn` auto-injects `PI_BUS_SESSION`, `PI_AGENT_ID`, and `ORCH_DIR`. If spawning via `tmux` directly (outside an `orch` run), you must set `PI_BUS_SESSION` and `PI_AGENT_ID` manually or `bus publish` will silently fail.
 
@@ -155,7 +165,7 @@ For single panes that aren't part of a multi-agent orchestration:
 Before implementation, gather with a cheap read-only scout (does not need `orch`):
 
 ```bash
-pi --no-session --tools read,bash,dev-tools --no-skills --model claude-haiku-4-5 \
+pi --no-session --tools read,bash,dev-tools --no-skills --model anthropic/claude-haiku-4-5 \
   "Analyze this repo for: [TASK]. For any language with LSP support, use dev-tools (symbols, definition, references) to trace structure — reserve read for config/prose and languages dev-tools doesn't cover. Report only:
    1. Stack and toolchain  2. Exact build/test/lint commands
    3. Files relevant to the task  4. Conventions that constrain implementation
@@ -181,7 +191,7 @@ For design decisions requiring genuine back-and-forth. Spawn agents on a shared 
 
 What makes it work: agents reason with evidence, stay on one topic until resolved, state disagreement directly. If two exchanges don't produce movement, bring both positions to the human — persistent disagreement is usually about values, not facts.
 
-**Model selection:** Sonnet ↔ Sonnet for known solution space; Sonnet ↔ Opus for genuine uncertainty or high-stakes architecture.
+**Model selection:** same-tier ↔ same-tier (`claude-sonnet-4-6` ↔ itself, or `gpt-5.5` ↔ itself) for known solution space; mix `heavy` ↔ same-family non-heavy for genuine uncertainty (e.g. `claude-opus-4-7` ↔ `claude-sonnet-4-6`). Tag definitions live in `~/.pi/agent/settings.json`.
 
 ---
 
