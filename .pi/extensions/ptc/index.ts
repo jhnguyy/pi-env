@@ -158,8 +158,9 @@ export default function ptcExtension(pi: ExtensionAPI) {
       parameters: Type.Object({
         code: Type.String({ description: PARAM_DESCRIPTION }),
       }),
-      execute: async (_toolCallId, { code }, signal, onUpdate) => {
+      execute: async (_toolCallId, params, signal, onUpdate) => {
         try {
+          const { code } = params as { code: string };
           const output = await executor.execute(code, sessionCwd, signal, onUpdate);
           return { content: [txt(output || "(no output)")], details: {} };
         } catch (e: unknown) {

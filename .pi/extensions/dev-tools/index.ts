@@ -118,9 +118,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   /** Shared execute — used by both registerTool and AgentTool registration. */
-  async function executeDevTools(_toolCallId: string, params: Record<string, unknown>) {
+  async function executeDevTools(_toolCallId: string, params: unknown) {
     try {
-      const result = await client.call(buildClientRequest(params));
+      const result = await client.call(buildClientRequest(params as Record<string, unknown>));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
       return { content: [txt(formatError(e))], details: null };
@@ -167,7 +167,7 @@ export default function (pi: ExtensionAPI) {
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
-      return executeDevTools(toolCallId, params as Record<string, unknown>);
+      return executeDevTools(toolCallId, params);
     },
     renderCall(args, theme, _ctx) {
       return renderDevToolsCall(args, theme);
