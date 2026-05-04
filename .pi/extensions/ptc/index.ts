@@ -89,7 +89,11 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
       // isError is provided via ctx, not embedded in result
       if (ctx.isError) {
-        return new Text(theme.fg("error", "✗ ") + theme.fg("error", text || "error"), 0, 0);
+        if (opts.expanded) {
+          return new Text(theme.fg("error", "✗ ptc failed") + "\n" + theme.fg("error", text || "error"), 0, 0);
+        }
+        const summary = (text.split("\n").find((l) => l.trim().length > 0) ?? "error").slice(0, 120);
+        return new Text(theme.fg("error", "✗ ptc ") + theme.fg("error", summary), 0, 0);
       }
 
       if (isPartial) {
@@ -226,4 +230,5 @@ const PARAM_DESCRIPTION = [
   "",
   "Return a string to set the output, or use console.log(). Both are captured.",
   "Throwing an error marks the result as failed.",
+  "For scripts that can fail, wrap calls in try/catch and rethrow with tool-specific context.",
 ].join("\n");
