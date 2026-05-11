@@ -17,7 +17,7 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 
 ## Pi CLI install
 
-`setup.sh` installs `@mariozechner/pi-coding-agent` with Bun into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Bun entrypoint, so setup stays Node-free while still using a normal package-manager install rather than a custom compiled binary.
+`setup.sh` installs `@earendil-works/pi-coding-agent` with Bun into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Bun entrypoint, so setup stays Node-free while still using a normal package-manager install rather than a custom compiled binary.
 
 ## Further reading
 

@@ -14,7 +14,7 @@ import type { LspResult, LspAction } from "./protocol";
 import type { DaemonRequest, DaemonResponse } from "./protocol";
 import type { HandlerDeps } from "./handlers";
 import type { RenderTheme } from "./renderers";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@
  *   before_agent_start   — context injection (git status + todo list)
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
 import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 

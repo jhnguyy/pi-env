@@ -17,10 +17,10 @@
  *   types.ts        — constants, blocklist, RPC message types
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";

@@ -1,10 +1,10 @@
 # Pi Capability Map
 
-> Auto-generated from pi v0.64.0. Regenerate: `bash scripts/generate-capability-map.sh`
+> Auto-generated from pi v0.74.0. Regenerate: `bash scripts/generate-capability-map.sh`
 > Navigation aid — not a replacement for docs. Follow doc paths for full details.
 > IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for pi topics. Read the linked doc before implementing.
 
-[Docs Root] ../node_modules/@mariozechner/pi-coding-agent
+[Docs Root] ../node_modules/@earendil-works/pi-coding-agent
 
 ## Modes
 
@@ -22,9 +22,9 @@
 ## Customization — four resource types, all shareable via Pi Packages (docs/packages.md)
 
 ### Extensions — TypeScript modules extending pi at runtime
-|capabilities:{custom-tools(pi.registerTool),event-interception(~57 event types · block/modify tool calls, inject context, customize compaction),custom-commands(pi.registerCommand),custom-shortcuts(pi.registerShortcut),custom-ui(TUI components, widgets, overlays, status lines, footers, custom editors → docs/tui.md),session-persistence(pi.appendEntry),custom-rendering(tool calls/results display),custom-providers(pi.registerProvider · OAuth support → docs/custom-provider.md),dynamic-tools(register/unregister at runtime · toggle active set),remote-execution(pluggable ops for SSH, containers, sandboxes),custom-compaction(replace summarization strategy),input-transformation(rewrite user input before processing),inter-extension-events(pi.events shared bus)}
+|capabilities:{custom-tools(pi.registerTool),event-interception(~60 event types · block/modify tool calls, inject context, customize compaction),custom-commands(pi.registerCommand),custom-shortcuts(pi.registerShortcut),custom-ui(TUI components, widgets, overlays, status lines, footers, custom editors → docs/tui.md),session-persistence(pi.appendEntry),custom-rendering(tool calls/results display),custom-providers(pi.registerProvider · OAuth support → docs/custom-provider.md),dynamic-tools(register/unregister at runtime · toggle active set),remote-execution(pluggable ops for SSH, containers, sandboxes),custom-compaction(replace summarization strategy),input-transformation(rewrite user input before processing),inter-extension-events(pi.events shared bus)}
 |locations:{~/.pi/agent/extensions/(global),.pi/extensions/(project),settings.json,CLI -e}
-|doc:docs/extensions.md|examples:67 in examples/extensions/
+|doc:docs/extensions.md|examples:72 in examples/extensions/
 
 ### Skills — on-demand instruction packages (Agent Skills standard · agentskills.io)
 |progressive disclosure: descriptions always in context, full SKILL.md loaded on demand
@@ -66,7 +66,7 @@
 ## Providers
 
 |oauth:{Anthropic Claude,OpenAI ChatGPT,GitHub Copilot,Google Gemini CLI,Google Antigravity}
-|api-keys:{Anthropic,OpenAI,Azure OpenAI,Google Gemini,Google Vertex,Amazon Bedrock,Mistral,Groq,Cerebras,xAI,OpenRouter,Vercel AI Gateway,ZAI,OpenCode Zen,OpenCode Go,Hugging Face,Kimi For Coding,MiniMax}
+|api-keys:{Anthropic,OpenAI,Azure OpenAI,DeepSeek,Google Gemini,Google Vertex,Amazon Bedrock,Mistral,Groq,Cerebras,Cloudflare AI Gateway,Cloudflare Workers AI,xAI,OpenRouter,Vercel AI Gateway,ZAI,OpenCode Zen,OpenCode Go,Hugging Face,Fireworks,Kimi For Coding,MiniMax,Xiaomi MiMo,Xiaomi MiMo Token Plan (China),Xiaomi MiMo Token Plan (Amsterdam),Xiaomi MiMo Token Plan (Singapore)}
 |custom: models.json or pi.registerProvider() in extensions · OpenAI/Anthropic/Google API formats + custom streaming
 |docs:{docs/providers.md,docs/models.md,docs/custom-provider.md}
 
@@ -74,12 +74,12 @@
 
 |@(file references · fuzzy-search project files)|Tab(path completion)|Ctrl+V(image paste)
 |!/!!(bash · run shell, optionally send output to LLM)|Ctrl+P(model cycling)|Shift+Tab(thinking levels: off→minimal→low→medium→high→xhigh)
-|Ctrl+O(tool output toggle)|Ctrl+G(external editor · $VISUAL/$EDITOR)|keybindings.json(57 rebindable actions)
+|Ctrl+O(tool output toggle)|Ctrl+G(external editor · $VISUAL/$EDITOR)|keybindings.json(72 rebindable actions)
 |doc:docs/keybindings.md
 
 ## Settings
 
-|43 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
+|48 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
 |locations:{~/.pi/agent/settings.json(global),.pi/settings.json(project overrides global)}
 |doc:docs/settings.md
 
@@ -92,7 +92,7 @@
 |runPrintMode(single-shot from SDK → docs/sdk.md#runprintmode)
 |runRpcMode(RPC from SDK → docs/sdk.md#runrpcmode)
 |tool-factories:createReadTool(cwd) etc. for custom working dirs → docs/sdk.md#tools-with-custom-cwd
-|12 examples in examples/sdk/
+|13 examples in examples/sdk/
 
 ## Package System
 
@@ -100,7 +100,7 @@
 |pi list|pi update(non-pinned)|pi config(enable/disable resources)|-l for project-local
 |doc:docs/packages.md
 
-## Doc Index — 23 files in docs/
+## Doc Index — 26 files in docs/
 
 |extensions.md(Extension API, events, tools, UI, rendering)|sdk.md(programmatic embedding, AgentSession, tools)
 |rpc.md(JSON protocol for headless integration)|session.md(JSONL format, entry types, SessionManager API)

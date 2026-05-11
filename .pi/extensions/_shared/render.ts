@@ -8,8 +8,8 @@
  *   }
  */
 
-import { Text } from "@mariozechner/pi-tui";
-import type { Theme } from "@mariozechner/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 
 // ─── defaultRenderResult ─────────────────────────────────────────────────────
 

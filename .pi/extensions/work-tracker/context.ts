@@ -26,8 +26,8 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Theme } from "@mariozechner/pi-coding-agent";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount, gitSync } from "../_shared/git";
 import type { WorkTrackerConfig } from "./types";

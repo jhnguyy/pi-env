@@ -27,7 +27,7 @@ import type {
   AgentToolResult,
   ToolDefinition,
   ToolInfo,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
   createBashToolDefinition,
   createEditToolDefinition,
@@ -36,7 +36,7 @@ import {
   createLsToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { BLOCKED_TOOLS } from "./types";
 import type { ExtToolRegistration } from "../subagent/types";

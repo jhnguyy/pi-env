@@ -6,7 +6,7 @@
  * redaction notice. This prevents key material from being serialized into
  * session history and re-sent to the provider on every API request.
  */
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CredentialScanner } from "./credential-scanner";
 
 export default function (pi: ExtensionAPI) {

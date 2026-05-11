@@ -14,7 +14,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PI_PKG="$REPO_ROOT/node_modules/@mariozechner/pi-coding-agent"
+PI_PKG="$REPO_ROOT/node_modules/@earendil-works/pi-coding-agent"
 PI_DOCS="$PI_PKG/docs"
 PI_EXAMPLES="$PI_PKG/examples"
 OUTPUT="$REPO_ROOT/docs/pi-capability-map.md"
@@ -46,7 +46,7 @@ cat > "$OUTPUT" << ENDOFMAP
 > Navigation aid — not a replacement for docs. Follow doc paths for full details.
 > IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for pi topics. Read the linked doc before implementing.
 
-[Docs Root] ../node_modules/@mariozechner/pi-coding-agent
+[Docs Root] ../node_modules/@earendil-works/pi-coding-agent
 
 ## Modes
 
