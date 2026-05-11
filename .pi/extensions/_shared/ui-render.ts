@@ -21,7 +21,7 @@
  *      data is ready and clearSlot(key, ctx) when it has nothing to show.
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isHeadless } from "./context.js";
 
 // ─── Slot registry ────────────────────────────────────────────────────────────

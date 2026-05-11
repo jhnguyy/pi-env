@@ -37,7 +37,7 @@ skip()   { echo "  —  $1 (exists locally, skipping)"; }
 relink() { echo "  ↺  $1 (relinked)"; }
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-# bun install downloads @mariozechner/pi-coding-agent at the version pinned in
+# bun install downloads @earendil-works/pi-coding-agent at the version pinned in
 # bun.lock and postinstall builds extension bundles. The Pi CLI install below
 # uses Bun's package manager too, but into a separate user-local prefix.
 
@@ -54,13 +54,13 @@ ok "node_modules up to date"
 echo ""
 echo "Pi CLI"
 echo "------"
-PI_VERSION=$(cd "$REPO" && bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@mariozechner/pi-coding-agent'] ?? pkg.default.dependencies?.['@mariozechner/pi-coding-agent']);" 2>/dev/null)
+PI_VERSION=$(cd "$REPO" && bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.default.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
 PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
 PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
-PI_PKG_SPEC="@mariozechner/pi-coding-agent@$PI_VERSION"
+PI_PKG_SPEC="@earendil-works/pi-coding-agent@$PI_VERSION"
 mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
 BUN_INSTALL="$PI_CLI_ROOT" bun install -g "$PI_PKG_SPEC"
-PI_PACKAGE_DIR="$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent"
+PI_PACKAGE_DIR="$PI_CLI_ROOT/install/global/node_modules/@earendil-works/pi-coding-agent"
 PI_ENTRY="$PI_PACKAGE_DIR/dist/bun/cli.js"
 [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
 [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
@@ -71,7 +71,7 @@ set -eu
 
 DEFAULT_PI_CLI_ROOT='$PI_CLI_ROOT_LITERAL'
 PI_CLI_ROOT="\${PI_CLI_ROOT:-\$DEFAULT_PI_CLI_ROOT}"
-PI_PACKAGE_DIR="\$PI_CLI_ROOT/install/global/node_modules/@mariozechner/pi-coding-agent"
+PI_PACKAGE_DIR="\$PI_CLI_ROOT/install/global/node_modules/@earendil-works/pi-coding-agent"
 PI_ENTRY="\$PI_PACKAGE_DIR/dist/bun/cli.js"
 
 if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then

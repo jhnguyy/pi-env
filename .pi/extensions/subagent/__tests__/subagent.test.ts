@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { Container, Text } from "@mariozechner/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import initSubagent from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────

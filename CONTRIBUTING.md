@@ -32,9 +32,9 @@ bun run build
 bun build .pi/extensions/<name>/index.ts \
   --outfile .pi/extensions/<name>/dist/index.js \
   --target bun --format esm \
-  --external @mariozechner/pi-coding-agent \
-  --external @mariozechner/pi-ai \
-  --external @mariozechner/pi-tui \
+  --external @earendil-works/pi-coding-agent \
+  --external @earendil-works/pi-ai \
+  --external @earendil-works/pi-tui \
   --external @mariozechner/pi-agent-core \
   --external @sinclair/typebox
 ```

@@ -18,8 +18,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { getAgentDir } from "@mariozechner/pi-coding-agent";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { discoverAgents } from "./agents";

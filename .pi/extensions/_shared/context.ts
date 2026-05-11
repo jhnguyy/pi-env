@@ -8,7 +8,7 @@
  *     agentLoop subagents). Safe for all rendering guards.
  */
 
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 /**
  * Returns true when the current process has no interactive TUI.

@@ -11,8 +11,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   AgentToolUpdateCallback,
-} from "@mariozechner/pi-coding-agent";
-import { DEFAULT_MAX_LINES, truncateHead } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { buildCodeFrame, mapGeneratedStackToUserLine } from "../_shared/code-frame";
 import { RpcBridge } from "./rpc-bridge";

@@ -8,7 +8,7 @@
  * This file provides the top-level renderDevToolsResult + renderDevToolsCall.
  */
 
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import type { LspResult, LspAction } from "./protocol";
 import { getAction } from "./action-registry";
 

@@ -20,7 +20,7 @@ import {
   formatReferences, formatIncomingCalls, formatOutgoingCalls,
   formatSymbols, formatStatus,
 } from "./formatters";
-import { Text } from "@mariozechner/pi-tui";
+import { Text } from "@earendil-works/pi-tui";
 import type { RenderTheme } from "./renderers";
 import type {
   DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, SymbolsResult, StatusResult,

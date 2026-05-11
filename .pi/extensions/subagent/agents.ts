@@ -1,12 +1,12 @@
 /**
  * Agent discovery and configuration
  *
- * Ported from node_modules/@mariozechner/pi-coding-agent/examples/extensions/subagent/agents.ts
+ * Ported from node_modules/@earendil-works/pi-coding-agent/examples/extensions/subagent/agents.ts
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, parseFrontmatter, SettingsManager } from "@mariozechner/pi-coding-agent";
+import { getAgentDir, parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
 

@@ -11,7 +11,7 @@
 
 import { createInterface } from "readline";
 import type { ChildProcess } from "child_process";
-import type { AgentToolUpdateCallback } from "@mariozechner/pi-coding-agent";
+import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { formatParamsPreview } from "../_shared/code-frame";
 import { formatError } from "../_shared/errors";
 import { killGracefully, MAX_STDERR_BYTES, MAX_OUTPUT_BYTES } from "./types";

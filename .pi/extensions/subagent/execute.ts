@@ -24,9 +24,9 @@ import {
   createLsTool,
   createReadTool,
   createWriteTool,
-} from "@mariozechner/pi-coding-agent";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import { discoverAgents } from "./agents";
 import { MAX_TURNS, type SubagentDetails, type UsageStats, type ToolCapability } from "./types";
