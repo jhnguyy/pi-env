@@ -1,7 +1,7 @@
 /**
  * Shared types for the subagent extension.
  */
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
