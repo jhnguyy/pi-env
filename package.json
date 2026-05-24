@@ -15,7 +15,6 @@
       ".pi/extensions/security",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
-      ".pi/extensions/usage-bar",
       ".pi/extensions/work-tracker"
     ],
     "skills": [".agents/skills"],

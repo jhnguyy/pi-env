@@ -32,7 +32,6 @@ EXTENSIONS=(
   security
   skill-builder
   subagent
-  usage-bar
   work-tracker
 )
 
