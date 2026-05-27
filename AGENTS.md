@@ -4,10 +4,6 @@
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before making any changes.
 
-## Pi Capabilities
-
-For a structured overview of pi's features, modes, extension API, session system, SDK, and all doc locations, see [`docs/pi-capability-map.md`](docs/pi-capability-map.md). The map is auto-generated from upstream docs — regenerate after version bumps with `bash scripts/generate-capability-map.sh`.
-
 ## Code Intelligence
 
 Prefer `dev-tools` over grep/read for **all** code navigation in TypeScript/JS/Bash/Nix codebases. It's faster, precise, and avoids reading entire files:

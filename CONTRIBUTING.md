@@ -45,17 +45,6 @@ The build runs automatically on `npm install` / `npm ci` via `postinstall`.
 
 Store shared services on `globalThis`, not at module level — module-level variables are per-bundle; `globalThis` is process-wide.
 
-## Pi Version Bumps
-
-After bumping pi packages in `package.json`, regenerate the capability map:
-
-```bash
-npm install
-bash scripts/generate-capability-map.sh
-```
-
-Include the updated `docs/pi-capability-map.md` in the bump commit.
-
 ## Worktree Isolation
 
 **Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
