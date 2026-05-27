@@ -6,11 +6,12 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
-import { describe } from "bun:test";
+import { fileURLToPath } from "node:url";
+import { describe } from "vitest";
 
-const EXTENSIONS_DIR = resolve(import.meta.dir, "..");
+const EXTENSIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
 
 interface Settings {

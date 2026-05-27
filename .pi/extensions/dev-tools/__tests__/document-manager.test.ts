@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { DocumentManager } from "../document-manager";
 import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";

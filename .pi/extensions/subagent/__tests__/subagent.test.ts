@@ -5,7 +5,7 @@
  * parameter validation. We do NOT invoke agentLoop (requires real API keys).
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { Container, Text } from "@earendil-works/pi-tui";
 import initSubagent from "../index";

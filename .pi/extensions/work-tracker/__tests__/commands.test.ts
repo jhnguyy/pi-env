@@ -8,7 +8,7 @@
  * The suite confirms the module contract is intact after the commands.ts split.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 
 // ─── Shared mock builder ──────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
  * non-extension file detection, multi-extension diffs, edge cases.
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { parseDiff } from "../parser";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

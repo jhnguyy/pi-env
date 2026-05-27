@@ -38,7 +38,7 @@ export class LspClient {
   constructor(
     private socketPath = SOCKET_PATH,
     private pidPath = PID_PATH,
-    private daemonScript = resolve(__dirname, "daemon.ts"),
+    private daemonScript = resolve(__dirname, "daemon.js"),
   ) {}
 
   /** Send a request to the daemon, auto-spawning if needed. */
@@ -219,7 +219,7 @@ export class LspClient {
 
   private spawnDaemon(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn("bun", ["run", this.daemonScript], {
+      const child = spawn(process.execPath, [this.daemonScript], {
         detached: true,
         stdio: "ignore",
         env: { ...process.env },

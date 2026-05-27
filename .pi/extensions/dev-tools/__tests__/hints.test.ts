@@ -3,7 +3,7 @@
  * LspBackend (handles, getLanguageId).
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { isSupported, getBackendConfig, BACKEND_CONFIGS, type LspBackendConfig } from "../backend-configs";
 import { LspBackend } from "../backend";
 

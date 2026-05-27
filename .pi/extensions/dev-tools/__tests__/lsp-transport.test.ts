@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { serializeMessage, LspParser, type LspMessage } from "../lsp-transport";
 

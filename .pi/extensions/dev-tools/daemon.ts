@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * LSP Daemon — standalone process that manages language servers.
  *
@@ -17,11 +17,12 @@
  *   - Listens on /tmp/pi-lsp-$UID.sock
  *   - Auto-shuts down after IDLE_TIMEOUT_MS of inactivity (default: 30 min)
  *
- * Run directly: bun run daemon.ts
+ * Run directly after build: node dist/daemon.js
  */
 
 import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { LspBackend } from "./backend";
 import { BACKEND_CONFIGS, type LspBackendConfig } from "./backend-configs";
@@ -183,7 +184,9 @@ export class LspDaemon {
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
-if (import.meta.main) {
+const isMain = process.argv[1] === fileURLToPath(import.meta.url);
+
+if (isMain) {
   const daemon = new LspDaemon();
   process.on("SIGTERM", () => daemon.shutdown());
   process.on("SIGINT", () => daemon.shutdown());

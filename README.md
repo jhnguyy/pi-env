@@ -4,7 +4,7 @@ Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, s
 
 ## Setup
 
-Prerequisites: `git` and [bun](https://bun.sh) ≥ 1.3.
+Prerequisites: `git`, Node.js ≥ 22.19, and npm ≥ 10. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`.
 
 ```bash
 git clone <your-fork> ~/pi-env
@@ -13,11 +13,11 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 ./setup.sh
 ```
 
-`setup.sh` is self-documenting — its header lists everything it does and what it leaves alone. In short, it installs the `pi` CLI with Bun into a user-local prefix, installs repo dependencies, builds extension bundles, and registers pi-env as a package.
+`setup.sh` is self-documenting — its header lists everything it does and what it leaves alone. In short, it installs the `pi` CLI with npm into a user-local prefix, installs repo dependencies, builds extension bundles, and registers pi-env as a package.
 
 ## Pi CLI install
 
-`setup.sh` installs `@earendil-works/pi-coding-agent` with Bun into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Bun entrypoint, so setup stays Node-free while still using a normal package-manager install rather than a custom compiled binary.
+`setup.sh` installs `@earendil-works/pi-coding-agent` with npm into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Node entrypoint.
 
 ## Further reading
 

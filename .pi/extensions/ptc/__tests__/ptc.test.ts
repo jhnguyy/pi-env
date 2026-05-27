@@ -8,9 +8,10 @@
  *   - BLOCKED_TOOLS: blocklist completeness
  */
 
-import { describe, it, expect } from "bun:test";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { toIdentifier, generateWrappers } from "../wrapper-gen";
 import { BLOCKED_TOOLS } from "../types";
 
@@ -92,7 +93,7 @@ describe("generateWrappers", () => {
 // to catch accidental protocol or API breakage.
 
 describe("subprocess-preamble.ts", () => {
-  const content = readFileSync(join(import.meta.dir, "../subprocess-preamble.ts"), "utf-8");
+  const content = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../subprocess-preamble.ts"), "utf-8");
 
   it("exports __rpc_call as an async function", () => {
     expect(content).toContain("export async function __rpc_call(");

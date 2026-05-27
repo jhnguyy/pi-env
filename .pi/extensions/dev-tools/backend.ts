@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, extname, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
@@ -29,7 +30,7 @@ export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 
 export async function findBinary(name: string): Promise<string | null> {
   // Check local node_modules first (installed in extension dir)
-  const ext = import.meta.dir;
+  const ext = dirname(fileURLToPath(import.meta.url));
   const local = resolvePath(ext, "node_modules", ".bin", name);
   if (existsSync(local)) return local;
 

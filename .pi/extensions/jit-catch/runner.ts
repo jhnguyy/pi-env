@@ -6,7 +6,7 @@
  * - Read source file contents to enrich the subagent prompt
  * - Spawn a pi subagent that outputs test content to stdout
  * - Write the catching test file
- * - Run `bun test` and return pass/fail + output
+ * - Run `npm test` and return pass/fail + output
  * - Auto-discard on pass
  *
  * ExecFn is injected for testability (same pattern as jit-catch).
@@ -170,7 +170,7 @@ export function buildTestPrompt(
     `   - Happy path through the change`,
     `   - One boundary or error condition`,
     `   - If exported: one basic integration case`,
-    `3. Test style: use bun:test named imports — \`import { describe, it, expect } from 'bun:test'\``,
+    `3. Test style: use Vitest named imports — \`import { describe, it, expect } from 'vitest'\``,
     `   Check if existing tests in ${testPath.replace(`${ext.name}.catching.test.ts`, "")} use a different style and match it.`,
     `4. Do NOT test unchanged behaviors.`,
     `5. Output ONLY the TypeScript test file content. No explanation, no markdown fences.`,
@@ -219,7 +219,7 @@ export async function generateTestContent(
 // ─── Test execution ───────────────────────────────────────────────────────────
 
 /**
- * Run `bun test` for the catching test file.
+ * Run Vitest for the catching test file.
  * Returns pass/fail and the combined output.
  */
 export async function runCatchingTests(
@@ -229,7 +229,7 @@ export async function runCatchingTests(
 ): Promise<{ passed: boolean; output: string }> {
   const testFile = join("__tests__", `${extName}.catching.test.ts`);
 
-  const result = await exec("bun", ["test", testFile], {
+  const result = await exec("npm", ["test", "--", testFile], {
     cwd: extDir,
     timeout: 60_000,
   });
@@ -289,7 +289,7 @@ export async function runForExtension(
   writeFileSync(testPath, testContent + "\n");
 
   // 5. Run tests
-  onProgress?.("running bun test…");
+  onProgress?.("running npm test…");
   const { passed, output } = await runCatchingTests(extDir, ext.name, exec);
 
   // 6. Auto-discard on pass

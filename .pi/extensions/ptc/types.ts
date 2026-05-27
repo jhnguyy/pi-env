@@ -28,22 +28,20 @@ export function killGracefully(proc: ChildProcess, gracePeriodMs = 5_000): void 
 /**
  * Build the environment for the PTC subprocess.
  *
- * Only vars needed by the bun runtime are forwarded. Secrets (API keys, tokens)
+ * Only vars needed by the Node runtime are forwarded. Secrets (API keys, tokens)
  * are intentionally excluded — tool calls run in the parent process via RPC, so
  * tools still have full env access; only the subprocess's own direct operations
  * are restricted.
  */
 export function buildSubprocessEnv(): Record<string, string | undefined> {
   const SAFE_VARS = [
-    "PATH",            // find executables (bun, git, etc.)
-    "HOME",            // bun module cache + node_modules resolution
+    "PATH",            // find executables (node, git, etc.)
+    "HOME",            // npm cache + node_modules resolution
     "USER",
     "SHELL",
     "TMPDIR",          // temp file paths
     "TEMP",            // Windows compat
     "TMP",             // Windows compat
-    "BUN_INSTALL",     // bun's install prefix
-    "BUN_DIR",         // bun's data dir (alt env var)
     "NODE_ENV",        // may affect module behaviour
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",

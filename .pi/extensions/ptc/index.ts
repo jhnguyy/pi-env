@@ -10,7 +10,7 @@
  * Architecture:
  *   index.ts        — extension entry, installs intercept, registers tool
  *   tool-registry.ts — registerTool intercept + createXxxToolDefinition dispatch
- *   executor.ts     — temp file + Bun subprocess lifecycle
+ *   executor.ts     — temp file + Node subprocess lifecycle
  *   rpc-bridge.ts   — parent-side JSON-over-stdio RPC dispatcher
  *   subprocess-preamble.ts — RPC client code running inside the subprocess
  *   wrapper-gen.ts  — generates async wrapper functions from ToolInfo[]

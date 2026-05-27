@@ -23,7 +23,7 @@ export interface ParseResult {
 export interface ExtensionRunResult {
   extName: string;
   passed: boolean;
-  /** Combined stdout+stderr from bun test. */
+  /** Combined stdout+stderr from the test runner. */
   testOutput: string;
   /** Absolute path to the test file, or null if it was auto-discarded on pass. */
   testPath: string | null;

@@ -7,7 +7,7 @@
  * formatting logic, not the language servers themselves.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import "../register-actions"; // populate action registry for daemon dispatch
 import { LspDaemon } from "../daemon";

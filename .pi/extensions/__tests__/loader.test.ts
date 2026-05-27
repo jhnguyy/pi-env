@@ -10,12 +10,13 @@
  * Run after adding or building an extension to confirm it's wired up correctly.
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { existsSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getEnabledExtensions } from "./test-utils";
 
-const EXTENSIONS_DIR = resolve(import.meta.dir, "..");
+const EXTENSIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("Extension Loader", () => {
   const enabled = getEnabledExtensions();

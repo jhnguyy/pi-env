@@ -4,8 +4,8 @@
 # Idempotent. Re-run after git pull to pick up new extensions/skills.
 #
 # What it does:
-#   1. bun install (frozen lockfile; postinstall builds extensions)
-#   2. Install pi CLI with Bun into a user-local prefix + ~/.local/bin/pi
+#   1. npm ci (frozen lockfile; postinstall builds extensions)
+#   2. Install pi CLI with npm into a user-local prefix + ~/.local/bin/pi
 #   3. Bootstrap settings.json from template (only on first run — never overwrites)
 #   4. Register pi-env as a pi package in settings.json
 #   5. Set gruvbox as the pi theme in settings.json
@@ -36,32 +36,41 @@ linked() { echo "  →  $1"; }
 skip()   { echo "  —  $1 (exists locally, skipping)"; }
 relink() { echo "  ↺  $1 (relinked)"; }
 
+require_node() {
+  node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
+    echo "  ✗  Node.js >= 22.19 is required (found: $(node -v 2>/dev/null || echo missing))" >&2
+    exit 1
+  }
+}
+
+require_node
+
 # ── Dependencies ─────────────────────────────────────────────────────────────
-# bun install downloads @earendil-works/pi-coding-agent at the version pinned in
-# bun.lock and postinstall builds extension bundles. The Pi CLI install below
-# uses Bun's package manager too, but into a separate user-local prefix.
+# npm ci downloads @earendil-works/pi-coding-agent at the version pinned in
+# package-lock.json and postinstall builds extension bundles. The Pi CLI install
+# below uses npm too, but into a separate user-local prefix.
 
 echo "Dependencies"
 echo "------------"
-(cd "$REPO" && bun install --frozen-lockfile)
+(cd "$REPO" && npm ci)
 ok "node_modules up to date"
 
 # ── Pi CLI ──────────────────────────────────────────────────────────────────
-# Install the CLI with Bun into an isolated user-local prefix, then expose a
-# stable ~/.local/bin/pi command. The wrapper intentionally runs Pi's Bun
-# entrypoint so machines do not need a separate Node install just to launch pi.
+# Install the CLI with npm into an isolated user-local prefix, then expose a
+# stable ~/.local/bin/pi command. The wrapper intentionally runs Pi's Node
+# entrypoint so Bun is not required on target machines.
 
 echo ""
 echo "Pi CLI"
 echo "------"
-PI_VERSION=$(cd "$REPO" && bun -e "const pkg = await import('./package.json', { with: { type: 'json' } }); console.log(pkg.default.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.default.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
+PI_VERSION=$(cd "$REPO" && node -e "const pkg = JSON.parse(require('fs').readFileSync('./package.json', 'utf8')); console.log(pkg.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
 PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
 PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 PI_PKG_SPEC="@earendil-works/pi-coding-agent@$PI_VERSION"
 mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
-BUN_INSTALL="$PI_CLI_ROOT" bun install -g "$PI_PKG_SPEC"
-PI_PACKAGE_DIR="$PI_CLI_ROOT/install/global/node_modules/@earendil-works/pi-coding-agent"
-PI_ENTRY="$PI_PACKAGE_DIR/dist/bun/cli.js"
+npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC"
+PI_PACKAGE_DIR="$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
+PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
 [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
 [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
 PI_CLI_ROOT_LITERAL=$(printf '%s' "$PI_CLI_ROOT" | sed "s/'/'\\\\''/g")
@@ -71,8 +80,8 @@ set -eu
 
 DEFAULT_PI_CLI_ROOT='$PI_CLI_ROOT_LITERAL'
 PI_CLI_ROOT="\${PI_CLI_ROOT:-\$DEFAULT_PI_CLI_ROOT}"
-PI_PACKAGE_DIR="\$PI_CLI_ROOT/install/global/node_modules/@earendil-works/pi-coding-agent"
-PI_ENTRY="\$PI_PACKAGE_DIR/dist/bun/cli.js"
+PI_PACKAGE_DIR="\$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
+PI_ENTRY="\$PI_PACKAGE_DIR/dist/cli.js"
 
 if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at \$PI_PACKAGE_DIR" >&2
@@ -80,7 +89,7 @@ if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   exit 127
 fi
 
-exec bun "\$PI_ENTRY" "\$@"
+exec node "\$PI_ENTRY" "\$@"
 EOF
 chmod +x "$PI_BIN_DIR/pi"
 ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
@@ -129,7 +138,7 @@ echo "Package registration"
 echo "--------------------"
 if [ -f "$SETTINGS_FILE" ]; then
   # Check if pi-env repo path is already in the packages array
-  if bun -e "
+  if node -e "
     const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
     const pkgs = s.packages || [];
     process.exit(pkgs.some(p => (typeof p === 'string' ? p : p.source) === '$REPO') ? 0 : 1);
@@ -137,7 +146,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     ok "pi-env registered in settings.json packages"
   else
     # Add the repo path to the packages array
-    bun -e "
+    node -e "
       const fs = require('fs');
       const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
       s.packages = s.packages || [];
@@ -156,13 +165,13 @@ fi
 echo ""
 echo "Pi theme"
 echo "--------"
-if bun -e "
+if node -e "
   const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
   process.exit(s.theme === 'gruvbox' ? 0 : 1);
 " 2>/dev/null; then
   ok "theme set to gruvbox in settings.json"
 else
-  bun -e "
+  node -e "
     const fs = require('fs');
     const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
     s.theme = 'gruvbox';
@@ -296,4 +305,4 @@ echo ""
 echo "Done."
 echo "  Pi CLI:         $PI_BIN_DIR/pi"
 echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
-echo "  Tests:          cd $REPO && bun test"
+echo "  Tests:          cd $REPO && npm test"

@@ -3,10 +3,11 @@
  * @purpose Orchestrates PTC subprocess execution.
  */
 
-import { spawn } from "child_process";
-import { writeFileSync, unlinkSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
+import { spawn } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { transformSync } from "esbuild";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -20,7 +21,7 @@ import { generateWrappers } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
 import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv, killGracefully } from "./types";
 
-const PREAMBLE_PATH = new URL("./subprocess-preamble.ts", import.meta.url).pathname;
+const PREAMBLE_PATH = new URL("./subprocess-preamble.js", import.meta.url).pathname;
 
 export class PtcExecutor {
   constructor(
@@ -38,9 +39,10 @@ export class PtcExecutor {
     const tools = this.registry.getAvailableTools(this.pi);
     const wrappers = generateWrappers(tools);
     const fullCode = buildSubprocessCode(PREAMBLE_PATH, wrappers, userCode);
+    const runnableCode = transformSubprocessCode(fullCode);
 
-    const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.ts`);
-    writeFileSync(tmpPath, fullCode, { encoding: "utf-8", mode: 0o600 });
+    const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.mjs`);
+    writeFileSync(tmpPath, runnableCode, { encoding: "utf-8", mode: 0o600 });
 
     try {
       return await this.runSubprocess(tmpPath, userCode, cwd, signal, onUpdate, ctx);
@@ -61,7 +63,7 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
   ): Promise<string> {
-    const proc = spawn("bun", ["run", scriptPath], {
+    const proc = spawn(process.execPath, [scriptPath], {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
       env: buildSubprocessEnv(),
@@ -111,25 +113,34 @@ function buildSubprocessCode(preamblePath: string, wrappers: string, userCode: s
     wrappers,
     "",
     "// --- user code ---",
-    "async function __user_main(): Promise<unknown> {",
+    "async function __user_main() {",
     indented,
     "}",
     "",
     "// --- execution harness ---",
     "//# sourceURL=ptc-user-script.ts",
     "__user_main()",
-    "  .then((result: unknown) => {",
+    "  .then((result) => {",
     "    const out = result !== undefined && result !== null ? String(result) : '';",
     `    process.stdout.write(JSON.stringify({ type: 'complete', output: out }) + '\\n');`,
     "    process.exit(0);",
     "  })",
-    "  .catch((e: unknown) => {",
+    "  .catch((e) => {",
     "    const msg = e instanceof Error ? e.message : String(e);",
     "    const stack = e instanceof Error ? e.stack : undefined;",
     `    process.stdout.write(JSON.stringify({ type: 'error', message: msg, stack }) + '\\n');`,
     "    process.exit(1);",
     "  });",
   ].join("\n");
+}
+
+function transformSubprocessCode(code: string): string {
+  return transformSync(code, {
+    loader: "ts",
+    format: "esm",
+    target: "node22.19",
+    sourcemap: "inline",
+  }).code;
 }
 
 function truncateOutput(output: string): string {
