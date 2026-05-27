@@ -29,14 +29,20 @@ export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 // ─── Binary discovery ─────────────────────────────────────────────────────────
 
 export async function findBinary(name: string): Promise<string | null> {
-  // Check local node_modules first (installed in extension dir)
-  const ext = dirname(fileURLToPath(import.meta.url));
-  const local = resolvePath(ext, "node_modules", ".bin", name);
-  if (existsSync(local)) return local;
+  // Search node_modules/.bin from current extension dir up to filesystem root.
+  // This covers both extension-local installs and workspace-root installs.
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const local = resolvePath(dir, "node_modules", ".bin", name);
+    if (existsSync(local)) return local;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
 
-  // Check PATH
+  // Fallback to PATH.
   return new Promise((resolve) => {
-    const proc = spawn("which", [name], { stdio: "pipe" });
+    const proc = spawn("sh", ["-lc", `command -v ${name}`], { stdio: ["ignore", "pipe", "ignore"] });
     let out = "";
     proc.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
     proc.on("close", (code: number) => {

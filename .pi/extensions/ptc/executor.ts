@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
 import type {
   ExtensionAPI,
@@ -21,7 +22,7 @@ import { generateWrappers } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
 import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv, killGracefully } from "./types";
 
-const PREAMBLE_PATH = new URL("./subprocess-preamble.js", import.meta.url).pathname;
+const PREAMBLE_PATH = fileURLToPath(new URL("./subprocess-preamble.js", import.meta.url));
 
 export class PtcExecutor {
   constructor(
