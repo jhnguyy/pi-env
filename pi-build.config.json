@@ -1,0 +1,37 @@
+{
+  "extensionsDir": ".pi/extensions",
+  "extensions": [
+    "dev-tools",
+    "jit-catch",
+    "ptc",
+    "security",
+    "skill-builder",
+    "subagent",
+    "work-tracker"
+  ],
+  "externals": [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-tui",
+    "@mariozechner/pi-agent-core",
+    "typebox",
+    "@sinclair/typebox",
+    "esbuild"
+  ],
+  "sidecars": {
+    "dev-tools": [
+      {
+        "entry": "daemon.ts",
+        "outfile": "dist/daemon.js",
+        "banner": false
+      }
+    ],
+    "ptc": [
+      {
+        "entry": "subprocess-preamble.ts",
+        "outfile": "dist/subprocess-preamble.js",
+        "banner": false
+      }
+    ]
+  }
+}

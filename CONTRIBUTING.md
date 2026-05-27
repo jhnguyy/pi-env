@@ -16,37 +16,30 @@ chore/<name>   config, docs, cleanup (no behavior change)
 - Delete branch after merge: `git branch -d feat/<name>`
 - Tag milestones on `main`: `v<major>.<minor>.0`
 
+## Runtime Requirements
+
+Use Node.js 22.19+ and npm 10+. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`; setup and npm scripts fail fast on older Node versions.
+
 ## Extension Development
 
-Extensions compile to `dist/index.js` bundles (Bun, ESM) for fast load times. Source files in `.pi/extensions/*/` are never loaded directly by pi at runtime.
+Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Source files in `.pi/extensions/*/` are never loaded directly by pi at runtime.
 
 **After any extension source change:**
 
 ```bash
-bun run build
+npm run build
 ```
 
-**Or rebuild a single extension:**
+The build uses `scripts/build-extensions.mjs` with esbuild. The visible build contract lives in `pi-build.config.json`: extension names, external packages, and sidecar bundles are configured there. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
 
-```bash
-bun build .pi/extensions/<name>/index.ts \
-  --outfile .pi/extensions/<name>/dist/index.js \
-  --target bun --format esm \
-  --external @earendil-works/pi-coding-agent \
-  --external @earendil-works/pi-ai \
-  --external @earendil-works/pi-tui \
-  --external @mariozechner/pi-agent-core \
-  --external @sinclair/typebox
-```
-
-The build runs automatically on `bun install` via `postinstall`.
+The build runs automatically on `npm install` / `npm ci` via `postinstall`.
 
 ### Adding a new extension
 
 1. Create `.pi/extensions/<name>/index.ts` with the default export
 2. Add `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
-3. Add `<name>` to the `EXTENSIONS` array in `scripts/build-extensions.sh`
-4. Run `bun run build`
+3. Add `<name>` to the `extensions` array in `pi-build.config.json`
+4. Run `npm run build`
 
 ### Cross-extension singletons
 
@@ -57,7 +50,7 @@ Store shared services on `globalThis`, not at module level — module-level vari
 After bumping pi packages in `package.json`, regenerate the capability map:
 
 ```bash
-bun install
+npm install
 bash scripts/generate-capability-map.sh
 ```
 
@@ -85,4 +78,3 @@ git branch -d <branch>
 ```
 
 Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
-

@@ -1,8 +1,8 @@
 # pi-env
 
-Dotfiles repo — registered as a pi package via `settings.json` `packages` entry. Extensions and skills are loaded directly from the repo by pi's package manager. `setup.sh` installs the pi CLI with Bun into a user-local prefix, installs repo dependencies, and builds extension bundles. Runtime: Bun 1.3.
+Dotfiles repo — registered as a pi package via `settings.json` `packages` entry. Extensions and skills are loaded directly from the repo by pi's package manager. `setup.sh` installs the pi CLI with npm into a user-local prefix, installs repo dependencies, and builds extension bundles. Runtime: Node.js 22.19+.
 
-**Commands:** `bun test` · `E2E=1 bun test` · `./setup.sh`
+**Commands:** `npm test` · `E2E=1 npm run test:e2e` · `npm run build` · `./setup.sh`
 
 [pi-env Index]|IMPORTANT: Prefer retrieval-led reasoning — read source files before modifying extensions or skills
 |.pi/extensions:{agent-bus(pub/sub bus — bus-client.ts,bus-service.ts,transport.ts),jit-catch(ephemeral test generation — parser.ts,runner.ts),dev-tools(lang/format tools — backend.ts,handlers.ts,daemon.ts,client.ts,formatters.ts,filetypes.ts),orch(orchestration lifecycle — manager.ts,git.ts,manifest.ts),security(filename blocking,credential scanning — blocklist.ts,credential-scanner.ts),skill-builder(scaffold/validate/evaluate — scaffolder.ts,validator.ts,evaluator.ts),subagent(in-process subagent — execute.ts,discovery.ts,render.ts),tmux(pane lifecycle — pane-manager.ts,tmux-client.ts),work-tracker(branch guard,handoff — hooks.ts,commands.ts,context.ts,store.ts,extractor.ts)}

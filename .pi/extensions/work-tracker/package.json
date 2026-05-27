@@ -3,6 +3,11 @@
   "type": "module",
   "private": true,
   "pi": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

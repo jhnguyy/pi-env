@@ -18,6 +18,7 @@ import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
+import { findNodeBinary } from "../_shared/node-bin";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,21 +29,7 @@ export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 // ─── Binary discovery ─────────────────────────────────────────────────────────
 
 export async function findBinary(name: string): Promise<string | null> {
-  // Check local node_modules first (installed in extension dir)
-  const ext = import.meta.dir;
-  const local = resolvePath(ext, "node_modules", ".bin", name);
-  if (existsSync(local)) return local;
-
-  // Check PATH
-  return new Promise((resolve) => {
-    const proc = spawn("which", [name], { stdio: "pipe" });
-    let out = "";
-    proc.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
-    proc.on("close", (code: number) => {
-      if (code === 0) resolve(out.trim());
-      else resolve(null);
-    });
-  });
+  return findNodeBinary(name, import.meta.url);
 }
 
 // ─── LspBackend ───────────────────────────────────────────────────────────────

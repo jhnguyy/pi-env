@@ -15,7 +15,7 @@
  *   - Stderr included in rejection message for non-zero exit
  */
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect } from "vitest";
 import { EventEmitter } from "events";
 import { PassThrough } from "stream";
 import type { ChildProcess } from "child_process";
@@ -174,11 +174,11 @@ describe("race fix: non-zero exit always rejects", () => {
     const m = makeMock();
     const bridge = new RpcBridge(m.proc, noDispatch);
     bridge.completion.catch(() => {});
-    m.err("bun: syntax error near line 5\n");
+    m.err("node: syntax error near line 5\n");
     await flush();
     m.exit(1);
     await flush();
-    await expect(bridge.completion).rejects.toThrow("bun: syntax error near line 5");
+    await expect(bridge.completion).rejects.toThrow("node: syntax error near line 5");
   });
 
   it("falls back to exit-code message when stderr is empty", async () => {

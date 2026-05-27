@@ -8,10 +8,10 @@
  *   2. Parse which extensions changed
  *   3. Prepare test environment
  *   4. Spawn a subagent to generate ephemeral catching tests
- *   5. Run `bun test` on the generated file
+ *   5. Run the test command on the generated file
  *   6. Auto-discard on pass; surface test output on fail
  *
- * Decision rule (when to use vs `bun test` directly) lives in the updated
+ * Decision rule (when to use vs `npm test` directly) lives in the updated
  * jit-catch skill, which is now much thinner.
  */
 
@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
     label: "JiT-Catch",
     description: [
       "Generate and run ephemeral catching tests for a code diff against extension files.",
-      "Tests are written by a subagent, executed with bun test, then auto-discarded on pass.",
+      "Tests are written by a subagent, executed with npm test, then auto-discarded on pass.",
       "Never commits test files.",
       "",
       "## Taxonomy",
@@ -41,7 +41,7 @@ export default function (pi: ExtensionAPI) {
       "",
       "## When to use",
       "Use jit_catch for changes to extension files with NO existing hardening test coverage.",
-      "Use `bun test` directly if coverage already exists in __tests__/, or for non-extension files.",
+      "Use `npm test` directly if coverage already exists in __tests__/, or for non-extension files.",
       "",
       "## Diff acquisition (pick one):",
       "  diff_source='unstaged' (default) — runs `git diff` in git_cwd",
@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
       "## On failure",
       "Fix code, then re-run jit_catch (auto-discards on pass) or edit the kept test file",
       "at ~/.pi/agent/extensions/<ext-name>/__tests__/<ext-name>.catching.test.ts, then",
-      "`bun test` and `rm` it. Use the jit-catch skill for promoting criteria.",
+      "`npm test` and `rm` it. Use the jit-catch skill for promoting criteria.",
     ].join("\n"),
 
     parameters: Type.Object({
@@ -199,13 +199,13 @@ export default function (pi: ExtensionAPI) {
 
   // Register jit_catch as an AgentTool so subagents (e.g. code-review agents) can run catching tests.
   // Uses process.cwd() for git operations since subagents run in-process and share the same cwd.
-  // Capabilities: write (creates temp test files), execute (runs bun test).
+  // Capabilities: write (creates temp test files), execute (runs npm test).
   pi.on("session_start", () => {
     const exec = pi.exec.bind(pi);
     const jitAgentTool: AgentTool<any, any> = {
       name: "jit_catch",
       label: "JiT-Catch",
-      description: "Generate and run ephemeral catching tests for a code diff. Tests are written by a subagent, executed with bun test, then auto-discarded on pass.",
+      description: "Generate and run ephemeral catching tests for a code diff. Tests are written by a subagent, executed with npm test, then auto-discarded on pass.",
       parameters: Type.Object({
         diff_source: Type.Optional(StringEnum(["unstaged", "staged", "commit"] as const, { description: "How to acquire the diff. Default: 'unstaged'." })),
         commit: Type.Optional(Type.String({ description: "Commit SHA — required when diff_source='commit'." })),

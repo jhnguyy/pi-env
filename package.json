@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.19.0",
+    "npm": ">=10"
+  },
   "workspaces": [
     ".pi/extensions/*"
   ],
@@ -17,13 +23,23 @@
       ".pi/extensions/subagent",
       ".pi/extensions/work-tracker"
     ],
-    "skills": [".agents/skills"],
-    "themes": ["themes"]
+    "skills": [
+      ".agents/skills"
+    ],
+    "themes": [
+      "themes"
+    ]
   },
   "scripts": {
-    "build": "bash scripts/build-extensions.sh",
-    "test": "bun test",
-    "postinstall": "sh scripts/restart-lsp-daemon.sh && bash scripts/build-extensions.sh"
+    "check:node": "node -e \"const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error('Node.js >= 22.19 is required; found ' + process.version); process.exit(1); }\"",
+    "build": "node scripts/build-extensions.mjs",
+    "test": "vitest run",
+    "test:e2e": "E2E=1 vitest run",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "sh scripts/restart-lsp-daemon.sh && node scripts/build-extensions.mjs",
+    "prebuild": "npm run check:node",
+    "pretest": "npm run check:node",
+    "preinstall": "npm run check:node"
   },
   "peerDependencies": {
     "typebox": "*",
@@ -35,8 +51,10 @@
     "@earendil-works/pi-ai": "0.75.5",
     "@earendil-works/pi-coding-agent": "0.75.5",
     "@earendil-works/pi-tui": "0.75.5",
-    "@types/bun": "latest",
+    "@types/node": "^22.15.30",
+    "esbuild": "^0.25.5",
     "typebox": "^1.1.24",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

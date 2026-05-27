@@ -6,6 +6,11 @@
     "@mariozechner/pi-agent-core": "*"
   },
   "pi": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

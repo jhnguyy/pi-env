@@ -3,9 +3,9 @@
  * LspBackend (handles, getLanguageId).
  */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { isSupported, getBackendConfig, BACKEND_CONFIGS, type LspBackendConfig } from "../backend-configs";
-import { LspBackend } from "../backend";
+import { LspBackend, findBinary } from "../backend";
 
 // ─── isSupported ──────────────────────────────────────────────────────────────
 
@@ -125,5 +125,19 @@ describe("LspBackend.handles and getLanguageId (via configs)", () => {
   });
   it("no backend handles .tf (format-only, not LSP)", () => {
     expect(getBackend("foo.tf")).toBeUndefined();
+  });
+});
+
+describe("findBinary", () => {
+  it("finds workspace-installed binaries even when PATH is stripped", async () => {
+    const oldPath = process.env["PATH"];
+    process.env["PATH"] = "/nonexistent";
+    try {
+      const bin = await findBinary("typescript-language-server");
+      expect(bin).toBeTruthy();
+      expect(bin).toContain("node_modules/.bin");
+    } finally {
+      process.env["PATH"] = oldPath;
+    }
   });
 });

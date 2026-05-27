@@ -2,7 +2,7 @@
  * Client tests — mock socket server to verify connect/retry/timeout behavior.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { LspClient } from "../client";
 import { createServer, type Server, type Socket } from "node:net";
@@ -148,7 +148,7 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       });
 
       const client = createClient();
-      expect(client.call({ action: "diagnostics" })).rejects.toThrow("no path");
+      await expect(client.call({ action: "diagnostics" })).rejects.toThrow("no path");
       client.close();
     });
   });
@@ -188,7 +188,7 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       await new Promise((r) => setTimeout(r, 50)); // let it connect
       client.close();
 
-      expect(reqPromise).rejects.toThrow("Client closed");
+      await expect(reqPromise).rejects.toThrow("Client closed");
     });
   });
 });

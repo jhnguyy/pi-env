@@ -31,7 +31,7 @@ function generateWrapper(tool: ToolInfo): string {
   const rpcName = JSON.stringify(tool.name); // original name for RPC dispatch
   return [
     `/** ${tool.description.split("\n")[0].substring(0, 100)} */`,
-    `async function ${fnName}(params: Record<string, unknown> = {}): Promise<string> {`,
+    `async function ${fnName}(params = {}) {`,
     `  return __rpc_call(${rpcName}, params);`,
     `}`,
   ].join("\n");

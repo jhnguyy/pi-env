@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
 import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, SymbolsResult, StatusResult } from "../protocol";

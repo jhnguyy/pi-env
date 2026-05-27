@@ -6,7 +6,7 @@
  * extractSession (file I/O), which is tested via a temp file.
  */
 
-import { expect, it, afterEach } from "bun:test";
+import { expect, it, afterEach } from "vitest";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
