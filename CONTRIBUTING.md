@@ -30,7 +30,7 @@ Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Sour
 npm run build
 ```
 
-The build uses `scripts/build-extensions.mjs` with esbuild. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
+The build uses `scripts/build-extensions.mjs` with esbuild. The visible build contract lives in `pi-build.config.json`: extension names, external packages, and sidecar bundles are configured there. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
 
 The build runs automatically on `npm install` / `npm ci` via `postinstall`.
 
@@ -38,7 +38,7 @@ The build runs automatically on `npm install` / `npm ci` via `postinstall`.
 
 1. Create `.pi/extensions/<name>/index.ts` with the default export
 2. Add `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
-3. Add `<name>` to the `extensions` array in `scripts/build-extensions.mjs`
+3. Add `<name>` to the `extensions` array in `pi-build.config.json`
 4. Run `npm run build`
 
 ### Cross-extension singletons

@@ -11,7 +11,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, extname, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
@@ -19,6 +18,7 @@ import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
+import { findNodeBinary } from "../_shared/node-bin";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,27 +29,7 @@ export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 // ─── Binary discovery ─────────────────────────────────────────────────────────
 
 export async function findBinary(name: string): Promise<string | null> {
-  // Search node_modules/.bin from current extension dir up to filesystem root.
-  // This covers both extension-local installs and workspace-root installs.
-  let dir = dirname(fileURLToPath(import.meta.url));
-  while (true) {
-    const local = resolvePath(dir, "node_modules", ".bin", name);
-    if (existsSync(local)) return local;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-
-  // Fallback to PATH.
-  return new Promise((resolve) => {
-    const proc = spawn("sh", ["-lc", `command -v ${name}`], { stdio: ["ignore", "pipe", "ignore"] });
-    let out = "";
-    proc.stdout?.on("data", (d: Buffer) => { out += d.toString(); });
-    proc.on("close", (code: number) => {
-      if (code === 0) resolve(out.trim());
-      else resolve(null);
-    });
-  });
+  return findNodeBinary(name, import.meta.url);
 }
 
 // ─── LspBackend ───────────────────────────────────────────────────────────────

@@ -1,33 +1,15 @@
 #!/usr/bin/env node
 // build-extensions.mjs — Compile each extension to single-file Node ESM bundles.
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const extDir = join(repoRoot, ".pi", "extensions");
-
-const peerExternals = [
-  "@earendil-works/pi-coding-agent",
-  "@earendil-works/pi-ai",
-  "@earendil-works/pi-tui",
-  "@mariozechner/pi-agent-core",
-  "typebox",
-  "@sinclair/typebox",
-  "esbuild",
-];
-
-const extensions = [
-  "dev-tools",
-  "jit-catch",
-  "ptc",
-  "security",
-  "skill-builder",
-  "subagent",
-  "work-tracker",
-];
+const configPath = join(repoRoot, "pi-build.config.json");
+const config = JSON.parse(readFileSync(configPath, "utf8"));
+const extDir = join(repoRoot, config.extensionsDir ?? ".pi/extensions");
 
 const common = {
   bundle: true,
@@ -35,7 +17,7 @@ const common = {
   platform: "node",
   target: "node22.19",
   sourcemap: false,
-  external: peerExternals,
+  external: config.externals ?? [],
   logLevel: "silent",
   banner: {
     js: "import { createRequire as __piCreateRequire } from 'node:module'; import { fileURLToPath as __piFileURLToPath } from 'node:url'; import { dirname as __piDirname } from 'node:path'; const require = __piCreateRequire(import.meta.url); const __filename = __piFileURLToPath(import.meta.url); const __dirname = __piDirname(__filename);",
@@ -54,7 +36,7 @@ async function buildFile(entry, outfile, options = {}) {
   });
 }
 
-for (const ext of extensions) {
+for (const ext of config.extensions ?? []) {
   const entry = join(extDir, ext, "index.ts");
   const outdir = join(extDir, ext, "dist");
   if (!existsSync(entry)) {
@@ -66,19 +48,11 @@ for (const ext of extensions) {
   try {
     await buildFile(entry, join(outdir, "index.js"));
 
-    if (ext === "ptc") {
+    for (const sidecar of config.sidecars?.[ext] ?? []) {
       await buildFile(
-        join(extDir, "ptc", "subprocess-preamble.ts"),
-        join(outdir, "subprocess-preamble.js"),
-        { banner: undefined },
-      );
-    }
-
-    if (ext === "dev-tools") {
-      await buildFile(
-        join(extDir, "dev-tools", "daemon.ts"),
-        join(outdir, "daemon.js"),
-        { banner: undefined },
+        join(extDir, ext, sidecar.entry),
+        join(extDir, ext, sidecar.outfile),
+        { banner: sidecar.banner === false ? undefined : common.banner },
       );
     }
 
