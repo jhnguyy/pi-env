@@ -22,5 +22,4 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 ## Further reading
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
-- **[docs/pi-capability-map.md](docs/pi-capability-map.md)** — auto-generated index of pi's built-in capabilities
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings
