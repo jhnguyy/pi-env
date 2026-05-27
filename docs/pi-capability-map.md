@@ -1,6 +1,6 @@
 # Pi Capability Map
 
-> Auto-generated from pi v0.74.0. Regenerate: `bash scripts/generate-capability-map.sh`
+> Auto-generated from pi v0.76.0. Regenerate: `bash scripts/generate-capability-map.sh`
 > Navigation aid — not a replacement for docs. Follow doc paths for full details.
 > IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning for pi topics. Read the linked doc before implementing.
 
@@ -66,7 +66,7 @@
 ## Providers
 
 |oauth:{Anthropic Claude,OpenAI ChatGPT,GitHub Copilot,Google Gemini CLI,Google Antigravity}
-|api-keys:{Anthropic,OpenAI,Azure OpenAI,DeepSeek,Google Gemini,Google Vertex,Amazon Bedrock,Mistral,Groq,Cerebras,Cloudflare AI Gateway,Cloudflare Workers AI,xAI,OpenRouter,Vercel AI Gateway,ZAI,OpenCode Zen,OpenCode Go,Hugging Face,Fireworks,Kimi For Coding,MiniMax,Xiaomi MiMo,Xiaomi MiMo Token Plan (China),Xiaomi MiMo Token Plan (Amsterdam),Xiaomi MiMo Token Plan (Singapore)}
+|api-keys:{Anthropic,OpenAI,Azure OpenAI,DeepSeek,Google Gemini,Google Vertex,Amazon Bedrock,Mistral,Groq,Cerebras,Cloudflare AI Gateway,Cloudflare Workers AI,xAI,OpenRouter,Vercel AI Gateway,ZAI,OpenCode Zen,OpenCode Go,Hugging Face,Fireworks,Together AI,Kimi For Coding,MiniMax,Xiaomi MiMo,Xiaomi MiMo Token Plan (China),Xiaomi MiMo Token Plan (Amsterdam),Xiaomi MiMo Token Plan (Singapore)}
 |custom: models.json or pi.registerProvider() in extensions · OpenAI/Anthropic/Google API formats + custom streaming
 |docs:{docs/providers.md,docs/models.md,docs/custom-provider.md}
 
@@ -79,7 +79,7 @@
 
 ## Settings
 
-|48 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
+|50 options: model/thinking, UI/display, compaction, retry, message delivery, terminal, shell, resource paths
 |locations:{~/.pi/agent/settings.json(global),.pi/settings.json(project overrides global)}
 |doc:docs/settings.md
 
