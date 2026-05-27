@@ -52,7 +52,11 @@ require_node
 
 echo "Dependencies"
 echo "------------"
-(cd "$REPO" && npm ci)
+if ! (cd "$REPO" && npm ci --no-audit); then
+  echo "  —  npm ci failed; removing node_modules and retrying once."
+  rm -rf "$REPO/node_modules"
+  (cd "$REPO" && npm ci --no-audit)
+fi
 ok "node_modules up to date"
 
 # ── Pi CLI ──────────────────────────────────────────────────────────────────
@@ -68,7 +72,7 @@ PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
 PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 PI_PKG_SPEC="@earendil-works/pi-coding-agent@$PI_VERSION"
 mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
-npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC"
+npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC" --no-audit
 PI_PACKAGE_DIR="$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
 PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
 [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
