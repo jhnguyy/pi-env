@@ -1,7 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { booleanAt, numberAt, readExtensionSettings, stringAt, type SettingsRecord } from "../_shared/settings";
 
 export interface ThemeSchedulerConfig {
   enabled: boolean;
@@ -12,14 +10,7 @@ export interface ThemeSchedulerConfig {
   pollIntervalMs: number;
 }
 
-interface RawThemeSchedulerConfig {
-  enabled?: unknown;
-  lightTheme?: unknown;
-  darkTheme?: unknown;
-  lightStart?: unknown;
-  lightEnd?: unknown;
-  pollIntervalMs?: unknown;
-}
+type RawThemeSchedulerConfig = SettingsRecord;
 
 const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   enabled: false,
@@ -30,38 +21,21 @@ const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   pollIntervalMs: 60_000,
 };
 
-function readThemeSchedulerBlock(path: string): RawThemeSchedulerConfig | null {
-  if (!existsSync(path)) return null;
-
-  try {
-    const settings = JSON.parse(readFileSync(path, "utf8")) as { themeScheduler?: RawThemeSchedulerConfig };
-    return settings.themeScheduler ?? null;
-  } catch {
-    return null;
-  }
-}
-
 function mergeConfig(base: ThemeSchedulerConfig, raw: RawThemeSchedulerConfig | null): ThemeSchedulerConfig {
   if (!raw) return base;
 
   return {
-    enabled: typeof raw.enabled === "boolean" ? raw.enabled : base.enabled,
-    lightTheme: typeof raw.lightTheme === "string" && raw.lightTheme.trim() ? raw.lightTheme : base.lightTheme,
-    darkTheme: typeof raw.darkTheme === "string" && raw.darkTheme.trim() ? raw.darkTheme : base.darkTheme,
-    lightStart: typeof raw.lightStart === "string" && raw.lightStart.trim() ? raw.lightStart : base.lightStart,
-    lightEnd: typeof raw.lightEnd === "string" && raw.lightEnd.trim() ? raw.lightEnd : base.lightEnd,
-    pollIntervalMs:
-      typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs) && raw.pollIntervalMs >= 1_000
-        ? raw.pollIntervalMs
-        : base.pollIntervalMs,
+    enabled: booleanAt(raw, "enabled") ?? base.enabled,
+    lightTheme: stringAt(raw, "lightTheme") ?? base.lightTheme,
+    darkTheme: stringAt(raw, "darkTheme") ?? base.darkTheme,
+    lightStart: stringAt(raw, "lightStart") ?? base.lightStart,
+    lightEnd: stringAt(raw, "lightEnd") ?? base.lightEnd,
+    pollIntervalMs: Math.max(numberAt(raw, "pollIntervalMs") ?? base.pollIntervalMs, 1_000),
   };
 }
 
 export function loadConfig(cwd: string): ThemeSchedulerConfig {
-  const globalConfig = readThemeSchedulerBlock(join(getAgentDir(), "settings.json"));
-  const projectConfig = readThemeSchedulerBlock(join(cwd, ".pi", "settings.json"));
-
-  return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
+  return mergeConfig(DEFAULT_CONFIG, readExtensionSettings("themeScheduler", cwd));
 }
 
 export function parseTimeOfDay(value: string): number | null {
