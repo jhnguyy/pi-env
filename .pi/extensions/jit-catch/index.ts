@@ -22,7 +22,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
 
 import { parseDiff } from "./parser";
-import { captureDiff, runForExtension } from "./runner";
+import { captureDiff, resolveGitRoot, runForExtension } from "./runner";
 import { err } from "../_shared/result";
 import type { ExtToolRegistration } from "../subagent/types";
 
@@ -58,8 +58,8 @@ export default function (pi: ExtensionAPI) {
       "",
       "## On failure",
       "Fix code, then re-run jit_catch (auto-discards on pass) or edit the kept test file",
-      "at ~/.pi/agent/extensions/<ext-name>/__tests__/<ext-name>.catching.test.ts, then",
-      "`npm test` and `rm` it. Use the jit-catch skill for promoting criteria.",
+      "at the reported path, then `npm test` and `rm` it. Use the jit-catch skill",
+      "for promoting criteria.",
     ].join("\n"),
 
     parameters: Type.Object({
@@ -99,13 +99,16 @@ export default function (pi: ExtensionAPI) {
 
       // ─── 1. Acquire diff ──────────────────────────────────────
       let diffText: string;
+      let workspaceRoot = params.git_cwd ?? ctx.cwd;
       progress("Acquiring diff…");
       try {
         if (params.diff) {
+          workspaceRoot = await resolveGitRoot(exec, workspaceRoot);
           diffText = params.diff;
         } else {
           const source = params.diff_source ?? "unstaged";
           const gitCwd = params.git_cwd ?? ctx.cwd;
+          workspaceRoot = await resolveGitRoot(exec, gitCwd);
           diffText = await captureDiff(source, exec, gitCwd, params.commit);
         }
       } catch (e) {
@@ -140,7 +143,7 @@ export default function (pi: ExtensionAPI) {
       const results = [];
       for (const ext of targets) {
         progress(`${ext.name}: generating tests…`);
-        const result = await runForExtension(ext, diffText, exec, signal, (phase) => {
+        const result = await runForExtension(ext, diffText, exec, signal, workspaceRoot, (phase) => {
           progress(`${ext.name}: ${phase}`);
         });
         results.push(result);
@@ -222,12 +225,15 @@ export default function (pi: ExtensionAPI) {
           ext_name?: string;
         };
         let diffText: string;
+        let workspaceRoot = args.git_cwd ?? process.cwd();
         try {
           if (args.diff) {
+            workspaceRoot = await resolveGitRoot(exec, workspaceRoot);
             diffText = args.diff;
           } else {
             const source = args.diff_source ?? "unstaged";
             const gitCwd = args.git_cwd ?? process.cwd();
+            workspaceRoot = await resolveGitRoot(exec, gitCwd);
             diffText = await captureDiff(source, exec, gitCwd, args.commit);
           }
         } catch (e) { return err(String(e)); }
@@ -237,7 +243,7 @@ export default function (pi: ExtensionAPI) {
         if (targets.length === 0) return err(`Extension '${args.ext_name}' not found. Present: ${extensions.map((e) => e.name).join(", ")}`);
         const results = [];
         for (const ext of targets) {
-          const result = await runForExtension(ext, diffText, exec, signal, () => {});
+          const result = await runForExtension(ext, diffText, exec, signal, workspaceRoot, () => {});
           results.push(result);
         }
         const lines: string[] = [];
