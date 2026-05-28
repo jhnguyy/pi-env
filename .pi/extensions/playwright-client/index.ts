@@ -4,42 +4,14 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { txt } from "../_shared/result";
-import { BrowserClient, type ControlState, type LocatorParams, type WaitParams } from "./browser";
+import { BROWSER_ACTIONS, executeBrowserAction, formatActionSummary, formatTargets, translateBrowserError, type BrowserAction, type BrowserArgs } from "./actions";
+import { BrowserClient } from "./browser";
 import { loadBrowserClientConfig } from "./config";
 import type { ExtToolRegistration } from "../subagent/types";
 
-const browserActionSchema = StringEnum([
-  "targets",
-  "status",
-  "control",
-  "pages",
-  "snapshot",
-  "screenshot",
-  "navigate",
-  "newPage",
-  "back",
-  "forward",
-  "reload",
-  "wait",
-  "history",
-  "click",
-  "type",
-] as const, { description: "Browser action to perform" });
+const browserActionSchema = StringEnum(BROWSER_ACTIONS, { description: "Browser action to perform" });
 
-type BrowserAction = "targets" | "status" | "control" | "pages" | "snapshot" | "screenshot" | "navigate" | "newPage" | "back" | "forward" | "reload" | "wait" | "history" | "click" | "type";
-type TypeMode = "fill" | "type";
 type BrowserCommandContext = { ui: { notify(message: string, level?: "info" | "warning" | "error"): void } };
-
-type BrowserArgs = LocatorParams & WaitParams & {
-  state?: ControlState;
-  pageId?: string;
-  pageTitle?: string;
-  pageUrl?: string;
-  fullPage?: boolean;
-  value?: string;
-  mode?: TypeMode;
-  limit?: number;
-};
 
 export default function playwrightClientExtension(pi: ExtensionAPI) {
   const browser = new BrowserClient(loadBrowserClientConfig());
@@ -143,154 +115,6 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
       ctx.ui.notify("Browser control state: agent", "info");
     },
   });
-}
-
-async function executeBrowserAction(browser: BrowserClient, action: BrowserAction, target: string | undefined, args: BrowserArgs): Promise<{ text: string; details: unknown }> {
-  switch (action) {
-    case "targets": {
-      const targets = browser.listTargets();
-      return { text: formatTargets(targets), details: { action, targets } };
-    }
-    case "control": {
-      if (!args.state) throw new Error("browser action=control requires args.state");
-      browser.setControlState(args.state);
-      return { text: `Browser control state: ${args.state}`, details: { action, state: args.state } };
-    }
-    case "status": {
-      const targetName = requireTarget(action, target);
-      const text = await browser.status(targetName);
-      return { text, details: { action, target: targetName, controlState: browser.getControlState() } };
-    }
-    case "pages": {
-      const targetName = requireTarget(action, target);
-      if (args.pageId || args.pageTitle || args.pageUrl) {
-        const page = await browser.selectPage(targetName, { pageId: args.pageId, title: args.pageTitle, url: args.pageUrl });
-        return { text: formatPages([page]), details: { action, target: targetName, pages: [page], selected: page } };
-      }
-      const pages = await browser.listPages(targetName);
-      return { text: formatPages(pages), details: { action, target: targetName, pages, selected: null } };
-    }
-    case "snapshot": {
-      const targetName = requireTarget(action, target);
-      return { text: await browser.snapshot(targetName), details: { action, target: targetName } };
-    }
-    case "screenshot": {
-      const targetName = requireTarget(action, target);
-      const shot = await browser.screenshot(targetName, Boolean(args.fullPage));
-      const text = [`target: ${shot.target}`, `screenshot: ${shot.path}`, `title: ${shot.title || "(untitled)"}`, `url: ${shot.url}`].join("\n");
-      return { text, details: { action, ...shot } };
-    }
-    case "navigate": {
-      const targetName = requireTarget(action, target);
-      if (!args.url) throw new Error("browser action=navigate requires args.url");
-      const result = await browser.navigate(targetName, args.url);
-      return { text: `target: ${result.target}\nnavigated: ${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-    case "newPage": {
-      const targetName = requireTarget(action, target);
-      const result = await browser.newPage(targetName);
-      return { text: `target: ${result.target}\nnewPage: ${result.id}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-    case "back":
-    case "forward":
-    case "reload": {
-      const targetName = requireTarget(action, target);
-      const result = action === "back" ? await browser.back(targetName) : action === "forward" ? await browser.forward(targetName) : await browser.reload(targetName);
-      return { text: `target: ${result.target}\n${action}: ${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-    case "wait": {
-      const targetName = requireTarget(action, target);
-      const result = await browser.wait(targetName, args);
-      return { text: `target: ${result.target}\nwaited: ${result.waitedFor}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-    case "history": {
-      const entries = browser.getHistory(args.limit);
-      return { text: formatHistory(entries), details: { action, history: entries } };
-    }
-    case "click": {
-      const targetName = requireTarget(action, target);
-      const result = await browser.click(targetName, args);
-      return { text: `target: ${result.target}\nclicked: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-    case "type": {
-      const targetName = requireTarget(action, target);
-      if (args.value === undefined) throw new Error("browser action=type requires args.value");
-      const hasLocator = Boolean(args.role || args.text || args.label || args.placeholder || args.testId || args.selector);
-      const mode = args.mode ?? (hasLocator ? "fill" : "type");
-      const result = await browser.type(targetName, args, args.value, mode);
-      return { text: `target: ${result.target}\n${result.mode}: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
-    }
-  }
-}
-
-function requireTarget(action: string, target: string | undefined): string {
-  if (!target) throw new Error(`browser action=${action} requires target. Use action=targets to list configured targets.`);
-  return target;
-}
-
-function formatTargets(targets: Array<{ name: string; host: string; port: number; protocol: string; path: string; cdpUrl: string; description?: string }>): string {
-  if (targets.length === 0) return "No browser targets configured.";
-  return targets.map((target) => [
-    `- ${target.name}: ${target.cdpUrl}`,
-    `  host=${target.host} port=${target.port} protocol=${target.protocol}${target.path ? ` path=${target.path}` : ""}`,
-    target.description ? `  ${target.description}` : "",
-  ].filter(Boolean).join("\n")).join("\n");
-}
-
-function formatPages(pages: Array<{ id: string; title: string; url: string; active: boolean }>): string {
-  if (pages.length === 0) return "No browser pages.";
-  return pages.map((page) => `${page.active ? "*" : "-"} ${page.id}: ${page.title || "(untitled)"}\n  ${page.url}`).join("\n");
-}
-
-function formatHistory(entries: Array<{ timestamp: string; action: string; target?: string; pageTitle?: string; pageUrl?: string; result?: string; error?: string }>): string {
-  if (entries.length === 0) return "No browser action history.";
-  return entries.map((entry) => [
-    `- ${entry.timestamp} action=${entry.action}${entry.target ? ` target=${entry.target}` : ""}`,
-    entry.pageTitle || entry.pageUrl ? `  page: ${entry.pageTitle || "(untitled)"} — ${entry.pageUrl || ""}` : "",
-    entry.result ? `  result: ${entry.result}` : "",
-    entry.error ? `  error: ${entry.error}` : "",
-  ].filter(Boolean).join("\n")).join("\n");
-}
-
-function formatActionSummary(action: string, args: Record<string, unknown> | undefined): string {
-  if (!args) return "";
-  if ((action === "navigate" || action === "wait") && args.url) return String(args.url);
-  if (action === "control" && args.state) return String(args.state);
-  if (action === "pages") {
-    if (args.pageId) return `page=${String(args.pageId)}`;
-    if (args.pageTitle) return `title~=${String(args.pageTitle)}`;
-    if (args.pageUrl) return `url~=${String(args.pageUrl)}`;
-  }
-  if (action === "type" && args.value) return formatLocatorArgs(args);
-  if (action === "click") return formatLocatorArgs(args);
-  return "";
-}
-
-function formatLocatorArgs(args: Record<string, unknown>): string {
-  for (const key of ["role", "text", "label", "placeholder", "testId", "selector"] as const) {
-    const value = args[key];
-    if (value) return `${key}=${String(value)}`;
-  }
-  return "focused element";
-}
-
-function translateBrowserError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
-  const guidance: string[] = [];
-  if (lower.includes("unable to connect") || lower.includes("econnrefused") || lower.includes("connect") || lower.includes("target closed")) {
-    guidance.push("Next steps: run browser action=targets to confirm the target name, start Chrome with --remote-debugging-port, and verify the CDP URL is reachable from this pi process.");
-  }
-  if (lower.includes("no pages are open") || lower.includes("page") && (lower.includes("closed") || lower.includes("crash") || lower.includes("detached"))) {
-    guidance.push("Next steps: run browser action=pages to refresh page state, or browser action=newPage to create a fresh active page.");
-  }
-  if (lower.includes("timeout") || lower.includes("waiting for") || lower.includes("strict mode violation")) {
-    guidance.push("Next steps: run browser action=snapshot to inspect current content; try a more specific semantic locator, selector fallback, or browser action=wait with a longer timeout.");
-  }
-  if (lower.includes("control state is human")) {
-    guidance.push("Next steps: wait for the human, or use browser action=control args.state=agent when control should return to the agent.");
-  }
-  return [message, ...guidance].join("\n");
 }
 
 function launchGuidance(): string {

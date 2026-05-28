@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import playwrightClientExtension from "../index";
+import { BROWSER_ACTIONS } from "../actions";
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
 
@@ -77,6 +78,12 @@ describe("playwright-client config", () => {
       profilePath: "/tmp/pi-browser-profile",
       artifactDir: "/tmp/pi-browser-artifacts-test",
     });
+  });
+});
+
+describe("playwright-client action metadata", () => {
+  it("keeps browser actions alphabetized for reviewable tool metadata", () => {
+    expect([...BROWSER_ACTIONS].sort()).toEqual([...BROWSER_ACTIONS]);
   });
 });
 
