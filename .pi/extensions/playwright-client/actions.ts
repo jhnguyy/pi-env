@@ -37,7 +37,7 @@ export interface BrowserActionResult {
   details: unknown;
 }
 
-type BrowserActionHandler = (ctx: BrowserActionContext) => Promise<BrowserActionResult>;
+type BrowserActionHandler = (ctx: BrowserActionContext) => Promise<BrowserActionPayload>;
 
 interface BrowserActionContext {
   browser: BrowserClient;
@@ -46,65 +46,65 @@ interface BrowserActionContext {
   args: BrowserArgs;
 }
 
+type Details = Record<string, unknown>;
+
+interface BrowserActionPayload {
+  target?: string;
+  title?: string;
+  url?: string;
+  summary?: string;
+  text?: string;
+  details?: Details;
+}
+
 const TARGETED_ACTIONS = {
-  back: async ({ browser, action, target }) => {
-    const result = await browser.back(requireTarget(action, target));
-    return navigationResult(action, result);
-  },
+  back: async ({ browser, action, target }) => pagePayload(action, await browser.back(requireTarget(action, target))),
   click: async ({ browser, action, target, args }) => {
     const result = await browser.click(requireTarget(action, target), args);
-    return { text: `target: ${result.target}\nclicked: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+    return pagePayload(action, result, { summary: `clicked: ${result.locator}`, details: { locator: result.locator } });
   },
-  forward: async ({ browser, action, target }) => {
-    const result = await browser.forward(requireTarget(action, target));
-    return navigationResult(action, result);
-  },
+  forward: async ({ browser, action, target }) => pagePayload(action, await browser.forward(requireTarget(action, target))),
   navigate: async ({ browser, action, target, args }) => {
     if (!args.url) throw new Error("browser action=navigate requires args.url");
     const result = await browser.navigate(requireTarget(action, target), args.url);
-    return { text: `target: ${result.target}\nnavigated: ${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+    return pagePayload(action, result, { summary: "navigated" });
   },
   newPage: async ({ browser, action, target }) => {
     const result = await browser.newPage(requireTarget(action, target));
-    return { text: `target: ${result.target}\nnewPage: ${result.id}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+    return pagePayload(action, result, { summary: `newPage: ${result.id}`, details: { id: result.id } });
   },
   pages: async ({ browser, action, target, args }) => {
     const targetName = requireTarget(action, target);
     if (args.pageId || args.pageTitle || args.pageUrl) {
       const page = await browser.selectPage(targetName, { pageId: args.pageId, title: args.pageTitle, url: args.pageUrl });
-      return { text: formatPages([page]), details: { action, target: targetName, pages: [page], selected: page } };
+      return { text: formatPages([page]), details: { target: targetName, pages: [page], selected: page } };
     }
     const pages = await browser.listPages(targetName);
-    return { text: formatPages(pages), details: { action, target: targetName, pages, selected: null } };
+    return { text: formatPages(pages), details: { target: targetName, pages, selected: null } };
   },
-  reload: async ({ browser, action, target }) => {
-    const result = await browser.reload(requireTarget(action, target));
-    return navigationResult(action, result);
-  },
+  reload: async ({ browser, action, target }) => pagePayload(action, await browser.reload(requireTarget(action, target))),
   screenshot: async ({ browser, action, target, args }) => {
     const shot = await browser.screenshot(requireTarget(action, target), Boolean(args.fullPage));
-    const text = [`target: ${shot.target}`, `screenshot: ${shot.path}`, `title: ${shot.title || "(untitled)"}`, `url: ${shot.url}`].join("\n");
-    return { text, details: { action, ...shot } };
+    return pagePayload(action, shot, { summary: `screenshot: ${shot.path}`, details: { path: shot.path } });
   },
   snapshot: async ({ browser, action, target }) => {
     const targetName = requireTarget(action, target);
-    return { text: await browser.snapshot(targetName), details: { action, target: targetName } };
+    return { text: await browser.snapshot(targetName), details: { target: targetName } };
   },
   status: async ({ browser, action, target }) => {
     const targetName = requireTarget(action, target);
-    const text = await browser.status(targetName);
-    return { text, details: { action, target: targetName, controlState: browser.getControlState() } };
+    return { text: await browser.status(targetName), details: { target: targetName, controlState: browser.getControlState() } };
   },
   type: async ({ browser, action, target, args }) => {
     if (args.value === undefined) throw new Error("browser action=type requires args.value");
     const hasLocator = Boolean(args.role || args.text || args.label || args.placeholder || args.testId || args.selector);
     const mode = args.mode ?? (hasLocator ? "fill" : "type");
     const result = await browser.type(requireTarget(action, target), args, args.value, mode);
-    return { text: `target: ${result.target}\n${result.mode}: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+    return pagePayload(action, result, { summary: `${result.mode}: ${result.locator}`, details: { locator: result.locator, mode: result.mode } });
   },
   wait: async ({ browser, action, target, args }) => {
     const result = await browser.wait(requireTarget(action, target), args);
-    return { text: `target: ${result.target}\nwaited: ${result.waitedFor}\n${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+    return pagePayload(action, result, { summary: `waited: ${result.waitedFor}`, details: { waitedFor: result.waitedFor } });
   },
 } satisfies Partial<Record<BrowserAction, BrowserActionHandler>>;
 
@@ -121,27 +121,52 @@ const ACTION_HANDLERS = {
   status: TARGETED_ACTIONS.status,
   type: TARGETED_ACTIONS.type,
   wait: TARGETED_ACTIONS.wait,
-  control: async ({ browser, action, args }) => {
+  control: async ({ browser, args }) => {
     if (!args.state) throw new Error("browser action=control requires args.state");
     browser.setControlState(args.state);
-    return { text: `Browser control state: ${args.state}`, details: { action, state: args.state } };
+    return { text: `Browser control state: ${args.state}`, details: { state: args.state } };
   },
-  history: async ({ browser, action, args }) => {
+  history: async ({ browser, args }) => {
     const entries = browser.getHistory(args.limit);
-    return { text: formatHistory(entries), details: { action, history: entries } };
+    return { text: formatHistory(entries), details: { history: entries } };
   },
-  targets: async ({ browser, action }) => {
+  targets: async ({ browser }) => {
     const targets = browser.listTargets();
-    return { text: formatTargets(targets), details: { action, targets } };
+    return { text: formatTargets(targets), details: { targets } };
   },
 } satisfies Record<BrowserAction, BrowserActionHandler>;
 
-export function executeBrowserAction(browser: BrowserClient, action: BrowserAction, target: string | undefined, args: BrowserArgs): Promise<BrowserActionResult> {
-  return ACTION_HANDLERS[action]({ browser, action, target, args });
+export async function executeBrowserAction(browser: BrowserClient, action: BrowserAction, target: string | undefined, args: BrowserArgs): Promise<BrowserActionResult> {
+  const payload = await ACTION_HANDLERS[action]({ browser, action, target, args });
+  return renderActionResult(action, payload);
 }
 
-function navigationResult(action: BrowserAction, result: { title: string; url: string; target: string }): BrowserActionResult {
-  return { text: `target: ${result.target}\n${action}: ${result.title || "(untitled)"}\n${result.url}`, details: { action, ...result } };
+function pagePayload(
+  action: BrowserAction,
+  result: { title: string; url: string; target: string },
+  extras: { summary?: string; details?: Details } = {},
+): BrowserActionPayload {
+  return {
+    target: result.target,
+    title: result.title,
+    url: result.url,
+    summary: extras.summary ?? action,
+    details: { ...result, ...extras.details },
+  };
+}
+
+function renderActionResult(action: BrowserAction, payload: BrowserActionPayload): BrowserActionResult {
+  const details = { action, ...payload.details };
+  if (payload.text !== undefined) return { text: payload.text, details };
+  return {
+    text: [
+      payload.target ? `target: ${payload.target}` : "",
+      payload.summary ?? action,
+      payload.title !== undefined ? payload.title || "(untitled)" : "",
+      payload.url ?? "",
+    ].filter(Boolean).join("\n"),
+    details,
+  };
 }
 
 function requireTarget(action: string, target: string | undefined): string {
