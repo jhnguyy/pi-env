@@ -51,10 +51,11 @@ require_node
 
 echo "Dependencies"
 echo "------------"
-if ! (cd "$REPO" && npm ci --no-audit); then
+echo "  —  installing repo dependencies, including dev dependencies required for extension builds"
+if ! (cd "$REPO" && npm ci --no-audit --include=dev); then
   echo "  —  npm ci failed; removing node_modules and retrying once."
   rm -rf "$REPO/node_modules"
-  (cd "$REPO" && npm ci --no-audit)
+  (cd "$REPO" && npm ci --no-audit --include=dev)
 fi
 ok "node_modules up to date"
 

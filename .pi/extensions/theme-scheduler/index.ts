@@ -1,7 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { readSettingsBlock, type SettingsBlock } from "../_shared/settings";
 
 export interface ThemeSchedulerConfig {
   enabled: boolean;
@@ -10,15 +8,6 @@ export interface ThemeSchedulerConfig {
   lightStart: string;
   lightEnd: string;
   pollIntervalMs: number;
-}
-
-interface RawThemeSchedulerConfig {
-  enabled?: unknown;
-  lightTheme?: unknown;
-  darkTheme?: unknown;
-  lightStart?: unknown;
-  lightEnd?: unknown;
-  pollIntervalMs?: unknown;
 }
 
 const DEFAULT_CONFIG: ThemeSchedulerConfig = {
@@ -30,19 +19,12 @@ const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   pollIntervalMs: 60_000,
 };
 
-function readThemeSchedulerBlock(path: string): RawThemeSchedulerConfig | null {
-  if (!existsSync(path)) return null;
-
-  try {
-    const settings = JSON.parse(readFileSync(path, "utf8")) as { themeScheduler?: RawThemeSchedulerConfig };
-    return settings.themeScheduler ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function mergeConfig(base: ThemeSchedulerConfig, raw: RawThemeSchedulerConfig | null): ThemeSchedulerConfig {
+function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | null): ThemeSchedulerConfig {
   if (!raw) return base;
+
+  const pollIntervalMs = typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs)
+    ? Math.max(raw.pollIntervalMs, 1_000)
+    : base.pollIntervalMs;
 
   return {
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : base.enabled,
@@ -50,18 +32,12 @@ function mergeConfig(base: ThemeSchedulerConfig, raw: RawThemeSchedulerConfig | 
     darkTheme: typeof raw.darkTheme === "string" && raw.darkTheme.trim() ? raw.darkTheme : base.darkTheme,
     lightStart: typeof raw.lightStart === "string" && raw.lightStart.trim() ? raw.lightStart : base.lightStart,
     lightEnd: typeof raw.lightEnd === "string" && raw.lightEnd.trim() ? raw.lightEnd : base.lightEnd,
-    pollIntervalMs:
-      typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs) && raw.pollIntervalMs >= 1_000
-        ? raw.pollIntervalMs
-        : base.pollIntervalMs,
+    pollIntervalMs,
   };
 }
 
 export function loadConfig(cwd: string): ThemeSchedulerConfig {
-  const globalConfig = readThemeSchedulerBlock(join(getAgentDir(), "settings.json"));
-  const projectConfig = readThemeSchedulerBlock(join(cwd, ".pi", "settings.json"));
-
-  return mergeConfig(mergeConfig(DEFAULT_CONFIG, globalConfig), projectConfig);
+  return mergeConfig(DEFAULT_CONFIG, readSettingsBlock("themeScheduler", cwd));
 }
 
 export function parseTimeOfDay(value: string): number | null {

@@ -7,17 +7,16 @@
  *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
  *
  * **Ordering invariant**: format backends run BEFORE LSP diagnostics in agent_end.
- * LSP diagnostics may call sendMessage({ triggerTurn: true }), which enqueues a new
- * agent turn. Any sendMessage call that happens AFTER triggerTurn appears in the new
- * turn's context, making it look like it fires at turn start rather than turn end.
- * Running format first ensures the formatter notification lands at the end of the
- * current agent turn, before any diagnostics-triggered re-engage.
+ * LSP diagnostics can re-engage the model when errors are found. The actual
+ * sendMessage call is deferred until after agent_end returns because pi still treats
+ * the agent as streaming while agent_end handlers run; calling sendMessage there
+ * would enqueue diagnostics instead of starting the synthetic follow-up turn.
  *
  * The dev-tools interactive tool (hover, definition, symbols, …) routes through
  * the LSP daemon only — it does not interact with format backends.
  */
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -259,15 +258,26 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ── Unified render + send ──────────────────────────────────────────────
-    // One message, all backends. triggerTurn is disabled for now — the hook
-    // (shouldTriggerTurn) is wired up and ready to re-enable when needed.
+    // One message, all backends. Defer the send until the next event-loop turn:
+    // agent_end is emitted before pi marks the agent idle, so sendMessage called
+    // directly in this handler is treated as in-flight steering/follow-up queue
+    // data. Once deferred, non-error summaries are appended immediately, and LSP
+    // errors can start a synthetic follow-up turn with the diagnostics in context.
     const summary = renderAgentEndSummary(allResults);
     if (summary) {
-      pi.sendMessage({
+      const triggerTurn = shouldTriggerTurn(allResults);
+      const message = {
         customType: "dev-tools-agent-end",
         content: `[post-edit]\n${summary}`,
         display: true,
-      });
+      };
+
+      setTimeout(() => {
+        void pi.sendMessage(
+          message,
+          triggerTurn ? { triggerTurn: true, deliverAs: "followUp" } : undefined,
+        );
+      }, 0);
     }
   });
 }

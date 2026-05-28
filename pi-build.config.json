@@ -3,6 +3,7 @@
   "extensions": [
     "dev-tools",
     "jit-catch",
+    "playwright-client",
     "ptc",
     "security",
     "skill-builder",
@@ -14,10 +15,11 @@
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
     "@earendil-works/pi-tui",
-    "@mariozechner/pi-agent-core",
+    "@earendil-works/pi-agent-core",
     "typebox",
     "@sinclair/typebox",
-    "esbuild"
+    "esbuild",
+    "playwright"
   ],
   "sidecars": {
     "dev-tools": [

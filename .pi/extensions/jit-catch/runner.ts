@@ -26,6 +26,37 @@ export type ExecFn = (
 /** Absolute path to the extensions directory. */
 export const EXTENSIONS_DIR = join(homedir(), ".pi", "agent", "extensions");
 
+/**
+ * Resolve the git repository root for project-local extension diffs.
+ * Falls back to gitCwd so raw/non-git callers still get deterministic paths.
+ */
+export async function resolveGitRoot(exec: ExecFn, gitCwd: string): Promise<string> {
+  const result = await exec("git", ["rev-parse", "--show-toplevel"], { cwd: gitCwd });
+  return result.code === 0 && result.stdout.trim() ? result.stdout.trim() : gitCwd;
+}
+
+/**
+ * Resolve an extension directory from parsed diff paths.
+ *
+ * jit-catch originally assumed installed global extensions live under
+ * ~/.pi/agent/extensions/<name>. pi-env usually edits project-local extensions
+ * under .pi/extensions/<name> in a worktree, so derive the directory from the
+ * changed file path relative to the git root first, then fall back to the legacy
+ * global location for older/global-extension workflows.
+ */
+export function resolveExtensionDir(ext: ExtensionDiff, workspaceRoot: string): string {
+  const marker = `extensions/${ext.name}/`;
+  const changedFile = ext.changedFiles.find((file) => file.includes(marker));
+  if (changedFile) {
+    const markerEnd = changedFile.indexOf(marker) + marker.length;
+    const relativeExtDir = changedFile.slice(0, markerEnd - 1);
+    const projectLocal = join(workspaceRoot, relativeExtDir);
+    if (existsSync(projectLocal)) return projectLocal;
+  }
+
+  return join(EXTENSIONS_DIR, ext.name);
+}
+
 // ─── Diff acquisition ─────────────────────────────────────────────────────────
 
 /**
@@ -98,14 +129,15 @@ const MAX_SOURCE_BYTES = 32_000; // cap total injected source content
  * Read source files changed in the diff and return them as a formatted block.
  * Truncates aggressively to keep the subagent prompt manageable.
  */
-export function readSourceFiles(changedFiles: string[]): string {
+export function readSourceFiles(changedFiles: string[], workspaceRoot: string): string {
   const parts: string[] = [];
   let totalBytes = 0;
 
   for (const relPath of changedFiles) {
-    // changedFiles are relative to repo root (e.g. `.pi/agent/extensions/dev-tools/index.ts`).
-    // Resolve against home dir — covers the common `~/.pi/agent/extensions/<ext>/` layout.
+    // changedFiles are relative to repo root for git diffs. Resolve against the
+    // current workspace first (project-local extensions), then legacy/global paths.
     const candidates = [
+      join(workspaceRoot, relPath),
       join(homedir(), relPath),
       join("/", relPath),
     ];
@@ -143,8 +175,9 @@ export function buildTestPrompt(
   ext: ExtensionDiff,
   diffText: string,
   sourceContent: string,
+  extDir: string,
 ): string {
-  const testPath = `~/.pi/agent/extensions/${ext.name}/__tests__/${ext.name}.catching.test.ts`;
+  const testPath = join(extDir, "__tests__", `${ext.name}.catching.test.ts`);
 
   return [
     `You are a test writer for a pi extension. Generate catching tests for the following diff.`,
@@ -249,9 +282,10 @@ export async function runForExtension(
   diffText: string,
   exec: ExecFn,
   signal: AbortSignal | undefined,
+  workspaceRoot: string,
   onProgress?: (phase: string) => void,
 ): Promise<ExtensionRunResult> {
-  const extDir = join(EXTENSIONS_DIR, ext.name);
+  const extDir = resolveExtensionDir(ext, workspaceRoot);
 
   if (!existsSync(extDir)) {
     return {
@@ -267,11 +301,11 @@ export async function runForExtension(
 
   // 2. Read source files for context
   onProgress?.("reading source files…");
-  const sourceContent = readSourceFiles(ext.changedFiles);
+  const sourceContent = readSourceFiles(ext.changedFiles, workspaceRoot);
 
   // 3. Build prompt and generate tests via subagent
   onProgress?.("generating tests via subagent…");
-  const prompt = buildTestPrompt(ext, diffText, sourceContent);
+  const prompt = buildTestPrompt(ext, diffText, sourceContent, extDir);
   let testContent: string;
   try {
     testContent = await generateTestContent(prompt, exec, signal);
