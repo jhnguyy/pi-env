@@ -32,6 +32,14 @@
   "packages": [],
   "permissionLevel": "none",
   "theme": "dark",
+  "themeScheduler": {
+    "enabled": false,
+    "lightTheme": "gruvbox-light",
+    "darkTheme": "gruvbox-dark",
+    "lightStart": "10:00",
+    "lightEnd": "16:00",
+    "pollIntervalMs": 60000
+  },
   "extensions": [],
   "skills": [],
   "modelAnnotations": {
