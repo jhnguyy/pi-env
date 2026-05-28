@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { booleanAt, numberAt, readExtensionSettings, stringAt, type SettingsRecord } from "../_shared/settings";
+import { readSettingsBlock, type SettingsBlock } from "../_shared/settings";
 
 export interface ThemeSchedulerConfig {
   enabled: boolean;
@@ -10,8 +10,6 @@ export interface ThemeSchedulerConfig {
   pollIntervalMs: number;
 }
 
-type RawThemeSchedulerConfig = SettingsRecord;
-
 const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   enabled: false,
   lightTheme: "gruvbox-light",
@@ -21,21 +19,25 @@ const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   pollIntervalMs: 60_000,
 };
 
-function mergeConfig(base: ThemeSchedulerConfig, raw: RawThemeSchedulerConfig | null): ThemeSchedulerConfig {
+function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | null): ThemeSchedulerConfig {
   if (!raw) return base;
 
+  const pollIntervalMs = typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs)
+    ? Math.max(raw.pollIntervalMs, 1_000)
+    : base.pollIntervalMs;
+
   return {
-    enabled: booleanAt(raw, "enabled") ?? base.enabled,
-    lightTheme: stringAt(raw, "lightTheme") ?? base.lightTheme,
-    darkTheme: stringAt(raw, "darkTheme") ?? base.darkTheme,
-    lightStart: stringAt(raw, "lightStart") ?? base.lightStart,
-    lightEnd: stringAt(raw, "lightEnd") ?? base.lightEnd,
-    pollIntervalMs: Math.max(numberAt(raw, "pollIntervalMs") ?? base.pollIntervalMs, 1_000),
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : base.enabled,
+    lightTheme: typeof raw.lightTheme === "string" && raw.lightTheme.trim() ? raw.lightTheme : base.lightTheme,
+    darkTheme: typeof raw.darkTheme === "string" && raw.darkTheme.trim() ? raw.darkTheme : base.darkTheme,
+    lightStart: typeof raw.lightStart === "string" && raw.lightStart.trim() ? raw.lightStart : base.lightStart,
+    lightEnd: typeof raw.lightEnd === "string" && raw.lightEnd.trim() ? raw.lightEnd : base.lightEnd,
+    pollIntervalMs,
   };
 }
 
 export function loadConfig(cwd: string): ThemeSchedulerConfig {
-  return mergeConfig(DEFAULT_CONFIG, readExtensionSettings("themeScheduler", cwd));
+  return mergeConfig(DEFAULT_CONFIG, readSettingsBlock("themeScheduler", cwd));
 }
 
 export function parseTimeOfDay(value: string): number | null {
