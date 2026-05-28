@@ -8,13 +8,12 @@
 #   2. Install pi CLI with npm into a user-local prefix + ~/.local/bin/pi
 #   3. Bootstrap settings.json from template (only on first run — never overwrites)
 #   4. Register pi-env as a pi package in settings.json
-#   5. Set gruvbox as the pi theme in settings.json
-#   6. Bootstrap APPEND_SYSTEM.md → ~/.pi/agent/APPEND_SYSTEM.md
-#   7. Bootstrap AGENTS.md → ~/.pi/agent/AGENTS.md
-#   8. Symlink roles → ~/.agents/roles
-#   9. Source tmux theme from ~/.tmux.conf
-#  10. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
-#  11. Install git post-merge hook
+#   5. Bootstrap APPEND_SYSTEM.md → ~/.pi/agent/APPEND_SYSTEM.md
+#   6. Bootstrap AGENTS.md → ~/.pi/agent/AGENTS.md
+#   7. Symlink roles → ~/.agents/roles
+#   8. Source tmux theme from ~/.tmux.conf
+#   9. Symlink VS Code Gruvbox extension → ~/.vscode/extensions/
+#  10. Install git post-merge hook
 #
 # Extensions and skills are loaded by pi's package manager from the repo
 # directory — no per-extension or per-skill symlinks needed. Local extensions
@@ -160,29 +159,6 @@ if [ -f "$SETTINGS_FILE" ]; then
     " 2>/dev/null
     linked "pi-env added to settings.json packages"
   fi
-fi
-
-# ── Pi theme ─────────────────────────────────────────────────────────────────
-# Set the gruvbox theme in settings.json so pi uses it on first launch.
-# gruvbox.json ships in this repo's themes/ directory and is loaded by pi
-# via the registered package — requires package registration above to complete.
-
-echo ""
-echo "Pi theme"
-echo "--------"
-if node -e "
-  const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
-  process.exit(s.theme === 'gruvbox' ? 0 : 1);
-" 2>/dev/null; then
-  ok "theme set to gruvbox in settings.json"
-else
-  node -e "
-    const fs = require('fs');
-    const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
-    s.theme = 'gruvbox';
-    fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
-  " 2>/dev/null
-  linked "theme → gruvbox in settings.json"
 fi
 
 # ── Roles (entire directory, no local override) ──────────────────────────────
