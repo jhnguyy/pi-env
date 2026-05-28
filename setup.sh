@@ -4,7 +4,7 @@
 # Idempotent. Re-run after git pull to pick up new extensions/skills.
 #
 # What it does:
-#   1. npm ci (frozen lockfile; postinstall builds extensions)
+#   1. npm ci (frozen lockfile; optional native deps included; postinstall builds extensions)
 #   2. Install pi CLI with npm into a user-local prefix + ~/.local/bin/pi
 #   3. Bootstrap settings.json from template (only on first run — never overwrites)
 #   4. Register pi-env as a pi package in settings.json
@@ -46,16 +46,17 @@ require_node
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
 # npm ci downloads @earendil-works/pi-coding-agent at the version pinned in
-# package-lock.json and postinstall builds extension bundles. The Pi CLI install
-# below uses npm too, but into a separate user-local prefix.
+# package-lock.json and postinstall builds extension bundles. Including optional
+# dependencies ensures platform-specific native packages such as esbuild are
+# installed even when user npm config would otherwise omit them.
 
 echo "Dependencies"
 echo "------------"
-echo "  —  installing repo dependencies, including dev dependencies required for extension builds"
-if ! (cd "$REPO" && npm ci --no-audit --include=dev); then
+echo "  —  installing repo dependencies, including optional native packages"
+if ! (cd "$REPO" && npm ci --no-audit --include=dev --include=optional); then
   echo "  —  npm ci failed; removing node_modules and retrying once."
   rm -rf "$REPO/node_modules"
-  (cd "$REPO" && npm ci --no-audit --include=dev)
+  (cd "$REPO" && npm ci --no-audit --include=dev --include=optional)
 fi
 ok "node_modules up to date"
 
@@ -72,7 +73,8 @@ PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
 PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
 PI_PKG_SPEC="@earendil-works/pi-coding-agent@$PI_VERSION"
 mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
-npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC" --no-audit
+rm -rf "$PI_CLI_ROOT/node_modules" "$PI_CLI_ROOT/package-lock.json"
+npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC" --no-audit --include=optional
 PI_PACKAGE_DIR="$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
 PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
 [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }

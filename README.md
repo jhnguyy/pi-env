@@ -15,6 +15,8 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 
 `setup.sh` is self-documenting — its header lists everything it does and what it leaves alone. In short, it installs the `pi` CLI with npm into a user-local prefix, installs repo dependencies, builds extension bundles, and registers pi-env as a package.
 
+Setup is safe to re-run after moving between dev environments. It performs clean installs with npm optional dependencies enabled so native packages such as `esbuild` are selected for the current platform.
+
 ## Pi CLI install
 
 `setup.sh` installs `@earendil-works/pi-coding-agent` with npm into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Node entrypoint.
