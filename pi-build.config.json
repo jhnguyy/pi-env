@@ -7,6 +7,7 @@
     "security",
     "skill-builder",
     "subagent",
+    "theme-scheduler",
     "work-tracker"
   ],
   "externals": [

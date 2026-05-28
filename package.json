@@ -21,6 +21,7 @@
       ".pi/extensions/security",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
+      ".pi/extensions/theme-scheduler",
       ".pi/extensions/work-tracker"
     ],
     "skills": [
