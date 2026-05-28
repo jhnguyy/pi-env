@@ -3,6 +3,7 @@
   "extensions": [
     "dev-tools",
     "jit-catch",
+    "playwright-client",
     "ptc",
     "security",
     "skill-builder",
@@ -17,7 +18,8 @@
     "@mariozechner/pi-agent-core",
     "typebox",
     "@sinclair/typebox",
-    "esbuild"
+    "esbuild",
+    "playwright"
   ],
   "sidecars": {
     "dev-tools": [

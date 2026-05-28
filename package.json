@@ -15,9 +15,10 @@
   ],
   "pi": {
     "extensions": [
-      ".pi/extensions/ptc",
       ".pi/extensions/dev-tools",
       ".pi/extensions/jit-catch",
+      ".pi/extensions/playwright-client",
+      ".pi/extensions/ptc",
       ".pi/extensions/security",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
