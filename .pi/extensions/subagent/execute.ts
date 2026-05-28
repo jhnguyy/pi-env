@@ -5,7 +5,7 @@
  * registeredExtTools injected via closure so the pi tool signature stays clean.
  */
 
-import { agentLoop } from "@mariozechner/pi-agent-core";
+import { agentLoop } from "@earendil-works/pi-agent-core";
 import type {
   AgentContext,
   AgentEvent,
@@ -14,7 +14,7 @@ import type {
   AgentTool,
   AgentToolResult,
   AgentToolUpdateCallback,
-} from "@mariozechner/pi-agent-core";
+} from "@earendil-works/pi-agent-core";
 import {
   convertToLlm,
   createBashTool,
