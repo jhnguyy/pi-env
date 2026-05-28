@@ -41,8 +41,8 @@ The scheduler defaults to off. When enabled, `lightStart` is inclusive and `ligh
 
 Slack custom theme strings:
 
-- Gruvbox Dark: `#282828,#3c3836,#fe8019,#282828,#fbf1c7,#ebdbb2,#b8bb26,#fb4934,#1d2021,#ebdbb2`
-- Gruvbox Light: `#fbf1c7,#ebdbb2,#af3a03,#fbf1c7,#282828,#3c3836,#79740e,#9d0006,#f9f5d7,#282828`
+- Gruvbox Dark: `#282828,#3c3836,#fe8019,#282828,#504945,#ebdbb2,#b8bb26,#fb4934,#1d2021,#ebdbb2`
+- Gruvbox Light: `#fbf1c7,#ebdbb2,#af3a03,#fbf1c7,#d5c4a1,#282828,#79740e,#9d0006,#f9f5d7,#282828`
 
 ## Further reading
 
