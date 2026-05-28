@@ -22,7 +22,8 @@
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
       ".pi/extensions/theme-scheduler",
-      ".pi/extensions/work-tracker"
+      ".pi/extensions/work-tracker",
+      ".pi/extensions/playwright-client"
     ],
     "skills": [
       ".agents/skills"
