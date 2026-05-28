@@ -49,16 +49,12 @@ export interface LocatorParams {
   exact?: boolean;
 }
 export class BrowserClient {
-  private browser?: BrowserLike;
-  private activePageIndex = 0;
+  private readonly browsers = new Map<string, BrowserLike>();
+  private readonly activePageIndexes = new Map<string, number>();
   private controlState: ControlState = "agent";
   private readonly artifacts: BrowserArtifacts;
-  private cdpUrl: string;
-  private targetName: string;
   constructor(private readonly config: BrowserClientConfig) {
     this.artifacts = new BrowserArtifacts(config.artifactDir);
-    this.cdpUrl = config.cdpUrl;
-    this.targetName = config.targetName;
   }
   setControlState(state: ControlState): void {
     this.controlState = state;
@@ -66,28 +62,20 @@ export class BrowserClient {
   getControlState(): ControlState {
     return this.controlState;
   }
-  listTargets(): Array<BrowserTarget & { active: boolean }> {
-    return this.config.targets.map((target) => ({ ...target, active: target.name === this.targetName }));
+  listTargets(): BrowserTarget[] {
+    return this.config.targets;
   }
-  async selectTarget(name: string): Promise<BrowserTarget> {
-    const target = this.config.targets.find((candidate) => candidate.name === name);
-    if (!target) throw new Error(`No browser target named ${name}. Available targets: ${this.config.targets.map((candidate) => candidate.name).join(", ")}`);
-    await this.disconnect();
-    this.targetName = target.name;
-    this.cdpUrl = target.cdpUrl;
-    this.activePageIndex = 0;
-    return target;
-  }
-  async status(): Promise<string> {
-    const connected = await this.tryConnect();
-    const pages = connected ? await this.listPages() : [];
+  async status(targetName: string): Promise<string> {
+    const target = this.targetByName(targetName);
+    const connected = await this.tryConnect(target);
+    const pages = connected ? await this.listPages(target.name) : [];
     const active = pages.find((page) => page.active);
     return [
       `backend: chrome-cdp`,
       `connected: ${connected ? "yes" : "no"}`,
-      `target: ${this.targetName}`,
-      `cdpUrl: ${this.cdpUrl}`,
-      `targets: ${this.config.targets.map((target) => target.name).join(", ")}`,
+      `target: ${target.name}`,
+      `cdpUrl: ${target.cdpUrl}`,
+      `targets: ${this.config.targets.map((candidate) => candidate.name).join(", ")}`,
       `profile: ${this.config.profileName}`,
       `profilePath: ${this.config.profilePath}`,
       `artifactDir: ${this.config.artifactDir}`,
@@ -96,29 +84,30 @@ export class BrowserClient {
       active ? `activePage: ${active.id} ${active.title || "(untitled)"} — ${active.url}` : `activePage: none`,
     ].join("\n");
   }
-  async listPages(): Promise<PageSummary[]> {
-    await this.ensureConnected();
-    const pages = await this.pages();
-    if (this.activePageIndex >= pages.length) this.activePageIndex = Math.max(0, pages.length - 1);
+  async listPages(targetName: string): Promise<PageSummary[]> {
+    const target = this.targetByName(targetName);
+    await this.ensureConnected(target);
+    const pages = await this.pages(target);
+    const activePageIndex = this.activePageIndex(target.name, pages.length);
     return Promise.all(pages.map(async (page, index) => ({
       id: String(index),
       index,
       title: await page.title().catch(() => ""),
       url: safeUrl(page),
-      active: index === this.activePageIndex,
+      active: index === activePageIndex,
     })));
   }
-  async selectPage(id: string): Promise<PageSummary> {
-    const pages = await this.listPages();
+  async selectPage(targetName: string, id: string): Promise<PageSummary> {
+    const pages = await this.listPages(targetName);
     const index = Number(id);
     if (!Number.isInteger(index) || index < 0 || index >= pages.length) {
-      throw new Error(`No browser page with id ${id}`);
+      throw new Error(`No browser page with id ${id} for target ${targetName}`);
     }
-    this.activePageIndex = index;
-    return (await this.listPages())[index];
+    this.activePageIndexes.set(targetName, index);
+    return (await this.listPages(targetName))[index];
   }
-  async snapshot(): Promise<string> {
-    const page = await this.activePage();
+  async snapshot(targetName: string): Promise<string> {
+    const page = await this.activePage(targetName);
     const title = await page.title().catch(() => "");
     const url = safeUrl(page);
     const body = page.locator("body");
@@ -128,56 +117,57 @@ export class BrowserClient {
     }
     const text = await body.innerText({ timeout: 3_000 }).catch(() => "");
     return [
+      `target: ${targetName}`,
       `title: ${title || "(untitled)"}`,
       `url: ${url}`,
       semantic ? `\naria snapshot:\n${semantic}` : "",
       text ? `\nvisible text:\n${text.slice(0, 20_000)}` : "\nvisible text: (empty or unavailable)",
     ].filter(Boolean).join("\n");
   }
-  async screenshot(fullPage: boolean): Promise<{ path: string; title: string; url: string }> {
-    const page = await this.activePage();
+  async screenshot(targetName: string, fullPage: boolean): Promise<{ path: string; title: string; url: string; target: string }> {
+    const page = await this.activePage(targetName);
     const title = await page.title().catch(() => "");
     const path = await this.artifacts.screenshotPath(title);
     await page.screenshot({ path, fullPage });
-    return { path, title, url: safeUrl(page) };
+    return { path, title, url: safeUrl(page), target: targetName };
   }
-  async navigate(url: string): Promise<{ title: string; url: string }> {
+  async navigate(targetName: string, url: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("navigate");
-    const page = await this.activePage();
+    const page = await this.activePage(targetName);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-    return { title: await page.title().catch(() => ""), url: safeUrl(page) };
+    return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
   }
-  async click(params: LocatorParams): Promise<{ target: string; title: string; url: string }> {
+  async click(targetName: string, params: LocatorParams): Promise<{ target: string; locator: string; title: string; url: string }> {
     this.assertCanMutate("click");
-    const page = await this.activePage();
+    const page = await this.activePage(targetName);
     const { locator, target } = locate(page, params);
     await locator.click({ timeout: 10_000 });
-    return { target, title: await page.title().catch(() => ""), url: safeUrl(page) };
+    return { target: targetName, locator: target, title: await page.title().catch(() => ""), url: safeUrl(page) };
   }
-  async type(params: LocatorParams, value: string, mode: "fill" | "type"): Promise<{ target: string; mode: "fill" | "type"; title: string; url: string }> {
+  async type(targetName: string, params: LocatorParams, value: string, mode: "fill" | "type"): Promise<{ target: string; locator: string; mode: "fill" | "type"; title: string; url: string }> {
     this.assertCanMutate("type");
-    const page = await this.activePage();
+    const page = await this.activePage(targetName);
     const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
     if (!hasLocator) {
       if (mode === "fill") throw new Error("browser_type mode=fill requires a locator");
       await page.keyboard.type(value);
-      return { target: "focused element", mode, title: await page.title().catch(() => ""), url: safeUrl(page) };
+      return { target: targetName, locator: "focused element", mode, title: await page.title().catch(() => ""), url: safeUrl(page) };
     }
     const { locator, target } = locate(page, params);
     if (mode === "fill") await locator.fill(value, { timeout: 10_000 });
     else await locator.type(value, { timeout: 10_000 });
-    return { target, mode, title: await page.title().catch(() => ""), url: safeUrl(page) };
+    return { target: targetName, locator: target, mode, title: await page.title().catch(() => ""), url: safeUrl(page) };
   }
-  private async tryConnect(): Promise<boolean> {
+  private async tryConnect(target: BrowserTarget): Promise<boolean> {
     try {
-      await this.ensureConnected();
+      await this.ensureConnected(target);
       return true;
     } catch {
       return false;
     }
   }
-  private async ensureConnected(): Promise<void> {
-    if (this.browser) return;
+  private async ensureConnected(target: BrowserTarget): Promise<void> {
+    if (this.browsers.has(target.name)) return;
     let mod: PlaywrightModule;
     try {
       mod = await import("playwright") as PlaywrightModule;
@@ -185,30 +175,37 @@ export class BrowserClient {
       throw new Error(`Playwright is not installed for playwright-client extension: ${formatError(error)}`);
     }
     try {
-      this.browser = await mod.chromium.connectOverCDP(this.cdpUrl);
+      this.browsers.set(target.name, await mod.chromium.connectOverCDP(target.cdpUrl));
     } catch (error) {
       throw new Error(
-        `Unable to connect to Chrome CDP target ${this.targetName} at ${this.cdpUrl}. ` +
+        `Unable to connect to Chrome CDP target ${target.name} at ${target.cdpUrl}. ` +
         `Start Chrome with --remote-debugging-port and profile ${this.config.profilePath}. ${formatError(error)}`,
       );
     }
   }
-  private async disconnect(): Promise<void> {
-    if (!this.browser) return;
-    const browser = this.browser;
-    this.browser = undefined;
-    await browser.close().catch(() => undefined);
-  }
-  private async pages(): Promise<PageLike[]> {
-    await this.ensureConnected();
-    const pages = this.browser!.contexts().flatMap((context) => context.pages());
-    if (pages.length === 0) throw new Error("Connected to Chrome, but no pages are open");
+  private async pages(target: BrowserTarget): Promise<PageLike[]> {
+    await this.ensureConnected(target);
+    const browser = this.browsers.get(target.name);
+    if (!browser) throw new Error(`Not connected to browser target ${target.name}`);
+    const pages = browser.contexts().flatMap((context) => context.pages());
+    if (pages.length === 0) throw new Error(`Connected to Chrome target ${target.name}, but no pages are open`);
     return pages;
   }
-  private async activePage(): Promise<PageLike> {
-    const pages = await this.pages();
-    if (this.activePageIndex >= pages.length) this.activePageIndex = Math.max(0, pages.length - 1);
-    return pages[this.activePageIndex];
+  private async activePage(targetName: string): Promise<PageLike> {
+    const target = this.targetByName(targetName);
+    const pages = await this.pages(target);
+    return pages[this.activePageIndex(target.name, pages.length)];
+  }
+  private activePageIndex(targetName: string, pageCount: number): number {
+    const current = this.activePageIndexes.get(targetName) ?? 0;
+    const next = current >= pageCount ? Math.max(0, pageCount - 1) : current;
+    this.activePageIndexes.set(targetName, next);
+    return next;
+  }
+  private targetByName(name: string): BrowserTarget {
+    const target = this.config.targets.find((candidate) => candidate.name === name);
+    if (!target) throw new Error(`No browser target named ${name}. Available targets: ${this.config.targets.map((candidate) => candidate.name).join(", ")}`);
+    return target;
   }
   private assertCanMutate(action: string): void {
     if (this.controlState === "human") {

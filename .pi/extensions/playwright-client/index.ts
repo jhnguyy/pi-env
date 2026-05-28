@@ -9,6 +9,10 @@ const controlStateSchema = StringEnum(["agent", "human", "unlocked"] as const, {
   description: "Browser control state. Mutation tools refuse to act in human mode.",
 });
 
+const targetParameter = {
+  target: Type.String({ description: "Browser target name from browser_targets, e.g. local, colima, daily-driver" }),
+};
+
 const locatorParameters = {
   role: Type.Optional(Type.String({ description: "ARIA role to locate, e.g. button, textbox, link" })),
   name: Type.Optional(Type.String({ description: "Accessible name for role locator" })),
@@ -26,14 +30,14 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "browser_status",
     label: "Browser Status",
-    description: "Report Chrome/CDP connection, configured profile, active page, artifact directory, and control state.",
-    parameters: Type.Object({}),
-    async execute() {
-      const text = await browser.status();
-      return { content: [{ type: "text", text }], details: { controlState: browser.getControlState() } };
+    description: "Report Chrome/CDP connection, configured profile, active page, artifact directory, and control state for a named target.",
+    parameters: Type.Object(targetParameter),
+    async execute(_toolCallId, params) {
+      const text = await browser.status(String(params.target));
+      return { content: [{ type: "text", text }], details: { target: String(params.target), controlState: browser.getControlState() } };
     },
-    renderCall(_args, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("browser_status")), 0, 0);
+    renderCall(args, theme) {
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_status"))} ${theme.fg("accent", String(args.target ?? ""))}`, 0, 0);
     },
   });
 
@@ -55,113 +59,108 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "browser_targets",
     label: "Browser Targets",
-    description: "List configured Chrome/CDP targets or select the active target for this pi session. Useful for local, SSH-forwarded, Docker, and Colima host browsers.",
-    parameters: Type.Object({
-      action: Type.Optional(StringEnum(["list", "select"] as const, { description: "List targets or select one by name" })),
-      target: Type.Optional(Type.String({ description: "Target name from browser_targets action=list" })),
-    }),
-    async execute(_toolCallId, params) {
-      if (params.action === "select") {
-        if (!params.target) throw new Error("browser_targets action=select requires target");
-        const target = await browser.selectTarget(String(params.target));
-        return { content: [{ type: "text", text: `selected target: ${target.name}\n${target.cdpUrl}` }], details: { action: "select", targetName: target.name, cdpUrl: target.cdpUrl, targets: browser.listTargets() } };
-      }
+    description: "List configured Chrome/CDP targets. Other browser tools require one of these target names on every call.",
+    parameters: Type.Object({}),
+    async execute() {
       const targets = browser.listTargets();
-      return { content: [{ type: "text", text: formatTargets(targets) }], details: { action: "list", targetName: "", cdpUrl: "", targets } };
+      return { content: [{ type: "text", text: formatTargets(targets) }], details: { targets } };
     },
-    renderCall(args, theme) {
-      const action = String(args.action ?? "list");
-      return new Text(`${theme.fg("toolTitle", theme.bold("browser_targets"))} ${theme.fg("accent", action)}`, 0, 0);
+    renderCall(_args, theme) {
+      return new Text(theme.fg("toolTitle", theme.bold("browser_targets")), 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_pages",
     label: "Browser Pages",
-    description: "List open Chrome pages/tabs and optionally select the active page for this pi session.",
+    description: "List open Chrome pages/tabs for a target and optionally select the active page for that target in this pi session.",
     parameters: Type.Object({
+      ...targetParameter,
       action: Type.Optional(StringEnum(["list", "select"] as const, { description: "List pages or select one by id" })),
       pageId: Type.Optional(Type.String({ description: "Page id from browser_pages action=list" })),
     }),
     async execute(_toolCallId, params) {
+      const target = String(params.target);
       if (params.action === "select") {
         if (!params.pageId) throw new Error("browser_pages action=select requires pageId");
-        const page = await browser.selectPage(String(params.pageId));
-        return { content: [{ type: "text", text: formatPages([page]) }], details: { action: "select", pages: [page], selected: page as typeof page | null } };
+        const page = await browser.selectPage(target, String(params.pageId));
+        return { content: [{ type: "text", text: formatPages([page]) }], details: { action: "select", target, pages: [page], selected: page as typeof page | null } };
       }
-      const pages = await browser.listPages();
-      return { content: [{ type: "text", text: formatPages(pages) }], details: { action: "list", pages, selected: null as (typeof pages)[number] | null } };
+      const pages = await browser.listPages(target);
+      return { content: [{ type: "text", text: formatPages(pages) }], details: { action: "list", target, pages, selected: null as (typeof pages)[number] | null } };
     },
     renderCall(args, theme) {
       const action = String(args.action ?? "list");
-      return new Text(`${theme.fg("toolTitle", theme.bold("browser_pages"))} ${theme.fg("accent", action)}`, 0, 0);
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_pages"))} ${theme.fg("accent", String(args.target ?? ""))} ${theme.fg("muted", action)}`, 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_snapshot",
     label: "Browser Snapshot",
-    description: "Return text/accessibility-oriented state for the active browser page. Prefer this before screenshot-driven actions.",
-    parameters: Type.Object({}),
-    async execute() {
-      const text = await browser.snapshot();
-      return { content: [{ type: "text", text }], details: {} };
+    description: "Return text/accessibility-oriented state for the active page of a target. Prefer this before screenshot-driven actions.",
+    parameters: Type.Object(targetParameter),
+    async execute(_toolCallId, params) {
+      const text = await browser.snapshot(String(params.target));
+      return { content: [{ type: "text", text }], details: { target: String(params.target) } };
     },
-    renderCall(_args, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("browser_snapshot")), 0, 0);
+    renderCall(args, theme) {
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_snapshot"))} ${theme.fg("accent", String(args.target ?? ""))}`, 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_screenshot",
     label: "Browser Screenshot",
-    description: "Capture a screenshot artifact for the active browser page and return its filesystem path.",
+    description: "Capture a screenshot artifact for the active page of a target and return its filesystem path.",
     parameters: Type.Object({
+      ...targetParameter,
       fullPage: Type.Optional(Type.Boolean({ description: "Capture the full scrollable page instead of the viewport" })),
     }),
     async execute(_toolCallId, params) {
-      const shot = await browser.screenshot(Boolean(params.fullPage));
-      const text = [`screenshot: ${shot.path}`, `title: ${shot.title || "(untitled)"}`, `url: ${shot.url}`].join("\n");
+      const shot = await browser.screenshot(String(params.target), Boolean(params.fullPage));
+      const text = [`target: ${shot.target}`, `screenshot: ${shot.path}`, `title: ${shot.title || "(untitled)"}`, `url: ${shot.url}`].join("\n");
       return { content: [{ type: "text", text }], details: shot };
     },
-    renderCall(_args, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("browser_screenshot")), 0, 0);
+    renderCall(args, theme) {
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_screenshot"))} ${theme.fg("accent", String(args.target ?? ""))}`, 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_navigate",
     label: "Browser Navigate",
-    description: "Navigate the active browser page to a URL. Refuses while browser control state is human.",
-    parameters: Type.Object({ url: Type.String({ description: "URL to open in the active page" }) }),
+    description: "Navigate the active page of a target to a URL. Refuses while browser control state is human.",
+    parameters: Type.Object({ ...targetParameter, url: Type.String({ description: "URL to open in the active page" }) }),
     async execute(_toolCallId, params) {
-      const result = await browser.navigate(String(params.url));
-      return { content: [{ type: "text", text: `navigated: ${result.title || "(untitled)"}\n${result.url}` }], details: result };
+      const result = await browser.navigate(String(params.target), String(params.url));
+      return { content: [{ type: "text", text: `target: ${result.target}\nnavigated: ${result.title || "(untitled)"}\n${result.url}` }], details: result };
     },
     renderCall(args, theme) {
-      return new Text(`${theme.fg("toolTitle", theme.bold("browser_navigate"))} ${theme.fg("muted", String(args.url ?? ""))}`, 0, 0);
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_navigate"))} ${theme.fg("accent", String(args.target ?? ""))} ${theme.fg("muted", String(args.url ?? ""))}`, 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_click",
     label: "Browser Click",
-    description: "Click an element in the active page using semantic locators first, with selector fallback. Refuses while browser control state is human.",
-    parameters: Type.Object(locatorParameters),
+    description: "Click an element in the active page of a target using semantic locators first, with selector fallback. Refuses while browser control state is human.",
+    parameters: Type.Object({ ...targetParameter, ...locatorParameters }),
     async execute(_toolCallId, params) {
-      const result = await browser.click(params);
-      return { content: [{ type: "text", text: `clicked: ${result.target}\n${result.title || "(untitled)"}\n${result.url}` }], details: result };
+      const result = await browser.click(String(params.target), params);
+      return { content: [{ type: "text", text: `target: ${result.target}\nclicked: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}` }], details: result };
     },
     renderCall(args, theme) {
-      return new Text(`${theme.fg("toolTitle", theme.bold("browser_click"))} ${theme.fg("muted", formatLocatorArgs(args))}`, 0, 0);
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_click"))} ${theme.fg("accent", String(args.target ?? ""))} ${theme.fg("muted", formatLocatorArgs(args))}`, 0, 0);
     },
   });
 
   pi.registerTool({
     name: "browser_type",
     label: "Browser Type",
-    description: "Fill or type text into an element using semantic locators, or type into the focused element when no locator is provided. Refuses while browser control state is human.",
+    description: "Fill or type text into an element on a target using semantic locators, or type into the focused element when no locator is provided. Refuses while browser control state is human.",
     parameters: Type.Object({
+      ...targetParameter,
       ...locatorParameters,
       value: Type.String({ description: "Text to enter" }),
       mode: Type.Optional(StringEnum(["fill", "type"] as const, { description: "fill replaces element value; type sends keystrokes. Defaults to fill when a locator is provided, otherwise type." })),
@@ -169,18 +168,25 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params) {
       const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
       const mode = (params.mode ?? (hasLocator ? "fill" : "type")) as "fill" | "type";
-      const result = await browser.type(params, String(params.value), mode);
-      return { content: [{ type: "text", text: `${result.mode}: ${result.target}\n${result.title || "(untitled)"}\n${result.url}` }], details: result };
+      const result = await browser.type(String(params.target), params, String(params.value), mode);
+      return { content: [{ type: "text", text: `target: ${result.target}\n${result.mode}: ${result.locator}\n${result.title || "(untitled)"}\n${result.url}` }], details: result };
     },
     renderCall(args, theme) {
-      return new Text(`${theme.fg("toolTitle", theme.bold("browser_type"))} ${theme.fg("muted", formatLocatorArgs(args))}`, 0, 0);
+      return new Text(`${theme.fg("toolTitle", theme.bold("browser_type"))} ${theme.fg("accent", String(args.target ?? ""))} ${theme.fg("muted", formatLocatorArgs(args))}`, 0, 0);
     },
   });
 
-  pi.registerCommand("browser-status", {
-    description: "Show browser/CDP connection status",
+  pi.registerCommand("browser-targets", {
+    description: "Show configured browser/CDP targets",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(await browser.status(), "info");
+      ctx.ui.notify(formatTargets(browser.listTargets()), "info");
+    },
+  });
+
+  pi.registerCommand("browser-connect", {
+    description: "Show Chrome launch guidance and configured targets",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(`${launchGuidance()}\n\n${formatTargets(browser.listTargets())}`, "info");
     },
   });
 
@@ -199,25 +205,15 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
       ctx.ui.notify("Browser control state: agent", "info");
     },
   });
-
-  pi.registerCommand("browser-targets", {
-    description: "Show configured browser/CDP targets",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(formatTargets(browser.listTargets()), "info");
-    },
-  });
-
-  pi.registerCommand("browser-connect", {
-    description: "Show Chrome launch guidance and current browser status",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(`${launchGuidance()}\n\n${await browser.status()}`, "info");
-    },
-  });
 }
 
-function formatTargets(targets: Array<{ name: string; cdpUrl: string; description?: string; active: boolean }>): string {
+function formatTargets(targets: Array<{ name: string; host: string; port: number; protocol: string; path: string; cdpUrl: string; description?: string }>): string {
   if (targets.length === 0) return "No browser targets configured.";
-  return targets.map((target) => `${target.active ? "*" : "-"} ${target.name}: ${target.cdpUrl}${target.description ? `\n  ${target.description}` : ""}`).join("\n");
+  return targets.map((target) => [
+    `- ${target.name}: ${target.cdpUrl}`,
+    `  host=${target.host} port=${target.port} protocol=${target.protocol}${target.path ? ` path=${target.path}` : ""}`,
+    target.description ? `  ${target.description}` : "",
+  ].filter(Boolean).join("\n")).join("\n");
 }
 
 function formatPages(pages: Array<{ id: string; title: string; url: string; active: boolean }>): string {
@@ -237,8 +233,9 @@ function launchGuidance(): string {
   return [
     "Start Chrome/Chromium with CDP enabled, for example:",
     'chromium --remote-debugging-port=9222 --user-data-dir="$HOME/.config/pi-browser-default"',
-    "Targets can be selected with playwrightClient.target in settings.json, PI_BROWSER_TARGET, or browser_targets. Built-ins: local, docker-host, colima.",
-    "For Colima/Docker containers controlling the host browser: launch Google Chrome on the host with --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222, then use target colima (http://host.docker.internal:9222).",
-    "Custom targets: set playwrightClient.targets in ~/.pi/agent/settings.json or .pi/settings.json, e.g. {\"mac\":\"http://host.docker.internal:9222\",\"daily\":{\"host\":\"127.0.0.1\",\"port\":9222}}.",
+    "Every browser tool call takes a target name. List targets with browser_targets or /browser-targets.",
+    "For Colima/Docker containers controlling the host browser: launch Google Chrome on the host with --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222, then pass target=colima.",
+    "Custom targets use one shape: playwrightClient.targets is an object keyed by target name, and each target is an object with host plus optional port/protocol/path/description.",
+    "Example: {\"playwrightClient\":{\"targets\":{\"mac\":{\"host\":\"host.docker.internal\",\"port\":9222}}}}",
   ].join("\n");
 }
