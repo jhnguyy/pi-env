@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import playwrightClientExtension from "../index";
+import { BROWSER_ACTIONS } from "../actions";
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
 
@@ -79,6 +81,33 @@ describe("playwright-client config", () => {
   });
 });
 
+describe("playwright-client action metadata", () => {
+  it("keeps browser actions alphabetized for reviewable tool metadata", () => {
+    expect([...BROWSER_ACTIONS].sort()).toEqual([...BROWSER_ACTIONS]);
+  });
+});
+
+describe("playwright-client extension registration", () => {
+  it("emits browser on agent-tools:register so ptc can capture it regardless of load order", () => {
+    const sessionStartHandlers: Array<() => void> = [];
+    const emitted: unknown[] = [];
+    const pi = {
+      registerTool: () => undefined,
+      registerCommand: () => undefined,
+      on: (event: string, handler: () => void) => {
+        if (event === "session_start") sessionStartHandlers.push(handler);
+      },
+      events: { emit: (_event: string, payload: unknown) => emitted.push(payload) },
+    };
+
+    playwrightClientExtension(pi as never);
+    for (const handler of sessionStartHandlers) handler();
+
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]).toMatchObject({ tool: { name: "browser" }, capabilities: ["read", "write", "execute"] });
+  });
+});
+
 describe("BrowserClient targets", () => {
   it("lists configured targets without active target state", () => {
     clearBrowserEnv();
@@ -89,6 +118,21 @@ describe("BrowserClient targets", () => {
 
     expect(targets.map((target) => target.name)).toEqual(["lab"]);
     expect(targets.some((target) => "active" in target)).toBe(false);
+  });
+
+  it("keeps bounded action history for UX/debugging", () => {
+    clearBrowserEnv();
+    const client = new BrowserClient(loadBrowserClientConfig(tempProject()));
+
+    client.recordHistory({ action: "navigate", target: "local", pageTitle: "Example", pageUrl: "https://example.test", result: "ok" });
+    client.recordHistory({ action: "click", target: "local", error: "locator timeout" });
+
+    expect(client.getHistory()).toMatchObject([
+      { action: "navigate", target: "local", pageTitle: "Example", result: "ok" },
+      { action: "click", target: "local", error: "locator timeout" },
+    ]);
+    expect(client.getHistory(1)).toHaveLength(1);
+    expect(client.getHistory(1)[0]).toMatchObject({ action: "click" });
   });
 });
 

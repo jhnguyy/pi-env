@@ -2,20 +2,32 @@ import type { BrowserClientConfig, BrowserTarget } from "./config";
 import { BrowserArtifacts } from "./artifacts";
 
 type BrowserLike = {
-  contexts(): Array<{ pages(): PageLike[] }>;
+  contexts(): ContextLike[];
   close(): Promise<void>;
+};
+type ContextLike = {
+  pages(): PageLike[];
+  newPage(): Promise<PageLike>;
 };
 type LocatorLike = {
   click(options?: { timeout?: number }): Promise<unknown>;
   fill(value: string, options?: { timeout?: number }): Promise<unknown>;
   type(value: string, options?: { timeout?: number }): Promise<unknown>;
+  waitFor(options?: { state?: LocatorWaitState; timeout?: number }): Promise<unknown>;
   innerText(options?: { timeout?: number }): Promise<string>;
   ariaSnapshot?(options?: { timeout?: number }): Promise<string>;
 };
+type LoadState = "domcontentloaded" | "load" | "networkidle";
+type LocatorWaitState = "attached" | "detached" | "visible" | "hidden";
 type PageLike = {
   title(): Promise<string>;
   url(): string;
-  goto(url: string, options?: { waitUntil?: "domcontentloaded" | "load"; timeout?: number }): Promise<unknown>;
+  goto(url: string, options?: { waitUntil?: Extract<LoadState, "domcontentloaded" | "load">; timeout?: number }): Promise<unknown>;
+  goBack(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
+  goForward(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
+  reload(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
+  waitForLoadState(state?: LoadState, options?: { timeout?: number }): Promise<unknown>;
+  waitForURL(url: string | RegExp, options?: { timeout?: number }): Promise<unknown>;
   screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>;
   locator(selector: string): LocatorLike;
   getByRole?(role: string, options?: { name?: string; exact?: boolean }): LocatorLike;
@@ -48,9 +60,32 @@ export interface LocatorParams {
   selector?: string;
   exact?: boolean;
 }
+export interface PageSelectionParams {
+  pageId?: string;
+  title?: string;
+  url?: string;
+}
+export interface WaitParams extends LocatorParams {
+  url?: string;
+  loadState?: LoadState;
+  locatorState?: LocatorWaitState;
+  timeout?: number;
+}
+export interface BrowserActionHistoryEntry {
+  timestamp: string;
+  action: string;
+  target?: string;
+  pageTitle?: string;
+  pageUrl?: string;
+  result?: string;
+  error?: string;
+}
+const HISTORY_LIMIT = 50;
+
 export class BrowserClient {
   private readonly browsers = new Map<string, BrowserLike>();
   private readonly activePageIndexes = new Map<string, number>();
+  private readonly history: BrowserActionHistoryEntry[] = [];
   private controlState: ControlState = "agent";
   private readonly artifacts: BrowserArtifacts;
   constructor(private readonly config: BrowserClientConfig) {
@@ -64,6 +99,13 @@ export class BrowserClient {
   }
   listTargets(): BrowserTarget[] {
     return this.config.targets;
+  }
+  getHistory(limit = HISTORY_LIMIT): BrowserActionHistoryEntry[] {
+    return this.history.slice(-Math.max(0, limit));
+  }
+  recordHistory(entry: Omit<BrowserActionHistoryEntry, "timestamp">): void {
+    this.history.push({ timestamp: new Date().toISOString(), ...entry });
+    if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
   }
   async status(targetName: string): Promise<string> {
     const target = this.targetByName(targetName);
@@ -97,14 +139,25 @@ export class BrowserClient {
       active: index === activePageIndex,
     })));
   }
-  async selectPage(targetName: string, id: string): Promise<PageSummary> {
+  async selectPage(targetName: string, selection: PageSelectionParams): Promise<PageSummary> {
     const pages = await this.listPages(targetName);
-    const index = Number(id);
-    if (!Number.isInteger(index) || index < 0 || index >= pages.length) {
-      throw new Error(`No browser page with id ${id} for target ${targetName}`);
-    }
-    this.activePageIndexes.set(targetName, index);
-    return (await this.listPages(targetName))[index];
+    const match = selectPageSummary(pages, selection, targetName);
+    this.activePageIndexes.set(targetName, match.index);
+    return (await this.listPages(targetName))[match.index];
+  }
+  async currentPageSummary(targetName: string): Promise<PageSummary | undefined> {
+    const target = this.targetByName(targetName);
+    await this.ensureConnected(target);
+    const pages = await this.pages(target, { allowEmpty: true });
+    if (pages.length === 0) return undefined;
+    const page = pages[this.activePageIndex(target.name, pages.length)];
+    return {
+      id: String(this.activePageIndex(target.name, pages.length)),
+      index: this.activePageIndex(target.name, pages.length),
+      title: await page.title().catch(() => ""),
+      url: safeUrl(page),
+      active: true,
+    };
   }
   async snapshot(targetName: string): Promise<string> {
     const page = await this.activePage(targetName);
@@ -131,11 +184,59 @@ export class BrowserClient {
     await page.screenshot({ path, fullPage });
     return { path, title, url: safeUrl(page), target: targetName };
   }
+  async newPage(targetName: string): Promise<{ id: string; title: string; url: string; target: string }> {
+    this.assertCanMutate("newPage");
+    const target = this.targetByName(targetName);
+    await this.ensureConnected(target);
+    const browser = this.browsers.get(target.name);
+    const context = browser?.contexts()[0];
+    if (!context) throw new Error(`Connected to Chrome target ${target.name}, but no browser context is available`);
+    const page = await context.newPage();
+    const pages = await this.pages(target, { allowEmpty: true });
+    const index = pages.indexOf(page);
+    this.activePageIndexes.set(target.name, index >= 0 ? index : Math.max(0, pages.length - 1));
+    return { id: String(this.activePageIndex(target.name, pages.length)), title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
+  }
   async navigate(targetName: string, url: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("navigate");
     const page = await this.activePage(targetName);
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
+  }
+  async back(targetName: string): Promise<{ title: string; url: string; target: string }> {
+    this.assertCanMutate("back");
+    const page = await this.activePage(targetName);
+    await page.goBack({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
+  }
+  async forward(targetName: string): Promise<{ title: string; url: string; target: string }> {
+    this.assertCanMutate("forward");
+    const page = await this.activePage(targetName);
+    await page.goForward({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
+  }
+  async reload(targetName: string): Promise<{ title: string; url: string; target: string }> {
+    this.assertCanMutate("reload");
+    const page = await this.activePage(targetName);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
+  }
+  async wait(targetName: string, params: WaitParams): Promise<{ target: string; waitedFor: string; title: string; url: string }> {
+    const page = await this.activePage(targetName);
+    const timeout = params.timeout;
+    if (params.url) {
+      await page.waitForURL(params.url, { timeout });
+      return { target: targetName, waitedFor: `url=${params.url}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
+    }
+    const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
+    if (hasLocator) {
+      const { locator, target } = locate(page, params);
+      await locator.waitFor({ state: params.locatorState ?? "visible", timeout });
+      return { target: targetName, waitedFor: `${target} state=${params.locatorState ?? "visible"}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
+    }
+    const state = params.loadState ?? "load";
+    await page.waitForLoadState(state, { timeout });
+    return { target: targetName, waitedFor: `loadState=${state}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
   }
   async click(targetName: string, params: LocatorParams): Promise<{ target: string; locator: string; title: string; url: string }> {
     this.assertCanMutate("click");
@@ -183,12 +284,12 @@ export class BrowserClient {
       );
     }
   }
-  private async pages(target: BrowserTarget): Promise<PageLike[]> {
+  private async pages(target: BrowserTarget, options?: { allowEmpty?: boolean }): Promise<PageLike[]> {
     await this.ensureConnected(target);
     const browser = this.browsers.get(target.name);
     if (!browser) throw new Error(`Not connected to browser target ${target.name}`);
     const pages = browser.contexts().flatMap((context) => context.pages());
-    if (pages.length === 0) throw new Error(`Connected to Chrome target ${target.name}, but no pages are open`);
+    if (!options?.allowEmpty && pages.length === 0) throw new Error(`Connected to Chrome target ${target.name}, but no pages are open`);
     return pages;
   }
   private async activePage(targetName: string): Promise<PageLike> {
@@ -237,6 +338,37 @@ function locate(page: PageLike, params: LocatorParams): { locator: LocatorLike; 
   }
   if (params.selector) return { locator: page.locator(params.selector), target: `selector=${params.selector}` };
   throw new Error("A locator is required: role/name, text, label, placeholder, testId, or selector");
+}
+function selectPageSummary(pages: PageSummary[], selection: PageSelectionParams, targetName: string): PageSummary {
+  if (selection.pageId) {
+    const index = Number(selection.pageId);
+    if (!Number.isInteger(index) || index < 0 || index >= pages.length) {
+      throw new Error(`No browser page with id ${selection.pageId} for target ${targetName}. Use action=pages to list current pages.`);
+    }
+    return pages[index];
+  }
+  const titleNeedle = selection.title?.toLowerCase();
+  const urlNeedle = selection.url?.toLowerCase();
+  if (!titleNeedle && !urlNeedle) throw new Error("Page selection requires pageId, title, or url");
+  const matches = pages.filter((page) => {
+    const titleMatches = titleNeedle ? page.title.toLowerCase().includes(titleNeedle) : true;
+    const urlMatches = urlNeedle ? page.url.toLowerCase().includes(urlNeedle) : true;
+    return titleMatches && urlMatches;
+  });
+  if (matches.length === 0) {
+    throw new Error(`No browser page matched ${formatPageSelection(selection)} for target ${targetName}. Use action=pages to list current pages.`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Multiple browser pages matched ${formatPageSelection(selection)} for target ${targetName}: ${matches.map((page) => `${page.id} ${page.title || "(untitled)"}`).join(", ")}. Select by pageId.`);
+  }
+  return matches[0];
+}
+function formatPageSelection(selection: PageSelectionParams): string {
+  return [
+    selection.pageId ? `pageId=${selection.pageId}` : "",
+    selection.title ? `title~=${selection.title}` : "",
+    selection.url ? `url~=${selection.url}` : "",
+  ].filter(Boolean).join(" ");
 }
 function safeUrl(page: PageLike): string {
   try {
