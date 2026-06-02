@@ -137,8 +137,13 @@ const ACTION_HANDLERS = {
 } satisfies Record<BrowserAction, BrowserActionHandler>;
 
 export async function executeBrowserAction(browser: BrowserClient, action: BrowserAction, target: string | undefined, args: BrowserArgs): Promise<BrowserActionResult> {
-  const payload = await ACTION_HANDLERS[action]({ browser, action, target, args });
-  return renderActionResult(action, payload);
+  try {
+    const payload = await ACTION_HANDLERS[action]({ browser, action, target, args });
+    return renderActionResult(action, payload);
+  } catch (error) {
+    await browser.cleanupAfterError(target, error);
+    throw error;
+  }
 }
 
 function pagePayload(
