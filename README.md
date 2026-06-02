@@ -4,7 +4,7 @@ Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, s
 
 ## Setup
 
-Prerequisites: `git`, Node.js ≥ 22.19, and npm ≥ 10. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`.
+Prerequisites: `git`, Node.js ≥ 22.19, and npm ≥ 10. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`. See [`setup/prerequisites.md`](setup/prerequisites.md) for macOS/Linux package hints and recommended daily-driver tools.
 
 ```bash
 git clone <your-fork> ~/pi-env
@@ -13,9 +13,19 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 ./setup.sh
 ```
 
-`setup.sh` is self-documenting — its header lists everything it does and what it leaves alone. In short, it installs the `pi` CLI with npm into a user-local prefix, installs repo dependencies, builds extension bundles, and registers pi-env as a package.
+`setup.sh` is a thin entrypoint into `setup/main.sh`; supporting setup modules and assets live under `setup/`. `setup/context.sh` receives the setup directory from the entrypoint and derives repo paths, target paths, and environment decisions once for the other modules. Setup orchestration is grouped by domain: environment checks, runtime installs, Pi config, terminal tools, and repo tools.
 
 Setup is safe to re-run after moving between dev environments. It performs clean installs with npm optional dependencies enabled so native packages such as `esbuild` are selected for the current platform.
+
+## Terminal configs
+
+`setup.sh` always links `setup/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers.
+
+Ghostty is only useful where a GUI terminal runs. Setup detects devcontainers/container-like environments and skips Ghostty linking there by default; GUI hosts and VMs get `ghostty/config` and `ghostty/themes/*` linked into `~/.config/ghostty/`. Set `PI_ENV_LINK_GHOSTTY=1 ./setup.sh` to force Ghostty linking in an unusual environment.
+
+Ghostty uses JetBrains Mono at 18pt and auto-switches between pi-env Gruvbox dark/light palettes. Put machine-only Ghostty overrides in `~/.config/ghostty/config.local`; the repo config imports it if present.
+
+Other Ghostty settings worth tuning per machine: window padding, cell-height adjustment, opacity/blur, cursor style, keybindings, shell integration, and whether copy-on-select is desirable on shared machines.
 
 ## Pi CLI install
 

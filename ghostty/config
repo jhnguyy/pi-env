@@ -1,0 +1,30 @@
+# pi-env Ghostty config
+# Linked by setup.sh to ~/.config/ghostty/config.
+# Reload Ghostty after setup; local machine-specific overrides can live in
+# ~/.config/ghostty/config.local and are imported if present.
+
+font-family = JetBrains Mono
+font-size = 18
+
+# Follow the operating-system light/dark preference with matching pi-env
+# Gruvbox palettes from ghostty/themes/.
+theme = dark:pi-env-gruvbox-dark,light:pi-env-gruvbox-light
+
+# Terminal behavior worth keeping explicit for editor/agent workflows.
+copy-on-select = clipboard
+clipboard-read = allow
+clipboard-write = allow
+confirm-close-surface = false
+window-save-state = always
+shell-integration = detect
+
+# Slightly roomier text at 18pt without making panes feel padded.
+window-padding-x = 6
+window-padding-y = 4
+adjust-cell-height = 5%
+
+# Keep command-clickable links and terminal apps happy.
+link-url = true
+mouse-hide-while-typing = true
+
+config-file = ?~/.config/ghostty/config.local
