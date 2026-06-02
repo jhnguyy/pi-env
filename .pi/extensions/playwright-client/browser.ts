@@ -4,6 +4,8 @@ import { BrowserArtifacts } from "./artifacts";
 type BrowserLike = {
   contexts(): ContextLike[];
   close(): Promise<void>;
+  isConnected?(): boolean;
+  on?(event: "disconnected", handler: () => void): void;
 };
 type ContextLike = {
   pages(): PageLike[];
@@ -80,10 +82,18 @@ export interface BrowserActionHistoryEntry {
   result?: string;
   error?: string;
 }
+interface BrowserConnection {
+  browser: BrowserLike;
+  connectedAt: number;
+  lastUsedAt: number;
+  failures: number;
+  lastFailureAt?: number;
+}
 const HISTORY_LIMIT = 50;
+const CONNECTION_MAX_IDLE_MS = 10 * 60 * 1_000;
 
 export class BrowserClient {
-  private readonly browsers = new Map<string, BrowserLike>();
+  private readonly connections = new Map<string, BrowserConnection>();
   private readonly activePageIndexes = new Map<string, number>();
   private readonly history: BrowserActionHistoryEntry[] = [];
   private controlState: ControlState = "agent";
@@ -108,6 +118,7 @@ export class BrowserClient {
     if (this.history.length > HISTORY_LIMIT) this.history.splice(0, this.history.length - HISTORY_LIMIT);
   }
   async status(targetName: string): Promise<string> {
+    await this.cleanupStaleConnections();
     const target = this.targetByName(targetName);
     const connected = await this.tryConnect(target);
     const pages = connected ? await this.listPages(target.name) : [];
@@ -127,6 +138,7 @@ export class BrowserClient {
     ].join("\n");
   }
   async listPages(targetName: string): Promise<PageSummary[]> {
+    await this.cleanupStaleConnections();
     const target = this.targetByName(targetName);
     await this.ensureConnected(target);
     const pages = await this.pages(target);
@@ -188,7 +200,7 @@ export class BrowserClient {
     this.assertCanMutate("newPage");
     const target = this.targetByName(targetName);
     await this.ensureConnected(target);
-    const browser = this.browsers.get(target.name);
+    const browser = this.connections.get(target.name)?.browser;
     const context = browser?.contexts()[0];
     if (!context) throw new Error(`Connected to Chrome target ${target.name}, but no browser context is available`);
     const page = await context.newPage();
@@ -268,15 +280,32 @@ export class BrowserClient {
     }
   }
   private async ensureConnected(target: BrowserTarget): Promise<void> {
-    if (this.browsers.has(target.name)) return;
+    const existing = this.connections.get(target.name);
+    if (existing) {
+      if (this.isConnectionHealthy(existing.browser)) {
+        existing.lastUsedAt = Date.now();
+        return;
+      }
+      await this.evictConnection(target.name, "cached connection is no longer healthy");
+    }
     let mod: PlaywrightModule;
     try {
+      // @ts-ignore - the extension-level inferred LSP project does not see root dependencies; root tsc resolves playwright.
       mod = await import("playwright") as PlaywrightModule;
     } catch (error) {
       throw new Error(`Playwright is not installed for playwright-client extension: ${formatError(error)}`);
     }
     try {
-      this.browsers.set(target.name, await mod.chromium.connectOverCDP(target.cdpUrl));
+      const browser = await mod.chromium.connectOverCDP(target.cdpUrl);
+      browser.on?.("disconnected", () => {
+        void this.evictConnection(target.name, "browser disconnected");
+      });
+      this.connections.set(target.name, {
+        browser,
+        connectedAt: Date.now(),
+        lastUsedAt: Date.now(),
+        failures: 0,
+      });
     } catch (error) {
       throw new Error(
         `Unable to connect to Chrome CDP target ${target.name} at ${target.cdpUrl}. ` +
@@ -286,7 +315,7 @@ export class BrowserClient {
   }
   private async pages(target: BrowserTarget, options?: { allowEmpty?: boolean }): Promise<PageLike[]> {
     await this.ensureConnected(target);
-    const browser = this.browsers.get(target.name);
+    const browser = this.connections.get(target.name)?.browser;
     if (!browser) throw new Error(`Not connected to browser target ${target.name}`);
     const pages = browser.contexts().flatMap((context) => context.pages());
     if (!options?.allowEmpty && pages.length === 0) throw new Error(`Connected to Chrome target ${target.name}, but no pages are open`);
@@ -308,11 +337,61 @@ export class BrowserClient {
     if (!target) throw new Error(`No browser target named ${name}. Available targets: ${this.config.targets.map((candidate) => candidate.name).join(", ")}`);
     return target;
   }
+  async cleanupAfterError(targetName: string | undefined, error: unknown): Promise<void> {
+    if (!targetName || !isConnectionBrokenError(error)) return;
+    const connection = this.connections.get(targetName);
+    if (connection) {
+      connection.failures += 1;
+      connection.lastFailureAt = Date.now();
+    }
+    await this.evictConnection(targetName, formatError(error));
+  }
+  private async cleanupStaleConnections(): Promise<void> {
+    const now = Date.now();
+    for (const [targetName, connection] of this.connections) {
+      if (!this.isConnectionHealthy(connection.browser)) {
+        await this.evictConnection(targetName, "connection failed health check");
+      } else if (now - connection.lastUsedAt > CONNECTION_MAX_IDLE_MS) {
+        await this.evictConnection(targetName, `idle for ${now - connection.lastUsedAt}ms`);
+      }
+    }
+  }
+  private isConnectionHealthy(browser: BrowserLike): boolean {
+    if (browser.isConnected && !browser.isConnected()) return false;
+    try {
+      browser.contexts();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  private async evictConnection(targetName: string, reason: string): Promise<void> {
+    const connection = this.connections.get(targetName);
+    this.connections.delete(targetName);
+    this.activePageIndexes.delete(targetName);
+    if (!connection) return;
+    await connection.browser.close().catch(() => undefined);
+    this.recordHistory({ action: "cleanup", target: targetName, result: `evicted stale browser connection: ${reason}` });
+  }
   private assertCanMutate(action: string): void {
     if (this.controlState === "human") {
       throw new Error(`browser_${action} refused because browser control state is human; use /browser-resume or browser_control first`);
     }
   }
+}
+export function isConnectionBrokenError(error: unknown): boolean {
+  const message = formatError(error).toLowerCase();
+  return [
+    "target closed",
+    "browser has been closed",
+    "browser context closed",
+    "page closed",
+    "connection closed",
+    "websocket",
+    "econnreset",
+    "econnrefused",
+    "cdp",
+  ].some((needle) => message.includes(needle));
 }
 function locate(page: PageLike, params: LocatorParams): { locator: LocatorLike; target: string } {
   const exact = params.exact;
