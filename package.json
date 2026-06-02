@@ -44,22 +44,22 @@
     "preinstall": "npm run check:node"
   },
   "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
-    "typebox": "*",
-    "@earendil-works/pi-agent-core": "*"
+    "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.77.0",
-    "@earendil-works/pi-coding-agent": "0.77.0",
-    "@earendil-works/pi-tui": "0.77.0",
+    "@earendil-works/pi-agent-core": "0.78.0",
+    "@earendil-works/pi-ai": "0.78.0",
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@earendil-works/pi-tui": "0.78.0",
     "@types/node": "^22.15.30",
     "esbuild": "^0.25.5",
     "typebox": "^1.1.24",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4",
-    "@earendil-works/pi-agent-core": "0.77.0"
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "minimatch": "10.2.3"
