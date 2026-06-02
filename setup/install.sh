@@ -47,6 +47,7 @@ EOF
   chmod +x "$PI_BIN_DIR/pi"
   ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
   if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$PI_BIN_DIR"; then
-    echo "  —  $PI_BIN_DIR is not in PATH yet; add it to your shell profile."
+    echo "  —  $PI_BIN_DIR is not in PATH yet; updating shell profiles."
+    ensure_path_in_shell_profiles "$PI_BIN_DIR"
   fi
 }

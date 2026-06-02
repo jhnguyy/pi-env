@@ -9,8 +9,8 @@ Prerequisites: `git`, Node.js ≥ 22.19, and npm ≥ 10. The repo includes `.nod
 ```bash
 git clone <your-fork> ~/pi-env
 cd ~/pi-env
-export PATH="$HOME/.local/bin:$PATH"   # add to ~/.profile to persist
 ./setup.sh
+# Open a new shell (or source your shell profile) before running `pi`.
 ```
 
 `setup.sh` is a thin entrypoint into `setup/main.sh`; supporting setup modules and assets live under `setup/`. `setup/context.sh` receives the setup directory from the entrypoint and derives repo paths, target paths, and environment decisions once for the other modules. Setup orchestration is grouped by domain: environment checks, runtime installs, Pi config, terminal tools, and repo tools.
@@ -29,7 +29,7 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 
 ## Pi CLI install
 
-`setup.sh` installs `@earendil-works/pi-coding-agent` with npm into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. The wrapper runs Pi's Node entrypoint.
+`setup.sh` installs `@earendil-works/pi-coding-agent` with npm into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. If `~/.local/bin` is not already on `PATH`, setup idempotently adds it to existing `~/.zshrc`, `~/.bashrc`, and/or `~/.profile` files, falling back to creating `~/.profile` when no shell profile exists. The wrapper runs Pi's Node entrypoint.
 
 ## Themes
 
