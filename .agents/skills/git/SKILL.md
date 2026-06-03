@@ -1,57 +1,37 @@
 ---
 name: git
-description: Git hygiene rules for any repository: keep the base tree on an updated base branch and do all branch work in dedicated git worktrees.
+description: Git hygiene rules for any repository: keep the base tree updated and do all branch work in dedicated git worktrees.
 ---
 
 # Git Hygiene
 
 ## When to Use
 
-Use before starting non-trivial work in any Git repository, creating/checking out a branch, merging work, or cleaning up a completed branch.
+Use before starting non-trivial work in any Git repository, creating or switching branches, merging work, or cleaning up a completed branch.
 
-## Core Rules
+## Required Rules
 
-- Keep the base working tree on the base branch (`main` unless project instructions specify otherwise).
-- Update the base branch from its remote before starting work.
+- The base working tree is the repository checkout used to track the base branch, not a feature branch checkout.
+- Keep the base working tree on the base branch (`main` unless project instructions specify otherwise). If multiple plausible base branches exist, prefer explicit project instructions, then the remote default branch; otherwise ask the user.
+- Before starting work, sync the base branch from its remote when one exists. If no remote exists, proceed only when the base tree is clean.
 - Do not create, switch to, or edit feature branches in the base working tree.
 - Do all branch work in a dedicated worktree: one branch/session per worktree.
-- Stop and ask the user if the base tree is dirty, ahead of remote, diverged from remote, or cannot fast-forward.
 - Follow project-specific branch naming, test, merge, and push conventions when they exist.
 
-## Workflow
+## Worktree Guidance
 
-1. From the repository root, confirm the base tree is clean and on the base branch.
-2. Fast-forward the base branch from its remote. If the repository has no remote, require only a clean base tree.
-3. Create or enter a worktree for the work branch.
-   - Use the real branch name for Git.
-   - Use a slash-free filesystem slug for the worktree path, e.g. `feat/example` -> `repo-feat-example`.
-   - Prefer a durable repo-adjacent path unless project instructions specify another location.
-4. Perform all edits, tests, commits, and review inside the worktree.
-5. Merge only from the updated base tree. Prefer `git merge --no-ff` unless project instructions say otherwise.
-6. If merge conflicts occur, resolve and test in the base tree, then commit the merge; if unsure, abort and ask the user.
-7. Remove the worktree and delete the local branch after merge.
-8. Push branches or the merged base only when the user explicitly requests it.
+- Use the real branch name for Git.
+- Use a slash-free filesystem slug for the worktree path, e.g. `feat/example` -> `repo-feat-example`.
+- Prefer a durable repo-adjacent worktree path unless project instructions specify another location: a sibling directory of the base checkout, not a temporary directory likely to be cleaned automatically.
+- This skill intentionally omits full command sequences; for Git syntax details, use `git help worktree` rather than expanding this skill into a Git tutorial.
+- After merge, remove the completed worktree and delete the local branch with the standard Git cleanup commands (`git worktree remove`, `git branch -d`).
 
-## Minimal Command Shapes
+## When to Ask the User
 
-These are reminders, not a script. Adapt paths, branch names, and base branch to the repository.
+Stop and ask before proceeding when:
 
-```bash
-# Update base tree before work
-git switch <base-branch>
-git status --short --branch
-git pull --ff-only
-
-# New work branch in its own worktree
-git worktree add <repo-adjacent-worktree-path> -b <branch-name>
-
-# Existing branch in its own worktree
-git worktree add <repo-adjacent-worktree-path> <branch-name>
-
-# Merge and cleanup from the base tree
-git switch <base-branch>
-git pull --ff-only
-git merge --no-ff <branch-name>
-git worktree remove <repo-adjacent-worktree-path>
-git branch -d <branch-name>
-```
+- the base tree has uncommitted changes
+- the base branch is ahead of its remote
+- the base branch has diverged from its remote
+- the base branch cannot fast-forward from its remote; do not merge, rebase, or reset the base branch without user approval
+- the repository has no clear base branch and project instructions do not specify one
