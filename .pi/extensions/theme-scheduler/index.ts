@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readSettingsBlock, type SettingsBlock } from "../_shared/settings";
 
@@ -7,24 +10,18 @@ export interface ThemeSchedulerConfig {
   darkTheme: string;
   lightStart: string;
   lightEnd: string;
-  pollIntervalMs: number;
 }
 
-const DEFAULT_CONFIG: ThemeSchedulerConfig = {
-  enabled: false,
+export const DEFAULT_CONFIG: ThemeSchedulerConfig = {
+  enabled: true,
   lightTheme: "gruvbox-light",
   darkTheme: "gruvbox-dark",
   lightStart: "10:00",
   lightEnd: "16:00",
-  pollIntervalMs: 60_000,
 };
 
-function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | null): ThemeSchedulerConfig {
+export function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | null): ThemeSchedulerConfig {
   if (!raw) return base;
-
-  const pollIntervalMs = typeof raw.pollIntervalMs === "number" && Number.isFinite(raw.pollIntervalMs)
-    ? Math.max(raw.pollIntervalMs, 1_000)
-    : base.pollIntervalMs;
 
   return {
     enabled: typeof raw.enabled === "boolean" ? raw.enabled : base.enabled,
@@ -32,12 +29,26 @@ function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | null): The
     darkTheme: typeof raw.darkTheme === "string" && raw.darkTheme.trim() ? raw.darkTheme : base.darkTheme,
     lightStart: typeof raw.lightStart === "string" && raw.lightStart.trim() ? raw.lightStart : base.lightStart,
     lightEnd: typeof raw.lightEnd === "string" && raw.lightEnd.trim() ? raw.lightEnd : base.lightEnd,
-    pollIntervalMs,
   };
 }
 
 export function loadConfig(cwd: string): ThemeSchedulerConfig {
   return mergeConfig(DEFAULT_CONFIG, readSettingsBlock("themeScheduler", cwd));
+}
+
+export function findThemesDir(startDir = dirname(fileURLToPath(import.meta.url))): string | null {
+  let dir = startDir;
+
+  while (true) {
+    const candidate = join(dir, "themes");
+    if (existsSync(join(candidate, "gruvbox-dark.json")) && existsSync(join(candidate, "gruvbox-light.json"))) {
+      return candidate;
+    }
+
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
 
 export function parseTimeOfDay(value: string): number | null {
@@ -67,34 +78,84 @@ export function selectTheme(config: ThemeSchedulerConfig, now = new Date()): str
   return isWithinWindow(nowMinutes, startMinutes, endMinutes) ? config.lightTheme : config.darkTheme;
 }
 
+function dateAtMinutes(base: Date, minutes: number): Date {
+  const next = new Date(base);
+  next.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return next;
+}
+
+export function getNextTransitionDelayMs(config: ThemeSchedulerConfig, now = new Date()): number | null {
+  const startMinutes = parseTimeOfDay(config.lightStart) ?? parseTimeOfDay(DEFAULT_CONFIG.lightStart)!;
+  const endMinutes = parseTimeOfDay(config.lightEnd) ?? parseTimeOfDay(DEFAULT_CONFIG.lightEnd)!;
+  if (startMinutes === endMinutes) return null;
+
+  const candidates = [dateAtMinutes(now, startMinutes), dateAtMinutes(now, endMinutes)];
+  for (const candidate of [...candidates]) {
+    const tomorrow = new Date(candidate);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    candidates.push(tomorrow);
+  }
+
+  const nextTransition = candidates
+    .filter((candidate) => candidate.getTime() > now.getTime())
+    .sort((a, b) => a.getTime() - b.getTime())[0];
+
+  return nextTransition ? nextTransition.getTime() - now.getTime() : null;
+}
+
+export function setScheduledTheme(ctx: any, themeName: string): { success: boolean; error?: string } {
+  // Passing the theme name applies it locally and persists it globally through
+  // pi's SettingsManager. SettingsManager serializes writes with a file lock,
+  // so concurrent pi processes cannot corrupt settings.json.
+  return ctx.ui.setTheme(themeName);
+}
+
 export default function (pi: ExtensionAPI) {
-  let intervalId: ReturnType<typeof setInterval> | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   let currentTheme: string | null = null;
 
+  const clearScheduler = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+
+  pi.on("resources_discover", () => {
+    const themesDir = findThemesDir();
+    return themesDir ? { themePaths: [themesDir] } : undefined;
+  });
+
   pi.on("session_start", (_event, ctx: any) => {
+    clearScheduler();
+
     const config = loadConfig(ctx.cwd ?? process.cwd());
     if (!config.enabled) return;
 
-    const applyTheme = () => {
-      const nextTheme = selectTheme(config);
-      if (nextTheme === currentTheme) return;
+    const scheduleNextTransition = () => {
+      const delayMs = getNextTransitionDelayMs(config);
+      if (delayMs === null) return;
 
-      const result = ctx.ui.setTheme(nextTheme);
-      if (result?.ok === false) {
-        ctx.ui.notify?.(`Theme scheduler could not switch to ${nextTheme}: ${result.error}`, "warning");
-        return;
-      }
-      currentTheme = nextTheme;
+      timeoutId = setTimeout(applyThemeAndScheduleNext, delayMs);
     };
 
-    applyTheme();
-    intervalId = setInterval(applyTheme, config.pollIntervalMs);
+    const applyThemeAndScheduleNext = () => {
+      timeoutId = null;
+      const nextTheme = selectTheme(config);
+      if (nextTheme !== currentTheme) {
+        const result = setScheduledTheme(ctx, nextTheme);
+        if (result.success === false) {
+          ctx.ui.notify?.(`Theme scheduler could not switch to ${nextTheme}: ${result.error}`, "warning");
+        } else {
+          currentTheme = nextTheme;
+        }
+      }
+
+      scheduleNextTransition();
+    };
+
+    timeoutId = setTimeout(applyThemeAndScheduleNext, 0);
   });
 
-  pi.on("session_shutdown", () => {
-    if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-  });
+  pi.on("session_shutdown", clearScheduler);
 }

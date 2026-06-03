@@ -1,5 +1,8 @@
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { isWithinWindow, parseTimeOfDay, selectTheme, type ThemeSchedulerConfig } from "../index";
+import { DEFAULT_CONFIG, findThemesDir, getNextTransitionDelayMs, isWithinWindow, mergeConfig, parseTimeOfDay, selectTheme, setScheduledTheme, type ThemeSchedulerConfig } from "../index";
 
 const baseConfig: ThemeSchedulerConfig = {
   enabled: true,
@@ -7,7 +10,6 @@ const baseConfig: ThemeSchedulerConfig = {
   darkTheme: "gruvbox-dark",
   lightStart: "10:00",
   lightEnd: "16:00",
-  pollIntervalMs: 60_000,
 };
 
 describe("theme-scheduler", () => {
@@ -35,5 +37,46 @@ describe("theme-scheduler", () => {
     expect(isWithinWindow(23 * 60, 22 * 60, 6 * 60)).toBe(true);
     expect(isWithinWindow(3 * 60, 22 * 60, 6 * 60)).toBe(true);
     expect(isWithinWindow(12 * 60, 22 * 60, 6 * 60)).toBe(false);
+  });
+
+  it("schedules the next transition instead of polling", () => {
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 9, 30))).toBe(30 * 60 * 1000);
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 10, 0))).toBe(6 * 60 * 60 * 1000);
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 16, 0))).toBe(18 * 60 * 60 * 1000);
+  });
+
+  it("does not schedule transitions when lightStart equals lightEnd", () => {
+    expect(getNextTransitionDelayMs({ ...baseConfig, lightStart: "10:00", lightEnd: "10:00" })).toBeNull();
+  });
+
+  it("is enabled by default so startup applies a theme without settings edits", () => {
+    expect(mergeConfig(DEFAULT_CONFIG, {}).enabled).toBe(true);
+  });
+
+  it("finds bundled themes from nested extension paths", () => {
+    const root = mkdtempSync(join(tmpdir(), "theme-scheduler-"));
+    const nested = join(root, ".pi", "extensions", "theme-scheduler", "dist");
+    const themes = join(root, "themes");
+    mkdirSync(nested, { recursive: true });
+    mkdirSync(themes, { recursive: true });
+    writeFileSync(join(themes, "gruvbox-dark.json"), "{}");
+    writeFileSync(join(themes, "gruvbox-light.json"), "{}");
+
+    expect(findThemesDir(nested)).toBe(themes);
+  });
+
+  it("uses pi's named theme path so scheduled switches apply locally and persist globally", () => {
+    const calls: unknown[] = [];
+    const ctx = {
+      ui: {
+        setTheme: (value: unknown) => {
+          calls.push(value);
+          return { success: true };
+        },
+      },
+    };
+
+    expect(setScheduledTheme(ctx, "gruvbox-dark")).toEqual({ success: true });
+    expect(calls).toEqual(["gruvbox-dark"]);
   });
 });
