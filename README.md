@@ -33,9 +33,9 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 
 ## Themes
 
-This package registers the `themes/` directory with pi. Select `gruvbox-dark` or `gruvbox-light` in `/settings`, or set `"theme"` in `settings.json`.
+This package registers the `themes/` directory with pi and the theme scheduler applies the matching Gruvbox theme automatically at startup. By default it uses `gruvbox-light` during the configured daytime window and `gruvbox-dark` otherwise.
 
-To switch automatically by time of day, enable the theme scheduler in `settings.json`:
+To customize or disable automatic switching, edit the theme scheduler in `settings.json`:
 
 ```json
 {
@@ -49,7 +49,7 @@ To switch automatically by time of day, enable the theme scheduler in `settings.
 }
 ```
 
-The scheduler defaults to off. When enabled, `lightStart` is inclusive and `lightEnd` is exclusive, so the defaults use light mode from 10:00 through 15:59 and dark mode otherwise.
+`lightStart` is inclusive and `lightEnd` is exclusive, so the defaults use light mode from 10:00 through 15:59 and dark mode otherwise. The scheduler sets one timer for the next transition rather than polling. Scheduled switches also persist the global `theme` setting; pi's settings manager serializes concurrent writes so multiple running pi processes cannot corrupt `settings.json`. Set `"enabled": false` if you want pi's own theme selection to take over.
 
 Slack custom theme strings:
 

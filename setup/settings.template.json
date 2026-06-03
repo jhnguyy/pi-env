@@ -32,12 +32,11 @@
   "packages": [],
   "permissionLevel": "none",
   "themeScheduler": {
-    "enabled": false,
+    "enabled": true,
     "lightTheme": "gruvbox-light",
     "darkTheme": "gruvbox-dark",
     "lightStart": "10:00",
-    "lightEnd": "16:00",
-    "pollIntervalMs": 60000
+    "lightEnd": "16:00"
   },
   "extensions": [],
   "skills": [],
