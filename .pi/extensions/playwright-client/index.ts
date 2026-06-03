@@ -22,7 +22,7 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
     name: "browser",
     label: "Browser",
     description: DESCRIPTION,
-    promptSnippet: "Control a configured Chrome/Chromium CDP target: list targets/pages, snapshot, navigate, wait, click, type, screenshot.",
+    promptSnippet: "Control a configured Chrome/Chromium CDP target: list targets/pages, snapshot, navigate, wait, click, type, screenshot, download.",
     promptGuidelines: [
       "Use browser action=targets first when you need to discover configured browser targets.",
       "Use browser action=snapshot before browser action=screenshot; snapshots provide text/accessibility state with less context cost.",
@@ -41,7 +41,7 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
         url: Type.Optional(Type.String({ description: "URL for action=navigate, or URL/string pattern for action=wait" })),
         loadState: Type.Optional(StringEnum(["domcontentloaded", "load", "networkidle"] as const, { description: "Load state for action=wait" })),
         locatorState: Type.Optional(StringEnum(["attached", "detached", "visible", "hidden"] as const, { description: "Locator state for action=wait with a locator" })),
-        timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds for action=wait" })),
+        timeout: Type.Optional(Type.Number({ description: "Timeout in milliseconds for action=wait or action=download" })),
         limit: Type.Optional(Type.Number({ description: "Number of history entries for action=history" })),
         role: Type.Optional(Type.String({ description: "ARIA role locator for click/type, e.g. button, textbox, link" })),
         name: Type.Optional(Type.String({ description: "Accessible name for role locator" })),
@@ -63,7 +63,7 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
         const result = await executeBrowserAction(browser, action, target, args);
         const page = target ? await browser.currentPageSummary(target).catch(() => undefined) : undefined;
         if (action !== "history") browser.recordHistory({ action, target, pageTitle: page?.title, pageUrl: page?.url, result: result.text.split("\n")[0] });
-        return { content: [txt(result.text)], details: result.details };
+        return { content: [txt(result.text), ...(result.content ?? [])], details: result.details };
       } catch (error) {
         const page = target ? await browser.currentPageSummary(target).catch(() => undefined) : undefined;
         const message = translateBrowserError(error);
@@ -138,12 +138,13 @@ const DESCRIPTION = [
   "- control: set side-by-side control state with args.state = agent | human | unlocked; no target required.",
   "- pages: list pages for target; pass args.pageId, args.pageTitle, or args.pageUrl to select the active page.",
   "- snapshot: return text/accessibility state for the active page.",
-  "- screenshot: capture the active page to an artifact path; args.fullPage optional.",
+  "- screenshot: capture the active page to an artifact path and return the image inline; args.fullPage optional.",
   "- navigate: navigate active page; requires args.url.",
   "- newPage: create a new page with context.newPage() and make it active.",
   "- back / forward / reload: use Playwright page navigation primitives on the active page.",
   "- wait: wait for load state, URL, or locator; pass args.url, locator args, args.loadState, args.locatorState, and/or args.timeout.",
   "- history: show recent browser actions with target, page, result, or error.",
   "- click: click by semantic locator; pass args.role+args.name, text, label, placeholder, testId, or selector.",
+  "- download: wait for a browser download and save it under the agent-side artifact temp dir; optionally trigger it with a locator click or args.url navigation; pass args.timeout optional.",
   "- type: fill/type text; requires args.value and optional semantic locator. Defaults to fill when a locator is provided, otherwise type into focused element.",
 ].join("\n");
