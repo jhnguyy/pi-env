@@ -19,6 +19,11 @@ type LocatorLike = {
   innerText(options?: { timeout?: number }): Promise<string>;
   ariaSnapshot?(options?: { timeout?: number }): Promise<string>;
 };
+type DownloadLike = {
+  suggestedFilename(): string;
+  saveAs(path: string): Promise<unknown>;
+  failure(): Promise<string | null>;
+};
 type LoadState = "domcontentloaded" | "load" | "networkidle";
 type LocatorWaitState = "attached" | "detached" | "visible" | "hidden";
 type PageLike = {
@@ -30,7 +35,8 @@ type PageLike = {
   reload(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
   waitForLoadState(state?: LoadState, options?: { timeout?: number }): Promise<unknown>;
   waitForURL(url: string | RegExp, options?: { timeout?: number }): Promise<unknown>;
-  screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>;
+  waitForEvent(event: "download", options?: { timeout?: number }): Promise<DownloadLike>;
+  screenshot(options: { path: string; fullPage?: boolean }): Promise<Uint8Array>;
   locator(selector: string): LocatorLike;
   getByRole?(role: string, options?: { name?: string; exact?: boolean }): LocatorLike;
   getByText?(text: string, options?: { exact?: boolean }): LocatorLike;
@@ -189,12 +195,13 @@ export class BrowserClient {
       text ? `\nvisible text:\n${text.slice(0, 20_000)}` : "\nvisible text: (empty or unavailable)",
     ].filter(Boolean).join("\n");
   }
-  async screenshot(targetName: string, fullPage: boolean): Promise<{ path: string; title: string; url: string; target: string }> {
+  async screenshot(targetName: string, fullPage: boolean): Promise<{ path: string; data: string; mimeType: "image/png"; title: string; url: string; target: string }> {
     const page = await this.activePage(targetName);
     const title = await page.title().catch(() => "");
     const path = await this.artifacts.screenshotPath(title);
-    await page.screenshot({ path, fullPage });
-    return { path, title, url: safeUrl(page), target: targetName };
+    const bytes = await page.screenshot({ path, fullPage });
+    const data = Buffer.from(bytes).toString("base64");
+    return { path, data, mimeType: "image/png", title, url: safeUrl(page), target: targetName };
   }
   async newPage(targetName: string): Promise<{ id: string; title: string; url: string; target: string }> {
     this.assertCanMutate("newPage");
@@ -256,6 +263,27 @@ export class BrowserClient {
     const { locator, target } = locate(page, params);
     await locator.click({ timeout: 10_000 });
     return { target: targetName, locator: target, title: await page.title().catch(() => ""), url: safeUrl(page) };
+  }
+  async download(targetName: string, params: LocatorParams & { timeout?: number; url?: string }): Promise<{ target: string; locator: string; path: string; suggestedFilename: string; title: string; url: string }> {
+    const page = await this.activePage(targetName);
+    const timeout = params.timeout ?? 30_000;
+    const trigger = downloadTrigger(page, params);
+    if (trigger.kind !== "wait") this.assertCanMutate("download");
+    const downloadPromise = page.waitForEvent("download", { timeout });
+    let download: DownloadLike;
+    try {
+      await trigger.run();
+      download = await downloadPromise;
+    } catch (error) {
+      downloadPromise.catch(() => undefined);
+      throw error;
+    }
+    const failure = await download.failure();
+    if (failure) throw new Error(`Browser download failed: ${failure}`);
+    const suggestedFilename = download.suggestedFilename();
+    const path = await this.artifacts.downloadPath(suggestedFilename);
+    await download.saveAs(path);
+    return { target: targetName, locator: trigger.label, path, suggestedFilename, title: await page.title().catch(() => ""), url: safeUrl(page) };
   }
   async type(targetName: string, params: LocatorParams, value: string, mode: "fill" | "type"): Promise<{ target: string; locator: string; mode: "fill" | "type"; title: string; url: string }> {
     this.assertCanMutate("type");
@@ -393,6 +421,18 @@ export function isConnectionBrokenError(error: unknown): boolean {
     "cdp",
   ].some((needle) => message.includes(needle));
 }
+function downloadTrigger(page: PageLike, params: LocatorParams & { url?: string }): { kind: "click" | "navigate" | "wait"; label: string; run(): Promise<unknown> } {
+  const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
+  if (hasLocator) {
+    const { locator, target } = locate(page, params);
+    return { kind: "click", label: target, run: () => locator.click({ timeout: 10_000 }) };
+  }
+  if (params.url) {
+    return { kind: "navigate", label: `url=${params.url}`, run: () => page.goto(params.url!, { waitUntil: "domcontentloaded", timeout: 30_000 }) };
+  }
+  return { kind: "wait", label: "next download", run: async () => undefined };
+}
+
 function locate(page: PageLike, params: LocatorParams): { locator: LocatorLike; target: string } {
   const exact = params.exact;
   if (params.role) {

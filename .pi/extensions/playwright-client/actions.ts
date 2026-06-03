@@ -4,6 +4,7 @@ export const BROWSER_ACTIONS = [
   "back",
   "click",
   "control",
+  "download",
   "forward",
   "history",
   "navigate",
@@ -32,9 +33,12 @@ export type BrowserArgs = LocatorParams & WaitParams & {
   limit?: number;
 };
 
+type ResultContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
 export interface BrowserActionResult {
   text: string;
   details: unknown;
+  content?: ResultContent[];
 }
 
 type BrowserActionHandler = (ctx: BrowserActionContext) => Promise<BrowserActionPayload>;
@@ -55,6 +59,7 @@ interface BrowserActionPayload {
   summary?: string;
   text?: string;
   details?: Details;
+  content?: ResultContent[];
 }
 
 const TARGETED_ACTIONS = {
@@ -62,6 +67,10 @@ const TARGETED_ACTIONS = {
   click: async ({ browser, action, target, args }) => {
     const result = await browser.click(requireTarget(action, target), args);
     return pagePayload(action, result, { summary: `clicked: ${result.locator}`, details: { locator: result.locator } });
+  },
+  download: async ({ browser, action, target, args }) => {
+    const result = await browser.download(requireTarget(action, target), args);
+    return pagePayload(action, result, { summary: `download: ${result.path}`, details: { locator: result.locator, path: result.path, suggestedFilename: result.suggestedFilename } });
   },
   forward: async ({ browser, action, target }) => pagePayload(action, await browser.forward(requireTarget(action, target))),
   navigate: async ({ browser, action, target, args }) => {
@@ -85,7 +94,11 @@ const TARGETED_ACTIONS = {
   reload: async ({ browser, action, target }) => pagePayload(action, await browser.reload(requireTarget(action, target))),
   screenshot: async ({ browser, action, target, args }) => {
     const shot = await browser.screenshot(requireTarget(action, target), Boolean(args.fullPage));
-    return pagePayload(action, shot, { summary: `screenshot: ${shot.path}`, details: { path: shot.path } });
+    return pagePayload(action, shot, {
+      summary: `screenshot: ${shot.path}`,
+      details: { path: shot.path, mimeType: shot.mimeType },
+      content: [{ type: "image", data: shot.data, mimeType: shot.mimeType }],
+    });
   },
   snapshot: async ({ browser, action, target }) => {
     const targetName = requireTarget(action, target);
@@ -111,6 +124,7 @@ const TARGETED_ACTIONS = {
 const ACTION_HANDLERS = {
   back: TARGETED_ACTIONS.back,
   click: TARGETED_ACTIONS.click,
+  download: TARGETED_ACTIONS.download,
   forward: TARGETED_ACTIONS.forward,
   navigate: TARGETED_ACTIONS.navigate,
   newPage: TARGETED_ACTIONS.newPage,
@@ -149,7 +163,7 @@ export async function executeBrowserAction(browser: BrowserClient, action: Brows
 function pagePayload(
   action: BrowserAction,
   result: { title: string; url: string; target: string },
-  extras: { summary?: string; details?: Details } = {},
+  extras: { summary?: string; details?: Details; content?: ResultContent[] } = {},
 ): BrowserActionPayload {
   return {
     target: result.target,
@@ -157,12 +171,13 @@ function pagePayload(
     url: result.url,
     summary: extras.summary ?? action,
     details: { ...result, ...extras.details },
+    content: extras.content,
   };
 }
 
 function renderActionResult(action: BrowserAction, payload: BrowserActionPayload): BrowserActionResult {
   const details = { action, ...payload.details };
-  if (payload.text !== undefined) return { text: payload.text, details };
+  if (payload.text !== undefined) return { text: payload.text, details, content: payload.content };
   return {
     text: [
       payload.target ? `target: ${payload.target}` : "",
@@ -171,6 +186,7 @@ function renderActionResult(action: BrowserAction, payload: BrowserActionPayload
       payload.url ?? "",
     ].filter(Boolean).join("\n"),
     details,
+    content: payload.content,
   };
 }
 
@@ -213,7 +229,7 @@ export function formatActionSummary(action: string, args: Record<string, unknown
     if (args.pageUrl) return `url~=${String(args.pageUrl)}`;
   }
   if (action === "type" && args.value) return formatLocatorArgs(args);
-  if (action === "click") return formatLocatorArgs(args);
+  if (action === "click" || action === "download") return formatLocatorArgs(args);
   return "";
 }
 
