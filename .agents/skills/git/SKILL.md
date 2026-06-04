@@ -1,6 +1,6 @@
 ---
 name: git
-description: Git hygiene rules for any repository: keep the base tree updated and do all branch work in dedicated git worktrees.
+description: "Git hygiene rules for any repository: keep the base tree updated and do all branch work in dedicated git worktrees."
 ---
 
 # Git Hygiene
