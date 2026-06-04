@@ -64,6 +64,13 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
       expect(prompt).toContain("context-efficiency");
     });
 
+    it("does not require command snippets for every skill", () => {
+      const content = createSkillContent("my-tool", "# My Tool");
+      const prompt = buildEvalPrompt(content, "my-tool");
+      expect(prompt).toContain("command snippets are required only when exact syntax is essential or non-obvious");
+      expect(prompt).toContain("policy skills may state invariants and decision rules rather than full command recipes");
+    });
+
     it("requests structured JSON output", () => {
       const content = createSkillContent("my-tool", "# My Tool");
       const prompt = buildEvalPrompt(content, "my-tool");

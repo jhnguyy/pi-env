@@ -50,16 +50,17 @@ const RUBRIC = `## Evaluation Rubric
 Evaluate the skill against these categories:
 
 ### clarity
-Are instructions unambiguous? Can an agent follow them without guessing?
-- Commands are copy-pasteable
+Are instructions unambiguous at the right level of abstraction? Can an agent follow the policy without inventing requirements?
+- Operational detail is appropriate to the skill's purpose; command snippets are required only when exact syntax is essential or non-obvious
 - Conditions for use are explicit
 - No jargon without definition
+- Avoid requesting examples that would duplicate common tool help or turn a policy skill into a tutorial
 
 ### completeness
-Does the skill cover its stated purpose?
+Does the skill cover its stated purpose without over-specifying routine mechanics?
 - Setup instructions present if needed
-- Edge cases covered
-- Workflow covers the full task lifecycle
+- Edge cases covered when they change the intended decision or safety boundary
+- Lifecycle coverage is proportionate to the skill: policy skills may state invariants and decision rules rather than full command recipes
 
 ### context-efficiency
 Does the skill minimize token consumption?
@@ -132,9 +133,10 @@ Respond with a JSON object (no markdown wrapping needed, but it's okay if you us
 }
 
 Rules:
-- "pass" = no errors, ready to use
-- "needs-revision" = warnings that should be addressed
+- "pass" = no errors or blocking warnings; ready to use
+- "needs-revision" = warnings for issues that materially reduce reliability, safety, or usability
 - "fail" = errors that prevent the skill from working
+- Use severity "info" for optional enhancements, stylistic preferences, or suggestions that conflict with the skill's deliberate scope
 - Every finding must have a specific, actionable message
 - Only use "jit-catch" category when a diff is provided
 - Be concise. One finding per issue.`;
