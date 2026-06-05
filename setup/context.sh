@@ -8,6 +8,7 @@ setup_init_context() {
   PI_AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
   AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
   SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
+  MANAGED_SETTINGS_FILE="$SETUP_DIR/managed-settings.json"
 
   PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
   PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"

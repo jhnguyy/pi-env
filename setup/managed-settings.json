@@ -1,0 +1,13 @@
+{
+  "_comment_managed_retry": "Managed by pi-env setup. Keep provider attempts short so Anthropic hangs fail fast while allowing one provider-level retry before pi's agent-level retry takes over.",
+  "retry": {
+    "enabled": true,
+    "maxRetries": 3,
+    "baseDelayMs": 2000,
+    "provider": {
+      "timeoutMs": 20000,
+      "maxRetries": 1,
+      "maxRetryDelayMs": 60000
+    }
+  }
+}

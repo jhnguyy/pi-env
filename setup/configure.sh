@@ -20,32 +20,22 @@ setup_bootstrap_settings() {
     "settings.json ← settings.template.json (review and customize: defaultModel, permissionLevel)"
 }
 
-setup_register_package() {
-  if [ -f "$SETTINGS_FILE" ]; then
-    if node -e "
-      const s = JSON.parse(require('fs').readFileSync('$SETTINGS_FILE', 'utf-8'));
-      const pkgs = s.packages || [];
-      process.exit(pkgs.some(p => (typeof p === 'string' ? p : p.source) === '$REPO') ? 0 : 1);
-    " 2>/dev/null; then
-      ok "pi-env registered in settings.json packages"
-    else
-      node -e "
-        const fs = require('fs');
-        const s = JSON.parse(fs.readFileSync('$SETTINGS_FILE', 'utf-8'));
-        s.packages = s.packages || [];
-        s.packages.push('$REPO');
-        fs.writeFileSync('$SETTINGS_FILE', JSON.stringify(s, null, 2) + '\n');
-      " 2>/dev/null
-      linked "pi-env added to settings.json packages"
-    fi
-  fi
+setup_apply_managed_settings() {
+  local result
+  result=$(node "$SETUP_DIR/apply-managed-settings.mjs" "$SETTINGS_FILE" "$MANAGED_SETTINGS_FILE" "$REPO")
+  case "$result" in
+    unchanged) ok "managed settings and package registration" ;;
+    created) linked "settings.json created with managed settings and package registration" ;;
+    updated) linked "managed settings applied to settings.json" ;;
+    *) echo "$result" ;;
+  esac
 }
 
 setup_configure_pi() {
   section "Pi"
 
   setup_bootstrap_settings
-  setup_register_package
+  setup_apply_managed_settings
 
   mkdir -p "$AGENTS_DIR" "$TEST_UTILS_DIR"
   link_entries \

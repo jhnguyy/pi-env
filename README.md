@@ -17,6 +17,8 @@ cd ~/pi-env
 
 Setup is safe to re-run after moving between dev environments. It performs clean installs with npm optional dependencies enabled so native packages such as `esbuild` are selected for the current platform.
 
+`setup/settings.template.json` bootstraps new machines only. Existing machine-specific settings are preserved, but `setup/managed-settings.json` is reapplied on every run for small cross-machine defaults that should stay consistent. Today that managed subset keeps pi's agent-level retry enabled while limiting provider request attempts to 20 seconds with one provider-level retry, so Anthropic stalls fail quickly before pi's visible agent-level retry takes over.
+
 ## Terminal configs
 
 `setup.sh` always links `setup/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers.

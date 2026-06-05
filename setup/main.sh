@@ -15,7 +15,8 @@
 # in ~/.pi/agent/extensions/ coexist via pi's auto-discovery.
 #
 # What stays local (never touched after first run):
-#   ~/.pi/agent/auth.json, settings.json, models.json, sessions/
+#   ~/.pi/agent/auth.json, models.json, sessions/
+# setup reapplies the small safe subset in setup/managed-settings.json to settings.json.
 #   ~/.pi/agent/extensions/my-extension/ (local-only extensions)
 
 set -euo pipefail
