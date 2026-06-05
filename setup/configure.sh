@@ -114,5 +114,6 @@ setup_print_done() {
   echo "Done."
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
   echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
-  echo "  Tests:          cd $REPO && npm test"
+  echo "  Install check:  cd $REPO && npm run verify:install"
+  echo "  Merge check:    cd $REPO && npm run verify"
 }

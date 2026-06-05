@@ -17,6 +17,8 @@ cd ~/pi-env
 
 Setup is safe to re-run after moving between dev environments. It performs clean installs with npm optional dependencies enabled so native packages such as `esbuild` are selected for the current platform.
 
+Setup does not run the full Vitest suite by default. Routine install and post-merge setup should be cheap and operational: install dependencies, rebuild extensions, and leave the repo ready to use. Run `npm run verify:install` for a cheap setup/readiness check, and run `npm run verify` before merging code changes.
+
 `setup/settings.template.json` bootstraps new machines only. Existing machine-specific settings are preserved, but `setup/managed-settings.json` is reapplied on every run for small cross-machine defaults that should stay consistent. Today that managed subset keeps pi's agent-level retry enabled while limiting provider request attempts to 20 seconds with one provider-level retry, so Anthropic stalls fail quickly before pi's visible agent-level retry takes over.
 
 ## Terminal configs
@@ -32,6 +34,13 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 ## Pi CLI install
 
 `setup.sh` installs `@earendil-works/pi-coding-agent` with npm into `~/.local/share/pi-env/pi-cli` and writes `~/.local/bin/pi`. If `~/.local/bin` is not already on `PATH`, setup idempotently adds it to existing `~/.zshrc`, `~/.bashrc`, and/or `~/.profile` files, falling back to creating `~/.profile` when no shell profile exists. The wrapper runs Pi's Node entrypoint.
+
+## Test and verification commands
+
+- `npm test` / `npm run test:unit` — default unit test suite; E2E tests are excluded for lower noise.
+- `npm run test:e2e` — explicit E2E/integration suite gated by `E2E=1`.
+- `npm run verify:install` — cheap setup readiness check that rebuilds and verifies extension bundles/manifests.
+- `npm run verify` — pre-merge gate: typecheck, build, and unit tests.
 
 ## Themes
 

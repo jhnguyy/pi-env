@@ -32,7 +32,17 @@ npm run build
 
 The build uses `scripts/build-extensions.mjs` with esbuild. The visible build contract lives in `pi-build.config.json`: extension names, external packages, and sidecar bundles are configured there. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
 
-The build runs automatically on `npm install` / `npm ci` via `postinstall`.
+The build runs automatically on `npm install` / `npm ci` via `postinstall`. Install/setup intentionally does not run the full test suite; it stays focused on making the local Pi environment current without burning CPU on routine pulls.
+
+Use the flattened verification commands for stronger gates:
+
+```bash
+npm run verify:install # cheap setup/readiness check: build artifacts and extension manifests
+npm run verify         # pre-merge gate: typecheck, build, and unit tests
+npm run test:e2e       # explicit integration/E2E checks when relevant
+```
+
+`npm test` is an alias for unit tests only. E2E tests are excluded unless `E2E=1` is set through `npm run test:e2e`, which keeps the default signal high and avoids skipped-suite noise.
 
 ### Adding a new extension
 
