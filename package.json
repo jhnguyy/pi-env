@@ -35,12 +35,17 @@
   "scripts": {
     "check:node": "node -e \"const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error('Node.js >= 22.19 is required; found ' + process.version); process.exit(1); }\"",
     "build": "node scripts/build-extensions.mjs",
-    "test": "vitest run",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
     "test:e2e": "E2E=1 vitest run",
     "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run build && npm run test:unit",
+    "verify:install": "npm run build && node scripts/verify-install.mjs",
     "postinstall": "sh scripts/restart-lsp-daemon.sh && node scripts/build-extensions.mjs",
     "prebuild": "npm run check:node",
-    "pretest": "npm run check:node",
+    "pretest:unit": "npm run check:node",
+    "pretest:e2e": "npm run check:node",
+    "pretypecheck": "npm run check:node",
     "preinstall": "npm run check:node"
   },
   "peerDependencies": {
