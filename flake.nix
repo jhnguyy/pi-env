@@ -41,7 +41,30 @@
             echo "Clone the repo, cd into it, then run: nix run .#setup" >&2
             exit 2
           fi
-          exec ./setup.sh "$@"
+          export PI_ENV_CONFIG_MANAGED_BY_NIX=1
+          exec ./setup.sh --nix-managed "$@"
+        '';
+      };
+      bootstrapAppFor = pkgs: pkgs.writeShellApplication {
+        name = "pi-env-bootstrap";
+        runtimeInputs = toolchainPackages pkgs;
+        text = ''
+          target="''${1:-$HOME/pi-env}"
+          repo_url="''${PI_ENV_REPO_URL:-https://github.com/jhnguyy/pi-env.git}"
+
+          if [ -e "$target/.git" ]; then
+            echo "pi-env checkout exists: $target"
+          elif [ -e "$target" ]; then
+            echo "bootstrap target exists but is not a git checkout: $target" >&2
+            exit 2
+          else
+            mkdir -p "$(dirname "$target")"
+            git clone "$repo_url" "$target"
+          fi
+
+          cd "$target"
+          export PI_ENV_CONFIG_MANAGED_BY_NIX=1
+          exec ./setup.sh --nix-managed
         '';
       };
       verifyInstallAppFor = pkgs: pkgs.writeShellApplication {
@@ -80,6 +103,10 @@
             type = "app";
             program = "${setupAppFor pkgs}/bin/pi-env-setup";
           };
+          bootstrap = {
+            type = "app";
+            program = "${bootstrapAppFor pkgs}/bin/pi-env-bootstrap";
+          };
           verify-install = {
             type = "app";
             program = "${verifyInstallAppFor pkgs}/bin/pi-env-verify-install";
@@ -105,6 +132,8 @@
             bash setup/__tests__/path-profile.test.sh
             bash setup/__tests__/managed-settings.test.sh
             bash setup/__tests__/nix-managed-config.test.sh
+            bash setup/__tests__/setup-options.test.sh
+            bash setup/__tests__/pi-cli-wrapper.test.sh
             node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8")); JSON.parse(require("fs").readFileSync("flake.lock", "utf8"));'
             touch "$out"
           '';

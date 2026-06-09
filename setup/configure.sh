@@ -91,12 +91,20 @@ setup_configure_ghostty() {
 
 setup_configure_terminal_tools() {
   section "Terminal tools"
+  if [ "${PI_ENV_SKIP_TERMINAL:-0}" = "1" ]; then
+    skip "terminal tools (disabled by setup option)"
+    return
+  fi
   setup_configure_tmux
   setup_configure_ghostty
 }
 
 setup_configure_repo_tools() {
   section "Repo tools"
+  if [ "${PI_ENV_SKIP_REPO_HOOKS:-0}" = "1" ]; then
+    skip "repo hooks (disabled by setup option)"
+    return
+  fi
 
   GIT_DIR="$(git -C "$REPO" rev-parse --absolute-git-dir)"
   GIT_COMMON_DIR="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)"
@@ -120,6 +128,7 @@ setup_configure_repo_tools() {
 setup_print_done() {
   echo ""
   echo "Done."
+  echo "  Setup mode:     ${PI_ENV_SETUP_MODE:-portable}"
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
   echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
   echo "  Install check:  cd $REPO && npm run verify:install"

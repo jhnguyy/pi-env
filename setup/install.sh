@@ -16,29 +16,25 @@ setup_install_pi_cli() {
   section "Pi CLI"
 
   PI_VERSION=$(cd "$REPO" && node -e "const pkg = JSON.parse(require('fs').readFileSync('./package.json', 'utf8')); console.log(pkg.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
-  PI_PKG_SPEC="@earendil-works/pi-coding-agent@$PI_VERSION"
-  mkdir -p "$PI_BIN_DIR" "$PI_CLI_ROOT"
-  rm -rf "$PI_CLI_ROOT/node_modules" "$PI_CLI_ROOT/package-lock.json"
-  npm install --prefix "$PI_CLI_ROOT" "$PI_PKG_SPEC" --no-audit --include=optional
+  mkdir -p "$PI_BIN_DIR"
 
-  PI_PACKAGE_DIR="$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
+  PI_PACKAGE_DIR="$REPO/node_modules/@earendil-works/pi-coding-agent"
   PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
   [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
   [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
 
-  PI_CLI_ROOT_LITERAL=$(printf '%s' "$PI_CLI_ROOT" | sed "s/'/'\\''/g")
+  PI_PACKAGE_DIR_LITERAL=$(printf '%s' "$PI_PACKAGE_DIR" | sed "s/'/'\\''/g")
   cat > "$PI_BIN_DIR/pi" <<EOF
 #!/usr/bin/env sh
 set -eu
 
-DEFAULT_PI_CLI_ROOT='$PI_CLI_ROOT_LITERAL'
-PI_CLI_ROOT="\${PI_CLI_ROOT:-\$DEFAULT_PI_CLI_ROOT}"
-PI_PACKAGE_DIR="\$PI_CLI_ROOT/node_modules/@earendil-works/pi-coding-agent"
+DEFAULT_PI_PACKAGE_DIR='$PI_PACKAGE_DIR_LITERAL'
+PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-\$DEFAULT_PI_PACKAGE_DIR}"
 PI_ENTRY="\$PI_PACKAGE_DIR/dist/cli.js"
 
 if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at \$PI_PACKAGE_DIR" >&2
-  echo "pi-env: rerun setup.sh, or set PI_CLI_ROOT to the install prefix." >&2
+  echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to the pi package directory." >&2
   exit 127
 fi
 
