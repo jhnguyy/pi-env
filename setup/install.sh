@@ -46,7 +46,9 @@ exec node "\$PI_ENTRY" "\$@"
 EOF
   chmod +x "$PI_BIN_DIR/pi"
   ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
-  if ! echo "$PATH" | tr ':' '\n' | grep -qxF "$PI_BIN_DIR"; then
+  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_PATH_PROFILE:-0}" = "1" ]; then
+    skip "shell profile PATH edits (managed externally)"
+  elif ! echo "$PATH" | tr ':' '\n' | grep -qxF "$PI_BIN_DIR"; then
     echo "  —  $PI_BIN_DIR is not in PATH yet; updating shell profiles."
     ensure_path_in_shell_profiles "$PI_BIN_DIR"
   fi

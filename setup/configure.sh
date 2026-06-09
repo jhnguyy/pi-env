@@ -53,6 +53,10 @@ setup_configure_pi() {
 }
 
 setup_configure_tmux() {
+  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_TMUX:-0}" = "1" ]; then
+    skip "tmux config (managed externally)"
+    return
+  fi
   if [ -f "$TMUX_CONF" ] && grep -qF "$TMUX_SOURCE_LINE" "$TMUX_CONF"; then
     ok "tmux-gruvbox.conf sourced from ~/.tmux.conf"
   elif [ -f "$TMUX_CONF" ]; then
@@ -65,6 +69,10 @@ setup_configure_tmux() {
 }
 
 setup_configure_ghostty() {
+  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_GHOSTTY:-0}" = "1" ]; then
+    skip "~/.config/ghostty (managed externally)"
+    return
+  fi
   if [ "$should_link_ghostty" -eq 0 ]; then
     skip "~/.config/ghostty (not needed for $context_label; set PI_ENV_LINK_GHOSTTY=1 to force)"
     return

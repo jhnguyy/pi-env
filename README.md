@@ -13,6 +13,14 @@ cd ~/pi-env
 # Open a new shell (or source your shell profile) before running `pi`.
 ```
 
+If the host uses Nix with flakes enabled, one command runs setup with the repo toolchain:
+
+```bash
+nix run .#setup
+```
+
+For a persistent user-profile tool install, run `nix profile install .#toolchain` first, then `./setup.sh`. See [`setup/nix.md`](setup/nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, and the intended Nix split: Nix owns host tools; `pi-env` owns portable pi configuration and mutable setup.
+
 `setup.sh` is a thin entrypoint into `setup/main.sh`; supporting setup modules and assets live under `setup/`. `setup/context.sh` receives the setup directory from the entrypoint and derives repo paths, target paths, and environment decisions once for the other modules. Setup orchestration is grouped by domain: environment checks, runtime installs, Pi config, terminal tools, and repo tools.
 
 Setup is safe to re-run after moving between dev environments. It performs clean installs with npm optional dependencies enabled so native packages such as `esbuild` are selected for the current platform.
@@ -70,4 +78,5 @@ Slack custom theme strings:
 ## Further reading
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
+- **[setup/nix.md](setup/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings
