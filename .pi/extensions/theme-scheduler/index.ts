@@ -16,7 +16,7 @@ export const DEFAULT_CONFIG: ThemeSchedulerConfig = {
   enabled: true,
   lightTheme: "gruvbox-light",
   darkTheme: "gruvbox-dark",
-  lightStart: "10:00",
+  lightStart: "09:00",
   lightEnd: "16:00",
 };
 

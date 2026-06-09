@@ -1,0 +1,9 @@
+{
+  "name": "@pi-env/pi-update",
+  "type": "module",
+  "private": true,
+  "pi": {
+    "extensions": [
+    ]
+  }
+}

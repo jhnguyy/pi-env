@@ -8,7 +8,7 @@ const baseConfig: ThemeSchedulerConfig = {
   enabled: true,
   lightTheme: "gruvbox-light",
   darkTheme: "gruvbox-dark",
-  lightStart: "10:00",
+  lightStart: "09:00",
   lightEnd: "16:00",
 };
 
@@ -26,9 +26,9 @@ describe("theme-scheduler", () => {
     expect(parseTimeOfDay("nope")).toBeNull();
   });
 
-  it("treats 10:00 as light and 16:00 as dark", () => {
-    expect(selectTheme(baseConfig, new Date(2026, 0, 1, 9, 59))).toBe("gruvbox-dark");
-    expect(selectTheme(baseConfig, new Date(2026, 0, 1, 10, 0))).toBe("gruvbox-light");
+  it("treats 09:00 as light and 16:00 as dark", () => {
+    expect(selectTheme(baseConfig, new Date(2026, 0, 1, 8, 59))).toBe("gruvbox-dark");
+    expect(selectTheme(baseConfig, new Date(2026, 0, 1, 9, 0))).toBe("gruvbox-light");
     expect(selectTheme(baseConfig, new Date(2026, 0, 1, 15, 59))).toBe("gruvbox-light");
     expect(selectTheme(baseConfig, new Date(2026, 0, 1, 16, 0))).toBe("gruvbox-dark");
   });
@@ -40,9 +40,9 @@ describe("theme-scheduler", () => {
   });
 
   it("schedules the next transition instead of polling", () => {
-    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 9, 30))).toBe(30 * 60 * 1000);
-    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 10, 0))).toBe(6 * 60 * 60 * 1000);
-    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 16, 0))).toBe(18 * 60 * 60 * 1000);
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 8, 30))).toBe(30 * 60 * 1000);
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 9, 0))).toBe(7 * 60 * 60 * 1000);
+    expect(getNextTransitionDelayMs(baseConfig, new Date(2026, 0, 1, 16, 0))).toBe(17 * 60 * 60 * 1000);
   });
 
   it("does not schedule transitions when lightStart equals lightEnd", () => {

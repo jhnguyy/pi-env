@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { slugify } from "../_shared/slug";
 
 export class BrowserArtifacts {
   constructor(private readonly rootDir: string) {}
@@ -7,7 +8,7 @@ export class BrowserArtifacts {
   async screenshotPath(pageTitle: string | undefined): Promise<string> {
     await mkdir(this.rootDir, { recursive: true });
     const stamp = stampForPath();
-    const slug = slugify(pageTitle ?? "page");
+    const slug = slugify(pageTitle ?? "page", { fallback: "page" });
     return join(this.rootDir, `${stamp}-${slug}.png`);
   }
 
@@ -28,10 +29,5 @@ function safeFilename(value: string): string {
   const match = /^(.*?)(\.[^.]+)?$/.exec(name);
   const stem = match?.[1] || "download";
   const ext = (match?.[2] ?? "").toLowerCase().replace(/[^.a-z0-9]+/g, "").slice(0, 20);
-  return `${slugify(stem)}${ext}`;
-}
-
-function slugify(value: string): string {
-  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug.slice(0, 60) || "page";
+  return `${slugify(stem, { fallback: "page" })}${ext}`;
 }
