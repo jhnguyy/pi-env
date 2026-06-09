@@ -38,6 +38,7 @@ JSON
   [ "$(json_get "$settings" 's.retry.enabled')" = "true" ] || fail "retry.enabled should be true"
   [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "provider timeout should be 20000"
   [ "$(json_get "$settings" 's.retry.provider.maxRetries')" = "1" ] || fail "provider retries should be 1"
+  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "false" ] || fail "piUpdate should default to disabled"
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "_comment_managed_retry")')" = "false" ] || fail "managed comments should not be written to user settings"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
   [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "package path should be repo"
@@ -70,6 +71,27 @@ JSON
   rm -rf "$tmp"
 }
 
+test_preserves_enabled_pi_update() {
+  local tmp settings repo
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  cat > "$settings" <<'JSON'
+{
+  "piUpdate": {
+    "enabled": true
+  }
+}
+JSON
+
+  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "true" ] || fail "piUpdate.enabled=true should be preserved"
+
+  rm -rf "$tmp"
+}
+
 test_applies_to_missing_settings_file() {
   local tmp settings repo result
   tmp="$(mktemp -d)"
@@ -81,6 +103,7 @@ test_applies_to_missing_settings_file() {
 
   [ "$result" = "created" ] || fail "missing settings should be created, got $result"
   [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "created settings should include managed timeout"
+  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "false" ] || fail "created settings should disable piUpdate"
   [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "created settings should include package"
 
   rm -rf "$tmp"
@@ -88,6 +111,7 @@ test_applies_to_missing_settings_file() {
 
 test_applies_managed_settings_and_package_once
 test_preserves_unmanaged_retry_settings
+test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 
 echo "managed settings tests passed"

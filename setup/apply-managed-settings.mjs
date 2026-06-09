@@ -136,11 +136,21 @@ function packageSource(pkg) {
   return typeof pkg === "string" ? pkg : isPlainObject(pkg) ? pkg.source : undefined;
 }
 
+function ensurePiUpdateDefault(settings) {
+  if (!isPlainObject(settings.piUpdate)) {
+    settings.piUpdate = {};
+  }
+  if (settings.piUpdate.enabled !== true) {
+    settings.piUpdate.enabled = false;
+  }
+}
+
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
 const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
 
 mergeManaged(settings, managed);
+ensurePiUpdateDefault(settings);
 
 if (!Array.isArray(settings.packages)) {
   settings.packages = [];
