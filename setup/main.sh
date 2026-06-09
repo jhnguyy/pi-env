@@ -25,6 +25,9 @@ BOOTSTRAP_SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # shellcheck source=setup/lib.sh
 source "$BOOTSTRAP_SETUP_DIR/lib.sh"
+# shellcheck source=setup/options.sh
+source "$BOOTSTRAP_SETUP_DIR/options.sh"
+setup_parse_args "$@"
 # shellcheck source=setup/context.sh
 source "$BOOTSTRAP_SETUP_DIR/context.sh"
 setup_init_context "$BOOTSTRAP_SETUP_DIR"

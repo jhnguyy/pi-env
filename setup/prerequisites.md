@@ -1,8 +1,10 @@
 # pi-env prerequisites
 
-`setup.sh` checks required commands and prints recommended tools for the current OS and runtime context. It does not install system packages automatically.
+Nix path prerequisite: Nix with flakes enabled. Then run `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` on a fresh machine, or `nix run .#setup` from an existing checkout.
 
-If Nix flakes are available, run `nix run .#setup` from the repo root for a one-command Nix-backed setup, or `nix profile install .#toolchain` for a persistent user-profile tool install. See [`nix.md`](nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, and what stays managed by `pi-env`.
+Portable fallback prerequisite: `setup.sh` checks required commands and prints recommended tools for the current OS and runtime context. It does not install system packages automatically.
+
+See [`nix.md`](nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, setup modes, and what stays managed by `pi-env`.
 
 Context rules:
 
@@ -10,7 +12,7 @@ Context rules:
 - **GUI host or VM**: install/link CLI, tmux config, and Ghostty config/themes.
 - Set `PI_ENV_LINK_GHOSTTY=1` to force Ghostty linking when detection is wrong.
 
-## Required
+## Required for portable fallback
 
 | Tool | macOS | Linux | Why |
 | --- | --- | --- | --- |
