@@ -15,6 +15,7 @@
   ],
   "pi": {
     "extensions": [
+      ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
       ".pi/extensions/jit-catch",
       ".pi/extensions/playwright-client",

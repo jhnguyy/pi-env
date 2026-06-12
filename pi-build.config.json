@@ -1,6 +1,7 @@
 {
   "extensionsDir": ".pi/extensions",
   "extensions": [
+    "web-context",
     "dev-tools",
     "jit-catch",
     "playwright-client",
