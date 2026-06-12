@@ -1,0 +1,13 @@
+{
+  "name": "@pi-env/web-context",
+  "type": "module",
+  "private": true,
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}
