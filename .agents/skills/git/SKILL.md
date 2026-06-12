@@ -1,6 +1,6 @@
 ---
 name: git
-description: "Git hygiene rules for any repository: keep the base tree updated and do all branch work in dedicated git worktrees."
+description: "Git hygiene and pull request rules for any repository: keep the base tree updated, do branch work in dedicated git worktrees, and write reviewer-friendly PR descriptions."
 ---
 
 # Git Hygiene
@@ -17,3 +17,20 @@ Use before starting non-trivial work in any Git repository, creating or switchin
 - Follow project-specific branch naming, test, merge, push, and PR conventions. If the repository uses remote PR-only merges, do not perform a local merge.
 - For new work, sync the base tree first, then create a branch worktree. For existing work, find or attach the existing branch worktree. After merge or PR completion, verify the branch is no longer needed, then remove the worktree and delete the local branch (`git worktree remove`, `git branch -d`).
 - For Git syntax details, use `git help worktree` rather than expanding this skill into a Git tutorial.
+
+## Pull Requests
+
+When preparing or creating a pull request:
+
+- First explore the repository for pull request conventions instead of assuming a format. Look for project-specific PR guidance and templates such as `pull_request_template`, `.github/PULL_REQUEST_TEMPLATE*`, Forgejo/Gitea/GitHub templates, contributing docs, or nearby repository-specific instructions.
+- Follow any discovered PR template or project convention. If no template exists, create a reviewer-friendly description tailored to the actual change.
+- Do not duplicate qualitative information already available in the Files Changed tab: avoid file-by-file summaries, mechanical diff narration, or listing every touched path.
+- Prefer behavioral and decision-oriented information:
+  - what behavior changes for users, operators, agents, or maintainers
+  - why the change was made
+  - important decisions and tradeoffs
+  - constraints considered
+  - validation performed
+  - risks, follow-ups, or reviewer attention areas
+- The PR description should equip a reviewer to approve or reject the change without reverse-engineering intent from the diff.
+- If the repository uses PR-only merges, do not merge locally unless explicitly instructed.
