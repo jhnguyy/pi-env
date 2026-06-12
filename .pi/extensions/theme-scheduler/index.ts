@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readSettingsBlock, type SettingsBlock } from "../_shared/settings";
 
@@ -34,21 +31,6 @@ export function mergeConfig(base: ThemeSchedulerConfig, raw: SettingsBlock | nul
 
 export function loadConfig(cwd: string): ThemeSchedulerConfig {
   return mergeConfig(DEFAULT_CONFIG, readSettingsBlock("themeScheduler", cwd));
-}
-
-export function findThemesDir(startDir = dirname(fileURLToPath(import.meta.url))): string | null {
-  let dir = startDir;
-
-  while (true) {
-    const candidate = join(dir, "themes");
-    if (existsSync(join(candidate, "gruvbox-dark.json")) && existsSync(join(candidate, "gruvbox-light.json"))) {
-      return candidate;
-    }
-
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
 }
 
 export function parseTimeOfDay(value: string): number | null {
@@ -120,11 +102,6 @@ export default function (pi: ExtensionAPI) {
       timeoutId = null;
     }
   };
-
-  pi.on("resources_discover", () => {
-    const themesDir = findThemesDir();
-    return themesDir ? { themePaths: [themesDir] } : undefined;
-  });
 
   pi.on("session_start", (_event, ctx: any) => {
     clearScheduler();
