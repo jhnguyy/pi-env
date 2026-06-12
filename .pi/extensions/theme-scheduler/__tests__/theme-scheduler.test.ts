@@ -1,8 +1,5 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, findThemesDir, getNextTransitionDelayMs, isWithinWindow, mergeConfig, parseTimeOfDay, selectTheme, setScheduledTheme, type ThemeSchedulerConfig } from "../index";
+import { DEFAULT_CONFIG, getNextTransitionDelayMs, isWithinWindow, mergeConfig, parseTimeOfDay, selectTheme, setScheduledTheme, type ThemeSchedulerConfig } from "../index";
 
 const baseConfig: ThemeSchedulerConfig = {
   enabled: true,
@@ -13,6 +10,19 @@ const baseConfig: ThemeSchedulerConfig = {
 };
 
 describe("theme-scheduler", () => {
+  it("leaves theme resource registration to the package manifest", async () => {
+    const events: string[] = [];
+    const { default: registerThemeScheduler } = await import("../index");
+
+    registerThemeScheduler({
+      on: (event: string) => {
+        events.push(event);
+      },
+    } as any);
+
+    expect(events).not.toContain("resources_discover");
+  });
+
   it("parses 1000 and 10:00 style time strings", () => {
     expect(parseTimeOfDay("1000")).toBe(600);
     expect(parseTimeOfDay("10:00")).toBe(600);
@@ -51,18 +61,6 @@ describe("theme-scheduler", () => {
 
   it("is enabled by default so startup applies a theme without settings edits", () => {
     expect(mergeConfig(DEFAULT_CONFIG, {}).enabled).toBe(true);
-  });
-
-  it("finds bundled themes from nested extension paths", () => {
-    const root = mkdtempSync(join(tmpdir(), "theme-scheduler-"));
-    const nested = join(root, ".pi", "extensions", "theme-scheduler", "dist");
-    const themes = join(root, "themes");
-    mkdirSync(nested, { recursive: true });
-    mkdirSync(themes, { recursive: true });
-    writeFileSync(join(themes, "gruvbox-dark.json"), "{}");
-    writeFileSync(join(themes, "gruvbox-light.json"), "{}");
-
-    expect(findThemesDir(nested)).toBe(themes);
   });
 
   it("uses pi's named theme path so scheduled switches apply locally and persist globally", () => {
