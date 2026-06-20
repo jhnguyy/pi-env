@@ -42,7 +42,7 @@ setup_detect_environment() {
 setup_check_prerequisites() {
   section "Prerequisites"
 
-  check_required_commands git node npm
+  check_required_commands git node bun
   setup_detect_environment
 
   echo "  —  platform: $os_label"

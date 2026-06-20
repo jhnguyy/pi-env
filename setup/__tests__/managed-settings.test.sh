@@ -15,6 +15,11 @@ json_get() {
   node -e "const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const value = $expr; console.log(Array.isArray(value) ? JSON.stringify(value) : value);" "$file"
 }
 
+apply_settings() {
+  local settings="$1" repo="$2"
+  node "$SCRIPT" "$settings" "$MANAGED" "$repo"
+}
+
 test_applies_managed_settings_and_package_once() {
   local tmp settings repo first second
   tmp="$(mktemp -d)"
@@ -29,8 +34,8 @@ test_applies_managed_settings_and_package_once() {
 }
 JSON
 
-  first=$(node "$SCRIPT" "$settings" "$MANAGED" "$repo")
-  second=$(node "$SCRIPT" "$settings" "$MANAGED" "$repo")
+  first=$(apply_settings "$settings" "$repo")
+  second=$(apply_settings "$settings" "$repo")
 
   [ "$first" = "updated" ] || fail "first run should update settings, got $first"
   [ "$second" = "unchanged" ] || fail "second run should be unchanged, got $second"
@@ -63,7 +68,7 @@ test_preserves_unmanaged_retry_settings() {
 }
 JSON
 
-  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+  apply_settings "$settings" "$repo" >/dev/null
 
   [ "$(json_get "$settings" 's.retry.customLocalSetting')" = "keep-me" ] || fail "unmanaged retry key should be preserved"
   [ "$(json_get "$settings" 's.retry.provider.customProviderSetting')" = "keep-me-too" ] || fail "unmanaged provider key should be preserved"
@@ -85,7 +90,7 @@ test_preserves_enabled_pi_update() {
 }
 JSON
 
-  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+  apply_settings "$settings" "$repo" >/dev/null
 
   [ "$(json_get "$settings" 's.piUpdate.enabled')" = "true" ] || fail "piUpdate.enabled=true should be preserved"
 
@@ -99,7 +104,7 @@ test_applies_to_missing_settings_file() {
   repo="$tmp/repo"
   mkdir -p "$repo"
 
-  result=$(node "$SCRIPT" "$settings" "$MANAGED" "$repo")
+  result=$(apply_settings "$settings" "$repo")
 
   [ "$result" = "created" ] || fail "missing settings should be created, got $result"
   [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "created settings should include managed timeout"
@@ -127,7 +132,7 @@ test_migrates_theme_scheduler_to_pi_auto_theme() {
 }
 JSON
 
-  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+  apply_settings "$settings" "$repo" >/dev/null
 
   [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "themeScheduler should migrate to pi automatic theme"
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "themeScheduler")')" = "false" ] || fail "themeScheduler should be removed"
@@ -152,10 +157,37 @@ test_preserves_existing_theme_during_scheduler_cleanup() {
 }
 JSON
 
-  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+  apply_settings "$settings" "$repo" >/dev/null
 
   [ "$(json_get "$settings" 's.theme')" = "dark" ] || fail "existing theme should be preserved"
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "themeScheduler")')" = "false" ] || fail "themeScheduler should be removed even when preserving theme"
+
+  rm -rf "$tmp"
+}
+
+test_migrates_only_default_npm_command_to_bun() {
+  local tmp settings custom_settings repo
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  custom_settings="$tmp/custom-settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  cat > "$settings" <<'JSON'
+{
+  "npmCommand": ["npm"]
+}
+JSON
+  cat > "$custom_settings" <<'JSON'
+{
+  "npmCommand": ["npm", "--offline"]
+}
+JSON
+
+  apply_settings "$settings" "$repo" >/dev/null
+  apply_settings "$custom_settings" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.npmCommand')" = '["bun"]' ] || fail "default npmCommand should migrate to bun"
+  [ "$(json_get "$custom_settings" 's.npmCommand')" = '["npm","--offline"]' ] || fail "custom npmCommand should be preserved"
 
   rm -rf "$tmp"
 }
@@ -166,5 +198,6 @@ test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 test_migrates_theme_scheduler_to_pi_auto_theme
 test_preserves_existing_theme_during_scheduler_cleanup
+test_migrates_only_default_npm_command_to_bun
 
 echo "managed settings tests passed"

@@ -131,6 +131,6 @@ setup_print_done() {
   echo "  Setup mode:     ${PI_ENV_SETUP_MODE:-portable}"
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
   echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
-  echo "  Install check:  cd $REPO && npm run verify:install"
-  echo "  Merge check:    cd $REPO && npm run verify"
+  echo "  Install check:  cd $REPO && bun run verify:install"
+  echo "  Merge check:    cd $REPO && bun run verify"
 }

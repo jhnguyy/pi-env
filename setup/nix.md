@@ -2,7 +2,7 @@
 
 Nix is the primary path for reproducible `pi-env` setup. The portable shell setup remains as a fallback for machines where Nix is unavailable.
 
-With Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies the baseline toolchain, and setup uses the repo `package-lock.json` for JavaScript dependencies.
+With Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies the baseline toolchain, and setup uses the repo `bun.lock` for JavaScript dependencies.
 
 The flake supports Linux and macOS on `x86_64` and `aarch64`:
 
@@ -39,7 +39,8 @@ nix profile install .#toolchain
 The dev shell and installable `.#toolchain` package include:
 
 - `git`
-- Node.js 22 / `npm`
+- Node.js 22
+- Bun
 - `neovim`
 - `tmux`
 - `gh`
@@ -50,8 +51,8 @@ The dev shell and installable `.#toolchain` package include:
 Handled deterministically:
 
 - Nix pins the host toolchain through `flake.lock`.
-- `npm ci` pins repo JavaScript dependencies through `package-lock.json`.
-- The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules`; setup no longer performs a second independent npm install for the CLI.
+- `bun install --frozen-lockfile` pins repo JavaScript dependencies through `bun.lock`.
+- The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules` and executes it with Node; setup no longer performs a second independent package install for the CLI.
 - Managed pi settings are merged from `setup/managed-settings.json` without overwriting machine-local settings.
 
 Intentionally mutable/local:
@@ -93,14 +94,14 @@ HOME=$(mktemp -d) nix run .#setup
 HOME=$(mktemp -d) PI_ENV_REPO_URL=file://$PWD nix run .#bootstrap -- /tmp/pi-env-bootstrap-test
 
 # Validate setup shell helpers without Nix.
-npm run test:setup
+bun run test:setup
 
-# Validate pi-env install readiness after setup/npm install.
+# Validate pi-env install readiness after setup/bun install.
 nix run .#verify-install
-# equivalent: npm run verify:install
+# equivalent: bun run verify:install
 
 # Full pre-merge gate for code changes, including setup shell tests.
-npm run verify
+bun run verify
 ```
 
 ## Optional Home Manager module
@@ -136,10 +137,10 @@ These pieces remain scripts because they operate on mutable user state or repo-l
 | Script | Why it remains |
 | --- | --- |
 | `setup.sh`, `setup/main.sh` | Portable entrypoint and Nix app target. |
-| `setup/install.sh` | Runs `npm ci` and writes the user-local `pi` wrapper into `~/.local/bin`. |
+| `setup/install.sh` | Runs `bun install --frozen-lockfile` and writes the user-local `pi` wrapper into `~/.local/bin`. |
 | `setup/configure.sh` | Registers the pi package, merges managed settings, bootstraps agent context, and installs repo hooks. |
 | `setup/apply-managed-settings.mjs` | Safely merges managed pi settings without overwriting machine-local state. |
 | `scripts/build-extensions.*`, `scripts/verify-install.mjs` | Repo build and verification logic. |
-| `scripts/restart-lsp-daemon.sh` | npm postinstall runtime hygiene. |
+| `scripts/restart-lsp-daemon.sh` | Bun postinstall runtime hygiene. |
 
-The old non-deterministic standalone pi CLI npm install has been removed. The main remaining non-Nix operation is `npm ci`, which is deterministic through `package-lock.json` but still fetches npm artifacts unless cached.
+The old non-deterministic standalone pi CLI npm install has been removed. The main remaining non-Nix operation is `bun install --frozen-lockfile`, which is deterministic through `bun.lock` but still fetches npm artifacts unless cached.
