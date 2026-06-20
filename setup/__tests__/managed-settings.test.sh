@@ -109,9 +109,62 @@ test_applies_to_missing_settings_file() {
   rm -rf "$tmp"
 }
 
+test_migrates_theme_scheduler_to_pi_auto_theme() {
+  local tmp settings repo
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  cat > "$settings" <<'JSON'
+{
+  "themeScheduler": {
+    "enabled": true,
+    "lightTheme": "gruvbox-light",
+    "darkTheme": "gruvbox-dark",
+    "lightStart": "09:00",
+    "lightEnd": "16:00"
+  }
+}
+JSON
+
+  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "themeScheduler should migrate to pi automatic theme"
+  [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "themeScheduler")')" = "false" ] || fail "themeScheduler should be removed"
+
+  rm -rf "$tmp"
+}
+
+test_preserves_existing_theme_during_scheduler_cleanup() {
+  local tmp settings repo
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  cat > "$settings" <<'JSON'
+{
+  "theme": "dark",
+  "themeScheduler": {
+    "enabled": true,
+    "lightTheme": "gruvbox-light",
+    "darkTheme": "gruvbox-dark"
+  }
+}
+JSON
+
+  node "$SCRIPT" "$settings" "$MANAGED" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.theme')" = "dark" ] || fail "existing theme should be preserved"
+  [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "themeScheduler")')" = "false" ] || fail "themeScheduler should be removed even when preserving theme"
+
+  rm -rf "$tmp"
+}
+
 test_applies_managed_settings_and_package_once
 test_preserves_unmanaged_retry_settings
 test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
+test_migrates_theme_scheduler_to_pi_auto_theme
+test_preserves_existing_theme_during_scheduler_cleanup
 
 echo "managed settings tests passed"
