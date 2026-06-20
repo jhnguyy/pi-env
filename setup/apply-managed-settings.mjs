@@ -145,11 +145,27 @@ function ensurePiUpdateDefault(settings) {
   }
 }
 
+function migrateThemeScheduler(settings) {
+  if (!isPlainObject(settings.themeScheduler)) return;
+
+  const scheduler = settings.themeScheduler;
+  const enabled = scheduler.enabled !== false;
+  const lightTheme = typeof scheduler.lightTheme === "string" && scheduler.lightTheme.trim() ? scheduler.lightTheme.trim() : "gruvbox-light";
+  const darkTheme = typeof scheduler.darkTheme === "string" && scheduler.darkTheme.trim() ? scheduler.darkTheme.trim() : "gruvbox-dark";
+
+  if (enabled && typeof settings.theme !== "string") {
+    settings.theme = `${lightTheme}/${darkTheme}`;
+  }
+
+  delete settings.themeScheduler;
+}
+
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
 const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
 
 mergeManaged(settings, managed);
+migrateThemeScheduler(settings);
 ensurePiUpdateDefault(settings);
 
 if (!Array.isArray(settings.packages)) {

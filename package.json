@@ -24,7 +24,6 @@
       ".pi/extensions/security",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
-      ".pi/extensions/theme-scheduler",
       ".pi/extensions/work-tracker"
     ],
     "skills": [
@@ -60,10 +59,10 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.79.3",
-    "@earendil-works/pi-ai": "0.79.3",
-    "@earendil-works/pi-coding-agent": "0.79.3",
-    "@earendil-works/pi-tui": "0.79.3",
+    "@earendil-works/pi-agent-core": "0.79.8",
+    "@earendil-works/pi-ai": "0.79.8",
+    "@earendil-works/pi-coding-agent": "0.79.8",
+    "@earendil-works/pi-tui": "0.79.8",
     "@types/node": "^22.15.30",
     "esbuild": "^0.25.5",
     "typebox": "^1.1.24",

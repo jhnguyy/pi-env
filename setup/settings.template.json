@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to ~/.pi/agent/settings.json, then run setup.sh to register pi-env as a package. Defaults favor flat-rate OpenAI Codex/Copilot usage; Anthropic models are available for tasks where they outperform. Customize enabledModels, permissionLevel, themeScheduler, and local model entries per machine.",
+  "_comment": "Copy to ~/.pi/agent/settings.json, then run setup.sh to register pi-env as a package. Defaults favor flat-rate OpenAI Codex/Copilot usage; Anthropic models are available for tasks where they outperform. Customize enabledModels, permissionLevel, theme, and local model entries per machine.",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.4-mini",
   "defaultThinkingLevel": "medium",
@@ -31,13 +31,7 @@
   "localExtensions": [],
   "packages": [],
   "permissionLevel": "none",
-  "themeScheduler": {
-    "enabled": true,
-    "lightTheme": "gruvbox-light",
-    "darkTheme": "gruvbox-dark",
-    "lightStart": "09:00",
-    "lightEnd": "16:00"
-  },
+  "theme": "gruvbox-light/gruvbox-dark",
   "piUpdate": {
     "enabled": false
   },
