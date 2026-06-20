@@ -20,6 +20,7 @@
         pkgs.git
         pkgs.gh
         (nodeFor pkgs)
+        pkgs.bun
         pkgs.neovim
         pkgs.ripgrep
         pkgs.tmux
@@ -75,7 +76,7 @@
             echo "pi-env verify app must be run from a pi-env checkout." >&2
             exit 2
           fi
-          exec npm run verify:install
+          exec bun run verify:install
         '';
       };
     in
@@ -121,6 +122,7 @@
           setup-tests = pkgs.runCommand "pi-env-setup-tests" {
             nativeBuildInputs = [
               (nodeFor pkgs)
+              pkgs.bun
               pkgs.bash
               pkgs.coreutils
               pkgs.gnugrep
@@ -150,7 +152,7 @@
             shellHook = ''
               echo "pi-env dev shell"
               echo "  node: $(node --version 2>/dev/null || echo missing)"
-              echo "  npm:  $(npm --version 2>/dev/null || echo missing)"
+              echo "  bun:  $(bun --version 2>/dev/null || echo missing)"
               echo "Run ./setup.sh to install/update the user-local pi CLI and register this package."
             '';
           };

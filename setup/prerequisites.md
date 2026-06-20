@@ -17,8 +17,8 @@ Context rules:
 | Tool | macOS | Linux | Why |
 | --- | --- | --- | --- |
 | git | Xcode Command Line Tools or `brew install git` | `apt install git`, `dnf install git`, or equivalent | clone/update this repo |
-| node >= 22.19 | `brew install node@22`, `fnm`, `mise`, `nvm`, or `nix develop` | Nix `nodejs_22`, NodeSource, distro package if current enough, `fnm`, `mise`, or `nvm` | pi and extension tooling |
-| npm >= 10 | included with Node 22 | included with Node 22 / Nix `nodejs_22` | dependency install |
+| node >= 22.19 | `brew install node@22`, `fnm`, `mise`, `nvm`, or `nix develop` | Nix `nodejs_22`, NodeSource, distro package if current enough, `fnm`, `mise`, or `nvm` | pi runtime and extension tooling |
+| bun >= 1.3 | `brew install oven-sh/bun/bun`, `curl -fsSL https://bun.sh/install \| bash`, or `nix develop` | Nix `bun`, distro package if current enough, or upstream installer | dependency install, build, and test script runner |
 
 ## Recommended daily-driver tools
 
@@ -31,4 +31,4 @@ Context rules:
 | gh | `brew install gh` | GitHub CLI package for your distro | PR/release workflow |
 | ripgrep | `brew install ripgrep` | `apt install ripgrep`, `dnf install ripgrep`, Nix `ripgrep`, or equivalent | fast text searches |
 
-The repo flake's dev shell and installable `.#toolchain` package include `git`, Node.js 22, `npm`, `neovim`, `tmux`, `gh`, and `ripgrep`. GUI tools such as Ghostty and fonts are intentionally opt-in through host package management or the Home Manager module because they vary more by machine and OS.
+The repo flake's dev shell and installable `.#toolchain` package include `git`, Node.js 22, Bun, `neovim`, `tmux`, `gh`, and `ripgrep`. GUI tools such as Ghostty and fonts are intentionally opt-in through host package management or the Home Manager module because they vary more by machine and OS.

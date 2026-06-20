@@ -5,7 +5,7 @@
 #
 # Orchestration is grouped by domain/tool instead of by individual command:
 #   1. Environment: required software and context-specific recommendations
-#   2. Runtime: repo npm dependencies and the user-local pi CLI install
+#   2. Runtime: repo Bun dependencies and the user-local pi CLI install
 #   3. Pi: settings/package registration, agent context, roles, test utilities
 #   4. Terminal tools: tmux plus Ghostty when running on a GUI host/VM
 #   5. Repo tools: git hooks

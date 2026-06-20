@@ -160,12 +160,19 @@ function migrateThemeScheduler(settings) {
   delete settings.themeScheduler;
 }
 
+function migrateDefaultNpmCommand(settings) {
+  if (Array.isArray(settings.npmCommand) && settings.npmCommand.length === 1 && settings.npmCommand[0] === "npm") {
+    settings.npmCommand = ["bun"];
+  }
+}
+
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
 const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
 
 mergeManaged(settings, managed);
 migrateThemeScheduler(settings);
+migrateDefaultNpmCommand(settings);
 ensurePiUpdateDefault(settings);
 
 if (!Array.isArray(settings.packages)) {

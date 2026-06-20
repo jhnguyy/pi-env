@@ -3,11 +3,11 @@
 
 setup_install_dependencies() {
   section "Dependencies"
-  echo "  —  installing repo dependencies, including optional native packages"
-  if ! (cd "$REPO" && npm ci --no-audit --include=dev --include=optional); then
-    echo "  —  npm ci failed; removing node_modules and retrying once."
+  echo "  —  installing repo dependencies with bun"
+  if ! (cd "$REPO" && bun install --frozen-lockfile); then
+    echo "  —  bun install failed; removing node_modules and retrying once."
     rm -rf "$REPO/node_modules"
-    (cd "$REPO" && npm ci --no-audit --include=dev --include=optional)
+    (cd "$REPO" && bun install --frozen-lockfile)
   fi
   ok "node_modules up to date"
 }
