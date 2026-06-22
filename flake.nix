@@ -21,6 +21,11 @@
         pkgs.gh
         (nodeFor pkgs)
         pkgs.bun
+        pkgs.coreutils
+        pkgs.findutils
+        pkgs.gawk
+        pkgs.gnugrep
+        pkgs.gnused
         pkgs.neovim
         pkgs.ripgrep
         pkgs.tmux
@@ -125,7 +130,10 @@
               pkgs.bun
               pkgs.bash
               pkgs.coreutils
+              pkgs.findutils
+              pkgs.gawk
               pkgs.gnugrep
+              pkgs.gnused
             ];
           } ''
             cp -R ${self} source

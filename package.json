@@ -45,6 +45,7 @@
   "scripts": {
     "check:node": "node -e \"const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error('Node.js >= 22.19 is required; found ' + process.version); process.exit(1); }\"",
     "build": "node scripts/build-extensions.mjs",
+    "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
     "test": "bun run test:unit",
     "test:unit": "vitest run",
     "test:setup": "bash setup/__tests__/path-profile.test.sh && bash setup/__tests__/managed-settings.test.sh && bash setup/__tests__/nix-managed-config.test.sh && bash setup/__tests__/setup-options.test.sh && bash setup/__tests__/pi-cli-wrapper.test.sh",

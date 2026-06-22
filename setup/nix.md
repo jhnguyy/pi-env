@@ -36,15 +36,7 @@ nix profile install .#toolchain
 
 ## Toolchain
 
-The dev shell and installable `.#toolchain` package include:
-
-- `git`
-- Node.js 22
-- Bun
-- `neovim`
-- `tmux`
-- `gh`
-- `ripgrep`
+The flake's `toolchainPackages` is the source of truth for the dev shell, installable `.#toolchain` package, setup app runtime, bootstrap app runtime, and Nix setup checks.
 
 ## Deterministic boundaries
 
@@ -82,28 +74,7 @@ Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `
 
 ## Validation
 
-Use layered validation depending on what changed:
-
-```bash
-# Validate Nix outputs and setup shell tests.
-nix flake check
-
-# Validate the Nix-backed setup path from a checkout.
-HOME=$(mktemp -d) nix run .#setup
-
-# Validate first-run clone + setup. Override URL for branch/local testing.
-HOME=$(mktemp -d) PI_ENV_REPO_URL=file://$PWD nix run .#bootstrap -- /tmp/pi-env-bootstrap-test
-
-# Validate setup shell helpers without Nix.
-bun run test:setup
-
-# Validate pi-env install readiness after setup/bun install.
-nix run .#verify-install
-# equivalent: bun run verify:install
-
-# Full pre-merge gate for code changes, including setup shell tests.
-bun run verify
-```
+Use the flake apps/checks for Nix-backed validation and `package.json` scripts for Bun-backed validation. Keep command details in those sources rather than duplicating them here.
 
 ## Optional Home Manager module
 
