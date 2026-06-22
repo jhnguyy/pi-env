@@ -25,7 +25,7 @@ From an existing checkout, run setup with the repo toolchain:
 nix run .#setup
 ```
 
-For a persistent user-profile tool install, run `nix profile install .#toolchain` first, then `./setup.sh --nix-managed`. See [`setup/nix.md`](setup/nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, and the intended Nix split: Nix owns host tools; `pi-env` owns portable pi configuration and mutable setup.
+For a persistent user-profile tool install, run `nix profile install .#toolchain` first, then `./setup.sh --nix-managed`. See [`setup/nix.md`](setup/nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, and the intended Nix split: Nix owns host tools and any higher-priority wrappers/config; `pi-env` owns repo hydration and mutable setup.
 
 `setup.sh` is a thin entrypoint into `setup/main.sh`; supporting setup modules and assets live under `setup/`. `setup/context.sh` receives the setup directory from the entrypoint and derives repo paths, target paths, and environment decisions once for the other modules. Setup orchestration is grouped by domain: environment checks, runtime installs, Pi config, terminal tools, and repo tools.
 
@@ -47,7 +47,7 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 
 ## Pi CLI install
 
-`setup.sh` runs deterministic `bun install --frozen-lockfile` from `bun.lock` and writes `~/.local/bin/pi`. The wrapper points at the locked `@earendil-works/pi-coding-agent` package in this checkout's `node_modules` and executes it with Node. If `~/.local/bin` is not already on `PATH`, portable setup idempotently adds it to existing `~/.zshrc`, `~/.bashrc`, and/or `~/.profile` files, falling back to creating `~/.profile` when no shell profile exists. Nix-managed setup skips profile edits because the flake/Home Manager path owns PATH.
+`setup.sh` runs deterministic `bun install --frozen-lockfile` from `bun.lock` and verifies the locked `@earendil-works/pi-coding-agent` package in this checkout's `node_modules`. Portable setup writes `~/.local/bin/pi` and points it at that package. When `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup leaves the wrapper untouched so a Nix-managed or otherwise higher-priority wrapper is not overwritten. If `~/.local/bin` is not already on `PATH`, portable setup idempotently adds it to existing `~/.zshrc`, `~/.bashrc`, and/or `~/.profile` files, falling back to creating `~/.profile` when no shell profile exists. Nix-managed setup skips profile edits because Nix owns PATH.
 
 ## Test and verification commands
 

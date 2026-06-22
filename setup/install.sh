@@ -16,25 +16,35 @@ setup_install_pi_cli() {
   section "Pi CLI"
 
   PI_VERSION=$(cd "$REPO" && node -e "const pkg = JSON.parse(require('fs').readFileSync('./package.json', 'utf8')); console.log(pkg.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
-  mkdir -p "$PI_BIN_DIR"
-
   PI_PACKAGE_DIR="$REPO/node_modules/@earendil-works/pi-coding-agent"
   PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
   [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
   [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
 
+  if [ "${PI_ENV_CLI_MANAGED_BY_NIX:-0}" = "1" ]; then
+    ok "pi $PI_VERSION package installed (CLI wrapper managed externally)"
+    return
+  fi
+
+  mkdir -p "$PI_BIN_DIR"
   PI_PACKAGE_DIR_LITERAL=$(printf '%s' "$PI_PACKAGE_DIR" | sed "s/'/'\\''/g")
   cat > "$PI_BIN_DIR/pi" <<EOF
 #!/usr/bin/env sh
 set -eu
 
 DEFAULT_PI_PACKAGE_DIR='$PI_PACKAGE_DIR_LITERAL'
-PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-\$DEFAULT_PI_PACKAGE_DIR}"
+REQUESTED_PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-}"
+PI_PACKAGE_DIR="\$DEFAULT_PI_PACKAGE_DIR"
+
+if [ -n "\$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "\$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "\$REQUESTED_PI_PACKAGE_DIR/dist/cli.js" ]; then
+  PI_PACKAGE_DIR="\$REQUESTED_PI_PACKAGE_DIR"
+fi
+
 PI_ENTRY="\$PI_PACKAGE_DIR/dist/cli.js"
 
 if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at \$PI_PACKAGE_DIR" >&2
-  echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to the pi package directory." >&2
+  echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
 fi
 
