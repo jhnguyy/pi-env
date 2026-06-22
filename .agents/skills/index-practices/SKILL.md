@@ -23,7 +23,7 @@ Lead with the most distinctive fact. File names, format names, numbers, decision
 
 ## Format
 
-Pipe-delimited, one line per group. Used in `.pi/AGENTS.md` and similar structural indices.
+Pipe-delimited, one line per group. Use for structural indices where the file is meant to be a navigational map.
 
 ```
 [Domain Index]|context line

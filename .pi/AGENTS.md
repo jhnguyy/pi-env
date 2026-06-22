@@ -4,11 +4,7 @@ Dotfiles repo — registered as a pi package via `settings.json` `packages` entr
 
 **Commands:** `npm test` · `E2E=1 npm run test:e2e` · `npm run build` · `./setup.sh`
 
-[pi-env Index]|IMPORTANT: Prefer retrieval-led reasoning — read source files before modifying extensions or skills
-|.pi/agents:{scout(structural recon),gatherer(question answering with citations),workspace-init(intent-driven context assembly)}
-|.agents/skills:{jit-catch,orchestration,skill-builder,index-practices}
-|.agents/skills/reference:{handoff.md,distillation.md,index-generator.md — manually loaded, not auto-discovered}
-|setup:{settings.template.json,models.template.json}
+[pi-env Index]|IMPORTANT: Prefer retrieval-led reasoning.
 
 Root `AGENTS.md` is bootstrapped to `~/.pi/agent/AGENTS.md` on first setup — keep it principles-only, no project content.
 

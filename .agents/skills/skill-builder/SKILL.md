@@ -7,7 +7,7 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 
 ## Conventions
 
-**Reference skills** — some skills are manually loaded, not auto-discovered. They live in `~/.agents/skills/reference/` as plain `.md` files. Before scaffolding, confirm whether the skill should be a reference skill or a full auto-discovered skill. Current reference skills: `handoff`, `distillation`, `index-generator`.
+**Reference skills** — lightweight skills that live in `~/.agents/skills/reference/` as plain `.md` files.
 
 **Auto-discovered skills** — directories with `SKILL.md` in `~/.agents/skills/` (global) or `.pi/skills/` (project). Names: lowercase, a-z, 0-9, single hyphens, 1–64 chars, must match directory name.
 
