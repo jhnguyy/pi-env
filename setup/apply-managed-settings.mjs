@@ -3,6 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const [settingsFile, managedSettingsFile, repoPath] = process.argv.slice(2);
+const DEFAULT_LIGHT_THEME = "gruvbox-light";
+const DEFAULT_DARK_THEME = "gruvbox-dark";
+const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
 
 if (!settingsFile || !managedSettingsFile || !repoPath) {
   console.error("usage: apply-managed-settings.mjs <settings-file> <managed-settings-file> <repo-path>");
@@ -145,19 +148,10 @@ function ensurePiUpdateDefault(settings) {
   }
 }
 
-function migrateThemeScheduler(settings) {
-  if (!isPlainObject(settings.themeScheduler)) return;
-
-  const scheduler = settings.themeScheduler;
-  const enabled = scheduler.enabled !== false;
-  const lightTheme = typeof scheduler.lightTheme === "string" && scheduler.lightTheme.trim() ? scheduler.lightTheme.trim() : "gruvbox-light";
-  const darkTheme = typeof scheduler.darkTheme === "string" && scheduler.darkTheme.trim() ? scheduler.darkTheme.trim() : "gruvbox-dark";
-
-  if (enabled && typeof settings.theme !== "string") {
-    settings.theme = `${lightTheme}/${darkTheme}`;
+function ensureDefaultTheme(settings) {
+  if (typeof settings.theme !== "string" || settings.theme.trim() === "") {
+    settings.theme = DEFAULT_AUTO_THEME;
   }
-
-  delete settings.themeScheduler;
 }
 
 function migrateDefaultNpmCommand(settings) {
@@ -171,7 +165,7 @@ const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
 
 mergeManaged(settings, managed);
-migrateThemeScheduler(settings);
+ensureDefaultTheme(settings);
 migrateDefaultNpmCommand(settings);
 ensurePiUpdateDefault(settings);
 
