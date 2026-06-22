@@ -32,7 +32,7 @@ nix profile install .#toolchain
 ./setup.sh --nix-managed
 ```
 
-`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those are handled by Nix/Home Manager when desired.
+`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `bun install`.
 
 ## Toolchain
 
@@ -73,8 +73,9 @@ Intentionally mutable/local:
 ./setup.sh --no-repo-hooks  # skip git hook setup
 ```
 
-The Home Manager module sets `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `./setup.sh` runs skip duplicate PATH/tmux/Ghostty writes. Granular environment flags are also supported:
+Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `./setup.sh` runs skip duplicate PATH/tmux/Ghostty writes. They can also set `PI_ENV_CLI_MANAGED_BY_NIX=1` so setup does not overwrite a Nix-managed `~/.local/bin/pi`. Granular environment flags are supported:
 
+- `PI_ENV_CLI_MANAGED_BY_NIX=1`
 - `PI_ENV_SKIP_PATH_PROFILE=1`
 - `PI_ENV_SKIP_TMUX=1`
 - `PI_ENV_SKIP_GHOSTTY=1`
@@ -137,7 +138,7 @@ These pieces remain scripts because they operate on mutable user state or repo-l
 | Script | Why it remains |
 | --- | --- |
 | `setup.sh`, `setup/main.sh` | Portable entrypoint and Nix app target. |
-| `setup/install.sh` | Runs `bun install --frozen-lockfile` and writes the user-local `pi` wrapper into `~/.local/bin`. |
+| `setup/install.sh` | Runs `bun install --frozen-lockfile`, verifies the locked pi package, and writes the user-local `pi` wrapper only when a higher-priority Nix config is not managing it. |
 | `setup/configure.sh` | Registers the pi package, merges managed settings, bootstraps agent context, and installs repo hooks. |
 | `setup/apply-managed-settings.mjs` | Safely merges managed pi settings without overwriting machine-local state. |
 | `scripts/build-extensions.*`, `scripts/verify-install.mjs` | Repo build and verification logic. |

@@ -12,14 +12,9 @@ fail() {
   exit 1
 }
 
-test_pi_cli_wrapper_uses_repo_locked_package() {
-  local tmp old_path
-  tmp="$(mktemp -d)"
-  old_path="$PATH"
-
-  REPO="$tmp/repo"
-  PI_BIN_DIR="$tmp/bin"
-  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+create_stub_repo() {
+  REPO="$1/repo"
+  PI_BIN_DIR="$1/bin"
   mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/dist" "$PI_BIN_DIR"
   cat > "$REPO/package.json" <<'JSON'
 {
@@ -37,6 +32,15 @@ JSON
   cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" <<'JS'
 console.log('stub pi')
 JS
+}
+
+test_pi_cli_wrapper_uses_repo_locked_package() {
+  local tmp old_path
+  tmp="$(mktemp -d)"
+  old_path="$PATH"
+
+  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  create_stub_repo "$tmp"
 
   setup_install_pi_cli >/dev/null
 
@@ -45,12 +49,29 @@ JS
   if grep -qF 'PI_CLI_ROOT' "$PI_BIN_DIR/pi"; then
     fail "wrapper should no longer depend on separate PI_CLI_ROOT npm install"
   fi
+  PI_PACKAGE_DIR="$tmp/missing/@earendil-works/pi-coding-agent" "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "wrapper should ignore stale invalid PI_PACKAGE_DIR and use repo package"
 
   PATH="$old_path"
   unset PI_ENV_CONFIG_MANAGED_BY_NIX
   rm -rf "$tmp"
 }
 
+test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
+  local tmp
+  tmp="$(mktemp -d)"
+
+  PI_ENV_CLI_MANAGED_BY_NIX=1
+  create_stub_repo "$tmp"
+
+  setup_install_pi_cli >/dev/null
+
+  [ ! -e "$PI_BIN_DIR/pi" ] || fail "setup should not write pi wrapper when Nix manages it"
+
+  unset PI_ENV_CLI_MANAGED_BY_NIX
+  rm -rf "$tmp"
+}
+
 test_pi_cli_wrapper_uses_repo_locked_package
+test_pi_cli_wrapper_skips_write_when_managed_by_nix
 
 echo "pi CLI wrapper tests passed"
