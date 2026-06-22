@@ -4,7 +4,7 @@ Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, s
 
 ## Setup
 
-Nix path prerequisite: Nix with flakes enabled. Portable fallback prerequisites: `git`, Node.js ≥ 22.19, and Bun ≥ 1.3. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`; Node remains the runtime for pi while Bun owns dependency install and script execution. See [`setup/prerequisites.md`](setup/prerequisites.md) for macOS/Linux package hints and recommended daily-driver tools.
+Prefer the Nix flake for a reproducible toolchain. Portable fallback setup is still supported; `setup.sh` checks the required commands and reports environment-specific recommendations. See [`setup/prerequisites.md`](setup/prerequisites.md) for the source-of-truth split.
 
 ```bash
 git clone <your-fork> ~/pi-env
@@ -25,13 +25,13 @@ From an existing checkout, run setup with the repo toolchain:
 nix run .#setup
 ```
 
-For a persistent user-profile tool install, run `nix profile install .#toolchain` first, then `./setup.sh --nix-managed`. See [`setup/nix.md`](setup/nix.md) for Linux/macOS support, validation commands, the optional Home Manager module, and the intended Nix split: Nix owns host tools and any higher-priority wrappers/config; `pi-env` owns repo hydration and mutable setup.
+For a persistent user-profile tool install, run `nix profile install .#toolchain` first, then `./setup.sh --nix-managed`. See [`setup/nix.md`](setup/nix.md) for Linux/macOS support, the optional Home Manager module, and the intended Nix split: Nix owns host tools and any higher-priority wrappers/config; `pi-env` owns repo hydration and mutable setup.
 
 `setup.sh` is a thin entrypoint into `setup/main.sh`; supporting setup modules and assets live under `setup/`. `setup/context.sh` receives the setup directory from the entrypoint and derives repo paths, target paths, and environment decisions once for the other modules. Setup orchestration is grouped by domain: environment checks, runtime installs, Pi config, terminal tools, and repo tools.
 
 Setup is safe to re-run after moving between dev environments. It performs clean installs with Bun so native packages such as `esbuild` are selected for the current platform.
 
-Setup does not run the full Vitest suite by default. Routine install and post-merge setup should be cheap and operational: install dependencies, rebuild extensions, and leave the repo ready to use. Run `bun run verify:install` for a cheap setup/readiness check, and run `bun run verify` before merging code changes.
+Setup does not run the full Vitest suite by default. Routine install and post-merge setup stays cheap and operational: install dependencies, rebuild extensions, and leave the repo ready to use. Use `package.json` scripts as the source of truth for verification commands.
 
 `setup/settings.template.json` bootstraps new machines only. Existing machine-specific settings are preserved, but `setup/managed-settings.json` is reapplied on every run for small cross-machine defaults that should stay consistent. Today that managed subset keeps pi's agent-level retry enabled while limiting provider request attempts to 20 seconds with one provider-level retry, so Anthropic stalls fail quickly before pi's visible agent-level retry takes over.
 
@@ -48,13 +48,6 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 ## Pi CLI install
 
 `setup.sh` runs deterministic `bun install --frozen-lockfile` from `bun.lock` and verifies the locked `@earendil-works/pi-coding-agent` package in this checkout's `node_modules`. Portable setup writes `~/.local/bin/pi` and points it at that package. When `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup leaves the wrapper untouched so a Nix-managed or otherwise higher-priority wrapper is not overwritten. If `~/.local/bin` is not already on `PATH`, portable setup idempotently adds it to existing `~/.zshrc`, `~/.bashrc`, and/or `~/.profile` files, falling back to creating `~/.profile` when no shell profile exists. Nix-managed setup skips profile edits because Nix owns PATH.
-
-## Test and verification commands
-
-- `bun run test` / `bun run test:unit` — default unit test suite; E2E tests are excluded for lower noise.
-- `bun run test:e2e` — explicit E2E/integration suite gated by `E2E=1`.
-- `bun run verify:install` — cheap setup readiness check that rebuilds and verifies extension bundles/manifests.
-- `bun run verify` — pre-merge gate: typecheck, build, and unit tests.
 
 ## Themes
 

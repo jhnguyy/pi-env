@@ -1,17 +1,5 @@
 {
   "extensionsDir": ".pi/extensions",
-  "extensions": [
-    "web-context",
-    "dev-tools",
-    "jit-catch",
-    "playwright-client",
-    "pi-update",
-    "ptc",
-    "security",
-    "skill-builder",
-    "subagent",
-    "work-tracker"
-  ],
   "externals": [
     "@earendil-works/pi-coding-agent",
     "@earendil-works/pi-ai",
