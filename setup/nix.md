@@ -19,20 +19,30 @@ Fresh machine with only Nix installed:
 nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env
 ```
 
+The bootstrap app brings `git` from the flake toolchain before cloning, so the host does not need a separate Git install.
+
 Existing checkout:
 
 ```bash
 nix run .#setup
 ```
 
+Equivalent checkout-local convenience command:
+
+```bash
+./setup.sh --use-nix
+```
+
 Persistent user-profile tool install:
 
 ```bash
 nix profile install .#toolchain
+nix run .#setup
+# or, after the profile is active in PATH:
 ./setup.sh --nix-managed
 ```
 
-`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `bun install`.
+`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout and exports `PI_ENV_NODE_BIN` to the flake-provided Node executable. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `bun install`.
 
 ## Toolchain
 
@@ -44,7 +54,7 @@ Handled deterministically:
 
 - Nix pins the host toolchain through `flake.lock`.
 - `bun install --frozen-lockfile` pins repo JavaScript dependencies through `bun.lock`.
-- The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules` and executes it with Node; setup no longer performs a second independent package install for the CLI.
+- The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules` and executes it with the Node selected during setup; setup no longer performs a second independent package install for the CLI.
 - Managed pi settings are merged from `setup/managed-settings.json` without overwriting machine-local settings.
 
 Intentionally mutable/local:
@@ -58,6 +68,7 @@ Intentionally mutable/local:
 ## Setup modes
 
 ```bash
+./setup.sh --use-nix        # re-exec nix run .#setup from a checkout
 ./setup.sh --nix-managed    # Nix/Home Manager owns shell and terminal config
 ./setup.sh --portable       # fallback default for non-Nix hosts
 ./setup.sh --no-terminal    # skip tmux/Ghostty setup
@@ -78,7 +89,8 @@ Use the flake apps/checks for Nix-backed validation and `package.json` scripts f
 
 ## Optional Home Manager module
 
-The flake exposes a Home Manager module for hosts where you want pi-env shell/config pieces declared through Nix while keeping the source config in this repo:
+The flake exposes a Home Manager module for hosts where you want pi-env shell/config pieces declared through Nix while keeping the source config in this repo. In Nix-managed shells, avoid auto-activating generic `nvm` Node builds ahead of the Nix toolchain; if `nvm` is present, source it with `--no-use` and run `nvm use` only intentionally.
+
 
 ```nix
 {
@@ -108,7 +120,7 @@ These pieces remain scripts because they operate on mutable user state or repo-l
 
 | Script | Why it remains |
 | --- | --- |
-| `setup.sh`, `setup/main.sh` | Portable entrypoint and Nix app target. |
+| `setup.sh`, `setup/main.sh` | Portable entrypoint, `--use-nix` convenience re-exec, and Nix app target. |
 | `setup/install.sh` | Runs `bun install --frozen-lockfile`, verifies the locked pi package, and writes the user-local `pi` wrapper only when a higher-priority Nix config is not managing it. |
 | `setup/configure.sh` | Registers the pi package, merges managed settings, bootstraps agent context, and installs repo hooks. |
 | `setup/apply-managed-settings.mjs` | Safely merges managed pi settings without overwriting machine-local state. |

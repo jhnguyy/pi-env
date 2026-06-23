@@ -21,8 +21,9 @@ setup_bootstrap_settings() {
 }
 
 setup_apply_managed_settings() {
-  local result
-  result=$(node "$SETUP_DIR/apply-managed-settings.mjs" "$SETTINGS_FILE" "$MANAGED_SETTINGS_FILE" "$REPO")
+  local node_bin result
+  node_bin=$(resolve_setup_node_bin)
+  result=$("$node_bin" "$SETUP_DIR/apply-managed-settings.mjs" "$SETTINGS_FILE" "$MANAGED_SETTINGS_FILE" "$REPO")
   case "$result" in
     unchanged) ok "managed settings and package registration" ;;
     created) linked "settings.json created with managed settings and package registration" ;;
@@ -53,7 +54,7 @@ setup_configure_pi() {
 }
 
 setup_configure_tmux() {
-  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_TMUX:-0}" = "1" ]; then
+  if setup_external_config_managed || [ "${PI_ENV_SKIP_TMUX:-0}" = "1" ]; then
     skip "tmux config (managed externally)"
     return
   fi
@@ -69,7 +70,7 @@ setup_configure_tmux() {
 }
 
 setup_configure_ghostty() {
-  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_GHOSTTY:-0}" = "1" ]; then
+  if setup_external_config_managed || [ "${PI_ENV_SKIP_GHOSTTY:-0}" = "1" ]; then
     skip "~/.config/ghostty (managed externally)"
     return
   fi

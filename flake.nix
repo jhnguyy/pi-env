@@ -48,6 +48,7 @@
             exit 2
           fi
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
+          export PI_ENV_NODE_BIN="$(command -v node)"
           exec ./setup.sh --nix-managed "$@"
         '';
       };
@@ -70,6 +71,7 @@
 
           cd "$target"
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
+          export PI_ENV_NODE_BIN="$(command -v node)"
           exec ./setup.sh --nix-managed
         '';
       };
@@ -161,7 +163,7 @@
               echo "pi-env dev shell"
               echo "  node: $(node --version 2>/dev/null || echo missing)"
               echo "  bun:  $(bun --version 2>/dev/null || echo missing)"
-              echo "Run ./setup.sh to install/update the user-local pi CLI and register this package."
+              echo "Run nix run .#setup or ./setup.sh --nix-managed to install/update the user-local pi CLI and register this package."
             '';
           };
         });

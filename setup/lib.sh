@@ -18,9 +18,48 @@ section() {
   printf '%s\n' "$underline"
 }
 
+setup_nix_managed() {
+  [ "${PI_ENV_SETUP_MODE:-portable}" = "nix-managed" ] || [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ]
+}
+
+setup_external_config_managed() {
+  setup_nix_managed
+}
+
+setup_cli_managed_externally() {
+  [ "${PI_ENV_CLI_MANAGED_BY_NIX:-0}" = "1" ]
+}
+
+resolve_setup_node_bin() {
+  if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
+    if [ -x "$PI_ENV_NODE_BIN" ]; then
+      printf '%s\n' "$PI_ENV_NODE_BIN"
+      return 0
+    fi
+    echo "  ✗  PI_ENV_NODE_BIN is set but not executable: $PI_ENV_NODE_BIN" >&2
+    return 1
+  fi
+
+  if setup_nix_managed; then
+    if [ -x "$HOME/.nix-profile/bin/node" ]; then
+      printf '%s\n' "$HOME/.nix-profile/bin/node"
+      return 0
+    fi
+    if [ -x /run/current-system/sw/bin/node ]; then
+      printf '%s\n' /run/current-system/sw/bin/node
+      return 0
+    fi
+  fi
+
+  command -v node
+}
+
 require_node() {
-  node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
-    echo "  ✗  Node.js >= 22.19 is required (found: $(node -v 2>/dev/null || echo missing))" >&2
+  local node_bin found
+  node_bin=$(resolve_setup_node_bin) || exit 1
+  "$node_bin" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
+    found=$("$node_bin" -v 2>/dev/null || echo missing)
+    echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin)" >&2
     exit 1
   }
 }

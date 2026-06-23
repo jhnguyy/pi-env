@@ -37,6 +37,25 @@ test_granular_flags() {
   [ "$PI_ENV_SKIP_REPO_HOOKS" = "1" ] || fail "--no-repo-hooks should set skip flag"
 }
 
+test_use_nix_entrypoint_reexecs_nix_setup_app() {
+  local tmp old_path output
+  tmp="$(mktemp -d)"
+  old_path="$PATH"
+  output="$tmp/out"
+  cat > "$tmp/nix" <<'SH'
+#!/usr/bin/env sh
+printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
+SH
+  chmod +x "$tmp/nix"
+
+  PATH="$tmp:$PATH" PI_ENV_TEST_NIX_OUT="$output" "$ROOT/setup.sh" --use-nix --no-terminal
+
+  [ "$(cat "$output")" = "run .#setup -- --no-terminal" ] || fail "--use-nix should re-exec nix run .#setup with remaining args"
+
+  PATH="$old_path"
+  rm -rf "$tmp"
+}
+
 test_later_portable_overrides_nix_managed() {
   reset_setup_env
   setup_parse_args --nix-managed --portable
@@ -47,6 +66,7 @@ test_later_portable_overrides_nix_managed() {
 test_defaults_to_portable
 test_nix_managed_sets_skip_signal
 test_granular_flags
+test_use_nix_entrypoint_reexecs_nix_setup_app
 test_later_portable_overrides_nix_managed
 
 echo "setup option tests passed"
