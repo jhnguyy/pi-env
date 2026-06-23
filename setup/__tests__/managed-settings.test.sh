@@ -10,14 +10,26 @@ fail() {
   exit 1
 }
 
+node_bin() {
+  if [ -x "${PI_ENV_NODE_BIN:-}" ]; then
+    printf '%s\n' "$PI_ENV_NODE_BIN"
+  elif [ -x /bin/node ]; then
+    printf '%s\n' /bin/node
+  else
+    command -v node
+  fi
+}
+
 json_get() {
-  local file="$1" expr="$2"
-  node -e "const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const value = $expr; console.log(Array.isArray(value) ? JSON.stringify(value) : value);" "$file"
+  local file="$1" expr="$2" node
+  node=$(node_bin)
+  "$node" -e "const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const value = $expr; console.log(Array.isArray(value) ? JSON.stringify(value) : value);" "$file"
 }
 
 apply_settings() {
-  local settings="$1" repo="$2"
-  node "$SCRIPT" "$settings" "$MANAGED" "$repo"
+  local settings="$1" repo="$2" node
+  node=$(node_bin)
+  "$node" "$SCRIPT" "$settings" "$MANAGED" "$repo"
 }
 
 test_applies_managed_settings_and_package_once() {

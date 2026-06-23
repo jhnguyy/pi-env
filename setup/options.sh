@@ -29,6 +29,8 @@ setup_parse_args() {
         cat <<'EOF'
 Usage: ./setup.sh [options]
 
+Use ./setup.sh --use-nix to re-exec the recommended Nix setup app.
+
 Options:
   --nix-managed    Assume Nix/Home Manager owns shell and terminal config.
                    Skips PATH profile edits, tmux writes, and Ghostty writes.
@@ -38,6 +40,9 @@ Options:
   --no-path        Skip shell profile PATH edits.
   --no-repo-hooks  Skip repo hook installation.
   -h, --help       Show this help.
+
+Entrypoint-only option:
+  --use-nix        Re-exec nix run .#setup from the repo root.
 EOF
         exit 0
         ;;

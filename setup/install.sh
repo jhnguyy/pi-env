@@ -15,19 +15,21 @@ setup_install_dependencies() {
 setup_install_pi_cli() {
   section "Pi CLI"
 
-  PI_VERSION=$(cd "$REPO" && node -e "const pkg = JSON.parse(require('fs').readFileSync('./package.json', 'utf8')); console.log(pkg.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
+  PI_NODE_BIN=$(resolve_setup_node_bin)
+  PI_VERSION=$(cd "$REPO" && "$PI_NODE_BIN" -e "const pkg = JSON.parse(require('fs').readFileSync('./package.json', 'utf8')); console.log(pkg.devDependencies['@earendil-works/pi-coding-agent'] ?? pkg.dependencies?.['@earendil-works/pi-coding-agent']);" 2>/dev/null)
   PI_PACKAGE_DIR="$REPO/node_modules/@earendil-works/pi-coding-agent"
   PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
   [ -f "$PI_PACKAGE_DIR/package.json" ] || { echo "  ✗  missing pi package after install: $PI_PACKAGE_DIR" >&2; exit 1; }
   [ -f "$PI_ENTRY" ] || { echo "  ✗  missing pi entrypoint after install: $PI_ENTRY" >&2; exit 1; }
 
-  if [ "${PI_ENV_CLI_MANAGED_BY_NIX:-0}" = "1" ]; then
+  if setup_cli_managed_externally; then
     ok "pi $PI_VERSION package installed (CLI wrapper managed externally)"
     return
   fi
 
   mkdir -p "$PI_BIN_DIR"
   PI_PACKAGE_DIR_LITERAL=$(printf '%s' "$PI_PACKAGE_DIR" | sed "s/'/'\\''/g")
+  PI_NODE_BIN_LITERAL=$(printf '%s' "$PI_NODE_BIN" | sed "s/'/'\\''/g")
   cat > "$PI_BIN_DIR/pi" <<EOF
 #!/usr/bin/env sh
 set -eu
@@ -41,6 +43,13 @@ if [ -n "\$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "\$REQUESTED_PI_PACKAGE_DIR/packa
 fi
 
 PI_ENTRY="\$PI_PACKAGE_DIR/dist/cli.js"
+NODE_BIN='$PI_NODE_BIN_LITERAL'
+
+if [ ! -x "\$NODE_BIN" ]; then
+  echo "pi-env: configured Node is not executable: \$NODE_BIN" >&2
+  echo "pi-env: rerun setup through nix run .#setup or set PI_ENV_NODE_BIN before setup." >&2
+  exit 127
+fi
 
 if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at \$PI_PACKAGE_DIR" >&2
@@ -48,11 +57,11 @@ if [ ! -f "\$PI_PACKAGE_DIR/package.json" ] || [ ! -f "\$PI_ENTRY" ]; then
   exit 127
 fi
 
-exec node "\$PI_ENTRY" "\$@"
+exec "\$NODE_BIN" "\$PI_ENTRY" "\$@"
 EOF
   chmod +x "$PI_BIN_DIR/pi"
   ok "pi $PI_VERSION → $PI_BIN_DIR/pi"
-  if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ] || [ "${PI_ENV_SKIP_PATH_PROFILE:-0}" = "1" ]; then
+  if setup_external_config_managed || [ "${PI_ENV_SKIP_PATH_PROFILE:-0}" = "1" ]; then
     skip "shell profile PATH edits (managed externally)"
   elif ! echo "$PATH" | tr ':' '\n' | grep -qxF "$PI_BIN_DIR"; then
     echo "  —  $PI_BIN_DIR is not in PATH yet; updating shell profiles."

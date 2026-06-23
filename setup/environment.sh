@@ -42,11 +42,16 @@ setup_detect_environment() {
 setup_check_prerequisites() {
   section "Prerequisites"
 
-  check_required_commands git node bun
+  check_required_commands git bun
+  ok "node ($(resolve_setup_node_bin))"
   setup_detect_environment
 
   echo "  —  platform: $os_label"
   echo "  —  context: $context_label"
+  if [ "${PI_ENV_SETUP_MODE:-portable}" = "portable" ] && command -v nix >/dev/null 2>&1 && [ -f "$REPO/flake.nix" ]; then
+    echo "  —  Nix detected; recommended reproducible setup is: nix run .#setup"
+    echo "  —  portable ./setup.sh uses the current PATH tools instead"
+  fi
   check_recommended_commands tmux gh rg
 
   if [ "$should_link_ghostty" -eq 1 ]; then
