@@ -57,14 +57,14 @@ for (const dir of listExtensionDirs(extensionsDir)) {
   if (dir.name.startsWith("_") || activeNames.has(dir.name)) continue;
   const entries = readdirSync(dir.absPath);
   if (entries.includes("dist") && !entries.includes("index.ts")) {
-    errors.push(`stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath)} (run \`bun run clean:extensions\`)`);
+    errors.push(`stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath)} (run \`nub run clean:extensions\`)`);
   }
 }
 
 if (errors.length > 0) {
   console.error("Install readiness check failed:");
   for (const error of errors) console.error(`  - ${error}`);
-  console.error("Run `bun run build` and retry `bun run verify:install`.");
+  console.error("Run `nub run build` and retry `nub run verify:install`.");
   process.exit(1);
 }
 console.log(`Install readiness check passed for ${extensions.length} extensions.`);

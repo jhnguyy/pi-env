@@ -3,12 +3,13 @@
 
 setup_install_dependencies() {
   section "Dependencies"
-  echo "  —  installing repo dependencies with bun"
-  if ! (cd "$REPO" && bun install --frozen-lockfile); then
-    echo "  —  bun install failed; removing node_modules and retrying once."
+  echo "  —  installing repo dependencies with nub"
+  if ! (cd "$REPO" && nub install --frozen-lockfile); then
+    echo "  —  nub install failed; removing node_modules and retrying once."
     rm -rf "$REPO/node_modules"
-    (cd "$REPO" && bun install --frozen-lockfile)
+    (cd "$REPO" && nub install --frozen-lockfile)
   fi
+  (cd "$REPO" && nub run build)
   ok "node_modules up to date"
 }
 

@@ -25,3 +25,7 @@ Use `grep`/`rg` **only** for text/pattern searches (comments, strings, config va
 ## Subagent Model Selection
 
 Match model to task. `subagent()` inherits the parent model by default — override it. Read-heavy gathering, file summarization, and mechanical edits should use a cheap model (`anthropic/claude-haiku-4-5`). Reserve the parent model for tasks requiring judgment, adversarial thinking, or subtle tradeoff analysis.
+
+## JavaScript Tooling
+
+Prefer `nub` over `node`, `bun`, `npm`, `npx`, `pnpm`, and `yarn`: run files with `nub <file>`, scripts with `nub run <script>`, local CLIs with `nubx <tool>`, and installs with `nub install` / `nub add`. Use `nub --node <file>` only when strict, unaugmented Node behavior is required.

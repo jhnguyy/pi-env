@@ -24,5 +24,6 @@ setup_init_context() {
   APPEND_MARKER="<!-- pi-env:append-system -->"
 
   TEST_UTILS_DIR="$PI_AGENT_DIR/extensions/__tests__"
-  HOOK_SRC="$SETUP_DIR/post-merge"
+  POST_MERGE_HOOK_SRC="$SETUP_DIR/post-merge"
+  PRE_COMMIT_HOOK_SRC="$SETUP_DIR/pre-commit"
 }
