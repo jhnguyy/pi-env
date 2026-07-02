@@ -100,6 +100,20 @@ setup_configure_terminal_tools() {
   setup_configure_ghostty
 }
 
+setup_install_git_hook() {
+  local name="$1" src="$2" dst="$GIT_COMMON_DIR/hooks/$name"
+  mkdir -p "$(dirname "$dst")"
+  if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+    ok "$name hook"
+  elif [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    skip "$name hook (custom hook already exists at .git/hooks/$name)"
+  else
+    ln -sfn "$src" "$dst"
+    chmod +x "$src"
+    linked "$name hook → setup/$name"
+  fi
+}
+
 setup_configure_repo_tools() {
   section "Repo tools"
   if [ "${PI_ENV_SKIP_REPO_HOOKS:-0}" = "1" ]; then
@@ -110,19 +124,10 @@ setup_configure_repo_tools() {
   GIT_DIR="$(git -C "$REPO" rev-parse --absolute-git-dir)"
   GIT_COMMON_DIR="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)"
   if [ "$GIT_DIR" != "$GIT_COMMON_DIR" ]; then
-    skip "post-merge hook (worktree checkout — run setup.sh in the primary checkout to update shared hooks)"
+    skip "repo hooks (worktree checkout — run setup.sh in the primary checkout to update shared hooks)"
   else
-    HOOK_DST="$GIT_COMMON_DIR/hooks/post-merge"
-    mkdir -p "$(dirname "$HOOK_DST")"
-    if [ -L "$HOOK_DST" ] && [ "$(readlink "$HOOK_DST")" = "$HOOK_SRC" ]; then
-      ok "post-merge hook"
-    elif [ -e "$HOOK_DST" ] && [ ! -L "$HOOK_DST" ]; then
-      skip "post-merge hook (custom hook already exists at .git/hooks/post-merge)"
-    else
-      ln -sfn "$HOOK_SRC" "$HOOK_DST"
-      chmod +x "$HOOK_SRC"
-      linked "post-merge hook → setup/post-merge"
-    fi
+    setup_install_git_hook post-merge "$POST_MERGE_HOOK_SRC"
+    setup_install_git_hook pre-commit "$PRE_COMMIT_HOOK_SRC"
   fi
 }
 
@@ -132,6 +137,6 @@ setup_print_done() {
   echo "  Setup mode:     ${PI_ENV_SETUP_MODE:-portable}"
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
   echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
-  echo "  Install check:  cd $REPO && bun run verify:install"
-  echo "  Merge check:    cd $REPO && bun run verify"
+  echo "  Install check:  cd $REPO && nub run verify:install"
+  echo "  Merge check:    cd $REPO && nub run verify"
 }

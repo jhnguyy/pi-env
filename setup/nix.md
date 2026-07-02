@@ -2,7 +2,7 @@
 
 Nix is the primary path for reproducible `pi-env` setup. The portable shell setup remains as a fallback for machines where Nix is unavailable.
 
-With Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies the baseline toolchain, and setup uses the repo `bun.lock` for JavaScript dependencies.
+With Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies the baseline toolchain, and setup uses Nub for JavaScript dependencies and script orchestration.
 
 The flake supports Linux and macOS on `x86_64` and `aarch64`:
 
@@ -24,9 +24,9 @@ The bootstrap app brings `git` from the flake toolchain before cloning, so a fre
 
 `--use-nix` means “invoke local Nix now” and re-execs `nix run .#setup`. Use it only on machines where the current user can realize Nix store paths.
 
-`--nix-managed` means “Nix/Home Manager/nix-manager already provided the toolchain or owns shell/terminal config.” It does not call `nix run`; it uses the existing `node`, `bun`, and `git` on `PATH` unless `PI_ENV_NODE_BIN` pins Node explicitly.
+`--nix-managed` means “Nix/Home Manager/nix-manager already provided the toolchain or owns shell/terminal config.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` on `PATH` unless `PI_ENV_NODE_BIN` pins Node explicitly.
 
-`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout and exports `PI_ENV_NODE_BIN` to the flake-provided Node executable. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `bun install`.
+`nix run .#setup` runs `./setup.sh --nix-managed` from the checkout and exports `PI_ENV_NODE_BIN` to the flake-provided Node executable. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `nub install`.
 
 ## Toolchain
 
@@ -37,7 +37,7 @@ The flake's `toolchainPackages` is the source of truth for the dev shell, instal
 Handled deterministically:
 
 - Nix pins the host toolchain through `flake.lock`.
-- `bun install --frozen-lockfile` pins repo JavaScript dependencies through `bun.lock`.
+- `nub install --frozen-lockfile` pins repo JavaScript dependencies while preserving the incumbent lockfile.
 - The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules` and executes it with the Node selected during setup; setup no longer performs a second independent package install for the CLI.
 - Managed pi settings are merged from `setup/managed-settings.json` without overwriting machine-local settings.
 
@@ -69,7 +69,7 @@ Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `
 
 ## Validation
 
-Use the flake apps/checks for Nix-backed validation and `package.json` scripts for Bun-backed validation. Keep command details in those sources rather than duplicating them here.
+Use the flake apps/checks for Nix-backed validation and `package.json` scripts for Nub-backed validation. Keep command details in those sources rather than duplicating them here.
 
 ## Optional Home Manager module
 
@@ -105,10 +105,10 @@ These pieces remain scripts because they operate on mutable user state or repo-l
 | Script | Why it remains |
 | --- | --- |
 | `setup.sh`, `setup/main.sh` | Portable entrypoint, `--use-nix` convenience re-exec, and Nix app target. |
-| `setup/install.sh` | Runs `bun install --frozen-lockfile`, verifies the locked pi package, and writes the user-local `pi` wrapper only when a higher-priority Nix config is not managing it. |
+| `setup/install.sh` | Runs `nub install --frozen-lockfile`, verifies the locked pi package, and writes the user-local `pi` wrapper only when a higher-priority Nix config is not managing it. |
 | `setup/configure.sh` | Registers the pi package, merges managed settings, bootstraps agent context, and installs repo hooks. |
 | `setup/apply-managed-settings.mjs` | Safely merges managed pi settings without overwriting machine-local state. |
 | `scripts/build-extensions.*`, `scripts/verify-install.mjs` | Repo build and verification logic. |
-| `scripts/restart-lsp-daemon.sh` | Bun postinstall runtime hygiene. |
+| `scripts/restart-lsp-daemon.sh` | Install-time LSP daemon hygiene. |
 
-The old non-deterministic standalone pi CLI npm install has been removed. The main remaining non-Nix operation is `bun install --frozen-lockfile`, which is deterministic through `bun.lock` but still fetches npm artifacts unless cached.
+The old non-deterministic standalone pi CLI npm install has been removed. The main remaining non-Nix operation is `nub install --frozen-lockfile`, which is deterministic through the project lockfile but still fetches npm artifacts unless cached.

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if ! command -v nub >/dev/null 2>&1; then
+  echo "pre-commit: nub is required; run nix develop or install the pi-env toolchain" >&2
+  exit 1
+fi
+
+echo "pre-commit: shell syntax"
+bash -n setup/*.sh setup/__tests__/*.sh scripts/*.sh
+
+echo "pre-commit: package manifest"
+nub --node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8"))'
+
+echo "pre-commit: typecheck"
+nub run typecheck
+
+echo "pre-commit: install readiness"
+nub run verify:install

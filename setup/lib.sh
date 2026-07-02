@@ -40,15 +40,8 @@ resolve_setup_node_bin() {
     return 1
   fi
 
-  if setup_nix_managed; then
-    if [ -x "$HOME/.nix-profile/bin/node" ]; then
-      printf '%s\n' "$HOME/.nix-profile/bin/node"
-      return 0
-    fi
-    if [ -x /run/current-system/sw/bin/node ]; then
-      printf '%s\n' /run/current-system/sw/bin/node
-      return 0
-    fi
+  if command -v nub >/dev/null 2>&1; then
+    (cd "$REPO" && nub node which 2>/dev/null) && return 0
   fi
 
   command -v node
@@ -59,7 +52,7 @@ require_node() {
   node_bin=$(resolve_setup_node_bin) || exit 1
   "$node_bin" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
     found=$("$node_bin" -v 2>/dev/null || echo missing)
-    echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin)" >&2
+    echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin; install/provision with nub)" >&2
     exit 1
   }
 }

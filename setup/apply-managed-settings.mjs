@@ -156,7 +156,7 @@ function ensureDefaultTheme(settings) {
 
 function migrateDefaultNpmCommand(settings) {
   if (Array.isArray(settings.npmCommand) && settings.npmCommand.length === 1 && settings.npmCommand[0] === "npm") {
-    settings.npmCommand = ["bun"];
+    settings.npmCommand = ["nub"];
   }
 }
 

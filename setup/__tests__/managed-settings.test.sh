@@ -147,7 +147,7 @@ JSON
   rm -rf "$tmp"
 }
 
-test_migrates_only_default_npm_command_to_bun() {
+test_migrates_only_default_npm_command_to_nub() {
   local tmp settings custom_settings repo
   tmp="$(mktemp -d)"
   settings="$tmp/settings.json"
@@ -168,7 +168,7 @@ JSON
   apply_settings "$settings" "$repo" >/dev/null
   apply_settings "$custom_settings" "$repo" >/dev/null
 
-  [ "$(json_get "$settings" 's.npmCommand')" = '["bun"]' ] || fail "default npmCommand should migrate to bun"
+  [ "$(json_get "$settings" 's.npmCommand')" = '["nub"]' ] || fail "default npmCommand should migrate to nub"
   [ "$(json_get "$custom_settings" 's.npmCommand')" = '["npm","--offline"]' ] || fail "custom npmCommand should be preserved"
 
   rm -rf "$tmp"
@@ -179,6 +179,6 @@ test_preserves_unmanaged_retry_settings
 test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 test_preserves_existing_theme
-test_migrates_only_default_npm_command_to_bun
+test_migrates_only_default_npm_command_to_nub
 
 echo "managed settings tests passed"

@@ -42,7 +42,7 @@ setup_detect_environment() {
 setup_check_prerequisites() {
   section "Prerequisites"
 
-  check_required_commands git bun
+  check_required_commands git nub
   ok "node ($(resolve_setup_node_bin))"
   setup_detect_environment
 
