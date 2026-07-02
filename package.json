@@ -7,8 +7,7 @@
     "pi-package"
   ],
   "engines": {
-    "node": ">=22.19.0",
-    "bun": ">=1.3.0"
+    "node": ">=22.19.0"
   },
   "workspaces": [
     ".pi/extensions/web-context",
@@ -46,20 +45,20 @@
     "check:node": "node -e \"const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error('Node.js >= 22.19 is required; found ' + process.version); process.exit(1); }\"",
     "build": "node scripts/build-extensions.mjs",
     "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
-    "test": "bun run test:unit",
+    "test": "nub run test:unit",
     "test:unit": "vitest run",
     "test:setup": "bash setup/__tests__/path-profile.test.sh && bash setup/__tests__/managed-settings.test.sh && bash setup/__tests__/nix-managed-config.test.sh && bash setup/__tests__/setup-options.test.sh && bash setup/__tests__/pi-cli-wrapper.test.sh",
     "test:e2e": "E2E=1 vitest run",
     "typecheck": "tsc --noEmit",
-    "verify": "bun run test:setup && bun run typecheck && bun run build && bun run test:unit",
-    "verify:install": "bun run build && node scripts/verify-install.mjs",
+    "verify": "nub run test:setup && nub run typecheck && nub run build && nub run test:unit",
+    "verify:install": "nub run build && node scripts/verify-install.mjs",
     "postinstall": "sh scripts/restart-lsp-daemon.sh && node scripts/build-extensions.mjs",
-    "prebuild": "bun run check:node",
-    "pretest:unit": "bun run check:node",
-    "pretest:setup": "bun run check:node",
-    "pretest:e2e": "bun run check:node",
-    "pretypecheck": "bun run check:node",
-    "preinstall": "bun run check:node"
+    "prebuild": "nub run check:node",
+    "pretest:unit": "nub run check:node",
+    "pretest:setup": "nub run check:node",
+    "pretest:e2e": "nub run check:node",
+    "pretypecheck": "nub run check:node",
+    "preinstall": "nub run check:node"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
@@ -82,5 +81,12 @@
   "overrides": {
     "minimatch": "10.2.3"
   },
-  "packageManager": "bun@1.3.14"
+  "packageManager": "nub@0.2.10",
+  "devEngines": {
+    "packageManager": {
+      "name": "nub",
+      "version": "^0.2.10",
+      "onFail": "warn"
+    }
+  }
 }

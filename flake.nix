@@ -3,9 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nub.url = "github:nubjs/nub";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nub }:
     let
       systems = [
         "x86_64-linux"
@@ -20,7 +21,7 @@
         pkgs.git
         pkgs.gh
         (nodeFor pkgs)
-        pkgs.bun
+        nub.packages.${pkgs.system}.default
         pkgs.coreutils
         pkgs.findutils
         pkgs.gawk
@@ -49,6 +50,7 @@
           fi
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
           export PI_ENV_NODE_BIN="$(command -v node)"
+          export NODE_EXECUTABLE="$PI_ENV_NODE_BIN"
           exec ./setup.sh --nix-managed "$@"
         '';
       };
@@ -72,6 +74,7 @@
           cd "$target"
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
           export PI_ENV_NODE_BIN="$(command -v node)"
+          export NODE_EXECUTABLE="$PI_ENV_NODE_BIN"
           exec ./setup.sh --nix-managed
         '';
       };
@@ -83,7 +86,8 @@
             echo "pi-env verify app must be run from a pi-env checkout." >&2
             exit 2
           fi
-          exec bun run verify:install
+          export NODE_EXECUTABLE="$(command -v node)"
+          exec nub run verify:install
         '';
       };
     in
@@ -129,7 +133,7 @@
           setup-tests = pkgs.runCommand "pi-env-setup-tests" {
             nativeBuildInputs = [
               (nodeFor pkgs)
-              pkgs.bun
+              nub.packages.${system}.default
               pkgs.bash
               pkgs.coreutils
               pkgs.findutils
@@ -162,7 +166,8 @@
             shellHook = ''
               echo "pi-env dev shell"
               echo "  node: $(node --version 2>/dev/null || echo missing)"
-              echo "  bun:  $(bun --version 2>/dev/null || echo missing)"
+              export NODE_EXECUTABLE="$(command -v node)"
+              echo "  nub:  $(nub --version 2>/dev/null || echo missing)"
               echo "Run nix run .#setup or ./setup.sh --nix-managed to install/update the user-local pi CLI and register this package."
             '';
           };

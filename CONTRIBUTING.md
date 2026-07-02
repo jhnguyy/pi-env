@@ -18,7 +18,7 @@ chore/<name>   config, docs, cleanup (no behavior change)
 
 ## Runtime Requirements
 
-Use Node.js 22.19+ and Bun 1.3+. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`; setup and Bun scripts fail fast on older Node versions. Node remains the runtime for pi; Bun owns dependency install and script orchestration.
+Use Nub with Node.js 22.19+. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`; setup asks Nub to provision/resolve that Node. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
 
 ## Extension Development
 
@@ -28,7 +28,7 @@ Use `package.json` scripts as the source of truth for build, test, cleanup, and 
 
 The build uses `scripts/build-extensions.mjs` with esbuild. Active extension names come from `package.json`'s `pi.extensions` list; `pi-build.config.json` holds build-only details such as external packages and sidecar bundles. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
 
-The build runs automatically on `bun install` via `postinstall`. Install/setup intentionally does not run the full test suite; it stays focused on making the local Pi environment current without burning CPU on routine pulls.
+The build runs during `nub install`/setup via `postinstall` plus an explicit setup build step. Install/setup intentionally does not run the full test suite; it stays focused on making the local Pi environment current without burning CPU on routine pulls.
 
 ### Adding a new extension
 

@@ -7,7 +7,7 @@ Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, s
 Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed paths:
 
 - **Local Nix** means this machine can run `nix run` and realize store paths.
-- **Externally Nix-managed** means tools such as `git`, Node.js, and Bun are already provisioned by Home Manager, nix-manager, a container image, or another host-level Nix system; setup should consume those tools and should not invoke `nix run`.
+- **Externally Nix-managed** means tools such as `git`, Nub, and Node.js are already provisioned by Home Manager, nix-manager, a container image, or another host-level Nix system; setup should consume those tools and should not invoke `nix run`.
 
 | Environment | Command |
 | --- | --- |
@@ -16,7 +16,7 @@ Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed path
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
 | No Nix | `./setup.sh` |
 
-`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `node`, `bun`, and `git` tools.
+`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
 
 Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`setup/nix.md`](setup/nix.md) for Nix details and [`setup/prerequisites.md`](setup/prerequisites.md) for the mode split.
 
@@ -34,7 +34,7 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 
 ## Pi CLI install
 
-`setup.sh` runs `bun install --frozen-lockfile`, verifies the locked `@earendil-works/pi-coding-agent` package in this checkout, and writes a user-local `pi` wrapper that pins the Node executable selected during setup. That keeps later shell startup changes such as `nvm use` from silently changing the pi runtime. In local-Nix setup the flake app exports its Node path; in externally Nix-managed or portable setup, setup uses current `node` unless `PI_ENV_NODE_BIN` is set.
+`setup.sh` runs `nub install --frozen-lockfile`, verifies the locked `@earendil-works/pi-coding-agent` package in this checkout, and writes a user-local `pi` wrapper that pins the Node executable selected during setup. That keeps later shell startup changes such as `nvm use` from silently changing the pi runtime. In local-Nix setup the flake app exports its Node path; in externally Nix-managed or portable setup, setup asks Nub for the project Node unless `PI_ENV_NODE_BIN` is set.
 
 ## Theme snippets
 
