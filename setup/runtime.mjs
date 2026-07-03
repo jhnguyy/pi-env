@@ -128,9 +128,10 @@ function ensurePathInShellProfiles(binDir) {
       ? 'export PATH="$HOME/.local/bin:$PATH"'
       : `export PATH="${binDir}:$PATH"`;
     mkdirSync(dirname(profile), { recursive: true });
-    const prefix = existsSync(profile) ? '\n' : '';
+    const existed = existsSync(profile);
+    const prefix = existed ? '\n' : '';
     writeFileSync(profile, `${prefix}${marker}\n${pathExpr}\n`, { flag: 'a' });
-    ok(`${profile} (${existsSync(profile) ? 'appended' : 'created'} PATH entry)`);
+    ok(`${profile} (${existed ? 'appended' : 'created'} PATH entry)`);
   }
 }
 

@@ -145,7 +145,6 @@
             cp -R ${self} source
             chmod -R u+w source
             cd source
-            bash setup/__tests__/path-profile.test.sh
             bash setup/__tests__/managed-settings.test.sh
             bash setup/__tests__/nix-managed-config.test.sh
             bash setup/__tests__/setup-options.test.sh

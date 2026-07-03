@@ -8,6 +8,17 @@ fail() {
   exit 1
 }
 
+assert_contains() {
+  local file="$1" expected="$2"
+  grep -qF "$expected" "$file" || fail "$file does not contain: $expected"
+}
+
+assert_count() {
+  local file="$1" pattern="$2" expected="$3" actual
+  actual=$(grep -cF "$pattern" "$file" || true)
+  [ "$actual" = "$expected" ] || fail "$file has $actual copies of $pattern; expected $expected"
+}
+
 test_node_bin() {
   if [ -x /bin/node ]; then
     printf '%s\n' /bin/node
@@ -25,6 +36,7 @@ run_pi_cli_setup() {
   PI_ENV_NODE_BIN="${PI_ENV_NODE_BIN:-}" \
   PI_ENV_CONFIG_MANAGED_BY_NIX="${PI_ENV_CONFIG_MANAGED_BY_NIX:-}" \
   PI_ENV_CLI_MANAGED_BY_NIX="${PI_ENV_CLI_MANAGED_BY_NIX:-}" \
+  PI_ENV_SKIP_PATH_PROFILE="${PI_ENV_SKIP_PATH_PROFILE:-}" \
   "$node_bin" "$ROOT/setup/runtime.mjs" "${PI_ENV_NODE_BIN:-$node_bin}" pi-cli >/dev/null
 }
 
@@ -117,8 +129,35 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   rm -rf "$tmp"
 }
 
+test_pi_cli_wrapper_adds_path_profile_when_portable() {
+  local tmp old_home old_path
+  tmp="$(mktemp -d)"
+  old_home="$HOME"
+  old_path="$PATH"
+
+  HOME="$tmp/home"
+  PATH="/bin"
+  mkdir -p "$HOME"
+  PI_ENV_NODE_BIN=$(test_node_bin)
+  create_stub_repo "$tmp"
+
+  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE || true
+  run_pi_cli_setup
+  run_pi_cli_setup
+
+  assert_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
+  assert_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
+  assert_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
+
+  HOME="$old_home"
+  PATH="$old_path"
+  unset PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_pins_configured_node
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
+test_pi_cli_wrapper_adds_path_profile_when_portable
 
 echo "pi CLI wrapper tests passed"
