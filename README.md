@@ -4,19 +4,21 @@ Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, s
 
 ## Getting started
 
-Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed paths:
+Prefer the Nix flake for a reproducible toolchain. Plain `./setup.sh` now chooses the best available path:
 
-- **Local Nix** means this machine can run `nix run` and realize store paths.
-- **Externally Nix-managed** means tools such as `git`, Nub, and Node.js are already provisioned by Home Manager, nix-manager, a container image, or another host-level Nix system; setup should consume those tools and should not invoke `nix run`.
+- **Local Nix**: setup tries `nix run .#setup` and falls back to portable setup if the current user cannot realize store paths.
+- **Externally Nix-managed**: when `PI_ENV_CONFIG_MANAGED_BY_NIX=1` is already present, setup consumes provisioned tools and does not invoke `nix run`.
+- **No Nix**: setup uses the current `PATH` tools.
 
 | Environment | Command |
 | --- | --- |
 | Fresh machine with local Nix + flakes | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` |
-| Existing checkout with local Nix | `nix run .#setup` or `./setup.sh --use-nix` |
-| Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
-| No Nix | `./setup.sh` |
+| Existing checkout | `./setup.sh` |
+| Force local Nix, no fallback | `./setup.sh --use-nix` |
+| Force provisioned Nix/tool ownership | `./setup.sh --nix-managed` |
+| Force portable PATH tools | `./setup.sh --portable` |
 
-`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
+`--use-nix` means “invoke local Nix now.” Use it only when failure is preferable to fallback. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
 
 Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`setup/nix.md`](setup/nix.md) for Nix details and [`setup/prerequisites.md`](setup/prerequisites.md) for the mode split.
 
@@ -47,4 +49,5 @@ Slack custom theme strings:
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
 - **[setup/nix.md](setup/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
+- **[setup/improvements.md](setup/improvements.md)** — setup cleanup backlog and review pressure
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings
