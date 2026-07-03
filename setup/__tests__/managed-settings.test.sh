@@ -60,6 +60,7 @@ JSON
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "_comment_managed_retry")')" = "false" ] || fail "managed comments should not be written to user settings"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
   [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "package path should be repo"
+  [ "$(json_get "$settings" 's.extensions')" = '["-playwright-client"]' ] || fail "playwright-client should be disabled by setup"
 
   rm -rf "$tmp"
 }
@@ -147,6 +148,25 @@ JSON
   rm -rf "$tmp"
 }
 
+test_disables_browser_extension_without_clobbering_other_extensions() {
+  local tmp settings repo
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  cat > "$settings" <<'JSON'
+{
+  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client"]
+}
+JSON
+
+  apply_settings "$settings" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.extensions')" = '["my-extension","-playwright-client"]' ] || fail "setup should preserve other extensions and disable browser once"
+
+  rm -rf "$tmp"
+}
+
 test_migrates_only_default_npm_command_to_nub() {
   local tmp settings custom_settings repo
   tmp="$(mktemp -d)"
@@ -179,6 +199,7 @@ test_preserves_unmanaged_retry_settings
 test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 test_preserves_existing_theme
+test_disables_browser_extension_without_clobbering_other_extensions
 test_migrates_only_default_npm_command_to_nub
 
 echo "managed settings tests passed"
