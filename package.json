@@ -45,7 +45,7 @@
     "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
     "test": "nub run test:unit",
     "test:unit": "vitest run",
-    "test:setup": "bash setup/__tests__/path-profile.test.sh && bash setup/__tests__/managed-settings.test.sh && bash setup/__tests__/nix-managed-config.test.sh && bash setup/__tests__/setup-options.test.sh && bash setup/__tests__/pi-cli-wrapper.test.sh",
+    "test:setup": "bash setup/__tests__/path-profile.test.sh && bash setup/__tests__/managed-settings.test.sh && bash setup/__tests__/nix-managed-config.test.sh && bash setup/__tests__/setup-options.test.sh && bash setup/__tests__/node-resolution.test.sh && bash setup/__tests__/pi-cli-wrapper.test.sh",
     "test:e2e": "E2E=1 vitest run",
     "typecheck": "tsc --noEmit",
     "verify": "nub run test:setup && nub run typecheck && nub run build && nub run test:unit",

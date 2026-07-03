@@ -30,6 +30,12 @@ setup_cli_managed_externally() {
   [ "${PI_ENV_CLI_MANAGED_BY_NIX:-0}" = "1" ]
 }
 
+setup_node_bin_works() {
+  [ -n "${1:-}" ] || return 1
+  [ -x "$1" ] || return 1
+  "$1" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" >/dev/null 2>&1
+}
+
 resolve_setup_node_bin() {
   if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
     if [ -x "$PI_ENV_NODE_BIN" ]; then
@@ -41,12 +47,30 @@ resolve_setup_node_bin() {
   fi
 
   if setup_nix_managed && command -v node >/dev/null 2>&1; then
-    command -v node
-    return 0
+    local path_node
+    path_node=$(command -v node)
+    if setup_node_bin_works "$path_node"; then
+      printf '%s\n' "$path_node"
+      return 0
+    fi
   fi
 
   if command -v nub >/dev/null 2>&1; then
-    (cd "$REPO" && nub node which 2>/dev/null) && return 0
+    local nub_node
+    nub_node=$(cd "$REPO" && nub node which 2>/dev/null || true)
+    if setup_node_bin_works "$nub_node"; then
+      printf '%s\n' "$nub_node"
+      return 0
+    fi
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    local path_node
+    path_node=$(command -v node)
+    if setup_node_bin_works "$path_node"; then
+      printf '%s\n' "$path_node"
+      return 0
+    fi
   fi
 
   command -v node
@@ -55,7 +79,7 @@ resolve_setup_node_bin() {
 require_node() {
   local node_bin found
   node_bin=$(resolve_setup_node_bin) || exit 1
-  "$node_bin" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
+  setup_node_bin_works "$node_bin" || {
     found=$("$node_bin" -v 2>/dev/null || echo missing)
     echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin; install/provision with nub)" >&2
     exit 1
