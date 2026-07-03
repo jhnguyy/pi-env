@@ -33,7 +33,7 @@ setup_cli_managed_externally() {
 setup_node_bin_works() {
   [ -n "${1:-}" ] || return 1
   [ -x "$1" ] || return 1
-  "$1" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" >/dev/null 2>&1
+  "$1" "$REPO/scripts/check-node-version.mjs" "$REPO" >/dev/null 2>&1
 }
 
 resolve_setup_node_bin() {
@@ -81,7 +81,9 @@ require_node() {
   node_bin=$(resolve_setup_node_bin) || exit 1
   setup_node_bin_works "$node_bin" || {
     found=$("$node_bin" -v 2>/dev/null || echo missing)
-    echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin; install/provision with nub)" >&2
+    local required
+    required=$("$node_bin" -e "const pkg = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(pkg.engines?.node ?? 'required by package.json');" "$REPO/package.json" 2>/dev/null || echo "required by package.json")
+    echo "  ✗  Node.js $required is required (found: $found at $node_bin; install/provision with nub)" >&2
     exit 1
   }
 }

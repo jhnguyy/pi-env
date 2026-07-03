@@ -14,7 +14,7 @@ make_fake_node() {
   local path="$1" exit_code="${2:-0}"
   cat > "$path" <<SH
 #!/usr/bin/env sh
-if [ "\${1:-}" = "-e" ]; then
+if [ "$exit_code" != "0" ]; then
   exit $exit_code
 fi
 printf 'fake node\n'

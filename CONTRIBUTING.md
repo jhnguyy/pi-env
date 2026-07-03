@@ -18,7 +18,7 @@ chore/<name>   config, docs, cleanup (no behavior change)
 
 ## Runtime Requirements
 
-Use Nub with Node.js 22.19+. The repo includes `.node-version` / `.nvmrc` pinned to `22.19.0`; setup asks Nub to provision/resolve that Node. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
+Use Nub with the Node.js version required by `package.json#engines.node`. The repo includes `.node-version` / `.nvmrc` for local tool provisioning; setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
 
 ## Extension Development
 

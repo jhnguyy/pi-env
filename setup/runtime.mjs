@@ -14,6 +14,11 @@ import {
   skip,
 } from './runtime-support.mjs';
 
+const PiPackage = Object.freeze({
+  Name: '@earendil-works/pi-coding-agent',
+  Entry: 'dist/cli.js',
+});
+
 const repo = mustEnv('REPO');
 const piBinDir = mustEnv('PI_BIN_DIR');
 const setupNodeBin = process.argv[2] || process.execPath;
@@ -55,8 +60,8 @@ function installDependencies() {
 
 function readPiVersion() {
   const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
-  return pkg.devDependencies?.['@earendil-works/pi-coding-agent']
-    ?? pkg.dependencies?.['@earendil-works/pi-coding-agent'];
+  return pkg.devDependencies?.[PiPackage.Name]
+    ?? pkg.dependencies?.[PiPackage.Name];
 }
 
 function shSingleQuote(value) {
@@ -72,11 +77,11 @@ DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
 REQUESTED_PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-}"
 PI_PACKAGE_DIR="$DEFAULT_PI_PACKAGE_DIR"
 
-if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/dist/cli.js" ]; then
+if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/${PiPackage.Entry}" ]; then
   PI_PACKAGE_DIR="$REQUESTED_PI_PACKAGE_DIR"
 fi
 
-PI_ENTRY="$PI_PACKAGE_DIR/dist/cli.js"
+PI_ENTRY="$PI_PACKAGE_DIR/${PiPackage.Entry}"
 NODE_BIN='${shSingleQuote(setupNodeBin)}'
 
 if [ ! -x "$NODE_BIN" ]; then
@@ -139,8 +144,8 @@ function installPiCli() {
   section('Pi CLI');
 
   const version = readPiVersion();
-  const piPackageDir = join(repo, 'node_modules/@earendil-works/pi-coding-agent');
-  const piEntry = join(piPackageDir, 'dist/cli.js');
+  const piPackageDir = join(repo, 'node_modules', ...PiPackage.Name.split('/'));
+  const piEntry = join(piPackageDir, PiPackage.Entry);
 
   if (!existsSync(join(piPackageDir, 'package.json'))) {
     fail(`  ✗  missing pi package after install: ${piPackageDir}`);

@@ -40,7 +40,7 @@
     ]
   },
   "scripts": {
-    "check:node": "node -e \"const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error('Node.js >= 22.19 is required; found ' + process.version); process.exit(1); }\"",
+    "check:node": "node scripts/check-node-version.mjs",
     "build": "node scripts/build-extensions.mjs",
     "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
     "test": "nub run test:unit",

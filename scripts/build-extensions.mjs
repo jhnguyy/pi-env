@@ -4,13 +4,14 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
 import { loadExtensionManifest } from "./extension-manifest.mjs";
+import { esbuildNodeTarget } from "./node-policy.mjs";
 
 const { config, extensions } = loadExtensionManifest();
 const common = {
   bundle: true,
   format: "esm",
   platform: "node",
-  target: "node22.19",
+  target: esbuildNodeTarget(),
   sourcemap: false,
   external: config.externals ?? [],
   logLevel: "silent",
