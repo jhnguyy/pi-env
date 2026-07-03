@@ -50,9 +50,7 @@ setup_runtime() {
 main() {
   setup_environment
   setup_runtime
-  setup_configure_pi
-  setup_configure_terminal_tools
-  setup_configure_repo_tools
+  setup_configure_all
   setup_print_done
 }
 
