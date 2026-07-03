@@ -101,7 +101,8 @@ setup_configure_terminal_tools() {
 }
 
 setup_install_git_hook() {
-  local name="$1" src="$2" dst="$GIT_COMMON_DIR/hooks/$name"
+  local name="$1" src="$2" dst
+  dst="$GIT_COMMON_DIR/hooks/$name"
   mkdir -p "$(dirname "$dst")"
   if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
     ok "$name hook"

@@ -40,6 +40,11 @@ resolve_setup_node_bin() {
     return 1
   fi
 
+  if setup_nix_managed && command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+
   if command -v nub >/dev/null 2>&1; then
     (cd "$REPO" && nub node which 2>/dev/null) && return 0
   fi

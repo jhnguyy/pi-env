@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
 # Dependency and pi CLI installation.
 
+setup_nub_needs_plain_node() {
+  [ -n "${1:-}" ] || return 1
+  (cd "$REPO" && nub run --silent check:node >/dev/null 2>&1) && return 1
+  (cd "$REPO" && nub run --node --ignore-scripts --silent check:node >/dev/null 2>&1)
+}
+
 setup_install_dependencies() {
   section "Dependencies"
+  local setup_node_bin
+  setup_node_bin=$(resolve_setup_node_bin)
   echo "  —  installing repo dependencies with nub"
-  if ! (cd "$REPO" && nub install --frozen-lockfile); then
-    echo "  —  nub install failed; removing node_modules and retrying once."
-    rm -rf "$REPO/node_modules"
-    (cd "$REPO" && nub install --frozen-lockfile)
+  if setup_nub_needs_plain_node "$setup_node_bin"; then
+    echo "  —  nub runtime augmentation cannot execute Node here; using plain Node for setup scripts."
+    if ! (cd "$REPO" && nub install --ignore-scripts --frozen-lockfile); then
+      echo "  —  nub install failed; removing node_modules and retrying once."
+      rm -rf "$REPO/node_modules"
+      (cd "$REPO" && nub install --ignore-scripts --frozen-lockfile)
+    fi
+    (cd "$REPO" && sh scripts/restart-lsp-daemon.sh)
+    (cd "$REPO" && "$setup_node_bin" scripts/build-extensions.mjs)
+  else
+    if ! (cd "$REPO" && nub install --frozen-lockfile); then
+      echo "  —  nub install failed; removing node_modules and retrying once."
+      rm -rf "$REPO/node_modules"
+      (cd "$REPO" && nub install --frozen-lockfile)
+    fi
+    (cd "$REPO" && nub run build)
   fi
-  (cd "$REPO" && nub run build)
   ok "node_modules up to date"
 }
 
