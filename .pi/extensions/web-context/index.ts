@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { txt } from "../_shared/result";
+import { injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools } from "./anthropic-tools";
 
 export interface SiteAdapter {
   id: string;
@@ -68,6 +69,21 @@ export function selectAdapter(url: URL): SiteAdapter | null {
   return SITE_ADAPTERS.find((adapter) => adapter.match(url)) ?? null;
 }
 
+export async function fetchWebText(rawUrl: string, maxBytes = 100_000, signal?: AbortSignal): Promise<{ text: string; url: string; status: number; contentType: string | null; truncated: boolean }> {
+  const url = parseWebUrl(rawUrl);
+  const response = await fetch(url, {
+    redirect: "follow",
+    signal,
+    headers: { accept: "text/html, text/plain, application/json, application/xml, text/*;q=0.9, */*;q=0.1" },
+  });
+  const contentType = response.headers.get("content-type");
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const limit = Math.max(1, Math.min(maxBytes, 1_000_000));
+  const truncated = bytes.byteLength > limit;
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, limit));
+  return { text, url: response.url, status: response.status, contentType, truncated };
+}
+
 export function buildContextPlan(rawUrl: string, purpose?: string): string {
   const url = parseWebUrl(rawUrl);
   const adapter = selectAdapter(url);
@@ -92,6 +108,48 @@ export function buildContextPlan(rawUrl: string, purpose?: string): string {
 }
 
 export default function webContext(pi: ExtensionAPI) {
+  pi.on("before_provider_request", (event, ctx) => {
+    const settings = loadAnthropicWebToolSettings(ctx.cwd);
+    if (!shouldInjectAnthropicHostedWebTools(ctx.model, settings)) return undefined;
+    return injectAnthropicHostedWebTools(event.payload, settings);
+  });
+
+  pi.registerTool({
+    name: "web_fetch",
+    label: "Web Fetch",
+    description: [
+      "Fetch an http(s) URL as text without browser automation.",
+      "Use web_fetch for direct URL retrieval when a text/API/static fetch is sufficient.",
+      "This tool does not execute page JavaScript, click, authenticate, or visually inspect pages.",
+      "For direct Anthropic models, hosted web_search is attached at the provider layer.",
+    ].join("\n"),
+    promptSnippet: "Fetch an http(s) URL as bounded text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
+    promptGuidelines: [
+      "Use web_fetch for direct URL retrieval before considering browser automation.",
+      "Do not use web_fetch for secrets, authenticated pages, forms, or actions with side effects.",
+    ],
+    parameters: Type.Object({
+      url: Type.String({ description: "http(s) URL to fetch." }),
+      maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return, capped at 1 MB. Default 100000." })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      try {
+        const result = await fetchWebText(params.url, params.maxBytes, signal);
+        const header = [
+          `URL: ${result.url}`,
+          `Status: ${result.status}`,
+          `Content-Type: ${result.contentType ?? "unknown"}`,
+          result.truncated ? "Truncated: true" : "Truncated: false",
+          "",
+        ].join("\n");
+        return { content: [txt(`${header}${result.text}`)], details: result };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { content: [txt(`Could not fetch URL: ${message}`)], details: { text: "", url: params.url, status: 0, contentType: null, truncated: false, error: message }, isError: true };
+      }
+    },
+  });
+
   pi.registerTool({
     name: "web_context",
     label: "Web Context",
@@ -103,6 +161,7 @@ export default function webContext(pi: ExtensionAPI) {
       "Prefer existing scripts, APIs, repo docs, cached notes, static fetches, sitemaps, feeds, llms.txt, and other text-first sources before browser automation.",
       "The tool returns known site-specific adapters when available and a generic text/API-first plan otherwise.",
       "It does not browse visually or click through pages.",
+      "On direct Anthropic models, pi-env can attach Anthropic-hosted web_search to provider requests; set webContext.anthropicHostedTools.enabled=false to disable."
     ].join("\n"),
     parameters: Type.Object({
       url: Type.String({ description: "Website URL to gather context for." }),

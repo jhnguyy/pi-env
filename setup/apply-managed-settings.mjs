@@ -6,6 +6,7 @@ const [settingsFile, managedSettingsFile, repoPath] = process.argv.slice(2);
 const DEFAULT_LIGHT_THEME = "gruvbox-light";
 const DEFAULT_DARK_THEME = "gruvbox-dark";
 const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
+const DISABLED_EXTENSIONS = ["playwright-client"];
 
 if (!settingsFile || !managedSettingsFile || !repoPath) {
   console.error("usage: apply-managed-settings.mjs <settings-file> <managed-settings-file> <repo-path>");
@@ -160,6 +161,14 @@ function migrateDefaultNpmCommand(settings) {
   }
 }
 
+function ensureDisabledExtensions(settings) {
+  const existing = Array.isArray(settings.extensions) ? settings.extensions : [];
+  settings.extensions = [
+    ...existing.filter((entry) => !DISABLED_EXTENSIONS.some((name) => entry === name || entry === `extensions/${name}` || entry === `.pi/extensions/${name}` || entry === `-${name}`)),
+    ...DISABLED_EXTENSIONS.map((name) => `-${name}`),
+  ];
+}
+
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
 const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
@@ -168,6 +177,7 @@ mergeManaged(settings, managed);
 ensureDefaultTheme(settings);
 migrateDefaultNpmCommand(settings);
 ensurePiUpdateDefault(settings);
+ensureDisabledExtensions(settings);
 
 if (!Array.isArray(settings.packages)) {
   settings.packages = [];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContextPlan, parseWebUrl, selectAdapter } from "../index";
+import { AnthropicHostedToolName, injectAnthropicHostedWebTools, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 
 describe("web context", () => {
   it("selects the GitHub adapter", () => {
@@ -23,5 +24,34 @@ describe("web context", () => {
 
   it("rejects non-web protocols", () => {
     expect(() => parseWebUrl("file:///tmp/example.html")).toThrow("Unsupported URL protocol");
+  });
+});
+
+describe("anthropic hosted web tools", () => {
+  const settings: AnthropicWebToolSettings = { enabled: true, tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch], maxUses: 3 };
+
+  it("injects hosted search/fetch tools without replacing existing tools", () => {
+    const payload = injectAnthropicHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
+
+    expect(payload.tools).toEqual([
+      { name: "read", input_schema: { type: "object" } },
+      { type: "web_search_20250305", name: "web_search", max_uses: 3 },
+      { type: "web_fetch_20250910", name: "web_fetch" },
+    ]);
+  });
+
+  it("does not duplicate hosted tools", () => {
+    const payload = injectAnthropicHostedWebTools({ tools: [{ type: "web_search_20250305", name: "web_search" }] }, settings) as { tools: Array<Record<string, unknown>> };
+
+    expect(payload.tools).toEqual([
+      { type: "web_search_20250305", name: "web_search" },
+      { type: "web_fetch_20250910", name: "web_fetch" },
+    ]);
+  });
+
+  it("only enables hosted tools for direct Anthropic models", () => {
+    expect(shouldInjectAnthropicHostedWebTools({ provider: "anthropic", api: "anthropic-messages" }, settings)).toBe(true);
+    expect(shouldInjectAnthropicHostedWebTools({ provider: "github-copilot", api: "anthropic-messages" }, settings)).toBe(false);
+    expect(shouldInjectAnthropicHostedWebTools({ provider: "anthropic", api: "anthropic-messages" }, { ...settings, enabled: false })).toBe(false);
   });
 });
