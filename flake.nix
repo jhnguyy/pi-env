@@ -145,10 +145,10 @@
             cp -R ${self} source
             chmod -R u+w source
             cd source
-            bash setup/__tests__/path-profile.test.sh
             bash setup/__tests__/managed-settings.test.sh
             bash setup/__tests__/nix-managed-config.test.sh
             bash setup/__tests__/setup-options.test.sh
+            bash setup/__tests__/node-resolution.test.sh
             bash setup/__tests__/pi-cli-wrapper.test.sh
             node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8")); JSON.parse(require("fs").readFileSync("flake.lock", "utf8"));'
             touch "$out"

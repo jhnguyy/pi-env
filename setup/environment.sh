@@ -48,9 +48,8 @@ setup_check_prerequisites() {
 
   echo "  —  platform: $os_label"
   echo "  —  context: $context_label"
-  if [ "${PI_ENV_SETUP_MODE:-portable}" = "portable" ] && command -v nix >/dev/null 2>&1 && [ -f "$REPO/flake.nix" ]; then
-    echo "  —  Nix detected; recommended reproducible setup is: nix run .#setup"
-    echo "  —  portable ./setup.sh uses the current PATH tools instead"
+  if [ "${PI_ENV_AUTO_NIX_FAILED:-0}" = "1" ]; then
+    echo "  —  Nix detected, but automatic Nix setup was unavailable; using current PATH tools"
   fi
   check_recommended_commands tmux gh rg
 

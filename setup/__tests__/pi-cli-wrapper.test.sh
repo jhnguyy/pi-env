@@ -2,14 +2,21 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=setup/lib.sh
-source "$ROOT/setup/lib.sh"
-# shellcheck source=setup/install.sh
-source "$ROOT/setup/install.sh"
 
 fail() {
   echo "FAIL: $*" >&2
   exit 1
+}
+
+assert_contains() {
+  local file="$1" expected="$2"
+  grep -qF "$expected" "$file" || fail "$file does not contain: $expected"
+}
+
+assert_count() {
+  local file="$1" pattern="$2" expected="$3" actual
+  actual=$(grep -cF "$pattern" "$file" || true)
+  [ "$actual" = "$expected" ] || fail "$file has $actual copies of $pattern; expected $expected"
 }
 
 test_node_bin() {
@@ -18,6 +25,19 @@ test_node_bin() {
   else
     command -v node
   fi
+}
+
+run_pi_cli_setup() {
+  local node_bin
+  node_bin=$(test_node_bin)
+  REPO="$REPO" \
+  SETUP_DIR="$ROOT/setup" \
+  PI_BIN_DIR="$PI_BIN_DIR" \
+  PI_ENV_NODE_BIN="${PI_ENV_NODE_BIN:-}" \
+  PI_ENV_CONFIG_MANAGED_BY_NIX="${PI_ENV_CONFIG_MANAGED_BY_NIX:-}" \
+  PI_ENV_CLI_MANAGED_BY_NIX="${PI_ENV_CLI_MANAGED_BY_NIX:-}" \
+  PI_ENV_SKIP_PATH_PROFILE="${PI_ENV_SKIP_PATH_PROFILE:-}" \
+  "$node_bin" "$ROOT/setup/runtime.mjs" "${PI_ENV_NODE_BIN:-$node_bin}" pi-cli >/dev/null
 }
 
 create_stub_repo() {
@@ -51,7 +71,7 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
   PI_ENV_NODE_BIN=$(test_node_bin)
   create_stub_repo "$tmp"
 
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   [ -x "$PI_BIN_DIR/pi" ] || fail "pi wrapper should be executable"
   grep -qF "DEFAULT_PI_PACKAGE_DIR='$REPO/node_modules/@earendil-works/pi-coding-agent'" "$PI_BIN_DIR/pi" || fail "wrapper should point at repo node_modules pi package"
@@ -77,15 +97,17 @@ if [ "$1" = "-e" ]; then
   echo "1.2.3"
   exit 0
 fi
-echo "fake node: $1"
+echo "fake node: $*"
 SH
   chmod +x "$fake_node"
 
   PI_ENV_NODE_BIN="$fake_node"
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   grep -qF "NODE_BIN='$fake_node'" "$PI_BIN_DIR/pi" || fail "wrapper should pin configured node path"
-  "$PI_BIN_DIR/pi" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node"
+  local wrapper_output
+  wrapper_output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")
+  printf '%s' "$wrapper_output" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node (got: $wrapper_output)"
 
   unset PI_ENV_NODE_BIN
   rm -rf "$tmp"
@@ -99,7 +121,7 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   PI_ENV_NODE_BIN=$(test_node_bin)
   create_stub_repo "$tmp"
 
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   [ ! -e "$PI_BIN_DIR/pi" ] || fail "setup should not write pi wrapper when Nix manages it"
 
@@ -107,8 +129,35 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   rm -rf "$tmp"
 }
 
+test_pi_cli_wrapper_adds_path_profile_when_portable() {
+  local tmp old_home old_path
+  tmp="$(mktemp -d)"
+  old_home="$HOME"
+  old_path="$PATH"
+
+  HOME="$tmp/home"
+  PATH="/bin"
+  mkdir -p "$HOME"
+  PI_ENV_NODE_BIN=$(test_node_bin)
+  create_stub_repo "$tmp"
+
+  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE || true
+  run_pi_cli_setup
+  run_pi_cli_setup
+
+  assert_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
+  assert_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
+  assert_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
+
+  HOME="$old_home"
+  PATH="$old_path"
+  unset PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_pins_configured_node
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
+test_pi_cli_wrapper_adds_path_profile_when_portable
 
 echo "pi CLI wrapper tests passed"

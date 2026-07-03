@@ -30,6 +30,12 @@ setup_cli_managed_externally() {
   [ "${PI_ENV_CLI_MANAGED_BY_NIX:-0}" = "1" ]
 }
 
+setup_node_bin_works() {
+  [ -n "${1:-}" ] || return 1
+  [ -x "$1" ] || return 1
+  "$1" "$REPO/scripts/check-node-version.mjs" "$REPO" >/dev/null 2>&1
+}
+
 resolve_setup_node_bin() {
   if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
     if [ -x "$PI_ENV_NODE_BIN" ]; then
@@ -40,8 +46,31 @@ resolve_setup_node_bin() {
     return 1
   fi
 
+  if setup_nix_managed && command -v node >/dev/null 2>&1; then
+    local path_node
+    path_node=$(command -v node)
+    if setup_node_bin_works "$path_node"; then
+      printf '%s\n' "$path_node"
+      return 0
+    fi
+  fi
+
   if command -v nub >/dev/null 2>&1; then
-    (cd "$REPO" && nub node which 2>/dev/null) && return 0
+    local nub_node
+    nub_node=$(cd "$REPO" && nub node which 2>/dev/null || true)
+    if setup_node_bin_works "$nub_node"; then
+      printf '%s\n' "$nub_node"
+      return 0
+    fi
+  fi
+
+  if command -v node >/dev/null 2>&1; then
+    local path_node
+    path_node=$(command -v node)
+    if setup_node_bin_works "$path_node"; then
+      printf '%s\n' "$path_node"
+      return 0
+    fi
   fi
 
   command -v node
@@ -50,9 +79,11 @@ resolve_setup_node_bin() {
 require_node() {
   local node_bin found
   node_bin=$(resolve_setup_node_bin) || exit 1
-  "$node_bin" -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 19)) process.exit(1);" 2>/dev/null || {
+  setup_node_bin_works "$node_bin" || {
     found=$("$node_bin" -v 2>/dev/null || echo missing)
-    echo "  ✗  Node.js >= 22.19 is required (found: $found at $node_bin; install/provision with nub)" >&2
+    local required
+    required=$("$node_bin" -e "const pkg = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(pkg.engines?.node ?? 'required by package.json');" "$REPO/package.json" 2>/dev/null || echo "required by package.json")
+    echo "  ✗  Node.js $required is required (found: $found at $node_bin; install/provision with nub)" >&2
     exit 1
   }
 }
@@ -118,57 +149,3 @@ append_once() {
   fi
 }
 
-profile_has_path_entry() {
-  local profile="$1" bin_dir="$2" marker="$3"
-  [ -e "$profile" ] || return 1
-  grep -qF "$marker" "$profile" && return 0
-  grep -qF "$bin_dir" "$profile" && grep -qF 'PATH' "$profile" && return 0
-  if [ "$bin_dir" = "$HOME/.local/bin" ]; then
-    grep -Eq '(\$HOME|~)/\.local/bin' "$profile" && grep -qF 'PATH' "$profile" && return 0
-  fi
-  return 1
-}
-
-append_path_entry_once() {
-  local profile="$1" bin_dir="$2" marker="$3" label="$4" path_expr
-  if profile_has_path_entry "$profile" "$bin_dir" "$marker"; then
-    ok "$label (PATH entry already present)"
-    return
-  fi
-
-  if [ "$bin_dir" = "$HOME/.local/bin" ]; then
-    path_expr='export PATH="$HOME/.local/bin:$PATH"'
-  else
-    path_expr="export PATH=\"$bin_dir:\$PATH\""
-  fi
-
-  if [ -e "$profile" ]; then
-    printf '\n%s\n%s\n' "$marker" "$path_expr" >> "$profile"
-    ok "$label (appended PATH entry)"
-  else
-    printf '%s\n%s\n' "$marker" "$path_expr" > "$profile"
-    ok "$label (created with PATH entry)"
-  fi
-}
-
-ensure_path_in_shell_profiles() {
-  local bin_dir="$1" marker="# pi-env: add user-local bin to PATH"
-  local profiles=() profile configured=0
-
-  for profile in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
-    if profile_has_path_entry "$profile" "$bin_dir" "$marker"; then
-      ok "$profile already configures $bin_dir"
-      configured=1
-    elif [ -e "$profile" ]; then
-      profiles+=("$profile")
-    fi
-  done
-
-  if [ "${#profiles[@]}" -eq 0 ] && [ "$configured" -eq 0 ]; then
-    profiles=("$HOME/.profile")
-  fi
-
-  for profile in "${profiles[@]}"; do
-    append_path_entry_once "$profile" "$bin_dir" "$marker" "$profile"
-  done
-}

@@ -16,15 +16,17 @@ The flake supports Linux and macOS on `x86_64` and `aarch64`:
 | Environment | Command | Meaning |
 | --- | --- | --- |
 | Fresh machine with local Nix + flakes | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` | Use local Nix to provide `git`, clone, and run setup. |
-| Existing checkout with local Nix | `nix run .#setup` or `./setup.sh --use-nix` | Use local Nix to run the setup app. |
-| Externally Nix-managed runtime/container | `./setup.sh --nix-managed` | Consume already-provisioned tools; do not invoke local Nix. |
+| Existing checkout with local Nix | `./setup.sh` or `nix run .#setup` | Plain setup auto-detects Nix and tries the setup app. |
+| Externally Nix-managed runtime/container | `./setup.sh` | Consume already-provisioned tools when `PI_ENV_CONFIG_MANAGED_BY_NIX=1`; do not invoke local Nix. |
 | Persistent user-profile tools | `nix profile install .#toolchain`, then `nix run .#setup` or `./setup.sh --nix-managed` | Install the toolchain into the user profile, then hydrate mutable repo/user state. |
 
 The bootstrap app brings `git` from the flake toolchain before cloning, so a fresh local-Nix host does not need a separate Git install.
 
-`--use-nix` means “invoke local Nix now” and re-execs `nix run .#setup`. Use it only on machines where the current user can realize Nix store paths.
+Plain `./setup.sh` auto-detects local Nix and tries `nix run .#setup` before falling back to portable setup. Set `PI_ENV_AUTO_NIX=0` or pass `--portable` to skip that automatic Nix attempt.
 
-`--nix-managed` means “Nix/Home Manager/nix-manager already provided the toolchain or owns shell/terminal config.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` on `PATH` unless `PI_ENV_NODE_BIN` pins Node explicitly.
+`--use-nix` means “invoke local Nix now” and re-execs `nix run .#setup`. Use it only when you want failure instead of fallback if the current user cannot realize Nix store paths.
+
+`--nix-managed` means “Nix/Home Manager/nix-manager already provided the toolchain or owns shell/terminal config.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` on `PATH` unless `PI_ENV_NODE_BIN` pins Node explicitly. This mode is selected automatically when `PI_ENV_CONFIG_MANAGED_BY_NIX=1` is already present.
 
 `nix run .#setup` runs `./setup.sh --nix-managed` from the checkout and exports `PI_ENV_NODE_BIN` to the flake-provided Node executable. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `nub install`.
 
@@ -52,9 +54,10 @@ Intentionally mutable/local:
 ## Setup modes
 
 ```bash
-./setup.sh --use-nix        # local Nix: re-exec nix run .#setup from a checkout
-./setup.sh --nix-managed    # external Nix: consume provisioned tools/config ownership
-./setup.sh --portable       # fallback default for non-Nix hosts
+./setup.sh                  # auto: try local Nix setup, then fallback when needed
+./setup.sh --use-nix        # local Nix: re-exec nix run .#setup from a checkout, no fallback
+./setup.sh --nix-managed    # external Nix: force provisioned tools/config ownership
+./setup.sh --portable       # skip auto-Nix and use current PATH tools
 ./setup.sh --no-terminal    # skip tmux/Ghostty setup
 ./setup.sh --no-path        # skip shell profile PATH edits
 ./setup.sh --no-repo-hooks  # skip git hook setup
