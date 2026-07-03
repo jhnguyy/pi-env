@@ -44,8 +44,7 @@ setup_environment() {
 }
 
 setup_runtime() {
-  setup_install_dependencies
-  setup_install_pi_cli
+  setup_install_runtime
 }
 
 main() {

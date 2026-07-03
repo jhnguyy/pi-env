@@ -2,10 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# shellcheck source=setup/lib.sh
-source "$ROOT/setup/lib.sh"
-# shellcheck source=setup/install.sh
-source "$ROOT/setup/install.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -18,6 +14,18 @@ test_node_bin() {
   else
     command -v node
   fi
+}
+
+run_pi_cli_setup() {
+  local node_bin
+  node_bin=$(test_node_bin)
+  REPO="$REPO" \
+  SETUP_DIR="$ROOT/setup" \
+  PI_BIN_DIR="$PI_BIN_DIR" \
+  PI_ENV_NODE_BIN="${PI_ENV_NODE_BIN:-}" \
+  PI_ENV_CONFIG_MANAGED_BY_NIX="${PI_ENV_CONFIG_MANAGED_BY_NIX:-}" \
+  PI_ENV_CLI_MANAGED_BY_NIX="${PI_ENV_CLI_MANAGED_BY_NIX:-}" \
+  "$node_bin" "$ROOT/setup/runtime.mjs" "${PI_ENV_NODE_BIN:-$node_bin}" pi-cli >/dev/null
 }
 
 create_stub_repo() {
@@ -51,7 +59,7 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
   PI_ENV_NODE_BIN=$(test_node_bin)
   create_stub_repo "$tmp"
 
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   [ -x "$PI_BIN_DIR/pi" ] || fail "pi wrapper should be executable"
   grep -qF "DEFAULT_PI_PACKAGE_DIR='$REPO/node_modules/@earendil-works/pi-coding-agent'" "$PI_BIN_DIR/pi" || fail "wrapper should point at repo node_modules pi package"
@@ -77,15 +85,17 @@ if [ "$1" = "-e" ]; then
   echo "1.2.3"
   exit 0
 fi
-echo "fake node: $1"
+echo "fake node: $*"
 SH
   chmod +x "$fake_node"
 
   PI_ENV_NODE_BIN="$fake_node"
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   grep -qF "NODE_BIN='$fake_node'" "$PI_BIN_DIR/pi" || fail "wrapper should pin configured node path"
-  "$PI_BIN_DIR/pi" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node"
+  local wrapper_output
+  wrapper_output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")
+  printf '%s' "$wrapper_output" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node (got: $wrapper_output)"
 
   unset PI_ENV_NODE_BIN
   rm -rf "$tmp"
@@ -99,7 +109,7 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   PI_ENV_NODE_BIN=$(test_node_bin)
   create_stub_repo "$tmp"
 
-  setup_install_pi_cli >/dev/null
+  run_pi_cli_setup
 
   [ ! -e "$PI_BIN_DIR/pi" ] || fail "setup should not write pi wrapper when Nix manages it"
 
