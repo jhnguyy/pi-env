@@ -2,7 +2,10 @@
 
 ## Workflow
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before making any changes.
+Before making changes:
+
+1. Read [`README.md`](README.md).
+2. Read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Code Intelligence
 
