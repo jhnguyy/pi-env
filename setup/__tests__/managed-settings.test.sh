@@ -156,7 +156,7 @@ test_disables_browser_extension_without_clobbering_other_extensions() {
   mkdir -p "$repo"
   cat > "$settings" <<'JSON'
 {
-  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client"]
+  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client", "-playwright-client"]
 }
 JSON
 

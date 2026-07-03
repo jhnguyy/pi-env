@@ -1,6 +1,46 @@
 import { readSettingsBlock } from "../_shared/settings";
 
-export type AnthropicHostedToolName = "web_search" | "web_fetch";
+export enum AnthropicHostedToolName {
+  WebSearch = "web_search",
+  WebFetch = "web_fetch",
+}
+
+enum AnthropicHostedToolType {
+  WebSearch = "web_search_20250305",
+  WebFetch = "web_fetch_20250910",
+}
+
+enum WebContextSettingKey {
+  Root = "webContext",
+  HostedTools = "anthropicHostedTools",
+}
+
+enum AnthropicHostedToolSettingKey {
+  Enabled = "enabled",
+  AllowWithZdr = "allowWithZdr",
+  Tools = "tools",
+  MaxUses = "maxUses",
+}
+
+enum ZdrEnvVar {
+  Anthropic = "ANTHROPIC_ZDR",
+  PiAnthropic = "PI_ANTHROPIC_ZDR",
+  Claude = "CLAUDE_ZDR",
+}
+
+enum AnthropicHostedToolEnvVar {
+  Enabled = "PI_ANTHROPIC_WEB_TOOLS",
+  AllowWithZdr = "PI_ANTHROPIC_WEB_TOOLS_ALLOW_ZDR",
+}
+
+enum ProviderName {
+  Anthropic = "anthropic",
+  GitHubCopilot = "github-copilot",
+}
+
+enum ModelApi {
+  AnthropicMessages = "anthropic-messages",
+}
 
 export interface AnthropicWebToolSettings {
   enabled: boolean;
@@ -9,65 +49,62 @@ export interface AnthropicWebToolSettings {
   maxUses?: number;
 }
 
-const DEFAULT_TOOLS: AnthropicHostedToolName[] = ["web_search"];
-const TOOL_TYPES: Record<AnthropicHostedToolName, string> = {
-  web_search: "web_search_20250305",
-  web_fetch: "web_fetch_20250910",
+const DEFAULT_TOOLS = [AnthropicHostedToolName.WebSearch] as const;
+const TOOL_TYPES: Record<AnthropicHostedToolName, AnthropicHostedToolType> = {
+  [AnthropicHostedToolName.WebSearch]: AnthropicHostedToolType.WebSearch,
+  [AnthropicHostedToolName.WebFetch]: AnthropicHostedToolType.WebFetch,
 };
 
-export function loadAnthropicWebToolSettings(cwd = process.cwd(), env = process.env): AnthropicWebToolSettings {
-  const settings = readSettingsBlock("webContext", cwd);
-  const hosted = objectAt(settings, "anthropicHostedTools");
-  const legacy = objectAt(settings, "anthropicWebSearch");
-  const merged = { ...legacy, ...hosted };
+export function loadAnthropicWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): AnthropicWebToolSettings {
+  const settings = objectAt(readSettingsBlock(WebContextSettingKey.Root, cwd), WebContextSettingKey.HostedTools);
 
   return {
-    enabled: booleanSetting(merged.enabled, env.PI_ANTHROPIC_WEB_TOOLS, true),
-    allowWithZdr: booleanSetting(merged.allowWithZdr, env.PI_ANTHROPIC_WEB_TOOLS_ALLOW_ZDR, false),
-    tools: parseToolList(merged.tools) ?? DEFAULT_TOOLS,
-    maxUses: numberSetting(merged.maxUses),
+    enabled: booleanSetting(settings[AnthropicHostedToolSettingKey.Enabled], env[AnthropicHostedToolEnvVar.Enabled], true),
+    allowWithZdr: booleanSetting(settings[AnthropicHostedToolSettingKey.AllowWithZdr], env[AnthropicHostedToolEnvVar.AllowWithZdr], false),
+    tools: parseToolList(settings[AnthropicHostedToolSettingKey.Tools]) ?? [...DEFAULT_TOOLS],
+    maxUses: numberSetting(settings[AnthropicHostedToolSettingKey.MaxUses]),
   };
 }
 
-export function shouldInjectAnthropicHostedWebTools(model: unknown, env = process.env, settings = loadAnthropicWebToolSettings()): boolean {
-  if (!settings.enabled) return false;
-  if (!isAnthropicProviderModel(model)) return false;
-  if (isZdrEnabled(env) && !settings.allowWithZdr) return false;
-  return true;
+export function shouldInjectAnthropicHostedWebTools(
+  model: unknown,
+  env: Record<string, string | undefined> = process.env,
+  settings = loadAnthropicWebToolSettings(),
+): boolean {
+  return settings.enabled && isAnthropicProviderModel(model) && (!isZdrEnabled(env) || settings.allowWithZdr);
 }
 
 export function injectAnthropicHostedWebTools(payload: unknown, settings: AnthropicWebToolSettings): unknown {
   if (!isRecord(payload)) return payload;
 
   const existingTools = Array.isArray(payload.tools) ? [...payload.tools] : [];
-  const existingNames = new Set(existingTools.map((tool) => (isRecord(tool) ? tool.name : undefined)).filter((name): name is string => typeof name === "string"));
+  const existingNames = new Set(
+    existingTools
+      .map((tool) => (isRecord(tool) ? tool.name : undefined))
+      .filter((name): name is string => typeof name === "string"),
+  );
   const hostedTools = settings.tools
     .filter((name) => !existingNames.has(name))
     .map((name) => buildHostedTool(name, settings));
 
-  if (hostedTools.length === 0) return payload;
-  return {
-    ...payload,
-    tools: [...existingTools, ...hostedTools],
-  };
+  return hostedTools.length === 0 ? payload : { ...payload, tools: [...existingTools, ...hostedTools] };
 }
 
-export function isZdrEnabled(env = process.env): boolean {
-  return [env.ANTHROPIC_ZDR, env.PI_ANTHROPIC_ZDR, env.CLAUDE_ZDR]
-    .some((value) => typeof value === "string" && /^(1|true|yes|on)$/i.test(value.trim()));
+export function isZdrEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  return Object.values(ZdrEnvVar).some((name) => parseBoolean(env[name]) === true);
 }
 
 function buildHostedTool(name: AnthropicHostedToolName, settings: AnthropicWebToolSettings): Record<string, unknown> {
   return {
     type: TOOL_TYPES[name],
     name,
-    ...(name === "web_search" && settings.maxUses !== undefined ? { max_uses: settings.maxUses } : {}),
+    ...(name === AnthropicHostedToolName.WebSearch && settings.maxUses !== undefined ? { max_uses: settings.maxUses } : {}),
   };
 }
 
 function isAnthropicProviderModel(model: unknown): boolean {
   if (!isRecord(model)) return false;
-  return model.provider === "anthropic" || model.api === "anthropic-messages" && model.provider !== "github-copilot";
+  return model.provider === ProviderName.Anthropic || (model.api === ModelApi.AnthropicMessages && model.provider !== ProviderName.GitHubCopilot);
 }
 
 function objectAt(root: Record<string, unknown>, key: string): Record<string, unknown> {
@@ -76,10 +113,7 @@ function objectAt(root: Record<string, unknown>, key: string): Record<string, un
 }
 
 function booleanSetting(value: unknown, envValue: unknown, defaultValue: boolean): boolean {
-  const parsedEnv = parseBoolean(envValue);
-  if (parsedEnv !== undefined) return parsedEnv;
-  const parsedValue = parseBoolean(value);
-  return parsedValue ?? defaultValue;
+  return parseBoolean(envValue) ?? parseBoolean(value) ?? defaultValue;
 }
 
 function parseBoolean(value: unknown): boolean | undefined {
@@ -96,7 +130,7 @@ function numberSetting(value: unknown): number | undefined {
 
 function parseToolList(value: unknown): AnthropicHostedToolName[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const tools = value.filter((item): item is AnthropicHostedToolName => item === "web_search" || item === "web_fetch");
+  const tools = value.filter((item): item is AnthropicHostedToolName => Object.values(AnthropicHostedToolName).includes(item));
   return tools.length > 0 ? [...new Set(tools)] : undefined;
 }
 

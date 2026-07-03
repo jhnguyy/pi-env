@@ -162,17 +162,11 @@ function migrateDefaultNpmCommand(settings) {
 }
 
 function ensureDisabledExtensions(settings) {
-  if (!Array.isArray(settings.extensions)) {
-    settings.extensions = [];
-  }
-
-  for (const name of DISABLED_EXTENSIONS) {
-    const disableEntry = `-${name}`;
-    settings.extensions = settings.extensions.filter((entry) => entry !== name && entry !== `extensions/${name}` && entry !== `.pi/extensions/${name}`);
-    if (!settings.extensions.includes(disableEntry)) {
-      settings.extensions.push(disableEntry);
-    }
-  }
+  const existing = Array.isArray(settings.extensions) ? settings.extensions : [];
+  settings.extensions = [
+    ...existing.filter((entry) => !DISABLED_EXTENSIONS.some((name) => entry === name || entry === `extensions/${name}` || entry === `.pi/extensions/${name}` || entry === `-${name}`)),
+    ...DISABLED_EXTENSIONS.map((name) => `-${name}`),
+  ];
 }
 
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";

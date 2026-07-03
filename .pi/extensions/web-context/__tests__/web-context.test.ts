@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildContextPlan, parseWebUrl, selectAdapter } from "../index";
-import { injectAnthropicHostedWebTools, isZdrEnabled, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
+import { AnthropicHostedToolName, injectAnthropicHostedWebTools, isZdrEnabled, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 
 describe("web context", () => {
   it("selects the GitHub adapter", () => {
@@ -28,7 +28,7 @@ describe("web context", () => {
 });
 
 describe("anthropic hosted web tools", () => {
-  const settings: AnthropicWebToolSettings = { enabled: true, allowWithZdr: false, tools: ["web_search", "web_fetch"], maxUses: 3 };
+  const settings: AnthropicWebToolSettings = { enabled: true, allowWithZdr: false, tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch], maxUses: 3 };
 
   it("injects hosted search/fetch tools without replacing existing tools", () => {
     const payload = injectAnthropicHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
