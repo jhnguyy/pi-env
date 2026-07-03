@@ -11,36 +11,85 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { readFileSync, readdirSync, existsSync } from "fs";
-import { basename, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { homedir } from "os";
+import { fileURLToPath } from "url";
 import type { ExtToolRegistration } from "../subagent/types";
 
-const REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
+const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
+const REFERENCE_SKILL_TOOL_DESCRIPTION =
+  "Load a named reference skill only when the user explicitly asks to reference that skill (for example: 'reference the teach skill to help me learn X'). Call without a name only when the user asks what reference skills are available.";
+
+interface ReferenceSkillEntry {
+  readonly name: string;
+  readonly filePath: string;
+  readonly sourceDir: string;
+}
 
 /**
- * Lazy per-process index: skillName (lowercased) → absolute file path.
+ * Lazy per-process index: skillName (lowercased) → reference skill entry.
  * Built on first reference_skill lookup; avoids re-reading all markdown files
  * on every invocation. Null = not yet built.
  */
-let _referenceSkillIndex: Map<string, string> | null = null;
+let _referenceSkillIndex: Map<string, ReferenceSkillEntry> | null = null;
 
-function getReferenceSkillIndex(): Map<string, string> {
+function findPackageReferenceDir(): string | null {
+  let current = dirname(fileURLToPath(import.meta.url));
+
+  for (let i = 0; i < 8; i += 1) {
+    const packageJson = join(current, "package.json");
+    const referenceDir = join(current, ".agents", "skills", "reference");
+    if (existsSync(packageJson) && existsSync(referenceDir)) {
+      return referenceDir;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return null;
+}
+
+export function getReferenceDirs(): string[] {
+  const dirs = [USER_REFERENCE_DIR, findPackageReferenceDir()].filter((dir): dir is string =>
+    Boolean(dir && existsSync(dir)),
+  );
+  return Array.from(new Set(dirs.map((dir) => resolve(dir))));
+}
+
+function readReferenceSkillName(filePath: string, fallback: string): string {
+  const content = readFileSync(filePath, "utf-8");
+  const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
+  return nameMatch ? nameMatch[1].trim() : fallback;
+}
+
+export function listReferenceSkillNames(): string[] {
+  const names = new Set<string>();
+  for (const dir of getReferenceDirs()) {
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+      names.add(file.replace(/\.md$/, ""));
+    }
+  }
+  return Array.from(names).sort();
+}
+
+export function getReferenceSkillIndex(): Map<string, ReferenceSkillEntry> {
   if (_referenceSkillIndex !== null) return _referenceSkillIndex;
-  const index = new Map<string, string>();
-  if (!existsSync(REFERENCE_DIR)) {
-    _referenceSkillIndex = index;
-    return index;
+  const index = new Map<string, ReferenceSkillEntry>();
+
+  for (const dir of getReferenceDirs()) {
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+      const filePath = join(dir, file);
+      const filenameKey = file.replace(/\.md$/, "");
+      const skillName = readReferenceSkillName(filePath, filenameKey);
+      const entry = { name: skillName, filePath, sourceDir: dir };
+
+      // First directory wins so user-level reference skills can override package defaults.
+      if (!index.has(skillName.toLowerCase())) index.set(skillName.toLowerCase(), entry);
+      if (!index.has(filenameKey.toLowerCase())) index.set(filenameKey.toLowerCase(), entry);
+    }
   }
-  for (const file of readdirSync(REFERENCE_DIR).filter((f) => f.endsWith(".md"))) {
-    const filePath = join(REFERENCE_DIR, file);
-    const content = readFileSync(filePath, "utf-8");
-    const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
-    const skillName = nameMatch ? nameMatch[1].trim().toLowerCase() : file.replace(/\.md$/, "");
-    index.set(skillName, filePath);
-    // Also index by filename so both frontmatter name and filename match.
-    const filenameKey = file.replace(/\.md$/, "").toLowerCase();
-    if (filenameKey !== skillName) index.set(filenameKey, filePath);
-  }
+
   _referenceSkillIndex = index;
   return index;
 }
@@ -53,8 +102,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "reference_skill",
     label: "Reference Skill",
-    description:
-      "Access skills that are not in passive context. Call without a name to list available skills, or with a name to load that skill's instructions.",
+    description: REFERENCE_SKILL_TOOL_DESCRIPTION,
     parameters: Type.Object({
       name: Type.Optional(
         Type.String({ description: "Skill name to load. Omit to list available skills." }),
@@ -62,18 +110,21 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      if (!existsSync(REFERENCE_DIR)) {
+      const referenceDirs = getReferenceDirs();
+      if (referenceDirs.length === 0) {
         return {
-          content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }],
-          details: null,
+          content: [
+            {
+              type: "text",
+              text: `No reference skill directories found. Checked: ${USER_REFERENCE_DIR}`,
+            },
+          ],
+          details: { referenceDirs },
         };
       }
 
-      // List mode — filenames only, no file reads needed
       if (!params.name) {
-        const names = readdirSync(REFERENCE_DIR)
-          .filter((f: string) => f.endsWith(".md"))
-          .map((f: string) => f.replace(/\.md$/, ""));
+        const names = listReferenceSkillNames();
         return {
           content: [
             {
@@ -81,7 +132,7 @@ export default function (pi: ExtensionAPI) {
               text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}`,
             },
           ],
-          details: null,
+          details: { referenceDirs },
         };
       }
 
@@ -91,9 +142,7 @@ export default function (pi: ExtensionAPI) {
       const matched = index.get(target) ?? null;
 
       if (!matched) {
-        const names = readdirSync(REFERENCE_DIR)
-          .filter((f: string) => f.endsWith(".md"))
-          .map((f: string) => f.replace(/\.md$/, ""));
+        const names = listReferenceSkillNames();
         return {
           content: [
             {
@@ -101,14 +150,14 @@ export default function (pi: ExtensionAPI) {
               text: `No reference skill named "${params.name}". Available: ${names.join(", ")}`,
             },
           ],
-          details: null,
+          details: { referenceDirs },
         };
       }
 
-      const content = readFileSync(matched, "utf-8");
+      const content = readFileSync(matched.filePath, "utf-8");
       return {
         content: [{ type: "text", text: content }],
-        details: null,
+        details: matched,
       };
     },
   });
@@ -294,21 +343,24 @@ export default function (pi: ExtensionAPI) {
     const referenceSkillAgentTool: AgentTool<any, any> = {
       name: "reference_skill",
       label: "Reference Skill",
-      description: "Access skills that are not in passive context. Call without a name to list, or with a name to load.",
+      description: REFERENCE_SKILL_TOOL_DESCRIPTION,
       parameters: Type.Object({
         name: Type.Optional(Type.String({ description: "Skill name to load. Omit to list available skills." })),
       }),
       execute: async (_toolCallId, params) => {
         const args = params as { name?: string };
-        if (!existsSync(REFERENCE_DIR)) return { content: [{ type: "text", text: `Reference skill directory not found: ${REFERENCE_DIR}` }], details: null };
+        const referenceDirs = getReferenceDirs();
+        if (referenceDirs.length === 0) {
+          return { content: [{ type: "text", text: `No reference skill directories found. Checked: ${USER_REFERENCE_DIR}` }], details: { referenceDirs } };
+        }
         if (!args.name) {
-          const names = readdirSync(REFERENCE_DIR).filter((f: string) => f.endsWith(".md")).map((f: string) => f.replace(/\.md$/, ""));
-          return { content: [{ type: "text", text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}` }], details: null };
+          const names = listReferenceSkillNames();
+          return { content: [{ type: "text", text: `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}` }], details: { referenceDirs } };
         }
         const index = getReferenceSkillIndex();
         const matched = index.get(args.name.toLowerCase()) ?? null;
-        if (!matched) return { content: [{ type: "text", text: `No reference skill named "${args.name}".` }], details: null };
-        return { content: [{ type: "text", text: readFileSync(matched, "utf-8") }], details: null };
+        if (!matched) return { content: [{ type: "text", text: `No reference skill named "${args.name}".` }], details: { referenceDirs } };
+        return { content: [{ type: "text", text: readFileSync(matched.filePath, "utf-8") }], details: matched };
       },
     };
     pi.events.emit("agent-tools:register", { tool: referenceSkillAgentTool, capabilities: ["read"] } satisfies ExtToolRegistration);

@@ -79,6 +79,14 @@ describe("playwright-client config", () => {
       artifactDir: "/tmp/pi-browser-artifacts-test",
     });
   });
+
+  it("rejects malformed target settings with a typed config boundary", () => {
+    clearBrowserEnv();
+    const cwd = tempProject({ playwrightClient: { targets: { bad: { host: "127.0.0.1", protocol: "ftp" } } } });
+
+    expect(() => loadBrowserClientConfig(cwd)).toThrow(/playwrightClient\.targets/);
+    expect(() => loadBrowserClientConfig(cwd)).toThrow(/protocol/);
+  });
 });
 
 describe("playwright-client action metadata", () => {
