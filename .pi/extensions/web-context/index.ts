@@ -110,7 +110,7 @@ export function buildContextPlan(rawUrl: string, purpose?: string): string {
 export default function webContext(pi: ExtensionAPI) {
   pi.on("before_provider_request", (event, ctx) => {
     const settings = loadAnthropicWebToolSettings(ctx.cwd);
-    if (!shouldInjectAnthropicHostedWebTools(ctx.model, process.env, settings)) return undefined;
+    if (!shouldInjectAnthropicHostedWebTools(ctx.model, settings)) return undefined;
     return injectAnthropicHostedWebTools(event.payload, settings);
   });
 
@@ -121,7 +121,7 @@ export default function webContext(pi: ExtensionAPI) {
       "Fetch an http(s) URL as text without browser automation.",
       "Use web_fetch for direct URL retrieval when a text/API/static fetch is sufficient.",
       "This tool does not execute page JavaScript, click, authenticate, or visually inspect pages.",
-      "For direct Anthropic models, hosted web_search is attached at the provider layer unless ZDR is enabled.",
+      "For direct Anthropic models, hosted web_search is attached at the provider layer.",
     ].join("\n"),
     promptSnippet: "Fetch an http(s) URL as bounded text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
     promptGuidelines: [
@@ -161,7 +161,7 @@ export default function webContext(pi: ExtensionAPI) {
       "Prefer existing scripts, APIs, repo docs, cached notes, static fetches, sitemaps, feeds, llms.txt, and other text-first sources before browser automation.",
       "The tool returns known site-specific adapters when available and a generic text/API-first plan otherwise.",
       "It does not browse visually or click through pages.",
-      "On direct Anthropic models, pi-env can attach Anthropic-hosted web_search to provider requests unless ZDR is enabled; set webContext.anthropicHostedTools.enabled=false to disable."
+      "On direct Anthropic models, pi-env can attach Anthropic-hosted web_search to provider requests; set webContext.anthropicHostedTools.enabled=false to disable."
     ].join("\n"),
     parameters: Type.Object({
       url: Type.String({ description: "Website URL to gather context for." }),

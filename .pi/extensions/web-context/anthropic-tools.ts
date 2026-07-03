@@ -17,20 +17,12 @@ enum WebContextSettingKey {
 
 enum AnthropicHostedToolSettingKey {
   Enabled = "enabled",
-  AllowWithZdr = "allowWithZdr",
   Tools = "tools",
   MaxUses = "maxUses",
 }
 
-enum ZdrEnvVar {
-  Anthropic = "ANTHROPIC_ZDR",
-  PiAnthropic = "PI_ANTHROPIC_ZDR",
-  Claude = "CLAUDE_ZDR",
-}
-
 enum AnthropicHostedToolEnvVar {
   Enabled = "PI_ANTHROPIC_WEB_TOOLS",
-  AllowWithZdr = "PI_ANTHROPIC_WEB_TOOLS_ALLOW_ZDR",
 }
 
 enum ProviderName {
@@ -44,7 +36,6 @@ enum ModelApi {
 
 export interface AnthropicWebToolSettings {
   enabled: boolean;
-  allowWithZdr: boolean;
   tools: AnthropicHostedToolName[];
   maxUses?: number;
 }
@@ -60,18 +51,13 @@ export function loadAnthropicWebToolSettings(cwd = process.cwd(), env: Record<st
 
   return {
     enabled: booleanSetting(settings[AnthropicHostedToolSettingKey.Enabled], env[AnthropicHostedToolEnvVar.Enabled], true),
-    allowWithZdr: booleanSetting(settings[AnthropicHostedToolSettingKey.AllowWithZdr], env[AnthropicHostedToolEnvVar.AllowWithZdr], false),
     tools: parseToolList(settings[AnthropicHostedToolSettingKey.Tools]) ?? [...DEFAULT_TOOLS],
     maxUses: numberSetting(settings[AnthropicHostedToolSettingKey.MaxUses]),
   };
 }
 
-export function shouldInjectAnthropicHostedWebTools(
-  model: unknown,
-  env: Record<string, string | undefined> = process.env,
-  settings = loadAnthropicWebToolSettings(),
-): boolean {
-  return settings.enabled && isAnthropicProviderModel(model) && (!isZdrEnabled(env) || settings.allowWithZdr);
+export function shouldInjectAnthropicHostedWebTools(model: unknown, settings = loadAnthropicWebToolSettings()): boolean {
+  return settings.enabled && isAnthropicProviderModel(model);
 }
 
 export function injectAnthropicHostedWebTools(payload: unknown, settings: AnthropicWebToolSettings): unknown {
@@ -88,10 +74,6 @@ export function injectAnthropicHostedWebTools(payload: unknown, settings: Anthro
     .map((name) => buildHostedTool(name, settings));
 
   return hostedTools.length === 0 ? payload : { ...payload, tools: [...existingTools, ...hostedTools] };
-}
-
-export function isZdrEnabled(env: Record<string, string | undefined> = process.env): boolean {
-  return Object.values(ZdrEnvVar).some((name) => parseBoolean(env[name]) === true);
 }
 
 function buildHostedTool(name: AnthropicHostedToolName, settings: AnthropicWebToolSettings): Record<string, unknown> {
