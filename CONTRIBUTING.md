@@ -1,14 +1,6 @@
 # Contributing
 
-Solo project — these conventions exist so `git log --graph` stays readable, the work-tracker extension has a stable contract to enforce, and the repo stays smaller than the problems it solves.
-
-## Engineering Values
-
-- **Reduce before adding.** Prefer deleting stale paths, collapsing duplicate options, and tightening boundaries before introducing another abstraction.
-- **One source of truth.** Commands live in `package.json`, setup policy lives under `setup/`, and durable rationale lives in docs/notes rather than scattered comments.
-- **Deterministic first, portable second.** Nix and the lockfile should make the common path reproducible; portable fallback exists for survival, not as a parallel platform.
-- **Mutable state stays explicit.** Auth, sessions, provider choices, and local overrides are machine state. Setup may hydrate them but should not silently own them.
-- **Small PRs with cleanup pressure.** Any PR that adds setup branches, config modes, or extension surface area should either remove an older path or leave a named follow-up in docs/notes. Setup-specific follow-ups belong in [`setup/improvements.md`](setup/improvements.md).
+Solo project — these conventions exist so `git log --graph` stays readable and the work-tracker extension has a stable contract to enforce.
 
 ## Branch Convention
 
