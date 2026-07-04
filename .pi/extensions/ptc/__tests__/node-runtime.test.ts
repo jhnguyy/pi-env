@@ -1,0 +1,65 @@
+import type { ChildProcess } from "node:child_process";
+import { Effect, Either } from "effect";
+import { describe, expect, it } from "vitest";
+import {
+  cleanupTempScript,
+  createTempScript,
+  PtcExecutionPhase,
+  spawnSubprocess,
+  type PtcNodeRuntime,
+} from "../node-runtime";
+
+function fakeRuntime(overrides: Partial<PtcNodeRuntime> = {}): PtcNodeRuntime {
+  return {
+    tmpdir: () => "/tmp",
+    writeFile: () => {},
+    unlink: () => {},
+    spawn: () => ({}) as ChildProcess,
+    ...overrides,
+  };
+}
+
+describe("ptc node runtime", () => {
+  it("writes temp scripts with private file permissions", async () => {
+    const writes: Array<{ path: string; data: string; mode: number }> = [];
+
+    const path = await Effect.runPromise(createTempScript("console.log(1)", fakeRuntime({
+      writeFile: (filePath, data, options) => {
+        writes.push({ path: filePath, data, mode: options.mode });
+      },
+    })));
+
+    expect(path).toMatch(/^\/tmp\/ptc-[a-z0-9]+\.mjs$/);
+    expect(writes).toEqual([{ path, data: "console.log(1)", mode: 0o600 }]);
+  });
+
+  it("maps temp script write failures to prepare errors", async () => {
+    const result = await Effect.runPromise(Effect.either(createTempScript("", fakeRuntime({
+      writeFile: () => { throw new Error("disk full"); },
+    }))));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe(PtcExecutionPhase.Prepare);
+      expect(result.left.message).toBe("PTC prepare failed: disk full");
+    }
+  });
+
+  it("treats cleanup unlink failures as best-effort", async () => {
+    await expect(Effect.runPromise(cleanupTempScript("/tmp/missing", fakeRuntime({
+      unlink: () => { throw new Error("already gone"); },
+    })))).resolves.toBeUndefined();
+  });
+
+  it("maps spawn failures to run errors", async () => {
+    const result = await Effect.runPromise(Effect.either(spawnSubprocess("/tmp/script.mjs", "/repo", fakeRuntime({
+      spawn: () => { throw new Error("spawn failed"); },
+    }))));
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe(PtcExecutionPhase.Run);
+      expect(result.left.message).toBe("PTC run failed: spawn failed");
+    }
+  });
+});
