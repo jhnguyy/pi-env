@@ -6,13 +6,20 @@
  * and calls renderAgentEndSummary once to produce a single consolidated message.
  *
  * Adding a new backend type? Make it produce AgentEndFileResult[] and push into
- * the shared allResults array. No other changes needed.
+ * the shared allResults array. Use the result `kind` to encode backend policy.
  */
+import { basename } from "node:path";
 import type { DiagnosticsResult, DiagnosticItem } from "./protocol";
+import { BackendName } from "./backend-configs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** A single normalized issue from any backend. */
+export enum AgentEndResultKind {
+  Lsp = "lsp",
+  Format = "format",
+}
+
 export interface AgentEndIssue {
   severity: "error" | "warning" | "info";
   message: string;
@@ -28,34 +35,107 @@ export interface AgentEndIssue {
  * All issues found in one file by one backend at agent_end.
  * An empty issues array means the file was processed cleanly.
  */
-export interface AgentEndFileResult {
+interface AgentEndFileResultBase {
   /** Backend name for display, e.g. "hcl", "terraform", "typescript", "bash" */
-  backend: string;
+  backend: BackendName;
   /** Absolute file path */
   filePath: string;
   /** Basename for display */
   fileName: string;
   /** Issues found. Empty → no problems. */
   issues: AgentEndIssue[];
-  /**
-   * When true, error-severity issues in this result cause the model to be
-   * re-engaged via sendMessage({ triggerTurn: true }).
-   * Format backends set this to false — their errors are informational.
-   * LSP backends set this to true — errors need the model to fix them.
-   */
-  triggerOnError: boolean;
 }
+
+/** LSP diagnostics can re-engage the model when they contain errors. */
+export interface LspAgentEndFileResult extends AgentEndFileResultBase {
+  kind: AgentEndResultKind.Lsp;
+}
+
+/** Formatter failures are shown to the user but do not re-engage the model. */
+export interface FormatAgentEndFileResult extends AgentEndFileResultBase {
+  kind: AgentEndResultKind.Format;
+}
+
+export type AgentEndFileResult = LspAgentEndFileResult | FormatAgentEndFileResult;
 
 // ─── Decision ─────────────────────────────────────────────────────────────────
 
 /**
- * Returns true if any result with triggerOnError has at least one error-severity
- * issue. Used to decide whether to pass { triggerTurn: true } to sendMessage.
+ * Returns true if any LSP result has at least one error-severity issue. Used to
+ * decide whether to pass { triggerTurn: true } to sendMessage.
  */
 export function shouldTriggerTurn(results: AgentEndFileResult[]): boolean {
   return results.some(
-    (r) => r.triggerOnError && r.issues.some((i) => i.severity === "error"),
+    (r) => r.kind === AgentEndResultKind.Lsp && r.issues.some((i) => i.severity === "error"),
   );
+}
+
+// ─── Active state ─────────────────────────────────────────────────────────────
+/**
+ * Mutable active diagnostics state keyed by file path.
+ *
+ * agent_end backends often omit clean files, so callers must pass every file that
+ * was actually processed. Those files are first removed from the active set, then
+ * any newly reported issues are inserted. This lets a later clean write retire a
+ * stale diagnostic instead of leaving old post-edit messages in model context.
+ */
+export type ActiveAgentEndResults = Map<string, AgentEndFileResult>;
+
+export function updateActiveAgentEndResults(
+  active: ActiveAgentEndResults,
+  processedFiles: string[],
+  latestResults: AgentEndFileResult[],
+): void {
+  for (const file of processedFiles) active.delete(file);
+  for (const result of latestResults) {
+    if (result.issues.length > 0) active.set(result.filePath, result);
+  }
+}
+
+/** Return active results in deterministic file-path order. */
+export function sortedActiveAgentEndResults(active: ActiveAgentEndResults): AgentEndFileResult[] {
+  return [...active.values()].sort((a, b) => a.filePath.localeCompare(b.filePath));
+}
+
+/** Render the current active state in stable file-path order. */
+export function renderActiveAgentEndSummary(active: ActiveAgentEndResults): string {
+  return renderAgentEndSummary(sortedActiveAgentEndResults(active));
+}
+
+export interface AgentEndProcessingResult {
+  /** Summary for just this agent_end batch, used for displayed follow-up messages. */
+  batchSummary: string;
+  /** Summary for all currently active issues, used for LLM context injection. */
+  activeSummary: string;
+  /** Whether this batch should start a synthetic fix-up turn. */
+  triggerTurn: boolean;
+}
+
+export function processAgentEndResults(
+  active: ActiveAgentEndResults,
+  processedFiles: string[],
+  latestResults: AgentEndFileResult[],
+): AgentEndProcessingResult {
+  updateActiveAgentEndResults(active, processedFiles, latestResults);
+  return {
+    batchSummary: renderAgentEndSummary(latestResults),
+    activeSummary: renderActiveAgentEndSummary(active),
+    triggerTurn: shouldTriggerTurn(latestResults),
+  };
+}
+
+export function formatAgentEndErrorResult(
+  backend: BackendName,
+  filePath: string,
+  message: string,
+): FormatAgentEndFileResult {
+  return {
+    kind: AgentEndResultKind.Format,
+    backend,
+    filePath,
+    fileName: basename(filePath),
+    issues: [{ severity: "error", message }],
+  };
 }
 
 // ─── Mappers ──────────────────────────────────────────────────────────────────
@@ -72,29 +152,38 @@ function mapDiagItem(item: DiagnosticItem): AgentEndIssue {
   };
 }
 
+function hasReportableDiagnostics(items: DiagnosticItem[]): boolean {
+  return items.some((item) => item.severity === "error" || item.severity === "warning");
+}
+
+function backendName(value: string | undefined): BackendName | undefined {
+  if (!value) return undefined;
+  return Object.values(BackendName).includes(value as BackendName) ? value as BackendName : BackendName.Lsp;
+}
+
 /**
  * Map a DiagnosticsResult (single file or bulk) to AgentEndFileResult[].
  * Files with no errors or warnings are omitted.
  */
 export function diagnosticsToAgentEndResults(diags: DiagnosticsResult): AgentEndFileResult[] {
-  const toResult = (path: string, language: string | undefined, items: DiagnosticItem[]): AgentEndFileResult => ({
-    backend: language ?? "lsp",
+  const toResult = (path: string, language: BackendName | undefined, items: DiagnosticItem[]): AgentEndFileResult => ({
+    kind: AgentEndResultKind.Lsp,
+    backend: language ?? BackendName.Lsp,
     filePath: path,
-    fileName: path.split("/").pop() ?? path,
+    fileName: basename(path),
     issues: items.map(mapDiagItem),
-    triggerOnError: true,
   });
 
   if (diags.files) {
-    // Bulk result — one entry per file that has issues
+    // Bulk result — one entry per file that has reportable issues.
     return diags.files
-      .filter((f) => f.errorCount > 0 || f.warnCount > 0)
-      .map((f) => toResult(f.path, f.language ?? diags.language, f.items));
+      .filter((f) => hasReportableDiagnostics(f.items))
+      .map((f) => toResult(f.path, backendName(f.language ?? diags.language), f.items));
   }
 
   // Single-file result
-  if (diags.errorCount === 0 && diags.warnCount === 0) return [];
-  return [toResult(diags.path, diags.language, diags.items)];
+  if (!hasReportableDiagnostics(diags.items)) return [];
+  return [toResult(diags.path, backendName(diags.language), diags.items)];
 }
 
 // ─── Renderer ─────────────────────────────────────────────────────────────────

@@ -3,12 +3,13 @@
  * @purpose Orchestrates PTC subprocess execution.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
+import { Data, Effect } from "effect";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -23,6 +24,22 @@ import type { ToolRegistry } from "./tool-registry";
 import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv, killGracefully } from "./types";
 
 const PREAMBLE_PATH = fileURLToPath(new URL("./subprocess-preamble.js", import.meta.url));
+
+enum PtcExecutionPhase {
+  Prepare = "prepare",
+  Run = "run",
+  Cleanup = "cleanup",
+}
+
+class PtcExecutionError extends Data.TaggedError("PtcExecutionError")<{
+  readonly phase: PtcExecutionPhase;
+  readonly cause: unknown;
+}> {
+  override get message(): string {
+    const reason = this.cause instanceof Error ? this.cause.message : String(this.cause);
+    return `PTC ${this.phase} failed: ${reason}`;
+  }
+}
 
 export class PtcExecutor {
   constructor(
@@ -42,21 +59,39 @@ export class PtcExecutor {
     const fullCode = buildSubprocessCode(PREAMBLE_PATH, wrappers, userCode);
     const runnableCode = transformSubprocessCode(fullCode);
 
-    const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.mjs`);
-    writeFileSync(tmpPath, runnableCode, { encoding: "utf-8", mode: 0o600 });
-
-    try {
-      return await this.runSubprocess(tmpPath, userCode, cwd, signal, onUpdate, ctx);
-    } finally {
-      try {
-        unlinkSync(tmpPath);
-      } catch {
-        /* best-effort cleanup */
-      }
-    }
+    return Effect.runPromise(
+      Effect.acquireUseRelease(
+        createTempScript(runnableCode),
+        (tmpPath) => this.runSubprocessEffect(tmpPath, userCode, cwd, signal, onUpdate, ctx),
+        (tmpPath) => cleanupTempScript(tmpPath),
+      ),
+    );
   }
 
-  private async runSubprocess(
+  private runSubprocessEffect(
+    scriptPath: string,
+    userCode: string,
+    cwd: string,
+    signal?: AbortSignal,
+    onUpdate?: AgentToolUpdateCallback<unknown>,
+    ctx?: ExtensionContext,
+  ): Effect.Effect<string, PtcExecutionError> {
+    return Effect.acquireUseRelease(
+      spawnSubprocess(scriptPath, cwd),
+      (proc) => Effect.tryPromise({
+        try: () => this.awaitSubprocess(proc, scriptPath, userCode, cwd, signal, onUpdate, ctx),
+        catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause }),
+      }),
+      (proc) => Effect.sync(() => {
+        if (proc.exitCode === null && proc.signalCode === null) {
+          killGracefully(proc);
+        }
+      }),
+    );
+  }
+
+  private async awaitSubprocess(
+    proc: ChildProcess,
     scriptPath: string,
     userCode: string,
     cwd: string,
@@ -64,12 +99,6 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
   ): Promise<string> {
-    const proc = spawn(process.execPath, [scriptPath], {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: buildSubprocessEnv(),
-    });
-
     const dispatch = (tool: string, params: Record<string, unknown>) =>
       this.registry.dispatch(tool, params, cwd, undefined, ctx);
 
@@ -92,13 +121,45 @@ export class PtcExecutor {
 
     try {
       const raw = await Promise.race([bridge.completion, timeoutPromise]);
-      if (timeoutId) clearTimeout(timeoutId);
       return truncateOutput(raw);
     } catch (err) {
-      if (timeoutId) clearTimeout(timeoutId);
       throw enhancePtcError(err, scriptPath, userCode);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
+}
+
+function createTempScript(code: string): Effect.Effect<string, PtcExecutionError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.mjs`);
+      writeFileSync(tmpPath, code, { encoding: "utf-8", mode: 0o600 });
+      return tmpPath;
+    },
+    catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Prepare, cause }),
+  });
+}
+
+function cleanupTempScript(path: string): Effect.Effect<void> {
+  return Effect.sync(() => {
+    try {
+      unlinkSync(path);
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+}
+
+function spawnSubprocess(scriptPath: string, cwd: string): Effect.Effect<ChildProcess, PtcExecutionError> {
+  return Effect.tryPromise({
+    try: async () => spawn(process.execPath, [scriptPath], {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: buildSubprocessEnv(),
+    }),
+    catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause }),
+  });
 }
 
 function buildSubprocessCode(preamblePath: string, wrappers: string, userCode: string): string {

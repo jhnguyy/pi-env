@@ -17,6 +17,7 @@
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { Static } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -26,41 +27,64 @@ import { formatResult } from "./formatters";
 import {
   type AgentEndFileResult,
   diagnosticsToAgentEndResults,
-  renderAgentEndSummary,
-  shouldTriggerTurn,
+  formatAgentEndErrorResult,
+  processAgentEndResults,
+  renderActiveAgentEndSummary,
 } from "./agent-end";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DaemonRequest, DiagnosticsResult, LspAction } from "./protocol";
+import type { DaemonRequest, DiagnosticsResult, LspResult } from "./protocol";
 import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 
-// ─── Actions that require exactly one path ──────────────────────────────────
-const SINGLE_PATH_ACTIONS = new Set<string>([
-  "hover", "definition", "implementation", "references",
-  "incoming-calls", "outgoing-calls", "symbols",
-]);
+// ─── Tool action enum ───────────────────────────────────────────────────────
+enum DevToolsAction {
+  Diagnostics = "diagnostics",
+  Hover = "hover",
+  Definition = "definition",
+  Implementation = "implementation",
+  References = "references",
+  IncomingCalls = "incoming-calls",
+  OutgoingCalls = "outgoing-calls",
+  Symbols = "symbols",
+  Status = "status",
+}
+
+const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
+
+interface DevToolsParams {
+  action: DevToolsAction;
+  path?: string | string[];
+  line?: number;
+  character?: number;
+  query?: string;
+}
 
 /**
  * Shared request builder — normalises tool params → daemon wire format.
  * Pure function, no closure dependencies.
  */
-function buildClientRequest(params: Record<string, unknown>): Omit<DaemonRequest, "id"> {
-  const action = params.action as LspAction;
-  const rawPath = params.path as string | string[] | undefined;
+function buildClientRequest(params: DevToolsParams): Omit<DaemonRequest, "id"> {
+  const rawPath = params.path;
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
 
-  if (action === "diagnostics") {
-    return { action, paths, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
+  switch (params.action) {
+    case DevToolsAction.Diagnostics:
+      return { action: params.action, paths };
+    case DevToolsAction.Status:
+      return { action: params.action };
+    case DevToolsAction.Symbols:
+      if (paths.length > 1) throw new Error(`${params.action} requires a single path — ${paths.length} were provided`);
+      return { action: params.action, path: paths[0], query: params.query };
+    case DevToolsAction.Hover:
+    case DevToolsAction.Definition:
+    case DevToolsAction.Implementation:
+    case DevToolsAction.References:
+    case DevToolsAction.IncomingCalls:
+    case DevToolsAction.OutgoingCalls:
+      if (paths.length > 1) throw new Error(`${params.action} requires a single path — ${paths.length} were provided`);
+      return { action: params.action, path: paths[0], line: params.line, character: params.character };
   }
-
-  if (SINGLE_PATH_ACTIONS.has(action)) {
-    if (paths.length > 1) throw new Error(`${action} requires a single path — ${paths.length} were provided`);
-    return { action, path: paths[0], line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
-  }
-
-  // status and others: no path needed
-  return { action, line: params.line as number | undefined, character: params.character as number | undefined, query: params.query as string | undefined };
 }
 
 // ─── Format binary cache ──────────────────────────────────────────────────────
@@ -84,6 +108,9 @@ export default function (pi: ExtensionAPI) {
   // Single set tracking all supported edited files during the agent run.
   // Partitioned by backend mode at agent_end, not at collection time.
   const pendingFiles = new Set<string>();
+  // Current post-edit issues keyed by file. Older dev-tools-agent-end messages
+  // are filtered out of model context and replaced with this live summary.
+  const activeAgentEndResults = new Map<string, AgentEndFileResult>();
 
   // ─── dev-tools tool ───────────────────────────────────────────────────────
 
@@ -97,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 
   const toolParameters = Type.Object({
     action: StringEnum(
-      ["diagnostics", "hover", "definition", "implementation", "references", "incoming-calls", "outgoing-calls", "symbols", "status"] as const,
+      DEV_TOOLS_ACTIONS,
       { description: "Action to perform" },
     ),
     path: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], {
@@ -116,10 +143,12 @@ export default function (pi: ExtensionAPI) {
     })),
   });
 
+  type DevToolsToolParameters = typeof toolParameters;
+
   /** Shared execute — used by both registerTool and AgentTool registration. */
-  async function executeDevTools(_toolCallId: string, params: unknown) {
+  async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
     try {
-      const result = await client.call(buildClientRequest(params as Record<string, unknown>));
+      const result = await client.call(buildClientRequest(params as DevToolsParams));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
       return { content: [txt(formatError(e))], details: null };
@@ -128,9 +157,10 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", () => {
     pendingFiles.clear();
+    activeAgentEndResults.clear();
 
     // Register dev-tools as an AgentTool so subagents can use it
-    const agentTool: AgentTool<any, any> = {
+    const agentTool: AgentTool<DevToolsToolParameters, LspResult | null> = {
       name: "dev-tools",
       label: "Dev Tools",
       description: description,
@@ -176,6 +206,25 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // ─── context hook: collapse stale post-edit hints ─────────────────────────
+  pi.on("context", async (event) => {
+    const messages = event.messages.filter((message) => {
+      const customType = (message as { customType?: string }).customType;
+      return customType !== "dev-tools-agent-end";
+    });
+    const summary = renderActiveAgentEndSummary(activeAgentEndResults);
+    if (summary) {
+      messages.push({
+        role: "custom",
+        customType: "dev-tools-agent-end",
+        content: `[post-edit]\n${summary}`,
+        display: false,
+        timestamp: Date.now(),
+      });
+    }
+    return { messages };
+  });
+
   // ─── tool_result hook: accumulate edited files ────────────────────────────
   // Collect all edit/write targets into pendingFiles. At agent_end the set is
   // partitioned by backend mode — we don't need to know mode at collection time.
@@ -212,8 +261,7 @@ export default function (pi: ExtensionAPI) {
     const allResults: AgentEndFileResult[] = [];
 
     // ── Format backends ──────────────────────────────────────────────────
-    // Sync + best-effort. triggerOnError: false — format errors are shown
-    // but don’t re-engage the model.
+    // Sync + best-effort. Format errors are shown but don’t re-engage the model.
     for (const { file, config } of formatFiles) {
       const bin = resolveBin(config.binaryName);
       if (!bin) continue;
@@ -225,27 +273,19 @@ export default function (pi: ExtensionAPI) {
         });
         if (r.status !== 0) {
           const detail = (r.stderr as string).trim() || `exit ${r.status}`;
-          allResults.push({
-            backend: config.name,
-            filePath: file,
-            fileName: file.split("/").pop() ?? file,
-            issues: [{ severity: "error", message: detail }],
-            triggerOnError: false,
-          });
+          allResults.push(formatAgentEndErrorResult(config.name, file, detail));
         }
       } catch (e) {
-        allResults.push({
-          backend: config.name,
-          filePath: file,
-          fileName: file.split("/").pop() ?? file,
-          issues: [{ severity: "error", message: e instanceof Error ? e.message : String(e) }],
-          triggerOnError: false,
-        });
+        allResults.push(formatAgentEndErrorResult(
+          config.name,
+          file,
+          e instanceof Error ? e.message : String(e),
+        ));
       }
     }
 
     // ── LSP diagnostics ──────────────────────────────────────────────────
-    // Async, batch. triggerOnError: true — LSP errors need the model to fix.
+    // Async, batch. LSP errors need the model to fix.
     if (lspFiles.length > 0) {
       try {
         const result = await client.call({ action: "diagnostics", paths: lspFiles });
@@ -257,15 +297,19 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── Unified render + send ──────────────────────────────────────────────
-    // One message, all backends. Defer the send until the next event-loop turn:
+    // ── Active-state update + render + send ────────────────────────────────
+    // Replace any old issues for files processed in this pass. This lets clean
+    // diagnostics retire stale post-edit hints from later model contexts.
+    const processed = processAgentEndResults(activeAgentEndResults, files, allResults);
+
+    // One displayed message, all backends. Defer the send until the next event-loop turn:
     // agent_end is emitted before pi marks the agent idle, so sendMessage called
     // directly in this handler is treated as in-flight steering/follow-up queue
     // data. Once deferred, non-error summaries are appended immediately, and LSP
     // errors can start a synthetic follow-up turn with the diagnostics in context.
-    const summary = renderAgentEndSummary(allResults);
+    const summary = processed.batchSummary;
     if (summary) {
-      const triggerTurn = shouldTriggerTurn(allResults);
+      const triggerTurn = processed.triggerTurn;
       const message = {
         customType: "dev-tools-agent-end",
         content: `[post-edit]\n${summary}`,

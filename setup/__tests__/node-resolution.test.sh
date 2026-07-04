@@ -35,6 +35,37 @@ SH
   chmod +x "$path"
 }
 
+real_node_bin() {
+  if [ -x /bin/node ]; then
+    printf '%s\n' /bin/node
+  else
+    command -v node
+  fi
+}
+
+test_node_run_honors_valid_pi_env_node_bin() {
+  local output
+  output="$(PI_ENV_NODE_BIN="$(real_node_bin)" "$ROOT/scripts/node-run.sh" -e 'console.log(process.argv[1])' ok)"
+  [ "$output" = "ok" ] || fail "node-run should execute with PI_ENV_NODE_BIN, got $output"
+}
+
+test_node_run_rejects_invalid_pi_env_node_bin() {
+  local tmp output status
+  tmp="$(mktemp -d)"
+  cat > "$tmp/not-node" <<'SH'
+#!/usr/bin/env sh
+exit 127
+SH
+  chmod +x "$tmp/not-node"
+  set +e
+  output="$(PI_ENV_NODE_BIN="$tmp/not-node" "$ROOT/scripts/node-run.sh" -e 'console.log(1)' 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -eq 127 ] || fail "node-run should reject invalid PI_ENV_NODE_BIN with 127, got $status"
+  printf '%s' "$output" | grep -q 'PI_ENV_NODE_BIN is not usable' || fail "node-run should explain invalid PI_ENV_NODE_BIN"
+  rm -rf "$tmp"
+}
+
 test_falls_back_when_nub_node_is_broken() {
   local tmp old_path resolved
   tmp="$(mktemp -d)"
@@ -75,6 +106,8 @@ test_uses_working_nub_node_first() {
   rm -rf "$tmp"
 }
 
+test_node_run_honors_valid_pi_env_node_bin
+test_node_run_rejects_invalid_pi_env_node_bin
 test_falls_back_when_nub_node_is_broken
 test_uses_working_nub_node_first
 

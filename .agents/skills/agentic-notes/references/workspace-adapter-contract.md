@@ -2,6 +2,8 @@
 
 Use this when creating or reviewing local note boundary rules for a workspace. The adapter should be short and concrete. It tells the portable `agentic-notes` skill how to behave locally.
 
+Adapters separate portable method from local storage. The portable skill defines note quality and rewrite judgment. The adapter defines paths, tools, backends, credentials, write permissions, and privacy boundaries.
+
 ## Minimal Adapter
 
 ```markdown
@@ -37,7 +39,8 @@ Use this when creating or reviewing local note boundary rules for a workspace. T
 
 Include local facts only:
 
-- note storage backend or filesystem paths
+- note storage backend, tool contract, or filesystem paths
+- provider/backend names and default provider choice
 - allowed prefixes
 - frontmatter schema
 - index conventions
@@ -47,17 +50,16 @@ Include local facts only:
 
 Do not restate general note-writing theory. Keep reusable practice in the portable skill.
 
-## Homelab-Style Adapter Guidance
+## Adapter Guidance
 
-For a personal homelab vault, useful boundaries usually include:
+Useful adapters usually specify:
 
-- read current note content before editing
-- prefer full coherent rewrites for design/reference/project notes
-- preserve human-owned voice and existing metadata
-- keep worklogs chronological and append-only unless asked otherwise
-- do not expose secrets, credentials, internal URLs with tokens, or private keys
-- keep generated HTML as sidecars or scratch unless promoted by the user
-- update relevant indexes only when local index rules are known
+- the canonical access path, such as a tool contract or filesystem root
+- whether agents may write directly or must ask first
+- when existing content must be read before editing
+- metadata, link, and index conventions to preserve
+- which records are append-only versus rewrite-friendly
+- secret and sensitive-data boundaries
 
 ## Adapter Discovery
 

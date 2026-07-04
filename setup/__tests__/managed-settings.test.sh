@@ -167,6 +167,36 @@ JSON
   rm -rf "$tmp"
 }
 
+test_registers_primary_checkout_when_run_from_worktree() {
+  local tmp settings repo worktree result
+  tmp="$(mktemp -d)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  worktree="$tmp/worktree"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" config user.email test@example.invalid
+  git -C "$repo" config user.name 'pi-env test'
+  touch "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -q -m init
+  git -C "$repo" worktree add -q "$worktree" -b feature/test
+  cat > "$settings" <<JSON
+{
+  "packages": ["$worktree"]
+}
+JSON
+
+  result=$(apply_settings "$settings" "$worktree")
+
+  [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
+  [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
+  [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "worktree setup should register primary checkout"
+
+  git -C "$repo" worktree remove -f "$worktree" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+}
+
 test_migrates_only_default_npm_command_to_nub() {
   local tmp settings custom_settings repo
   tmp="$(mktemp -d)"
@@ -200,6 +230,7 @@ test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 test_preserves_existing_theme
 test_disables_browser_extension_without_clobbering_other_extensions
+test_registers_primary_checkout_when_run_from_worktree
 test_migrates_only_default_npm_command_to_nub
 
 echo "managed settings tests passed"

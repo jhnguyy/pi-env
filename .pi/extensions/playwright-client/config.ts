@@ -1,6 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { isObject, readSettingsBlock, type SettingsBlock } from "../_shared/settings";
+import { Data, Schema } from "effect";
+import { readSettingsBlock, type SettingsBlock } from "../_shared/settings";
 
 export interface BrowserTarget {
   name: string;
@@ -20,6 +21,25 @@ export interface BrowserClientConfig {
 }
 
 const DEFAULT_CDP_PORT = 9222;
+
+class BrowserConfigError extends Data.TaggedError("BrowserConfigError")<{
+  readonly path: string;
+  readonly reason: string;
+}> {
+  override get message(): string {
+    return `${this.path}: ${this.reason}`;
+  }
+}
+
+const TargetSettingsSchema = Schema.Struct({
+  host: Schema.String,
+  port: Schema.optional(Schema.Union(Schema.Number, Schema.String)),
+  protocol: Schema.optional(Schema.Literal("http", "https")),
+  path: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+});
+const TargetsSchema = Schema.Record({ key: Schema.String, value: TargetSettingsSchema });
+type TargetSettings = Schema.Schema.Type<typeof TargetSettingsSchema>;
 
 export function loadBrowserClientConfig(cwd = process.cwd()): BrowserClientConfig {
   const settings = readSettingsBlock("playwrightClient", cwd);
@@ -43,27 +63,33 @@ function loadTargets(settings: SettingsBlock): BrowserTarget[] {
       description: "Default local Chrome/CDP endpoint or SSH reverse-forward",
     })];
   }
-  if (!isObject(rawTargets)) throw new Error("playwrightClient.targets must be an object keyed by target name");
 
-  return Object.entries(rawTargets).map(([name, target]) => {
-    if (!isObject(target)) throw new Error(`playwrightClient.targets.${name} must be an object with host and optional port/protocol/path`);
-    return normalizeTarget(name, target);
-  });
+  const targets = decodeTargets(rawTargets);
+  return Object.entries(targets).map(([name, target]) => normalizeTarget(name, target));
 }
 
-function normalizeTarget(name: string, settings: SettingsBlock): BrowserTarget {
-  const host = asString(settings.host);
-  if (!host) throw new Error(`playwrightClient.targets.${name}.host is required`);
+function decodeTargets(rawTargets: unknown): Record<string, TargetSettings> {
+  try {
+    return Schema.decodeUnknownSync(TargetsSchema)(rawTargets);
+  } catch (cause) {
+    throw new BrowserConfigError({
+      path: "playwrightClient.targets",
+      reason: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+}
 
-  const port = asNumber(settings.port) ?? DEFAULT_CDP_PORT;
-  const protocol = settings.protocol === "https" ? "https" : "http";
-  if (settings.protocol !== undefined && settings.protocol !== "http" && settings.protocol !== "https") {
-    throw new Error(`playwrightClient.targets.${name}.protocol must be http or https`);
+function normalizeTarget(name: string, settings: TargetSettings): BrowserTarget {
+  const host = settings.host;
+  if (host.length === 0) {
+    throw new BrowserConfigError({ path: `playwrightClient.targets.${name}.host`, reason: "is required" });
   }
 
-  const rawPath = asString(settings.path) ?? "";
+  const port = asNumber(settings.port) ?? DEFAULT_CDP_PORT;
+  const protocol = settings.protocol ?? "http";
+  const rawPath = settings.path ?? "";
   const path = rawPath && !rawPath.startsWith("/") ? `/${rawPath}` : rawPath;
-  const description = asString(settings.description);
+  const description = settings.description;
 
   return {
     name,

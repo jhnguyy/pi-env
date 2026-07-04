@@ -16,6 +16,16 @@ chore/<name>   config, docs, cleanup (no behavior change)
 - Delete branch after merge: `git branch -d feat/<name>`
 - Tag milestones on `main`: `v<major>.<minor>.0`
 
+## Documentation Changes
+
+Keep documentation targeted:
+
+- `README.md`: purpose, setup, design intent.
+- `CONTRIBUTING.md`: branch, build, test, packaging, extension process.
+- `AGENTS.md`: coding-agent workflow.
+
+Cross-link when useful. Do not duplicate guidance.
+
 ## Runtime Requirements
 
 Use Nub with the Node.js version required by `package.json#engines.node`. The repo includes `.node-version` / `.nvmrc` for local tool provisioning; setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
