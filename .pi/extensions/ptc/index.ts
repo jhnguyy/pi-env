@@ -26,7 +26,7 @@ import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
 import { BLOCKED_TOOLS } from "./types";
-import type { ExtToolRegistration } from "../subagent/types";
+import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 
 export default function ptcExtension(pi: ExtensionAPI) {
   // ToolRegistry installs the registerTool intercept immediately — before any
@@ -153,7 +153,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
   // session, so this is the correct project directory. No ctx available in the
   // AgentTool execute signature, so extension tools called from ptc subagent
   // scripts get a { cwd } stub (safe: ptc-eligible ext tools don't use ctx).
-  pi.on("session_start", (_event, ctx) => {
+  pi.on(PiEvent.SessionStart, (_event, ctx) => {
     const sessionCwd = ctx.cwd;
     const ptcAgentTool: AgentTool<any, any> = {
       name: "ptc",
@@ -172,7 +172,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
         }
       },
     };
-    pi.events.emit("agent-tools:register", { tool: ptcAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
+    registerAgentTools(pi, { tool: ptcAgentTool, capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] });
   });
 }
 

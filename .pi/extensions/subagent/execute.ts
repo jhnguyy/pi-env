@@ -29,7 +29,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import { discoverAgents } from "./agents";
-import { MAX_TURNS, type SubagentDetails, type UsageStats, type ToolCapability } from "./types";
+import { ToolCapability, MAX_TURNS, type SubagentDetails, type UsageStats } from "./types";
 
 // ─── Tool factory map ─────────────────────────────────────────────────────────
 
@@ -39,13 +39,13 @@ export interface ToolDef {
 }
 
 export const BUILT_IN_TOOLS: Record<string, ToolDef> = {
-  read:  { factory: (cwd) => createReadTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
-  bash:  { factory: (cwd) => createBashTool(cwd) as AgentTool<any, any>,  capabilities: ["read", "write", "execute"] },
-  edit:  { factory: (cwd) => createEditTool(cwd) as AgentTool<any, any>,  capabilities: ["write"] },
-  write: { factory: (cwd) => createWriteTool(cwd) as AgentTool<any, any>, capabilities: ["write"] },
-  grep:  { factory: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
-  find:  { factory: (cwd) => createFindTool(cwd) as AgentTool<any, any>,  capabilities: ["read"] },
-  ls:    { factory: (cwd) => createLsTool(cwd) as AgentTool<any, any>,    capabilities: ["read"] },
+  read:  { factory: (cwd) => createReadTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
+  bash:  { factory: (cwd) => createBashTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] },
+  edit:  { factory: (cwd) => createEditTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Write] },
+  write: { factory: (cwd) => createWriteTool(cwd) as AgentTool<any, any>, capabilities: [ToolCapability.Write] },
+  grep:  { factory: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
+  find:  { factory: (cwd) => createFindTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
+  ls:    { factory: (cwd) => createLsTool(cwd) as AgentTool<any, any>,    capabilities: [ToolCapability.Read] },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ export function createExecuteSubagent(
 
     // ── 2. Resolve tools ────────────────────────────────────────────────
     // Two mechanisms, unioned when both present:
-    //   capabilities: ["read"] — include all tools whose capability tags are
+    //   capabilities: [ToolCapability.Read] — include all tools whose capability tags are
     //     a SUBSET of the requested set. "read" gets tools tagged ["read"]
     //     only, not ["read","write"]. This keeps read-only agents safe.
     //   tools: ["dev-tools","bash"] — include specific tools by name.

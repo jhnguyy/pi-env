@@ -34,6 +34,7 @@ import {
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { DaemonRequest, DiagnosticsResult, LspResult } from "./protocol";
 import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
+import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 
@@ -155,7 +156,7 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  pi.on("session_start", () => {
+  pi.on(PiEvent.SessionStart, () => {
     pendingFiles.clear();
     activeAgentEndResults.clear();
 
@@ -167,7 +168,7 @@ export default function (pi: ExtensionAPI) {
       parameters: toolParameters,
       execute: executeDevTools,
     };
-    pi.events.emit("agent-tools:register", { tool: agentTool, capabilities: ["read"] });
+    registerAgentTools(pi, { tool: agentTool, capabilities: [ToolCapability.Read] });
   });
 
   pi.registerTool({

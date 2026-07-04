@@ -3,7 +3,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
-import type { ExtToolRegistration } from "../subagent/types";
+import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import {
   DEFAULT_SESSION_DIR,
   assertUnderSessionDir,
@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on("session_start", () => {
+  pi.on(PiEvent.SessionStart, () => {
     const listTool: AgentTool<any, any> = {
       name: "list_sessions",
       label: "List Sessions",
@@ -153,7 +153,7 @@ export default function (pi: ExtensionAPI) {
       execute: async (_id, params, signal) => executeReadSession(params as ReadSessionParams, signal),
     };
 
-    pi.events.emit("agent-tools:register", { tool: listTool, capabilities: ["read"] } satisfies ExtToolRegistration);
-    pi.events.emit("agent-tools:register", { tool: readTool, capabilities: ["read"] } satisfies ExtToolRegistration);
+    registerAgentTools(pi, { tool: listTool, capabilities: [ToolCapability.Read] });
+    registerAgentTools(pi, { tool: readTool, capabilities: [ToolCapability.Read] });
   });
 }

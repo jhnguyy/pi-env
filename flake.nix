@@ -226,7 +226,7 @@
               programs.tmux = {
                 enable = lib.mkDefault true;
                 extraConfig = lib.mkAfter ''
-                  source-file ${self}/setup/tmux.conf
+                  source-file ${self}/setup/templates/tmux.conf
                 '';
               };
             })

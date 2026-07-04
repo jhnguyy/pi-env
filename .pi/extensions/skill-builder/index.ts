@@ -14,7 +14,7 @@ import { readFileSync, readdirSync, existsSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
-import type { ExtToolRegistration } from "../subagent/types";
+import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 
 const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 const REFERENCE_SKILL_TOOL_DESCRIPTION =
@@ -339,7 +339,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── Agent tool registration ──────────────────────────────────────────────────
-  pi.on("session_start", () => {
+  pi.on(PiEvent.SessionStart, () => {
     const referenceSkillAgentTool: AgentTool<any, any> = {
       name: "reference_skill",
       label: "Reference Skill",
@@ -363,7 +363,7 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text: readFileSync(matched.filePath, "utf-8") }], details: matched };
       },
     };
-    pi.events.emit("agent-tools:register", { tool: referenceSkillAgentTool, capabilities: ["read"] } satisfies ExtToolRegistration);
+    registerAgentTools(pi, { tool: referenceSkillAgentTool, capabilities: [ToolCapability.Read] });
 
     const skillBuildAgentTool: AgentTool<any, any> = {
       name: "skill_build",
@@ -425,6 +425,6 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text: lines.join("\n") }], details: { skillDir, validation } };
       },
     };
-    pi.events.emit("agent-tools:register", { tool: skillBuildAgentTool, capabilities: ["read", "write", "execute"] } satisfies ExtToolRegistration);
+    registerAgentTools(pi, { tool: skillBuildAgentTool, capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] });
   });
 }

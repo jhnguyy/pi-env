@@ -39,7 +39,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { BLOCKED_TOOLS } from "./types";
-import type { ExtToolRegistration } from "../subagent/types";
+import { listenForAgentTools } from "../_shared/agent-tools";
 
 type ExecuteFn = (
   toolCallId: string,
@@ -108,8 +108,7 @@ export class ToolRegistry {
    * overwrites it with the same execute function — harmless, last-write-wins.
    */
   private installAgentToolsListener(pi: ExtensionAPI): void {
-    pi.events.on("agent-tools:register", (data: unknown) => {
-      const { tool } = data as ExtToolRegistration;
+    listenForAgentTools(pi, ({ tool }) => {
       if (BLOCKED_TOOLS.has(tool.name) || BUILTIN_NAMES.has(tool.name)) return;
       // Adapt AgentTool's 4-arg execute to ExecuteFn's 5-arg shape.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

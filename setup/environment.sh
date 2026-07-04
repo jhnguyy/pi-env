@@ -18,25 +18,21 @@ setup_detect_environment() {
     virt_label="$(systemd-detect-virt 2>/dev/null || printf 'unknown')"
   fi
 
-  if [ "$is_devcontainer" -eq 1 ]; then
-    context_label="devcontainer"
-  elif [ "$virt_label" != "none" ]; then
-    context_label="vm/container:$virt_label"
-  else
-    context_label="host"
-  fi
+  case "$is_devcontainer:$virt_label" in
+    1:*) context_label="devcontainer" ;;
+    0:none) context_label="host" ;;
+    0:*) context_label="vm/container:$virt_label" ;;
+  esac
 
   has_gui=0
   if [ "$os_label" = "macOS" ] || [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
     has_gui=1
   fi
 
-  should_link_ghostty=0
-  if [ "${PI_ENV_LINK_GHOSTTY:-}" = "1" ]; then
-    should_link_ghostty=1
-  elif [ "$is_devcontainer" -eq 0 ] && [ "$has_gui" -eq 1 ]; then
-    should_link_ghostty=1
-  fi
+  case "${PI_ENV_LINK_GHOSTTY:-0}:$is_devcontainer:$has_gui" in
+    1:*|0:0:1) should_link_ghostty=1 ;;
+    *) should_link_ghostty=0 ;;
+  esac
 }
 
 setup_check_prerequisites() {
@@ -57,7 +53,7 @@ setup_check_prerequisites() {
     if command -v ghostty >/dev/null 2>&1; then
       ok "ghostty"
     else
-      echo "  —  ghostty not found (recommended for GUI hosts/VMs; see setup/prerequisites.md)"
+      echo "  —  ghostty not found (recommended for GUI hosts/VMs; see docs/prerequisites.md)"
     fi
     echo "  —  font: JetBrains Mono recommended for Ghostty"
   else

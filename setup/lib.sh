@@ -94,7 +94,7 @@ check_required_commands() {
     if command -v "$cmd" >/dev/null 2>&1; then
       ok "$cmd"
     else
-      echo "  ✗  $cmd (required; see setup/prerequisites.md)" >&2
+      echo "  ✗  $cmd (required; see docs/prerequisites.md)" >&2
       missing=1
     fi
   done
@@ -107,7 +107,7 @@ check_recommended_commands() {
     if command -v "$cmd" >/dev/null 2>&1; then
       ok "$cmd"
     else
-      echo "  —  $cmd not found (recommended; see setup/prerequisites.md)"
+      echo "  —  $cmd not found (recommended; see docs/prerequisites.md)"
     fi
   done
 }

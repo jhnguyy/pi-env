@@ -41,7 +41,7 @@ Handled deterministically:
 - Nix pins the host toolchain through `flake.lock`.
 - `nub install --frozen-lockfile` pins repo JavaScript dependencies while preserving the incumbent lockfile.
 - The `pi` wrapper points at the locked `@earendil-works/pi-coding-agent` installed in this checkout's `node_modules` and executes it with the Node selected during setup; setup no longer performs a second independent package install for the CLI.
-- Managed pi settings are merged from `setup/managed-settings.json` without overwriting machine-local settings.
+- Managed pi settings are merged from `setup/config/managed-settings.json` without overwriting machine-local settings.
 
 Intentionally mutable/local:
 
@@ -98,7 +98,7 @@ The module can:
 - install the baseline toolchain into the Home Manager profile
 - add `~/.local/bin` and `~/.pi/agent/bin` to the session PATH
 - set `PI_ENV_CONFIG_MANAGED_BY_NIX=1` so later setup runs skip duplicate PATH/tmux/Ghostty writes
-- enable Home Manager tmux and source `setup/tmux.conf`
+- enable Home Manager tmux and source `setup/templates/tmux.conf`
 - install Ghostty config/themes from `ghostty/` when `ghostty.enable = true`
 
 ## What remains outside Nix
