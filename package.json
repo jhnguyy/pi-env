@@ -79,7 +79,8 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
-    "minimatch": "10.2.3"
+    "minimatch": "10.2.3",
+    "protobufjs": "8.6.6"
   },
   "packageManager": "nub@0.2.10",
   "devEngines": {
@@ -91,5 +92,9 @@
   },
   "dependencies": {
     "effect": "^3.21.4"
+  },
+  "allowBuilds": {
+    "@google/genai": true,
+    "esbuild": true
   }
 }
