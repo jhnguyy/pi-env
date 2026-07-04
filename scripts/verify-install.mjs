@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // verify-install.mjs — cheap setup readiness checks, not a full test suite.
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { listExtensionDirs, loadExtensionManifest, relativeFromRepo, repoRoot } from "./extension-manifest.mjs";
 
@@ -12,6 +12,14 @@ const activePaths = new Set(extensions.map((ext) => ext.packagePath));
 for (const ext of extensions) {
   const entry = join(ext.absPath, "index.ts");
   const bundle = join(ext.absPath, "dist/index.js");
+  const packageJsonPath = join(ext.absPath, "package.json");
+  if (existsSync(packageJsonPath)) {
+    const extPkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    const exports = extPkg.pi?.extensions ?? [];
+    if (!Array.isArray(exports) || !exports.includes("./dist/index.js")) {
+      errors.push(`${ext.name}: package.json pi.extensions must include ./dist/index.js`);
+    }
+  }
   if (!existsSync(entry)) {
     errors.push(`${ext.name}: missing source entry ${relativeFromRepo(entry)}`);
   }

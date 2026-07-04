@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fail, mustEnv, ok, section, skip } from './runtime-support.mjs';
+import { isNixManaged } from './ownership.mjs';
 
 const ConfigureCommand = Object.freeze({
   All: 'all',
@@ -33,10 +34,6 @@ const preCommitHookSrc = mustEnv('PRE_COMMIT_HOOK_SRC');
 
 function linked(message) { console.log(`  →  ${message}`); }
 function relink(message) { console.log(`  ↺  ${message} (relinked)`); }
-
-function isNixManaged() {
-  return env.PI_ENV_SETUP_MODE === 'nix-managed' || env.PI_ENV_CONFIG_MANAGED_BY_NIX === '1';
-}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
