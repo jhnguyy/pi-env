@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -140,6 +141,22 @@ function packageSource(pkg) {
   return typeof pkg === "string" ? pkg : isPlainObject(pkg) ? pkg.source : undefined;
 }
 
+function gitOutput(args) {
+  const result = spawnSync("git", ["-C", repoPath, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function packageRepoPath() {
+  const gitDir = gitOutput(["rev-parse", "--absolute-git-dir"]);
+  const commonDir = gitOutput(["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (!gitDir || !commonDir || gitDir === commonDir) return repoPath;
+
+  // Worktrees share the primary checkout's common .git directory. Register the
+  // primary checkout as the pi package so temporary feature worktrees do not
+  // create duplicate skills/themes/extensions in every new pi session.
+  return path.dirname(commonDir);
+}
+
 function ensurePiUpdateDefault(settings) {
   if (!isPlainObject(settings.piUpdate)) {
     settings.piUpdate = {};
@@ -179,11 +196,13 @@ migrateDefaultNpmCommand(settings);
 ensurePiUpdateDefault(settings);
 ensureDisabledExtensions(settings);
 
+const packagePath = packageRepoPath();
 if (!Array.isArray(settings.packages)) {
   settings.packages = [];
 }
-if (!settings.packages.some((pkg) => packageSource(pkg) === repoPath)) {
-  settings.packages.push(repoPath);
+settings.packages = settings.packages.filter((pkg) => packageSource(pkg) !== repoPath || repoPath === packagePath);
+if (!settings.packages.some((pkg) => packageSource(pkg) === packagePath)) {
+  settings.packages.push(packagePath);
 }
 
 const after = `${JSON.stringify(settings, null, 2)}\n`;

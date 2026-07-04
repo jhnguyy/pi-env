@@ -7,7 +7,7 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 
 ## Conventions
 
-**Reference skills** — lightweight skills that live in `~/.agents/skills/reference/` as plain `.md` files.
+**Reference skills** — lightweight skills that live in `~/.agents/skills/reference/` or a package-root `.agents/skills/reference/` directory as plain `.md` files. They are loaded only when explicitly referenced, not through passive skill context.
 
 **Auto-discovered skills** — directories with `SKILL.md` in `~/.agents/skills/` (global) or `.pi/skills/` (project). Names: lowercase, a-z, 0-9, single hyphens, 1–64 chars, must match directory name.
 
