@@ -11,6 +11,8 @@ function normalizedPathSet(paths = []) {
   return new Set(paths.map((path) => normalizePackagePath(path)));
 }
 
+const DEFAULT_DISABLED_EXTENSIONS = new Set(["playwright-client"]);
+
 function activeExtensionSets(extensions) {
   return {
     names: new Set(extensions.map((ext) => ext.name)),
@@ -30,6 +32,14 @@ function requireUniqueActiveExtensions(extensions, errors) {
     }
     seenNames.add(ext.name);
     seenPaths.add(ext.packagePath);
+  }
+}
+
+function rejectDefaultDisabledActiveExtensions(extensions, errors) {
+  for (const ext of extensions) {
+    if (DEFAULT_DISABLED_EXTENSIONS.has(ext.name)) {
+      errors.push(`${ext.name}: extension must stay disabled by default; do not register it in package pi.extensions`);
+    }
   }
 }
 
@@ -109,6 +119,7 @@ export function validateExtensionInstall(manifest = loadExtensionManifest()) {
   const active = activeExtensionSets(extensions);
 
   requireUniqueActiveExtensions(extensions, errors);
+  rejectDefaultDisabledActiveExtensions(extensions, errors);
   for (const ext of extensions) requireBuiltExtension(ext, config, errors, repoRoot);
   requireRegisteredPackageFiles(pkg, errors, repoRoot);
   requireWorkspaceParity(pkg, extensionsDir, active.packagePaths, extensions, errors);
