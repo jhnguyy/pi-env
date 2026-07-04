@@ -32,3 +32,5 @@ Keep tools context-economical:
 ## Cross-extension singletons
 
 Store shared services on `globalThis`, not at module level. Module-level variables are per-bundle; `globalThis` is process-wide.
+
+Hide the global behind a small registry/helper module and expose explicit test reset hooks when tests need isolation. Do not make tests delete global keys directly.
