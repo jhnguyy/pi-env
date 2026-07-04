@@ -19,9 +19,18 @@ import { extname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export enum BackendName {
+  Lsp = "lsp",
+  TypeScript = "typescript",
+  Bash = "bash",
+  Nil = "nil",
+  Hcl = "hcl",
+  Terraform = "terraform",
+}
+
 interface BackendConfigBase {
   /** Display name shown in status messages, e.g. "typescript" or "hcl". */
-  name: string;
+  name: BackendName;
   /** Binary to locate via PATH (or local node_modules/.bin). */
   binaryName: string;
   /** File extension → language label mapping, e.g. ".ts" → "typescript". */
@@ -117,7 +126,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   // ── LSP backends ────────────────────────────────────────────────────────────
   {
     mode: "lsp",
-    name: "typescript",
+    name: BackendName.TypeScript,
     binaryName: "typescript-language-server",
     binaryArgs: ["--stdio"],
     extensions: new Map([
@@ -133,7 +142,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   },
   {
     mode: "lsp",
-    name: "bash",
+    name: BackendName.Bash,
     binaryName: "bash-language-server",
     binaryArgs: ["start"],
     extensions: new Map([
@@ -147,7 +156,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   },
   {
     mode: "lsp",
-    name: "nil",
+    name: BackendName.Nil,
     binaryName: "nil",
     binaryArgs: [],
     extensions: new Map([
@@ -162,7 +171,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   // ── Format backends ─────────────────────────────────────────────────────────
   {
     mode: "format",
-    name: "hcl",
+    name: BackendName.Hcl,
     binaryName: "terragrunt",
     extensions: new Map([[".hcl", "hcl"]]),
     rootMarkers: ["terragrunt.hcl"],
@@ -170,7 +179,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
   },
   {
     mode: "format",
-    name: "terraform",
+    name: BackendName.Terraform,
     binaryName: "terraform",
     extensions: new Map([[".tf", "terraform"], [".tfvars", "terraform"]]),
     rootMarkers: [],
