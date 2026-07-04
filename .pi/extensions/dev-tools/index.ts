@@ -26,14 +26,12 @@ import { LspClient } from "./client";
 import { formatResult } from "./formatters";
 import {
   type AgentEndFileResult,
-  diagnosticsToAgentEndResults,
-  formatAgentEndErrorResult,
-  processAgentEndResults,
   renderActiveAgentEndSummary,
 } from "./agent-end";
+import { processAgentEndBatch } from "./agent-end-pipeline";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DiagnosticsResult, LspResult } from "./protocol";
-import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
+import type { LspResult } from "./protocol";
+import { PendingPostEditFiles } from "./post-edit-files";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
@@ -57,9 +55,9 @@ function resolveBin(name: string): string | null {
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
 
-  // Single set tracking all supported edited files during the agent run.
-  // Partitioned by backend mode at agent_end, not at collection time.
-  const pendingFiles = new Set<string>();
+  // Tracks supported edited files during the agent run. Partitioned by backend
+  // mode at agent_end, not at collection time.
+  const pendingFiles = new PendingPostEditFiles();
   // Current post-edit issues keyed by file. Older dev-tools-agent-end messages
   // are filtered out of model context and replaced with this live summary.
   const activeAgentEndResults = new Map<string, AgentEndFileResult>();
@@ -161,7 +159,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── context hook: collapse stale post-edit hints ─────────────────────────
-  pi.on("context", async (event) => {
+  pi.on(PiEvent.Context, async (event) => {
     const messages = event.messages.filter((message) => {
       const customType = (message as { customType?: string }).customType;
       return customType !== "dev-tools-agent-end";
@@ -182,14 +180,8 @@ export default function (pi: ExtensionAPI) {
   // ─── tool_result hook: accumulate edited files ────────────────────────────
   // Collect all edit/write targets into pendingFiles. At agent_end the set is
   // partitioned by backend mode — we don't need to know mode at collection time.
-  pi.on("tool_result", async (event) => {
-    if ((event.toolName !== "edit" && event.toolName !== "write") || event.isError) return;
-    const inp = event.input as Record<string, unknown> | null | undefined;
-    const path: string | undefined =
-      typeof inp?.path === "string" ? inp.path :
-      typeof inp?.file_path === "string" ? inp.file_path :
-      undefined;
-    if (path && isSupported(path)) pendingFiles.add(path);
+  pi.on(PiEvent.ToolResult, async (event) => {
+    pendingFiles.recordToolResult(event);
   });
 
   // ─── agent_end: collect from all backends, render once ─────────────────────
@@ -197,71 +189,28 @@ export default function (pi: ExtensionAPI) {
   // One sendMessage at the end covers everything. triggerTurn fires only when
   // LSP results have errors (format errors are informational, no re-engage).
   // See agent-end.ts for types, mappers, and the renderer.
-  pi.on("agent_end", async () => {
-    const files = [...pendingFiles];
-    pendingFiles.clear();
+  pi.on(PiEvent.AgentEnd, async () => {
+    const files = pendingFiles.drain();
     if (files.length === 0) return;
 
-    const lspFiles: string[] = [];
-    const formatFiles: Array<{ file: string; config: FormatBackendConfig }> = [];
-
-    for (const file of files) {
-      const config = getBackendConfig(file);
-      if (!config) continue;
-      if (config.mode === "lsp") lspFiles.push(file);
-      else formatFiles.push({ file, config });
-    }
-
-    const allResults: AgentEndFileResult[] = [];
-
-    // ── Format backends ──────────────────────────────────────────────────
-    // Sync + best-effort. Format errors are shown but don’t re-engage the model.
-    for (const { file, config } of formatFiles) {
-      const bin = resolveBin(config.binaryName);
-      if (!bin) continue;
-      try {
-        const r = spawnSync(bin, config.formatArgs(file), {
-          encoding: "utf8",
-          stdio: "pipe",
-          timeout: 10_000,
-        });
-        if (r.status !== 0) {
-          const detail = (r.stderr as string).trim() || `exit ${r.status}`;
-          allResults.push(formatAgentEndErrorResult(config.name, file, detail));
-        }
-      } catch (e) {
-        allResults.push(formatAgentEndErrorResult(
-          config.name,
-          file,
-          e instanceof Error ? e.message : String(e),
-        ));
-      }
-    }
-
-    // ── LSP diagnostics ──────────────────────────────────────────────────
-    // Async, batch. LSP errors need the model to fix.
-    if (lspFiles.length > 0) {
-      try {
-        const result = await client.call({ action: "diagnostics", paths: lspFiles });
-        if (result) {
-          allResults.push(...diagnosticsToAgentEndResults(result as DiagnosticsResult));
-        }
-      } catch {
-        // Non-fatal — diagnostics are best-effort
-      }
-    }
-
-    // ── Active-state update + render + send ────────────────────────────────
-    // Replace any old issues for files processed in this pass. This lets clean
-    // diagnostics retire stale post-edit hints from later model contexts.
-    const processed = processAgentEndResults(activeAgentEndResults, files, allResults);
+    // Run formatters before LSP diagnostics, then replace stale active issues
+    // for every file processed in this pass.
+    const processed = await processAgentEndBatch(activeAgentEndResults, files, {
+      resolveFormatBinary: resolveBin,
+      runFormat: (bin, args) => spawnSync(bin, args, {
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 10_000,
+      }),
+      runDiagnostics: (paths) => client.call({ action: "diagnostics", paths }),
+    });
 
     // One displayed message, all backends. Defer the send until the next event-loop turn:
     // agent_end is emitted before pi marks the agent idle, so sendMessage called
     // directly in this handler is treated as in-flight steering/follow-up queue
     // data. Once deferred, non-error summaries are appended immediately, and LSP
     // errors can start a synthetic follow-up turn with the diagnostics in context.
-    const summary = processed.batchSummary;
+    const summary = processed.summary;
     if (summary) {
       const triggerTurn = processed.triggerTurn;
       const message = {

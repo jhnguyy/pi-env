@@ -2,6 +2,13 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 
 export enum PiEvent {
   SessionStart = "session_start",
+  SessionShutdown = "session_shutdown",
+  BeforeAgentStart = "before_agent_start",
+  BeforeProviderRequest = "before_provider_request",
+  TurnEnd = "turn_end",
+  Context = "context",
+  ToolResult = "tool_result",
+  AgentEnd = "agent_end",
 }
 
 export enum AgentToolEvent {

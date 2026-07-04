@@ -7,12 +7,13 @@
  * session history and re-sent to the provider on every API request.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { PiEvent } from "../_shared/agent-tools";
 import { CredentialScanner } from "./credential-scanner";
 
 export default function (pi: ExtensionAPI) {
   const scanner = new CredentialScanner();
 
-  pi.on("tool_result", async (event) => {
+  pi.on(PiEvent.ToolResult, async (event) => {
     if (event.toolName !== "read") return undefined;
     const path = (event.input as Record<string, unknown>)?.path;
     if (typeof path !== "string") return undefined;

@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools } from "./anthropic-tools";
 
@@ -108,7 +109,7 @@ export function buildContextPlan(rawUrl: string, purpose?: string): string {
 }
 
 export default function webContext(pi: ExtensionAPI) {
-  pi.on("before_provider_request", (event, ctx) => {
+  pi.on(PiEvent.BeforeProviderRequest, (event, ctx) => {
     const settings = loadAnthropicWebToolSettings(ctx.cwd);
     if (!shouldInjectAnthropicHostedWebTools(ctx.model, settings)) return undefined;
     return injectAnthropicHostedWebTools(event.payload, settings);
