@@ -31,7 +31,7 @@ import {
 import { processAgentEndBatch } from "./agent-end-pipeline";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { LspResult } from "./protocol";
-import { isSupported } from "./backend-configs";
+import { PendingPostEditFiles } from "./post-edit-files";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
@@ -55,9 +55,9 @@ function resolveBin(name: string): string | null {
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
 
-  // Single set tracking all supported edited files during the agent run.
-  // Partitioned by backend mode at agent_end, not at collection time.
-  const pendingFiles = new Set<string>();
+  // Tracks supported edited files during the agent run. Partitioned by backend
+  // mode at agent_end, not at collection time.
+  const pendingFiles = new PendingPostEditFiles();
   // Current post-edit issues keyed by file. Older dev-tools-agent-end messages
   // are filtered out of model context and replaced with this live summary.
   const activeAgentEndResults = new Map<string, AgentEndFileResult>();
@@ -181,13 +181,7 @@ export default function (pi: ExtensionAPI) {
   // Collect all edit/write targets into pendingFiles. At agent_end the set is
   // partitioned by backend mode — we don't need to know mode at collection time.
   pi.on("tool_result", async (event) => {
-    if ((event.toolName !== "edit" && event.toolName !== "write") || event.isError) return;
-    const inp = event.input as Record<string, unknown> | null | undefined;
-    const path: string | undefined =
-      typeof inp?.path === "string" ? inp.path :
-      typeof inp?.file_path === "string" ? inp.file_path :
-      undefined;
-    if (path && isSupported(path)) pendingFiles.add(path);
+    pendingFiles.recordToolResult(event);
   });
 
   // ─── agent_end: collect from all backends, render once ─────────────────────
@@ -196,8 +190,7 @@ export default function (pi: ExtensionAPI) {
   // LSP results have errors (format errors are informational, no re-engage).
   // See agent-end.ts for types, mappers, and the renderer.
   pi.on("agent_end", async () => {
-    const files = [...pendingFiles];
-    pendingFiles.clear();
+    const files = pendingFiles.drain();
     if (files.length === 0) return;
 
     // Run formatters before LSP diagnostics, then replace stale active issues
