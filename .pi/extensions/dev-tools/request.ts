@@ -1,3 +1,4 @@
+import { Either } from "effect";
 import type { DaemonRequest } from "./protocol";
 
 export enum DevToolsAction {
@@ -24,6 +25,17 @@ export interface DevToolsParams {
 
 type PathMode = "none" | "single" | "many";
 
+type ClientRequest = Omit<DaemonRequest, "id">;
+
+export interface RequestBuildError {
+  readonly _tag: "RequestBuildError";
+  readonly message: string;
+}
+
+function requestBuildError(message: string): RequestBuildError {
+  return { _tag: "RequestBuildError", message };
+}
+
 const PATH_MODE_BY_ACTION: Record<DevToolsAction, PathMode> = {
   [DevToolsAction.Diagnostics]: "many",
   [DevToolsAction.Hover]: "single",
@@ -36,38 +48,46 @@ const PATH_MODE_BY_ACTION: Record<DevToolsAction, PathMode> = {
   [DevToolsAction.Status]: "none",
 };
 
-function normalizePathsForAction(params: DevToolsParams): string[] {
+function normalizePathsForAction(params: DevToolsParams): Either.Either<string[], RequestBuildError> {
   const rawPath = params.path;
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
   const mode = PATH_MODE_BY_ACTION[params.action];
 
   if (mode === "single" && paths.length > 1) {
-    throw new Error(`${params.action} requires a single path — ${paths.length} were provided`);
+    return Either.left(requestBuildError(`${params.action} requires a single path — ${paths.length} were provided`));
   }
 
-  return mode === "none" ? [] : paths;
+  return Either.right(mode === "none" ? [] : paths);
 }
 
 /**
  * Shared request builder — normalises tool params → daemon wire format.
  * Pure function, no closure dependencies.
  */
-export function buildClientRequest(params: DevToolsParams): Omit<DaemonRequest, "id"> {
-  const paths = normalizePathsForAction(params);
+export function buildClientRequestEither(params: DevToolsParams): Either.Either<ClientRequest, RequestBuildError> {
+  const pathsResult = normalizePathsForAction(params);
+  if (Either.isLeft(pathsResult)) return Either.left(pathsResult.left);
 
+  const paths = pathsResult.right;
   switch (params.action) {
     case DevToolsAction.Diagnostics:
-      return { action: params.action, paths };
+      return Either.right({ action: params.action, paths });
     case DevToolsAction.Status:
-      return { action: params.action };
+      return Either.right({ action: params.action });
     case DevToolsAction.Symbols:
-      return { action: params.action, path: paths[0], query: params.query };
+      return Either.right({ action: params.action, path: paths[0], query: params.query });
     case DevToolsAction.Hover:
     case DevToolsAction.Definition:
     case DevToolsAction.Implementation:
     case DevToolsAction.References:
     case DevToolsAction.IncomingCalls:
     case DevToolsAction.OutgoingCalls:
-      return { action: params.action, path: paths[0], line: params.line, character: params.character };
+      return Either.right({ action: params.action, path: paths[0], line: params.line, character: params.character });
   }
+}
+
+export function buildClientRequest(params: DevToolsParams): ClientRequest {
+  const result = buildClientRequestEither(params);
+  if (Either.isLeft(result)) throw new Error(result.left.message);
+  return result.right;
 }
