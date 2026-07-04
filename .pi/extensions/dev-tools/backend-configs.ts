@@ -28,6 +28,11 @@ export enum BackendName {
   Terraform = "terraform",
 }
 
+export enum BackendMode {
+  Lsp = "lsp",
+  Format = "format",
+}
+
 interface BackendConfigBase {
   /** Display name shown in status messages, e.g. "typescript" or "hcl". */
   name: BackendName;
@@ -41,7 +46,7 @@ interface BackendConfigBase {
 
 /** A persistent language server backend (diagnostics, hover, definition, …). */
 export interface LspBackendConfig extends BackendConfigBase {
-  mode: "lsp";
+  mode: BackendMode.Lsp;
   /** Args passed to the language server binary, e.g. ["--stdio"]. */
   binaryArgs: string[];
   /** LSP initialize capabilities sent during handshake. */
@@ -54,7 +59,7 @@ export interface LspBackendConfig extends BackendConfigBase {
 
 /** A one-shot file formatter (runs per-file at agent_end, no persistent process). */
 export interface FormatBackendConfig extends BackendConfigBase {
-  mode: "format";
+  mode: BackendMode.Format;
   /**
    * Build the argument list for a formatting invocation.
    * Called once per file — the binary is `binaryName`.
@@ -125,7 +130,7 @@ const NIX_CAPABILITIES = {
 export const BACKEND_CONFIGS: BackendConfig[] = [
   // ── LSP backends ────────────────────────────────────────────────────────────
   {
-    mode: "lsp",
+    mode: BackendMode.Lsp,
     name: BackendName.TypeScript,
     binaryName: "typescript-language-server",
     binaryArgs: ["--stdio"],
@@ -141,7 +146,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     supportsWorkspaceSymbols: true,
   },
   {
-    mode: "lsp",
+    mode: BackendMode.Lsp,
     name: BackendName.Bash,
     binaryName: "bash-language-server",
     binaryArgs: ["start"],
@@ -155,7 +160,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     supportsWorkspaceSymbols: false,
   },
   {
-    mode: "lsp",
+    mode: BackendMode.Lsp,
     name: BackendName.Nil,
     binaryName: "nil",
     binaryArgs: [],
@@ -170,7 +175,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
 
   // ── Format backends ─────────────────────────────────────────────────────────
   {
-    mode: "format",
+    mode: BackendMode.Format,
     name: BackendName.Hcl,
     binaryName: "terragrunt",
     extensions: new Map([[".hcl", "hcl"]]),
@@ -178,7 +183,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     formatArgs: (f) => ["hclfmt", "--terragrunt-hclfmt-file", f],
   },
   {
-    mode: "format",
+    mode: BackendMode.Format,
     name: BackendName.Terraform,
     binaryName: "terraform",
     extensions: new Map([[".tf", "terraform"], [".tfvars", "terraform"]]),

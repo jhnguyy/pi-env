@@ -50,7 +50,7 @@ export function registerHooks(
   store: TodoStore,
 ): void {
   // ─── 1. Handoff cleanup on merge ────────────────────────────────────────────
-  pi.on("tool_result", async (event, ctx) => {
+  pi.on(PiEvent.ToolResult, async (event, ctx) => {
     if (event.toolName !== "bash" || event.isError) return;
 
     const command = (event.input as Record<string, string>).command ?? "";
@@ -117,20 +117,20 @@ export function registerHooks(
   });
 
   // ─── 4. Session shutdown — clear todos + slot state ─────────────────────────
-  pi.on("session_shutdown", async () => {
+  pi.on(PiEvent.SessionShutdown, async () => {
     store.clear();
     resetGitFailureCache();
     resetSlots();
   });
 
   // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
-  pi.on("turn_end", async (_event, ctx) => {
+  pi.on(PiEvent.TurnEnd, async (_event, ctx) => {
     invalidateGitCache();
     batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
   });
 
   // ─── 7. Widget refresh + context injection before agent start ───────────────
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on(PiEvent.BeforeAgentStart, async (_event, ctx) => {
     store.purgeCompleted();
     batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
 
@@ -140,7 +140,7 @@ export function registerHooks(
   });
 
   // ─── 8. Todo context injection (root sessions only) ─────────────────────────
-  pi.on("before_agent_start", async () => {
+  pi.on(PiEvent.BeforeAgentStart, async () => {
     return { message: { customType: "session-todos", content: store.render(), display: false } };
   });
 }

@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isSupported, getBackendConfig, BACKEND_CONFIGS, type LspBackendConfig } from "../backend-configs";
+import { isSupported, getBackendConfig, BACKEND_CONFIGS, BackendMode, type LspBackendConfig } from "../backend-configs";
 import { LspBackend, findBinary } from "../backend";
 
 // ─── isSupported ──────────────────────────────────────────────────────────────
@@ -40,22 +40,22 @@ describe("isSupported", () => {
 describe("getBackendConfig", () => {
   it("returns the hcl format backend for .hcl files", () => {
     const c = getBackendConfig("foo.hcl");
-    expect(c?.mode).toBe("format");
+    expect(c?.mode).toBe(BackendMode.Format);
     expect(c?.name).toBe("hcl");
   });
   it("returns the terraform format backend for .tf files", () => {
     const c = getBackendConfig("foo.tf");
-    expect(c?.mode).toBe("format");
+    expect(c?.mode).toBe(BackendMode.Format);
     expect(c?.name).toBe("terraform");
   });
   it("returns the terraform format backend for .tfvars files", () => {
     const c = getBackendConfig("foo.tfvars");
-    expect(c?.mode).toBe("format");
+    expect(c?.mode).toBe(BackendMode.Format);
     expect(c?.name).toBe("terraform");
   });
   it("returns an lsp backend for .ts files", () => {
     const c = getBackendConfig("foo.ts");
-    expect(c?.mode).toBe("lsp");
+    expect(c?.mode).toBe(BackendMode.Lsp);
     expect(c?.name).toBe("typescript");
   });
   it("returns null for unsupported extensions", () => {
@@ -63,8 +63,8 @@ describe("getBackendConfig", () => {
   });
   it("hcl formatArgs build the expected terragrunt command", () => {
     const c = getBackendConfig("path/to/main.hcl");
-    expect(c?.mode).toBe("format");
-    if (c?.mode === "format") {
+    expect(c?.mode).toBe(BackendMode.Format);
+    if (c?.mode === BackendMode.Format) {
       expect(c.formatArgs("path/to/main.hcl")).toEqual([
         "hclfmt", "--terragrunt-hclfmt-file", "path/to/main.hcl",
       ]);
@@ -72,8 +72,8 @@ describe("getBackendConfig", () => {
   });
   it("tf formatArgs build the expected terraform command", () => {
     const c = getBackendConfig("main.tf");
-    expect(c?.mode).toBe("format");
-    if (c?.mode === "format") {
+    expect(c?.mode).toBe(BackendMode.Format);
+    if (c?.mode === BackendMode.Format) {
       expect(c.formatArgs("main.tf")).toEqual(["fmt", "main.tf"]);
     }
   });
@@ -83,7 +83,7 @@ describe("getBackendConfig", () => {
 
 describe("LspBackend.handles and getLanguageId (via configs)", () => {
   // LspBackend only consumes LSP-mode configs — mirror the daemon's filter.
-  const backends = (BACKEND_CONFIGS.filter((c) => c.mode === "lsp") as LspBackendConfig[])
+  const backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[])
     .map((c) => new LspBackend(c));
   const getBackend = (path: string) => backends.find((b) => b.handles(path));
 

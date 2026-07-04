@@ -159,7 +159,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── context hook: collapse stale post-edit hints ─────────────────────────
-  pi.on("context", async (event) => {
+  pi.on(PiEvent.Context, async (event) => {
     const messages = event.messages.filter((message) => {
       const customType = (message as { customType?: string }).customType;
       return customType !== "dev-tools-agent-end";
@@ -180,7 +180,7 @@ export default function (pi: ExtensionAPI) {
   // ─── tool_result hook: accumulate edited files ────────────────────────────
   // Collect all edit/write targets into pendingFiles. At agent_end the set is
   // partitioned by backend mode — we don't need to know mode at collection time.
-  pi.on("tool_result", async (event) => {
+  pi.on(PiEvent.ToolResult, async (event) => {
     pendingFiles.recordToolResult(event);
   });
 
@@ -189,7 +189,7 @@ export default function (pi: ExtensionAPI) {
   // One sendMessage at the end covers everything. triggerTurn fires only when
   // LSP results have errors (format errors are informational, no re-engage).
   // See agent-end.ts for types, mappers, and the renderer.
-  pi.on("agent_end", async () => {
+  pi.on(PiEvent.AgentEnd, async () => {
     const files = pendingFiles.drain();
     if (files.length === 0) return;
 

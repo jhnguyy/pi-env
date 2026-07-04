@@ -6,7 +6,7 @@ import {
   formatAgentEndErrorResult,
   processAgentEndResults,
 } from "./agent-end";
-import { getBackendConfig, type FormatBackendConfig } from "./backend-configs";
+import { BackendMode, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
 import type { LspResult } from "./protocol";
 
 export interface AgentEndFormatFile {
@@ -37,7 +37,7 @@ export function partitionAgentEndFiles(files: string[]): AgentEndFilePartition {
   for (const file of files) {
     const config = getBackendConfig(file);
     if (!config) continue;
-    if (config.mode === "lsp") lspFiles.push(file);
+    if (config.mode === BackendMode.Lsp) lspFiles.push(file);
     else formatFiles.push({ file, config });
   }
 
