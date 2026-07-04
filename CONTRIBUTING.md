@@ -18,6 +18,8 @@ chore/<name>   config, docs, cleanup (no behavior change)
 
 ## Documentation Changes
 
+Implementation conventions live under [`docs/conventions/`](docs/conventions/README.md). Start with the overview and follow the area-specific page that matches the work, such as [`docs/conventions/typescript.md`](docs/conventions/typescript.md) for TypeScript enum and type-shape preferences.
+
 Keep documentation targeted:
 
 - `README.md`: purpose, setup, design intent.
