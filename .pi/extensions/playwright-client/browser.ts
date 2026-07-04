@@ -1,6 +1,10 @@
 import type { BrowserClientConfig, BrowserTarget } from "./config";
 import { BrowserArtifacts } from "./artifacts";
 
+import type { DownloadLike, LocatorParams, PageLike, WaitParams } from "./locators";
+import { downloadTrigger, hasLocatorParams, LoadState, LocatorWaitState, locate } from "./locators";
+export type { LocatorParams, WaitParams } from "./locators";
+
 type BrowserLike = {
   contexts(): ContextLike[];
   close(): Promise<void>;
@@ -10,40 +14,6 @@ type BrowserLike = {
 type ContextLike = {
   pages(): PageLike[];
   newPage(): Promise<PageLike>;
-};
-type LocatorLike = {
-  click(options?: { timeout?: number }): Promise<unknown>;
-  fill(value: string, options?: { timeout?: number }): Promise<unknown>;
-  type(value: string, options?: { timeout?: number }): Promise<unknown>;
-  waitFor(options?: { state?: LocatorWaitState; timeout?: number }): Promise<unknown>;
-  innerText(options?: { timeout?: number }): Promise<string>;
-  ariaSnapshot?(options?: { timeout?: number }): Promise<string>;
-};
-type DownloadLike = {
-  suggestedFilename(): string;
-  saveAs(path: string): Promise<unknown>;
-  failure(): Promise<string | null>;
-};
-type LoadState = "domcontentloaded" | "load" | "networkidle";
-type LocatorWaitState = "attached" | "detached" | "visible" | "hidden";
-type PageLike = {
-  title(): Promise<string>;
-  url(): string;
-  goto(url: string, options?: { waitUntil?: Extract<LoadState, "domcontentloaded" | "load">; timeout?: number }): Promise<unknown>;
-  goBack(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
-  goForward(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
-  reload(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
-  waitForLoadState(state?: LoadState, options?: { timeout?: number }): Promise<unknown>;
-  waitForURL(url: string | RegExp, options?: { timeout?: number }): Promise<unknown>;
-  waitForEvent(event: "download", options?: { timeout?: number }): Promise<DownloadLike>;
-  screenshot(options: { path: string; fullPage?: boolean }): Promise<Uint8Array>;
-  locator(selector: string): LocatorLike;
-  getByRole?(role: string, options?: { name?: string; exact?: boolean }): LocatorLike;
-  getByText?(text: string, options?: { exact?: boolean }): LocatorLike;
-  getByLabel?(text: string, options?: { exact?: boolean }): LocatorLike;
-  getByPlaceholder?(text: string, options?: { exact?: boolean }): LocatorLike;
-  getByTestId?(testId: string): LocatorLike;
-  keyboard: { type(value: string): Promise<unknown> };
 };
 type PlaywrightModule = {
   chromium: {
@@ -58,26 +28,10 @@ export interface PageSummary {
   url: string;
   active: boolean;
 }
-export interface LocatorParams {
-  role?: string;
-  name?: string;
-  text?: string;
-  label?: string;
-  placeholder?: string;
-  testId?: string;
-  selector?: string;
-  exact?: boolean;
-}
 export interface PageSelectionParams {
   pageId?: string;
   title?: string;
   url?: string;
-}
-export interface WaitParams extends LocatorParams {
-  url?: string;
-  loadState?: LoadState;
-  locatorState?: LocatorWaitState;
-  timeout?: number;
 }
 export interface BrowserActionHistoryEntry {
   timestamp: string;
@@ -219,25 +173,25 @@ export class BrowserClient {
   async navigate(targetName: string, url: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("navigate");
     const page = await this.activePage(targetName);
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goto(url, { waitUntil: LoadState.DomContentLoaded, timeout: 30_000 });
     return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
   }
   async back(targetName: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("back");
     const page = await this.activePage(targetName);
-    await page.goBack({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goBack({ waitUntil: LoadState.DomContentLoaded, timeout: 30_000 });
     return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
   }
   async forward(targetName: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("forward");
     const page = await this.activePage(targetName);
-    await page.goForward({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goForward({ waitUntil: LoadState.DomContentLoaded, timeout: 30_000 });
     return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
   }
   async reload(targetName: string): Promise<{ title: string; url: string; target: string }> {
     this.assertCanMutate("reload");
     const page = await this.activePage(targetName);
-    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.reload({ waitUntil: LoadState.DomContentLoaded, timeout: 30_000 });
     return { title: await page.title().catch(() => ""), url: safeUrl(page), target: targetName };
   }
   async wait(targetName: string, params: WaitParams): Promise<{ target: string; waitedFor: string; title: string; url: string }> {
@@ -247,13 +201,12 @@ export class BrowserClient {
       await page.waitForURL(params.url, { timeout });
       return { target: targetName, waitedFor: `url=${params.url}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
     }
-    const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
-    if (hasLocator) {
+    if (hasLocatorParams(params)) {
       const { locator, target } = locate(page, params);
-      await locator.waitFor({ state: params.locatorState ?? "visible", timeout });
-      return { target: targetName, waitedFor: `${target} state=${params.locatorState ?? "visible"}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
+      await locator.waitFor({ state: params.locatorState ?? LocatorWaitState.Visible, timeout });
+      return { target: targetName, waitedFor: `${target} state=${params.locatorState ?? LocatorWaitState.Visible}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
     }
-    const state = params.loadState ?? "load";
+    const state = params.loadState ?? LoadState.Load;
     await page.waitForLoadState(state, { timeout });
     return { target: targetName, waitedFor: `loadState=${state}`, title: await page.title().catch(() => ""), url: safeUrl(page) };
   }
@@ -288,8 +241,7 @@ export class BrowserClient {
   async type(targetName: string, params: LocatorParams, value: string, mode: "fill" | "type"): Promise<{ target: string; locator: string; mode: "fill" | "type"; title: string; url: string }> {
     this.assertCanMutate("type");
     const page = await this.activePage(targetName);
-    const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
-    if (!hasLocator) {
+    if (!hasLocatorParams(params)) {
       if (mode === "fill") throw new Error("browser_type mode=fill requires a locator");
       await page.keyboard.type(value);
       return { target: targetName, locator: "focused element", mode, title: await page.title().catch(() => ""), url: safeUrl(page) };
@@ -420,43 +372,6 @@ export function isConnectionBrokenError(error: unknown): boolean {
     "econnrefused",
     "cdp",
   ].some((needle) => message.includes(needle));
-}
-function downloadTrigger(page: PageLike, params: LocatorParams & { url?: string }): { kind: "click" | "navigate" | "wait"; label: string; run(): Promise<unknown> } {
-  const hasLocator = Boolean(params.role || params.text || params.label || params.placeholder || params.testId || params.selector);
-  if (hasLocator) {
-    const { locator, target } = locate(page, params);
-    return { kind: "click", label: target, run: () => locator.click({ timeout: 10_000 }) };
-  }
-  if (params.url) {
-    return { kind: "navigate", label: `url=${params.url}`, run: () => page.goto(params.url!, { waitUntil: "domcontentloaded", timeout: 30_000 }) };
-  }
-  return { kind: "wait", label: "next download", run: async () => undefined };
-}
-
-function locate(page: PageLike, params: LocatorParams): { locator: LocatorLike; target: string } {
-  const exact = params.exact;
-  if (params.role) {
-    if (!page.getByRole) throw new Error("Current Playwright page object does not support getByRole");
-    return { locator: page.getByRole(params.role, { name: params.name, exact }), target: `role=${params.role}${params.name ? ` name=${params.name}` : ""}` };
-  }
-  if (params.label) {
-    if (!page.getByLabel) throw new Error("Current Playwright page object does not support getByLabel");
-    return { locator: page.getByLabel(params.label, { exact }), target: `label=${params.label}` };
-  }
-  if (params.placeholder) {
-    if (!page.getByPlaceholder) throw new Error("Current Playwright page object does not support getByPlaceholder");
-    return { locator: page.getByPlaceholder(params.placeholder, { exact }), target: `placeholder=${params.placeholder}` };
-  }
-  if (params.text) {
-    if (!page.getByText) throw new Error("Current Playwright page object does not support getByText");
-    return { locator: page.getByText(params.text, { exact }), target: `text=${params.text}` };
-  }
-  if (params.testId) {
-    if (!page.getByTestId) throw new Error("Current Playwright page object does not support getByTestId");
-    return { locator: page.getByTestId(params.testId), target: `testId=${params.testId}` };
-  }
-  if (params.selector) return { locator: page.locator(params.selector), target: `selector=${params.selector}` };
-  throw new Error("A locator is required: role/name, text, label, placeholder, testId, or selector");
 }
 function selectPageSummary(pages: PageSummary[], selection: PageSelectionParams, targetName: string): PageSummary {
   if (selection.pageId) {
