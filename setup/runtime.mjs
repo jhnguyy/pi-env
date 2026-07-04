@@ -13,6 +13,7 @@ import {
   section,
   skip,
 } from './runtime-support.mjs';
+import { isCliManagedExternally, shouldSkipPathProfile } from './ownership.mjs';
 
 const PiPackage = Object.freeze({
   Name: '@earendil-works/pi-coding-agent',
@@ -154,7 +155,7 @@ function installPiCli() {
     fail(`  ✗  missing pi entrypoint after install: ${piEntry}`);
   }
 
-  if (process.env.PI_ENV_CLI_MANAGED_BY_NIX === '1') {
+  if (isCliManagedExternally()) {
     ok(`pi ${version} package installed (CLI wrapper managed externally)`);
     return;
   }
@@ -162,9 +163,7 @@ function installPiCli() {
   writePiWrapper(piPackageDir);
   ok(`pi ${version} → ${join(piBinDir, 'pi')}`);
 
-  if (process.env.PI_ENV_SETUP_MODE === 'nix-managed'
-      || process.env.PI_ENV_CONFIG_MANAGED_BY_NIX === '1'
-      || process.env.PI_ENV_SKIP_PATH_PROFILE === '1') {
+  if (shouldSkipPathProfile()) {
     skip('shell profile PATH edits (managed externally)');
   } else if (!process.env.PATH.split(':').includes(piBinDir)) {
     console.log(`  —  ${piBinDir} is not in PATH yet; updating shell profiles.`);

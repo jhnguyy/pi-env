@@ -34,13 +34,44 @@ export interface AgentToolEvents {
   on(event: PiEvent.SessionStart, handler: () => void): void;
 }
 
+type AgentToolHandler = (registration: ExtToolRegistration) => void;
+
+interface AgentToolStore {
+  registrations: Map<string, ExtToolRegistration>;
+  listeners: Set<AgentToolHandler>;
+}
+
+const STORE_KEY = "__piEnvAgentToolStore";
+
+function getStore(): AgentToolStore {
+  const root = globalThis as typeof globalThis & { [STORE_KEY]?: AgentToolStore };
+  root[STORE_KEY] ??= {
+    registrations: new Map<string, ExtToolRegistration>(),
+    listeners: new Set<AgentToolHandler>(),
+  };
+  return root[STORE_KEY];
+}
+
+function rememberRegistration(registration: ExtToolRegistration): ExtToolRegistration | null {
+  const store = getStore();
+  const previous = store.registrations.get(registration.tool.name);
+  store.registrations.set(registration.tool.name, registration);
+  return previous === registration ? null : registration;
+}
+
+function notifyListeners(registration: ExtToolRegistration): void {
+  for (const listener of getStore().listeners) listener(registration);
+}
+
 export function formatCapabilities(caps: ToolCapability[]): string {
   return caps.join(", ");
 }
 
 export function registerAgentTools(pi: AgentToolEvents, registrations: ExtToolRegistration | ExtToolRegistration[]): void {
   for (const registration of Array.isArray(registrations) ? registrations : [registrations]) {
+    const remembered = rememberRegistration(registration);
     pi.events.emit(AgentToolEvent.Register, registration);
+    if (remembered && !pi.events.on) notifyListeners(registration);
   }
 }
 
@@ -48,6 +79,14 @@ export function registerAgentToolsOnSessionStart(pi: AgentToolEvents, registrati
   pi.on(PiEvent.SessionStart, () => registerAgentTools(pi, registrations));
 }
 
-export function listenForAgentTools(pi: AgentToolEvents, handler: (registration: ExtToolRegistration) => void): void {
-  pi.events.on?.(AgentToolEvent.Register, (data: unknown) => handler(data as ExtToolRegistration));
+export function listenForAgentTools(pi: AgentToolEvents, handler: AgentToolHandler): void {
+  const store = getStore();
+  store.listeners.add(handler);
+  for (const registration of store.registrations.values()) handler(registration);
+
+  pi.events.on?.(AgentToolEvent.Register, (data: unknown) => {
+    const registration = data as ExtToolRegistration;
+    rememberRegistration(registration);
+    handler(registration);
+  });
 }
