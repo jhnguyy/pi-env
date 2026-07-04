@@ -15,10 +15,7 @@
  *    — explicit config, no defaults applied
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
@@ -27,6 +24,7 @@ import { createExecuteSubagent } from "./execute";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentCall, renderSubagentResult } from "./render";
 import { listenForAgentTools, PiEvent, type ToolCapability } from "../_shared/agent-tools";
+import { readOptionalAgentSettings } from "../_shared/agent-settings";
 
 // ─── Parameters schema (stable across re-registrations) ──────────────────────
 
@@ -87,21 +85,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
     // 1. Read enabled models and annotations from settings.json
-    let enabledModelIds: string[] = [];
-    let modelAnnotations: Record<string, string[]> = {};
-    try {
-      const settingsPath = path.join(getAgentDir(), "settings.json");
-      const raw = fs.readFileSync(settingsPath, "utf-8");
-      const settings = JSON.parse(raw) as { enabledModels?: string[]; modelAnnotations?: Record<string, string[]> };
-      if (Array.isArray(settings.enabledModels)) {
-        enabledModelIds = settings.enabledModels;
-      }
-      if (settings.modelAnnotations) {
-        modelAnnotations = settings.modelAnnotations;
-      }
-    } catch {
-      // settings.json missing or malformed — will list all available models
-    }
+    const settings = readOptionalAgentSettings();
+    const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
+    const modelAnnotations = settings?.modelAnnotations ?? {};
 
     // 2. Get models that have working auth
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{

@@ -24,11 +24,9 @@
  *   }
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import { readOptionalAgentSettings } from "../_shared/agent-settings";
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount, gitSync } from "../_shared/git";
 import type { WorkTrackerConfig } from "./types";
 
@@ -36,13 +34,7 @@ import type { WorkTrackerConfig } from "./types";
 
 /** Read the `workTracker` block from settings.json, if present. */
 function readSettingsConfig(): { repos?: string[]; protectedBranches?: string[] } | null {
-  try {
-    const settingsPath = join(getAgentDir(), "settings.json");
-    const raw = JSON.parse(readFileSync(settingsPath, "utf8"));
-    return raw?.workTracker ?? null;
-  } catch {
-    return null;
-  }
+  return readOptionalAgentSettings()?.workTracker ?? null;
 }
 
 export function loadConfig(): WorkTrackerConfig {
