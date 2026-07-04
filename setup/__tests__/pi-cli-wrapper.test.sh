@@ -1,23 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-assert_contains() {
-  local file="$1" expected="$2"
-  grep -qF "$expected" "$file" || fail "$file does not contain: $expected"
-}
-
-assert_count() {
-  local file="$1" pattern="$2" expected="$3" actual
-  actual=$(grep -cF "$pattern" "$file" || true)
-  [ "$actual" = "$expected" ] || fail "$file has $actual copies of $pattern; expected $expected"
-}
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 test_node_bin() {
   if [ -x /bin/node ]; then
@@ -64,7 +49,7 @@ JS
 
 test_pi_cli_wrapper_uses_repo_locked_package() {
   local tmp old_path
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_path="$PATH"
 
   PI_ENV_CONFIG_MANAGED_BY_NIX=1
@@ -87,7 +72,7 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
 
 test_pi_cli_wrapper_pins_configured_node() {
   local tmp fake_node
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   fake_node="$tmp/node"
 
   create_stub_repo "$tmp"
@@ -115,7 +100,7 @@ SH
 
 test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   local tmp
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
 
   PI_ENV_CLI_MANAGED_BY_NIX=1
   PI_ENV_NODE_BIN=$(test_node_bin)
@@ -131,7 +116,7 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
 
 test_pi_cli_wrapper_adds_path_profile_when_portable() {
   local tmp old_home old_path
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_home="$HOME"
   old_path="$PATH"
 
@@ -145,9 +130,9 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   run_pi_cli_setup
   run_pi_cli_setup
 
-  assert_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
-  assert_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
-  assert_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
+  assert_file_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
+  assert_file_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
+  assert_file_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
 
   HOME="$old_home"
   PATH="$old_path"

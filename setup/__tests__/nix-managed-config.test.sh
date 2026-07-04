@@ -1,22 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-node_bin() {
-  if [ -n "${PI_ENV_NODE_BIN:-}" ] && [ -x "$PI_ENV_NODE_BIN" ]; then
-    printf '%s\n' "$PI_ENV_NODE_BIN"
-  elif [ -x /bin/node ]; then
-    printf '%s\n' /bin/node
-  else
-    command -v node
-  fi
-}
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 run_terminal_config() {
   local node
@@ -47,7 +33,7 @@ run_terminal_config() {
 
 test_nix_managed_config_skips_terminal_writes() {
   local old_home="${HOME:-}" tmp_home
-  tmp_home="$(mktemp -d)"
+  tmp_home="$(with_temp_dir)"
   HOME="$tmp_home"
 
   PI_ENV_CONFIG_MANAGED_BY_NIX=1
@@ -66,7 +52,7 @@ test_nix_managed_config_skips_terminal_writes() {
 
 test_granular_skip_flags_skip_terminal_writes() {
   local old_home="${HOME:-}" tmp_home
-  tmp_home="$(mktemp -d)"
+  tmp_home="$(with_temp_dir)"
   HOME="$tmp_home"
 
   PI_ENV_SKIP_TMUX=1

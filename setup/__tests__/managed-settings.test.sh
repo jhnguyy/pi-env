@@ -1,24 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 SCRIPT="$ROOT/setup/apply-managed-settings.mjs"
 MANAGED="$ROOT/setup/managed-settings.json"
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
-
-node_bin() {
-  if [ -x "${PI_ENV_NODE_BIN:-}" ]; then
-    printf '%s\n' "$PI_ENV_NODE_BIN"
-  elif [ -x /bin/node ]; then
-    printf '%s\n' /bin/node
-  else
-    command -v node
-  fi
-}
 
 json_get() {
   local file="$1" expr="$2" node
@@ -34,7 +20,7 @@ apply_settings() {
 
 test_applies_managed_settings_and_package_once() {
   local tmp settings repo first second
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -67,7 +53,7 @@ JSON
 
 test_preserves_unmanaged_retry_settings() {
   local tmp settings repo
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -92,7 +78,7 @@ JSON
 
 test_preserves_enabled_pi_update() {
   local tmp settings repo
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -113,7 +99,7 @@ JSON
 
 test_applies_to_missing_settings_file() {
   local tmp settings repo result
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/nested/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -131,7 +117,7 @@ test_applies_to_missing_settings_file() {
 
 test_preserves_existing_theme() {
   local tmp settings repo
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -150,7 +136,7 @@ JSON
 
 test_disables_browser_extension_without_clobbering_other_extensions() {
   local tmp settings repo
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
@@ -169,7 +155,7 @@ JSON
 
 test_registers_primary_checkout_when_run_from_worktree() {
   local tmp settings repo worktree result
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   worktree="$tmp/worktree"
@@ -199,7 +185,7 @@ JSON
 
 test_migrates_only_default_npm_command_to_nub() {
   local tmp settings custom_settings repo
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
   custom_settings="$tmp/custom-settings.json"
   repo="$tmp/repo"
