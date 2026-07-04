@@ -3,43 +3,30 @@
  * @purpose Orchestrates PTC subprocess execution.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import type {
   ExtensionAPI,
   ExtensionContext,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
-import { generateId } from "../_shared/id";
 import { buildCodeFrame, mapGeneratedStackToUserLine } from "../_shared/code-frame";
 import { RpcBridge } from "./rpc-bridge";
 import { generateWrappers } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
-import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv, killGracefully } from "./types";
+import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, killGracefully } from "./types";
+import {
+  createTempScript,
+  cleanupTempScript,
+  spawnSubprocess,
+  PtcExecutionError,
+  PtcExecutionPhase,
+} from "./node-runtime";
 
 const PREAMBLE_PATH = fileURLToPath(new URL("./subprocess-preamble.js", import.meta.url));
-
-enum PtcExecutionPhase {
-  Prepare = "prepare",
-  Run = "run",
-  Cleanup = "cleanup",
-}
-
-class PtcExecutionError extends Data.TaggedError("PtcExecutionError")<{
-  readonly phase: PtcExecutionPhase;
-  readonly cause: unknown;
-}> {
-  override get message(): string {
-    const reason = this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `PTC ${this.phase} failed: ${reason}`;
-  }
-}
 
 export class PtcExecutor {
   constructor(
@@ -128,38 +115,6 @@ export class PtcExecutor {
       if (timeoutId) clearTimeout(timeoutId);
     }
   }
-}
-
-function createTempScript(code: string): Effect.Effect<string, PtcExecutionError> {
-  return Effect.tryPromise({
-    try: async () => {
-      const tmpPath = join(tmpdir(), `ptc-${generateId(8)}.mjs`);
-      writeFileSync(tmpPath, code, { encoding: "utf-8", mode: 0o600 });
-      return tmpPath;
-    },
-    catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Prepare, cause }),
-  });
-}
-
-function cleanupTempScript(path: string): Effect.Effect<void> {
-  return Effect.sync(() => {
-    try {
-      unlinkSync(path);
-    } catch {
-      /* best-effort cleanup */
-    }
-  });
-}
-
-function spawnSubprocess(scriptPath: string, cwd: string): Effect.Effect<ChildProcess, PtcExecutionError> {
-  return Effect.tryPromise({
-    try: async () => spawn(process.execPath, [scriptPath], {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: buildSubprocessEnv(),
-    }),
-    catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause }),
-  });
 }
 
 function buildSubprocessCode(preamblePath: string, wrappers: string, userCode: string): string {
