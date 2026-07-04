@@ -28,7 +28,24 @@ import type {
 
 // ─── Shared renderer helpers ──────────────────────────────────────────────────
 
+function shortPath(path: string): string {
+  return path.split("/").filter(Boolean).slice(-2).join("/");
+}
+
+function diagnosticsFileSummary(d: DiagnosticsResult): string {
+  const files = d.files?.map((file) => file.path) ?? (d.path ? [d.path] : []);
+  if (files.length === 0) return "";
+
+  const visible = files.slice(0, 3).map(shortPath);
+  const suffix = files.length > visible.length ? `, +${files.length - visible.length} more` : "";
+  return `${files.length} file${files.length !== 1 ? "s" : ""}: ${visible.join(", ")}${suffix}`;
+}
+
 function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, theme: RenderTheme): Text {
+  if (opts.expanded) {
+    return new Text(JSON.stringify(d, null, 2), 0, 0);
+  }
+
   let text: string;
   if (d.errorCount === 0 && d.warnCount === 0) {
     text = theme.fg("success", "✓ no errors");
@@ -38,17 +55,10 @@ function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, t
     if (d.warnCount > 0) parts.push(theme.fg("warning", `⚠ ${d.warnCount} warning${d.warnCount !== 1 ? "s" : ""}`));
     text = parts.join(" ");
   }
-  if (opts.expanded && d.items.length > 0) {
-    for (const item of d.items) {
-      const sev = item.severity === "error"
-        ? theme.fg("error", "E")
-        : item.severity === "warning"
-        ? theme.fg("warning", "W")
-        : theme.fg("muted", "I");
-      const code = item.code ? ` ${item.code}` : "";
-      text += `\n  ${sev} L${item.line}:${item.character}${code} ${item.message}`;
-    }
-  }
+
+  const fileSummary = diagnosticsFileSummary(d);
+  if (fileSummary) text += ` ${theme.fg("muted", `scanned ${fileSummary}`)}`;
+
   return new Text(text, 0, 0);
 }
 

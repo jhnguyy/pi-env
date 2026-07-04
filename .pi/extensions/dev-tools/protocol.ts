@@ -34,9 +34,9 @@ export interface DaemonRequest {
   path?: string;
   /** Absolute paths for bulk diagnostics (action=diagnostics). When provided, 'path' is ignored. */
   paths?: string[];
-  /** Line number (1-indexed). Required for hover, definition, references. */
+  /** Line number in the file, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy. */
   line?: number;
-  /** Column number (1-indexed). Required for hover, definition, references. */
+  /** Column number on the line, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy. */
   character?: number;
   /** Search query for workspace symbols (action=symbols without path). */
   query?: string;
