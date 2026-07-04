@@ -5,6 +5,8 @@
  * internally when communicating with the typescript-language-server).
  */
 
+import type { DevToolsAction } from "./action-contract";
+
 // ─── Socket / PID paths ───────────────────────────────────────────────────────
 
 const UID = process.getuid?.() ?? 1000;
@@ -13,17 +15,8 @@ export const PID_PATH = `/tmp/pi-lsp-${UID}.pid`;
 
 // ─── Actions ────────────────────────────────────────────────────────────────
 
-export type LspAction =
-  | "diagnostics"
-  | "hover"
-  | "definition"
-  | "implementation"
-  | "references"
-  | "incoming-calls"
-  | "outgoing-calls"
-  | "symbols"
-  | "status"
-  | "shutdown";
+export type PublicLspAction = `${DevToolsAction}`;
+export type LspAction = PublicLspAction | "shutdown";
 
 // ─── Daemon Request/Response ─────────────────────────────────────────────────
 

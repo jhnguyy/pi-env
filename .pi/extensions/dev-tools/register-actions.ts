@@ -21,6 +21,7 @@ import {
   formatSymbols, formatStatus,
 } from "./formatters";
 import { Text } from "@earendil-works/pi-tui";
+import { DevToolsAction } from "./action-contract";
 import type { RenderTheme } from "./renderers";
 import type {
   DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, SymbolsResult, StatusResult,
@@ -93,55 +94,55 @@ const successRenderer = (label: string) =>
 
 // ─── Register all actions ─────────────────────────────────────────────────────
 
-registerAction("diagnostics", {
+registerAction(DevToolsAction.Diagnostics, {
   handler: handleDiagnostics,
   formatter: formatDiagnostics,
   renderer: renderDiagnostics,
 });
 
-registerAction("hover", {
+registerAction(DevToolsAction.Hover, {
   handler: handleHover,
   formatter: formatHover,
   renderer: (_r, _opts, theme) => new Text(theme.fg("success", "✓ hover"), 0, 0),
 });
 
-registerAction("definition", {
+registerAction(DevToolsAction.Definition, {
   handler: handleDefinition,
   formatter: formatDefinition,
   renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.locations.length} location(s)`), 0, 0),
 });
 
-registerAction("implementation", {
+registerAction(DevToolsAction.Implementation, {
   handler: handleImplementation,
   formatter: formatImplementation,
   renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.locations.length} implementation(s)`), 0, 0),
 });
 
-registerAction("references", {
+registerAction(DevToolsAction.References, {
   handler: handleReferences,
   formatter: formatReferences,
   renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.total} reference(s)`), 0, 0),
 });
 
-registerAction("incoming-calls", {
+registerAction(DevToolsAction.IncomingCalls, {
   handler: handleIncomingCalls,
   formatter: formatIncomingCalls,
   renderer: renderCallHierarchy,
 });
 
-registerAction("outgoing-calls", {
+registerAction(DevToolsAction.OutgoingCalls, {
   handler: handleOutgoingCalls,
   formatter: formatOutgoingCalls,
   renderer: renderCallHierarchy,
 });
 
-registerAction("symbols", {
+registerAction(DevToolsAction.Symbols, {
   handler: handleSymbols,
   formatter: formatSymbols,
   renderer: renderSymbols,
 });
 
-registerAction("status", {
+registerAction(DevToolsAction.Status, {
   handler: handleStatus,
   formatter: formatStatus,
   renderer: renderStatus,

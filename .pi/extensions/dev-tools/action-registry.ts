@@ -10,7 +10,7 @@
  * No more switch statements in formatters.ts, renderers.ts, or daemon.ts dispatch.
  */
 
-import type { LspResult, LspAction } from "./protocol";
+import type { LspResult, LspAction, PublicLspAction } from "./protocol";
 import type { DaemonRequest, DaemonResponse } from "./protocol";
 import type { HandlerDeps } from "./handlers";
 import type { RenderTheme } from "./renderers";
@@ -30,10 +30,10 @@ interface ActionEntry {
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
-const registry = new Map<LspAction, ActionEntry>();
+const registry = new Map<PublicLspAction, ActionEntry>();
 
 export function registerAction(
-  action: LspAction,
+  action: PublicLspAction,
   entry: ActionEntry,
 ): void {
   registry.set(action, entry);
@@ -41,17 +41,18 @@ export function registerAction(
 
 /** Look up all three dispatch functions for an action in one call. */
 export function getAction(action: LspAction): ActionEntry | undefined {
+  if (action === "shutdown") return undefined;
   return registry.get(action);
 }
 
 /** Format any LspResult by dispatching to the registered formatter. */
 export function formatResult(result: LspResult): string {
-  const entry = registry.get(result.action as LspAction);
+  const entry = registry.get(result.action as PublicLspAction);
   if (!entry) return JSON.stringify(result);
   return entry.formatter(result);
 }
 
 /** Get all registered action names (for building tool parameter enums). */
-export function getRegisteredActions(): LspAction[] {
+export function getRegisteredActions(): PublicLspAction[] {
   return [...registry.keys()];
 }

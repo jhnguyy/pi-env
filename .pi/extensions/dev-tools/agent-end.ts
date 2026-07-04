@@ -15,10 +15,11 @@ import { BackendName } from "./backend-configs";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** A single normalized issue from any backend. */
-export enum AgentEndResultKind {
-  Lsp = "lsp",
-  Format = "format",
-}
+export const AgentEndResultKind = {
+  Lsp: "lsp",
+  Format: "format",
+} as const;
+export type AgentEndResultKind = typeof AgentEndResultKind[keyof typeof AgentEndResultKind];
 
 export interface AgentEndIssue {
   severity: "error" | "warning" | "info";
@@ -48,12 +49,12 @@ interface AgentEndFileResultBase {
 
 /** LSP diagnostics can re-engage the model when they contain errors. */
 export interface LspAgentEndFileResult extends AgentEndFileResultBase {
-  kind: AgentEndResultKind.Lsp;
+  kind: typeof AgentEndResultKind.Lsp;
 }
 
 /** Formatter failures are shown to the user but do not re-engage the model. */
 export interface FormatAgentEndFileResult extends AgentEndFileResultBase {
-  kind: AgentEndResultKind.Format;
+  kind: typeof AgentEndResultKind.Format;
 }
 
 export type AgentEndFileResult = LspAgentEndFileResult | FormatAgentEndFileResult;

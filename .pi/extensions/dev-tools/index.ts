@@ -19,7 +19,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Static } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { spawnSync } from "node:child_process";
 import "./register-actions"; // side-effect: populate action formatters/renderers for this bundle
@@ -37,6 +36,7 @@ import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-to
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
+import { createDevToolsParameterSchema, DEV_TOOLS_TOOL_DESCRIPTIONS } from "./action-contract";
 
 // ─── Format binary cache ──────────────────────────────────────────────────────
 // Resolved lazily on first agent_end that contains format-backend files.
@@ -73,28 +73,9 @@ export default function (pi: ExtensionAPI) {
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
-  const toolParameters = Type.Object({
-    action: StringEnum(
-      DEV_TOOLS_ACTIONS,
-      { description: "Action to perform" },
-    ),
-    path: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], {
-      description:
-        "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols. " +
-        "For diagnostics, pass an array to check multiple files in one call.",
-    })),
-    line: Type.Optional(Type.Number({
-      minimum: 1,
-      description: "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
-    })),
-    character: Type.Optional(Type.Number({
-      minimum: 1,
-      description: "Column number on the line, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
-    })),
-    query: Type.Optional(Type.String({
-      description: "Search query for workspace symbols (action=symbols without path).",
-    })),
-  });
+  const toolParameters = createDevToolsParameterSchema(
+    StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+  );
 
   type DevToolsToolParameters = typeof toolParameters;
 

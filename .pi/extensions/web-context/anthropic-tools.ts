@@ -1,38 +1,45 @@
 import { readSettingsBlock } from "../_shared/settings";
 
-export enum AnthropicHostedToolName {
-  WebSearch = "web_search",
-  WebFetch = "web_fetch",
-}
+export const AnthropicHostedToolName = {
+  WebSearch: "web_search",
+  WebFetch: "web_fetch",
+} as const;
+export type AnthropicHostedToolName = typeof AnthropicHostedToolName[keyof typeof AnthropicHostedToolName];
 
-enum AnthropicHostedToolType {
-  WebSearch = "web_search_20250305",
-  WebFetch = "web_fetch_20250910",
-}
+const AnthropicHostedToolType = {
+  WebSearch: "web_search_20250305",
+  WebFetch: "web_fetch_20250910",
+} as const;
+type AnthropicHostedToolType = typeof AnthropicHostedToolType[keyof typeof AnthropicHostedToolType];
 
-enum WebContextSettingKey {
-  Root = "webContext",
-  HostedTools = "anthropicHostedTools",
-}
+const WebContextSettingKey = {
+  Root: "webContext",
+  HostedTools: "anthropicHostedTools",
+} as const;
+type WebContextSettingKey = typeof WebContextSettingKey[keyof typeof WebContextSettingKey];
 
-enum AnthropicHostedToolSettingKey {
-  Enabled = "enabled",
-  Tools = "tools",
-  MaxUses = "maxUses",
-}
+const AnthropicHostedToolSettingKey = {
+  Enabled: "enabled",
+  Tools: "tools",
+  MaxUses: "maxUses",
+} as const;
+type AnthropicHostedToolSettingKey = typeof AnthropicHostedToolSettingKey[keyof typeof AnthropicHostedToolSettingKey];
 
-enum AnthropicHostedToolEnvVar {
-  Enabled = "PI_ANTHROPIC_WEB_TOOLS",
-}
+const AnthropicHostedToolEnvVar = {
+  Enabled: "PI_ANTHROPIC_WEB_TOOLS",
+} as const;
+type AnthropicHostedToolEnvVar = typeof AnthropicHostedToolEnvVar[keyof typeof AnthropicHostedToolEnvVar];
 
-enum ProviderName {
-  Anthropic = "anthropic",
-  GitHubCopilot = "github-copilot",
-}
+const ProviderName = {
+  Anthropic: "anthropic",
+  GitHubCopilot: "github-copilot",
+} as const;
+type ProviderName = typeof ProviderName[keyof typeof ProviderName];
 
-enum ModelApi {
-  AnthropicMessages = "anthropic-messages",
-}
+const ModelApi = {
+  AnthropicMessages: "anthropic-messages",
+} as const;
+type ModelApi = typeof ModelApi[keyof typeof ModelApi];
 
 export interface AnthropicWebToolSettings {
   enabled: boolean;

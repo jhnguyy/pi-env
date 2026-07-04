@@ -8,7 +8,7 @@
  *   - branch-guard.ts — BranchGuard class (protected branch enforcement)
  *   - handoff-cleanup — handoff file cleanup on branch merge
  *   - store.ts        — TodoStore (in-memory task list)
- *   - todo-tool.ts    — todo schema, enum, and execution logic
+ *   - todo-tool.ts    — todo schema, action constants, and execution logic
  *   - types.ts        — WorkTrackerConfig
  *
  * Subagent detection: if PI_AGENT_ID env var is set, context injection is skipped

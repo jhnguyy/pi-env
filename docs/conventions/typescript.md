@@ -1,0 +1,47 @@
+# TypeScript conventions
+
+## Const objects for named value sets
+
+Prefer `as const` objects plus derived value types for named sets of string or number values, especially when the values cross module boundaries:
+
+- tool actions
+- protocol action names
+- modes and states
+- lifecycle event names
+- config values represented in code
+- public helper return tags
+
+Use object members at call sites instead of repeating raw literals.
+
+```ts
+export const LoadState = {
+  Load: "load",
+  DomContentLoaded: "domcontentloaded",
+  NetworkIdle: "networkidle",
+} as const;
+export type LoadState = typeof LoadState[keyof typeof LoadState];
+
+await page.waitForLoadState(LoadState.DomContentLoaded);
+```
+
+This keeps the enum-like calling style without TypeScript enum emit.
+
+## Avoid TypeScript enums
+
+Do not introduce `enum` or `const enum` for new code. TypeScript enums emit TypeScript-specific runtime code, numeric enums create reverse mappings, and `const enum` creates toolchain/module-boundary pitfalls with transpilers and published types.
+
+Use explicit reverse maps only when reverse lookup is actually needed.
+
+## Local literal unions
+
+String unions are acceptable for small local implementation details where no runtime value or cross-module symbol is useful.
+
+```ts
+type LocalPathMode = "none" | "single" | "many";
+```
+
+Do not replace every local union mechanically. Prefer the const-object pattern when the value set is a durable repo concept or public seam.
+
+## Effect-style tagged data
+
+For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.

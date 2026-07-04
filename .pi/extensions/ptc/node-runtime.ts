@@ -11,11 +11,12 @@ import { Data, Effect } from "effect";
 import { generateId } from "../_shared/id";
 import { buildSubprocessEnv } from "./types";
 
-export enum PtcExecutionPhase {
-  Prepare = "prepare",
-  Run = "run",
-  Cleanup = "cleanup",
-}
+export const PtcExecutionPhase = {
+  Prepare: "prepare",
+  Run: "run",
+  Cleanup: "cleanup",
+} as const;
+export type PtcExecutionPhase = typeof PtcExecutionPhase[keyof typeof PtcExecutionPhase];
 
 export class PtcExecutionError extends Data.TaggedError("PtcExecutionError")<{
   readonly phase: PtcExecutionPhase;

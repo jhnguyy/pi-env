@@ -12,24 +12,27 @@ import { parseSessionMilestoneLabel } from "../_shared/session-milestones";
 
 export const DEFAULT_SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
-export enum SessionEntryType {
-  Session = "session",
-  SessionInfo = "session_info",
-  Label = "label",
-  Compaction = "compaction",
-  Message = "message",
-  BranchSummary = "branch_summary",
-}
+export const SessionEntryType = {
+  Session: "session",
+  SessionInfo: "session_info",
+  Label: "label",
+  Compaction: "compaction",
+  Message: "message",
+  BranchSummary: "branch_summary",
+} as const;
+export type SessionEntryType = typeof SessionEntryType[keyof typeof SessionEntryType];
 
-export enum MessageRole {
-  User = "user",
-  Assistant = "assistant",
-  ToolResult = "toolResult",
-}
+export const MessageRole = {
+  User: "user",
+  Assistant: "assistant",
+  ToolResult: "toolResult",
+} as const;
+export type MessageRole = typeof MessageRole[keyof typeof MessageRole];
 
-export enum ContentBlockType {
-  Text = "text",
-}
+export const ContentBlockType = {
+  Text: "text",
+} as const;
+export type ContentBlockType = typeof ContentBlockType[keyof typeof ContentBlockType];
 
 export interface SessionDigest {
   file: string;
