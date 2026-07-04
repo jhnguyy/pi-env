@@ -9,6 +9,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 mkdir -p "$TMP_DIR/scripts" "$TMP_DIR/.pi/extensions/active/dist"
 cp "$ROOT_DIR/scripts/extension-manifest.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/extension-contract.mjs" "$TMP_DIR/scripts/"
+cp "$ROOT_DIR/scripts/package-contract.mjs" "$TMP_DIR/scripts/"
+cp "$ROOT_DIR/scripts/install-contract.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/verify-install.mjs" "$TMP_DIR/scripts/"
 
 touch "$TMP_DIR/.pi/extensions/active/index.ts" "$TMP_DIR/.pi/extensions/active/dist/index.js"
@@ -131,5 +133,28 @@ if grep -q 'workspace extension is not registered in package pi.extensions: .pi/
   echo 'ok: workspace/root extension drift is rejected'
 else
   echo 'missing workspace drift failure' >&2
+  exit 1
+fi
+write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
+cat > "$TMP_DIR/lock.yaml" <<'YAML'
+packages:
+  '@trusted/build-tool@1.0.0': {}
+YAML
+"$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
+const fs = require('node:fs');
+const path = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+pkg.allowBuilds = { '@trusted/build-tool': true, 'missing-build-tool': true, 'false-positive': false };
+pkg.patchedDependencies = { 'protobufjs@7.6.4': 'patches/protobufjs@7.6.4.patch' };
+fs.writeFileSync(path, JSON.stringify(pkg));
+JS
+output="$(run_verify || true)"
+if grep -q 'package allowBuilds package is not present in lock.yaml: missing-build-tool' <<<"$output" && \
+  grep -q 'package allowBuilds entry must be true: false-positive' <<<"$output" && \
+  grep -q 'package patchedDependencies patch file is missing: patches/protobufjs@7.6.4.patch' <<<"$output" && \
+  grep -q 'package patchedDependencies patch is not recorded in lock.yaml: protobufjs@7.6.4' <<<"$output"; then
+  echo 'ok: package install policy is enforced'
+else
+  echo 'missing package install policy failure' >&2
   exit 1
 fi

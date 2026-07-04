@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // verify-install.mjs — cheap setup readiness checks, not a full test suite.
 import { loadExtensionManifest } from "./extension-manifest.mjs";
-import { validateExtensionInstall } from "./extension-contract.mjs";
+import { validateInstall } from "./install-contract.mjs";
 
 const manifest = loadExtensionManifest();
-const errors = validateExtensionInstall(manifest);
+const errors = validateInstall(manifest);
 
 if (errors.length > 0) {
   console.error("Install readiness check failed:");
