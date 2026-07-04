@@ -3,13 +3,12 @@
  *
  *   tool_call hook       — branch guard (blocks git push to protected branches)
  *   tool_result hook     — handoff cleanup on merge / git pull
- *   session_start hook   — slot init, todo clear, tool deactivation
- *   session_switch hook  — todo clear on /new or /resume
+ *   session_start hook   — slot init, todo clear, session switch notice
  *   session_shutdown     — todo clear + slot state reset
  *   before_agent_start   — context injection (git status + todo list)
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getMergedBranches } from "../_shared/git";
 import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 
@@ -21,6 +20,28 @@ import {
 } from "./handoff-cleanup";
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
+
+enum SessionStartReason {
+  New = "new",
+  Resume = "resume",
+  Fork = "fork",
+}
+
+const REPLACEMENT_SESSION_REASONS = new Set<string>([
+  SessionStartReason.New,
+  SessionStartReason.Resume,
+  SessionStartReason.Fork,
+]);
+
+function refreshWorkTrackerSlots(
+  ctx: ExtensionContext,
+  config: WorkTrackerConfig,
+  store: TodoStore,
+  options: { includeGitStatus: boolean },
+): void {
+  setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+  setSlot("work-tracker", options.includeGitStatus ? buildStatusLineThemed(config, ctx.ui.theme) ?? undefined : undefined, ctx);
+}
 
 export function registerHooks(
   pi: ExtensionAPI,
@@ -75,42 +96,26 @@ export function registerHooks(
     }
   });
 
-  // ─── 3. Session start ───────────────────────────────────────────────────────
-  pi.on("session_start", async (_event, ctx) => {
-    store.clear();
-    invalidateGitCache();
-    resetGitFailureCache(); // give repos a fresh chance each session
-    // Skip git status here — spawning git subprocesses synchronously at
-    // session_start blocks in environments with many or slow mount points.
-    // The widget is populated lazily on the first before_agent_start call.
-    batchSlots(() => {
-      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-      setSlot("work-tracker", undefined, ctx);
-    }, ctx);
-
-    // Deactivate read_session in normal sessions — set PI_SESSION_READER=1 to keep it active.
-    if (!process.env.PI_SESSION_READER) {
-      pi.setActiveTools(pi.getActiveTools().filter((t) => t !== "read_session"));
-    }
-  });
-
-  // ─── 4. Session switch (/new, /resume, /fork) — clear todos ──────────────────
+  // ─── 3. Session start / switch ──────────────────────────────────────────────
   pi.on("session_start", async (event, ctx) => {
-    if (event.reason !== "new" && event.reason !== "resume" && event.reason !== "fork") return;
     const open = store.open().length;
+    const isReplacementSession = REPLACEMENT_SESSION_REASONS.has(event.reason);
+
     store.clear();
     invalidateGitCache();
-    resetGitFailureCache(); // allow repos to be retried after a session switch
-    batchSlots(() => {
-      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
-    }, ctx);
-    if (open > 0) {
+    resetGitFailureCache();
+
+    // Skip git status on startup — spawning git subprocesses synchronously at
+    // session_start blocks in environments with many or slow mount points.
+    // Replacement sessions refresh status because the cwd/session may change.
+    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: isReplacementSession }), ctx);
+
+    if (isReplacementSession && open > 0) {
       ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
     }
   });
 
-  // ─── 5. Session shutdown — clear todos + slot state ─────────────────────────
+  // ─── 4. Session shutdown — clear todos + slot state ─────────────────────────
   pi.on("session_shutdown", async () => {
     store.clear();
     resetGitFailureCache();
@@ -120,19 +125,13 @@ export function registerHooks(
   // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
   pi.on("turn_end", async (_event, ctx) => {
     invalidateGitCache();
-    batchSlots(() => {
-      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
-    }, ctx);
+    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
   });
 
   // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on("before_agent_start", async (_event, ctx) => {
     store.purgeCompleted();
-    batchSlots(() => {
-      setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-      setSlot("work-tracker", buildStatusLineThemed(config, ctx.ui.theme) ?? undefined, ctx);
-    }, ctx);
+    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
 
     const line = buildStatusLine(config); // plain text for LLM
     if (!line) return {};

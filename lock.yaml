@@ -55,6 +55,8 @@ importers:
         specifier: ^4.3.4
         version: 4.4.1
 
+  .pi/extensions/introspection: {}
+
   .pi/extensions/jit-catch: {}
 
   .pi/extensions/pi-update: {}
