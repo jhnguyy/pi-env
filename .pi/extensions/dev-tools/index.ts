@@ -26,14 +26,12 @@ import { LspClient } from "./client";
 import { formatResult } from "./formatters";
 import {
   type AgentEndFileResult,
-  diagnosticsToAgentEndResults,
-  formatAgentEndErrorResult,
-  processAgentEndResults,
   renderActiveAgentEndSummary,
 } from "./agent-end";
+import { processAgentEndBatch } from "./agent-end-pipeline";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DiagnosticsResult, LspResult } from "./protocol";
-import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
+import type { LspResult } from "./protocol";
+import { isSupported } from "./backend-configs";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
@@ -202,66 +200,24 @@ export default function (pi: ExtensionAPI) {
     pendingFiles.clear();
     if (files.length === 0) return;
 
-    const lspFiles: string[] = [];
-    const formatFiles: Array<{ file: string; config: FormatBackendConfig }> = [];
-
-    for (const file of files) {
-      const config = getBackendConfig(file);
-      if (!config) continue;
-      if (config.mode === "lsp") lspFiles.push(file);
-      else formatFiles.push({ file, config });
-    }
-
-    const allResults: AgentEndFileResult[] = [];
-
-    // ── Format backends ──────────────────────────────────────────────────
-    // Sync + best-effort. Format errors are shown but don’t re-engage the model.
-    for (const { file, config } of formatFiles) {
-      const bin = resolveBin(config.binaryName);
-      if (!bin) continue;
-      try {
-        const r = spawnSync(bin, config.formatArgs(file), {
-          encoding: "utf8",
-          stdio: "pipe",
-          timeout: 10_000,
-        });
-        if (r.status !== 0) {
-          const detail = (r.stderr as string).trim() || `exit ${r.status}`;
-          allResults.push(formatAgentEndErrorResult(config.name, file, detail));
-        }
-      } catch (e) {
-        allResults.push(formatAgentEndErrorResult(
-          config.name,
-          file,
-          e instanceof Error ? e.message : String(e),
-        ));
-      }
-    }
-
-    // ── LSP diagnostics ──────────────────────────────────────────────────
-    // Async, batch. LSP errors need the model to fix.
-    if (lspFiles.length > 0) {
-      try {
-        const result = await client.call({ action: "diagnostics", paths: lspFiles });
-        if (result) {
-          allResults.push(...diagnosticsToAgentEndResults(result as DiagnosticsResult));
-        }
-      } catch {
-        // Non-fatal — diagnostics are best-effort
-      }
-    }
-
-    // ── Active-state update + render + send ────────────────────────────────
-    // Replace any old issues for files processed in this pass. This lets clean
-    // diagnostics retire stale post-edit hints from later model contexts.
-    const processed = processAgentEndResults(activeAgentEndResults, files, allResults);
+    // Run formatters before LSP diagnostics, then replace stale active issues
+    // for every file processed in this pass.
+    const processed = await processAgentEndBatch(activeAgentEndResults, files, {
+      resolveFormatBinary: resolveBin,
+      runFormat: (bin, args) => spawnSync(bin, args, {
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 10_000,
+      }),
+      runDiagnostics: (paths) => client.call({ action: "diagnostics", paths }),
+    });
 
     // One displayed message, all backends. Defer the send until the next event-loop turn:
     // agent_end is emitted before pi marks the agent idle, so sendMessage called
     // directly in this handler is treated as in-flight steering/follow-up queue
     // data. Once deferred, non-error summaries are appended immediately, and LSP
     // errors can start a synthetic follow-up turn with the diagnostics in context.
-    const summary = processed.batchSummary;
+    const summary = processed.summary;
     if (summary) {
       const triggerTurn = processed.triggerTurn;
       const message = {
