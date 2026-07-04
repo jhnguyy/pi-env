@@ -20,14 +20,22 @@ const PiPackage = Object.freeze({
   Entry: 'dist/cli.js',
 });
 
+const InstallStrategy = Object.freeze({
+  NubManaged: 'nub-managed',
+  PlainNodeBootstrap: 'plain-node-bootstrap',
+});
+
 const repo = mustEnv('REPO');
 const piBinDir = mustEnv('PI_BIN_DIR');
 const setupNodeBin = process.argv[2] || process.execPath;
 const command = parseRuntimeCommand(process.argv[3]);
 
-function nubNeedsPlainNode() {
-  if (commandSucceeds('nub', ['run', '--silent', 'check:node'], { cwd: repo })) return false;
-  return commandSucceeds('nub', ['run', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo });
+function selectInstallStrategy() {
+  if (commandSucceeds('nub', ['run', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
+  if (commandSucceeds('nub', ['run', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
+    return InstallStrategy.PlainNodeBootstrap;
+  }
+  return InstallStrategy.NubManaged;
 }
 
 function nubInstall(args) {
@@ -44,14 +52,19 @@ function installWithRetry(args) {
 function installDependencies() {
   section('Dependencies');
   console.log('  —  installing repo dependencies with nub');
-  if (nubNeedsPlainNode()) {
-    console.log('  —  nub runtime augmentation cannot execute Node here; using plain Node for setup scripts.');
-    installWithRetry(['--ignore-scripts']);
-    runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
-    runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
-  } else {
-    installWithRetry([]);
-    runChecked('nub', ['run', 'build'], { cwd: repo });
+  switch (selectInstallStrategy()) {
+    case InstallStrategy.PlainNodeBootstrap:
+      console.log('  —  nub runtime augmentation cannot execute Node here; using plain Node for setup scripts.');
+      installWithRetry(['--ignore-scripts']);
+      runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
+      runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
+      break;
+    case InstallStrategy.NubManaged:
+      installWithRetry([]);
+      runChecked('nub', ['run', 'build'], { cwd: repo });
+      break;
+    default:
+      fail('unknown install strategy');
   }
   ok('node_modules up to date');
 }

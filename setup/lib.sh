@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Shared helpers for pi-env setup scripts. Sourced by setup/main.sh.
+# shellcheck source=setup/node-runtime.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node-runtime.sh"
 
 ok()     { echo "  ✓  $1"; }
 linked() { echo "  →  $1"; }
@@ -19,7 +21,7 @@ section() {
 }
 
 setup_nix_managed() {
-  [ "${PI_ENV_SETUP_MODE:-portable}" = "nix-managed" ] || [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ]
+  pi_env_setup_nix_managed
 }
 
 setup_external_config_managed() {
@@ -31,61 +33,17 @@ setup_cli_managed_externally() {
 }
 
 setup_node_bin_works() {
-  [ -n "${1:-}" ] || return 1
-  [ -x "$1" ] || return 1
-  "$1" "$REPO/scripts/check-node-version.mjs" "$REPO" >/dev/null 2>&1
+  pi_env_node_candidate_works "${1:-}" "$REPO"
 }
 
 resolve_setup_node_bin() {
-  if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
-    if [ -x "$PI_ENV_NODE_BIN" ]; then
-      printf '%s\n' "$PI_ENV_NODE_BIN"
-      return 0
-    fi
-    echo "  ✗  PI_ENV_NODE_BIN is set but not executable: $PI_ENV_NODE_BIN" >&2
-    return 1
-  fi
-
-  if setup_nix_managed && command -v node >/dev/null 2>&1; then
-    local path_node
-    path_node=$(command -v node)
-    if setup_node_bin_works "$path_node"; then
-      printf '%s\n' "$path_node"
-      return 0
-    fi
-  fi
-
-  if command -v nub >/dev/null 2>&1; then
-    local nub_node
-    nub_node=$(cd "$REPO" && nub node which 2>/dev/null || true)
-    if setup_node_bin_works "$nub_node"; then
-      printf '%s\n' "$nub_node"
-      return 0
-    fi
-  fi
-
-  if command -v node >/dev/null 2>&1; then
-    local path_node
-    path_node=$(command -v node)
-    if setup_node_bin_works "$path_node"; then
-      printf '%s\n' "$path_node"
-      return 0
-    fi
-  fi
-
-  command -v node
+  pi_env_select_node_bin "$REPO"
 }
 
 require_node() {
-  local node_bin found
+  local node_bin
   node_bin=$(resolve_setup_node_bin) || exit 1
-  setup_node_bin_works "$node_bin" || {
-    found=$("$node_bin" -v 2>/dev/null || echo missing)
-    local required
-    required=$("$node_bin" -e "const pkg = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); console.log(pkg.engines?.node ?? 'required by package.json');" "$REPO/package.json" 2>/dev/null || echo "required by package.json")
-    echo "  ✗  Node.js $required is required (found: $found at $node_bin; install/provision with nub)" >&2
-    exit 1
-  }
+  setup_node_bin_works "$node_bin" || exit 1
 }
 
 check_required_commands() {

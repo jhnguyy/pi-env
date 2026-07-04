@@ -10,34 +10,9 @@ fi
 script="$1"
 shift
 
-try_node() {
-  candidate="$1"
-  shift
-  [ -n "$candidate" ] || return 1
-  [ -x "$candidate" ] || return 1
-  "$candidate" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' >/dev/null 2>&1 || return 1
-  exec "$candidate" "$script" "$@"
-}
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+node_run_repo="${PI_ENV_REPO:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}"
+# shellcheck source=setup/node-runtime.sh
+. "$node_run_repo/setup/node-runtime.sh"
 
-if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
-  try_node "$PI_ENV_NODE_BIN" "$@" || {
-    echo "pi-env: PI_ENV_NODE_BIN is not usable: $PI_ENV_NODE_BIN" >&2
-    exit 127
-  }
-fi
-
-# In Nix-managed containers, /bin/node is often the patched executable while
-# nub's downloaded Node can be unusable because its dynamic linker/libs are not
-# present. Prefer /bin/node before PATH lookup.
-try_node /bin/node "$@" || true
-
-path_node=$(command -v node 2>/dev/null || true)
-try_node "$path_node" "$@" || true
-
-if command -v nub >/dev/null 2>&1; then
-  nub_node=$(nub node which 2>/dev/null || true)
-  try_node "$nub_node" "$@" || true
-fi
-
-echo "pi-env: no usable Node.js >=22 found; set PI_ENV_NODE_BIN" >&2
-exit 127
+PI_ENV_REPO="$node_run_repo" pi_env_exec_node "$script" "$@"
