@@ -21,7 +21,7 @@
  */
 
 import { createServer, type Socket, type Server } from "node:net";
-import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { LspBackend } from "./backend";
@@ -32,6 +32,7 @@ import { getAction } from "./action-registry";
 import "./register-actions"; // side-effect: populates the action registry
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
 import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
+import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,9 +80,7 @@ export class LspDaemon {
   async start(): Promise<void> {
     writeFileSync(this.pidPath, String(process.pid), "utf8");
 
-    if (existsSync(this.socketPath)) {
-      try { unlinkSync(this.socketPath); } catch {}
-    }
+    removeStaleArtifact(this.socketPath);
 
     await this.startServer();
     this.resetIdleTimer();
@@ -176,8 +175,7 @@ export class LspDaemon {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     for (const backend of this.backends) backend.shutdown();
     this.server?.close();
-    try { unlinkSync(this.socketPath); } catch {}
-    try { unlinkSync(this.pidPath); } catch {}
+    removeStaleArtifacts([this.socketPath, this.pidPath]);
     process.exit(0);
   }
 }

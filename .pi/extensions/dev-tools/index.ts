@@ -22,6 +22,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { spawnSync } from "node:child_process";
+import "./register-actions"; // side-effect: populate action formatters/renderers for this bundle
 import { LspClient } from "./client";
 import { formatResult } from "./formatters";
 import {
