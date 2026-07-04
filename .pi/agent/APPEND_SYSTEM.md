@@ -6,4 +6,4 @@ Never read secrets files (`.env`, credentials, keys) directly into context. Pipe
 
 Never reference external repositories in commits, PRs, or issues (cross-repo links, mentions, closing keywords) without explicit approval. This includes linking issues, commits, or branches across repo boundaries.
 
-Prioritize simplicity and clarity.
+Write directly and simply. Prefer short sentences. Do not explain the obvious. Avoid self-describing text.

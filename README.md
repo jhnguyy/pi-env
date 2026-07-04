@@ -2,6 +2,20 @@
 
 Personal [pi](https://github.com/badlogic/pi-mono) environment — extensions, skills, themes, and agent context as a dotfiles repo. Shared as a reference; setups are inherently personalized.
 
+## Mission
+
+`pi-env` is a portable agent workbench: reusable tools, skills, workflows, and UI affordances for different environments.
+
+Core design rule:
+
+> Method and storage are separate.
+
+Portable components define reusable practice. Local adapters define storage, credentials, paths, indexes, privacy boundaries, and machine-specific defaults.
+
+## Portability and local adapters
+
+Reusable skills should discover local policy before reading or writing durable state. `agentic-notes` defines portable note quality, rewrite, and retrieval practice. The current workspace supplies storage, paths, index conventions, and privacy boundaries.
+
 ## Getting started
 
 Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed paths:
@@ -46,5 +60,6 @@ Slack custom theme strings:
 ## Further reading
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
+- **[agentic-notes](.agents/skills/agentic-notes/SKILL.md)** — portable note quality and adapter discovery practice
 - **[setup/nix.md](setup/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings
