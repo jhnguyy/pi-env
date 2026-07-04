@@ -1,29 +1,17 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync } from "node:fs";
 import {
+  ExtensionRuntime,
+  extensionPaths,
   listExtensionDirs,
   loadExtensionManifest,
   normalizePackagePath,
   relativeFromRepo,
 } from "./extension-manifest.mjs";
 
-function normalizedPathSet(paths = []) {
-  return new Set(paths.map((path) => normalizePackagePath(path)));
-}
-
-const DEFAULT_DISABLED_EXTENSIONS = new Set(["playwright-client"]);
-
-function activeExtensionSets(extensions) {
-  return {
-    names: new Set(extensions.map((ext) => ext.name)),
-    packagePaths: new Set(extensions.map((ext) => ext.packagePath)),
-  };
-}
-
-function requireUniqueActiveExtensions(extensions, errors) {
+function requireUniqueActiveExtensions(manifest, errors) {
   const seenNames = new Set();
   const seenPaths = new Set();
-  for (const ext of extensions) {
+  for (const ext of manifest.extensions) {
     if (seenNames.has(ext.name)) {
       errors.push(`duplicate active extension name: ${ext.name}`);
     }
@@ -35,96 +23,82 @@ function requireUniqueActiveExtensions(extensions, errors) {
   }
 }
 
-function rejectDefaultDisabledActiveExtensions(extensions, errors) {
-  for (const ext of extensions) {
-    if (DEFAULT_DISABLED_EXTENSIONS.has(ext.name)) {
+function rejectDefaultDisabledActiveExtensions(manifest, errors) {
+  for (const ext of manifest.extensions) {
+    if (ext.defaultDisabled) {
       errors.push(`${ext.name}: extension must stay disabled by default; do not register it in package pi.extensions`);
     }
   }
 }
 
-function requireBuiltExtension(ext, config, errors, root) {
-  const entry = join(ext.absPath, "index.ts");
-  const bundle = join(ext.absPath, "dist/index.js");
-  const packageJsonPath = join(ext.absPath, "package.json");
-
-  if (existsSync(packageJsonPath)) {
-    const extPkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-    const exports = extPkg.pi?.extensions ?? [];
-    if (!Array.isArray(exports) || !exports.includes("./dist/index.js")) {
-      errors.push(`${ext.name}: package.json pi.extensions must include ./dist/index.js`);
+function requireBuiltExtension(ext, errors, root) {
+  if (ext.hasPackageJson) {
+    if (!Array.isArray(ext.runtimeEntries) || !ext.runtimeEntries.includes(ExtensionRuntime.PackageRuntimeEntry)) {
+      errors.push(`${ext.name}: package.json pi.extensions must include ${ExtensionRuntime.PackageRuntimeEntry}`);
     }
   }
-  if (!existsSync(entry)) {
-    errors.push(`${ext.name}: missing source entry ${relativeFromRepo(entry, root)}`);
+  if (!ext.hasSourceEntry) {
+    errors.push(`${ext.name}: missing source entry ${relativeFromRepo(ext.sourceEntry, root)}`);
   }
-  if (!existsSync(bundle)) {
-    errors.push(`${ext.name}: missing built bundle ${relativeFromRepo(bundle, root)}`);
+  if (!ext.hasBundleEntry) {
+    errors.push(`${ext.name}: missing built bundle ${relativeFromRepo(ext.bundleEntry, root)}`);
   }
-  for (const sidecar of config.sidecars?.[ext.name] ?? []) {
-    const sidecarOut = join(ext.absPath, sidecar.outfile);
-    if (!existsSync(sidecarOut)) {
-      errors.push(`${ext.name}: missing built sidecar ${relativeFromRepo(sidecarOut, root)}`);
+  for (const sidecar of ext.sidecars) {
+    if (!existsSync(sidecar.absOutfile)) {
+      errors.push(`${ext.name}: missing built sidecar ${relativeFromRepo(sidecar.absOutfile, root)}`);
     }
   }
 }
 
-function requireRegisteredPackageFiles(pkg, errors, root) {
-  for (const packagePath of pkg.pi?.extensions ?? []) {
+function requireRegisteredPackageFiles(manifest, errors) {
+  for (const packagePath of manifest.packageExtensions) {
     const normalized = normalizePackagePath(packagePath);
-    const manifest = join(root, ...normalized.split("/"), "package.json");
-    if (!existsSync(manifest)) {
+    const paths = extensionPaths(manifest.repoRoot, normalized);
+    if (!existsSync(paths.packageJson)) {
       errors.push(`package extension is missing package.json: ${normalized}`);
     }
   }
 }
 
-function requireWorkspaceParity(pkg, extensionsDir, activePaths, extensions, errors) {
-  const workspacePaths = normalizedPathSet(pkg.workspaces ?? []);
-
-  for (const normalized of workspacePaths) {
-    if (normalized.startsWith(`${extensionsDir}/`) && !activePaths.has(normalized)) {
+function requireWorkspaceParity(manifest, errors) {
+  for (const normalized of manifest.workspacePaths) {
+    if (normalized.startsWith(`${manifest.extensionsDir}/`) && !manifest.activePackagePaths.has(normalized)) {
       errors.push(`workspace extension is not registered in package pi.extensions: ${normalized}`);
     }
   }
-
-  for (const ext of extensions) {
-    if (!workspacePaths.has(ext.packagePath)) {
+  for (const ext of manifest.extensions) {
+    if (!manifest.workspacePaths.has(ext.packagePath)) {
       errors.push(`${ext.name}: package extension is missing from workspaces`);
     }
   }
 }
 
-function requireActiveSidecarTargets(config, activeNames, errors) {
-  for (const sidecarName of Object.keys(config.sidecars ?? {})) {
-    if (!activeNames.has(sidecarName)) {
+function requireActiveSidecarTargets(manifest, errors) {
+  for (const sidecarName of Object.keys(manifest.config.sidecars ?? {})) {
+    if (!manifest.activeNames.has(sidecarName)) {
       errors.push(`sidecar config references inactive extension: ${sidecarName}`);
     }
   }
 }
 
-function rejectStaleIgnoredArtifacts(extensionsDir, activeNames, errors, root) {
-  for (const dir of listExtensionDirs(extensionsDir, root)) {
-    if (dir.name.startsWith("_") || activeNames.has(dir.name)) continue;
+function rejectStaleIgnoredArtifacts(manifest, errors) {
+  for (const dir of listExtensionDirs(manifest.extensionsDir, manifest.repoRoot)) {
+    if (dir.name.startsWith("_") || manifest.activeNames.has(dir.name)) continue;
     const entries = readdirSync(dir.absPath);
-    if (entries.includes("dist") && !entries.includes("index.ts")) {
-      errors.push(`stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath, root)} (run \`nub run clean:extensions\`)`);
+    if (entries.includes("dist") && !entries.includes(ExtensionRuntime.SourceEntry)) {
+      errors.push(`stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath, manifest.repoRoot)} (run \`nub run clean:extensions\`)`);
     }
   }
 }
 
 export function validateExtensionInstall(manifest = loadExtensionManifest()) {
-  const { repoRoot, pkg, config, extensionsDir, extensions } = manifest;
   const errors = [];
-  const active = activeExtensionSets(extensions);
-
-  requireUniqueActiveExtensions(extensions, errors);
-  rejectDefaultDisabledActiveExtensions(extensions, errors);
-  for (const ext of extensions) requireBuiltExtension(ext, config, errors, repoRoot);
-  requireRegisteredPackageFiles(pkg, errors, repoRoot);
-  requireWorkspaceParity(pkg, extensionsDir, active.packagePaths, extensions, errors);
-  requireActiveSidecarTargets(config, active.names, errors);
-  rejectStaleIgnoredArtifacts(extensionsDir, active.names, errors, repoRoot);
-
+  requireUniqueActiveExtensions(manifest, errors);
+  rejectDefaultDisabledActiveExtensions(manifest, errors);
+  for (const ext of manifest.extensions) requireBuiltExtension(ext, errors, manifest.repoRoot);
+  requireRegisteredPackageFiles(manifest, errors);
+  requireWorkspaceParity(manifest, errors);
+  requireActiveSidecarTargets(manifest, errors);
+  rejectStaleIgnoredArtifacts(manifest, errors);
   return errors;
 }

@@ -32,19 +32,18 @@ async function buildFile(entry, outfile, options = {}) {
 }
 
 for (const ext of extensions) {
-  const entry = join(ext.absPath, "index.ts");
   const outdir = join(ext.absPath, "dist");
-  if (!existsSync(entry)) {
+  if (!existsSync(ext.sourceEntry)) {
     console.log(`  skip  ${ext.name} (no index.ts)`);
     continue;
   }
   mkdirSync(outdir, { recursive: true });
   try {
-    await buildFile(entry, join(outdir, "index.js"));
-    for (const sidecar of config.sidecars?.[ext.name] ?? []) {
+    await buildFile(ext.sourceEntry, ext.bundleEntry);
+    for (const sidecar of ext.sidecars) {
       await buildFile(
-        join(ext.absPath, sidecar.entry),
-        join(ext.absPath, sidecar.outfile),
+        sidecar.absEntry,
+        sidecar.absOutfile,
         { banner: sidecar.banner === false ? undefined : common.banner },
       );
     }
