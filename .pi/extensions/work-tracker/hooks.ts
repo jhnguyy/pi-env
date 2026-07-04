@@ -142,6 +142,6 @@ export function registerHooks(
 
   // ─── 8. Todo context injection (root sessions only) ─────────────────────────
   pi.on(PiEvent.BeforeAgentStart, async () => {
-    return { message: { customType: "session-todos", content: store.render(), display: false } };
+    return { message: { customType: "session-todos", content: store.renderContext(), display: false } };
   });
 }

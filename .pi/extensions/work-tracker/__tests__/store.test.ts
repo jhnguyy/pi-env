@@ -159,4 +159,10 @@ describe("TodoStore", () => {
     expect(output).toContain("□ (3) third");
     expect(output).not.toContain("second");
   });
+
+  it("renderContext() summarizes open tasks without task text", () => {
+    store.add("long task text that should stay out of automatic context");
+    store.add("another detailed task");
+    expect(store.renderContext()).toBe("[session-todos] 2 open tasks. Use todo action=list for details.");
+  });
 });
