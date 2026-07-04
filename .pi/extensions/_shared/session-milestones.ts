@@ -1,6 +1,7 @@
-export enum SessionMilestoneKind {
-  Todo = "todo",
-}
+export const SessionMilestoneKind = {
+  Todo: "todo",
+} as const;
+export type SessionMilestoneKind = typeof SessionMilestoneKind[keyof typeof SessionMilestoneKind];
 
 export const TODO_MILESTONE_PREFIX = `${SessionMilestoneKind.Todo}:`;
 

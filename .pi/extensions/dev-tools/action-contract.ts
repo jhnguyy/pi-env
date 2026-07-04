@@ -1,23 +1,25 @@
 import type { TSchema } from "typebox";
 import { Type } from "typebox";
 
-export enum DevToolsAction {
-  Diagnostics = "diagnostics",
-  Hover = "hover",
-  Definition = "definition",
-  Implementation = "implementation",
-  References = "references",
-  IncomingCalls = "incoming-calls",
-  OutgoingCalls = "outgoing-calls",
-  Symbols = "symbols",
-  Status = "status",
-}
+export const DevToolsAction = {
+  Diagnostics: "diagnostics",
+  Hover: "hover",
+  Definition: "definition",
+  Implementation: "implementation",
+  References: "references",
+  IncomingCalls: "incoming-calls",
+  OutgoingCalls: "outgoing-calls",
+  Symbols: "symbols",
+  Status: "status",
+} as const;
+export type DevToolsAction = typeof DevToolsAction[keyof typeof DevToolsAction];
 
-export enum DevToolsPathMode {
-  None = "none",
-  Single = "single",
-  Many = "many",
-}
+export const DevToolsPathMode = {
+  None: "none",
+  Single: "single",
+  Many: "many",
+} as const;
+export type DevToolsPathMode = typeof DevToolsPathMode[keyof typeof DevToolsPathMode];
 
 export interface DevToolsActionContract {
   readonly pathMode: DevToolsPathMode;

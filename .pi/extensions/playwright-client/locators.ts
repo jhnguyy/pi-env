@@ -1,15 +1,17 @@
-export enum LocatorWaitState {
-  Attached = "attached",
-  Detached = "detached",
-  Visible = "visible",
-  Hidden = "hidden",
-}
+export const LocatorWaitState = {
+  Attached: "attached",
+  Detached: "detached",
+  Visible: "visible",
+  Hidden: "hidden",
+} as const;
+export type LocatorWaitState = typeof LocatorWaitState[keyof typeof LocatorWaitState];
 
-export enum LoadState {
-  DomContentLoaded = "domcontentloaded",
-  Load = "load",
-  NetworkIdle = "networkidle",
-}
+export const LoadState = {
+  DomContentLoaded: "domcontentloaded",
+  Load: "load",
+  NetworkIdle: "networkidle",
+} as const;
+export type LoadState = typeof LoadState[keyof typeof LoadState];
 
 export type LocatorLike = {
   click(options?: { timeout?: number }): Promise<unknown>;
@@ -29,7 +31,7 @@ export type DownloadLike = {
 export type PageLike = {
   title(): Promise<string>;
   url(): string;
-  goto(url: string, options?: { waitUntil?: LoadState.DomContentLoaded | LoadState.Load; timeout?: number }): Promise<unknown>;
+  goto(url: string, options?: { waitUntil?: typeof LoadState.DomContentLoaded | typeof LoadState.Load; timeout?: number }): Promise<unknown>;
   goBack(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
   goForward(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;
   reload(options?: { waitUntil?: LoadState; timeout?: number }): Promise<unknown>;

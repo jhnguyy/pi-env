@@ -19,19 +19,21 @@ import { extname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export enum BackendName {
-  Lsp = "lsp",
-  TypeScript = "typescript",
-  Bash = "bash",
-  Nil = "nil",
-  Hcl = "hcl",
-  Terraform = "terraform",
-}
+export const BackendName = {
+  Lsp: "lsp",
+  TypeScript: "typescript",
+  Bash: "bash",
+  Nil: "nil",
+  Hcl: "hcl",
+  Terraform: "terraform",
+} as const;
+export type BackendName = typeof BackendName[keyof typeof BackendName];
 
-export enum BackendMode {
-  Lsp = "lsp",
-  Format = "format",
-}
+export const BackendMode = {
+  Lsp: "lsp",
+  Format: "format",
+} as const;
+export type BackendMode = typeof BackendMode[keyof typeof BackendMode];
 
 interface BackendConfigBase {
   /** Display name shown in status messages, e.g. "typescript" or "hcl". */
@@ -46,7 +48,7 @@ interface BackendConfigBase {
 
 /** A persistent language server backend (diagnostics, hover, definition, …). */
 export interface LspBackendConfig extends BackendConfigBase {
-  mode: BackendMode.Lsp;
+  mode: typeof BackendMode.Lsp;
   /** Args passed to the language server binary, e.g. ["--stdio"]. */
   binaryArgs: string[];
   /** LSP initialize capabilities sent during handshake. */
@@ -59,7 +61,7 @@ export interface LspBackendConfig extends BackendConfigBase {
 
 /** A one-shot file formatter (runs per-file at agent_end, no persistent process). */
 export interface FormatBackendConfig extends BackendConfigBase {
-  mode: BackendMode.Format;
+  mode: typeof BackendMode.Format;
   /**
    * Build the argument list for a formatting invocation.
    * Called once per file — the binary is `binaryName`.

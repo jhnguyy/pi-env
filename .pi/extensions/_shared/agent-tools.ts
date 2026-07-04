@@ -1,19 +1,21 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 
-export enum PiEvent {
-  SessionStart = "session_start",
-  SessionShutdown = "session_shutdown",
-  BeforeAgentStart = "before_agent_start",
-  BeforeProviderRequest = "before_provider_request",
-  TurnEnd = "turn_end",
-  Context = "context",
-  ToolResult = "tool_result",
-  AgentEnd = "agent_end",
-}
+export const PiEvent = {
+  SessionStart: "session_start",
+  SessionShutdown: "session_shutdown",
+  BeforeAgentStart: "before_agent_start",
+  BeforeProviderRequest: "before_provider_request",
+  TurnEnd: "turn_end",
+  Context: "context",
+  ToolResult: "tool_result",
+  AgentEnd: "agent_end",
+} as const;
+export type PiEvent = typeof PiEvent[keyof typeof PiEvent];
 
-export enum AgentToolEvent {
-  Register = "agent-tools:register",
-}
+export const AgentToolEvent = {
+  Register: "agent-tools:register",
+} as const;
+export type AgentToolEvent = typeof AgentToolEvent[keyof typeof AgentToolEvent];
 
 /**
  * Capability tags for extension tool registration.
@@ -21,11 +23,12 @@ export enum AgentToolEvent {
  * Describes what a tool can do, not what domain it belongs to. Consumers filter
  * by capability to enforce scope boundaries.
  */
-export enum ToolCapability {
-  Read = "read",
-  Write = "write",
-  Execute = "execute",
-}
+export const ToolCapability = {
+  Read: "read",
+  Write: "write",
+  Execute: "execute",
+} as const;
+export type ToolCapability = typeof ToolCapability[keyof typeof ToolCapability];
 
 /** Payload for the agent-tool registration event consumed by subagent-style tools. */
 export interface ExtToolRegistration {
@@ -35,10 +38,10 @@ export interface ExtToolRegistration {
 
 export interface AgentToolEvents {
   events: {
-    emit(event: AgentToolEvent.Register, data: ExtToolRegistration): void;
-    on?(event: AgentToolEvent.Register, handler: (data: unknown) => void): void;
+    emit(event: typeof AgentToolEvent.Register, data: ExtToolRegistration): void;
+    on?(event: typeof AgentToolEvent.Register, handler: (data: unknown) => void): void;
   };
-  on(event: PiEvent.SessionStart, handler: () => void): void;
+  on(event: typeof PiEvent.SessionStart, handler: () => void): void;
 }
 
 type AgentToolHandler = (registration: ExtToolRegistration) => void;

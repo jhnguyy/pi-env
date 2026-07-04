@@ -22,11 +22,12 @@ import {
 import type { TodoStore } from "./store";
 import type { WorkTrackerConfig } from "./types";
 
-enum SessionStartReason {
-  New = "new",
-  Resume = "resume",
-  Fork = "fork",
-}
+const SessionStartReason = {
+  New: "new",
+  Resume: "resume",
+  Fork: "fork",
+} as const;
+type SessionStartReason = typeof SessionStartReason[keyof typeof SessionStartReason];
 
 const REPLACEMENT_SESSION_REASONS = new Set<string>([
   SessionStartReason.New,

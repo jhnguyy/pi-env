@@ -4,13 +4,14 @@ import { setSlot } from "../_shared/ui-render";
 import { formatTodoMilestoneLabel } from "./milestones";
 import { TodoStore } from "./store";
 
-export enum TodoAction {
-  Add = "add",
-  Done = "done",
-  Remove = "rm",
-  List = "list",
-  Clear = "clear",
-}
+export const TodoAction = {
+  Add: "add",
+  Done: "done",
+  Remove: "rm",
+  List: "list",
+  Clear: "clear",
+} as const;
+export type TodoAction = typeof TodoAction[keyof typeof TodoAction];
 
 export type TodoParams = { action: TodoAction; text?: string[] };
 

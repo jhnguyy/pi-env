@@ -14,14 +14,14 @@ function createPi(): AgentToolEvents {
   const handlers: Array<(data: unknown) => void> = [];
   return {
     events: {
-      emit(event: AgentToolEvent.Register, data: ExtToolRegistration) {
+      emit(event: typeof AgentToolEvent.Register, data: ExtToolRegistration) {
         if (event === AgentToolEvent.Register) for (const handler of handlers) handler(data);
       },
-      on(event: AgentToolEvent.Register, handler: (data: unknown) => void) {
+      on(event: typeof AgentToolEvent.Register, handler: (data: unknown) => void) {
         if (event === AgentToolEvent.Register) handlers.push(handler);
       },
     },
-    on(_event: PiEvent.SessionStart, _handler: () => void) {},
+    on(_event: typeof PiEvent.SessionStart, _handler: () => void) {},
   };
 }
 

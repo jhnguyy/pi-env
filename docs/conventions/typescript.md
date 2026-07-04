@@ -1,8 +1,8 @@
 # TypeScript conventions
 
-## String enums for exported domain values
+## Const objects for named value sets
 
-Prefer exported string enums for domain concepts that cross module boundaries, including:
+Prefer `as const` objects plus derived value types for named sets of string or number values, especially when the values cross module boundaries:
 
 - tool actions
 - protocol action names
@@ -11,17 +11,28 @@ Prefer exported string enums for domain concepts that cross module boundaries, i
 - config values represented in code
 - public helper return tags
 
-Use enum members at call sites instead of repeating raw string literals.
+Use object members at call sites instead of repeating raw literals.
 
 ```ts
-export enum LoadState {
-  Load = "load",
-  DomContentLoaded = "domcontentloaded",
-  NetworkIdle = "networkidle",
-}
+export const LoadState = {
+  Load: "load",
+  DomContentLoaded: "domcontentloaded",
+  NetworkIdle: "networkidle",
+} as const;
+export type LoadState = typeof LoadState[keyof typeof LoadState];
 
 await page.waitForLoadState(LoadState.DomContentLoaded);
 ```
+
+This keeps the enum-like calling style without TypeScript enum emit.
+
+## Avoid TypeScript enums
+
+Do not introduce `enum` or `const enum` for new code. TypeScript enums emit TypeScript-specific runtime code, numeric enums create reverse mappings, and `const enum` creates toolchain/module-boundary pitfalls with transpilers and published types.
+
+Use explicit reverse maps only when reverse lookup is actually needed.
+
+## Local literal unions
 
 String unions are acceptable for small local implementation details where no runtime value or cross-module symbol is useful.
 
@@ -29,12 +40,8 @@ String unions are acceptable for small local implementation details where no run
 type LocalPathMode = "none" | "single" | "many";
 ```
 
-## Why
+Do not replace every local union mechanically. Prefer the const-object pattern when the value set is a durable repo concept or public seam.
 
-String enums make shared concepts easier to discover, import, refactor, and test. They also keep runtime wire values stable while giving code a named symbol.
+## Effect-style tagged data
 
-String unions are still useful for purely local type constraints, inferred literals, and template-literal type composition. Do not replace every union mechanically; prefer enums when the value is part of a durable repo concept or public seam.
-
-## Performance note
-
-String enums emit a small runtime object. In this repo that cost is negligible for public actions, states, and protocol values. Prefer clarity and consistency at boundaries over zero-runtime unions. For hot local internals, keep literal unions when they are simpler and avoid unnecessary emitted objects.
+For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
