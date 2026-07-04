@@ -10,10 +10,11 @@
 
 import { connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
-import { existsSync, unlinkSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseResponse, serializeRequest, SOCKET_PATH, PID_PATH, type DaemonRequest, type DaemonResponse, type LspResult } from "./protocol";
 import { sleep } from "./utils";
+import { removeStaleArtifact } from "./socket-artifacts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ export class LspClient {
         err.message.startsWith("LSP request timed out")
       ) {
         // Remove stale socket so doConnect() spawns a fresh daemon.
-        try { unlinkSync(this.socketPath); } catch {}
+        removeStaleArtifact(this.socketPath);
         // Tear down for reconnect on retry path
         this.socket?.destroy();
         this.socket = null;
@@ -137,9 +138,7 @@ export class LspClient {
     if (connected) return;
 
     // Remove stale socket file if present
-    if (existsSync(this.socketPath)) {
-      try { unlinkSync(this.socketPath); } catch {}
-    }
+    removeStaleArtifact(this.socketPath);
 
     // Spawn daemon
     await this.spawnDaemon();
