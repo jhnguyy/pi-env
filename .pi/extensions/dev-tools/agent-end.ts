@@ -2,7 +2,7 @@
  * agent-end.ts — unified result type and renderer for agent_end post-edit processing.
  *
  * Both format backends (hclfmt, terraform fmt) and LSP backends (diagnostics)
- * produce AgentEndFileResult values. The dispatcher in index.ts collects them all
+ * produce AgentEndFileResult values. The lifecycle dispatcher collects them all
  * and calls renderAgentEndSummary once to produce a single consolidated message.
  *
  * Adding a new backend type? Make it produce AgentEndFileResult[] and push into
