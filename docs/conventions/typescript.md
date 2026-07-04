@@ -69,3 +69,5 @@ export function prepareThing(input: Input): Promise<Thing> {
 ```
 
 Use `Either` for synchronous validation or pure parsing. Use `Effect` when the operation performs IO, needs acquire/use/release, or composes async steps. Do not convert every local helper mechanically; add the Effect seam where typed errors improve locality, test leverage, or boundary clarity.
+
+Bootstrap scripts that run before dependencies are installed must not import dependency-backed Effect modules at top level. Keep a dependency-free compatibility boundary for preinstall/runtime bootstrap, then enter Effect-based modules after install has made dependencies available.
