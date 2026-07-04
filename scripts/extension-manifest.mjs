@@ -16,9 +16,9 @@ export function extensionNameFromPath(path) {
   return posix.basename(normalizePackagePath(path));
 }
 
-export function loadExtensionManifest() {
-  const packagePath = join(repoRoot, "package.json");
-  const configPath = join(repoRoot, "pi-build.config.json");
+export function loadExtensionManifest(root = repoRoot) {
+  const packagePath = join(root, "package.json");
+  const configPath = join(root, "pi-build.config.json");
   const pkg = loadJson(packagePath);
   const config = loadJson(configPath);
   const extensionsDir = normalizePackagePath(config.extensionsDir ?? ".pi/extensions");
@@ -31,20 +31,20 @@ export function loadExtensionManifest() {
       return {
         name,
         packagePath,
-        absPath: join(repoRoot, ...packagePath.split("/")),
+        absPath: join(root, ...packagePath.split("/")),
       };
     });
-  return { pkg, config, extensionsDir, extensions };
+  return { repoRoot: root, pkg, config, extensionsDir, extensions };
 }
 
-export function listExtensionDirs(extensionsDir) {
-  const absDir = join(repoRoot, ...normalizePackagePath(extensionsDir).split("/"));
+export function listExtensionDirs(extensionsDir, root = repoRoot) {
+  const absDir = join(root, ...normalizePackagePath(extensionsDir).split("/"));
   if (!existsSync(absDir)) return [];
   return readdirSync(absDir)
     .map((name) => ({ name, absPath: join(absDir, name) }))
     .filter((entry) => statSync(entry.absPath).isDirectory());
 }
 
-export function relativeFromRepo(absPath) {
-  return absPath.replace(`${repoRoot}${sep}`, "").replaceAll("\\", "/");
+export function relativeFromRepo(absPath, root = repoRoot) {
+  return absPath.replace(`${root}${sep}`, "").replaceAll("\\", "/");
 }
