@@ -8,6 +8,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$TMP_DIR/scripts" "$TMP_DIR/.pi/extensions/active/dist"
 cp "$ROOT_DIR/scripts/extension-manifest.mjs" "$TMP_DIR/scripts/"
+cp "$ROOT_DIR/scripts/extension-contract.mjs" "$TMP_DIR/scripts/"
 cp "$ROOT_DIR/scripts/verify-install.mjs" "$TMP_DIR/scripts/"
 
 touch "$TMP_DIR/.pi/extensions/active/index.ts" "$TMP_DIR/.pi/extensions/active/dist/index.js"
@@ -39,6 +40,19 @@ run_verify() {
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
 run_verify >/dev/null
+"$NODE_RUN" - "$ROOT_DIR" "$TMP_DIR" <<'JS'
+const { join } = await import('node:path');
+const { pathToFileURL } = await import('node:url');
+const rootDir = process.argv[2];
+const tmpDir = process.argv[3];
+const { loadExtensionManifest } = await import(pathToFileURL(join(rootDir, 'scripts/extension-manifest.mjs')).href);
+const { validateExtensionInstall } = await import(pathToFileURL(join(rootDir, 'scripts/extension-contract.mjs')).href);
+const manifest = loadExtensionManifest(tmpDir);
+if (manifest.repoRoot !== tmpDir) throw new Error('custom repo root was not preserved');
+const errors = validateExtensionInstall(manifest);
+if (errors.length > 0) throw new Error(errors.join('\n'));
+JS
+echo 'ok: extension contract can validate an explicit repo root'
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": [] } }'
 output="$(run_verify || true)"
@@ -46,6 +60,22 @@ if grep -q 'active: package.json pi.extensions must include ./dist/index.js' <<<
   echo 'ok: active extension manifest export is enforced'
 else
   echo 'missing active extension manifest export failure' >&2
+  exit 1
+fi
+
+write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
+"$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
+const fs = require('node:fs');
+const path = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+pkg.pi.extensions.push('./.pi/extensions/active');
+fs.writeFileSync(path, JSON.stringify(pkg));
+JS
+output="$(run_verify || true)"
+if grep -q 'duplicate active extension path: .pi/extensions/active' <<<"$output"; then
+  echo 'ok: duplicate extension registrations are rejected'
+else
+  echo 'missing duplicate extension registration failure' >&2
   exit 1
 fi
 
