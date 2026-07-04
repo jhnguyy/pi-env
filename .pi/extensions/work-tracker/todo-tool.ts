@@ -65,6 +65,14 @@ function textResult(text: string, details: Record<string, unknown> = {}): TodoRe
   return { content: [{ type: "text", text }], details };
 }
 
+function formatCount(noun: string, count: number): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+function formatIds(ids: number[]): string {
+  return ids.join(", ");
+}
+
 function listTodos({ store }: TodoExecution): TodoResult {
   return textResult(store.render());
 }
@@ -77,10 +85,11 @@ function clearTodos({ store, ctx }: TodoExecution): TodoResult {
 
 function addTodos({ store, params, ctx }: TodoExecution): TodoResult {
   const added = requireText(TodoAction.Add, params.text).map((text) => store.add(text));
+  const ids = added.map((item) => item.id);
   updateTodoSlot(store, ctx);
   return textResult(
-    added.map((item) => `Added: □ (${item.id}) ${item.text}`).join("\n"),
-    { ids: added.map((item) => item.id) },
+    `Added ${formatCount("task", added.length)}: id${ids.length === 1 ? "" : "s"} ${formatIds(ids)}.`,
+    { ids },
   );
 }
 
@@ -99,10 +108,11 @@ function completeTodos({ store, params, ctx, pi }: TodoExecution): TodoResult {
   if (pi && leafId && milestoneLabel) pi.setLabel(leafId, milestoneLabel);
   updateTodoSlot(store, ctx);
 
+  const ids = completedItems.map((item) => item.id);
   const parts: string[] = [];
-  if (completedItems.length) parts.push(`Completed: ${completedItems.map((item) => `✅ (${item.id}) ${item.text}`).join(", ")}`);
+  if (completedItems.length) parts.push(`Completed ${formatCount("task", completedItems.length)}: id${ids.length === 1 ? "" : "s"} ${formatIds(ids)}.`);
   if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
-  return textResult(parts.join("\n"), { ids: completedItems.map((item) => item.id), failed: failed.length });
+  return textResult(parts.join("\n"), { ids, failed: failed.length });
 }
 
 function removeTodos({ store, params, ctx }: TodoExecution): TodoResult {
@@ -116,7 +126,7 @@ function removeTodos({ store, params, ctx }: TodoExecution): TodoResult {
   updateTodoSlot(store, ctx);
 
   const parts: string[] = [];
-  if (removedRefs.length) parts.push(`Removed: ${removedRefs.join(", ")}`);
+  if (removedRefs.length) parts.push(`Removed ${formatCount("task", removedRefs.length)}.`);
   if (failed.length) parts.push(`Not found: ${failed.join(", ")}`);
   return textResult(parts.join("\n"), { removed: removedRefs.length, failed: failed.length });
 }

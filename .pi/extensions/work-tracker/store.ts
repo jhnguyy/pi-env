@@ -63,12 +63,19 @@ export class TodoStore {
     return this.items.filter((i) => !i.done);
   }
 
-  /** Plain-text string for LLM context injection. Only shows open tasks. */
+  /** Plain-text string for explicit todo list requests. Only shows open tasks. */
   render(): string {
     const open = this.items.filter((i) => !i.done);
     if (open.length === 0) return "[session-todos] No tasks yet.";
     const lines = open.map((i) => `□ (${i.id}) ${i.text}`);
     return `[session-todos]\n${lines.join("\n")}`;
+  }
+
+  /** Compact string for automatic LLM context injection. */
+  renderContext(): string {
+    const open = this.items.filter((i) => !i.done);
+    if (open.length === 0) return "[session-todos] No tasks yet.";
+    return `[session-todos] ${open.length} open task${open.length === 1 ? "" : "s"}. Use todo action=list for details.`;
   }
 
   /**
