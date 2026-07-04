@@ -78,7 +78,7 @@ test_falls_back_when_nub_node_is_broken() {
   rm -rf "$tmp"
 }
 
-test_uses_working_nub_node_first() {
+test_prefers_path_node_before_nub_node() {
   local tmp old_path resolved
   tmp="$(with_temp_dir)"
   old_path="$PATH"
@@ -92,8 +92,34 @@ test_uses_working_nub_node_first() {
   PATH="$tmp/bin:$PATH"
   unset PI_ENV_NODE_BIN PI_ENV_SETUP_MODE PI_ENV_CONFIG_MANAGED_BY_NIX || true
   resolved="$(resolve_setup_node_bin)"
-  [ "$resolved" = "$tmp/nub-node" ] || fail "expected working Nub node, got $resolved"
+  [ "$resolved" = "$tmp/bin/node" ] || fail "expected PATH node before Nub node, got $resolved"
 
+  PATH="$old_path"
+  rm -rf "$tmp"
+}
+
+test_no_node_points_to_nix_next_step_when_nix_exists() {
+  local tmp old_path output status
+  tmp="$(with_temp_dir)"
+  old_path="$PATH"
+  REPO="$tmp/repo"
+  mkdir -p "$REPO" "$tmp/bin"
+  cat > "$tmp/bin/nix" <<'SH'
+#!/usr/bin/env sh
+exit 0
+SH
+  chmod +x "$tmp/bin/nix"
+  PATH="$tmp/bin"
+  unset PI_ENV_NODE_BIN PI_ENV_SETUP_MODE PI_ENV_CONFIG_MANAGED_BY_NIX || true
+  set +e
+  output="$(resolve_setup_node_bin 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -eq 127 ] || fail "expected missing node to exit 127, got $status"
+  case "$output" in
+    *'./setup.sh --use-nix'*) ;;
+    *) fail "missing node should point to nix setup next step" ;;
+  esac
   PATH="$old_path"
   rm -rf "$tmp"
 }
@@ -101,6 +127,7 @@ test_uses_working_nub_node_first() {
 test_node_run_honors_valid_pi_env_node_bin
 test_node_run_rejects_invalid_pi_env_node_bin
 test_falls_back_when_nub_node_is_broken
-test_uses_working_nub_node_first
+test_prefers_path_node_before_nub_node
+test_no_node_points_to_nix_next_step_when_nix_exists
 
 echo "node resolution tests passed"

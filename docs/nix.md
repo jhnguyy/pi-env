@@ -63,6 +63,8 @@ Intentionally mutable/local:
 ./setup.sh --no-repo-hooks  # skip git hook setup
 ```
 
+Setup selects a usable Node before running Node/Nub install steps. The selection contract is explicit: `PI_ENV_NODE_BIN` wins, Nix-managed setup trusts PATH Node first, portable setup prefers already working host Node, and Nub's project Node is a fallback. If no usable Node is found and Nix is available, setup reports `./setup.sh --use-nix` or an externally Nix-managed toolchain as the next step.
+
 Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `./setup.sh` runs skip duplicate PATH/tmux/Ghostty writes. They can also set `PI_ENV_CLI_MANAGED_BY_NIX=1` so setup does not overwrite a Nix-managed `~/.local/bin/pi`. Granular environment flags are supported:
 
 - `PI_ENV_CLI_MANAGED_BY_NIX=1`

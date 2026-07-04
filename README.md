@@ -48,7 +48,7 @@ Other Ghostty settings worth tuning per machine: window padding, cell-height adj
 
 ## Pi CLI install
 
-`setup.sh` runs `nub install --frozen-lockfile`, verifies the locked `@earendil-works/pi-coding-agent` package in this checkout, and writes a user-local `pi` wrapper that pins the Node executable selected during setup. That keeps later shell startup changes such as `nvm use` from silently changing the pi runtime. In local-Nix setup the flake app exports its Node path; in externally Nix-managed or portable setup, setup asks Nub for the project Node unless `PI_ENV_NODE_BIN` is set.
+`setup.sh` runs `nub install --frozen-lockfile`, verifies the locked `@earendil-works/pi-coding-agent` package in this checkout, and writes a user-local `pi` wrapper that pins the Node executable selected during setup. That keeps later shell startup changes such as `nvm use` from silently changing the pi runtime. In local-Nix setup the flake app exports its Node path. In externally Nix-managed or portable setup, setup prefers an already working host Node and falls back to Nub's project Node only when needed. If no usable Node is found and Nix is available, setup points you at `./setup.sh --use-nix` or an externally Nix-managed toolchain before running any Node/Nub install steps.
 
 ## Theme snippets
 
