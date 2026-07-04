@@ -20,6 +20,8 @@ chore/<name>   config, docs, cleanup (no behavior change)
 
 Use Nub with the Node.js version required by `package.json#engines.node`. The repo includes `.node-version` / `.nvmrc` for local tool provisioning; setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
 
+Before assuming a toolchain problem is a code problem, verify the environment boundary: whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
+
 ## Extension Development
 
 Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Source files in `.pi/extensions/*/` are never loaded directly by pi at runtime.
@@ -35,7 +37,8 @@ The build runs during `nub install`/setup via `postinstall` plus an explicit set
 1. Create `.pi/extensions/<name>/index.ts` with the default export
 2. Add `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
 3. Add `.pi/extensions/<name>` to `package.json`'s `workspaces` and `pi.extensions` lists
-4. Run the package build script
+4. Keep tools context-economical: prefer compact navigation/metadata outputs first, then opt-in detail views; never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced
+5. Run the package build script
 
 ### Cross-extension singletons
 

@@ -22,6 +22,10 @@ Portable fallback setup is still supported for hosts without Nix, but it intenti
 
 Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.
 
+## Working expectations
+
+Before changing code, review the closest existing conventions: this README for setup/runtime behavior, `CONTRIBUTING.md` for workflow, `AGENTS.md` for agent-facing development principles, package scripts for command source of truth, and nearby tests/modules for implementation style. When environment behavior matters, document the expectation here or in `setup/*.md` so future sessions do not rediscover it from failures.
+
 ## Terminal configs
 
 In portable mode, `setup.sh` links `setup/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.

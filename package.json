@@ -12,6 +12,7 @@
   "workspaces": [
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
+    ".pi/extensions/introspection",
     ".pi/extensions/jit-catch",
     ".pi/extensions/pi-update",
     ".pi/extensions/ptc",
@@ -24,6 +25,7 @@
     "extensions": [
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
+      ".pi/extensions/introspection",
       ".pi/extensions/jit-catch",
       ".pi/extensions/pi-update",
       ".pi/extensions/ptc",

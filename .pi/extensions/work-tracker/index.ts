@@ -8,7 +8,6 @@
  *   - branch-guard.ts — BranchGuard class (protected branch enforcement)
  *   - handoff-cleanup — handoff file cleanup on branch merge
  *   - store.ts        — TodoStore (in-memory task list)
- *   - extractor.ts    — session JSONL extraction for read_session tool
  *   - types.ts        — WorkTrackerConfig
  *
  * Subagent detection: if PI_AGENT_ID env var is set, context injection is skipped
@@ -17,25 +16,19 @@
  * Config via env vars:
  *   WORK_TRACKER_REPOS      — comma-separated repo paths (default: pi-env only)
  *   WORK_TRACKER_PROTECTED  — comma-separated protected branches (default: main, master)
- *   PI_SESSION_READER       — if set, keeps read_session tool active (for review subagents)
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
-
 import { registerCommands } from "./commands";
 import { loadConfig } from "./context";
 import { setSlot } from "../_shared/ui-render";
 import { registerHooks } from "./hooks";
+import { formatTodoMilestoneLabel } from "./milestones";
 import { TodoStore } from "./store";
-import { extractSession, formatSummary } from "./extractor";
 import type { ExtToolRegistration } from "../subagent/types";
 
-const SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
 export default function (pi: ExtensionAPI) {
   const config = loadConfig();
@@ -111,6 +104,9 @@ export default function (pi: ExtensionAPI) {
           else failed.push(ref);
         }
         if (completedItems.length === 0) throw new Error(`No matching open tasks: ${failed.join(", ")}`);
+        const leafId = ctx.sessionManager.getLeafId?.();
+        const milestoneLabel = formatTodoMilestoneLabel(completedItems);
+        if (leafId && milestoneLabel) pi.setLabel(leafId, milestoneLabel);
         setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
         const parts: string[] = [];
         if (completedItems.length) parts.push(`Completed: ${completedItems.map(i => `✅ (${i.id}) ${i.text}`).join(", ")}`);
@@ -146,64 +142,12 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ─── read_session tool ───────────────────────────────────────────────────────
-  pi.registerTool({
-    name: "read_session",
-    label: "Read Session",
-    description:
-      "Extract high-signal content from a pi session JSONL file. " +
-      "Returns user prompts, agent narrative text (no raw tool outputs), " +
-      "tool usage counts, and extension messages. " +
-      "Use to understand what happened in a past session without parsing raw JSONL. " +
-      "Discover session files with: find ~/.pi/agent/sessions/ -name '*.jsonl' | sort -r | head -20",
-    parameters: Type.Object({
-      path: Type.String({
-        description: "Absolute path to a session .jsonl file under ~/.pi/agent/sessions/",
-      }),
-    }),
-
-    async execute(_id, params, signal, _onUpdate, _ctx: any) {
-      if (signal?.aborted) {
-        return { content: [{ type: "text" as const, text: "Cancelled." }], details: {} };
-      }
-
-      const p = resolve(params.path.replace(/^@/, ""));
-
-      if (!p.startsWith(SESSION_DIR + "/")) {
-        throw new Error(
-          `read_session is restricted to session files under ${SESSION_DIR}/. Got: ${p}`,
-        );
-      }
-
-      const summary = extractSession(p);
-      const raw = formatSummary(summary);
-
-      const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
-      let text = trunc.content;
-      if (trunc.truncated) {
-        text +=
-          `\n\n[Output truncated: ${formatSize(trunc.outputBytes)} of ${formatSize(trunc.totalBytes)}. ` +
-          `Session had ${summary.userMessages.length} user turns and ${summary.agentNarrative.length} narrative blocks.]`;
-      }
-
-      return {
-        content: [{ type: "text" as const, text }],
-        details: {
-          filename: summary.filename,
-          timestamp: summary.timestamp,
-          toolCounts: summary.toolCounts,
-          truncated: trunc.truncated,
-        },
-      };
-    },
-  });
-
   // ─── Hooks ───────────────────────────────────────────────────────────────────
   registerHooks(pi, config, store);
 
   // ─── Agent tool registration ─────────────────────────────────────────────────
-  // Register todo and read_session as AgentTools so subagents can manage tasks
-  // and access past session context. UI slot updates are skipped in subagent context.
+  // Register todo as an AgentTool so subagents can manage tasks.
+  // UI slot updates are skipped in subagent context.
   pi.on("session_start", () => {
     const todoAgentTool: AgentTool<any, any> = {
       name: "todo",
@@ -239,25 +183,5 @@ export default function (pi: ExtensionAPI) {
       },
     };
     pi.events.emit("agent-tools:register", { tool: todoAgentTool, capabilities: ["write"] } satisfies ExtToolRegistration);
-
-    const readSessionAgentTool: AgentTool<any, any> = {
-      name: "read_session",
-      label: "Read Session",
-      description: "Extract high-signal content from a pi session JSONL file. Returns user prompts, agent narrative, tool usage counts.",
-      parameters: Type.Object({
-        path: Type.String({ description: "Absolute path to a session .jsonl file under ~/.pi/agent/sessions/" }),
-      }),
-      execute: async (_id, params, signal) => {
-        const args = params as { path: string };
-        if (signal?.aborted) return { content: [{ type: "text", text: "Cancelled." }], details: {} };
-        const p = resolve(args.path.replace(/^@/, ""));
-        if (!p.startsWith(SESSION_DIR + "/")) throw new Error(`read_session restricted to ${SESSION_DIR}/`);
-        const summary = extractSession(p);
-        const raw = formatSummary(summary);
-        const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
-        return { content: [{ type: "text", text: trunc.content }], details: { filename: summary.filename, truncated: trunc.truncated } };
-      },
-    };
-    pi.events.emit("agent-tools:register", { tool: readSessionAgentTool, capabilities: ["read"] } satisfies ExtToolRegistration);
   });
 }
