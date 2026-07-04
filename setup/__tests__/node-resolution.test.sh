@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 # shellcheck source=setup/lib.sh
 source "$ROOT/setup/lib.sh"
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
 
 make_fake_node() {
   local path="$1" exit_code="${2:-0}"
@@ -36,11 +32,7 @@ SH
 }
 
 real_node_bin() {
-  if [ -x /bin/node ]; then
-    printf '%s\n' /bin/node
-  else
-    command -v node
-  fi
+  node_bin
 }
 
 test_node_run_honors_valid_pi_env_node_bin() {
@@ -51,7 +43,7 @@ test_node_run_honors_valid_pi_env_node_bin() {
 
 test_node_run_rejects_invalid_pi_env_node_bin() {
   local tmp output status
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   cat > "$tmp/not-node" <<'SH'
 #!/usr/bin/env sh
 exit 127
@@ -68,7 +60,7 @@ SH
 
 test_falls_back_when_nub_node_is_broken() {
   local tmp old_path resolved
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_path="$PATH"
   REPO="$tmp/repo"
   mkdir -p "$REPO" "$tmp/bin"
@@ -88,7 +80,7 @@ test_falls_back_when_nub_node_is_broken() {
 
 test_uses_working_nub_node_first() {
   local tmp old_path resolved
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_path="$PATH"
   REPO="$tmp/repo"
   mkdir -p "$REPO" "$tmp/bin"

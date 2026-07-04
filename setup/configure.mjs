@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fail, mustEnv, ok, section, skip } from './runtime-support.mjs';
 
@@ -94,7 +94,7 @@ function pathExistsOrIsSymlink(path) {
 }
 
 function readlink(path) {
-  return run('readlink', [path], { stdio: 'pipe' }).stdout.trim();
+  return readlinkSync(path);
 }
 
 function appendOnce(src, dst, marker, label) {
@@ -198,17 +198,16 @@ function configureTerminalTools() {
 function installGitHook(name, src, gitCommonDir) {
   const dst = join(gitCommonDir, 'hooks', name);
   mkdirSync(dirname(dst), { recursive: true });
-  if (existsSync(dst)) {
-    try {
-      if (readlink(dst) === src) {
-        ok(`${name} hook`);
-        return;
-      }
-      unlinkSync(dst);
-    } catch {
+  if (pathExistsOrIsSymlink(dst)) {
+    if (!lstatSync(dst).isSymbolicLink()) {
       skip(`${name} hook (custom hook already exists at .git/hooks/${name})`);
       return;
     }
+    if (readlink(dst) === src) {
+      ok(`${name} hook`);
+      return;
+    }
+    unlinkSync(dst);
   }
   symlinkSync(src, dst);
   run('chmod', ['+x', src], { stdio: 'ignore' });

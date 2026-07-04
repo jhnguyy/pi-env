@@ -1,11 +1,11 @@
 ---
-name: improve-codebase-architecture
-description: Review a codebase for architectural friction and deepening opportunities, then help select and pressure-test one candidate. Use when asked to improve architecture, find better seams, or review module boundaries.
+name: architecture-friction-review
+description: Review code for architectural friction, module-depth opportunities, and better seams. Use when asked to improve architecture, find better boundaries, or pressure-test a refactor candidate.
 ---
 
-# Improve Codebase Architecture
+# Architecture Friction Review
 
-An architecture-review technique for finding places where deeper modules or better seams would improve understanding, changeability, and tests.
+A review technique for finding places where deeper modules or better seams would improve understanding, changeability, and tests.
 
 ## Intent
 

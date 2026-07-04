@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=setup/__tests__/helpers.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 # shellcheck source=setup/options.sh
 source "$ROOT/setup/options.sh"
-
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
 
 reset_setup_env() {
   unset PI_ENV_SETUP_MODE PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_SKIP_TERMINAL PI_ENV_SKIP_PATH_PROFILE PI_ENV_SKIP_REPO_HOOKS || true
@@ -46,7 +42,7 @@ test_granular_flags() {
 
 test_auto_nix_entrypoint_uses_nix_setup_app() {
   local tmp old_path output
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_path="$PATH"
   output="$tmp/out"
   cat > "$tmp/nix" <<'SH'
@@ -65,7 +61,7 @@ SH
 
 test_use_nix_entrypoint_reexecs_nix_setup_app() {
   local tmp old_path output
-  tmp="$(mktemp -d)"
+  tmp="$(with_temp_dir)"
   old_path="$PATH"
   output="$tmp/out"
   cat > "$tmp/nix" <<'SH'
