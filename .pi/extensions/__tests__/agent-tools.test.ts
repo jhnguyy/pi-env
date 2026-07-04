@@ -9,6 +9,7 @@ import {
   type AgentToolEvents,
   type ExtToolRegistration,
 } from "../_shared/agent-tools";
+import { resetAgentToolRegistryForTests } from "../_shared/agent-tool-registry";
 
 function createPi(): AgentToolEvents {
   const handlers: Array<(data: unknown) => void> = [];
@@ -37,7 +38,7 @@ function tool(name: string): AgentTool<any, any> {
 
 describe("agent tool registration", () => {
   beforeEach(() => {
-    delete (globalThis as any).__piEnvAgentToolStore;
+    resetAgentToolRegistryForTests();
   });
 
   it("replays registrations to late listeners", () => {
@@ -58,5 +59,16 @@ describe("agent tool registration", () => {
     registerAgentTools(pi, { tool: tool("later"), capabilities: [ToolCapability.Write] });
 
     expect(names).toEqual(["later"]);
+  });
+
+  it("replaces registrations by tool name for late listeners", () => {
+    const pi = createPi();
+    registerAgentTools(pi, { tool: tool("same"), capabilities: [ToolCapability.Read] });
+    registerAgentTools(pi, { tool: tool("same"), capabilities: [ToolCapability.Write] });
+
+    const capabilities: ToolCapability[][] = [];
+    listenForAgentTools(pi, (registration) => capabilities.push(registration.capabilities));
+
+    expect(capabilities).toEqual([[ToolCapability.Write]]);
   });
 });
