@@ -51,6 +51,12 @@ const { loadExtensionManifest } = await import(pathToFileURL(join(rootDir, 'scri
 const { validateExtensionInstall } = await import(pathToFileURL(join(rootDir, 'scripts/extension-contract.mjs')).href);
 const manifest = loadExtensionManifest(tmpDir);
 if (manifest.repoRoot !== tmpDir) throw new Error('custom repo root was not preserved');
+const [active] = manifest.extensions;
+if (active.name !== 'active') throw new Error('extension name was not normalized');
+if (active.packagePath !== '.pi/extensions/active') throw new Error('extension package path was not normalized');
+if (!active.hasPackageJson || !active.hasSourceEntry || !active.hasBundleEntry) throw new Error('extension artifact flags were not derived');
+if (!active.runtimeEntries.includes('./dist/index.js')) throw new Error('runtime entries were not loaded from extension package');
+if (!manifest.activeNames.has('active') || !manifest.activePackagePaths.has('.pi/extensions/active')) throw new Error('active extension sets were not derived');
 const errors = validateExtensionInstall(manifest);
 if (errors.length > 0) throw new Error(errors.join('\n'));
 JS

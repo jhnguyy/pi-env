@@ -36,25 +36,14 @@ Before assuming a toolchain problem is a code problem, verify the environment bo
 
 ## Extension Development
 
-Extensions compile to `dist/index.js` Node ESM bundles for fast load times. Source files in `.pi/extensions/*/` are never loaded directly by pi at runtime.
+Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules.
 
-Use `package.json` scripts as the source of truth for build, test, cleanup, and verification commands.
+Short version:
 
-The build uses `scripts/build-extensions.mjs` with esbuild. Active extension names come from `package.json`'s `pi.extensions` list; `pi-build.config.json` holds build-only details such as external packages and sidecar bundles. Pi peer packages are externalized so the runtime copies provided by pi are used instead of bundled duplicates.
-
-The build runs during `nub install`/setup via `postinstall` plus an explicit setup build step. Install/setup intentionally does not run the full test suite; it stays focused on making the local Pi environment current without burning CPU on routine pulls.
-
-### Adding a new extension
-
-1. Create `.pi/extensions/<name>/index.ts` with the default export
-2. Add `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
-3. Add `.pi/extensions/<name>` to `package.json`'s `workspaces` and `pi.extensions` lists
-4. Keep tools context-economical: prefer compact navigation/metadata outputs first, then opt-in detail views; never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced
-5. Run the package build script
-
-### Cross-extension singletons
-
-Store shared services on `globalThis`, not at module level — module-level variables are per-bundle; `globalThis` is process-wide.
+1. Add source and package metadata under `.pi/extensions/<name>/`.
+2. Register active extensions in both `package.json#workspaces` and `package.json#pi.extensions`.
+3. Keep `scripts/extension-manifest.mjs` as the shared lifecycle contract for build, cleanup, and install verification.
+4. Use `package.json` scripts for build, test, cleanup, and verification.
 
 ## Worktree Isolation
 
