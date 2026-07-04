@@ -1,19 +1,7 @@
 import { Either } from "effect";
 import type { DaemonRequest } from "./protocol";
-
-export enum DevToolsAction {
-  Diagnostics = "diagnostics",
-  Hover = "hover",
-  Definition = "definition",
-  Implementation = "implementation",
-  References = "references",
-  IncomingCalls = "incoming-calls",
-  OutgoingCalls = "outgoing-calls",
-  Symbols = "symbols",
-  Status = "status",
-}
-
-export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
+import { DevToolsAction, getActionContract } from "./action-contract";
+export { DevToolsAction, DEV_TOOLS_ACTIONS } from "./action-contract";
 
 export interface DevToolsParams {
   action: DevToolsAction;
@@ -22,8 +10,6 @@ export interface DevToolsParams {
   character?: number;
   query?: string;
 }
-
-type PathMode = "none" | "single" | "many";
 
 type ClientRequest = Omit<DaemonRequest, "id">;
 
@@ -36,22 +22,10 @@ function requestBuildError(message: string): RequestBuildError {
   return { _tag: "RequestBuildError", message };
 }
 
-const PATH_MODE_BY_ACTION: Record<DevToolsAction, PathMode> = {
-  [DevToolsAction.Diagnostics]: "many",
-  [DevToolsAction.Hover]: "single",
-  [DevToolsAction.Definition]: "single",
-  [DevToolsAction.Implementation]: "single",
-  [DevToolsAction.References]: "single",
-  [DevToolsAction.IncomingCalls]: "single",
-  [DevToolsAction.OutgoingCalls]: "single",
-  [DevToolsAction.Symbols]: "single",
-  [DevToolsAction.Status]: "none",
-};
-
 function normalizePathsForAction(params: DevToolsParams): Either.Either<string[], RequestBuildError> {
   const rawPath = params.path;
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
-  const mode = PATH_MODE_BY_ACTION[params.action];
+  const mode = getActionContract(params.action).pathMode;
 
   if (mode === "single" && paths.length > 1) {
     return Either.left(requestBuildError(`${params.action} requires a single path — ${paths.length} were provided`));
