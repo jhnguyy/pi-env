@@ -32,61 +32,12 @@ import {
   renderActiveAgentEndSummary,
 } from "./agent-end";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { DaemonRequest, DiagnosticsResult, LspResult } from "./protocol";
+import type { DiagnosticsResult, LspResult } from "./protocol";
 import { isSupported, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
-
-// ─── Tool action enum ───────────────────────────────────────────────────────
-enum DevToolsAction {
-  Diagnostics = "diagnostics",
-  Hover = "hover",
-  Definition = "definition",
-  Implementation = "implementation",
-  References = "references",
-  IncomingCalls = "incoming-calls",
-  OutgoingCalls = "outgoing-calls",
-  Symbols = "symbols",
-  Status = "status",
-}
-
-const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
-
-interface DevToolsParams {
-  action: DevToolsAction;
-  path?: string | string[];
-  line?: number;
-  character?: number;
-  query?: string;
-}
-
-/**
- * Shared request builder — normalises tool params → daemon wire format.
- * Pure function, no closure dependencies.
- */
-function buildClientRequest(params: DevToolsParams): Omit<DaemonRequest, "id"> {
-  const rawPath = params.path;
-  const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
-
-  switch (params.action) {
-    case DevToolsAction.Diagnostics:
-      return { action: params.action, paths };
-    case DevToolsAction.Status:
-      return { action: params.action };
-    case DevToolsAction.Symbols:
-      if (paths.length > 1) throw new Error(`${params.action} requires a single path — ${paths.length} were provided`);
-      return { action: params.action, path: paths[0], query: params.query };
-    case DevToolsAction.Hover:
-    case DevToolsAction.Definition:
-    case DevToolsAction.Implementation:
-    case DevToolsAction.References:
-    case DevToolsAction.IncomingCalls:
-    case DevToolsAction.OutgoingCalls:
-      if (paths.length > 1) throw new Error(`${params.action} requires a single path — ${paths.length} were provided`);
-      return { action: params.action, path: paths[0], line: params.line, character: params.character };
-  }
-}
+import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
 
 // ─── Format binary cache ──────────────────────────────────────────────────────
 // Resolved lazily on first agent_end that contains format-backend files.
@@ -134,10 +85,12 @@ export default function (pi: ExtensionAPI) {
         "For diagnostics, pass an array to check multiple files in one call.",
     })),
     line: Type.Optional(Type.Number({
-      description: "Line number (1-indexed). Required for hover, definition, references.",
+      minimum: 1,
+      description: "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
     })),
     character: Type.Optional(Type.Number({
-      description: "Column number (1-indexed). Required for hover, definition, references.",
+      minimum: 1,
+      description: "Column number on the line, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
     })),
     query: Type.Optional(Type.String({
       description: "Search query for workspace symbols (action=symbols without path).",

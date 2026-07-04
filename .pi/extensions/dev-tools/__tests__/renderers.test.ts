@@ -53,10 +53,11 @@ describeIfEnabled("dev-tools", "Renderers", () => {
       ],
     };
 
-    it("shows success for no errors", () => {
+    it("shows success and scanned file summary for no errors", () => {
       const t = text(renderDevToolsResult({ isError: false, content: [], details: noDiags }, {}, mockTheme));
       expect(t).toContain("no errors");
       expect(t).toContain("success");
+      expect(t).toContain("scanned 1 file: a.ts");
     });
 
     it("shows error count with error color", () => {
@@ -65,15 +66,15 @@ describeIfEnabled("dev-tools", "Renderers", () => {
       expect(t).toContain("2 errors");
     });
 
-    it("expanded=true shows individual diagnostics", () => {
+    it("expanded=true shows pretty-printed diagnostics JSON", () => {
       const t = text(renderDevToolsResult(
         { isError: false, content: [], details: withErrors },
         { expanded: true },
         mockTheme,
       ));
-      expect(t).toContain("L5:3");
-      expect(t).toContain("TS2339");
-      expect(t).toContain("L7:1");
+      expect(t).toContain('{\n  "action": "diagnostics"');
+      expect(t).toContain('"line": 5');
+      expect(t).toContain('"code": "TS2339"');
     });
 
     it("expanded=false does not show individual diagnostics", () => {
@@ -92,6 +93,24 @@ describeIfEnabled("dev-tools", "Renderers", () => {
       ]};
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("warning");
+    });
+
+    it("shows scanned files for bulk diagnostics", () => {
+      const r: DiagnosticsResult = {
+        action: "diagnostics",
+        path: "(bulk)",
+        errorCount: 0,
+        warnCount: 0,
+        items: [],
+        files: [
+          { action: "diagnostics", path: "/repo/src/a.ts", errorCount: 0, warnCount: 0, items: [] },
+          { action: "diagnostics", path: "/repo/test/b.ts", errorCount: 0, warnCount: 0, items: [] },
+          { action: "diagnostics", path: "/repo/lib/c.ts", errorCount: 0, warnCount: 0, items: [] },
+          { action: "diagnostics", path: "/repo/lib/d.ts", errorCount: 0, warnCount: 0, items: [] },
+        ],
+      };
+      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
+      expect(t).toContain("scanned 4 files: src/a.ts, test/b.ts, lib/c.ts, +1 more");
     });
   });
 
