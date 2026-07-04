@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Either } from "effect";
 import { describe, expect, it } from "vitest";
-import { buildDecisionPrompt, extractChangelogSection, isPiPackageName, packageNames, parseArgs, writeInstallCommand, type PiUpdatePrep } from "../index";
+import { buildDecisionPrompt, extractChangelogSection, isPiPackageName, packageNames, packageNamesEither, parseArgs, PiUpdatePhase, writeInstallCommand, type PiUpdatePrep } from "../index";
 
 describe("pi-update", () => {
   it("parses version and optional paths", () => {
@@ -36,6 +37,19 @@ describe("pi-update", () => {
 
     expect(names).toEqual(["@earendil-works/pi-ai"]);
     expect(readFileSync(command, "utf8")).toContain("@earendil-works/pi-ai@0.80.0");
+  });
+
+  it("returns tagged package discovery errors without throwing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-update-test-"));
+    const pkg = join(dir, "package.json");
+    writeFileSync(pkg, JSON.stringify({ devDependencies: { vitest: "^4" } }));
+
+    const result = packageNamesEither(pkg, isPiPackageName);
+
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe(PiUpdatePhase.PackageDiscovery);
+    }
   });
 
   it("creates a concise handoff prompt from prepared artifacts", () => {
