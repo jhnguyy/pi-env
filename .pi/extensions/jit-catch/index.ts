@@ -24,7 +24,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { parseDiff } from "./parser";
 import { captureDiff, resolveGitRoot, runForExtension } from "./runner";
 import { err } from "../_shared/result";
-import type { ExtToolRegistration } from "../subagent/types";
+import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -203,7 +203,7 @@ export default function (pi: ExtensionAPI) {
   // Register jit_catch as an AgentTool so subagents (e.g. code-review agents) can run catching tests.
   // Uses process.cwd() for git operations since subagents run in-process and share the same cwd.
   // Capabilities: write (creates temp test files), execute (runs npm test).
-  pi.on("session_start", () => {
+  pi.on(PiEvent.SessionStart, () => {
     const exec = pi.exec.bind(pi);
     const jitAgentTool: AgentTool<any, any> = {
       name: "jit_catch",
@@ -256,7 +256,7 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text: lines.join("\n") }], details: { results, anyFailed } };
       },
     };
-    pi.events.emit("agent-tools:register", { tool: jitAgentTool, capabilities: ["write", "execute"] } satisfies ExtToolRegistration);
+    registerAgentTools(pi, { tool: jitAgentTool, capabilities: [ToolCapability.Write, ToolCapability.Execute] });
   });
 }
 

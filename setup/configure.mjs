@@ -125,10 +125,10 @@ function applyManagedSettings() {
 function configurePi() {
   section('Pi');
   bootstrapFile(
-    join(setupDir, 'settings.template.json'),
+    join(setupDir, 'templates/settings.json'),
     settingsFile,
     'settings.json (exists — not overwritten)',
-    'settings.json ← settings.template.json (review and customize: defaultModel, permissionLevel)',
+    'settings.json ← setup/templates/settings.json (review and customize: defaultModel, permissionLevel)',
   );
   applyManagedSettings();
 

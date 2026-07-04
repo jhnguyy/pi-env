@@ -32,13 +32,13 @@ Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed path
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
 
-Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`setup/nix.md`](setup/nix.md) for Nix details and [`setup/prerequisites.md`](setup/prerequisites.md) for the mode split.
+Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`docs/nix.md`](docs/nix.md) for Nix details and [`docs/prerequisites.md`](docs/prerequisites.md) for the mode split.
 
-Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.
+Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/config/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.
 
 ## Terminal configs
 
-In portable mode, `setup.sh` links `setup/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.
+In portable mode, `setup.sh` links `setup/templates/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.
 
 Ghostty is only useful where a GUI terminal runs. Portable setup detects devcontainers/container-like environments and skips Ghostty linking there by default; GUI hosts and VMs get `ghostty/config` and `ghostty/themes/*` linked into `~/.config/ghostty/`. Nix-managed hosts can let the Home Manager module own these files. Set `PI_ENV_LINK_GHOSTTY=1 ./setup.sh` to force Ghostty linking in an unusual portable environment.
 
@@ -61,5 +61,5 @@ Slack custom theme strings:
 
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
 - **[agentic-notes](.agents/skills/agentic-notes/SKILL.md)** — portable note quality and adapter discovery practice
-- **[setup/nix.md](setup/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
+- **[docs/nix.md](docs/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings

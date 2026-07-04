@@ -4,7 +4,7 @@ set -euo pipefail
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 SCRIPT="$ROOT/setup/apply-managed-settings.mjs"
-MANAGED="$ROOT/setup/managed-settings.json"
+MANAGED="$ROOT/setup/config/managed-settings.json"
 
 json_get() {
   local file="$1" expr="$2" node

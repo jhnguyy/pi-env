@@ -9,7 +9,7 @@ configure_repo_tools_env() {
   REPO="$repo" \
   SETUP_DIR="$ROOT/setup" \
   SETTINGS_FILE="$home/settings.json" \
-  MANAGED_SETTINGS_FILE="$ROOT/setup/managed-settings.json" \
+  MANAGED_SETTINGS_FILE="$ROOT/setup/config/managed-settings.json" \
   AGENTS_DIR="$home/.agents" \
   TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
   APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
@@ -17,10 +17,10 @@ configure_repo_tools_env() {
   APPEND_MARKER="<!-- test -->" \
   PI_AGENT_DIR="$home/.pi/agent" \
   TMUX_CONF="$home/.tmux.conf" \
-  TMUX_SOURCE_LINE="source-file $ROOT/setup/tmux.conf" \
+  TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \
   GHOSTTY_CONFIG_DIR="$home/.config/ghostty" \
-  POST_MERGE_HOOK_SRC="$ROOT/setup/post-merge" \
-  PRE_COMMIT_HOOK_SRC="$ROOT/setup/pre-commit" \
+  POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
+  PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
   run_node "$ROOT/setup/configure.mjs" repo-tools "$(node_bin)"
 }
 

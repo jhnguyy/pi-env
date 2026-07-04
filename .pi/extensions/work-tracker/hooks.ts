@@ -1,3 +1,4 @@
+import { PiEvent } from "../_shared/agent-tools";
 /**
  * hooks.ts — pi lifecycle hook registrations for work-tracker.
  *
@@ -97,7 +98,7 @@ export function registerHooks(
   });
 
   // ─── 3. Session start / switch ──────────────────────────────────────────────
-  pi.on("session_start", async (event, ctx) => {
+  pi.on(PiEvent.SessionStart, async (event, ctx) => {
     const open = store.open().length;
     const isReplacementSession = REPLACEMENT_SESSION_REASONS.has(event.reason);
 

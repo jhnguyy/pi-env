@@ -2,13 +2,10 @@
 # Command-line option parsing for setup.sh.
 
 setup_parse_args() {
-  if [ -z "${PI_ENV_SETUP_MODE:-}" ]; then
-    if [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" = "1" ]; then
-      PI_ENV_SETUP_MODE="nix-managed"
-    else
-      PI_ENV_SETUP_MODE="portable"
-    fi
-  fi
+  case "${PI_ENV_SETUP_MODE:-}:${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" in
+    :1) PI_ENV_SETUP_MODE="nix-managed" ;;
+    :*) PI_ENV_SETUP_MODE="portable" ;;
+  esac
   PI_ENV_SKIP_TERMINAL="${PI_ENV_SKIP_TERMINAL:-0}"
   PI_ENV_SKIP_REPO_HOOKS="${PI_ENV_SKIP_REPO_HOOKS:-0}"
 

@@ -26,7 +26,7 @@ import { discoverAgents } from "./agents";
 import { createExecuteSubagent } from "./execute";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentCall, renderSubagentResult } from "./render";
-import type { ExtToolRegistration, ToolCapability } from "./types";
+import { listenForAgentTools, PiEvent, type ToolCapability } from "../_shared/agent-tools";
 
 // ─── Parameters schema (stable across re-registrations) ──────────────────────
 
@@ -61,14 +61,11 @@ const SUBAGENT_PARAMETERS = Type.Object({
 export default function (pi: ExtensionAPI) {
   // ── Extension tool registration ──────────────────────────────────────────
   // Collect AgentTool instances from other extensions at load time.
-  // Providers emit on "agent-tools:register" during session_start.
-  // Expected format: ExtToolRegistration envelope { tool, capabilities }.
   const registeredExtTools = new Map<string, AgentTool<any, any>>();
   const extToolCaps = new Map<string, ToolCapability[]>();
-  pi.events.on("agent-tools:register", (data: unknown) => {
-    const reg = data as ExtToolRegistration;
-    registeredExtTools.set(reg.tool.name, reg.tool);
-    extToolCaps.set(reg.tool.name, reg.capabilities);
+  listenForAgentTools(pi, (registration) => {
+    registeredExtTools.set(registration.tool.name, registration.tool);
+    extToolCaps.set(registration.tool.name, registration.capabilities);
   });
 
   // Named execute function — stable reference (no recreation on re-register)
@@ -88,7 +85,7 @@ export default function (pi: ExtensionAPI) {
 
   // ── session_start: re-register with dynamic model + agent list ────────────
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on(PiEvent.SessionStart, (_event, ctx) => {
     // 1. Read enabled models and annotations from settings.json
     let enabledModelIds: string[] = [];
     let modelAnnotations: Record<string, string[]> = {};
