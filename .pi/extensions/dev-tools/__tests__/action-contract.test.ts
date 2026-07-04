@@ -6,6 +6,7 @@ import {
   DEV_TOOLS_ACTIONS,
   DEV_TOOLS_TOOL_DESCRIPTIONS,
   DevToolsAction,
+  DevToolsPathMode,
   createDevToolsParameterSchema,
 } from "../action-contract";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -18,10 +19,10 @@ describeIfEnabled("dev-tools", "action contract", () => {
   });
 
   it("defines path cardinality in one public contract table", () => {
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Diagnostics].pathMode).toBe("many");
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Status].pathMode).toBe("none");
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.References].pathMode).toBe("single");
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Symbols].pathMode).toBe("single");
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Diagnostics].pathMode).toBe(DevToolsPathMode.Many);
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Status].pathMode).toBe(DevToolsPathMode.None);
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.References].pathMode).toBe(DevToolsPathMode.Single);
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Symbols].pathMode).toBe(DevToolsPathMode.Single);
   });
 
   it("builds the tool schema from shared parameter descriptions", () => {

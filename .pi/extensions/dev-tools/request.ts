@@ -1,6 +1,6 @@
 import { Either } from "effect";
 import type { DaemonRequest } from "./protocol";
-import { DevToolsAction, getActionContract } from "./action-contract";
+import { DevToolsAction, DevToolsPathMode, getActionContract } from "./action-contract";
 export { DevToolsAction, DEV_TOOLS_ACTIONS } from "./action-contract";
 
 export interface DevToolsParams {
@@ -27,11 +27,11 @@ function normalizePathsForAction(params: DevToolsParams): Either.Either<string[]
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
   const mode = getActionContract(params.action).pathMode;
 
-  if (mode === "single" && paths.length > 1) {
+  if (mode === DevToolsPathMode.Single && paths.length > 1) {
     return Either.left(requestBuildError(`${params.action} requires a single path — ${paths.length} were provided`));
   }
 
-  return Either.right(mode === "none" ? [] : paths);
+  return Either.right(mode === DevToolsPathMode.None ? [] : paths);
 }
 
 /**

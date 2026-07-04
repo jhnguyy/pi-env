@@ -13,7 +13,11 @@ export enum DevToolsAction {
   Status = "status",
 }
 
-export type DevToolsPathMode = "none" | "single" | "many";
+export enum DevToolsPathMode {
+  None = "none",
+  Single = "single",
+  Many = "many",
+}
 
 export interface DevToolsActionContract {
   readonly pathMode: DevToolsPathMode;
@@ -21,15 +25,15 @@ export interface DevToolsActionContract {
 }
 
 export const DEV_TOOLS_ACTION_CONTRACTS = {
-  [DevToolsAction.Diagnostics]: { pathMode: "many", needsPosition: false },
-  [DevToolsAction.Hover]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.Definition]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.Implementation]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.References]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.IncomingCalls]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.OutgoingCalls]: { pathMode: "single", needsPosition: true },
-  [DevToolsAction.Symbols]: { pathMode: "single", needsPosition: false },
-  [DevToolsAction.Status]: { pathMode: "none", needsPosition: false },
+  [DevToolsAction.Diagnostics]: { pathMode: DevToolsPathMode.Many, needsPosition: false },
+  [DevToolsAction.Hover]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.Definition]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.Implementation]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.References]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.IncomingCalls]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.OutgoingCalls]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
+  [DevToolsAction.Symbols]: { pathMode: DevToolsPathMode.Single, needsPosition: false },
+  [DevToolsAction.Status]: { pathMode: DevToolsPathMode.None, needsPosition: false },
 } as const satisfies Record<DevToolsAction, DevToolsActionContract>;
 
 export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
