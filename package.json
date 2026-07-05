@@ -63,7 +63,7 @@
     "pretypecheck": "nub run check:node",
     "preinstall": "nub run check:node",
     "check:deps": "NODE_PATH=node_modules scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs .pi/extensions --include-only '^\\.pi/extensions' --output-type err --progress none",
-    "check:clones": "NODE_PATH=node_modules scripts/node-run.sh node_modules/jscpd/bin/jscpd .pi/extensions --config .jscpd.json --exitCode 0",
+    "check:clones": "scripts/node-run.sh scripts/run-jscpd.js .pi/extensions --config .jscpd.json --exit-code 0",
     "check:unused": "NODE_PATH=node_modules scripts/node-run.sh node_modules/knip/bin/knip.js --reporter compact --no-progress --no-exit-code",
     "check:all": "nub run check:deps && nub run check:clones && nub run check:unused && nub run check:security",
     "harness:report": "scripts/node-run.sh scripts/harness-report.js",
@@ -82,15 +82,11 @@
     "@earendil-works/pi-ai": "0.80.3",
     "@earendil-works/pi-coding-agent": "0.80.3",
     "@earendil-works/pi-tui": "0.80.3",
-    "@jscpd/core": "4.0.1",
-    "@jscpd/finder": "4.0.1",
-    "@jscpd/html-reporter": "4.0.1",
-    "@jscpd/tokenizer": "4.0.1",
     "@types/node": "^22.20.0",
+    "cpd-linux-x64-musl": "5.0.11",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
-    "jscpd": "4.0.5",
-    "jscpd-sarif-reporter": "4.0.3",
+    "jscpd": "5.0.11",
     "knip": "^6.24.0",
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
@@ -114,5 +110,8 @@
   "allowBuilds": {
     "@google/genai": true,
     "esbuild": true
+  },
+  "optionalDependencies": {
+    "cpd-linux-x64-gnu": "5.0.11"
   }
 }

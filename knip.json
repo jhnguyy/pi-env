@@ -31,6 +31,7 @@
     "@jscpd/html-reporter",
     "@jscpd/tokenizer",
     "bash-language-server",
+    "cpd-linux-x64-musl",
     "dependency-cruiser",
     "jscpd",
     "jscpd-sarif-reporter",
