@@ -46,7 +46,7 @@ test_auto_nix_entrypoint_uses_nix_setup_app() {
   old_path="$PATH"
   output="$tmp/out"
   cat > "$tmp/nix" <<'SH'
-#!/usr/bin/env sh
+#!/bin/sh
 printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
 SH
   chmod +x "$tmp/nix"
@@ -65,7 +65,7 @@ test_use_nix_entrypoint_reexecs_nix_setup_app() {
   old_path="$PATH"
   output="$tmp/out"
   cat > "$tmp/nix" <<'SH'
-#!/usr/bin/env sh
+#!/bin/sh
 printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
 SH
   chmod +x "$tmp/nix"
