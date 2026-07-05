@@ -6,7 +6,7 @@
  */
 
 import type { AgentConfig } from "./agents";
-import { BUILT_IN_TOOLS } from "./execute";
+import { BUILT_IN_TOOLS } from "./resolver";
 import type { ToolCapability } from "./types";
 import { formatCapabilities } from "./types";
 
