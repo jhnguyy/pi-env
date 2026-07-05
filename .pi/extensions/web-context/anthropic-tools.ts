@@ -1,4 +1,4 @@
-import { readSettingsBlock } from "../_shared/settings";
+import { booleanSetting, isObject, objectAt, positiveIntegerSetting, readSettingsBlock } from "../_shared/settings";
 
 export const AnthropicHostedToolName = {
   WebSearch: "web_search",
@@ -59,21 +59,25 @@ export function loadAnthropicWebToolSettings(cwd = process.cwd(), env: Record<st
   return {
     enabled: booleanSetting(settings[AnthropicHostedToolSettingKey.Enabled], env[AnthropicHostedToolEnvVar.Enabled], true),
     tools: parseToolList(settings[AnthropicHostedToolSettingKey.Tools]) ?? [...DEFAULT_TOOLS],
-    maxUses: numberSetting(settings[AnthropicHostedToolSettingKey.MaxUses]),
+    maxUses: positiveIntegerSetting(settings[AnthropicHostedToolSettingKey.MaxUses]),
   };
 }
 
+export function isAnthropicHostedWebToolsModel(model: unknown): boolean {
+  return isAnthropicProviderModel(model);
+}
+
 export function shouldInjectAnthropicHostedWebTools(model: unknown, settings = loadAnthropicWebToolSettings()): boolean {
-  return settings.enabled && isAnthropicProviderModel(model);
+  return settings.enabled && isAnthropicHostedWebToolsModel(model);
 }
 
 export function injectAnthropicHostedWebTools(payload: unknown, settings: AnthropicWebToolSettings): unknown {
-  if (!isRecord(payload)) return payload;
+  if (!isObject(payload)) return payload;
 
   const existingTools = Array.isArray(payload.tools) ? [...payload.tools] : [];
   const existingNames = new Set(
     existingTools
-      .map((tool) => (isRecord(tool) ? tool.name : undefined))
+      .map((tool) => (isObject(tool) ? tool.name : undefined))
       .filter((name): name is string => typeof name === "string"),
   );
   const hostedTools = settings.tools
@@ -92,29 +96,8 @@ function buildHostedTool(name: AnthropicHostedToolName, settings: AnthropicWebTo
 }
 
 function isAnthropicProviderModel(model: unknown): boolean {
-  if (!isRecord(model)) return false;
+  if (!isObject(model)) return false;
   return model.provider === ProviderName.Anthropic || (model.api === ModelApi.AnthropicMessages && model.provider !== ProviderName.GitHubCopilot);
-}
-
-function objectAt(root: Record<string, unknown>, key: string): Record<string, unknown> {
-  const value = root[key];
-  return isRecord(value) ? value : {};
-}
-
-function booleanSetting(value: unknown, envValue: unknown, defaultValue: boolean): boolean {
-  return parseBoolean(envValue) ?? parseBoolean(value) ?? defaultValue;
-}
-
-function parseBoolean(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") return value;
-  if (typeof value !== "string") return undefined;
-  if (/^(1|true|yes|on)$/i.test(value.trim())) return true;
-  if (/^(0|false|no|off)$/i.test(value.trim())) return false;
-  return undefined;
-}
-
-function numberSetting(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
 function parseToolList(value: unknown): AnthropicHostedToolName[] | undefined {
@@ -123,6 +106,3 @@ function parseToolList(value: unknown): AnthropicHostedToolName[] | undefined {
   return tools.length > 0 ? [...new Set(tools)] : undefined;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}

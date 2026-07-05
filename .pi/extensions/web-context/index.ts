@@ -2,7 +2,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
-import { injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools } from "./anthropic-tools";
+import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
+import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
+
+export const WebFetchMode = {
+  Raw: "raw",
+  Text: "text",
+  Metadata: "metadata",
+} as const;
+export type WebFetchMode = typeof WebFetchMode[keyof typeof WebFetchMode];
 
 export interface SiteAdapter {
   id: string;
@@ -70,19 +78,163 @@ export function selectAdapter(url: URL): SiteAdapter | null {
   return SITE_ADAPTERS.find((adapter) => adapter.match(url)) ?? null;
 }
 
-export async function fetchWebText(rawUrl: string, maxBytes = 100_000, signal?: AbortSignal): Promise<{ text: string; url: string; status: number; contentType: string | null; truncated: boolean }> {
+export interface WebFetchOptions {
+  maxBytes?: number;
+  mode?: WebFetchMode;
+}
+
+export interface WebFetchResult {
+  text: string;
+  url: string;
+  status: number;
+  contentType: string | null;
+  truncated: boolean;
+  mode: WebFetchMode;
+  rawBytes: number;
+  outputBytes: number;
+}
+
+export async function fetchWebText(rawUrl: string, options: WebFetchOptions | number = {}, signal?: AbortSignal): Promise<WebFetchResult> {
+  const normalizedOptions = typeof options === "number" ? { maxBytes: options } : options;
+  const mode = normalizedOptions.mode ?? WebFetchMode.Text;
   const url = parseWebUrl(rawUrl);
   const response = await fetch(url, {
     redirect: "follow",
     signal,
-    headers: { accept: "text/html, text/plain, application/json, application/xml, text/*;q=0.9, */*;q=0.1" },
+    headers: { accept: "text/html, text/plain, application/json, application/xml, application/rss+xml, text/*;q=0.9, */*;q=0.1" },
   });
   const contentType = response.headers.get("content-type");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  const limit = Math.max(1, Math.min(maxBytes, 1_000_000));
-  const truncated = bytes.byteLength > limit;
-  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, limit));
-  return { text, url: response.url, status: response.status, contentType, truncated };
+  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  const transformed = transformFetchedText(decoded, contentType, mode);
+  const limit = Math.max(1, Math.min(normalizedOptions.maxBytes ?? 100_000, 1_000_000));
+  const encoded = new TextEncoder().encode(transformed);
+  const truncated = encoded.byteLength > limit;
+  const text = truncateUtf8(transformed, limit);
+  return { text, url: response.url, status: response.status, contentType, truncated, mode, rawBytes: bytes.byteLength, outputBytes: Math.min(encoded.byteLength, limit) };
+}
+
+function transformFetchedText(text: string, contentType: string | null, mode: WebFetchMode): string {
+  const lowerContentType = contentType?.toLowerCase() ?? "";
+  switch (mode) {
+    case WebFetchMode.Raw:
+      return text;
+    case WebFetchMode.Metadata:
+      return extractMetadata(text, lowerContentType);
+    case WebFetchMode.Text:
+      return transformFetchedBodyText(text, lowerContentType);
+  }
+}
+
+function transformFetchedBodyText(text: string, lowerContentType: string): string {
+  if (lowerContentType.includes("html")) return extractHtmlText(text);
+  if (lowerContentType.includes("xml") || lowerContentType.includes("rss") || lowerContentType.includes("atom")) return extractXmlText(text);
+  if (lowerContentType.includes("json")) return compactJsonText(text);
+  return normalizeWhitespace(text);
+}
+
+function extractMetadata(text: string, contentType: string): string {
+  if (!contentType.includes("html")) return compactJsonText(text);
+  const title = firstMatch(text, /<title[^>]*>([\s\S]*?)<\/title>/i);
+  const description = firstMatch(text, /<meta\s+[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']*)["'][^>]*>/i);
+  const headings = [...text.matchAll(/<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/gi)]
+    .slice(0, 40)
+    .map((match) => `${"#".repeat(Number(match[1]))} ${htmlToPlainText(match[2] ?? "")}`)
+    .filter(Boolean);
+  const links = extractLinks(text).slice(0, 80).map((link) => `- ${link.text}${link.href ? ` — ${link.href}` : ""}`);
+  return [title ? `# ${decodeEntities(title)}` : undefined, description ? decodeEntities(description) : undefined, headings.length ? `\n## Headings\n${headings.join("\n")}` : undefined, links.length ? `\n## Links\n${links.join("\n")}` : undefined]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function extractHtmlText(html: string): string {
+  const withoutNoise = html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<(?:header|footer|nav|aside)\b[\s\S]*?<\/(?:header|footer|nav|aside)>/gi, " ");
+  return htmlToPlainText(withoutNoise);
+}
+
+function htmlToPlainText(html: string): string {
+  return normalizeWhitespace(
+    decodeEntities(
+      html
+        .replace(/<\/(?:p|div|section|article|h[1-6]|li|tr|pre|blockquote)>/gi, "\n")
+        .replace(/<br\s*\/?\s*>/gi, "\n")
+        .replace(/<li\b[^>]*>/gi, "\n- ")
+        .replace(/<[^>]+>/g, " "),
+    ),
+  );
+}
+
+function extractXmlText(xml: string): string {
+  return normalizeWhitespace(
+    decodeEntities(
+      xml
+        .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+        .replace(/<\/(?:item|entry|channel|feed)>/gi, "\n\n")
+        .replace(/<\/(?:title|link|description|summary|updated|published)>/gi, "\n")
+        .replace(/<[^>]+>/g, " "),
+    ),
+  );
+}
+
+function compactJsonText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return normalizeWhitespace(text);
+  }
+}
+
+function extractLinks(html: string): Array<{ text: string; href: string }> {
+  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)]
+    .map((match) => ({ href: decodeEntities(match[1] ?? ""), text: htmlToPlainText(match[2] ?? "").slice(0, 120) }))
+    .filter((link) => link.text || link.href);
+}
+
+function firstMatch(text: string, pattern: RegExp): string | undefined {
+  const match = text.match(pattern);
+  return match?.[1];
+}
+
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_match, decimal: string) => String.fromCodePoint(Number.parseInt(decimal, 10)));
+}
+
+function normalizeWhitespace(value: string): string {
+  return value
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\t ]+/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function truncateUtf8(text: string, maxBytes: number): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(text).byteLength <= maxBytes) return text;
+  let output = "";
+  let used = 0;
+  for (const char of text) {
+    const length = encoder.encode(char).byteLength;
+    if (used + length > maxBytes) break;
+    output += char;
+    used += length;
+  }
+  return output;
 }
 
 export function buildContextPlan(rawUrl: string, purpose?: string): string {
@@ -109,44 +261,59 @@ export function buildContextPlan(rawUrl: string, purpose?: string): string {
 }
 
 export default function webContext(pi: ExtensionAPI) {
+  let anthropicSettings: AnthropicWebToolSettings | undefined;
+  let openAISettings: OpenAIWebToolSettings | undefined;
+
   pi.on(PiEvent.BeforeProviderRequest, (event, ctx) => {
-    const settings = loadAnthropicWebToolSettings(ctx.cwd);
-    if (!shouldInjectAnthropicHostedWebTools(ctx.model, settings)) return undefined;
-    return injectAnthropicHostedWebTools(event.payload, settings);
+    if (isAnthropicHostedWebToolsModel(ctx.model)) {
+      anthropicSettings ??= loadAnthropicWebToolSettings(ctx.cwd);
+      return shouldInjectAnthropicHostedWebTools(ctx.model, anthropicSettings) ? injectAnthropicHostedWebTools(event.payload, anthropicSettings) : undefined;
+    }
+
+    if (isOpenAIHostedWebToolsModel(ctx.model)) {
+      openAISettings ??= loadOpenAIWebToolSettings(ctx.cwd);
+      return shouldInjectOpenAIHostedWebTools(ctx.model, openAISettings) ? injectOpenAIHostedWebTools(event.payload, openAISettings) : undefined;
+    }
+
+    return undefined;
   });
 
   pi.registerTool({
     name: "web_fetch",
     label: "Web Fetch",
     description: [
-      "Fetch an http(s) URL as text without browser automation.",
-      "Use web_fetch for direct URL retrieval when a text/API/static fetch is sufficient.",
-      "This tool does not execute page JavaScript, click, authenticate, or visually inspect pages.",
-      "For direct Anthropic models, hosted web_search is attached at the provider layer.",
+      "Fetch an http(s) URL as bounded text; no JS, clicks, auth, or visual inspection.",
+      "Default mode='text' strips HTML boilerplate for lower token use; use mode='raw' only when exact markup matters.",
+      "Use mode='metadata' for a compact title/headings/links view.",
     ].join("\n"),
-    promptSnippet: "Fetch an http(s) URL as bounded text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
+    promptSnippet: "Fetch an http(s) URL as compact text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
     promptGuidelines: [
-      "Use web_fetch for direct URL retrieval before considering browser automation.",
-      "Do not use web_fetch for secrets, authenticated pages, forms, or actions with side effects.",
+      "Use web_fetch for direct URL retrieval; prefer default text/metadata modes to conserve tokens.",
+      "Do not use web_fetch for secrets, authenticated pages, forms, or side effects.",
     ],
     parameters: Type.Object({
       url: Type.String({ description: "http(s) URL to fetch." }),
-      maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return, capped at 1 MB. Default 100000." })),
+      maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return after extraction, capped at 1 MB. Default 100000." })),
+      mode: Type.Optional(Type.String({ description: "Output mode: text (default, token-efficient), raw (unprocessed response text), or metadata (title/headings/links)." })),
     }),
     async execute(_toolCallId, params, signal) {
       try {
-        const result = await fetchWebText(params.url, params.maxBytes, signal);
+        const mode = Object.values(WebFetchMode).includes(params.mode as WebFetchMode) ? (params.mode as WebFetchMode) : WebFetchMode.Text;
+        const result = await fetchWebText(params.url, { maxBytes: params.maxBytes, mode }, signal);
         const header = [
           `URL: ${result.url}`,
           `Status: ${result.status}`,
           `Content-Type: ${result.contentType ?? "unknown"}`,
+          `Mode: ${result.mode}`,
+          `Raw-Bytes: ${result.rawBytes}`,
+          `Output-Bytes: ${result.outputBytes}`,
           result.truncated ? "Truncated: true" : "Truncated: false",
           "",
         ].join("\n");
         return { content: [txt(`${header}${result.text}`)], details: result };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        return { content: [txt(`Could not fetch URL: ${message}`)], details: { text: "", url: params.url, status: 0, contentType: null, truncated: false, error: message }, isError: true };
+        return { content: [txt(`Could not fetch URL: ${message}`)], details: { text: "", url: params.url, status: 0, contentType: null, truncated: false, mode: WebFetchMode.Text, rawBytes: 0, outputBytes: 0, error: message }, isError: true };
       }
     },
   });
@@ -155,14 +322,10 @@ export default function webContext(pi: ExtensionAPI) {
     name: "web_context",
     label: "Web Context",
     description: [
-      "Map a website URL to the preferred programmatic context-gathering strategy.",
-      "Use this before considering the browser tool when a task mentions a website.",
-      "Policy: do not use the browser tool for websites unless the user explicitly asks you to browse, inspect, click through, or visually verify the site.",
-      "If browser use still appears necessary after text/API-first context gathering, ask the user for explicit permission before calling the browser tool.",
-      "Prefer existing scripts, APIs, repo docs, cached notes, static fetches, sitemaps, feeds, llms.txt, and other text-first sources before browser automation.",
-      "The tool returns known site-specific adapters when available and a generic text/API-first plan otherwise.",
-      "It does not browse visually or click through pages.",
-      "On direct Anthropic models, pi-env can attach Anthropic-hosted web_search to provider requests; set webContext.anthropicHostedTools.enabled=false to disable."
+      "Return a concise text/API-first plan for gathering context from a website URL.",
+      "Use before browser automation unless the user explicitly asks to browse, click, inspect, or visually verify.",
+      "Prefer APIs, local repos, static fetches, sitemaps, feeds, llms.txt, and source docs first.",
+      "Does not browse visually or click pages."
     ].join("\n"),
     parameters: Type.Object({
       url: Type.String({ description: "Website URL to gather context for." }),

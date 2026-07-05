@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildContextPlan, parseWebUrl, selectAdapter } from "../index";
+import { WebFetchMode, buildContextPlan, fetchWebText, parseWebUrl, selectAdapter } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
+import { OpenAISearchContextSize, injectOpenAIHostedWebTools, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
 describe("web context", () => {
   it("selects the GitHub adapter", () => {
@@ -24,6 +25,45 @@ describe("web context", () => {
 
   it("rejects non-web protocols", () => {
     expect(() => parseWebUrl("file:///tmp/example.html")).toThrow("Unsupported URL protocol");
+  });
+
+  it("extracts compact text from HTML by default", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response("<html><head><style>.x{}</style><script>noise()</script><title>T</title></head><body><nav>skip</nav><main><h1>Hello</h1><p>Useful <b>text</b>.</p></main></body></html>", {
+        headers: { "content-type": "text/html" },
+      });
+    try {
+      const result = await fetchWebText("https://example.com", { mode: WebFetchMode.Text });
+      expect(result.text).toContain("Hello");
+      expect(result.text).toContain("Useful text.");
+      expect(result.text).not.toContain("noise");
+      expect(result.text).not.toContain("skip");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("openai hosted web tools", () => {
+  const settings: OpenAIWebToolSettings = { enabled: true, searchContextSize: OpenAISearchContextSize.Low, externalWebAccess: false };
+
+  it("injects hosted web_search for GPT-5.5 responses payloads", () => {
+    const payload = injectOpenAIHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
+
+    expect(payload.tools).toEqual([
+      { name: "read", input_schema: { type: "object" } },
+      { type: "web_search", search_context_size: "low", external_web_access: false },
+    ]);
+  });
+
+  it("only enables hosted search for OpenAI GPT-5.5 responses models", () => {
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }, settings)).toBe(true);
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai", api: "openai-responses", id: "gpt-5.5" }, settings)).toBe(true);
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai", api: "openai-completions", id: "gpt-5.5" }, settings)).toBe(false);
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "github-copilot", api: "openai-responses", id: "gpt-5.5" }, settings)).toBe(false);
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.4" }, settings)).toBe(false);
+    expect(shouldInjectOpenAIHostedWebTools({ provider: "openai-codex", api: "openai-codex-responses", id: "gpt-5.5" }, { ...settings, enabled: false })).toBe(false);
   });
 });
 
