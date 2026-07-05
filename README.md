@@ -38,7 +38,7 @@ Setup is safe to re-run after moving between dev environments. It installs repo 
 
 ## Terminal configs
 
-In portable mode, `setup.sh` links `setup/templates/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.
+In portable mode, `setup.sh` sources `setup/templates/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. The template enables tmux QoL defaults, 1-based/renumbered windows, truecolor, OSC 8 passthrough, and Pi's recommended `extended-keys-format csi-u` for reliable modified keys. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.
 
 Ghostty is only useful where a GUI terminal runs. Portable setup detects devcontainers/container-like environments and skips Ghostty linking there by default; GUI hosts and VMs get `ghostty/config` and `ghostty/themes/*` linked into `~/.config/ghostty/`. Nix-managed hosts can let the Home Manager module own these files. Set `PI_ENV_LINK_GHOSTTY=1 ./setup.sh` to force Ghostty linking in an unusual portable environment.
 
