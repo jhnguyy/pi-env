@@ -1,0 +1,14 @@
+{
+  "threshold": 0.25,
+  "reporters": ["console"],
+  "mode": "mild",
+  "minLines": 8,
+  "minTokens": 80,
+  "gitignore": true,
+  "ignore": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/__tests__/**",
+    "lock.yaml"
+  ]
+}

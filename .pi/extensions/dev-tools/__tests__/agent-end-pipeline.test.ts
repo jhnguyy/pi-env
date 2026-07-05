@@ -1,6 +1,8 @@
 import type { SpawnSyncReturns } from "node:child_process";
 import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
+import { AgentEndIssueSeverity, AgentEndResultKind } from "../agent-end";
+import { AgentEndBackendCheckKind, AgentEndReadiness } from "../agent-end-review";
 import { BackendName } from "../backend-configs";
 import {
   collectDiagnosticsAgentEndResults,
@@ -33,6 +35,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     expect(partition.formatFiles.map((entry) => [entry.file, entry.config.name])).toEqual([
       ["/repo/main.tf", BackendName.Terraform],
     ]);
+    expect(partition.skippedFiles).toEqual(["/repo/README.md"]);
   });
 
   it("normalizes formatter failures without invoking missing binaries", () => {
@@ -49,10 +52,10 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     expect(runFormat).toHaveBeenCalledTimes(1);
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
-      kind: "format",
+      kind: AgentEndResultKind.Format,
       backend: BackendName.Terraform,
       filePath: "/repo/main.tf",
-      issues: [{ severity: "error", message: "fmt failed" }],
+      issues: [{ severity: AgentEndIssueSeverity.Error, message: "fmt failed" }],
     });
   });
 
@@ -62,7 +65,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     })).resolves.toEqual([]);
   });
 
-  it("processes a whole batch and triggers only for LSP errors", async () => {
+  it("processes a whole batch with review-readiness metadata", async () => {
     const active = new Map();
 
     const result = await processAgentEndBatch(active, ["/repo/a.ts", "/repo/main.tf"], {
@@ -87,9 +90,106 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     });
 
     expect(result.triggerTurn).toBe(true);
+    expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
+    expect(result.summary).toContain("Code sensors completed.");
+    expect(result.summary).toContain("Readiness: blocked");
     expect(result.summary).toContain("a.ts (typescript):");
     expect(result.summary).toContain("main.tf (terraform):");
     expect(result.summary).toContain("fmt failed");
     expect([...active.keys()].sort()).toEqual(["/repo/a.ts", "/repo/main.tf"]);
+  });
+
+  it("reports clean diagnostic metadata and asks the agent to confirm review readiness", async () => {
+    const active = new Map();
+
+    const result = await processAgentEndBatch(active, ["/repo/a.ts", "/repo/README.md"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: async () => ({
+        action: "diagnostics",
+        path: "/repo/a.ts",
+        errorCount: 0,
+        warnCount: 0,
+        language: "typescript",
+        items: [],
+      }),
+    });
+
+    expect(result.triggerTurn).toBe(true);
+    expect(result.metadata).toMatchObject({
+      checkedFiles: ["/repo/a.ts"],
+      skippedFiles: ["/repo/README.md"],
+      issueCounts: { errors: 0, warnings: 0, infos: 0 },
+      readiness: AgentEndReadiness.Ready,
+    });
+    expect(result.summary).toContain("Checked: 1 (a.ts)");
+    expect(result.summary).toContain("Skipped unsupported/unavailable: 1 (README.md)");
+    expect(result.summary).toContain("Readiness: clean. Confirm whether the change is ready for review");
+  });
+
+  it("includes configured code sensors in readiness metadata", async () => {
+    const active = new Map();
+
+    const result = await processAgentEndBatch(active, ["/repo/a.ts"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: async () => ({
+        action: "diagnostics",
+        path: "/repo/a.ts",
+        errorCount: 0,
+        warnCount: 0,
+        language: "typescript",
+        items: [],
+      }),
+      runCodeSensors: async () => [{
+        kind: AgentEndResultKind.Sensor,
+        backend: BackendName.Sensor,
+        filePath: "/repo/.pi/code-sensors.json",
+        fileName: ".pi/code-sensors.json",
+        issues: [{ severity: AgentEndIssueSeverity.Error, message: "depcruise: boundary violation" }],
+      }],
+    });
+
+    expect(result.triggerTurn).toBe(true);
+    expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
+    expect(result.metadata.backendChecks).toContainEqual({ kind: AgentEndBackendCheckKind.Sensor, backend: BackendName.Sensor, files: ["/repo/a.ts"] });
+    expect(result.summary).toContain("sensor:sensor 1");
+    expect(result.summary).toContain("depcruise: boundary violation");
+  });
+
+  it("clears stale sensor results when configured sensors pass later", async () => {
+    const active = new Map();
+    const cleanDiagnostics = async () => ({
+      action: "diagnostics" as const,
+      path: "/repo/a.ts",
+      errorCount: 0,
+      warnCount: 0,
+      language: "typescript",
+      items: [],
+    });
+
+    await processAgentEndBatch(active, ["/repo/a.ts"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: cleanDiagnostics,
+      runCodeSensors: async () => [{
+        kind: AgentEndResultKind.Sensor,
+        backend: BackendName.Sensor,
+        filePath: "/repo/.pi/code-sensors.json",
+        fileName: ".pi/code-sensors.json",
+        issues: [{ severity: AgentEndIssueSeverity.Error, message: "depcruise: boundary violation" }],
+      }],
+    });
+
+    expect([...active.keys()]).toEqual(["/repo/.pi/code-sensors.json"]);
+
+    await processAgentEndBatch(active, ["/repo/a.ts"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: cleanDiagnostics,
+      runCodeSensors: async () => [],
+    });
+
+    expect(active.size).toBe(0);
   });
 });

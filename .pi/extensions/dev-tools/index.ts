@@ -31,6 +31,7 @@ import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
 import { createDevToolsParameterSchema, DEV_TOOLS_TOOL_DESCRIPTIONS } from "./action-contract";
+import { runConfiguredCodeSensors } from "./code-sensors";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,8 @@ export default function (pi: ExtensionAPI) {
     "document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
+    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call. " +
+    "Post-edit code sensors report checked files, skipped files, issue counts, and review-readiness metadata before the agent declares work ready.";
 
   const toolParameters = createDevToolsParameterSchema(
     StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
@@ -85,7 +87,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
       "Use text search for strings, comments, config values, generated files, and unsupported file types.",
-      "After edits, diagnostics run automatically for supported files.",
+      "After edits, code sensors run automatically for supported files and ask the agent to confirm review readiness from the diagnostic metadata.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
@@ -102,5 +104,6 @@ export default function (pi: ExtensionAPI) {
   // ─── post-edit lifecycle ─────────────────────────────────────────────────
   registerDevToolsLifecycle(pi, {
     runDiagnostics: (paths) => client.call({ action: "diagnostics", paths }),
+    runCodeSensors: runConfiguredCodeSensors,
   });
 }

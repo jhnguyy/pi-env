@@ -12,6 +12,7 @@ import { PiEvent } from "../_shared/agent-tools";
 
 export interface DevToolsLifecycleDeps {
   runDiagnostics: (paths: string[]) => Promise<LspResult | null>;
+  runCodeSensors?: (cwd: string, paths: string[]) => Promise<AgentEndFileResult[]>;
   resolveFormatBinary?: (name: string) => string | null;
   runFormat?: (bin: string, args: string[]) => SpawnSyncReturns<string>;
   defer?: (callback: () => void) => void;
@@ -81,7 +82,7 @@ export function registerDevToolsLifecycle(
     state.pendingFiles.recordToolResult(event as ToolResultEditEvent);
   });
 
-  pi.on(PiEvent.AgentEnd, async () => {
+  pi.on(PiEvent.AgentEnd, async (_event, ctx) => {
     const files = state.pendingFiles.drain();
     if (files.length === 0) return;
 
@@ -89,6 +90,7 @@ export function registerDevToolsLifecycle(
       resolveFormatBinary: resolveBinary,
       runFormat,
       runDiagnostics: deps.runDiagnostics,
+      runCodeSensors: deps.runCodeSensors ? (paths) => deps.runCodeSensors?.(ctx?.cwd ?? process.cwd(), paths) ?? Promise.resolve([]) : undefined,
     });
 
     if (!processed.summary) return;

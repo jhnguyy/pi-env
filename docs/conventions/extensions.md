@@ -29,6 +29,29 @@ Keep tools context-economical:
 - use opt-in detail views for larger data
 - never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced
 
+## Post-edit sensors
+
+Use the `dev-tools` agent-end pipeline as the shared post-edit feedback loop for code sensors. Sensor output should lead with review-readiness metadata — checked files, skipped files, backends, and issue counts — before detailed findings. The follow-up message should tell the agent whether to keep fixing, justify warnings, or confirm that the change is ready for review.
+
+Project-specific external sensors can be configured with `.pi/code-sensors.json` when a repo is ready to opt in:
+
+```json
+{
+  "version": 1,
+  "sensors": [
+    {
+      "name": "dependency-cruiser",
+      "command": "nubx depcruise src",
+      "include": [".ts", ".tsx"],
+      "timeoutMs": 120000,
+      "severity": "error"
+    }
+  ]
+}
+```
+
+Keep commands deterministic and local to the repository. Prefer buying mature analyzers such as dependency-cruiser, jscpd, knip, and Semgrep; the pi-env code should only own config loading, diff/file scoping, and agent-readable result formatting.
+
 ## Cross-extension singletons
 
 Store shared services on `globalThis`, not at module level. Module-level variables are per-bundle; `globalThis` is process-wide.

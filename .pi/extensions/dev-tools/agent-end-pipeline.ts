@@ -2,12 +2,19 @@ import type { SpawnSyncReturns } from "node:child_process";
 import {
   type ActiveAgentEndResults,
   type AgentEndFileResult,
+  AgentEndResultKind,
   diagnosticsToAgentEndResults,
   formatAgentEndErrorResult,
   processAgentEndResults,
 } from "./agent-end";
-import { BackendMode, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
+import { BackendMode, BackendName, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
 import type { LspResult } from "./protocol";
+import {
+  AgentEndBackendCheckKind,
+  buildAgentEndReviewResult,
+  type AgentEndBackendCheck,
+  type AgentEndReviewMetadata,
+} from "./agent-end-review";
 
 export interface AgentEndFormatFile {
   file: string;
@@ -17,31 +24,38 @@ export interface AgentEndFormatFile {
 export interface AgentEndFilePartition {
   lspFiles: string[];
   formatFiles: AgentEndFormatFile[];
+  skippedFiles: string[];
 }
 
 export interface AgentEndPipelineDeps {
   resolveFormatBinary: (name: string) => string | null;
   runFormat: (bin: string, args: string[]) => SpawnSyncReturns<string>;
   runDiagnostics: (paths: string[]) => Promise<LspResult | null>;
+  runCodeSensors?: (files: string[]) => Promise<AgentEndFileResult[]>;
 }
 
 export interface AgentEndPipelineResult {
   summary: string;
   triggerTurn: boolean;
+  metadata: AgentEndReviewMetadata;
 }
 
 export function partitionAgentEndFiles(files: string[]): AgentEndFilePartition {
   const lspFiles: string[] = [];
   const formatFiles: AgentEndFormatFile[] = [];
+  const skippedFiles: string[] = [];
 
   for (const file of files) {
     const config = getBackendConfig(file);
-    if (!config) continue;
+    if (!config) {
+      skippedFiles.push(file);
+      continue;
+    }
     if (config.mode === BackendMode.Lsp) lspFiles.push(file);
     else formatFiles.push({ file, config });
   }
 
-  return { lspFiles, formatFiles };
+  return { lspFiles, formatFiles, skippedFiles };
 }
 
 export function collectFormatAgentEndResults(
@@ -91,15 +105,49 @@ export async function processAgentEndBatch(
   files: string[],
   deps: AgentEndPipelineDeps,
 ): Promise<AgentEndPipelineResult> {
-  const { lspFiles, formatFiles } = partitionAgentEndFiles(files);
+  const { lspFiles, formatFiles, skippedFiles } = partitionAgentEndFiles(files);
+  const runnableFormatFiles = formatFiles.filter((entry) => deps.resolveFormatBinary(entry.config.binaryName));
+  const unavailableFormatFiles = formatFiles
+    .filter((entry) => !runnableFormatFiles.some((runnable) => runnable.file === entry.file))
+    .map((entry) => entry.file);
+  const previousSensorResultPaths = deps.runCodeSensors
+    ? [...activeResults.values()]
+      .filter((result) => result.kind === AgentEndResultKind.Sensor)
+      .map((result) => result.filePath)
+    : [];
   const results = [
-    ...collectFormatAgentEndResults(formatFiles, deps),
+    ...collectFormatAgentEndResults(runnableFormatFiles, deps),
     ...await collectDiagnosticsAgentEndResults(lspFiles, deps.runDiagnostics),
+    ...await (deps.runCodeSensors?.(files) ?? []),
   ];
-  const processed = processAgentEndResults(activeResults, files, results);
+  processAgentEndResults(activeResults, [...files, ...previousSensorResultPaths], results);
 
-  return {
-    summary: processed.batchSummary,
-    triggerTurn: processed.triggerTurn,
-  };
+  const diagnosticBackendChecks = new Map<BackendName, string[]>();
+  for (const file of lspFiles) {
+    const config = getBackendConfig(file);
+    const backend = config?.name ?? BackendName.Lsp;
+    diagnosticBackendChecks.set(backend, [...diagnosticBackendChecks.get(backend) ?? [], file]);
+  }
+
+  const backendChecks: AgentEndBackendCheck[] = [
+    ...[...diagnosticBackendChecks.entries()].map(([backend, backendFiles]) => ({
+      kind: AgentEndBackendCheckKind.Diagnostics,
+      backend,
+      files: backendFiles,
+    })),
+    ...runnableFormatFiles.map((entry) => ({ kind: AgentEndBackendCheckKind.Format, backend: entry.config.name, files: [entry.file] })),
+  ];
+  if (deps.runCodeSensors) {
+    backendChecks.push({ kind: AgentEndBackendCheckKind.Sensor, backend: BackendName.Sensor, files });
+  }
+
+  return buildAgentEndReviewResult({
+    checkedFiles: [
+      ...lspFiles,
+      ...runnableFormatFiles.map((entry) => entry.file),
+    ],
+    skippedFiles: [...skippedFiles, ...unavailableFormatFiles],
+    backendChecks,
+    results,
+  });
 }

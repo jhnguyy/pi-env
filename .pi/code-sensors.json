@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "sensors": [
+    {
+      "name": "dependency-cruiser",
+      "command": "nub run sensor:deps",
+      "include": [".pi/extensions/", ".dependency-cruiser.cjs"],
+      "timeoutMs": 120000,
+      "severity": "error"
+    },
+    {
+      "name": "jscpd",
+      "command": "nub run sensor:dup",
+      "include": [".pi/extensions/", ".jscpd.json"],
+      "timeoutMs": 120000,
+      "severity": "warning"
+    }
+  ]
+}

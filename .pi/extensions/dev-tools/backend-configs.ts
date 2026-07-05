@@ -26,6 +26,7 @@ export const BackendName = {
   Nil: "nil",
   Hcl: "hcl",
   Terraform: "terraform",
+  Sensor: "sensor",
 } as const;
 export type BackendName = typeof BackendName[keyof typeof BackendName];
 

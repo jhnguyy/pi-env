@@ -18,11 +18,19 @@ import { BackendName } from "./backend-configs";
 export const AgentEndResultKind = {
   Lsp: "lsp",
   Format: "format",
+  Sensor: "sensor",
 } as const;
 export type AgentEndResultKind = typeof AgentEndResultKind[keyof typeof AgentEndResultKind];
 
+export const AgentEndIssueSeverity = {
+  Error: "error",
+  Warning: "warning",
+  Info: "info",
+} as const;
+export type AgentEndIssueSeverity = typeof AgentEndIssueSeverity[keyof typeof AgentEndIssueSeverity];
+
 export interface AgentEndIssue {
-  severity: "error" | "warning" | "info";
+  severity: AgentEndIssueSeverity;
   message: string;
   /** 1-indexed. Absent for format errors which have no line info. */
   line?: number;
@@ -57,7 +65,11 @@ export interface FormatAgentEndFileResult extends AgentEndFileResultBase {
   kind: typeof AgentEndResultKind.Format;
 }
 
-export type AgentEndFileResult = LspAgentEndFileResult | FormatAgentEndFileResult;
+export interface SensorAgentEndFileResult extends AgentEndFileResultBase {
+  kind: typeof AgentEndResultKind.Sensor;
+}
+
+export type AgentEndFileResult = LspAgentEndFileResult | FormatAgentEndFileResult | SensorAgentEndFileResult;
 
 // ─── Decision ─────────────────────────────────────────────────────────────────
 
@@ -65,9 +77,28 @@ export type AgentEndFileResult = LspAgentEndFileResult | FormatAgentEndFileResul
  * Returns true if any LSP result has at least one error-severity issue. Used to
  * decide whether to pass { triggerTurn: true } to sendMessage.
  */
+export interface AgentEndIssueCounts {
+  errors: number;
+  warnings: number;
+  infos: number;
+}
+
+export function countAgentEndIssues(results: AgentEndFileResult[]): AgentEndIssueCounts {
+  const counts: AgentEndIssueCounts = { errors: 0, warnings: 0, infos: 0 };
+  for (const result of results) {
+    for (const issue of result.issues) {
+      if (issue.severity === AgentEndIssueSeverity.Error) counts.errors++;
+      else if (issue.severity === AgentEndIssueSeverity.Warning) counts.warnings++;
+      else counts.infos++;
+    }
+  }
+  return counts;
+}
+
 export function shouldTriggerTurn(results: AgentEndFileResult[]): boolean {
   return results.some(
-    (r) => r.kind === AgentEndResultKind.Lsp && r.issues.some((i) => i.severity === "error"),
+    (r) => (r.kind === AgentEndResultKind.Lsp || r.kind === AgentEndResultKind.Sensor) &&
+      r.issues.some((i) => i.severity === AgentEndIssueSeverity.Error),
   );
 }
 
@@ -135,7 +166,7 @@ export function formatAgentEndErrorResult(
     backend,
     filePath,
     fileName: basename(filePath),
-    issues: [{ severity: "error", message }],
+    issues: [{ severity: AgentEndIssueSeverity.Error, message }],
   };
 }
 
@@ -143,9 +174,9 @@ export function formatAgentEndErrorResult(
 
 function mapDiagItem(item: DiagnosticItem): AgentEndIssue {
   return {
-    severity: item.severity === "error" ? "error"
-      : item.severity === "warning" ? "warning"
-      : "info",
+    severity: item.severity === "error" ? AgentEndIssueSeverity.Error
+      : item.severity === "warning" ? AgentEndIssueSeverity.Warning
+      : AgentEndIssueSeverity.Info,
     message: item.message,
     line: item.line,
     character: item.character,
@@ -208,8 +239,8 @@ export function renderAgentEndSummary(results: AgentEndFileResult[]): string {
   let totalWarnings = 0;
   for (const r of withIssues) {
     for (const i of r.issues) {
-      if (i.severity === "error") totalErrors++;
-      else if (i.severity === "warning") totalWarnings++;
+      if (i.severity === AgentEndIssueSeverity.Error) totalErrors++;
+      else if (i.severity === AgentEndIssueSeverity.Warning) totalWarnings++;
     }
   }
 
@@ -221,7 +252,7 @@ export function renderAgentEndSummary(results: AgentEndFileResult[]): string {
   for (const r of withIssues) {
     lines.push(`${r.fileName} (${r.backend}):`);
     for (const issue of r.issues) {
-      const prefix = issue.severity === "error" ? "E" : issue.severity === "warning" ? "W" : "I";
+      const prefix = issue.severity === AgentEndIssueSeverity.Error ? "E" : issue.severity === AgentEndIssueSeverity.Warning ? "W" : "I";
       const loc = issue.line != null ? ` L${issue.line}:${issue.character ?? 0}` : "";
       const code = issue.code ? ` ${issue.code}` : "";
       lines.push(`  ${prefix}${loc}${code} ${issue.message}`);
