@@ -16,7 +16,14 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsFor = system: import nixpkgs { inherit system; };
-      nodeFor = pkgs: if pkgs ? nodejs_22 then pkgs.nodejs_22 else pkgs.nodejs;
+      nodeVersion = builtins.replaceStrings [ "\n" "\r" " " ] [ "" "" "" ] (builtins.readFile ./.node-version);
+      nodeMajorMatch = builtins.match "([0-9]+).*" nodeVersion;
+      nodeMajor = if nodeMajorMatch == null then throw "Unsupported .node-version: ${nodeVersion}" else builtins.elemAt nodeMajorMatch 0;
+      nodeAttr = "nodejs_${nodeMajor}";
+      nodeFor = pkgs:
+        if builtins.hasAttr nodeAttr pkgs
+        then builtins.getAttr nodeAttr pkgs
+        else throw "nixpkgs for ${pkgs.system} does not provide ${nodeAttr} required by .node-version (${nodeVersion})";
       toolchainPackages = pkgs: [
         pkgs.git
         pkgs.gh
