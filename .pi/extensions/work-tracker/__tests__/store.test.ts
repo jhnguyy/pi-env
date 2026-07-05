@@ -160,6 +160,10 @@ describe("TodoStore", () => {
     expect(output).not.toContain("second");
   });
 
+  it("renderContext() returns null when there are no open tasks", () => {
+    expect(store.renderContext()).toBeNull();
+  });
+
   it("renderContext() summarizes open tasks without task text", () => {
     store.add("long task text that should stay out of automatic context");
     store.add("another detailed task");
