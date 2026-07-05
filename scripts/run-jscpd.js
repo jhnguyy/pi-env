@@ -3,20 +3,38 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const LINUX_X64_GNU = "cpd-linux-x64-gnu";
+const LINUX_X64_MUSL = "cpd-linux-x64-musl";
+
+function unique(values) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function detectLinuxLibc() {
+  if (process.platform !== "linux") return undefined;
+  const report = process.report?.getReport?.();
+  return report?.header?.glibcVersionRuntime ? "glibc" : "musl";
+}
+
 function linuxCandidates() {
   if (process.platform !== "linux" || process.arch !== "x64") return [];
-  // Some containerized/Nix-like environments report glibc to Node but can only
-  // execute the musl jscpd binary. Try both pinned Linux x64 packages.
-  return ["cpd-linux-x64-musl", "cpd-linux-x64-gnu"];
+  const detected = detectLinuxLibc() === "glibc" ? LINUX_X64_GNU : LINUX_X64_MUSL;
+  const fallback = detected === LINUX_X64_GNU ? LINUX_X64_MUSL : LINUX_X64_GNU;
+
+  // Prefer the platform Node detects, but keep the alternate Linux x64 binary
+  // as a fallback. Some containerized/Nix-like environments report glibc to
+  // Node while the gnu binary is not executable in the runtime image.
+  return [detected, fallback];
 }
 
 function platformCandidates() {
+  const explicit = process.env.JSCPD_PLATFORM_PACKAGE;
   const direct = {
     "darwin:arm64": "cpd-darwin-arm64",
     "darwin:x64": "cpd-darwin-x64",
     "win32:x64": "cpd-windows-x64-msvc",
   }[`${process.platform}:${process.arch}`];
-  return [...linuxCandidates(), ...(direct ? [direct] : [])];
+  return unique([explicit, ...linuxCandidates(), direct]);
 }
 
 function binaryForPackage(packageName) {
