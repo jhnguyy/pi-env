@@ -21,6 +21,13 @@
       "include": [".pi/extensions/", "scripts/", "setup/", "knip.json", "package.json"],
       "timeoutMs": 120000,
       "severity": "warning"
+    },
+    {
+      "name": "trivy",
+      "command": "nub run check:security",
+      "include": ["package.json", "lock.yaml", "scripts/check-security.sh"],
+      "timeoutMs": 300000,
+      "severity": "error"
     }
   ]
 }

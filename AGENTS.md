@@ -13,7 +13,7 @@ Run `nub run check:all` before considering any code task complete. For more read
 Canonical locations for cross-cutting concerns in this repo:
 
 - Validation and install/package checks: `scripts/*-contract.mjs`, `scripts/verify*.mjs`, `setup/__tests__/`, and `.pi/extensions/skill-builder/validator.ts`.
-- Dependency and duplication sensors: `.dependency-cruiser.cjs`, `.jscpd.json`, `knip.json`, `.pi/code-sensors.json`, and `.pi/extensions/dev-tools/code-sensors.ts`.
+- Dependency, duplication, unused-code, and security sensors: `.dependency-cruiser.cjs`, `.jscpd.json`, `knip.json`, `.pi/code-sensors.json`, `scripts/check-security.sh`, and `.pi/extensions/dev-tools/code-sensors.ts`.
 - HTTP/web access: `.pi/extensions/web-context/`; do not add ad hoc HTTP fetching elsewhere unless the extension owns that integration.
 - Config/settings access: `setup/config/`, `setup/templates/`, `.pi/extensions/_shared/settings.ts`, and `.pi/extensions/_shared/agent-settings.ts`.
 - Error handling: `.pi/extensions/_shared/errors.ts`; use `formatError(e, "label")` for caught errors returned to tools.

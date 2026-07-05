@@ -23,6 +23,13 @@ const CHECKS = [
     blocking: false,
     hint: formatKnip,
   },
+  {
+    name: "security scan",
+    command: "nub",
+    args: ["run", "check:security"],
+    blocking: true,
+    hint: formatTrivy,
+  },
 ];
 
 function stripAnsi(text) {
@@ -62,6 +69,14 @@ function formatJscpd(output) {
     }
   }
   return instructions;
+}
+
+function formatTrivy(output) {
+  if (output.includes("trivy not installed")) return [];
+  return output.split("\n")
+    .filter((line) => /CRITICAL|HIGH|SECRET|Misconfiguration|Vulnerability/i.test(line))
+    .slice(0, 20)
+    .map((line) => `Security finding: ${line.trim()}. Review the Trivy finding, update or suppress with a documented rationale, then re-run check:security.`);
 }
 
 function formatKnip(output) {

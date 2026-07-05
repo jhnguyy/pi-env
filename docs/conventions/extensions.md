@@ -52,7 +52,7 @@ Project-specific external sensors can be configured with `.pi/code-sensors.json`
 
 Keep commands deterministic and local to the repository. Prefer buying mature analyzers such as dependency-cruiser, jscpd, knip, and Semgrep; the pi-env code should only own config loading, diff/file scoping, and agent-readable result formatting.
 
-For pi-env itself, use `nub run check:all` as the combined harness entry point and `nub run harness:report` when you want the same checks rendered as agent-actionable instructions.
+For pi-env itself, use `nub run check:all` as the combined harness entry point and `nub run harness:report` when you want the same checks rendered as agent-actionable instructions. `check:security` uses Trivy when it is installed; set `REQUIRE_TRIVY=1` in CI to fail instead of skipping when the binary is missing.
 
 ## Cross-extension singletons
 

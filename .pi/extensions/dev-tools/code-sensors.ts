@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { Data, Effect } from "effect";
 import type { AgentEndFileResult } from "./agent-end";
 import { AgentEndIssueSeverity as Severity, AgentEndResultKind } from "./agent-end";
 import { BackendName } from "./backend-configs";
@@ -21,6 +22,11 @@ export interface CodeSensorCommand {
 export interface CodeSensorDeps {
   runCommand?: (command: string, cwd: string, timeoutMs: number) => SpawnSyncReturns<string>;
 }
+
+class CodeSensorError extends Data.TaggedError("CodeSensorError")<{
+  message: string;
+  cause?: unknown;
+}> {}
 
 export const CodeSensorSeverity = {
   Error: Severity.Error,
@@ -102,32 +108,48 @@ function firstUsefulLine(text: string): string {
   return text.split("\n").map((line) => line.trim()).find(Boolean) ?? "command failed";
 }
 
-export async function runConfiguredCodeSensors(
+function runConfiguredCodeSensorsEffect(
+  cwd: string,
+  files: string[],
+  deps: CodeSensorDeps = {},
+): Effect.Effect<AgentEndFileResult[], CodeSensorError> {
+  return Effect.gen(function* () {
+    const config = yield* Effect.try({
+      try: () => loadCodeSensorConfig(cwd),
+      catch: (cause) => new CodeSensorError({ message: "failed to load code sensor config", cause }),
+    });
+    const sensors = config?.sensors ?? [];
+    if (sensors.length === 0 || files.length === 0) return [];
+
+    const runCommand = deps.runCommand ?? defaultRunCommand;
+    const results: AgentEndFileResult[] = [];
+    for (const sensor of sensors.filter((entry) => sensorMatchesFiles(entry, files))) {
+      const run = yield* Effect.try({
+        try: () => runCommand(sensor.command, cwd, sensor.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        catch: (cause) => new CodeSensorError({ message: `${sensor.name} failed to start`, cause }),
+      });
+      if (run.status === 0) continue;
+
+      const detail = firstUsefulLine(run.stderr || run.stdout || `exit ${run.status ?? "unknown"}`);
+      results.push({
+        kind: AgentEndResultKind.Sensor,
+        backend: BackendName.Sensor,
+        filePath: join(cwd, CONFIG_PATH),
+        fileName: CONFIG_PATH,
+        issues: [{
+          severity: sensor.severity ?? CodeSensorSeverity.Error,
+          message: `${sensor.name}: ${detail}`,
+        }],
+      });
+    }
+    return results;
+  });
+}
+
+export function runConfiguredCodeSensors(
   cwd: string,
   files: string[],
   deps: CodeSensorDeps = {},
 ): Promise<AgentEndFileResult[]> {
-  const config = loadCodeSensorConfig(cwd);
-  const sensors = config?.sensors ?? [];
-  if (sensors.length === 0 || files.length === 0) return [];
-
-  const runCommand = deps.runCommand ?? defaultRunCommand;
-  const results: AgentEndFileResult[] = [];
-  for (const sensor of sensors.filter((entry) => sensorMatchesFiles(entry, files))) {
-    const run = runCommand(sensor.command, cwd, sensor.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    if (run.status === 0) continue;
-
-    const detail = firstUsefulLine(run.stderr || run.stdout || `exit ${run.status ?? "unknown"}`);
-    results.push({
-      kind: AgentEndResultKind.Sensor,
-      backend: BackendName.Sensor,
-      filePath: join(cwd, CONFIG_PATH),
-      fileName: CONFIG_PATH,
-      issues: [{
-        severity: sensor.severity ?? CodeSensorSeverity.Error,
-        message: `${sensor.name}: ${detail}`,
-      }],
-    });
-  }
-  return results;
+  return Effect.runPromise(runConfiguredCodeSensorsEffect(cwd, files, deps));
 }

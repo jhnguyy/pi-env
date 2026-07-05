@@ -65,9 +65,10 @@
     "check:deps": "NODE_PATH=node_modules scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs .pi/extensions --include-only '^\\.pi/extensions' --output-type err --progress none",
     "check:clones": "NODE_PATH=node_modules scripts/node-run.sh node_modules/jscpd/bin/jscpd .pi/extensions --config .jscpd.json --exitCode 0",
     "check:unused": "NODE_PATH=node_modules scripts/node-run.sh node_modules/knip/bin/knip.js --reporter compact --no-progress --no-exit-code",
-    "check:all": "nub run check:deps && nub run check:clones && nub run check:unused",
+    "check:all": "nub run check:deps && nub run check:clones && nub run check:unused && nub run check:security",
     "harness:report": "scripts/node-run.sh scripts/harness-report.js",
-    "sensor:unused": "nub run check:unused"
+    "sensor:unused": "nub run check:unused",
+    "check:security": "bash scripts/check-security.sh"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

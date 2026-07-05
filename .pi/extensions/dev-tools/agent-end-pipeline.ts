@@ -19,6 +19,7 @@ import {
 export interface AgentEndFormatFile {
   file: string;
   config: FormatBackendConfig;
+  bin?: string;
 }
 
 export interface AgentEndFilePartition {
@@ -64,8 +65,8 @@ export function collectFormatAgentEndResults(
 ): AgentEndFileResult[] {
   const results: AgentEndFileResult[] = [];
 
-  for (const { file, config } of formatFiles) {
-    const bin = deps.resolveFormatBinary(config.binaryName);
+  for (const { file, config, bin: cachedBin } of formatFiles) {
+    const bin = cachedBin ?? deps.resolveFormatBinary(config.binaryName);
     if (!bin) continue;
     try {
       const r = deps.runFormat(bin, config.formatArgs(file));
@@ -106,9 +107,13 @@ export async function processAgentEndBatch(
   deps: AgentEndPipelineDeps,
 ): Promise<AgentEndPipelineResult> {
   const { lspFiles, formatFiles, skippedFiles } = partitionAgentEndFiles(files);
-  const runnableFormatFiles = formatFiles.filter((entry) => deps.resolveFormatBinary(entry.config.binaryName));
-  const unavailableFormatFiles = formatFiles
-    .filter((entry) => !runnableFormatFiles.some((runnable) => runnable.file === entry.file))
+  const formatFilesWithBins = formatFiles.map((entry) => ({
+    ...entry,
+    bin: deps.resolveFormatBinary(entry.config.binaryName) ?? undefined,
+  }));
+  const runnableFormatFiles = formatFilesWithBins.filter((entry) => entry.bin);
+  const unavailableFormatFiles = formatFilesWithBins
+    .filter((entry) => !entry.bin)
     .map((entry) => entry.file);
   const previousSensorResultPaths = deps.runCodeSensors
     ? [...activeResults.values()]
