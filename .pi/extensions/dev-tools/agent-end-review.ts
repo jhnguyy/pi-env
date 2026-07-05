@@ -66,17 +66,15 @@ function renderBackendChecks(checks: AgentEndBackendCheck[]): string {
     .join(", ");
 }
 
+const REVIEW_INSTRUCTIONS: Record<AgentEndReadiness, string> = {
+  [AgentEndReadiness.Blocked]: "Readiness: blocked. Continue fixing these issues before asking for review.",
+  [AgentEndReadiness.ReviewWarnings]: "Readiness: warnings. Decide whether to fix them now; if not, state why the change is ready for review.",
+  [AgentEndReadiness.Ready]: "Readiness: clean. Confirm whether the change is ready for review; if not, continue with the next fix.",
+  [AgentEndReadiness.NotChecked]: "Readiness: not checked. No supported files were processed; run the appropriate project checks before review.",
+};
+
 function renderReviewInstruction(readiness: AgentEndReadiness): string {
-  switch (readiness) {
-    case AgentEndReadiness.Blocked:
-      return "Readiness: blocked. Continue fixing these issues before asking for review.";
-    case AgentEndReadiness.ReviewWarnings:
-      return "Readiness: warnings. Decide whether to fix them now; if not, state why the change is ready for review.";
-    case AgentEndReadiness.Ready:
-      return "Readiness: clean. Confirm whether the change is ready for review; if not, continue with the next fix.";
-    case AgentEndReadiness.NotChecked:
-      return "Readiness: not checked. No supported files were processed; run the appropriate project checks before review.";
-  }
+  return REVIEW_INSTRUCTIONS[readiness];
 }
 
 export function buildAgentEndReviewResult(args: {
