@@ -15,38 +15,12 @@ import type {
   AgentToolResult,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-agent-core";
-import {
-  convertToLlm,
-  createBashTool,
-  createEditTool,
-  createFindTool,
-  createGrepTool,
-  createLsTool,
-  createReadTool,
-  createWriteTool,
-} from "@earendil-works/pi-coding-agent";
+import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
-import { discoverAgents } from "./agents";
 import { ToolCapability, MAX_TURNS, type SubagentDetails, type UsageStats } from "./types";
-
-// ─── Tool factory map ─────────────────────────────────────────────────────────
-
-export interface ToolDef {
-  factory: (cwd: string) => AgentTool<any, any>;
-  capabilities: ToolCapability[];
-}
-
-export const BUILT_IN_TOOLS: Record<string, ToolDef> = {
-  read:  { factory: (cwd) => createReadTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  bash:  { factory: (cwd) => createBashTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] },
-  edit:  { factory: (cwd) => createEditTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Write] },
-  write: { factory: (cwd) => createWriteTool(cwd) as AgentTool<any, any>, capabilities: [ToolCapability.Write] },
-  grep:  { factory: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  find:  { factory: (cwd) => createFindTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  ls:    { factory: (cwd) => createLsTool(cwd) as AgentTool<any, any>,    capabilities: [ToolCapability.Read] },
-};
+import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -93,167 +67,32 @@ export function createExecuteSubagent(
 ) {
   return async function executeSubagent(
     _toolCallId: string,
-    params: {
-      agent?: string;
-      task: string;
-      tools?: string[];
-      model?: string;
-      system_prompt?: string;
-    },
+    params: SubagentParams,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentDetails>> {
-    // ── 1. Resolve agent file if specified ──────────────────────────────
-    let agentConfig: ReturnType<typeof discoverAgents>["agents"][number] | undefined;
-    if (params.agent) {
-      const discovery = discoverAgents(ctx.cwd, "both");
-      agentConfig = discovery.agents.find((a) => a.name === params.agent);
-      if (!agentConfig) {
-        const available = discovery.agents.map((a) => a.name).join(", ") || "none";
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Agent not found: "${params.agent}". Available: ${available}`,
-            },
-          ],
-          details: buildErrorDetails(params.task, [], params.model, "agent_not_found"),
-        };
-      }
-    }
-
-    // ── 2. Resolve tools ────────────────────────────────────────────────
-    // Two mechanisms, unioned when both present:
-    //   capabilities: [ToolCapability.Read] — include all tools whose capability tags are
-    //     a SUBSET of the requested set. "read" gets tools tagged ["read"]
-    //     only, not ["read","write"]. This keeps read-only agents safe.
-    //   tools: ["dev-tools","bash"] — include specific tools by name.
-    const requestedCaps = agentConfig?.capabilities;
-    const rawToolNames: string[] | undefined = agentConfig?.tools ?? params.tools;
-
-    if ((!rawToolNames || rawToolNames.length === 0) && (!requestedCaps || requestedCaps.length === 0)) {
+    // ── 1. Resolve execution plan ───────────────────────────────────────
+    const plan = resolveSubagentExecutionPlan(params, ctx, registeredExtTools, registeredExtCaps);
+    if (!isResolutionOk(plan)) {
       return {
-        content: [
-          {
-            type: "text",
-            text: "No tools or capabilities specified. Provide tools/capabilities in the agent file or pass the tools parameter.",
-          },
-        ],
-        details: buildErrorDetails(params.task, [], params.model, "no_tools"),
+        content: [{ type: "text", text: plan.error.message }],
+        details: buildErrorDetails(
+          params.task,
+          plan.error.toolNames,
+          plan.error.modelOverride ?? params.model,
+          plan.error.reason,
+        ),
       };
     }
 
-    const resolvedToolNames = new Set<string>();
+    const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt } = plan.value;
 
-    // Capability-based resolution: subset matching
-    if (requestedCaps && requestedCaps.length > 0) {
-      const capSet = new Set(requestedCaps);
-      // Built-in tools
-      for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
-        if (def.capabilities.every((c) => capSet.has(c))) {
-          resolvedToolNames.add(toolName);
-        }
-      }
-      // Extension tools
-      if (registeredExtCaps) {
-        for (const [toolName, caps] of registeredExtCaps) {
-          if (caps.every((c) => capSet.has(c))) {
-            resolvedToolNames.add(toolName);
-          }
-        }
-      }
-    }
-
-    // Explicit tool names: union with capability-resolved tools
-    if (rawToolNames) {
-      for (const name of rawToolNames) resolvedToolNames.add(name);
-    }
-
-    const resolvedTools: AgentTool<any, any>[] = [];
-    const unknownTools: string[] = [];
-    for (const name of resolvedToolNames) {
-      if (name in BUILT_IN_TOOLS) {
-        resolvedTools.push(BUILT_IN_TOOLS[name].factory(ctx.cwd));
-      } else if (registeredExtTools.has(name)) {
-        resolvedTools.push(registeredExtTools.get(name)!);
-      } else {
-        unknownTools.push(name);
-      }
-    }
-    // Canonical tool name list for details/reporting — always string[]
-    const toolNames = [...resolvedToolNames];
-    // Only report unknowns for explicitly named tools, not capability matches
-    const explicitUnknowns = unknownTools.filter((n) => rawToolNames?.includes(n));
-    if (explicitUnknowns.length > 0) {
-      const available = [
-        ...Object.keys(BUILT_IN_TOOLS),
-        ...registeredExtTools.keys(),
-      ].join(", ");
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Unknown tools: ${explicitUnknowns.join(", ")}. Available: ${available}`,
-          },
-        ],
-        details: buildErrorDetails(params.task, rawToolNames ?? [], params.model, "invalid_tools"),
-      };
-    }
-
-    // ── 3. Resolve model ────────────────────────────────────────────────
-    const modelStr: string | undefined = params.model ?? agentConfig?.model;
-    if (!modelStr) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: "No model specified. Provide model in the agent file or pass the model parameter.",
-          },
-        ],
-        details: buildErrorDetails(params.task, toolNames, params.model, "no_model"),
-      };
-    }
-
-    let resolvedModel;
-    const slashIdx = modelStr.indexOf("/");
-    if (slashIdx !== -1) {
-      resolvedModel = ctx.modelRegistry.find(
-        modelStr.slice(0, slashIdx),
-        modelStr.slice(slashIdx + 1),
-      );
-    } else {
-      const available = ctx.modelRegistry.getAvailable
-        ? ctx.modelRegistry.getAvailable()
-        : [];
-      resolvedModel = available.find(
-        (m: any) => m.id === modelStr || m.id.includes(modelStr),
-      );
-    }
-
-    if (!resolvedModel) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `Model not found: "${modelStr}". Check the model ID and provider name.`,
-          },
-        ],
-        details: buildErrorDetails(params.task, toolNames, modelStr, "model_not_found"),
-      };
-    }
-
-    // ── 4. Build system prompt ──────────────────────────────────────────
-    const systemPrompt =
-      params.system_prompt ??
-      agentConfig?.systemPrompt ??
-      "Complete the task using only the tools provided. Be concise and direct.";
-
-    // ── 5. Build config ─────────────────────────────────────────────────
+    // ── 2. Build config ─────────────────────────────────────────────────
     const config: AgentLoopConfig = {
-      model: resolvedModel,
+      model: resolvedModel as AgentLoopConfig["model"],
       convertToLlm,
-      getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
+      getApiKey: (provider: string) => ctx.modelRegistry.getApiKeyForProvider(provider),
       headers: { "X-Initiator": "agent" },
     };
 
