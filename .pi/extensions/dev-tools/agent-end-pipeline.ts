@@ -2,6 +2,7 @@ import type { SpawnSyncReturns } from "node:child_process";
 import {
   type ActiveAgentEndResults,
   type AgentEndFileResult,
+  AgentEndIssueSeverity,
   AgentEndResultKind,
   diagnosticsToAgentEndResults,
   formatAgentEndErrorResult,
@@ -101,6 +102,30 @@ export async function collectDiagnosticsAgentEndResults(
   }
 }
 
+function sensorFailureResult(error: unknown): AgentEndFileResult {
+  return {
+    kind: AgentEndResultKind.Sensor,
+    backend: BackendName.Sensor,
+    filePath: ".pi/code-sensors.json",
+    fileName: ".pi/code-sensors.json",
+    issues: [{
+      severity: AgentEndIssueSeverity.Error,
+      message: `code sensors failed: ${error instanceof Error ? error.message : String(error)}`,
+    }],
+  };
+}
+
+async function collectCodeSensorAgentEndResults(
+  files: string[],
+  runCodeSensors: NonNullable<AgentEndPipelineDeps["runCodeSensors"]>,
+): Promise<AgentEndFileResult[]> {
+  try {
+    return await runCodeSensors(files);
+  } catch (error) {
+    return [sensorFailureResult(error)];
+  }
+}
+
 export async function processAgentEndBatch(
   activeResults: ActiveAgentEndResults,
   files: string[],
@@ -123,7 +148,7 @@ export async function processAgentEndBatch(
   const results = [
     ...collectFormatAgentEndResults(runnableFormatFiles, deps),
     ...await collectDiagnosticsAgentEndResults(lspFiles, deps.runDiagnostics),
-    ...await (deps.runCodeSensors?.(files) ?? []),
+    ...await (deps.runCodeSensors ? collectCodeSensorAgentEndResults(files, deps.runCodeSensors) : []),
   ];
   processAgentEndResults(activeResults, [...files, ...previousSensorResultPaths], results);
 

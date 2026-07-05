@@ -53,9 +53,9 @@ function renderFileList(files: string[], limit = 6): string {
 }
 
 function readinessFromCounts(counts: AgentEndReviewMetadata["issueCounts"], checkedCount: number): AgentEndReadiness {
-  if (checkedCount === 0) return AgentEndReadiness.NotChecked;
   if (counts.errors > 0) return AgentEndReadiness.Blocked;
   if (counts.warnings > 0) return AgentEndReadiness.ReviewWarnings;
+  if (checkedCount === 0) return AgentEndReadiness.NotChecked;
   return AgentEndReadiness.Ready;
 }
 

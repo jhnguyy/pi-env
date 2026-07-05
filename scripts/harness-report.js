@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+const HARNESS_CORE_FILES = [".pi/code-sensors.json"];
+
 const CHECKS = [
   {
     name: "dependency boundaries",
@@ -38,6 +40,8 @@ const CHECKS = [
 
 function printFiles() {
   console.log("Harness file requirements:");
+  console.log("\npost-edit sensor wiring:");
+  for (const file of HARNESS_CORE_FILES) console.log(`- ${file}`);
   for (const check of CHECKS) {
     console.log(`\n${check.name}:`);
     for (const file of check.files ?? []) console.log(`- ${file}`);
@@ -124,7 +128,7 @@ for (const result of results) {
   if (instructions.length > 0) {
     for (const instruction of instructions.slice(0, 20)) console.log(`- ${instruction}`);
     if (instructions.length > 20) console.log(`- ... ${instructions.length - 20} more finding(s) omitted`);
-  } else if (result.output) {
+  } else if (failed && result.output) {
     console.log(result.output.split("\n").slice(0, 40).join("\n"));
   } else {
     console.log("No findings.");

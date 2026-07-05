@@ -157,6 +157,45 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     expect(result.summary).toContain("depcruise: boundary violation");
   });
 
+  it("uses sensor issue counts for readiness even when no files have LSP or formatter coverage", async () => {
+    const active = new Map();
+
+    const result = await processAgentEndBatch(active, ["/repo/package.json"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: async () => null,
+      runCodeSensors: async () => [{
+        kind: AgentEndResultKind.Sensor,
+        backend: BackendName.Sensor,
+        filePath: "/repo/.pi/code-sensors.json",
+        fileName: ".pi/code-sensors.json",
+        issues: [{ severity: AgentEndIssueSeverity.Warning, message: "knip: unused export" }],
+      }],
+    });
+
+    expect(result.metadata.readiness).toBe(AgentEndReadiness.ReviewWarnings);
+    expect(result.summary).toContain("Readiness: warnings");
+    expect(result.summary).toContain("knip: unused export");
+  });
+
+  it("reports code sensor execution failures as blocking sensor issues", async () => {
+    const active = new Map();
+
+    const result = await processAgentEndBatch(active, ["/repo/package.json"], {
+      resolveFormatBinary: () => null,
+      runFormat: () => spawnResult(0),
+      runDiagnostics: async () => null,
+      runCodeSensors: async () => {
+        throw new Error("invalid .pi/code-sensors.json");
+      },
+    });
+
+    expect(result.triggerTurn).toBe(true);
+    expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
+    expect(result.summary).toContain("code sensors failed: invalid .pi/code-sensors.json");
+    expect([...active.keys()]).toEqual([".pi/code-sensors.json"]);
+  });
+
   it("clears stale sensor results when configured sensors pass later", async () => {
     const active = new Map();
     const cleanDiagnostics = async () => ({
