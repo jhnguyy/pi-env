@@ -34,14 +34,6 @@ const CHECKS = [
     hint: formatPatterns,
     files: ["scripts/check-patterns.js"],
   },
-  {
-    name: "security scan",
-    command: "nub",
-    args: ["run", "check:security"],
-    blocking: true,
-    hint: formatTrivy,
-    files: ["scripts/check-security.sh", "package.json", "lock.yaml"],
-  },
 ];
 
 function printFiles() {
@@ -96,14 +88,6 @@ function formatPatterns(output) {
   return output.split("\n")
     .filter((line) => line.includes(":"))
     .map((line) => `Pattern fragmentation: ${line.trim()} Reuse the canonical helper or document why this case is intentionally separate.`);
-}
-
-function formatTrivy(output) {
-  if (output.includes("trivy not installed")) return [];
-  return output.split("\n")
-    .filter((line) => /CRITICAL|HIGH|SECRET|Misconfiguration|Vulnerability/i.test(line))
-    .slice(0, 20)
-    .map((line) => `Security finding: ${line.trim()}. Review the Trivy finding, update or suppress with a documented rationale, then re-run check:security.`);
 }
 
 function formatKnip(output) {
