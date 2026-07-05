@@ -71,10 +71,10 @@ export class TodoStore {
     return `[session-todos]\n${lines.join("\n")}`;
   }
 
-  /** Compact string for automatic LLM context injection. */
-  renderContext(): string {
+  /** Compact string for automatic LLM context injection. Returns null when there are no open tasks. */
+  renderContext(): string | null {
     const open = this.items.filter((i) => !i.done);
-    if (open.length === 0) return "[session-todos] No tasks yet.";
+    if (open.length === 0) return null;
     return `[session-todos] ${open.length} open task${open.length === 1 ? "" : "s"}. Use todo action=list for details.`;
   }
 

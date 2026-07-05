@@ -80,24 +80,12 @@ export default function (pi: ExtensionAPI) {
     label: "Dev Tools",
     description: description,
     promptSnippet:
-      "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
-      "go-to-implementation, find-references, incoming/outgoing call hierarchy, symbols. " +
-      "Use instead of grep chains for type-aware or shell-aware code navigation. " +
-      "Also supports nil (for .nix files) and bash-language-server (for .sh/.bash).",
+      "Language-server-backed code intelligence — diagnostics, hover, definitions, " +
+      "implementations, references, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
-      "Prefer dev-tools over grep/read for ALL code navigation in TypeScript codebases. dev-tools is faster, precise, and avoids reading entire files.",
-      "To find where a symbol is defined: dev-tools definition — not grep + read.",
-      "To find implementations of an interface or abstract method: dev-tools implementation.",
-      "To find all call sites of a function, type, or variable: dev-tools references — not grep -r.",
-      "To find what calls a function: dev-tools incoming-calls — maps the blast radius before changing a signature.",
-      "To find what a function calls: dev-tools outgoing-calls — maps dependencies before refactoring.",
-      "To understand a type, signature, or overload at a usage site: dev-tools hover — not reading the declaration file.",
-      "To orient in an unfamiliar file: dev-tools symbols — not reading top-to-bottom.",
-      "Before renaming or changing a function signature, use dev-tools references or incoming-calls to find all call sites first.",
-      "After the agent finishes, all edited files are automatically checked for diagnostics. If errors are found, the agent is re-engaged to triage.",
-      "Diagnostic errors mid-refactor are expected; finish the plan — diagnostics run at the end.",
-      "dev-tools uses 1-indexed lines and characters, matching read tool output.",
-      "Use grep/rg only for text/pattern searches (comments, strings, config values) where LSP cannot help.",
+      "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
+      "Use text search for strings, comments, config values, generated files, and unsupported file types.",
+      "After edits, diagnostics run automatically for supported files.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
