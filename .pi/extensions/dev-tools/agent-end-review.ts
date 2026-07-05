@@ -73,10 +73,6 @@ const REVIEW_INSTRUCTIONS: Record<AgentEndReadiness, string> = {
   [AgentEndReadiness.NotChecked]: "Readiness: not checked. No supported files were processed; run the appropriate project checks before review.",
 };
 
-function renderReviewInstruction(readiness: AgentEndReadiness): string {
-  return REVIEW_INSTRUCTIONS[readiness];
-}
-
 export function buildAgentEndReviewResult(args: {
   checkedFiles: string[];
   skippedFiles: string[];
@@ -110,7 +106,7 @@ export function buildAgentEndReviewResult(args: {
   }
   lines.push(
     `Issues: ${counts.errors} error${counts.errors === 1 ? "" : "s"}, ${counts.warnings} warning${counts.warnings === 1 ? "" : "s"}`,
-    renderReviewInstruction(readiness),
+    REVIEW_INSTRUCTIONS[readiness],
   );
   if (issueSummary) lines.push("", issueSummary);
 

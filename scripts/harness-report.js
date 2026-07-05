@@ -8,6 +8,7 @@ const CHECKS = [
     args: ["run", "check:deps"],
     blocking: true,
     hint: formatDependencyCruiser,
+    files: [".dependency-cruiser.cjs", "package.json", "lock.yaml"],
   },
   {
     name: "clone detection",
@@ -15,6 +16,7 @@ const CHECKS = [
     args: ["run", "check:clones"],
     blocking: false,
     hint: formatJscpd,
+    files: [".jscpd.json", "scripts/run-jscpd.js", "package.json", "lock.yaml"],
   },
   {
     name: "unused code",
@@ -22,6 +24,15 @@ const CHECKS = [
     args: ["run", "check:unused"],
     blocking: false,
     hint: formatKnip,
+    files: ["knip.json", "package.json", "lock.yaml"],
+  },
+  {
+    name: "pattern fragmentation",
+    command: "nub",
+    args: ["run", "check:patterns"],
+    blocking: false,
+    hint: formatPatterns,
+    files: ["scripts/check-patterns.js"],
   },
   {
     name: "security scan",
@@ -29,8 +40,17 @@ const CHECKS = [
     args: ["run", "check:security"],
     blocking: true,
     hint: formatTrivy,
+    files: ["scripts/check-security.sh", "package.json", "lock.yaml"],
   },
 ];
+
+function printFiles() {
+  console.log("Harness file requirements:");
+  for (const check of CHECKS) {
+    console.log(`\n${check.name}:`);
+    for (const file of check.files ?? []) console.log(`- ${file}`);
+  }
+}
 
 function stripAnsi(text) {
   return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
@@ -71,6 +91,13 @@ function formatJscpd(output) {
   return instructions;
 }
 
+function formatPatterns(output) {
+  if (output.includes("No pattern-fragmentation findings")) return [];
+  return output.split("\n")
+    .filter((line) => line.includes(":"))
+    .map((line) => `Pattern fragmentation: ${line.trim()} Reuse the canonical helper or document why this case is intentionally separate.`);
+}
+
 function formatTrivy(output) {
   if (output.includes("trivy not installed")) return [];
   return output.split("\n")
@@ -93,6 +120,11 @@ function formatKnip(output) {
     instructions.push(`${section}: ${line.trim()}. Confirm whether it is intentional, add config if it is an entry point, or remove/reuse it before tightening check:unused.`);
   }
   return instructions;
+}
+
+if (process.argv.includes("--files")) {
+  printFiles();
+  process.exit(0);
 }
 
 const results = CHECKS.map(run);

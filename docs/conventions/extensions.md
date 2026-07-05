@@ -31,28 +31,7 @@ Keep tools context-economical:
 
 ## Post-edit sensors
 
-Use the `dev-tools` agent-end pipeline as the shared post-edit feedback loop for code sensors. Sensor output should lead with review-readiness metadata — checked files, skipped files, backends, and issue counts — before detailed findings. The follow-up message should tell the agent whether to keep fixing, justify warnings, or confirm that the change is ready for review.
-
-Project-specific external sensors can be configured with `.pi/code-sensors.json` when a repo is ready to opt in:
-
-```json
-{
-  "version": 1,
-  "sensors": [
-    {
-      "name": "dependency-cruiser",
-      "command": "nubx depcruise src",
-      "include": [".ts", ".tsx"],
-      "timeoutMs": 120000,
-      "severity": "error"
-    }
-  ]
-}
-```
-
-Keep commands deterministic and local to the repository. Prefer buying mature analyzers such as dependency-cruiser, jscpd, knip, and Semgrep; the pi-env code should only own config loading, diff/file scoping, and agent-readable result formatting.
-
-For pi-env itself, use `nub run check:all` as the combined harness entry point and `nub run harness:report` when you want the same checks rendered as agent-actionable instructions. `check:security` uses Trivy when it is installed; set `REQUIRE_TRIVY=1` in CI to fail instead of skipping when the binary is missing. `check:clones` uses a pinned jscpd v5 wrapper (`scripts/run-jscpd.js`) so the repo controls native binary selection instead of relying on the upstream shim.
+Use the `dev-tools` agent-end pipeline as the shared post-edit feedback loop for code sensors. Keep policy in executable sources: `.pi/code-sensors.json`, analyzer configs, `package.json` scripts, and `scripts/harness-report.js`. Use `nub run harness:files` to inspect the files the harness depends on.
 
 ## Cross-extension singletons
 
