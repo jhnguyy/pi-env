@@ -34,6 +34,8 @@ Plain `./setup.sh` auto-detects local Nix and tries `nix run .#setup` before fal
 
 The flake's `toolchainPackages` is the source of truth for the dev shell, installable `.#toolchain` package, setup app runtime, bootstrap app runtime, and Nix setup checks.
 
+Node's major version is derived from `.node-version`, then resolved through nixpkgs as `nodejs_<major>`. Keep `.node-version`, `.nvmrc`, and `package.json#engines.node` aligned when moving to a new Node LTS line. The exact Nix patch version comes from `flake.lock`; the package engine range should express the supported LTS floor rather than a patch that the locked nixpkgs cannot provide. `nub run check:node` enforces that the local pins match and that `package.json#engines.node` stays on the same major line.
+
 ## Deterministic boundaries
 
 Handled deterministically:

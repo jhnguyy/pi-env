@@ -7,7 +7,7 @@
     "pi-package"
   ],
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.0.0"
   },
   "workspaces": [
     ".pi/extensions/web-context",
@@ -72,7 +72,7 @@
     "@earendil-works/pi-ai": "0.80.3",
     "@earendil-works/pi-coding-agent": "0.80.3",
     "@earendil-works/pi-tui": "0.80.3",
-    "@types/node": "^22.20.0",
+    "@types/node": "^24.0.0",
     "esbuild": "^0.28.1",
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
