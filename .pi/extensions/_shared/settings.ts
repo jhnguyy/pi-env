@@ -25,9 +25,25 @@ function readJsonObject(path: string): SettingsBlock {
   return isObject(parsed) ? parsed : {};
 }
 
-function objectAt(root: SettingsBlock, key: string): SettingsBlock {
+export function objectAt(root: SettingsBlock, key: string): SettingsBlock {
   const value = root[key];
   return isObject(value) ? value : {};
+}
+
+export function parseBooleanSetting(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return undefined;
+  if (/^(1|true|yes|on)$/i.test(value.trim())) return true;
+  if (/^(0|false|no|off)$/i.test(value.trim())) return false;
+  return undefined;
+}
+
+export function booleanSetting(value: unknown, envValue: unknown, defaultValue: boolean): boolean {
+  return parseBooleanSetting(envValue) ?? parseBooleanSetting(value) ?? defaultValue;
+}
+
+export function positiveIntegerSetting(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
 export function isObject(value: unknown): value is SettingsBlock {
