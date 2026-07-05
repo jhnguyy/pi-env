@@ -26,7 +26,7 @@ export const VERIFICATION_PHASES = [
     id: VerificationPhaseId.CodeSensors,
     label: "code sensors",
     command: "nub",
-    args: ["run", "sensors"],
+    args: ["run", "check:all"],
   },
   {
     id: VerificationPhaseId.Build,

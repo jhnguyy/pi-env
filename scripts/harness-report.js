@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+
+const CHECKS = [
+  {
+    name: "dependency boundaries",
+    command: "nub",
+    args: ["run", "check:deps"],
+    blocking: true,
+    hint: formatDependencyCruiser,
+  },
+  {
+    name: "clone detection",
+    command: "nub",
+    args: ["run", "check:clones"],
+    blocking: false,
+    hint: formatJscpd,
+  },
+  {
+    name: "unused code",
+    command: "nub",
+    args: ["run", "check:unused"],
+    blocking: false,
+    hint: formatKnip,
+  },
+];
+
+function stripAnsi(text) {
+  return text.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function run(check) {
+  const result = spawnSync(check.command, check.args, { encoding: "utf8" });
+  const output = stripAnsi(`${result.stdout ?? ""}${result.stderr ?? ""}`.trim());
+  return {
+    ...check,
+    status: result.status ?? (result.error ? 1 : 0),
+    output: result.error ? result.error.message : output,
+  };
+}
+
+function formatDependencyCruiser(output) {
+  const lines = output.split("\n").filter((line) => line.trim().startsWith("error "));
+  if (lines.length === 0) return [];
+  return lines.map((line) => {
+    const match = line.trim().match(/^error\s+([^:]+):\s+(.+?)\s+→\s+(.+)$/);
+    if (!match) return `Dependency boundary violation: ${line.trim()}`;
+    const [, rule, from, to] = match;
+    return `Dependency boundary violation (${rule}): ${from} imports ${to}. Move shared code to .pi/extensions/_shared or keep the import inside the owning extension, then re-run check:deps.`;
+  });
+}
+
+function formatJscpd(output) {
+  const lines = output.split("\n");
+  const instructions = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!lines[i].includes("Clone found")) continue;
+    const first = lines[i + 1]?.replace(/^\s*-\s*/, "").trim();
+    const second = lines[i + 2]?.trim();
+    if (first && second) {
+      instructions.push(`Duplicate code: ${first} also appears at ${second}. Reuse or extract the shared behavior, then re-run check:clones.`);
+    }
+  }
+  return instructions;
+}
+
+function formatKnip(output) {
+  const lines = output.split("\n");
+  const instructions = [];
+  let section = "";
+  for (const line of lines) {
+    const heading = line.match(/^(Unused files|Unused dependencies|Unused devDependencies|Unlisted dependencies|Unlisted binaries|Unused exports|Unused exported types)/);
+    if (heading) {
+      section = heading[1];
+      continue;
+    }
+    if (!section || !line.trim() || line.startsWith("$ ")) continue;
+    instructions.push(`${section}: ${line.trim()}. Confirm whether it is intentional, add config if it is an entry point, or remove/reuse it before tightening check:unused.`);
+  }
+  return instructions;
+}
+
+const results = CHECKS.map(run);
+let blockingFailure = false;
+
+for (const result of results) {
+  const failed = result.status !== 0;
+  if (failed && result.blocking) blockingFailure = true;
+  const instructions = result.hint(result.output);
+  const hasWarnings = !result.blocking && instructions.length > 0;
+  const label = failed ? (result.blocking ? "BLOCK" : "WARN") : hasWarnings ? "WARN" : "OK";
+  console.log(`\n[${label}] ${result.name}`);
+  if (instructions.length > 0) {
+    for (const instruction of instructions.slice(0, 20)) console.log(`- ${instruction}`);
+    if (instructions.length > 20) console.log(`- ... ${instructions.length - 20} more finding(s) omitted`);
+  } else if (result.output) {
+    console.log(result.output.split("\n").slice(0, 40).join("\n"));
+  } else {
+    console.log("No findings.");
+  }
+}
+
+process.exit(blockingFailure ? 1 : 0);

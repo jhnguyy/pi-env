@@ -1,0 +1,26 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/*.mjs",
+    "setup/*.mjs",
+    "vitest.config.ts",
+    ".pi/extensions/*/index.ts"
+  ],
+  "project": [
+    "scripts/**/*.mjs",
+    "setup/**/*.mjs",
+    ".pi/extensions/**/*.ts",
+    ".agents/skills/**/*.ts",
+    "*.config.ts"
+  ],
+  "ignore": [
+    ".pi/extensions/**/dist/**"
+  ],
+  "ignoreDependencies": [
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+    "typebox"
+  ]
+}

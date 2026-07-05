@@ -3,15 +3,22 @@
   "sensors": [
     {
       "name": "dependency-cruiser",
-      "command": "nub run sensor:deps",
+      "command": "nub run check:deps",
       "include": [".pi/extensions/", ".dependency-cruiser.cjs"],
       "timeoutMs": 120000,
       "severity": "error"
     },
     {
       "name": "jscpd",
-      "command": "nub run sensor:dup",
+      "command": "nub run check:clones",
       "include": [".pi/extensions/", ".jscpd.json"],
+      "timeoutMs": 120000,
+      "severity": "warning"
+    },
+    {
+      "name": "knip",
+      "command": "nub run check:unused",
+      "include": [".pi/extensions/", "scripts/", "setup/", "knip.json", "package.json"],
       "timeoutMs": 120000,
       "severity": "warning"
     }
