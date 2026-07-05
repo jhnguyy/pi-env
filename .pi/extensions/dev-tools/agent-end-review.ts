@@ -68,8 +68,8 @@ function renderBackendChecks(checks: AgentEndBackendCheck[]): string {
 
 const REVIEW_INSTRUCTIONS: Record<AgentEndReadiness, string> = {
   [AgentEndReadiness.Blocked]: "Readiness: blocked. Continue fixing these issues before asking for review.",
-  [AgentEndReadiness.ReviewWarnings]: "Readiness: warnings. Decide whether to fix them now; if not, state why the change is ready for review.",
-  [AgentEndReadiness.Ready]: "Readiness: clean. Confirm whether the change is ready for review; if not, continue with the next fix.",
+  [AgentEndReadiness.ReviewWarnings]: "Readiness: warnings. Review these before declaring the change ready.",
+  [AgentEndReadiness.Ready]: "Readiness: clean. No post-edit issues were found.",
   [AgentEndReadiness.NotChecked]: "Readiness: not checked. No supported files were processed; run the appropriate project checks before review.",
 };
 
@@ -112,7 +112,7 @@ export function buildAgentEndReviewResult(args: {
 
   return {
     summary: lines.join("\n"),
-    triggerTurn: shouldTriggerTurn(args.results) || readiness !== AgentEndReadiness.NotChecked,
+    triggerTurn: shouldTriggerTurn(args.results),
     metadata,
   };
 }

@@ -99,7 +99,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     expect([...active.keys()].sort()).toEqual(["/repo/a.ts", "/repo/main.tf"]);
   });
 
-  it("reports clean diagnostic metadata and asks the agent to confirm review readiness", async () => {
+  it("reports clean diagnostic metadata without forcing a readiness follow-up", async () => {
     const active = new Map();
 
     const result = await processAgentEndBatch(active, ["/repo/a.ts", "/repo/README.md"], {
@@ -115,7 +115,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
       }),
     });
 
-    expect(result.triggerTurn).toBe(true);
+    expect(result.triggerTurn).toBe(false);
     expect(result.metadata).toMatchObject({
       checkedFiles: ["/repo/a.ts"],
       skippedFiles: ["/repo/README.md"],
@@ -124,7 +124,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     });
     expect(result.summary).toContain("Checked: 1 (a.ts)");
     expect(result.summary).toContain("Skipped unsupported/unavailable: 1 (README.md)");
-    expect(result.summary).toContain("Readiness: clean. Confirm whether the change is ready for review");
+    expect(result.summary).toContain("Readiness: clean. No post-edit issues were found.");
   });
 
   it("includes configured code sensors in readiness metadata", async () => {
@@ -173,6 +173,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
       }],
     });
 
+    expect(result.triggerTurn).toBe(false);
     expect(result.metadata.readiness).toBe(AgentEndReadiness.ReviewWarnings);
     expect(result.summary).toContain("Readiness: warnings");
     expect(result.summary).toContain("knip: unused export");

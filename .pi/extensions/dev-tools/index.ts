@@ -87,7 +87,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
       "Use text search for strings, comments, config values, generated files, and unsupported file types.",
-      "After edits, code sensors run automatically for supported files and ask the agent to confirm review readiness from the diagnostic metadata.",
+      "After edits, code sensors run at agent-turn end for supported files and report diagnostic metadata without forcing a readiness follow-up unless there are blocking errors.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
