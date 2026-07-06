@@ -42,6 +42,34 @@ type LocalPathMode = "none" | "single" | "many";
 
 Do not replace every local union mechanically. Prefer the const-object pattern when the value set is a durable repo concept or public seam.
 
+## Branching and classification
+
+Prefer `switch` when branching on an explicit discriminant or named value set:
+
+- parser tokens
+- tool actions
+- protocol actions
+- tagged result states
+- enum-like const object values
+
+```ts
+switch (action) {
+  case ToolAction.Diagnostics:
+    return runDiagnostics(input);
+  case ToolAction.Hover:
+    return runHover(input);
+}
+```
+
+Prefer guard clauses for preconditions, exceptional cases, and simple boolean checks.
+
+```ts
+if (!path) return skipped("missing path");
+if (isDirty(path)) return skipped("worktree has uncommitted changes");
+```
+
+Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing `switch (true)` when naming the classification first would be clearer; derive a small const-object state, then switch on that state.
+
 ## Effect-style tagged data
 
 For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
