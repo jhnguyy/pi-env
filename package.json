@@ -69,7 +69,8 @@
     "harness:report": "scripts/node-run.sh scripts/harness-report.js",
     "sensor:unused": "nub run check:unused",
     "check:patterns": "scripts/node-run.sh scripts/check-patterns.js",
-    "harness:files": "scripts/node-run.sh scripts/harness-report.js --files"
+    "harness:files": "scripts/node-run.sh scripts/harness-report.js --files",
+    "security:trivy": "bash scripts/trivy-scan.sh"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

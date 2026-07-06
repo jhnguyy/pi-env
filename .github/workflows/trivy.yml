@@ -1,0 +1,46 @@
+name: Trivy
+
+on:
+  push: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trivy-main
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Filesystem scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+      options: --cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev
+    env:
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
+    steps:
+      - name: Checkout merge commit without checkout action
+        shell: sh
+        run: |
+          set -eu
+          git init --initial-branch=scan
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch --depth=1 --no-tags origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+
+      - name: Run Trivy in job container
+        shell: sh
+        run: |
+          mkdir -p "$TRIVY_CACHE_DIR"
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --skip-dirs node_modules \
+            --skip-dirs .git \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            .
