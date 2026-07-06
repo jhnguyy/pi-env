@@ -1,13 +1,8 @@
 /**
- * dev-tools extension — registers the `dev-tools` tool.
+ * dev-tools extension — registers language-server-backed code intelligence.
  *
- * The agent-end lifecycle intentionally does not run diagnostics, formatters, or
- * project-wide analyzers. Those checks can produce stale or distracting feedback
- * during the coding flow, so agents should invoke them manually before commit or
- * review.
- *
- * The dev-tools interactive tool (diagnostics, hover, definition, symbols, …)
- * routes through the LSP daemon.
+ * Use the interactive tool for diagnostics, hover, definitions, references,
+ * call hierarchy, and symbols. Diagnostics are useful before commit or review.
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -39,8 +34,7 @@ export default function (pi: ExtensionAPI) {
     "document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call. " +
-    "Before commit or review, diagnostics and the project quality harness are useful manual checks.";
+    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = createDevToolsParameterSchema(
     StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
@@ -79,8 +73,8 @@ export default function (pi: ExtensionAPI) {
       "implementations, references, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
+      "Use diagnostics to validate changed code before commit or review.",
       "Use text search for strings, comments, config values, generated files, and unsupported file types.",
-      "Before commit or review, manually run dev-tools diagnostics on changed code and the project quality harness (`nub run check:all` or `nub run harness:report`).",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
