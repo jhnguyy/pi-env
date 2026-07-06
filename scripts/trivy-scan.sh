@@ -3,18 +3,21 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 RUNTIME="${TRIVY_RUNTIME:-auto}"
-IMAGE="${TRIVY_IMAGE:-aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e}"
+IMAGE="${TRIVY_IMAGE:-aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f}"
 CACHE_DIR="${TRIVY_CACHE_DIR:-${TMPDIR:-/tmp}/pi-env-trivy-cache}"
 
 mkdir -p "$CACHE_DIR"
 
 trivy_args=(
   fs
-  --scanners vuln,secret,misconfig
+  --scanners "${TRIVY_SCANNERS:-vuln,secret,misconfig}"
+  --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:lock.yaml}"
   --skip-dirs node_modules
   --skip-dirs .git
-  --severity HIGH,CRITICAL
-  --ignore-unfixed
+  --severity "${TRIVY_SEVERITY:-HIGH,CRITICAL}"
+  --include-dev-deps
+  --exit-code "${TRIVY_EXIT_CODE:-1}"
+  --skip-version-check
 )
 
 run_local() {

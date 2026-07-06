@@ -7,7 +7,7 @@ The workflow is intentionally small:
 - `.github/workflows/trivy.yml` owns the trigger, permissions, checkout bootstrap, job container, and scan command.
 - `scripts/trivy-scan.sh` is the local testing entrypoint.
 
-The durable policy is to avoid running Trivy on pull request branches, avoid third-party scanner actions, pin executable container references by digest, and keep checkout separate from scanner action lifecycle hooks.
+The durable policy is to avoid running Trivy on pull request branches, avoid third-party scanner actions, pin executable container references by digest, and keep checkout separate from scanner action lifecycle hooks. The workflow checks out into a writable temp path inside the job container instead of relying on the default GitHub workspace path.
 
 Local testing:
 
