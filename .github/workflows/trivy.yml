@@ -1,7 +1,9 @@
 name: Trivy
 
 on:
-  push: {}
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -13,21 +15,23 @@ concurrency:
 jobs:
   scan:
     name: Filesystem scan
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     container:
-      image: aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+      image: aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
       options: --cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev
     env:
       TRIVY_CACHE_DIR: /tmp/trivy-cache
+      TRIVY_SCAN_ROOT: /tmp/pi-env-checkout
     steps:
       - name: Checkout merge commit without checkout action
         shell: sh
         run: |
           set -eu
+          mkdir -p "$TRIVY_SCAN_ROOT"
+          cd "$TRIVY_SCAN_ROOT"
           git init --initial-branch=scan
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
           git fetch --depth=1 --no-tags origin "$GITHUB_SHA"
@@ -36,11 +40,61 @@ jobs:
       - name: Run Trivy in job container
         shell: sh
         run: |
+          set -eu
           mkdir -p "$TRIVY_CACHE_DIR"
+          cd "$TRIVY_SCAN_ROOT"
+          test -f package.json
+          test -f lock.yaml
+
+          trivy fs \
+            --scanners vuln \
+            --file-patterns pnpm:lock.yaml \
+            --include-dev-deps \
+            --list-all-pkgs \
+            --skip-dirs node_modules \
+            --skip-dirs .git \
+            --skip-version-check \
+            --format json \
+            --output /tmp/trivy-dependency-inventory.json \
+            .
+
+          if grep -q '"Target": *"lock.yaml"' /tmp/trivy-dependency-inventory.json; then
+            echo "Trivy dependency target: lock.yaml"
+          else
+            echo "Trivy did not report lock.yaml as a dependency target" >&2
+            cat /tmp/trivy-dependency-inventory.json
+            exit 2
+          fi
+          package_count="$(grep -c '"Identifier"' /tmp/trivy-dependency-inventory.json || true)"
+          all_dependency_vulnerabilities="$(grep -c '"VulnerabilityID"' /tmp/trivy-dependency-inventory.json || true)"
+          echo "Trivy dependency packages detected: $package_count"
+          echo "Trivy dependency vulnerabilities detected at all severities/statuses: $all_dependency_vulnerabilities"
+          if [ "$package_count" -lt 10 ]; then
+            echo "Trivy detected too few dependency packages; dependency scan may be ineffective" >&2
+            cat /tmp/trivy-dependency-inventory.json
+            exit 2
+          fi
+
+          set +e
           trivy fs \
             --scanners vuln,secret,misconfig \
+            --file-patterns pnpm:lock.yaml \
             --skip-dirs node_modules \
             --skip-dirs .git \
             --severity HIGH,CRITICAL \
-            --ignore-unfixed \
+            --include-dev-deps \
+            --exit-code 1 \
+            --skip-version-check \
+            --format json \
+            --output /tmp/trivy-policy-results.json \
             .
+          trivy_status="$?"
+          set -e
+          policy_vulnerabilities="$(grep -c '"VulnerabilityID"' /tmp/trivy-policy-results.json || true)"
+          policy_rule_findings="$(grep -c '"RuleID"' /tmp/trivy-policy-results.json || true)"
+          echo "Trivy HIGH/CRITICAL vulnerability findings: $policy_vulnerabilities"
+          echo "Trivy HIGH/CRITICAL secret/misconfig findings: $policy_rule_findings"
+          if [ "$trivy_status" -ne 0 ]; then
+            cat /tmp/trivy-policy-results.json
+            exit "$trivy_status"
+          fi
