@@ -6,12 +6,16 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme, keyHint } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import { MAX_TURNS, type SubagentDetails } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function expandKeyText(): string {
+  return keyText("app.tools.expand") || "ctrl+o";
+}
 
 function formatTokens(count: number): string {
   if (count < 1000) return count.toString();
@@ -170,9 +174,9 @@ export function renderSubagentResult(
   }
 
   if (hiddenOutputLines > 0) {
-    text += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+    text += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines, ${expandKeyText()} to expand)`)}`;
   } else {
-    text += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
+    text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
   }
   return new Text(text, 0, 0);
 }
