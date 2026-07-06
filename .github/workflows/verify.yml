@@ -1,0 +1,60 @@
+name: Nub Setup
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nub-setup:
+    name: Nub setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
+
+      - name: Setup Node from project pin
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version-file: .node-version
+
+      - name: Install Nub
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global @nubjs/nub@0.2.10
+          nub --version
+          node --version
+
+      - name: Install dependencies
+        shell: bash
+        run: nub install --frozen-lockfile
+
+      - name: Verify setup tests
+        shell: bash
+        run: nub run --node test:setup
+
+      - name: Verify typecheck
+        shell: bash
+        run: nub run --node typecheck
+
+      - name: Verify build
+        shell: bash
+        run: nub run --node build
+
+      - name: Verify install readiness
+        shell: bash
+        run: scripts/node-run.sh scripts/verify-install.mjs
