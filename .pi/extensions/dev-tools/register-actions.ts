@@ -20,7 +20,7 @@ import {
   formatReferences, formatIncomingCalls, formatOutgoingCalls,
   formatSymbols, formatStatus,
 } from "./formatters";
-import { keyHint } from "@earendil-works/pi-coding-agent";
+import { keyText } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { DevToolsAction } from "./action-contract";
 import type { RenderTheme } from "./renderers";
@@ -29,6 +29,10 @@ import type {
 } from "./protocol";
 
 // ─── Shared renderer helpers ──────────────────────────────────────────────────
+
+function expandKeyText(): string {
+  return keyText("app.tools.expand") || "ctrl+o";
+}
 
 function shortPath(path: string): string {
   return path.split("/").filter(Boolean).slice(-2).join("/");
@@ -60,7 +64,7 @@ function renderDiagnostics(d: DiagnosticsResult, opts: { expanded?: boolean }, t
 
   const fileSummary = diagnosticsFileSummary(d);
   if (fileSummary) text += ` ${theme.fg("muted", `scanned ${fileSummary}`)}`;
-  text += ` ${theme.fg("muted", `(${keyHint("app.tools.expand", "for JSON")})`)}`;
+  text += ` ${theme.fg("muted", `(${expandKeyText()} for JSON)`)}`;
 
   return new Text(text, 0, 0);
 }
