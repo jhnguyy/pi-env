@@ -12,8 +12,8 @@ Run `nub run check:all` before considering any code task complete. Use `nub run 
 
 Canonical locations are source-of-truth files, not prose:
 
-- Harness sensors: `.dependency-cruiser.cjs`, `.jscpd.json`, `knip.json`, `.pi/code-sensors.json`, `scripts/check-*.{js,sh}`, `scripts/run-jscpd.js`.
-- Agent feedback loop: `.pi/extensions/dev-tools/code-sensors.ts`, `agent-end-pipeline.ts`, `agent-end-review.ts`.
+- Harness checks: `.dependency-cruiser.cjs`, `.jscpd.json`, `knip.json`, `scripts/check-*.{js,sh}`, `scripts/run-jscpd.js`.
+- Agent feedback loop: `.pi/extensions/dev-tools/agent-end-pipeline.ts`, `agent-end-review.ts`.
 - Shared extension helpers: `.pi/extensions/_shared/`.
 - Extension conventions: `docs/conventions/extensions.md`.
 

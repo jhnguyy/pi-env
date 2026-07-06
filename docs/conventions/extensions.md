@@ -29,9 +29,9 @@ Keep tools context-economical:
 - use opt-in detail views for larger data
 - never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced
 
-## Post-edit sensors
+## Code-quality harness
 
-Use the `dev-tools` agent-end pipeline as the shared post-edit feedback loop for code sensors. Keep policy in executable sources: `.pi/code-sensors.json`, analyzer configs, `package.json` scripts, and `scripts/harness-report.js`. Use `nub run harness:files` to inspect the files the harness depends on.
+Keep project-wide quality policy in executable sources: analyzer configs, `package.json` scripts, and `scripts/harness-report.js`. Run `nub run check:all` or `nub run harness:report` manually before commit/review instead of wiring expensive project-wide analyzers into the post-edit coding flow. Use `nub run harness:files` to inspect the files the harness depends on.
 
 ## Cross-extension singletons
 

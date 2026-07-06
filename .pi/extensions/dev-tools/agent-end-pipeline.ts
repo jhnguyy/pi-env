@@ -2,8 +2,6 @@ import type { SpawnSyncReturns } from "node:child_process";
 import {
   type ActiveAgentEndResults,
   type AgentEndFileResult,
-  AgentEndIssueSeverity,
-  AgentEndResultKind,
   diagnosticsToAgentEndResults,
   formatAgentEndErrorResult,
   processAgentEndResults,
@@ -33,7 +31,6 @@ export interface AgentEndPipelineDeps {
   resolveFormatBinary: (name: string) => string | null;
   runFormat: (bin: string, args: string[]) => SpawnSyncReturns<string>;
   runDiagnostics: (paths: string[]) => Promise<LspResult | null>;
-  runCodeSensors?: (files: string[]) => Promise<AgentEndFileResult[]>;
 }
 
 export interface AgentEndPipelineResult {
@@ -53,8 +50,14 @@ export function partitionAgentEndFiles(files: string[]): AgentEndFilePartition {
       skippedFiles.push(file);
       continue;
     }
-    if (config.mode === BackendMode.Lsp) lspFiles.push(file);
-    else formatFiles.push({ file, config });
+    switch (config.mode) {
+      case BackendMode.Lsp:
+        lspFiles.push(file);
+        break;
+      case BackendMode.Format:
+        formatFiles.push({ file, config });
+        break;
+    }
   }
 
   return { lspFiles, formatFiles, skippedFiles };
@@ -102,30 +105,6 @@ export async function collectDiagnosticsAgentEndResults(
   }
 }
 
-function sensorFailureResult(error: unknown): AgentEndFileResult {
-  return {
-    kind: AgentEndResultKind.Sensor,
-    backend: BackendName.Sensor,
-    filePath: ".pi/code-sensors.json",
-    fileName: ".pi/code-sensors.json",
-    issues: [{
-      severity: AgentEndIssueSeverity.Error,
-      message: `code sensors failed: ${error instanceof Error ? error.message : String(error)}`,
-    }],
-  };
-}
-
-async function collectCodeSensorAgentEndResults(
-  files: string[],
-  runCodeSensors: NonNullable<AgentEndPipelineDeps["runCodeSensors"]>,
-): Promise<AgentEndFileResult[]> {
-  try {
-    return await runCodeSensors(files);
-  } catch (error) {
-    return [sensorFailureResult(error)];
-  }
-}
-
 export async function processAgentEndBatch(
   activeResults: ActiveAgentEndResults,
   files: string[],
@@ -140,17 +119,11 @@ export async function processAgentEndBatch(
   const unavailableFormatFiles = formatFilesWithBins
     .filter((entry) => !entry.bin)
     .map((entry) => entry.file);
-  const previousSensorResultPaths = deps.runCodeSensors
-    ? [...activeResults.values()]
-      .filter((result) => result.kind === AgentEndResultKind.Sensor)
-      .map((result) => result.filePath)
-    : [];
   const results = [
     ...collectFormatAgentEndResults(runnableFormatFiles, deps),
     ...await collectDiagnosticsAgentEndResults(lspFiles, deps.runDiagnostics),
-    ...await (deps.runCodeSensors ? collectCodeSensorAgentEndResults(files, deps.runCodeSensors) : []),
   ];
-  processAgentEndResults(activeResults, [...files, ...previousSensorResultPaths], results);
+  processAgentEndResults(activeResults, files, results);
 
   const diagnosticBackendChecks = new Map<BackendName, string[]>();
   for (const file of lspFiles) {
@@ -167,9 +140,6 @@ export async function processAgentEndBatch(
     })),
     ...runnableFormatFiles.map((entry) => ({ kind: AgentEndBackendCheckKind.Format, backend: entry.config.name, files: [entry.file] })),
   ];
-  if (deps.runCodeSensors) {
-    backendChecks.push({ kind: AgentEndBackendCheckKind.Sensor, backend: BackendName.Sensor, files });
-  }
 
   return buildAgentEndReviewResult({
     checkedFiles: [

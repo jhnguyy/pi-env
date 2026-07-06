@@ -14,7 +14,6 @@ export type AgentEndReadiness = typeof AgentEndReadiness[keyof typeof AgentEndRe
 export const AgentEndBackendCheckKind = {
   Diagnostics: "diagnostics",
   Format: "format",
-  Sensor: "sensor",
 } as const;
 export type AgentEndBackendCheckKind = typeof AgentEndBackendCheckKind[keyof typeof AgentEndBackendCheckKind];
 
@@ -53,10 +52,16 @@ function renderFileList(files: string[], limit = 6): string {
 }
 
 function readinessFromCounts(counts: AgentEndReviewMetadata["issueCounts"], checkedCount: number): AgentEndReadiness {
-  if (counts.errors > 0) return AgentEndReadiness.Blocked;
-  if (counts.warnings > 0) return AgentEndReadiness.ReviewWarnings;
-  if (checkedCount === 0) return AgentEndReadiness.NotChecked;
-  return AgentEndReadiness.Ready;
+  switch (true) {
+    case counts.errors > 0:
+      return AgentEndReadiness.Blocked;
+    case counts.warnings > 0:
+      return AgentEndReadiness.ReviewWarnings;
+    case checkedCount === 0:
+      return AgentEndReadiness.NotChecked;
+    default:
+      return AgentEndReadiness.Ready;
+  }
 }
 
 function renderBackendChecks(checks: AgentEndBackendCheck[]): string {
@@ -97,7 +102,7 @@ export function buildAgentEndReviewResult(args: {
   };
 
   const lines = [
-    "Code sensors completed.",
+    "Post-edit checks completed.",
     `Checked: ${checkedFiles.length}${checkedFiles.length > 0 ? ` (${renderFileList(checkedFiles)})` : ""}`,
     `Backends: ${renderBackendChecks(metadata.backendChecks)}`,
   ];

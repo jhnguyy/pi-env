@@ -9,7 +9,7 @@ output=$(scripts/node-run.sh scripts/verify.mjs --list)
 for expected in \
   "setup-tests: setup tests — nub run test:setup" \
   "typecheck: typecheck — nub run typecheck" \
-  "code-sensors: code sensors — nub run check:all" \
+  "quality-harness: quality harness — nub run check:all" \
   "build: extension build — nub run build" \
   "install-readiness: install readiness — scripts/node-run.sh scripts/verify-install.mjs" \
   "unit-tests: unit tests — nub run test:unit"

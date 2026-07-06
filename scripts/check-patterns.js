@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -14,6 +14,7 @@ function gitFiles() {
 const findings = [];
 for (const file of gitFiles()) {
   if (file === ".pi/extensions/_shared/errors.ts") continue;
+  if (!existsSync(file)) continue;
   const text = readFileSync(file, "utf8");
   if (/function\s+formatError\s*\(/.test(text)) {
     findings.push({

@@ -2,7 +2,7 @@ import type { SpawnSyncReturns } from "node:child_process";
 import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { AgentEndIssueSeverity, AgentEndResultKind } from "../agent-end";
-import { AgentEndBackendCheckKind, AgentEndReadiness } from "../agent-end-review";
+import { AgentEndReadiness } from "../agent-end-review";
 import { BackendName } from "../backend-configs";
 import {
   collectDiagnosticsAgentEndResults,
@@ -91,7 +91,7 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
 
     expect(result.triggerTurn).toBe(true);
     expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
-    expect(result.summary).toContain("Code sensors completed.");
+    expect(result.summary).toContain("Post-edit checks completed.");
     expect(result.summary).toContain("Readiness: blocked");
     expect(result.summary).toContain("a.ts (typescript):");
     expect(result.summary).toContain("main.tf (terraform):");
@@ -127,109 +127,4 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     expect(result.summary).toContain("Readiness: clean. No post-edit issues were found.");
   });
 
-  it("includes configured code sensors in readiness metadata", async () => {
-    const active = new Map();
-
-    const result = await processAgentEndBatch(active, ["/repo/a.ts"], {
-      resolveFormatBinary: () => null,
-      runFormat: () => spawnResult(0),
-      runDiagnostics: async () => ({
-        action: "diagnostics",
-        path: "/repo/a.ts",
-        errorCount: 0,
-        warnCount: 0,
-        language: "typescript",
-        items: [],
-      }),
-      runCodeSensors: async () => [{
-        kind: AgentEndResultKind.Sensor,
-        backend: BackendName.Sensor,
-        filePath: "/repo/.pi/code-sensors.json",
-        fileName: ".pi/code-sensors.json",
-        issues: [{ severity: AgentEndIssueSeverity.Error, message: "depcruise: boundary violation" }],
-      }],
-    });
-
-    expect(result.triggerTurn).toBe(true);
-    expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
-    expect(result.metadata.backendChecks).toContainEqual({ kind: AgentEndBackendCheckKind.Sensor, backend: BackendName.Sensor, files: ["/repo/a.ts"] });
-    expect(result.summary).toContain("sensor:sensor 1");
-    expect(result.summary).toContain("depcruise: boundary violation");
-  });
-
-  it("uses sensor issue counts for readiness even when no files have LSP or formatter coverage", async () => {
-    const active = new Map();
-
-    const result = await processAgentEndBatch(active, ["/repo/package.json"], {
-      resolveFormatBinary: () => null,
-      runFormat: () => spawnResult(0),
-      runDiagnostics: async () => null,
-      runCodeSensors: async () => [{
-        kind: AgentEndResultKind.Sensor,
-        backend: BackendName.Sensor,
-        filePath: "/repo/.pi/code-sensors.json",
-        fileName: ".pi/code-sensors.json",
-        issues: [{ severity: AgentEndIssueSeverity.Warning, message: "knip: unused export" }],
-      }],
-    });
-
-    expect(result.triggerTurn).toBe(false);
-    expect(result.metadata.readiness).toBe(AgentEndReadiness.ReviewWarnings);
-    expect(result.summary).toContain("Readiness: warnings");
-    expect(result.summary).toContain("knip: unused export");
-  });
-
-  it("reports code sensor execution failures as blocking sensor issues", async () => {
-    const active = new Map();
-
-    const result = await processAgentEndBatch(active, ["/repo/package.json"], {
-      resolveFormatBinary: () => null,
-      runFormat: () => spawnResult(0),
-      runDiagnostics: async () => null,
-      runCodeSensors: async () => {
-        throw new Error("invalid .pi/code-sensors.json");
-      },
-    });
-
-    expect(result.triggerTurn).toBe(true);
-    expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
-    expect(result.summary).toContain("code sensors failed: invalid .pi/code-sensors.json");
-    expect([...active.keys()]).toEqual([".pi/code-sensors.json"]);
-  });
-
-  it("clears stale sensor results when configured sensors pass later", async () => {
-    const active = new Map();
-    const cleanDiagnostics = async () => ({
-      action: "diagnostics" as const,
-      path: "/repo/a.ts",
-      errorCount: 0,
-      warnCount: 0,
-      language: "typescript",
-      items: [],
-    });
-
-    await processAgentEndBatch(active, ["/repo/a.ts"], {
-      resolveFormatBinary: () => null,
-      runFormat: () => spawnResult(0),
-      runDiagnostics: cleanDiagnostics,
-      runCodeSensors: async () => [{
-        kind: AgentEndResultKind.Sensor,
-        backend: BackendName.Sensor,
-        filePath: "/repo/.pi/code-sensors.json",
-        fileName: ".pi/code-sensors.json",
-        issues: [{ severity: AgentEndIssueSeverity.Error, message: "depcruise: boundary violation" }],
-      }],
-    });
-
-    expect([...active.keys()]).toEqual(["/repo/.pi/code-sensors.json"]);
-
-    await processAgentEndBatch(active, ["/repo/a.ts"], {
-      resolveFormatBinary: () => null,
-      runFormat: () => spawnResult(0),
-      runDiagnostics: cleanDiagnostics,
-      runCodeSensors: async () => [],
-    });
-
-    expect(active.size).toBe(0);
-  });
 });

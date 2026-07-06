@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
-const HARNESS_CORE_FILES = [".pi/code-sensors.json"];
-
 const CHECKS = [
   {
     name: "dependency boundaries",
@@ -40,8 +38,6 @@ const CHECKS = [
 
 function printFiles() {
   console.log("Harness file requirements:");
-  console.log("\npost-edit sensor wiring:");
-  for (const file of HARNESS_CORE_FILES) console.log(`- ${file}`);
   for (const check of CHECKS) {
     console.log(`\n${check.name}:`);
     for (const file of check.files ?? []) console.log(`- ${file}`);
@@ -123,15 +119,31 @@ for (const result of results) {
   if (failed && result.blocking) blockingFailure = true;
   const instructions = result.hint(result.output);
   const hasWarnings = !result.blocking && instructions.length > 0;
-  const label = failed ? (result.blocking ? "BLOCK" : "WARN") : hasWarnings ? "WARN" : "OK";
+  let label;
+  switch (true) {
+    case failed && result.blocking:
+      label = "BLOCK";
+      break;
+    case failed || hasWarnings:
+      label = "WARN";
+      break;
+    default:
+      label = "OK";
+      break;
+  }
+
   console.log(`\n[${label}] ${result.name}`);
-  if (instructions.length > 0) {
-    for (const instruction of instructions.slice(0, 20)) console.log(`- ${instruction}`);
-    if (instructions.length > 20) console.log(`- ... ${instructions.length - 20} more finding(s) omitted`);
-  } else if (failed && result.output) {
-    console.log(result.output.split("\n").slice(0, 40).join("\n"));
-  } else {
-    console.log("No findings.");
+  switch (true) {
+    case instructions.length > 0:
+      for (const instruction of instructions.slice(0, 20)) console.log(`- ${instruction}`);
+      if (instructions.length > 20) console.log(`- ... ${instructions.length - 20} more finding(s) omitted`);
+      break;
+    case failed && result.output:
+      console.log(result.output.split("\n").slice(0, 40).join("\n"));
+      break;
+    default:
+      console.log("No findings.");
+      break;
   }
 }
 
