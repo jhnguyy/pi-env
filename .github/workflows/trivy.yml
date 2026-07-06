@@ -22,13 +22,16 @@ jobs:
       image: aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
       options: --cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev
     env:
-      TRIVY_RUNTIME: local
       TRIVY_CACHE_DIR: /tmp/trivy-cache
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
+      - name: Checkout merge commit without checkout action
+        shell: sh
+        run: |
+          set -eu
+          git init --initial-branch=scan
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git fetch --depth=1 --no-tags origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
 
       - name: Run Trivy in job container
         shell: sh
