@@ -20,3 +20,9 @@ TRIVY_RUNTIME=local bash scripts/trivy-scan.sh
 ```
 
 When changing scanner image, runtime flags, checkout behavior, or triggers, update the workflow and script together and let those files remain the source of truth for exact mechanics.
+
+## Container image boundary
+
+The image may contain source, locked dependencies, prebuilt extension bundles, Node, Nub, Git, and OpenSSH client tooling. It must not contain private keys, GitHub tokens, SSH signing keys, pi sessions, model credentials, local notes, or mutable agent state.
+
+Runtime identity and state must be mounted or provided externally. Image publishing is restricted to pushes on `main`.

@@ -18,7 +18,7 @@ Reusable skills should discover local policy before reading or writing durable s
 
 ## Getting started
 
-Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed paths:
+Nub is the canonical JavaScript toolchain. Nix remains available for host/runtime provisioning. There are two Nix-backed setup paths:
 
 - **Local Nix** means this machine can run `nix run` and realize store paths.
 - **Externally Nix-managed** means tools such as `git`, Nub, and Node.js are already provisioned by Home Manager, nix-manager, a container image, or another host-level Nix system; setup should consume those tools and should not invoke `nix run`.
@@ -33,6 +33,16 @@ Prefer the Nix flake for a reproducible toolchain. There are two Nix-backed path
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
 
 Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`docs/nix.md`](docs/nix.md) for Nix details and [`docs/prerequisites.md`](docs/prerequisites.md) for the mode split.
+
+Source validation:
+
+```bash
+nub install --frozen-lockfile
+nub run build
+nub run verify
+```
+
+See [`docs/container-image.md`](docs/container-image.md) for the container image contract.
 
 Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/config/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.
 

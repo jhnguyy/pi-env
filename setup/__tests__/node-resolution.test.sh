@@ -35,6 +35,12 @@ real_node_bin() {
   node_bin
 }
 
+test_node_run_honors_valid_node_executable() {
+  local output
+  output="$(NODE_EXECUTABLE="$(real_node_bin)" "$ROOT/scripts/node-run.sh" -e 'console.log(process.argv[1])' ok)"
+  [ "$output" = "ok" ] || fail "node-run should execute with NODE_EXECUTABLE, got $output"
+}
+
 test_node_run_honors_valid_pi_env_node_bin() {
   local output
   output="$(PI_ENV_NODE_BIN="$(real_node_bin)" "$ROOT/scripts/node-run.sh" -e 'console.log(process.argv[1])' ok)"
@@ -78,7 +84,7 @@ test_falls_back_when_nub_node_is_broken() {
   rm -rf "$tmp"
 }
 
-test_prefers_path_node_before_nub_node() {
+test_prefers_nub_node_before_path_node() {
   local tmp old_path resolved
   tmp="$(with_temp_dir)"
   old_path="$PATH"
@@ -90,9 +96,9 @@ test_prefers_path_node_before_nub_node() {
   make_fake_nub "$tmp/bin/nub" "$tmp/nub-node"
 
   PATH="$tmp/bin:$PATH"
-  unset PI_ENV_NODE_BIN PI_ENV_SETUP_MODE PI_ENV_CONFIG_MANAGED_BY_NIX || true
+  unset NODE_EXECUTABLE PI_ENV_NODE_BIN PI_ENV_SETUP_MODE PI_ENV_CONFIG_MANAGED_BY_NIX || true
   resolved="$(resolve_setup_node_bin)"
-  [ "$resolved" = "$tmp/bin/node" ] || fail "expected PATH node before Nub node, got $resolved"
+  [ "$resolved" = "$tmp/nub-node" ] || fail "expected Nub node before PATH node, got $resolved"
 
   PATH="$old_path"
   rm -rf "$tmp"
@@ -124,10 +130,11 @@ SH
   rm -rf "$tmp"
 }
 
+test_node_run_honors_valid_node_executable
 test_node_run_honors_valid_pi_env_node_bin
 test_node_run_rejects_invalid_pi_env_node_bin
 test_falls_back_when_nub_node_is_broken
-test_prefers_path_node_before_nub_node
+test_prefers_nub_node_before_path_node
 test_no_node_points_to_nix_next_step_when_nix_exists
 
 echo "node resolution tests passed"

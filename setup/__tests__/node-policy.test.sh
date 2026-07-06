@@ -16,12 +16,14 @@ import {
   nodePolicyIssues,
   nodeVersionSatisfies,
   readNodePin,
+  readNodeRuntimePin,
 } from './scripts/node-policy.mjs';
 
 assert.equal(readNodePin('.node-version'), '24.16.0');
 assert.equal(readNodePin('.nvmrc'), '24.16.0');
+assert.equal(readNodeRuntimePin(), '24.16.0');
 assert.equal(nodeVersionSatisfies('24.16.0'), true);
-assert.equal(nodeVersionSatisfies('24.0.0'), true);
+assert.equal(nodeVersionSatisfies('24.0.0'), false);
 assert.equal(nodeVersionSatisfies('23.99.99'), false);
 assert.equal(esbuildNodeTarget(), 'node24.0');
 assert.deepEqual(nodePolicyIssues(), []);
@@ -41,6 +43,16 @@ try {
   assert.throws(() => assertNodePolicy(mismatchedPins), /Node policy mismatch/);
 } finally {
   rmSync(mismatchedPins, { recursive: true, force: true });
+}
+
+const mismatchedRuntime = makeRepo({
+  engines: { node: '>=24.0.0' },
+  devEngines: { runtime: { name: 'node', version: '24.17.0', onFail: 'error' } },
+}, '24.16.0');
+try {
+  assert.match(nodePolicyIssues(mismatchedRuntime).join('\n'), /devEngines\.runtime\.version/);
+} finally {
+  rmSync(mismatchedRuntime, { recursive: true, force: true });
 }
 
 const mismatchedMajor = makeRepo({ engines: { node: '>=23.0.0' } }, '24.16.0');

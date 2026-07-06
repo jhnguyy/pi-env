@@ -1,8 +1,8 @@
 # Nix support
 
-Nix is the primary path for reproducible `pi-env` setup. The portable shell setup remains as a fallback for machines where Nix is unavailable.
+Nub is the primary path for reproducible `pi-env` JavaScript setup. Nix remains supported for host/runtime provisioning and machines where Home Manager or nix-manager should own system tools and shell configuration.
 
-With Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies the baseline toolchain, and setup uses Nub for JavaScript dependencies and script orchestration.
+With local Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies baseline host tools, and setup uses Nub for Node resolution, JavaScript dependencies, and script orchestration.
 
 The flake supports Linux and macOS on `x86_64` and `aarch64`:
 
@@ -26,7 +26,7 @@ Plain `./setup.sh` auto-detects local Nix and tries `nix run .#setup` before fal
 
 `--use-nix` means “invoke local Nix now” and re-execs `nix run .#setup`. Use it only when you want failure instead of fallback if the current user cannot realize Nix store paths.
 
-`--nix-managed` means “Nix/Home Manager/nix-manager already provided the toolchain or owns shell/terminal config.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` on `PATH` unless `PI_ENV_NODE_BIN` pins Node explicitly. This mode is selected automatically when `PI_ENV_CONFIG_MANAGED_BY_NIX=1` is already present.
+`--nix-managed` means “Nix/Home Manager/nix-manager already provided host tools or owns shell/terminal config.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` on `PATH` while still allowing Nub to resolve the project Node. `NODE_EXECUTABLE` or `PI_ENV_NODE_BIN` can pin Node explicitly for runtimes that must use a host-provided binary. This mode is selected automatically when `PI_ENV_CONFIG_MANAGED_BY_NIX=1` is already present.
 
 `nix run .#setup` runs `./setup.sh --nix-managed` from the checkout and exports `PI_ENV_NODE_BIN` to the flake-provided Node executable. Nix-managed setup skips shell profile, tmux, and Ghostty writes because those can be handled by a higher-priority Nix configuration. If `PI_ENV_CLI_MANAGED_BY_NIX=1`, setup also leaves `~/.local/bin/pi` alone and only verifies that the checkout's locked pi package exists after `nub install`.
 
@@ -34,7 +34,7 @@ Plain `./setup.sh` auto-detects local Nix and tries `nix run .#setup` before fal
 
 The flake's `toolchainPackages` is the source of truth for the dev shell, installable `.#toolchain` package, setup app runtime, bootstrap app runtime, and Nix setup checks.
 
-Node's major version is derived from `.node-version`, then resolved through nixpkgs as `nodejs_<major>`. Keep `.node-version`, `.nvmrc`, and `package.json#engines.node` aligned when moving to a new Node LTS line. The exact Nix patch version comes from `flake.lock`; the package engine range should express the supported LTS floor rather than a patch that the locked nixpkgs cannot provide. `nub run check:node` enforces that the local pins match and that `package.json#engines.node` stays on the same major line.
+Nub resolves the project Node from `package.json#devEngines.runtime`, then `.node-version`, then `.nvmrc`, then `package.json#engines.node`. The flake derives the Nix Node major from `.node-version` for hosts that need Nix-provided Node. Keep these fields aligned when moving to a new Node LTS line. The exact Nix patch version comes from `flake.lock`; the package engine range should express the supported LTS floor rather than a patch that the locked nixpkgs cannot provide. `nub run check:node` enforces that the local pins match and that `package.json#engines.node` stays on the same major line.
 
 ## Deterministic boundaries
 
@@ -65,7 +65,7 @@ Intentionally mutable/local:
 ./setup.sh --no-repo-hooks  # skip git hook setup
 ```
 
-Setup selects a usable Node before running Node/Nub install steps. The selection contract is explicit: `PI_ENV_NODE_BIN` wins, Nix-managed setup trusts PATH Node first, portable setup prefers already working host Node, and Nub's project Node is a fallback. If no usable Node is found and Nix is available, setup reports `./setup.sh --use-nix` or an externally Nix-managed toolchain as the next step.
+Setup selects a usable Node before running Node/Nub install steps. The selection contract is explicit: `NODE_EXECUTABLE` wins as Nub's documented hard override, then `PI_ENV_NODE_BIN`, then Nub's project Node resolution. Nix-managed setup can still fall back to PATH Node if Nub is unavailable. If no usable Node is found and Nix is available, setup reports `./setup.sh --use-nix` or an externally Nix-managed toolchain as the next step.
 
 Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`, so later direct `./setup.sh` runs skip duplicate PATH/tmux/Ghostty writes. They can also set `PI_ENV_CLI_MANAGED_BY_NIX=1` so setup does not overwrite a Nix-managed `~/.local/bin/pi`. Granular environment flags are supported:
 

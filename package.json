@@ -104,6 +104,11 @@
       "name": "nub",
       "version": "^0.2.10",
       "onFail": "warn"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "24.16.0",
+      "onFail": "error"
     }
   },
   "dependencies": {
