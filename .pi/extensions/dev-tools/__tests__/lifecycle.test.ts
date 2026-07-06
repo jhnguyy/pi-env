@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { PiEvent } from "../../_shared/agent-tools";
 import { registerDevToolsLifecycle } from "../lifecycle";
@@ -26,46 +26,17 @@ function createPi() {
 }
 
 describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
-  it("records edited files, sends deferred post-edit diagnostics, and keeps active context compact", async () => {
+  it("removes stale post-edit feedback from context without sending new agent-end feedback", async () => {
     const pi = createPi();
-    const runDiagnostics = vi.fn(async (paths: string[]) => ({
-      action: "diagnostics" as const,
-      path: "",
-      errorCount: 1,
-      warnCount: 0,
-      language: "typescript",
-      items: [],
-      files: paths.map((path) => ({
-        action: "diagnostics" as const,
-        path,
-        language: "typescript",
-        errorCount: 1,
-        warnCount: 0,
-        items: [{ severity: "error" as const, line: 2, character: 3, code: "TS1", message: "broken" }],
-      })),
-    }));
+    const state = registerDevToolsLifecycle(pi as any);
 
-    registerDevToolsLifecycle(pi as any, {
-      runDiagnostics,
-      defer: (callback) => callback(),
-    });
-
-    await pi.emit(PiEvent.SessionStart);
     await pi.emit(PiEvent.ToolResult, {
       toolName: "write",
-      input: { path: "/repo/a.ts" },
+      input: { path: "/repo/main.tf" },
     });
     await pi.emit(PiEvent.AgentEnd);
 
-    expect(runDiagnostics).toHaveBeenCalledWith(["/repo/a.ts"]);
-    expect(pi.sent).toEqual([{ 
-      message: expect.objectContaining({
-        customType: "dev-tools-agent-end",
-        display: true,
-        content: expect.stringContaining("a.ts (typescript):"),
-      }),
-      options: { triggerTurn: true, deliverAs: "followUp" },
-    }]);
+    expect(pi.sent).toEqual([]);
 
     const [context] = await pi.emit(PiEvent.Context, {
       messages: [
@@ -77,41 +48,8 @@ describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
     expect(context).toEqual({
       messages: [
         { role: "user", content: "keep" },
-        expect.objectContaining({
-          role: "custom",
-          customType: "dev-tools-agent-end",
-          display: false,
-          content: expect.stringContaining("TS1 broken"),
-        }),
       ],
     });
-  });
-
-  it("clears pending edits and active diagnostics on session start", async () => {
-    const pi = createPi();
-    const runDiagnostics = vi.fn(async () => ({
-      action: "diagnostics" as const,
-      path: "/repo/a.ts",
-      language: "typescript",
-      errorCount: 0,
-      warnCount: 0,
-      items: [],
-    }));
-    const state = registerDevToolsLifecycle(pi as any, { runDiagnostics });
-
-    state.pendingFiles.recordToolResult({ toolName: "write", input: { path: "/repo/a.ts" } });
-    state.activeAgentEndResults.set("/repo/a.ts", {
-      kind: "lsp",
-      backend: "typescript",
-      filePath: "/repo/a.ts",
-      fileName: "a.ts",
-      issues: [{ severity: "error", message: "old" }],
-    });
-
-    await pi.emit(PiEvent.SessionStart);
-    await pi.emit(PiEvent.AgentEnd);
-
-    expect(runDiagnostics).not.toHaveBeenCalled();
-    expect(state.activeAgentEndResults.size).toBe(0);
+    expect(state.removedStalePostEditMessages).toBe(1);
   });
 });

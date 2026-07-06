@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 export const VerificationPhaseId = {
   SetupTests: "setup-tests",
   Typecheck: "typecheck",
+  QualityHarness: "quality-harness",
   Build: "build",
   InstallReadiness: "install-readiness",
   UnitTests: "unit-tests",
@@ -20,6 +21,12 @@ export const VERIFICATION_PHASES = [
     label: "typecheck",
     command: "nub",
     args: ["run", "typecheck"],
+  },
+  {
+    id: VerificationPhaseId.QualityHarness,
+    label: "quality harness",
+    command: "nub",
+    args: ["run", "check:all"],
   },
   {
     id: VerificationPhaseId.Build,

@@ -1,19 +1,8 @@
 /**
- * dev-tools extension — registers the `dev-tools` tool and hooks agent_end processing.
+ * dev-tools extension — registers language-server-backed code intelligence.
  *
- * dev-tools is a file-extension engine: at agent_end it dispatches each edited
- * file to the backend registered for its extension in BACKEND_CONFIGS:
- *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
- *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
- *
- * **Ordering invariant**: format backends run BEFORE LSP diagnostics in agent_end.
- * LSP diagnostics can re-engage the model when errors are found. The actual
- * sendMessage call is deferred until after agent_end returns because pi still treats
- * the agent as streaming while agent_end handlers run; calling sendMessage there
- * would enqueue diagnostics instead of starting the synthetic follow-up turn.
- *
- * The dev-tools interactive tool (hover, definition, symbols, …) routes through
- * the LSP daemon only — it does not interact with format backends.
+ * Use the interactive tool for diagnostics, hover, definitions, references,
+ * call hierarchy, and symbols. Diagnostics are useful before commit or review.
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -84,8 +73,8 @@ export default function (pi: ExtensionAPI) {
       "implementations, references, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
+      "Use diagnostics to validate changed code before commit or review.",
       "Use text search for strings, comments, config values, generated files, and unsupported file types.",
-      "After edits, diagnostics run automatically for supported files.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
@@ -100,7 +89,5 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── post-edit lifecycle ─────────────────────────────────────────────────
-  registerDevToolsLifecycle(pi, {
-    runDiagnostics: (paths) => client.call({ action: "diagnostics", paths }),
-  });
+  registerDevToolsLifecycle(pi);
 }

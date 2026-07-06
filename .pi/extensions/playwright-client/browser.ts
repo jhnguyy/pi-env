@@ -1,3 +1,4 @@
+import { formatError } from "../_shared/errors";
 import type { BrowserClientConfig, BrowserTarget } from "./config";
 import { BrowserArtifacts } from "./artifacts";
 
@@ -410,7 +411,4 @@ function safeUrl(page: PageLike): string {
   } catch {
     return "";
   }
-}
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

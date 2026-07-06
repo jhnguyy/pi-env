@@ -19,7 +19,7 @@ import { extname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export const BackendName = {
+const BackendName = {
   Lsp: "lsp",
   TypeScript: "typescript",
   Bash: "bash",
@@ -27,7 +27,7 @@ export const BackendName = {
   Hcl: "hcl",
   Terraform: "terraform",
 } as const;
-export type BackendName = typeof BackendName[keyof typeof BackendName];
+type BackendName = typeof BackendName[keyof typeof BackendName];
 
 export const BackendMode = {
   Lsp: "lsp",
@@ -60,7 +60,7 @@ export interface LspBackendConfig extends BackendConfigBase {
 }
 
 /** A one-shot file formatter (runs per-file at agent_end, no persistent process). */
-export interface FormatBackendConfig extends BackendConfigBase {
+interface FormatBackendConfig extends BackendConfigBase {
   mode: typeof BackendMode.Format;
   /**
    * Build the argument list for a formatting invocation.
@@ -75,7 +75,7 @@ export type BackendConfig = LspBackendConfig | FormatBackendConfig;
 // ─── Per-backend LSP capabilities ─────────────────────────────────────────────
 
 /** Baseline LSP capabilities shared across most backends. */
-export const STANDARD_CAPABILITIES = {
+const STANDARD_CAPABILITIES = {
   textDocument: {
     hover: { contentFormat: ["plaintext"] },
     definition: {},
@@ -197,7 +197,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
 // ─── Derived lookups ──────────────────────────────────────────────────────────
 
 /** All file extensions handled by any registered backend. */
-export const SUPPORTED_EXTENSIONS = new Set(
+const SUPPORTED_EXTENSIONS = new Set(
   BACKEND_CONFIGS.flatMap((c) => [...c.extensions.keys()]),
 );
 

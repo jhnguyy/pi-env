@@ -1,0 +1,42 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/*.mjs",
+    "setup/*.mjs",
+    "vitest.config.ts",
+    ".pi/extensions/*/index.ts"
+  ],
+  "project": [
+    "scripts/**/*.mjs",
+    "setup/**/*.mjs",
+    ".pi/extensions/**/*.ts",
+    ".agents/skills/**/*.ts",
+    "*.config.ts"
+  ],
+  "ignore": [
+    ".pi/extensions/**/dist/**",
+    ".pi/extensions/playwright-client/**"
+  ],
+  "ignoreBinaries": [
+    "scripts/node-run.sh",
+    "which"
+  ],
+  "ignoreDependencies": [
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+    "@jscpd/core",
+    "@jscpd/finder",
+    "@jscpd/html-reporter",
+    "@jscpd/tokenizer",
+    "bash-language-server",
+    "cpd-linux-x64-musl",
+    "dependency-cruiser",
+    "jscpd",
+    "jscpd-sarif-reporter",
+    "knip",
+    "typebox",
+    "typescript-language-server"
+  ]
+}

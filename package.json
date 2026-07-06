@@ -50,6 +50,9 @@
     "test:setup": "bash setup/__tests__/run.sh",
     "test:e2e": "E2E=1 scripts/node-run.sh node_modules/vitest/vitest.mjs run",
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
+    "sensor:deps": "nub run check:deps",
+    "sensor:dup": "nub run check:clones",
+    "sensors": "nub run check:all",
     "verify": "scripts/node-run.sh scripts/verify.mjs",
     "verify:install": "nub run build && scripts/node-run.sh scripts/verify-install.mjs",
     "postinstall": "sh scripts/restart-lsp-daemon.sh && scripts/node-run.sh scripts/build-extensions.mjs",
@@ -59,6 +62,14 @@
     "pretest:e2e": "nub run check:node",
     "pretypecheck": "nub run check:node",
     "preinstall": "nub run check:node",
+    "check:deps": "NODE_PATH=node_modules scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs .pi/extensions --include-only '^\\.pi/extensions' --output-type err --progress none",
+    "check:clones": "scripts/node-run.sh scripts/run-jscpd.js .pi/extensions --config .jscpd.json --exit-code 0",
+    "check:unused": "NODE_PATH=node_modules scripts/node-run.sh node_modules/knip/bin/knip.js --reporter compact --no-progress --no-exit-code",
+    "check:all": "nub run check:deps && nub run check:clones && nub run check:unused && nub run check:patterns",
+    "harness:report": "scripts/node-run.sh scripts/harness-report.js",
+    "sensor:unused": "nub run check:unused",
+    "check:patterns": "scripts/node-run.sh scripts/check-patterns.js",
+    "harness:files": "scripts/node-run.sh scripts/harness-report.js --files",
     "security:trivy": "bash scripts/trivy-scan.sh"
   },
   "peerDependencies": {
@@ -74,7 +85,11 @@
     "@earendil-works/pi-coding-agent": "0.80.3",
     "@earendil-works/pi-tui": "0.80.3",
     "@types/node": "^24.0.0",
+    "cpd-linux-x64-musl": "5.0.11",
+    "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
+    "jscpd": "5.0.11",
+    "knip": "^6.24.0",
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
@@ -97,5 +112,8 @@
   "allowBuilds": {
     "@google/genai": true,
     "esbuild": true
+  },
+  "optionalDependencies": {
+    "cpd-linux-x64-gnu": "5.0.11"
   }
 }
