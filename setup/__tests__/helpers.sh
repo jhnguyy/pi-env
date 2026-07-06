@@ -13,13 +13,17 @@ fail() {
 }
 
 node_bin() {
-  if [ -n "${PI_ENV_NODE_BIN:-}" ] && [ -x "$PI_ENV_NODE_BIN" ]; then
-    printf '%s\n' "$PI_ENV_NODE_BIN"
-  elif [ -x /bin/node ]; then
-    printf '%s\n' /bin/node
-  else
-    command -v node
+  # Resolve through the same policy used by setup/node-run so tests use the
+  # repository-declared Node version instead of whichever /bin/node exists on
+  # the host. The full test runner exports PI_ENV_TEST_NODE_BIN before tests
+  # mutate HOME/PATH; standalone test execution resolves it on demand.
+  if [ -n "${PI_ENV_TEST_NODE_BIN:-}" ] && [ -x "$PI_ENV_TEST_NODE_BIN" ]; then
+    printf '%s\n' "$PI_ENV_TEST_NODE_BIN"
+    return 0
   fi
+  # shellcheck source=setup/node-runtime.sh
+  . "$ROOT/setup/node-runtime.sh"
+  pi_env_select_node_bin "$ROOT"
 }
 
 run_node() {

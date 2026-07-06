@@ -4,17 +4,9 @@ set -euo pipefail
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
-test_node_bin() {
-  if [ -x /bin/node ]; then
-    printf '%s\n' /bin/node
-  else
-    command -v node
-  fi
-}
-
 run_pi_cli_setup() {
-  local node_bin
-  node_bin=$(test_node_bin)
+  local selected_node_bin
+  selected_node_bin=$(PI_ENV_NODE_BIN= node_bin)
   REPO="$REPO" \
   SETUP_DIR="$ROOT/setup" \
   PI_BIN_DIR="$PI_BIN_DIR" \
@@ -22,7 +14,7 @@ run_pi_cli_setup() {
   PI_ENV_CONFIG_MANAGED_BY_NIX="${PI_ENV_CONFIG_MANAGED_BY_NIX:-}" \
   PI_ENV_CLI_MANAGED_BY_NIX="${PI_ENV_CLI_MANAGED_BY_NIX:-}" \
   PI_ENV_SKIP_PATH_PROFILE="${PI_ENV_SKIP_PATH_PROFILE:-}" \
-  "$node_bin" "$ROOT/setup/runtime.mjs" "${PI_ENV_NODE_BIN:-$node_bin}" pi-cli >/dev/null
+  "$selected_node_bin" "$ROOT/setup/runtime.mjs" "${PI_ENV_NODE_BIN:-$selected_node_bin}" pi-cli >/dev/null
 }
 
 create_stub_repo() {
@@ -53,7 +45,7 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
   old_path="$PATH"
 
   PI_ENV_CONFIG_MANAGED_BY_NIX=1
-  PI_ENV_NODE_BIN=$(test_node_bin)
+  PI_ENV_NODE_BIN=$(node_bin)
   create_stub_repo "$tmp"
 
   run_pi_cli_setup
@@ -90,6 +82,7 @@ SH
   run_pi_cli_setup
 
   grep -qF "NODE_BIN='$fake_node'" "$PI_BIN_DIR/pi" || fail "wrapper should pin configured node path"
+  grep -qF "PI_NODE_ARGV0=pi exec \"\$NODE_BIN\" \"\$PI_ENTRY\" \"\$@\"" "$PI_BIN_DIR/pi" || fail "wrapper should request pi argv0 for title detection"
   local wrapper_output
   wrapper_output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")
   printf '%s' "$wrapper_output" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node (got: $wrapper_output)"
@@ -103,7 +96,7 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   tmp="$(with_temp_dir)"
 
   PI_ENV_CLI_MANAGED_BY_NIX=1
-  PI_ENV_NODE_BIN=$(test_node_bin)
+  PI_ENV_NODE_BIN=$(node_bin)
   create_stub_repo "$tmp"
 
   run_pi_cli_setup
@@ -120,10 +113,11 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   old_home="$HOME"
   old_path="$PATH"
 
+  PI_ENV_NODE_BIN=$(node_bin)
+  PI_ENV_TEST_NODE_BIN=$PI_ENV_NODE_BIN
   HOME="$tmp/home"
   PATH="/bin"
   mkdir -p "$HOME"
-  PI_ENV_NODE_BIN=$(test_node_bin)
   create_stub_repo "$tmp"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE || true
@@ -136,7 +130,7 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
 
   HOME="$old_home"
   PATH="$old_path"
-  unset PI_ENV_NODE_BIN
+  unset PI_ENV_NODE_BIN PI_ENV_TEST_NODE_BIN
   rm -rf "$tmp"
 }
 

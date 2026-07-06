@@ -101,7 +101,7 @@ if [ ! -f "$PI_PACKAGE_DIR/package.json" ] || [ ! -f "$PI_ENTRY" ]; then
   echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
 fi
-exec "$NODE_BIN" "$PI_ENTRY" "$@"
+PI_NODE_ARGV0=pi exec "$NODE_BIN" "$PI_ENTRY" "$@"
 `;
   const piPath = join(piBinDir, 'pi');
   writeFileSync(piPath, wrapper, { mode: 0o755 });
