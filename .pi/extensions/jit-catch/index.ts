@@ -15,7 +15,7 @@
  * jit-catch skill, which is now much thinner.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -184,19 +184,25 @@ export default function (pi: ExtensionAPI) {
       return new Text(text, 0, 0);
     },
 
-    renderResult(result, _opts, theme, _ctx) {
+    renderResult(result, opts, theme, _ctx) {
       const details = result.details as { anyFailed?: boolean } | null;
       const failed = details?.anyFailed ?? false;
       const first = result.content[0];
-      const text = first?.type === "text" ? first.text.split("\n")[0] ?? "" : "";
+      const rawText = first?.type === "text" ? first.text : "";
+      const lines = rawText.split("\n");
+      const text = opts.expanded ? rawText : (lines[0] ?? "");
+      const hiddenLines = Math.max(0, lines.length - 1);
 
       const isError =
         failed ||
         (details != null && typeof details === "object" && "error" in details);
-      if (isError) {
-        return new Text(theme.fg("error", "✗ " + text), 0, 0);
+      const prefix = isError ? "✗ " : "";
+      const color = isError ? "error" : "success";
+      let rendered = theme.fg(color, prefix + text);
+      if (!opts.expanded && hiddenLines > 0) {
+        rendered += `${theme.fg("muted", `\n... (${hiddenLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
       }
-      return new Text(theme.fg("success", text), 0, 0);
+      return new Text(rendered, 0, 0);
     },
   });
 

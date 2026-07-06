@@ -6,7 +6,7 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme, keyHint } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import { MAX_TURNS, type SubagentDetails } from "./types";
@@ -151,9 +151,13 @@ export function renderSubagentResult(
     text += ` ${theme.fg("warning", "[turn limit]")}`;
   }
 
+  let hiddenOutputLines = 0;
+
   // Output preview (first 3 lines)
   if (details.finalOutput && details.finalOutput !== "(no output)") {
-    const lines = details.finalOutput.split("\n").slice(0, 3).join("\n");
+    const outputLines = details.finalOutput.split("\n");
+    const lines = outputLines.slice(0, 3).join("\n");
+    hiddenOutputLines = Math.max(0, outputLines.length - 3);
     text += `\n${theme.fg("toolOutput", lines)}`;
   }
 
@@ -165,6 +169,10 @@ export function renderSubagentResult(
     text += `\n${theme.fg("dim", statsLine.join(" · "))}`;
   }
 
-  text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+  if (hiddenOutputLines > 0) {
+    text += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+  } else {
+    text += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
+  }
   return new Text(text, 0, 0);
 }
