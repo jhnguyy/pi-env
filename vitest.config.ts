@@ -4,6 +4,7 @@ const e2e = process.env.E2E === "1";
 
 export default defineConfig({
   test: {
+    setupFiles: [".pi/extensions/__tests__/setup.ts"],
     include: e2e
       ? [".pi/extensions/**/__tests__/e2e.test.ts"]
       : [".pi/extensions/**/__tests__/**/*.test.ts"],
