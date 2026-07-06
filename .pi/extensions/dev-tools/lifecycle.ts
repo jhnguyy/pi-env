@@ -6,12 +6,10 @@ import {
   renderActiveAgentEndSummary,
 } from "./agent-end";
 import { processAgentEndBatch } from "./agent-end-pipeline";
-import type { LspResult } from "./protocol";
 import { PendingPostEditFiles, type ToolResultEditEvent } from "./post-edit-files";
 import { PiEvent } from "../_shared/agent-tools";
 
 export interface DevToolsLifecycleDeps {
-  runDiagnostics: (paths: string[]) => Promise<LspResult | null>;
   resolveFormatBinary?: (name: string) => string | null;
   runFormat?: (bin: string, args: string[]) => SpawnSyncReturns<string>;
   defer?: (callback: () => void) => void;
@@ -43,7 +41,7 @@ export function createDevToolsLifecycleState(): DevToolsLifecycleState {
 
 export function registerDevToolsLifecycle(
   pi: ExtensionAPI,
-  deps: DevToolsLifecycleDeps,
+  deps: DevToolsLifecycleDeps = {},
   state: DevToolsLifecycleState = createDevToolsLifecycleState(),
 ): DevToolsLifecycleState {
   const resolveBinary = deps.resolveFormatBinary ?? resolveFormatBinary;
@@ -88,7 +86,6 @@ export function registerDevToolsLifecycle(
     const processed = await processAgentEndBatch(state.activeAgentEndResults, files, {
       resolveFormatBinary: resolveBinary,
       runFormat,
-      runDiagnostics: deps.runDiagnostics,
     });
 
     if (!processed.summary) return;

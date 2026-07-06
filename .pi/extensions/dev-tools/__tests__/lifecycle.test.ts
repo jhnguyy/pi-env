@@ -26,45 +26,38 @@ function createPi() {
 }
 
 describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
-  it("records edited files, sends deferred post-edit diagnostics, and keeps active context compact", async () => {
+  it("records edited files, sends deferred formatter feedback, and keeps active context compact", async () => {
     const pi = createPi();
-    const runDiagnostics = vi.fn(async (paths: string[]) => ({
-      action: "diagnostics" as const,
-      path: "",
-      errorCount: 1,
-      warnCount: 0,
-      language: "typescript",
-      items: [],
-      files: paths.map((path) => ({
-        action: "diagnostics" as const,
-        path,
-        language: "typescript",
-        errorCount: 1,
-        warnCount: 0,
-        items: [{ severity: "error" as const, line: 2, character: 3, code: "TS1", message: "broken" }],
-      })),
+    const runFormat = vi.fn(() => ({
+      pid: 1,
+      output: [null, "", "fmt failed"],
+      stdout: "",
+      stderr: "fmt failed",
+      status: 1,
+      signal: null,
     }));
 
     registerDevToolsLifecycle(pi as any, {
-      runDiagnostics,
+      resolveFormatBinary: () => "terraform",
+      runFormat,
       defer: (callback) => callback(),
     });
 
     await pi.emit(PiEvent.SessionStart);
     await pi.emit(PiEvent.ToolResult, {
       toolName: "write",
-      input: { path: "/repo/a.ts" },
+      input: { path: "/repo/main.tf" },
     });
     await pi.emit(PiEvent.AgentEnd);
 
-    expect(runDiagnostics).toHaveBeenCalledWith(["/repo/a.ts"]);
-    expect(pi.sent).toEqual([{ 
+    expect(runFormat).toHaveBeenCalledOnce();
+    expect(pi.sent).toEqual([{
       message: expect.objectContaining({
         customType: "dev-tools-agent-end",
         display: true,
-        content: expect.stringContaining("a.ts (typescript):"),
+        content: expect.stringContaining("main.tf (terraform):"),
       }),
-      options: { triggerTurn: true, deliverAs: "followUp" },
+      options: undefined,
     }]);
 
     const [context] = await pi.emit(PiEvent.Context, {
@@ -81,7 +74,7 @@ describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
           role: "custom",
           customType: "dev-tools-agent-end",
           display: false,
-          content: expect.stringContaining("TS1 broken"),
+          content: expect.stringContaining("fmt failed"),
         }),
       ],
     });
@@ -89,15 +82,7 @@ describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
 
   it("clears pending edits and active diagnostics on session start", async () => {
     const pi = createPi();
-    const runDiagnostics = vi.fn(async () => ({
-      action: "diagnostics" as const,
-      path: "/repo/a.ts",
-      language: "typescript",
-      errorCount: 0,
-      warnCount: 0,
-      items: [],
-    }));
-    const state = registerDevToolsLifecycle(pi as any, { runDiagnostics });
+    const state = registerDevToolsLifecycle(pi as any);
 
     state.pendingFiles.recordToolResult({ toolName: "write", input: { path: "/repo/a.ts" } });
     state.activeAgentEndResults.set("/repo/a.ts", {
@@ -111,7 +96,6 @@ describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
     await pi.emit(PiEvent.SessionStart);
     await pi.emit(PiEvent.AgentEnd);
 
-    expect(runDiagnostics).not.toHaveBeenCalled();
     expect(state.activeAgentEndResults.size).toBe(0);
   });
 });

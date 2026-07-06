@@ -5,7 +5,6 @@ import { AgentEndIssueSeverity, AgentEndResultKind } from "../agent-end";
 import { AgentEndReadiness } from "../agent-end-review";
 import { BackendName } from "../backend-configs";
 import {
-  collectDiagnosticsAgentEndResults,
   collectFormatAgentEndResults,
   partitionAgentEndFiles,
   processAgentEndBatch,
@@ -59,72 +58,39 @@ describeIfEnabled("dev-tools", "agent_end pipeline", () => {
     });
   });
 
-  it("treats diagnostics transport failures as best-effort", async () => {
-    await expect(collectDiagnosticsAgentEndResults(["/repo/a.ts"], async () => {
-      throw new Error("daemon unavailable");
-    })).resolves.toEqual([]);
-  });
-
-  it("processes a whole batch with review-readiness metadata", async () => {
+  it("processes a formatter batch with review-readiness metadata", async () => {
     const active = new Map();
 
     const result = await processAgentEndBatch(active, ["/repo/a.ts", "/repo/main.tf"], {
       resolveFormatBinary: () => "terraform",
       runFormat: () => spawnResult(1, "fmt failed"),
-      runDiagnostics: async (paths) => ({
-        action: "diagnostics",
-        path: "",
-        errorCount: 1,
-        warnCount: 0,
-        language: "typescript",
-        items: [],
-        files: paths.map((path) => ({
-          action: "diagnostics",
-          path,
-          language: "typescript",
-          errorCount: 1,
-          warnCount: 0,
-          items: [{ severity: "error", line: 2, character: 3, code: "TS1", message: "broken" }],
-        })),
-      }),
     });
 
-    expect(result.triggerTurn).toBe(true);
+    expect(result.triggerTurn).toBe(false);
     expect(result.metadata.readiness).toBe(AgentEndReadiness.Blocked);
     expect(result.summary).toContain("Post-edit checks completed.");
     expect(result.summary).toContain("Readiness: blocked");
-    expect(result.summary).toContain("a.ts (typescript):");
     expect(result.summary).toContain("main.tf (terraform):");
     expect(result.summary).toContain("fmt failed");
-    expect([...active.keys()].sort()).toEqual(["/repo/a.ts", "/repo/main.tf"]);
+    expect([...active.keys()].sort()).toEqual(["/repo/main.tf"]);
   });
 
-  it("reports clean diagnostic metadata without forcing a readiness follow-up", async () => {
+  it("does not send post-edit feedback when only manual-diagnostic files changed", async () => {
     const active = new Map();
 
     const result = await processAgentEndBatch(active, ["/repo/a.ts", "/repo/README.md"], {
       resolveFormatBinary: () => null,
       runFormat: () => spawnResult(0),
-      runDiagnostics: async () => ({
-        action: "diagnostics",
-        path: "/repo/a.ts",
-        errorCount: 0,
-        warnCount: 0,
-        language: "typescript",
-        items: [],
-      }),
     });
 
     expect(result.triggerTurn).toBe(false);
     expect(result.metadata).toMatchObject({
-      checkedFiles: ["/repo/a.ts"],
-      skippedFiles: ["/repo/README.md"],
+      checkedFiles: [],
+      skippedFiles: ["/repo/a.ts", "/repo/README.md"],
       issueCounts: { errors: 0, warnings: 0, infos: 0 },
-      readiness: AgentEndReadiness.Ready,
+      readiness: AgentEndReadiness.NotChecked,
     });
-    expect(result.summary).toContain("Checked: 1 (a.ts)");
-    expect(result.summary).toContain("Skipped unsupported/unavailable: 1 (README.md)");
-    expect(result.summary).toContain("Readiness: clean. No post-edit issues were found.");
+    expect(result.summary).toBe("");
   });
 
 });

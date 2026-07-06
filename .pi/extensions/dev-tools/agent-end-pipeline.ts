@@ -2,12 +2,10 @@ import type { SpawnSyncReturns } from "node:child_process";
 import {
   type ActiveAgentEndResults,
   type AgentEndFileResult,
-  diagnosticsToAgentEndResults,
   formatAgentEndErrorResult,
   processAgentEndResults,
 } from "./agent-end";
 import { BackendMode, BackendName, getBackendConfig, type FormatBackendConfig } from "./backend-configs";
-import type { LspResult } from "./protocol";
 import {
   AgentEndBackendCheckKind,
   buildAgentEndReviewResult,
@@ -30,7 +28,6 @@ export interface AgentEndFilePartition {
 export interface AgentEndPipelineDeps {
   resolveFormatBinary: (name: string) => string | null;
   runFormat: (bin: string, args: string[]) => SpawnSyncReturns<string>;
-  runDiagnostics: (paths: string[]) => Promise<LspResult | null>;
 }
 
 export interface AgentEndPipelineResult {
@@ -90,21 +87,6 @@ export function collectFormatAgentEndResults(
   return results;
 }
 
-export async function collectDiagnosticsAgentEndResults(
-  lspFiles: string[],
-  runDiagnostics: AgentEndPipelineDeps["runDiagnostics"],
-): Promise<AgentEndFileResult[]> {
-  if (lspFiles.length === 0) return [];
-
-  try {
-    const result = await runDiagnostics(lspFiles);
-    return result?.action === "diagnostics" ? diagnosticsToAgentEndResults(result) : [];
-  } catch {
-    // Non-fatal — diagnostics are best-effort.
-    return [];
-  }
-}
-
 export async function processAgentEndBatch(
   activeResults: ActiveAgentEndResults,
   files: string[],
@@ -121,32 +103,16 @@ export async function processAgentEndBatch(
     .map((entry) => entry.file);
   const results = [
     ...collectFormatAgentEndResults(runnableFormatFiles, deps),
-    ...await collectDiagnosticsAgentEndResults(lspFiles, deps.runDiagnostics),
   ];
   processAgentEndResults(activeResults, files, results);
 
-  const diagnosticBackendChecks = new Map<BackendName, string[]>();
-  for (const file of lspFiles) {
-    const config = getBackendConfig(file);
-    const backend = config?.name ?? BackendName.Lsp;
-    diagnosticBackendChecks.set(backend, [...diagnosticBackendChecks.get(backend) ?? [], file]);
-  }
-
   const backendChecks: AgentEndBackendCheck[] = [
-    ...[...diagnosticBackendChecks.entries()].map(([backend, backendFiles]) => ({
-      kind: AgentEndBackendCheckKind.Diagnostics,
-      backend,
-      files: backendFiles,
-    })),
     ...runnableFormatFiles.map((entry) => ({ kind: AgentEndBackendCheckKind.Format, backend: entry.config.name, files: [entry.file] })),
   ];
 
   return buildAgentEndReviewResult({
-    checkedFiles: [
-      ...lspFiles,
-      ...runnableFormatFiles.map((entry) => entry.file),
-    ],
-    skippedFiles: [...skippedFiles, ...unavailableFormatFiles],
+    checkedFiles: runnableFormatFiles.map((entry) => entry.file),
+    skippedFiles: [...lspFiles, ...skippedFiles, ...unavailableFormatFiles],
     backendChecks,
     results,
   });

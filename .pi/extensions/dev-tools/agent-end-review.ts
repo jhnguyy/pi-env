@@ -12,7 +12,6 @@ export const AgentEndReadiness = {
 export type AgentEndReadiness = typeof AgentEndReadiness[keyof typeof AgentEndReadiness];
 
 export const AgentEndBackendCheckKind = {
-  Diagnostics: "diagnostics",
   Format: "format",
 } as const;
 export type AgentEndBackendCheckKind = typeof AgentEndBackendCheckKind[keyof typeof AgentEndBackendCheckKind];
@@ -100,6 +99,10 @@ export function buildAgentEndReviewResult(args: {
     issueCounts: counts,
     readiness,
   };
+
+  if (metadata.backendChecks.length === 0 && args.results.length === 0) {
+    return { summary: "", triggerTurn: false, metadata };
+  }
 
   const lines = [
     "Post-edit checks completed.",

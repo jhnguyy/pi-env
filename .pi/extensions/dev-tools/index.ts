@@ -4,16 +4,14 @@
  * dev-tools is a file-extension engine: at agent_end it dispatches each edited
  * file to the backend registered for its extension in BACKEND_CONFIGS:
  *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
- *   - mode "lsp"    → bulk diagnostics via the LSP daemon (re-engages model on errors)
+ *   - mode "lsp"    → manual language intelligence through the dev-tools tool
  *
- * **Ordering invariant**: format backends run BEFORE LSP diagnostics in agent_end.
- * LSP diagnostics can re-engage the model when errors are found. The actual
- * sendMessage call is deferred until after agent_end returns because pi still treats
- * the agent as streaming while agent_end handlers run; calling sendMessage there
- * would enqueue diagnostics instead of starting the synthetic follow-up turn.
+ * Agent-end intentionally stays lightweight: it may run formatters for edited
+ * files, but project-wide diagnostics and quality harness checks are manual
+ * pre-commit/review actions.
  *
- * The dev-tools interactive tool (hover, definition, symbols, …) routes through
- * the LSP daemon only — it does not interact with format backends.
+ * The dev-tools interactive tool (diagnostics, hover, definition, symbols, …)
+ * routes through the LSP daemon only — it does not interact with format backends.
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -45,7 +43,8 @@ export default function (pi: ExtensionAPI) {
     "document/workspace symbols. Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
-    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
+    "Diagnostics supports bulk checks: pass multiple paths to check all files in one call. " +
+    "Before commit or review, diagnostics and the project quality harness are useful manual checks.";
 
   const toolParameters = createDevToolsParameterSchema(
     StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
@@ -85,7 +84,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
       "Use text search for strings, comments, config values, generated files, and unsupported file types.",
-      "Run project-level checks manually before commit or review; the post-edit lifecycle stays limited to lightweight file-local feedback."
+      "Before commit or review, manually run dev-tools diagnostics on changed code and the project quality harness (`nub run check:all` or `nub run harness:report`).",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
@@ -100,7 +99,5 @@ export default function (pi: ExtensionAPI) {
   });
 
   // ─── post-edit lifecycle ─────────────────────────────────────────────────
-  registerDevToolsLifecycle(pi, {
-    runDiagnostics: (paths) => client.call({ action: "diagnostics", paths }),
-  });
+  registerDevToolsLifecycle(pi);
 }
