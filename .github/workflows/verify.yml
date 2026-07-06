@@ -51,6 +51,10 @@ jobs:
         shell: bash
         run: nub run --node typecheck
 
+      - name: Verify quality harness
+        shell: bash
+        run: nub run --node check:all
+
       - name: Verify build
         shell: bash
         run: nub run --node build
@@ -58,3 +62,7 @@ jobs:
       - name: Verify install readiness
         shell: bash
         run: scripts/node-run.sh scripts/verify-install.mjs
+
+      - name: Verify unit tests
+        shell: bash
+        run: nub run --node test:unit
