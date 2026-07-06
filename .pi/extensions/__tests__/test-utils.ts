@@ -5,13 +5,14 @@
  * so tests can skip themselves when their extension is disabled.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe } from "vitest";
 
 const EXTENSIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = resolve(EXTENSIONS_DIR, "..", "..");
 const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
 
 interface Settings {
@@ -64,20 +65,12 @@ export function isExtensionEnabled(name: string): boolean {
  */
 export function getEnabledExtensions(): string[] {
   const disabled = getDisabledExtensions();
-  const enabled: string[] = [];
+  const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { pi?: { extensions?: string[] } };
 
-  for (const entry of readdirSync(EXTENSIONS_DIR, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("_") || entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "docs") continue;
-
-    const indexPath = join(EXTENSIONS_DIR, entry.name, "index.ts");
-    if (!existsSync(indexPath)) continue;
-    if (disabled.has(entry.name)) continue;
-
-    enabled.push(entry.name);
-  }
-
-  return enabled;
+  return (packageJson.pi?.extensions ?? [])
+    .map((entry) => entry.replace(/^\.pi\/extensions\//, ""))
+    .filter((name) => name && !disabled.has(name))
+    .filter((name) => existsSync(join(EXTENSIONS_DIR, name, "index.ts")));
 }
 
 /**
