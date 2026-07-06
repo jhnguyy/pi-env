@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { PiEvent } from "../../_shared/agent-tools";
 import { registerDevToolsLifecycle } from "../lifecycle";
@@ -26,39 +26,17 @@ function createPi() {
 }
 
 describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
-  it("records edited files, sends deferred formatter feedback, and keeps active context compact", async () => {
+  it("removes stale post-edit feedback from context without sending new agent-end feedback", async () => {
     const pi = createPi();
-    const runFormat = vi.fn(() => ({
-      pid: 1,
-      output: [null, "", "fmt failed"],
-      stdout: "",
-      stderr: "fmt failed",
-      status: 1,
-      signal: null,
-    }));
+    const state = registerDevToolsLifecycle(pi as any);
 
-    registerDevToolsLifecycle(pi as any, {
-      resolveFormatBinary: () => "terraform",
-      runFormat,
-      defer: (callback) => callback(),
-    });
-
-    await pi.emit(PiEvent.SessionStart);
     await pi.emit(PiEvent.ToolResult, {
       toolName: "write",
       input: { path: "/repo/main.tf" },
     });
     await pi.emit(PiEvent.AgentEnd);
 
-    expect(runFormat).toHaveBeenCalledOnce();
-    expect(pi.sent).toEqual([{
-      message: expect.objectContaining({
-        customType: "dev-tools-agent-end",
-        display: true,
-        content: expect.stringContaining("main.tf (terraform):"),
-      }),
-      options: undefined,
-    }]);
+    expect(pi.sent).toEqual([]);
 
     const [context] = await pi.emit(PiEvent.Context, {
       messages: [
@@ -70,32 +48,8 @@ describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
     expect(context).toEqual({
       messages: [
         { role: "user", content: "keep" },
-        expect.objectContaining({
-          role: "custom",
-          customType: "dev-tools-agent-end",
-          display: false,
-          content: expect.stringContaining("fmt failed"),
-        }),
       ],
     });
-  });
-
-  it("clears pending edits and active diagnostics on session start", async () => {
-    const pi = createPi();
-    const state = registerDevToolsLifecycle(pi as any);
-
-    state.pendingFiles.recordToolResult({ toolName: "write", input: { path: "/repo/a.ts" } });
-    state.activeAgentEndResults.set("/repo/a.ts", {
-      kind: "lsp",
-      backend: "typescript",
-      filePath: "/repo/a.ts",
-      fileName: "a.ts",
-      issues: [{ severity: "error", message: "old" }],
-    });
-
-    await pi.emit(PiEvent.SessionStart);
-    await pi.emit(PiEvent.AgentEnd);
-
-    expect(state.activeAgentEndResults.size).toBe(0);
+    expect(state.removedStalePostEditMessages).toBe(1);
   });
 });

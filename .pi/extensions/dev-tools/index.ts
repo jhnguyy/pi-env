@@ -1,17 +1,13 @@
 /**
- * dev-tools extension — registers the `dev-tools` tool and hooks agent_end processing.
+ * dev-tools extension — registers the `dev-tools` tool.
  *
- * dev-tools is a file-extension engine: at agent_end it dispatches each edited
- * file to the backend registered for its extension in BACKEND_CONFIGS:
- *   - mode "format" → one-shot formatter (silent, best-effort, no model re-engage)
- *   - mode "lsp"    → manual language intelligence through the dev-tools tool
- *
- * Agent-end intentionally stays lightweight: it may run formatters for edited
- * files, but project-wide diagnostics and quality harness checks are manual
- * pre-commit/review actions.
+ * The agent-end lifecycle intentionally does not run diagnostics, formatters, or
+ * project-wide analyzers. Those checks can produce stale or distracting feedback
+ * during the coding flow, so agents should invoke them manually before commit or
+ * review.
  *
  * The dev-tools interactive tool (diagnostics, hover, definition, symbols, …)
- * routes through the LSP daemon only — it does not interact with format backends.
+ * routes through the LSP daemon.
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";

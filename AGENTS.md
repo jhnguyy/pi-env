@@ -13,7 +13,7 @@ Run `nub run check:all` before considering any code task complete. Use `nub run 
 Canonical locations are source-of-truth files, not prose:
 
 - Harness checks: `.dependency-cruiser.cjs`, `.jscpd.json`, `knip.json`, `scripts/check-*.{js,sh}`, `scripts/run-jscpd.js`.
-- Agent feedback loop: `.pi/extensions/dev-tools/agent-end-pipeline.ts`, `agent-end-review.ts`.
+- Dev-tools manual diagnostics: `.pi/extensions/dev-tools/` LSP client/daemon/action files.
 - Shared extension helpers: `.pi/extensions/_shared/`.
 - Extension conventions: `docs/conventions/extensions.md`.
 
