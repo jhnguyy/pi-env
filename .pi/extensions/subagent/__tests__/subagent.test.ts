@@ -623,7 +623,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(t).toContain("3 tool calls");
     });
 
-    it("shows Ctrl+O hint in collapsed view", () => {
+    it("shows ctrl+o hint in collapsed view", () => {
       const t = extractText(
         registeredTool.renderResult(
           { content: [], details: successDetails },
@@ -631,7 +631,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
           mockTheme,
         ),
       );
-      expect(t).toContain("Ctrl+O");
+      expect(t).toContain("ctrl+o");
     });
 
     it("falls back gracefully when details are absent", () => {
@@ -729,14 +729,14 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(t).toContain("turn limit");
     });
 
-    it("expanded view does NOT show Ctrl+O hint", () => {
+    it("expanded view does NOT show ctrl+o hint", () => {
       const result = registeredTool.renderResult(
         { content: [], details: successDetails },
         { expanded: true },
         mockTheme,
       );
       const t = extractText(result);
-      expect(t).not.toContain("Ctrl+O");
+      expect(t).not.toContain("ctrl+o");
     });
 
     it("expanded view contains Task section header", () => {

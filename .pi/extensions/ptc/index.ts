@@ -17,7 +17,7 @@
  *   types.ts        — constants, blocklist, RPC message types
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
@@ -137,13 +137,19 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
       // Collapsed: icon + line count + call count + first non-empty output line
       const firstLine = outputLines[0]?.substring(0, 72) ?? "";
-      return new Text(
+      const hiddenOutputLines = Math.max(0, outputLines.length - (firstLine ? 1 : 0));
+      let collapsed =
         theme.fg("success", "✓ ") +
-          theme.fg("muted", countLabel) + callSuffix +
-          (firstLine ? "  " + theme.fg("text", firstLine) : ""),
-        0,
-        0,
-      );
+        theme.fg("muted", countLabel) + callSuffix +
+        (firstLine ? "  " + theme.fg("text", firstLine) : "");
+
+      if (hiddenOutputLines > 0) {
+        collapsed += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+      } else {
+        collapsed += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
+      }
+
+      return new Text(collapsed, 0, 0);
     },
   });
 
