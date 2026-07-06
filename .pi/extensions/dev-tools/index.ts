@@ -20,11 +20,14 @@ import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
 import { createDevToolsParameterSchema, DEV_TOOLS_TOOL_DESCRIPTIONS } from "./action-contract";
+import { registerCleanupCommand } from "./cleanup";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
   const client = new LspClient();
+
+  registerCleanupCommand(pi);
 
   // ─── dev-tools tool ───────────────────────────────────────────────────────
 
