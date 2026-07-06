@@ -58,7 +58,8 @@
     "pretest:setup": "nub run check:node",
     "pretest:e2e": "nub run check:node",
     "pretypecheck": "nub run check:node",
-    "preinstall": "nub run check:node"
+    "preinstall": "nub run check:node",
+    "security:trivy": "bash scripts/trivy-scan.sh"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

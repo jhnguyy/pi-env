@@ -1,0 +1,43 @@
+name: Trivy
+
+on:
+  push: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trivy-main
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Filesystem scan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: aquasec/trivy@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+      options: --cap-drop=ALL --security-opt=no-new-privileges --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev
+    env:
+      TRIVY_RUNTIME: local
+      TRIVY_CACHE_DIR: /tmp/trivy-cache
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Run Trivy in job container
+        shell: sh
+        run: |
+          mkdir -p "$TRIVY_CACHE_DIR"
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --skip-dirs node_modules \
+            --skip-dirs .git \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            .
