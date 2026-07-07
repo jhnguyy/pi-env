@@ -7,7 +7,7 @@ const [settingsFile, managedSettingsFile, repoPath] = process.argv.slice(2);
 const DEFAULT_LIGHT_THEME = "gruvbox-light";
 const DEFAULT_DARK_THEME = "gruvbox-dark";
 const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
-const DISABLED_EXTENSIONS = ["playwright-client"];
+const DISABLED_EXTENSIONS = ["playwright-client", "work-tracker"];
 
 if (!settingsFile || !managedSettingsFile || !repoPath) {
   console.error("usage: apply-managed-settings.mjs <settings-file> <managed-settings-file> <repo-path>");

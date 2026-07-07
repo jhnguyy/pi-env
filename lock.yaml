@@ -92,8 +92,6 @@ importers:
 
   .pi/extensions/web-context: {}
 
-  .pi/extensions/work-tracker: {}
-
 packages:
 
   '@anthropic-ai/sdk@0.91.1':

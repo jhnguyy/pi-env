@@ -46,7 +46,7 @@ JSON
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "_comment_managed_retry")')" = "false" ] || fail "managed comments should not be written to user settings"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
   [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "package path should be repo"
-  [ "$(json_get "$settings" 's.extensions')" = '["-playwright-client"]' ] || fail "playwright-client should be disabled by setup"
+  [ "$(json_get "$settings" 's.extensions')" = '["-playwright-client","-work-tracker"]' ] || fail "default-disabled extensions should be disabled by setup"
 
   rm -rf "$tmp"
 }
@@ -134,7 +134,7 @@ JSON
   rm -rf "$tmp"
 }
 
-test_disables_browser_extension_without_clobbering_other_extensions() {
+test_disables_default_extensions_without_clobbering_other_extensions() {
   local tmp settings repo
   tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
@@ -142,13 +142,13 @@ test_disables_browser_extension_without_clobbering_other_extensions() {
   mkdir -p "$repo"
   cat > "$settings" <<'JSON'
 {
-  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client", "-playwright-client"]
+  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client", "-playwright-client", "work-tracker", ".pi/extensions/work-tracker", "-work-tracker"]
 }
 JSON
 
   apply_settings "$settings" "$repo" >/dev/null
 
-  [ "$(json_get "$settings" 's.extensions')" = '["my-extension","-playwright-client"]' ] || fail "setup should preserve other extensions and disable browser once"
+  [ "$(json_get "$settings" 's.extensions')" = '["my-extension","-playwright-client","-work-tracker"]' ] || fail "setup should preserve other extensions and disable defaults once"
 
   rm -rf "$tmp"
 }
@@ -215,7 +215,7 @@ test_preserves_unmanaged_retry_settings
 test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
 test_preserves_existing_theme
-test_disables_browser_extension_without_clobbering_other_extensions
+test_disables_default_extensions_without_clobbering_other_extensions
 test_registers_primary_checkout_when_run_from_worktree
 test_migrates_only_default_npm_command_to_nub
 
