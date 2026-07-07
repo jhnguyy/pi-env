@@ -25,4 +25,4 @@ When changing scanner image, runtime flags, checkout behavior, or triggers, upda
 
 The image may contain source, locked dependencies, prebuilt extension bundles, Node, Nub, Git, and OpenSSH client tooling. It must not contain private keys, GitHub tokens, SSH signing keys, pi sessions, model credentials, local notes, or mutable agent state.
 
-Runtime identity and state must be mounted or provided externally. Image publishing is restricted to pushes on `main`.
+Runtime identity and state must be mounted or provided externally. Image publishing is restricted to pushes on `main`; PRs scan the locally built image before publish is possible.

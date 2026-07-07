@@ -22,12 +22,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           persist-credentials: false
 
       - name: Setup Nub and project Node
-        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d
+        uses: nubjs/setup-nub@45fe48f651d367e68a42bd886a42e93d696f0a24
         with:
           nub-version: 0.2.10
 
