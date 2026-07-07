@@ -1,0 +1,38 @@
+# Build context hygiene: keep the image focused on source + lockfile inputs.
+# Build-stage Git metadata is intentionally available so `nub run verify` can
+# run checks that use `git ls-files`; the final image removes `.git`.
+.git/config
+.git/hooks
+.git/info
+.git/logs
+.github/workflows/*.log
+node_modules
+coverage
+*.tsbuildinfo
+
+# Extension bundles are rebuilt inside the image from source.
+.pi/extensions/*/dist
+
+# Local pi state/config and credentials must never enter the image.
+auth.json
+settings.json
+models.json
+permissions.json
+permissions-audit.jsonl
+sessions
+sessions/**
+.pi/sessions
+.pi/sessions/**
+.pi/handoffs
+.pi/handoffs/**
+*.env
+*.env.*
+
+# Host/editor/cache noise.
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.cache
+.tmp

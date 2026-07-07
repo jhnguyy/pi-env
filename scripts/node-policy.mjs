@@ -1,9 +1,23 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+export function readPackageJson(repo = process.cwd()) {
+  return JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+}
+
 export function readNodeRequirement(repo = process.cwd()) {
-  const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+  const pkg = readPackageJson(repo);
   return pkg.engines?.node ?? null;
+}
+
+export function readNodeRuntimePin(repo = process.cwd()) {
+  const runtime = readPackageJson(repo).devEngines?.runtime;
+  if (!runtime) return null;
+  if (typeof runtime === 'string') return runtime;
+  if (runtime.name && runtime.name !== 'node') {
+    throw new Error(`package.json devEngines.runtime must name node, found: ${runtime.name}`);
+  }
+  return runtime.version ?? null;
 }
 
 export function readNodePin(path) {
@@ -26,8 +40,22 @@ export function nodePolicyIssues(repo = process.cwd()) {
     issues.push(err instanceof Error ? err.message : String(err));
   }
 
+  let runtimePin = null;
+  try {
+    runtimePin = readNodeRuntimePin(repo);
+  } catch (err) {
+    issues.push(err instanceof Error ? err.message : String(err));
+  }
+  if (runtimePin && !parseVersionStrict(runtimePin)) {
+    issues.push(`package.json devEngines.runtime.version must contain a plain semver version, found: ${runtimePin}`);
+  }
+
   const nodeVersion = readVersionFile(repo, '.node-version', issues);
   const nvmrc = readVersionFile(repo, '.nvmrc', issues);
+
+  if (runtimePin && nodeVersion && runtimePin !== nodeVersion) {
+    issues.push(`package.json devEngines.runtime.version (${runtimePin}) and .node-version (${nodeVersion}) must match`);
+  }
 
   if (nodeVersion && nvmrc && nodeVersion !== nvmrc) {
     issues.push(`.node-version (${nodeVersion}) and .nvmrc (${nvmrc}) must match`);
@@ -53,6 +81,10 @@ export function assertNodePolicy(repo = process.cwd()) {
 }
 
 export function nodeVersionSatisfies(version, repo = process.cwd()) {
+  const runtimePin = readNodeRuntimePin(repo);
+  if (runtimePin && parseVersionStrict(runtimePin)) {
+    return compareSemver(parseVersion(version), parseVersion(runtimePin)) === 0;
+  }
   const minimum = minimumNodeVersion(repo);
   if (!minimum) return true;
   return compareSemver(parseVersion(version), minimum) >= 0;
