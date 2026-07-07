@@ -22,7 +22,7 @@ Purpose: CI/toolchain artifact for pi-env; possible base for later homelab-agent
 
 Contains:
 
-- official digest-pinned `ghcr.io/nubjs/nub:0.2.10-slim`
+- official digest-pinned `ghcr.io/nubjs/nub:0.2.10-slim` with npm removed from global and cached Node installs
 - `git`, `openssh-client`, CA certificates
 - source under `/opt/pi-env`
 - locked dependencies from `lock.yaml`
@@ -59,7 +59,7 @@ Do not bake secrets or mutable agent state into the image.
 
 `.github/workflows/image.yml`:
 
-- PRs: build locally and smoke-test; no publish.
-- `main`: build locally, smoke-test, then publish to GHCR as `:main` and `:<sha>`.
+- PRs: build locally, smoke-test, and scan the built image with a compact Trivy summary; no publish.
+- `main`: build locally, smoke-test, scan, then publish to GHCR as `:main` and `:<sha>`.
 
-The workflow does not sign, scan, or deploy.
+The workflow does not sign or deploy.

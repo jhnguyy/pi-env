@@ -30,7 +30,8 @@ RUN apt-get update \
     openssh-client \
   && rm -rf /var/lib/apt/lists/*
 
-RUN node --version \
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  && node --version \
   && nub --version
 
 WORKDIR ${PI_ENV_HOME}
@@ -49,7 +50,10 @@ RUN nub run build
 RUN nub run verify
 
 USER root
-RUN rm -rf ${PI_ENV_HOME}/.git
+RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
+  && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
+  && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
+  && rm -rf ${PI_ENV_HOME}/.git
 
 USER node
 CMD ["nub", "run", "verify:install"]
