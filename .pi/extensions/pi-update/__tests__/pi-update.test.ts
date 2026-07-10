@@ -3,7 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Either } from "effect";
 import { describe, expect, it } from "vitest";
-import { buildDecisionPrompt, extractChangelogSection, isPiPackageName, packageNames, packageNamesEither, parseArgs, PiUpdatePhase, writeInstallCommand, type PiUpdatePrep } from "../index";
+import {
+  buildDecisionPrompt,
+  extractChangelogSection,
+  installCommandPrefix,
+  isPiPackageName,
+  packageManagerName,
+  packageNames,
+  packageNamesEither,
+  parseArgs,
+  PiUpdatePhase,
+  writeInstallCommand,
+  type PiUpdatePrep,
+} from "../index";
 
 describe("pi-update", () => {
   it("parses version and optional paths", () => {
@@ -36,7 +48,21 @@ describe("pi-update", () => {
     writeInstallCommand(command, names, "0.80.0");
 
     expect(names).toEqual(["@earendil-works/pi-ai"]);
+    expect(readFileSync(command, "utf8")).toContain("npm install --save-dev --save-exact");
     expect(readFileSync(command, "utf8")).toContain("@earendil-works/pi-ai@0.80.0");
+  });
+
+  it("uses nub workspace-root install commands for nub-managed repos", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-update-test-"));
+    const pkg = join(dir, "package.json");
+    const command = join(dir, "install-command.sh");
+    writeFileSync(pkg, JSON.stringify({ packageManager: "nub@0.2.10", devDependencies: { "@earendil-works/pi-ai": "0.79.0" } }));
+
+    writeInstallCommand(command, packageNames(pkg, isPiPackageName), "0.80.0", packageManagerName(pkg));
+
+    expect(packageManagerName(pkg)).toBe("nub");
+    expect(installCommandPrefix("nub")).toBe("nub install -W --save-dev --save-exact");
+    expect(readFileSync(command, "utf8")).toContain("nub install -W --save-dev --save-exact");
   });
 
   it("returns tagged package discovery errors without throwing", () => {

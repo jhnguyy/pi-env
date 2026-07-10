@@ -5,7 +5,17 @@ import { parseArgs } from "./args";
 import { isPiUpdateEnabled, preparePiUpdate } from "./workflow";
 
 export type { PiUpdateOptions, PiUpdatePrep } from "./contract";
-export { buildDecisionPrompt, extractChangelogSection, isPiPackageName, packageNames, packageNamesEither, writeInstallCommand, writeReport } from "./artifacts";
+export {
+  buildDecisionPrompt,
+  extractChangelogSection,
+  installCommandPrefix,
+  isPiPackageName,
+  packageManagerName,
+  packageNames,
+  packageNamesEither,
+  writeInstallCommand,
+  writeReport,
+} from "./artifacts";
 export { parseArgs } from "./args";
 export { PiUpdateError, PiUpdatePhase } from "./errors";
 export { isPiUpdateEnabled, preparePiUpdate, preparePiUpdateEffect } from "./workflow";

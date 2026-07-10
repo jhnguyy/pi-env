@@ -5,7 +5,7 @@ import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Effect, Either } from "effect";
 import { readSettingsBlock } from "../_shared/settings";
 import { slugify } from "../_shared/slug";
-import { extractChangelogSection, isPiPackageName, packageNamesEither, writeInstallCommand, writeReport } from "./artifacts";
+import { extractChangelogSection, isPiPackageName, packageManagerName, packageNamesEither, writeInstallCommand, writeReport } from "./artifacts";
 import { DEFAULT_REPO, PI_PACKAGE, PI_UPDATE_DOC_PATHS, type PiUpdateOptions, type PiUpdatePrep } from "./contract";
 import { PiUpdateError, PiUpdatePhase } from "./errors";
 
@@ -106,13 +106,15 @@ function fetchReleaseArtifactsEffect(exec: Exec, prep: PiUpdatePrep): Effect.Eff
     const section = extractChangelogSection(readFileSync(changelogPath, "utf8"), prep.version);
     if (!section.trim()) return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `changelog section for ${prep.version} not found` }));
 
-    const names = packageNamesEither(join(prep.worktree, "package.json"), isPiPackageName);
+    const packageJsonPath = join(prep.worktree, "package.json");
+    const names = packageNamesEither(packageJsonPath, isPiPackageName);
     if (Either.isLeft(names)) return yield* Effect.fail(names.left);
+    const packageManager = packageManagerName(packageJsonPath);
 
     yield* Effect.try({
       try: () => {
         writeFileSync(prep.changelog, section);
-        writeInstallCommand(prep.installCommand, names.right, prep.version);
+        writeInstallCommand(prep.installCommand, names.right, prep.version, packageManager);
         writeReport(prep.report, prep);
       },
       catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "writing prepared artifacts", cause }),

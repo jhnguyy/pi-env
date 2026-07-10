@@ -41,8 +41,21 @@ export function packageNames(packageJsonPath: string, targetPackage: (name: stri
   return result.right;
 }
 
-export function writeInstallCommand(path: string, packageNames: string[], version: string): void {
-  const lines = ["#!/usr/bin/env bash", "set -euo pipefail", "npm install --save-dev --save-exact \\"];
+export function packageManagerName(packageJsonPath: string): string | undefined {
+  try {
+    const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { packageManager?: unknown };
+    return typeof pkg.packageManager === "string" ? pkg.packageManager.split("@")[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function installCommandPrefix(packageManager?: string): string {
+  return packageManager === "nub" ? "nub install -W --save-dev --save-exact" : "npm install --save-dev --save-exact";
+}
+
+export function writeInstallCommand(path: string, packageNames: string[], version: string, packageManager?: string): void {
+  const lines = ["#!/usr/bin/env bash", "set -euo pipefail", `${installCommandPrefix(packageManager)} \\`];
   packageNames.forEach((name, index) => {
     lines.push(`  ${name}@${version}${index === packageNames.length - 1 ? "" : " \\"}`);
   });
@@ -65,7 +78,7 @@ export function writeReport(path: string, prep: PiUpdatePrep): void {
       `- settings, package loading, project trust, and resource discovery behavior\n` +
       `- CLI flags used by setup scripts, skills, and extension-spawned pi commands\n` +
       `- user-facing behavior that should be reported back\n\n` +
-      `If no pi-env adjustments are required, run the install command in the worktree, run npm run verify, then commit, push, and file a PR.\n` +
+      `If no pi-env adjustments are required, run the install command in the worktree, run nub run verify, then commit, push, and file a PR.\n` +
       `If breaking or ambiguous changes exist, propose the pi-env adjustment plan before updating dependencies.\n`,
   );
 }
@@ -81,6 +94,6 @@ export function buildDecisionPrompt(prep: PiUpdatePrep): string {
     ``,
     `Decision task: read the report and changelog section, compare the release against pi-env, and decide what is needed for this update. Focus on package exports/imports, extension lifecycle/API changes, settings/package/trust behavior, CLI flags used by setup/scripts/extensions, and user-facing changes to report back.`,
     ``,
-    `If no pi-env adjustments are required, run the install command in the worktree, run npm run verify, commit as "chore: update pi to ${prep.version}", push, and file a PR. If changes are breaking or ambiguous, propose the adjustment plan before updating dependencies.`,
+    `If no pi-env adjustments are required, run the install command in the worktree, run nub run verify, commit as "chore: update pi to ${prep.version}", push, and file a PR. If changes are breaking or ambiguous, propose the adjustment plan before updating dependencies.`,
   ].join("\n");
 }
