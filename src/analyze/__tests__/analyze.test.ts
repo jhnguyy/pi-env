@@ -4,17 +4,17 @@ import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { asyncRisks, canonicalizeWithCap, complexity, duplicates, similarTypes } from "../analyzers.js";
+import { asyncRisks, asyncRisksEffect, canonicalizeWithCap, complexity, complexityEffect, duplicates, duplicatesEffect, similarTypes, similarTypesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
-import { bundleAnalyzer, discoverExtensionEntrypoints, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
+import { bundleAnalyzer, bundleAnalyzerEffect, discoverExtensionEntrypoints, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
-import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
+import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
 import { createAnalysisProject, createProject, isTypeProject, ProjectRequirement } from "../program.js";
 import { projectRequirement, runAnalyzer } from "../registry.js";
-import { childHeapLimitMb, execFileEffect } from "../process.js";
-import { expandExplicitPaths, intersectsHunks, parseUnifiedHunks, resolveScope, type Scope } from "../scope.js";
+import { childHeapLimitMb, execFileEffect, streamProcessEffect } from "../process.js";
+import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
@@ -43,12 +43,21 @@ describe("analyze contracts", () => {
     expect(reported.analyzerFailures[0]?.analyzer).toBe("program");
   });
 
-  it("runs subprocesses and types exit and timeout failures", async () => {
+  it("runs subprocesses and types exit, timeout, and streaming-limit failures", async () => {
     await expect(Effect.runPromise(execFileEffect("/bin/echo", ["ok"]))).resolves.toMatchObject({ stdout: "ok\n" });
     const exited = await Effect.runPromise(Effect.either(execFileEffect("/bin/false", [])));
     expect(exited._tag === "Left" && exited.left.kind).toBe("exit");
     const timed = await Effect.runPromise(Effect.either(execFileEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
     expect(timed._tag === "Left" && timed.left.kind).toBe("timeout");
+    const streamTimed = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
+    expect(streamTimed._tag === "Left" && streamTimed.left.kind).toBe(ProcessErrorKind.Timeout);
+    const limited = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/echo", ["x".repeat(10_000)], { stdoutLimitBytes: 100 })));
+    expect(limited._tag === "Left" && limited.left.kind).toBe(ProcessErrorKind.OutputLimit);
+    if (limited._tag === "Left") expect(Buffer.byteLength(limited.left.stdout ?? "")).toBeLessThanOrEqual(100);
+    const interruptedAt = Date.now();
+    const interrupted = await Effect.runPromiseExit(streamProcessEffect("/bin/sleep", ["10"]).pipe(Effect.timeout("20 millis")));
+    expect(interrupted._tag).toBe("Failure");
+    expect(Date.now() - interruptedAt).toBeLessThan(1_000);
   });
 
   it("preserves typed benchmark failures", async () => {
@@ -164,6 +173,20 @@ describe("structural type similarity", () => {
 });
 
 describe("ast analyzers", () => {
+  it("keeps cooperative analyzer output identical to pure analyzers", async () => {
+    const cwd = writeProject({ "src/sample.ts": `
+      export async function alpha(items: number[]) { for (const item of items) await Promise.resolve(item); return items.length; }
+      export async function beta(values: number[]) { for (const value of values) await Promise.resolve(value); return values.length; }
+      export interface First { id: string; name: string; active: boolean; }
+      export interface Second { id: string; name: string; active: boolean; }
+    ` });
+    const project = createProject(cwd);
+    await expect(Effect.runPromise(complexityEffect(project, cwd, allScope))).resolves.toEqual(complexity(project, cwd, allScope));
+    await expect(Effect.runPromise(duplicatesEffect(project, cwd, allScope))).resolves.toEqual(duplicates(project, cwd, allScope));
+    await expect(Effect.runPromise(similarTypesEffect(project, cwd, allScope))).resolves.toEqual(similarTypes(project, cwd, allScope));
+    await expect(Effect.runPromise(asyncRisksEffect(project, cwd, allScope))).resolves.toEqual(asyncRisks(project, cwd, allScope));
+  });
+
   it("isolates nested function complexity and respects hunk body intersection", () => {
     const cwd = writeProject({ "src/complex.ts": `
       export function outer(value: number) {
@@ -295,18 +318,28 @@ describe("bundle entrypoints", () => {
     expect(findings.map(item => item.location.path)).toEqual([".pi/extensions/a/index.ts", ".pi/extensions/b/index.ts"]);
   });
 
-  it("does not bundle arbitrary changed TS files and returns no finding with no extension in scope", async () => {
+  it("maps bundle worker timeouts into typed analyzer failures", async () => {
+    const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
+    writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }));
+    const outcome = await Effect.runPromise(Effect.either(bundleAnalyzerEffect(cwd, allScope, 256, 10, {
+      process: (command) => Effect.fail(new ProcessError({ kind: ProcessErrorKind.Timeout, command, message: "timed out" })),
+    })));
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") expect(outcome.left).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Bundle, message: "timed out" });
+  });
+
+  it("bundles the owning extension for helper changes but ignores unrelated files", async () => {
     const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;", ".pi/extensions/alpha/helper.ts": "export const helper = 1;", "src/changed.ts": "export const changed = 1;" });
     writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }));
-    await expect(bundleAnalyzer(cwd, pathScope(["src/changed.ts", ".pi/extensions/alpha/helper.ts"]))).resolves.toEqual([]);
-    const findings = await bundleAnalyzer(cwd, pathScope([".pi/extensions/alpha/index.ts"]));
+    await expect(bundleAnalyzer(cwd, pathScope(["src/changed.ts"]))).resolves.toEqual([]);
+    const findings = await bundleAnalyzer(cwd, pathScope([".pi/extensions/alpha/helper.ts"]));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.path).toBe(".pi/extensions/alpha/index.ts");
   });
 });
 
 describe("bounded hardening", () => {
-  it("bounds explicit path walking to analyzable files and skipped directories", () => {
+  it("bounds explicit path walking to analyzable files and skipped directories", async () => {
     const cwd = writeProject({
       "src/a.ts": "export const a = 1;",
       "src/b.md": "ignored",
@@ -318,20 +351,23 @@ describe("bounded hardening", () => {
       ".pi/extensions/demo/index.ts": "export const demo = 1;",
       "config/app.json": "{}",
     });
-    const scope = resolveScope(cwd, ScopeMode.Paths, ["src", ".pi", "config", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]);
+    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]));
     expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts"]);
   });
 
-  it("throws ScopeError when explicit path walking exceeds the file cap seam", () => {
+  it("returns ScopeError when async explicit path walking exceeds limits", async () => {
     const cwd = writeProject({
       "src/a.ts": "export const a = 1;",
       "src/b.ts": "export const b = 1;",
       "src/c.ts": "export const c = 1;",
       "src/d.ts": "export const d = 1;",
     });
-    expect(() => expandExplicitPaths(cwd, ["src"], 3)).toThrow(/Scope file limit exceeded/);
-    expect(() => expandExplicitPaths(cwd, [".."])).toThrow(/outside cwd/);
-    expect(() => expandExplicitPaths(cwd, [tmpdir()])).toThrow(/outside cwd/);
+    const capped = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, ["src"], 3)));
+    expect(capped._tag === "Left" && capped.left.message).toMatch(/Scope file limit exceeded/);
+    const parent = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, [".."])));
+    expect(parent._tag === "Left" && parent.left.message).toMatch(/outside cwd/);
+    const absolute = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, [tmpdir()])));
+    expect(absolute._tag === "Left" && absolute.left.message).toMatch(/outside cwd/);
   });
 
   it("caps duplicate canonicalization by nodes or bytes", () => {

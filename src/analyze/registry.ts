@@ -1,8 +1,9 @@
 import { Effect } from "effect";
-import { asyncRisks, complexity, duplicates, similarTypes } from "./analyzers.js";
-import { bundleAnalyzer, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
+import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect } from "./analyzers.js";
+import { bundleAnalyzerEffect, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import { AnalyzerName, AnalyzerRunError, type Finding } from "./model.js";
 import { isTypeProject, ProjectRequirement, type Project } from "./program.js";
+import type { streamProcessEffect } from "./process.js";
 import type { Scope } from "./scope.js";
 
 export interface AnalyzerDescriptor {
@@ -55,6 +56,7 @@ export interface AnalyzerContext {
   maxMemoryMb: number;
   externalTimeoutMs?: number;
   beforeBundleEntry: (entrypoint: string) => boolean;
+  processRunner?: typeof streamProcessEffect;
 }
 
 const analyzerError = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError =>
@@ -62,33 +64,35 @@ const analyzerError = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError
     ? cause
     : new AnalyzerRunError({ analyzer, message: cause instanceof Error ? cause.message : String(cause) });
 
-function internalEffect(name: AnalyzerName, operation: () => Finding[]): Effect.Effect<Finding[], AnalyzerRunError> {
-  return Effect.try({ try: operation, catch: (cause) => analyzerError(name, cause) });
+function internalEffect(name: AnalyzerName, operation: Effect.Effect<Finding[], unknown>): Effect.Effect<Finding[], AnalyzerRunError> {
+  return operation.pipe(Effect.mapError((cause) => analyzerError(name, cause)));
 }
 
 export function runAnalyzer(name: AnalyzerName, context: AnalyzerContext): Effect.Effect<Finding[], AnalyzerRunError> {
   switch (name) {
     case AnalyzerName.Complexity:
-      return internalEffect(name, () => complexity(context.project!, context.cwd, context.scope));
+      return internalEffect(name, context.project === undefined
+        ? Effect.fail(new Error("Complexity analyzer requires a syntax project"))
+        : complexityEffect(context.project, context.cwd, context.scope));
     case AnalyzerName.Duplicates:
-      return internalEffect(name, () => duplicates(context.project!, context.cwd, context.scope));
+      return internalEffect(name, context.project === undefined
+        ? Effect.fail(new Error("Duplicate analyzer requires a syntax project"))
+        : duplicatesEffect(context.project, context.cwd, context.scope));
     case AnalyzerName.Types:
-      return internalEffect(name, () => {
-        if (context.project === undefined || !isTypeProject(context.project)) throw new Error("Type analyzer requires a TypeScript type project");
-        return similarTypes(context.project, context.cwd, context.scope, context.typeSimilarityThreshold);
-      });
+      return internalEffect(name, context.project === undefined || !isTypeProject(context.project)
+        ? Effect.fail(new Error("Type analyzer requires a TypeScript type project"))
+        : similarTypesEffect(context.project, context.cwd, context.scope, context.typeSimilarityThreshold));
     case AnalyzerName.AsyncRisk:
-      return internalEffect(name, () => asyncRisks(context.project!, context.cwd, context.scope));
+      return internalEffect(name, context.project === undefined
+        ? Effect.fail(new Error("Async-risk analyzer requires a syntax project"))
+        : asyncRisksEffect(context.project, context.cwd, context.scope));
     case AnalyzerName.Dependencies:
-      return dependencyAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs);
+      return dependencyAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs, { process: context.processRunner });
     case AnalyzerName.Knip:
-      return knipAnalyzerEffect(context.cwd, context.maxMemoryMb, context.externalTimeoutMs);
+      return knipAnalyzerEffect(context.cwd, context.maxMemoryMb, context.externalTimeoutMs, { process: context.processRunner });
     case AnalyzerName.Eslint:
-      return eslintAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs);
+      return eslintAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs, { process: context.processRunner });
     case AnalyzerName.Bundle:
-      return Effect.tryPromise({
-        try: () => bundleAnalyzer(context.cwd, context.scope, { beforeEntry: context.beforeBundleEntry }),
-        catch: (cause) => analyzerError(name, cause),
-      });
+      return bundleAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs, { beforeEntry: context.beforeBundleEntry, process: context.processRunner });
   }
 }

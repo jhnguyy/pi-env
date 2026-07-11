@@ -16,8 +16,9 @@ import {
   type ScopeMode,
 } from "./model.js";
 import { createAnalysisProject, createProject, ProjectRequirement, type Project } from "./program.js";
+import type { streamProcessEffect } from "./process.js";
 import { analyzerDescriptor, defaultAnalyzerNames, projectRequirement, runAnalyzer } from "./registry.js";
-import { resolveScope, type Scope } from "./scope.js";
+import { resolveScopeEffect, type Scope } from "./scope.js";
 
 export interface AnalyzeOptions {
   cwd: string;
@@ -37,6 +38,7 @@ export interface EngineSeams {
   /** @deprecated Prefer createAnalysisProject so tests preserve project planning. */
   createProject?: typeof createProject;
   createAnalysisProject?: typeof createAnalysisProject;
+  processRunner?: typeof streamProcessEffect;
 }
 
 interface ProfileRecorder {
@@ -156,10 +158,6 @@ function toConfigError(cause: unknown): ConfigError {
   return cause instanceof ConfigError ? cause : new ConfigError({ message: String(cause) });
 }
 
-function toScopeError(cause: unknown): ScopeError {
-  return cause instanceof ScopeError ? cause : new ScopeError({ message: cause instanceof Error ? cause.message : String(cause) });
-}
-
 function toProgramError(cause: unknown): ProgramError {
   return cause instanceof ProgramError ? cause : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
 }
@@ -211,10 +209,9 @@ function setupAnalysis(options: AnalyzeOptions): Effect.Effect<{ budget: number;
   return Effect.gen(function* () {
     const budget = yield* Effect.try({ try: () => validateOptions(options), catch: toConfigError });
     const checks = yield* Effect.try({ try: () => selectedChecks(options), catch: toConfigError });
-    const scope = yield* Effect.try({
-      try: () => recorder.measure("scope", () => resolveScope(options.cwd, options.scope, options.paths ?? [], options.ref)),
-      catch: toScopeError,
-    });
+    const scopeStarted = performance.now();
+    const scope = yield* resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref);
+    if (options.profile) recorder.timings.scope = performance.now() - scopeStarted;
     recorder.snapshot("after:scope");
     return { budget, checks, scope, recorder, started };
   });
@@ -274,6 +271,7 @@ function runAnalyzers(
   findings: Finding[],
   budget: number,
   state: { guard: (name: AnalyzerName) => boolean; stop: () => void; isStopped: () => boolean },
+  seams: EngineSeams,
 ): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     let currentProject = project;
@@ -289,6 +287,7 @@ function runAnalyzers(
         maxMemoryMb: budget,
         externalTimeoutMs: options.externalTimeoutMs,
         beforeBundleEntry: () => state.guard(name),
+        processRunner: seams.processRunner,
       }));
       if (outcome._tag === "Right") {
         const capped = capFindings(outcome.right, Math.max(0, MAX_TOTAL_FINDINGS - findings.length));
@@ -349,9 +348,9 @@ export function analyzeEffect(
     const internalChecks = checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None);
     const externalChecks = checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None);
     let project = yield* loadProjectIfNeeded(options, seams, internalChecks, scope, recorder, state.guard);
-    yield* runAnalyzers(options, internalChecks, scope, project, recorder, failures, findings, budget, state);
+    yield* runAnalyzers(options, internalChecks, scope, project, recorder, failures, findings, budget, state, seams);
     project = undefined; // Release the sole Project reference before any external analyzer.
-    if (!state.isStopped()) yield* runAnalyzers(options, externalChecks, scope, undefined, recorder, failures, findings, budget, state);
+    if (!state.isStopped()) yield* runAnalyzers(options, externalChecks, scope, undefined, recorder, failures, findings, budget, state, seams);
     if (!state.isStopped()) yield* runBenchmarks(options, failures, benchmarks);
     return finalizeAnalysis(options, recorder, started, findings, failures, benchmarks);
   });

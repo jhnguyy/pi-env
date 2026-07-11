@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import ts from "typescript";
+import { Effect } from "effect";
 import { AnalyzerName, FindingKind, Severity, type Finding, type Location } from "./model.js";
 import type { SyntaxProject, TypeProject } from "./program.js";
 import type { Scope } from "./scope.js";
@@ -140,28 +141,40 @@ function functionComplexity(root: BodyFunction): { cyclomatic: number; cognitive
 
 const COMPLEXITY_ADVISORY = { cyclomatic: 15, cognitive: 20 } as const;
 
-export function complexity(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
-  const output: Finding[] = [];
-  for (const file of project.files) {
-    for (const fn of functions(file)) {
-      const loc = location(cwd, file, fn);
-      if (!changed(scope, loc)) continue;
-      const score = functionComplexity(fn);
-      if (score.cyclomatic >= COMPLEXITY_ADVISORY.cyclomatic
-        || score.cognitive >= COMPLEXITY_ADVISORY.cognitive) {
-        output.push({
-          id: "",
-          analyzer: AnalyzerName.Complexity,
-          kind: FindingKind.Complexity,
-          severity: Severity.Warning,
-          message: `Function complexity: cyclomatic ${score.cyclomatic}, cognitive ${score.cognitive}`,
-          location: loc,
-          data: score,
-        });
-      }
+function analyzeComplexityFile(file: ts.SourceFile, cwd: string, scope: Scope, output: Finding[]): void {
+  for (const fn of functions(file)) {
+    const loc = location(cwd, file, fn);
+    if (!changed(scope, loc)) continue;
+    const score = functionComplexity(fn);
+    if (score.cyclomatic >= COMPLEXITY_ADVISORY.cyclomatic || score.cognitive >= COMPLEXITY_ADVISORY.cognitive) {
+      output.push({ id: "", analyzer: AnalyzerName.Complexity, kind: FindingKind.Complexity, severity: Severity.Warning,
+        message: `Function complexity: cyclomatic ${score.cyclomatic}, cognitive ${score.cognitive}`, location: loc, data: score });
     }
   }
+}
+
+export function complexity(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
+  const output: Finding[] = [];
+  for (const file of project.files) analyzeComplexityFile(file, cwd, scope, output);
   return output;
+}
+
+function cooperativeFileAnalysis(
+  files: readonly ts.SourceFile[],
+  analyzeFile: (file: ts.SourceFile, output: Finding[]) => void,
+): Effect.Effect<Finding[], unknown> {
+  const output: Finding[] = [];
+  return Effect.gen(function* () {
+    for (const file of files) {
+      yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => cause });
+      yield* Effect.yieldNow();
+    }
+    return output;
+  });
+}
+
+export function complexityEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
+  return cooperativeFileAnalysis(project.files, (file, output) => analyzeComplexityFile(file, cwd, scope, output));
 }
 
 const ANALYZER_CAPS = {
@@ -175,34 +188,28 @@ const ANALYZER_CAPS = {
 const compareLocations = (left: Location, right: Location): number =>
   left.path.localeCompare(right.path) || left.line - right.line || left.column - right.column;
 
-function collectDuplicateGroups(project: SyntaxProject, cwd: string): {
-  groups: Map<string, DuplicateGroup>;
-  truncated: boolean;
-} {
-  const groups = new Map<string, DuplicateGroup>();
-  let candidates = 0;
-  for (const file of project.files) {
-    for (const fn of functions(file)) {
-      if (candidates >= ANALYZER_CAPS.duplicateCandidates) {
-        return { groups, truncated: true };
-      }
-      candidates++;
-      const result = canonicalizeWithCap(fn.body);
-      if (result.truncated
-        || result.canonical.length < 80
-        || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount
-        || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
-      const hash = createHash("sha256").update(result.canonical).digest("hex");
-      const prior = groups.get(hash);
-      if (prior === undefined) {
-        groups.set(hash, { canonical: result.canonical, locations: [location(cwd, file, fn)] });
-      } else if (prior.canonical === result.canonical) {
-        // Verify the canonical text because hashes are only bucket keys.
-        prior.locations.push(location(cwd, file, fn));
-      }
-    }
+interface DuplicateCollection { groups: Map<string, DuplicateGroup>; candidates: number; truncated: boolean }
+
+function collectDuplicateFile(file: ts.SourceFile, cwd: string, state: DuplicateCollection): void {
+  for (const fn of functions(file)) {
+    if (state.candidates >= ANALYZER_CAPS.duplicateCandidates) { state.truncated = true; return; }
+    state.candidates++;
+    const result = canonicalizeWithCap(fn.body);
+    if (result.truncated || result.canonical.length < 80 || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
+    const hash = createHash("sha256").update(result.canonical).digest("hex");
+    const prior = state.groups.get(hash);
+    if (prior === undefined) state.groups.set(hash, { canonical: result.canonical, locations: [location(cwd, file, fn)] });
+    else if (prior.canonical === result.canonical) prior.locations.push(location(cwd, file, fn));
   }
-  return { groups, truncated: false };
+}
+
+function collectDuplicateGroups(project: SyntaxProject, cwd: string): DuplicateCollection {
+  const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
+  for (const file of project.files) {
+    collectDuplicateFile(file, cwd, state);
+    if (state.truncated) break;
+  }
+  return state;
 }
 
 function duplicateFinding(group: DuplicateGroup, scope: Scope): Finding | undefined {
@@ -236,17 +243,13 @@ function truncationFinding(analyzer: AnalyzerName): Finding {
   };
 }
 
-export function duplicates(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
-  const collected = collectDuplicateGroups(project, cwd);
+function duplicateFindings(collected: DuplicateCollection, scope: Scope): Finding[] {
   const output: Finding[] = [];
   let truncated = collected.truncated;
   for (const group of collected.groups.values()) {
     const finding = duplicateFinding(group, scope);
     if (finding === undefined) continue;
-    if (output.length >= ANALYZER_CAPS.duplicateFindings) {
-      truncated = true;
-      break;
-    }
+    if (output.length >= ANALYZER_CAPS.duplicateFindings) { truncated = true; break; }
     output.push(finding);
   }
   if (truncated) {
@@ -254,6 +257,22 @@ export function duplicates(project: SyntaxProject, cwd: string, scope: Scope): F
     output.push(truncationFinding(AnalyzerName.Duplicates));
   }
   return output;
+}
+
+export function duplicates(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
+  return duplicateFindings(collectDuplicateGroups(project, cwd), scope);
+}
+
+export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
+  const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
+  return Effect.gen(function* () {
+    for (const file of project.files) {
+      yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => cause });
+      if (state.truncated) break;
+      yield* Effect.yieldNow();
+    }
+    return duplicateFindings(state, scope);
+  });
 }
 interface TypeShape {
   properties: readonly string[];
@@ -278,12 +297,16 @@ const primitiveType = (type: ts.Type): string | undefined => {
   return undefined;
 };
 
+const TYPE_SHAPE_CAPS = { properties: 256, signatures: 64, unionParts: 128, signatureBytes: 4_096 } as const;
+
 function propertyShapes(
   checker: ts.TypeChecker,
   type: ts.Type,
   depth: number,
 ): string[] {
-  return checker.getPropertiesOfType(type)
+  const properties = checker.getPropertiesOfType(type);
+  if (properties.length > TYPE_SHAPE_CAPS.properties) return [`#oversized-properties:${properties.length}`];
+  return properties
     .filter((property) => property.valueDeclaration !== undefined || property.declarations?.length)
     .map((property) => {
       const declaration = property.valueDeclaration ?? property.declarations![0]!;
@@ -299,12 +322,10 @@ function propertyShapes(
 }
 
 function signatureShapes(checker: ts.TypeChecker, type: ts.Type, at: ts.Node): string[] {
-  return [...type.getCallSignatures(), ...type.getConstructSignatures()]
-    .map((signature) => checker.signatureToString(
-      signature,
-      at,
-      ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.UseStructuralFallback,
-    ))
+  const signatures = [...type.getCallSignatures(), ...type.getConstructSignatures()];
+  if (signatures.length > TYPE_SHAPE_CAPS.signatures) return [`#oversized-signatures:${signatures.length}`];
+  return signatures
+    .map((signature) => checker.signatureToString(signature, at, ts.TypeFormatFlags.UseStructuralFallback).slice(0, TYPE_SHAPE_CAPS.signatureBytes))
     .sort();
 }
 
@@ -316,13 +337,15 @@ const structuralType = (
 ): string => {
   const primitive = primitiveType(type);
   if (primitive !== undefined) return primitive;
+  if (depth >= 3) return `flags:${type.flags}`;
   if (type.isUnion()) {
+    if (type.types.length > TYPE_SHAPE_CAPS.unionParts) return `oversized-union:${type.types.length}`;
     return `union(${type.types.map((part) => structuralType(checker, part, at, depth + 1)).sort().join("|")})`;
   }
   if (type.isIntersection()) {
+    if (type.types.length > TYPE_SHAPE_CAPS.unionParts) return `oversized-intersection:${type.types.length}`;
     return `intersection(${type.types.map((part) => structuralType(checker, part, at, depth + 1)).sort().join("&")})`;
   }
-  if (depth >= 3) return `flags:${type.flags}`;
 
   const arrayElement = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   if (arrayElement !== undefined && checker.getPropertiesOfType(type).some((property) => property.name === "length")) {
@@ -377,30 +400,21 @@ interface TypeCandidate {
   name: string;
 }
 
-function collectTypeCandidates(project: TypeProject, cwd: string): {
-  candidates: TypeCandidate[];
-  truncated: boolean;
-} {
-  const candidates: TypeCandidate[] = [];
-  let truncated = false;
-  for (const file of project.files) {
-    for (const statement of file.statements) {
-      if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue;
-      if (candidates.length >= ANALYZER_CAPS.typeCandidates) {
-        truncated = true;
-        continue;
-      }
-      const shape = typeShape(project.checker, statement);
-      if (shape !== undefined) {
-        candidates.push({
-          shape,
-          loc: location(cwd, file, statement),
-          name: statement.name.text,
-        });
-      }
-    }
+interface TypeCollection { candidates: TypeCandidate[]; truncated: boolean }
+
+function collectTypeFile(project: TypeProject, cwd: string, file: ts.SourceFile, state: TypeCollection): void {
+  for (const statement of file.statements) {
+    if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue;
+    if (state.candidates.length >= ANALYZER_CAPS.typeCandidates) { state.truncated = true; continue; }
+    const shape = typeShape(project.checker, statement);
+    if (shape !== undefined) state.candidates.push({ shape, loc: location(cwd, file, statement), name: statement.name.text });
   }
-  return { candidates, truncated };
+}
+
+function collectTypeCandidates(project: TypeProject, cwd: string): TypeCollection {
+  const state: TypeCollection = { candidates: [], truncated: false };
+  for (const file of project.files) collectTypeFile(project, cwd, file, state);
+  return state;
 }
 
 interface TypeCandidateIndex {
@@ -495,30 +509,41 @@ function emitTypeMatches(
   return false;
 }
 
-export function similarTypes(
-  project: TypeProject,
-  cwd: string,
-  scope: Scope,
-  threshold = 0.8,
-): Finding[] {
+interface TypeMatchingState { output: Finding[]; seen: Set<string>; truncated: boolean }
+
+function finishTypeMatches(state: TypeMatchingState): Finding[] {
+  if (state.truncated) {
+    if (state.output.length >= ANALYZER_CAPS.typeFindings) state.output.pop();
+    state.output.push(truncationFinding(AnalyzerName.Types));
+  }
+  return state.output.sort((left, right) => compareLocations(left.location, right.location));
+}
+
+export function similarTypes(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Finding[] {
   const collected = collectTypeCandidates(project, cwd);
   const index = indexTypeCandidates(collected.candidates);
-  const changedSeeds = collected.candidates.filter((candidate) => changed(scope, candidate.loc));
-  const output: Finding[] = [];
-  const seen = new Set<string>();
-  let truncated = collected.truncated;
+  const state: TypeMatchingState = { output: [], seen: new Set(), truncated: collected.truncated };
+  for (const seed of collected.candidates.filter((candidate) => changed(scope, candidate.loc))) {
+    if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) { state.truncated = true; break; }
+  }
+  return finishTypeMatches(state);
+}
 
-  for (const seed of changedSeeds) {
-    if (emitTypeMatches(seed, index, threshold, seen, output)) {
-      truncated = true;
-      break;
+export function similarTypesEffect(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Effect.Effect<Finding[], unknown> {
+  const collected: TypeCollection = { candidates: [], truncated: false };
+  return Effect.gen(function* () {
+    for (const file of project.files) {
+      yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => cause });
+      yield* Effect.yieldNow();
     }
-  }
-  if (truncated) {
-    if (output.length >= ANALYZER_CAPS.typeFindings) output.pop();
-    output.push(truncationFinding(AnalyzerName.Types));
-  }
-  return output.sort((left, right) => compareLocations(left.location, right.location));
+    const index = indexTypeCandidates(collected.candidates);
+    const state: TypeMatchingState = { output: [], seen: new Set(), truncated: collected.truncated };
+    for (const seed of collected.candidates.filter((candidate) => changed(scope, candidate.loc))) {
+      if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) { state.truncated = true; break; }
+      yield* Effect.yieldNow();
+    }
+    return finishTypeMatches(state);
+  });
 }
 
 function isLoop(node: ts.Node): boolean {
@@ -639,4 +664,8 @@ export function asyncRisks(project: SyntaxProject, cwd: string, scope: Scope): F
   const output: Finding[] = [];
   for (const file of project.files) visitAsyncRisks(file, cwd, scope, output);
   return output;
+}
+
+export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
+  return cooperativeFileAnalysis(project.files, (file, output) => visitAsyncRisks(file, cwd, scope, output));
 }

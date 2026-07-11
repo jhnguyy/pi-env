@@ -24,7 +24,7 @@ export class ScopeError extends Data.TaggedError("ScopeError")<{ message: string
 export class ProgramError extends Data.TaggedError("ProgramError")<{ message: string }>{}
 export class AnalyzerRunError extends Data.TaggedError("AnalyzerRunError")<{ analyzer: AnalyzerName; message: string }>{}
 export class BenchmarkError extends Data.TaggedError("BenchmarkError")<{ message: string; runs?: readonly number[] }>{}
-export const ProcessErrorKind = { Spawn: "spawn", Exit: "exit", Timeout: "timeout" } as const;
+export const ProcessErrorKind = { Spawn: "spawn", Exit: "exit", Timeout: "timeout", OutputLimit: "output-limit", Interrupted: "interrupted" } as const;
 export type ProcessErrorKind = typeof ProcessErrorKind[keyof typeof ProcessErrorKind];
 export class ProcessError extends Data.TaggedError("ProcessError")<{
   kind: ProcessErrorKind;
