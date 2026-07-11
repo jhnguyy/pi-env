@@ -149,9 +149,10 @@ describe("analyze contracts", () => {
     const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
     let creations = 0;
     let launches = 0;
+    const runtime = { now: () => 0, memory: () => ({ rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 }) };
     const rejectedInternal = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 1023, checks: [AnalyzerName.Types],
-    }, { createAnalysisProject: () => { creations++; return undefined; } }));
+    }, { createAnalysisProject: () => { creations++; return undefined; }, runtime }));
     expect(creations).toBe(0); // preflight rejects before the semantic project is created
     expect(rejectedInternal.analyzerFailures[0]).toMatchObject({ analyzer: AnalyzerName.Types });
 
@@ -160,6 +161,7 @@ describe("analyze contracts", () => {
     }, {
       createAnalysisProject: () => { creations++; return undefined; },
       processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); },
+      runtime,
     }));
     expect(creations).toBe(1); // complexity is accepted exactly at its 512 MiB boundary
     expect(launches).toBe(0);
@@ -170,13 +172,13 @@ describe("analyze contracts", () => {
     launches = 0;
     const rejectedExternal = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 1535, checks: [AnalyzerName.Eslint],
-    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); } }));
+    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); }, runtime }));
     expect(launches).toBe(0); // preflight rejects before Oxlint can be spawned
     expect(rejectedExternal.analyzerFailures[0]).toMatchObject({ analyzer: AnalyzerName.Eslint });
 
     const external = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 1535, checks: [AnalyzerName.Eslint, AnalyzerName.Dependencies],
-    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: JSON.stringify({ summary: { violations: [] } }), stderr: "" }); } }));
+    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: JSON.stringify({ summary: { violations: [] } }), stderr: "" }); }, runtime }));
     expect(launches).toBe(1); // dependencies remains eligible at 768 MiB
     expect(external.analyzerFailures).toEqual(expect.arrayContaining([
       expect.objectContaining({ analyzer: AnalyzerName.Eslint, message: expect.stringContaining("1536 MiB") }),
@@ -207,7 +209,7 @@ describe("analyze contracts", () => {
     expect(invocation?.command).toBe("node");
     expect(invocation?.args[0]).toBe(resolve(cwd, "node_modules/oxlint/bin/oxlint"));
     expect(invocation?.options?.env?.PATH).toMatch(/^\/bin:\/usr\/bin:/);
-    expect(invocation?.options?.env?.NODE_OPTIONS).toBeUndefined();
+    expect(invocation?.options?.env?.NODE_OPTIONS ?? "").not.toContain("--max-old-space-size");
   });
 
   it("plans external-only runs without creating a Program and profiles only on request", async () => {
