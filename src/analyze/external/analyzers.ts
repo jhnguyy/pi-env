@@ -4,7 +4,7 @@ import { AnalyzerName, AnalyzerRunError, type Finding, type ProgramError } from 
 import { DEFAULT_EXTERNAL_TIMEOUT_MS, nodeAnalyzerEnvironment, ProcessService, type StreamProcessOptions } from "../process.js";
 import { tsconfigFileNamesEffect } from "../program.js";
 import type { Scope } from "../scope.js";
-import { parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "./parsers.js";
+import { parseDependencyCruiserJson, parseOxlintJson, parseKnipOutput } from "./parsers.js";
 
 const OUTPUT_LIMIT_BYTES = 20 * 1024 * 1024;
 const MAX_ARGUMENT_BYTES = 128 * 1024;
@@ -28,8 +28,13 @@ const parseEffect = (
   catch: (cause) => new AnalyzerRunError({ analyzer, message: `Invalid ${label} output: ${cause instanceof Error ? cause.message : String(cause)}` }),
 });
 
-function processOptions(cwd: string, maxMemoryMb: number, timeoutMs: number): StreamProcessOptions {
+function nodeProcessOptions(cwd: string, maxMemoryMb: number, timeoutMs: number): StreamProcessOptions {
   return { cwd, timeoutMs, stdoutLimitBytes: OUTPUT_LIMIT_BYTES, stderrLimitBytes: OUTPUT_LIMIT_BYTES, env: nodeAnalyzerEnvironment(maxMemoryMb) };
+}
+
+/** Oxlint is native; applying Node's heap flag through NODE_OPTIONS would make it fail to start. */
+function nativeProcessOptions(cwd: string, timeoutMs: number): StreamProcessOptions {
+  return { cwd, timeoutMs, stdoutLimitBytes: OUTPUT_LIMIT_BYTES, stderrLimitBytes: OUTPUT_LIMIT_BYTES };
 }
 
 function processFailureMessage(cause: import("../model.js").ProcessError): string {
@@ -55,10 +60,13 @@ function argumentBatches(values: readonly string[], fixed: readonly string[]): s
   return batches;
 }
 
+// The public analyzer/check name remains `eslint` for v1 compatibility; Oxlint is its implementation.
 export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
   return Effect.gen(function* () {
-    const script = resolve(cwd, "node_modules/eslint/bin/eslint.js");
-    const fixed = [script, "--format", "json", "--"];
+    const command = resolve(cwd, "node_modules/.bin/oxlint");
+    // Keep batches serial and Oxlint single-threaded: type-aware analysis can otherwise multiply
+    // TypeScript program memory use. Do not add --type-check: this analyzer reports lint rules only.
+    const fixed = ["--type-aware", "--format", "json", "--threads", "1", "--no-error-on-unmatched-pattern", "--"];
     const files = yield* selectedTsPathsEffect(cwd, scope).pipe(
       Effect.mapError((cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message })),
     );
@@ -66,10 +74,10 @@ export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
     const findings: Finding[] = [];
     // analyze: allow-sequential
     for (const batch of batches) {
-      const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [...fixed, ...batch], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
-        Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(stdout, cwd))),
+      const parsed = yield* runProcess(command, [...fixed, ...batch], nativeProcessOptions(cwd, timeoutMs)).pipe(
+        Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Eslint, "Oxlint", () => parseOxlintJson(stdout, cwd))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
-          ? parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(cause.stdout!, cwd))
+          ? parseEffect(AnalyzerName.Eslint, "Oxlint", () => parseOxlintJson(cause.stdout!, cwd))
           : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: processFailureMessage(cause) }))),
       );
       findings.push(...parsed);
@@ -89,7 +97,7 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
     const findings: Finding[] = [];
     // analyze: allow-sequential
     for (const batch of batches) {
-      const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [script, ...batch, ...suffix], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
+      const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [script, ...batch, ...suffix], nodeProcessOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(stdout))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout
           ? parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(cause.stdout!))
@@ -103,7 +111,7 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
 }
 
 export function knipAnalyzerEffect(cwd: string, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
-  return runProcess(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/knip/bin/knip.js"), "--reporter", "compact", "--no-progress", "--no-exit-code"], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
+  return runProcess(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/knip/bin/knip.js"), "--reporter", "compact", "--no-progress", "--no-exit-code"], nodeProcessOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
     Effect.flatMap(({ stdout, stderr }) => parseEffect(AnalyzerName.Knip, "Knip", () => parseKnipOutput(`${stdout}\n${stderr}`))),
     Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Knip, message: processFailureMessage(cause) })),
   );

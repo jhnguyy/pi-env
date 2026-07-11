@@ -42,6 +42,14 @@ nub run build
 nub run verify
 ```
 
+For memory-constrained hosts or concurrent worktrees, use the safe validation lane instead:
+
+```bash
+nub run verify:safe
+```
+
+It takes a repository-wide lock in Git's common directory, so all worktrees run heavyweight phases one at a time. The lane runs Oxlint, typecheck, type-aware Oxlint, one-worker unit tests, build, and each existing analyzer check sequentially. This repo has no formatter check configured, so that named phase is explicitly skipped. It waits up to 10 minutes for another owner by default (`PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS` overrides this), and safely recovers locks left by dead processes. Normal `build`, `test`, and `verify` commands remain unchanged for everyday use.
+
 See [`docs/container-image.md`](docs/container-image.md) for the container image contract.
 
 Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/config/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.

@@ -189,10 +189,19 @@ function setupAnalysis(options: AnalyzeOptions): Effect.Effect<AnalysisPlan, Ana
     const runtime = yield* AnalysisRuntime;
     const started = runtime.now();
     const budget = yield* validateOptionsEffect(options);
-    const checks = yield* selectedChecksEffect(options);
+    const selected = yield* selectedChecksEffect(options);
+    // This preflight is deliberately before scope/project capability loading and analyzer dispatch.
+    // A rejected check must not raise the shared project's capability for checks that can run.
+    let state = initialState();
+    const checks = selected.filter((name) => {
+      const minimum = analyzerDescriptor(name).minimumTotalMemoryMb;
+      if (budget >= minimum) return true;
+      state = addFailure(state, name, `Insufficient memory budget: maxMemoryMb ${budget} MiB is below this analyzer's ${minimum} MiB minimum`);
+      return false;
+    });
     const scopeStarted = runtime.now();
     const scope = yield* resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref);
-    let state = timing(initialState(), options.profile === true, "scope", scopeStarted, runtime.now());
+    state = timing(state, options.profile === true, "scope", scopeStarted, runtime.now());
     state = snapshot(state, options.profile === true, "after:scope", runtime.memory());
     return { budget, checks, scope, started, state };
   });

@@ -17,4 +17,5 @@ export {
   parseDependencyCruiserJson,
   parseEslintJson,
   parseKnipOutput,
+  parseOxlintJson,
 } from "./external/parsers.js";

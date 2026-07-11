@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import ts from "typescript";
@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
-import { bundleAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
+import { bundleAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
@@ -143,6 +143,54 @@ describe("analyze contracts", () => {
       { start: 1, end: 1 },
       { start: 4, end: 4 },
     ]);
+  });
+
+  it("rejects impossible analyzer budgets before capability loading while allowing eligible checks", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    let creations = 0;
+    let launches = 0;
+    const rejectedInternal = await Effect.runPromise(analyzeEffect({
+      cwd, scope: ScopeMode.All, maxMemoryMb: 1023, checks: [AnalyzerName.Types],
+    }, { createAnalysisProject: () => { creations++; return undefined; } }));
+    expect(creations).toBe(0); // preflight rejects before the semantic project is created
+    expect(rejectedInternal.analyzerFailures[0]).toMatchObject({ analyzer: AnalyzerName.Types });
+
+    const result = await Effect.runPromise(analyzeEffect({
+      cwd, scope: ScopeMode.All, maxMemoryMb: 512, checks: [AnalyzerName.Complexity, AnalyzerName.Types],
+    }, {
+      createAnalysisProject: () => { creations++; return undefined; },
+      processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); },
+    }));
+    expect(creations).toBe(1); // complexity is accepted exactly at its 512 MiB boundary
+    expect(launches).toBe(0);
+    expect(result.analyzerFailures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ analyzer: AnalyzerName.Types, message: expect.stringContaining("512 MiB") }),
+    ]));
+
+    launches = 0;
+    const rejectedExternal = await Effect.runPromise(analyzeEffect({
+      cwd, scope: ScopeMode.All, maxMemoryMb: 1535, checks: [AnalyzerName.Eslint],
+    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); } }));
+    expect(launches).toBe(0); // preflight rejects before Oxlint can be spawned
+    expect(rejectedExternal.analyzerFailures[0]).toMatchObject({ analyzer: AnalyzerName.Eslint });
+
+    const external = await Effect.runPromise(analyzeEffect({
+      cwd, scope: ScopeMode.All, maxMemoryMb: 1535, checks: [AnalyzerName.Eslint, AnalyzerName.Dependencies],
+    }, { processRunner: () => { launches++; return Effect.succeed({ stdout: JSON.stringify({ summary: { violations: [] } }), stderr: "" }); } }));
+    expect(launches).toBe(1); // dependencies remains eligible at 768 MiB
+    expect(external.analyzerFailures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ analyzer: AnalyzerName.Eslint, message: expect.stringContaining("1536 MiB") }),
+    ]));
+  });
+
+  it("accepts the exact external budget boundary and does not give native Oxlint NODE_OPTIONS", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    let options: import("../process.js").StreamProcessOptions | undefined;
+    const result = await Effect.runPromise(analyzeEffect({
+      cwd, scope: ScopeMode.All, maxMemoryMb: 1536, checks: [AnalyzerName.Eslint],
+    }, { processRunner: (_command, _args, value) => { options = value; return Effect.succeed({ stdout: JSON.stringify({ diagnostics: [] }), stderr: "" }); } }));
+    expect(result.analyzerFailures).toEqual([]);
+    expect(options?.env?.NODE_OPTIONS).toBeUndefined();
   });
 
   it("plans external-only runs without creating a Program and profiles only on request", async () => {
@@ -383,13 +431,22 @@ describe("external analyzers and parsers", () => {
     expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: BENCHMARK_LIMITS.timeoutMs.max + 1 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
   });
 
-  it("parses only the configured ESLint rules from structured JSON", () => {
-    const findings = parseEslintJson(JSON.stringify([{ filePath: "/repo/src/a.ts", messages: [
-      { ruleId: "@typescript-eslint/no-floating-promises", severity: 2, message: "promise", line: 2, column: 3 },
-      { ruleId: "other", severity: 2, message: "ignored", line: 1, column: 1 },
-    ] }]), "/repo");
+  it("strictly parses configured Oxlint diagnostics and preserves labels", () => {
+    const findings = parseOxlintJson(JSON.stringify({ diagnostics: [
+      { code: "typescript(no-floating-promises)", severity: "error", message: "promise", filename: "src/a.ts", labels: [{ span: { line: 2, column: 3 } }, { span: { line: 4, column: 5 } }], related: [{ code: "note", severity: "info", message: "related", filename: "src/b.ts", labels: [{ span: { line: 6, column: 7 } }], related: [] }] },
+      { code: "other", severity: "error", message: "ignored", filename: "src/a.ts", labels: [{ span: { line: 1, column: 1 } }], related: [] },
+    ] }), "/repo");
     expect(findings).toHaveLength(1);
-    expect(findings[0]).toMatchObject({ severity: Severity.Error, location: { path: "src/a.ts", line: 2, column: 3 } });
+    expect(findings[0]).toMatchObject({ data: { ruleId: "@typescript-eslint/no-floating-promises" }, severity: Severity.Error, location: { path: "src/a.ts", line: 2, column: 3 }, related: [{ path: "src/a.ts", line: 4, column: 5 }, { path: "src/b.ts", line: 6, column: 7 }] });
+    expect(() => parseOxlintJson('{"diagnostics":[{}]}', "/repo")).toThrow("Invalid Oxlint diagnostic");
+  });
+
+  it("smoke tests the type-aware Oxlint backend", async () => {
+    const cwd = writeProject({ "src/a.ts": "async function f() { Promise.resolve(1); }\nf();" });
+    symlinkSync(join(process.cwd(), "node_modules"), join(cwd, "node_modules"), "junction");
+    writeFileSync(join(cwd, ".oxlintrc.json"), readFileSync(join(process.cwd(), ".oxlintrc.json")));
+    const findings = await Effect.runPromise(eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(ProcessServiceLive)));
+    expect(findings).toEqual(expect.arrayContaining([expect.objectContaining({ analyzer: AnalyzerName.Eslint, data: { ruleId: "@typescript-eslint/no-floating-promises" } })]));
   });
 });
 

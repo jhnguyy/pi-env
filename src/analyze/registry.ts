@@ -21,6 +21,8 @@ type AnalyzerRunner = (context: AnalyzerContext) => Effect.Effect<Finding[], Ana
 export interface AnalyzerDescriptor {
   name: AnalyzerName;
   defaultEnabled: boolean;
+  /** Minimum total analysis budget, based on conservative observed peak runs. */
+  minimumTotalMemoryMb: number;
   project: ProjectRequirement;
   run: AnalyzerRunner;
 }
@@ -37,6 +39,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Complexity,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 512,
     project: ProjectRequirement.ScopedSyntax,
     run: (context) => internalEffect(AnalyzerName.Complexity, context.project === undefined
       ? Effect.fail(new Error("Complexity analyzer requires a syntax project"))
@@ -45,6 +48,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Duplicates,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 768,
     project: ProjectRequirement.CorpusSyntax,
     run: (context) => internalEffect(AnalyzerName.Duplicates, context.project === undefined
       ? Effect.fail(new Error("Duplicate analyzer requires a syntax project"))
@@ -53,6 +57,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Types,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 1024,
     project: ProjectRequirement.Types,
     run: (context) => internalEffect(AnalyzerName.Types, context.project === undefined || !isTypeProject(context.project)
       ? Effect.fail(new Error("Type analyzer requires a TypeScript type project"))
@@ -61,6 +66,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.AsyncRisk,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 512,
     project: ProjectRequirement.ScopedSyntax,
     run: (context) => internalEffect(AnalyzerName.AsyncRisk, context.project === undefined
       ? Effect.fail(new Error("Async-risk analyzer requires a syntax project"))
@@ -69,24 +75,28 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Eslint,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 1536,
     project: ProjectRequirement.None,
     run: (context) => eslintAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs),
   },
   {
     name: AnalyzerName.Dependencies,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 768,
     project: ProjectRequirement.None,
     run: (context) => dependencyAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs),
   },
   {
     name: AnalyzerName.Knip,
     defaultEnabled: true,
+    minimumTotalMemoryMb: 768,
     project: ProjectRequirement.None,
     run: (context) => knipAnalyzerEffect(context.cwd, context.maxMemoryMb, context.externalTimeoutMs),
   },
   {
     name: AnalyzerName.Bundle,
     defaultEnabled: false,
+    minimumTotalMemoryMb: 768,
     project: ProjectRequirement.None,
     run: (context) => bundleAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs, { beforeEntry: context.beforeBundleEntry }),
   },
