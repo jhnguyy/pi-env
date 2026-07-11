@@ -123,11 +123,9 @@ export function resolveScopeEffect(cwd: string, mode: ScopeMode, paths: readonly
   if (mode === ScopeMode.All) return Effect.succeed({ mode, files: [], hunks: new Map() });
   return Effect.gen(function* () {
     const base = (yield* gitEffect(cwd, ["merge-base", ref, "HEAD"])).trim();
-    const chunks = [
-      yield* gitEffect(cwd, ["diff", "--unified=0", base, "HEAD"]),
-      yield* gitEffect(cwd, ["diff", "--unified=0", "--cached"]),
-      yield* gitEffect(cwd, ["diff", "--unified=0"]),
-    ];
+    // Compare the base directly with the worktree so every hunk uses the same
+    // line-number coordinate system as the source files parsed by analyzers.
+    const chunks = [yield* gitEffect(cwd, ["diff", "--unified=0", base])];
     const hunks = new Map<string, Hunk[]>();
     for (const chunk of chunks) {
       for (const [path, ranges] of parseUnifiedHunks(chunk)) {

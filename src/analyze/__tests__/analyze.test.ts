@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -7,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { asyncRisks, asyncRisksEffect, canonicalizeWithCap, complexity, complexityEffect, duplicates, duplicatesEffect, similarTypes, similarTypesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
-import { bundleAnalyzer, bundleAnalyzerEffect, discoverExtensionEntrypoints, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
+import { bundleAnalyzer, bundleAnalyzerEffect, discoverExtensionEntrypoints, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
@@ -60,6 +61,22 @@ describe("analyze contracts", () => {
     expect(Date.now() - interruptedAt).toBeLessThan(1_000);
   });
 
+  it("retains subprocess stderr in external analyzer failures", async () => {
+    const failure = new ProcessError({
+      kind: ProcessErrorKind.Exit,
+      command: "eslint",
+      message: "Process exited with code 2: eslint",
+      exitCode: 2,
+      stderr: "configuration could not be loaded",
+    });
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    const outcome = await Effect.runPromise(Effect.either(eslintAnalyzerEffect(cwd, allScope, 256, 100, {
+      process: () => Effect.fail(failure),
+    })));
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") expect(outcome.left.message).toContain("stderr: configuration could not be loaded");
+  });
+
   it("preserves typed benchmark failures", async () => {
     const outcome = await Effect.runPromise(Effect.either(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 })));
     expect(outcome._tag).toBe("Left");
@@ -82,6 +99,27 @@ describe("analyze contracts", () => {
     expect(hunks).toEqual([{ start: 10, end: 12 }]);
     expect(intersectsHunks(12, 14, hunks)).toBe(true);
     expect(intersectsHunks(1, 9, hunks)).toBe(false);
+  });
+
+  it("expresses committed and unstaged diff hunks in current worktree lines", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const first = 1;\nexport const second = 2;\nexport const third = 3;\n" });
+    const git = (...args: string[]): void => { execFileSync("git", args, { cwd, stdio: "ignore" }); };
+    git("init", "-b", "main");
+    git("config", "user.email", "analyze@example.invalid");
+    git("config", "user.name", "Analyze Test");
+    git("add", ".");
+    git("commit", "-m", "baseline");
+    git("switch", "-c", "feature");
+    writeFileSync(join(cwd, "src/a.ts"), "export const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
+    git("add", ".");
+    git("commit", "-m", "change third");
+    writeFileSync(join(cwd, "src/a.ts"), "// shifts committed hunk\nexport const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
+
+    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Diff, [], "main"));
+    expect(scope.hunks.get("src/a.ts")).toEqual([
+      { start: 1, end: 1 },
+      { start: 4, end: 4 },
+    ]);
   });
 
   it("plans external-only runs without creating a Program and profiles only on request", async () => {
@@ -148,6 +186,16 @@ describe("structural type similarity", () => {
     const findings = similarTypes(createProject(cwd), cwd, allScope, 0.6);
     expect(findings.some((item) => item.message.includes("Exact structural type duplicate: UserDto / AccountDto"))).toBe(true);
     expect(findings.some((item) => item.message.includes("Near structural type duplicate"))).toBe(true);
+  });
+
+  it("keeps distinct type pairs when declarations share a line", () => {
+    const cwd = writeProject({ "src/types.ts": "export interface A { id: string; name: string } export interface B { id: string; name: string } export interface C { id: string; name: string }" });
+    const findings = similarTypes(createProject(cwd), cwd, allScope);
+    expect(findings.map((item) => item.message)).toEqual([
+      "Exact structural type duplicate: A / B",
+      "Exact structural type duplicate: A / C",
+      "Exact structural type duplicate: B / C",
+    ]);
   });
 
   it("compares changed seeds against the global corpus", () => {

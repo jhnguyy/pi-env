@@ -34,6 +34,13 @@ function processOptions(cwd: string, maxMemoryMb: number, timeoutMs: number): St
   return { cwd, timeoutMs, stdoutLimitBytes: OUTPUT_LIMIT_BYTES, stderrLimitBytes: OUTPUT_LIMIT_BYTES, env: nodeAnalyzerEnvironment(maxMemoryMb) };
 }
 
+function processFailureMessage(cause: import("../model.js").ProcessError): string {
+  const stderr = cause.stderr?.trim();
+  if (!stderr) return cause.message;
+  const excerpt = stderr.length > 2_000 ? `${stderr.slice(0, 2_000)}…` : stderr;
+  return `${cause.message}\nstderr: ${excerpt}`;
+}
+
 function argumentBatches(values: readonly string[], fixed: readonly string[]): string[][] {
   const baseBytes = fixed.reduce((total, value) => total + Buffer.byteLength(value) + 1, 0);
   const batches: string[][] = [];
@@ -64,7 +71,7 @@ export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(stdout, cwd))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
           ? parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(cause.stdout!, cwd))
-          : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }))),
+          : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: processFailureMessage(cause) }))),
       );
       findings.push(...parsed);
       yield* Effect.yieldNow();
@@ -88,7 +95,7 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(stdout))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout
           ? parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(cause.stdout!))
-          : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause.message }))),
+          : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: processFailureMessage(cause) }))),
       );
       findings.push(...parsed);
       yield* Effect.yieldNow();
@@ -101,6 +108,6 @@ export function knipAnalyzerEffect(cwd: string, maxMemoryMb: number, timeoutMs: 
   const run = controls.process ?? streamProcessEffect;
   return run(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/knip/bin/knip.js"), "--reporter", "compact", "--no-progress", "--no-exit-code"], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
     Effect.flatMap(({ stdout, stderr }) => parseEffect(AnalyzerName.Knip, "Knip", () => parseKnipOutput(`${stdout}\n${stderr}`))),
-    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Knip, message: cause.message })),
+    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Knip, message: processFailureMessage(cause) })),
   );
 }

@@ -451,7 +451,7 @@ function comparableTypeCandidates(seed: TypeCandidate, index: TypeCandidateIndex
 }
 
 function typePairKey(left: TypeCandidate, right: TypeCandidate): string {
-  return [`${left.loc.path}:${left.loc.line}`, `${right.loc.path}:${right.loc.line}`]
+  return [`${left.loc.path}:${left.loc.line}:${left.loc.column}`, `${right.loc.path}:${right.loc.line}:${right.loc.column}`]
     .sort()
     .join("|");
 }
