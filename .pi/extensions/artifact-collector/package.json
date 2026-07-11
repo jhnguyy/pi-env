@@ -1,0 +1,18 @@
+{
+  "name": "@pi-env/artifact-collector",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "dependencies": {
+    "effect": "^3.21.4"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}
