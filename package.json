@@ -10,6 +10,7 @@
     "node": ">=24.0.0"
   },
   "workspaces": [
+    ".pi/extensions/analyze",
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
@@ -22,6 +23,7 @@
   ],
   "pi": {
     "extensions": [
+      ".pi/extensions/analyze",
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
       ".pi/extensions/introspection",
