@@ -13,19 +13,67 @@ export const SafeVerificationPhaseId = {
   Patterns: "analyzer-patterns",
 };
 
-// There is no formatter/checker configured in this repository yet. Keep the
-// explicit skipped phase so adding one cannot accidentally change safe order.
 export const SAFE_VERIFICATION_PHASES = [
-  { id: SafeVerificationPhaseId.Format, label: "format check", skip: "no format-check script is configured" },
-  { id: SafeVerificationPhaseId.Lint, label: "non-type lint", command: "nub", args: ["run", "lint"] },
-  { id: SafeVerificationPhaseId.Typecheck, label: "typecheck", command: "nub", args: ["run", "typecheck"] },
-  { id: SafeVerificationPhaseId.TypeAwareLint, label: "type-aware lint", command: "nub", args: ["run", "lint:type"] },
-  { id: SafeVerificationPhaseId.UnitTests, label: "unit tests (one worker)", command: "nub", args: ["run", "test:safe"] },
-  { id: SafeVerificationPhaseId.Build, label: "extension build", command: "nub", args: ["run", "build"] },
-  { id: SafeVerificationPhaseId.Dependencies, label: "dependency analyzer", command: "nub", args: ["run", "check:deps"] },
-  { id: SafeVerificationPhaseId.Clones, label: "clone analyzer", command: "nub", args: ["run", "check:clones"] },
-  { id: SafeVerificationPhaseId.Unused, label: "unused analyzer", command: "nub", args: ["run", "check:unused"] },
-  { id: SafeVerificationPhaseId.Patterns, label: "pattern analyzer", command: "nub", args: ["run", "check:patterns"] },
+  {
+    id: SafeVerificationPhaseId.Format,
+    label: "format check",
+    command: "nub",
+    args: ["run", "format:check"],
+  },
+  {
+    id: SafeVerificationPhaseId.Lint,
+    label: "non-type lint",
+    command: "nub",
+    args: ["run", "lint"],
+  },
+  {
+    id: SafeVerificationPhaseId.Typecheck,
+    label: "typecheck",
+    command: "nub",
+    args: ["run", "typecheck"],
+  },
+  {
+    id: SafeVerificationPhaseId.TypeAwareLint,
+    label: "type-aware lint",
+    command: "nub",
+    args: ["run", "lint:type"],
+  },
+  {
+    id: SafeVerificationPhaseId.UnitTests,
+    label: "unit tests (one worker)",
+    command: "nub",
+    args: ["run", "test:safe"],
+  },
+  {
+    id: SafeVerificationPhaseId.Build,
+    label: "extension build",
+    command: "nub",
+    args: ["run", "build"],
+  },
+  {
+    id: SafeVerificationPhaseId.Dependencies,
+    label: "dependency analyzer",
+    command: "nub",
+    args: ["run", "check:deps"],
+  },
+  {
+    id: SafeVerificationPhaseId.Clones,
+    label: "clone analyzer",
+    command: "nub",
+    args: ["run", "check:clones"],
+  },
+  {
+    id: SafeVerificationPhaseId.Unused,
+    label: "unused analyzer",
+    command: "nub",
+    args: ["run", "check:unused"],
+  },
+  {
+    id: SafeVerificationPhaseId.Patterns,
+    label: "pattern analyzer",
+    command: "nub",
+    args: ["run", "check:patterns"],
+  },
 ];
 
 export function formatSafePhase(phase) {

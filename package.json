@@ -53,6 +53,8 @@
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
     "lint": "oxlint . --threads=1 --deny-warnings",
     "lint:type": "oxlint . --type-aware --threads=1 --deny-warnings",
+    "format": "oxfmt --threads=1 scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
+    "format:check": "oxfmt --threads=1 --check scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
     "sensor:deps": "nub run check:deps",
     "sensor:dup": "nub run check:clones",
     "analyze": "scripts/node-run.sh scripts/analyze.ts",
@@ -99,6 +101,7 @@
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
     "vitest": "^4.1.9",
+    "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
     "oxlint-tsgolint": "0.24.0"
   },

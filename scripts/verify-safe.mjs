@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import { withHeavyweightLock } from "./heavyweight-lock.mjs";
-import { SAFE_VERIFICATION_PHASES, formatSafePhase, runSafeVerificationPlan } from "./safe-verification-plan.mjs";
+import {
+  SAFE_VERIFICATION_PHASES,
+  formatSafePhase,
+  runSafeVerificationPlan,
+} from "./safe-verification-plan.mjs";
 
 if (process.argv.includes("--list")) {
   console.log(SAFE_VERIFICATION_PHASES.map(formatSafePhase).join("\n"));
