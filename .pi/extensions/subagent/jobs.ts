@@ -1,14 +1,15 @@
 /** In-process asynchronous subagent job registry. Jobs are cancelled with their parent session. */
 
 import { randomUUID } from "node:crypto";
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Effect, Fiber } from "effect";
 
+import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { SubagentJobWaitInterrupted } from "./errors";
 import { runSubagentEffect, type RunSubagentOptions } from "./execute";
 import type { SubagentParams } from "./resolver";
-import type { SubagentDetails, ToolCapability } from "./types";
+import type { SubagentDetails } from "./types";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = 4;
 export const SubagentJobStatus = {
@@ -29,6 +30,7 @@ export interface SubagentJob {
   ctx: ExtensionContext;
   result?: AgentToolResult<SubagentDetails>;
   errorMessage?: string;
+  fiber?: Fiber.RuntimeFiber<void>;
   promise: Promise<void>;
   resolve: () => void;
 }
@@ -36,8 +38,7 @@ export interface SubagentJob {
 export type SubagentJobRunner = (
   params: SubagentParams,
   ctx: ExtensionContext,
-  registeredExtTools: Map<string, AgentTool<any, any>>,
-  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions,
 ) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
 
@@ -51,8 +52,7 @@ export class SubagentJobManager {
 
   constructor(
     private readonly pi: ExtensionAPI,
-    private readonly registeredExtTools: Map<string, AgentTool<any, any>>,
-    private readonly registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+    private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     private readonly runJob: SubagentJobRunner = runSubagentEffect,
   ) {}
 
@@ -117,6 +117,7 @@ export class SubagentJobManager {
         break;
       case SubagentJobStatus.Running:
         job.controller.abort();
+        if (job.fiber) void Effect.runFork(Fiber.interruptFork(job.fiber));
         break;
       default:
         break;
@@ -128,21 +129,14 @@ export class SubagentJobManager {
     const manager = this;
     return Effect.gen(function* () {
       for (const job of manager.jobs.values()) manager.cancel(job.id);
-      const completion = Effect.all(
+      yield* Fiber.interruptAll(
+        [...manager.jobs.values()]
+          .flatMap((job) => job.fiber ? [job.fiber] : []),
+      );
+      yield* Effect.all(
         [...manager.jobs.values()].map((job) => Effect.promise(() => job.promise)),
         { discard: true },
-      ).pipe(Effect.timeout("5 seconds"));
-      const exit = yield* Effect.exit(completion);
-      if (Exit.isSuccess(exit)) return;
-
-      // AbortSignal is cooperative. Do not let a non-cooperating provider or tool
-      // prevent the parent session from shutting down forever.
-      for (const job of manager.jobs.values()) {
-        if (job.status !== SubagentJobStatus.Running) continue;
-        job.status = SubagentJobStatus.Cancelled;
-        job.errorMessage = "Cancellation did not settle within 5 seconds.";
-        manager.record(job);
-      }
+      );
     });
   }
 
@@ -157,16 +151,22 @@ export class SubagentJobManager {
       this.activeCount++;
       job.status = SubagentJobStatus.Running;
       this.record(job);
-      void Effect.runPromise(this.runEffect(job));
+      job.fiber = Effect.runFork(this.runEffect(job));
     }
   }
 
   private runEffect(job: SubagentJob): Effect.Effect<void> {
     return Effect.acquireUseRelease(
       Effect.sync(() => undefined),
-      () => Effect.match(Effect.sandbox(this.runJob(job.params, job.ctx, this.registeredExtTools, this.registeredExtCaps, {
-        signal: job.controller.signal,
-      })), {
+      () => Effect.match(Effect.sandbox(Effect.onInterrupt(
+        this.runJob(job.params, job.ctx, this.registeredExtTools, {
+          signal: job.controller.signal,
+        }),
+        () => Effect.sync(() => {
+          job.status = SubagentJobStatus.Cancelled;
+          job.errorMessage = "Cancelled.";
+        }),
+      )), {
         onSuccess: (result) => {
           job.result = result;
           job.status = job.controller.signal.aborted
@@ -180,12 +180,16 @@ export class SubagentJobManager {
           job.errorMessage = Cause.pretty(cause);
         },
       }),
-      () => Effect.sync(() => {
-        this.record(job);
-        job.resolve();
-        this.activeCount--;
-        void this.pump();
-      }),
+      () => Effect.zipRight(
+        // Let the runner release its own resources before opening another slot.
+        Effect.yieldNow(),
+        Effect.sync(() => {
+          this.record(job);
+          job.resolve();
+          this.activeCount--;
+          void this.pump();
+        }),
+      ),
     );
   }
 

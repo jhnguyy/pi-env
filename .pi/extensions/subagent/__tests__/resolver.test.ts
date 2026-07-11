@@ -30,6 +30,10 @@ const readExtTool = {
   execute: async () => ({ content: [{ type: "text", text: "ok" }], details: null }),
 } as any;
 
+function externalTools(capabilities: ToolCapability[] = [ToolCapability.Read]) {
+  return new Map([["notes", { tool: readExtTool, capabilities }]]);
+}
+
 function agentConfig(overrides: Partial<AgentConfig>): AgentConfig {
   return {
     name: "scout",
@@ -44,12 +48,10 @@ function agentConfig(overrides: Partial<AgentConfig>): AgentConfig {
 
 describe("subagent resolver", () => {
   it("resolves explicit built-in and extension tools", () => {
-    const extTools = new Map([["notes", readExtTool]]);
     const result = resolveTools(
       { task: "x", tools: ["read", "notes"] },
       undefined,
-      extTools,
-      undefined,
+      externalTools(),
       "/tmp",
     );
 
@@ -60,13 +62,10 @@ describe("subagent resolver", () => {
   });
 
   it("resolves tools by capability subset", () => {
-    const extTools = new Map([["notes", readExtTool]]);
-    const extCaps = new Map([["notes", [ToolCapability.Read]]]);
     const result = resolveTools(
       { task: "x" },
       agentConfig({ capabilities: [ToolCapability.Read] }),
-      extTools,
-      extCaps,
+      externalTools(),
       "/tmp",
     );
 
@@ -82,7 +81,6 @@ describe("subagent resolver", () => {
       { task: "x", tools: ["missing"] },
       agentConfig({ capabilities: [ToolCapability.Read] }),
       new Map(),
-      undefined,
       "/tmp",
     );
 
@@ -116,7 +114,7 @@ describe("subagent resolver", () => {
     const result = resolveSubagentExecutionPlan(
       { task: "x", tools: ["notes"], model: "anthropic/claude-haiku-4-5" },
       { cwd: "/tmp", modelRegistry } as any,
-      new Map([["notes", readExtTool]]),
+      externalTools(),
     );
 
     expect(result._tag).toBe(ResolutionResultTag.Ok);

@@ -20,13 +20,17 @@ const mockTheme = {
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
 let registeredTool: any;
+const registeredTools = new Map<string, any>();
+const toolRegistrations: any[] = [];
 
 // Event listener map for testing agent-tools:register protocol
 const eventListeners = new Map<string, Function[]>();
 
 const mockPi = {
   registerTool: (tool: any) => {
-    registeredTool = tool;
+    toolRegistrations.push(tool);
+    registeredTools.set(tool.name, tool);
+    if (tool.name === "subagent") registeredTool = tool;
   },
   on: () => {},
   events: {
@@ -84,9 +88,10 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
-    it("registers a tool named 'subagent'", () => {
+    it("registers each stable tool exactly once", () => {
       expect(registeredTool).toBeDefined();
-      expect(registeredTool.name).toBe("subagent");
+      expect([...registeredTools.keys()]).toEqual(["subagent", "subagent_start", "subagent_job"]);
+      expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
     });
 
     it("has execute, renderCall, and renderResult methods", () => {

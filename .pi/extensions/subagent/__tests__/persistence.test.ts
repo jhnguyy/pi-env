@@ -66,7 +66,7 @@ describe("persistent subagent sessions", () => {
     const runner = () => Effect.fail(new Error("provider unavailable"));
     const jobs = new SubagentJobManager({
       appendEntry: (_type: string, data: any) => entries.push({ data }),
-    } as any, new Map(), undefined, runner);
+    } as any, new Map(), runner);
     const job = jobs.start({ name: "failure", task: "x" }, {} as any);
 
     await jobs.wait(job.id);
@@ -77,12 +77,12 @@ describe("persistent subagent sessions", () => {
   });
 
   it("interrupts a wait without cancelling the job", async () => {
-    const runner = (_params: any, _ctx: any, _tools: any, _caps: any, options: any) => Effect.async<any>((resume) => {
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
       const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
       options.signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
     });
-    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), undefined, runner);
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
     const job = jobs.start({ name: "long", task: "x" }, {} as any);
     const waitController = new AbortController();
     waitController.abort();
@@ -97,16 +97,43 @@ describe("persistent subagent sessions", () => {
     expect(job.status).toBe("cancelled");
   });
 
+  it("enforces bounded concurrency and releases a slot after completion", async () => {
+    let active = 0;
+    let peak = 0;
+    const completions: Array<() => void> = [];
+    const runner = () => Effect.acquireUseRelease(
+      Effect.sync(() => {
+        active++;
+        peak = Math.max(peak, active);
+      }),
+      () => Effect.async<any>((resume) => {
+        completions.push(() => resume(Effect.succeed({ content: [], details: { isError: false } })));
+      }),
+      () => Effect.sync(() => { active--; }),
+    );
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
+    const started = Array.from({ length: 5 }, (_, index) => jobs.start({ name: `job-${index}`, task: "x" }, {} as any));
+
+    expect(peak).toBe(4);
+    completions[0]!();
+    await jobs.wait(started[0]!.id);
+    expect(completions).toHaveLength(5);
+
+    for (const complete of completions.slice(1)) complete();
+    await Promise.all(started.slice(1).map((job) => jobs.wait(job.id)));
+    expect(peak).toBe(4);
+  });
+
   it("waits for running jobs to record cancellation during shutdown", async () => {
     const entries: Array<{ data: any }> = [];
-    const runner = (_params: any, _ctx: any, _tools: any, _caps: any, options: any) => Effect.async<any>((resume) => {
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
       const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
       options.signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
     });
     const jobs = new SubagentJobManager({
       appendEntry: (_type: string, data: any) => entries.push({ data }),
-    } as any, new Map(), undefined, runner);
+    } as any, new Map(), runner);
     const job = jobs.start({ name: "shutdown", task: "x" }, {} as any);
 
     await jobs.shutdown();
