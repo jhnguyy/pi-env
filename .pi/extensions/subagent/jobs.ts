@@ -3,9 +3,10 @@
 import { randomUUID } from "node:crypto";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Data, Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
-import { runSubagent } from "./execute";
+import { SubagentJobWaitInterrupted } from "./errors";
+import { runSubagentEffect, type RunSubagentOptions } from "./execute";
 import type { SubagentParams } from "./resolver";
 import type { SubagentDetails, ToolCapability } from "./types";
 
@@ -19,15 +20,7 @@ export const SubagentJobStatus = {
 } as const;
 export type SubagentJobStatus = typeof SubagentJobStatus[keyof typeof SubagentJobStatus];
 
-const SubagentJobPhase = { Run: "run" } as const;
-type SubagentJobPhase = typeof SubagentJobPhase[keyof typeof SubagentJobPhase];
-
-class SubagentJobError extends Data.TaggedError("SubagentJobError")<{
-  readonly phase: SubagentJobPhase;
-  readonly cause: unknown;
-}> {}
-
-interface SubagentJob {
+export interface SubagentJob {
   id: string;
   name: string;
   status: SubagentJobStatus;
@@ -35,10 +28,23 @@ interface SubagentJob {
   params: SubagentParams;
   ctx: ExtensionContext;
   result?: AgentToolResult<SubagentDetails>;
+  errorMessage?: string;
   promise: Promise<void>;
   resolve: () => void;
 }
 
+export type SubagentJobRunner = (
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  registeredExtTools: Map<string, AgentTool<any, any>>,
+  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  options: RunSubagentOptions,
+) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
+
+/**
+ * Owns job state and persistence. The scheduler is deliberately small and pure;
+ * Effect owns asynchronous execution, interruption, and finalization.
+ */
 export class SubagentJobManager {
   private readonly jobs = new Map<string, SubagentJob>();
   private activeCount = 0;
@@ -47,6 +53,7 @@ export class SubagentJobManager {
     private readonly pi: ExtensionAPI,
     private readonly registeredExtTools: Map<string, AgentTool<any, any>>,
     private readonly registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+    private readonly runJob: SubagentJobRunner = runSubagentEffect,
   ) {}
 
   start(params: SubagentParams, ctx: ExtensionContext): SubagentJob {
@@ -71,28 +78,76 @@ export class SubagentJobManager {
   get(id: string): SubagentJob | undefined { return this.jobs.get(id); }
   list(): SubagentJob[] { return [...this.jobs.values()]; }
 
-  async wait(id: string): Promise<SubagentJob | undefined> {
+  waitEffect(id: string, signal?: AbortSignal): Effect.Effect<SubagentJob | undefined, SubagentJobWaitInterrupted> {
     const job = this.jobs.get(id);
-    if (!job) return undefined;
-    await job.promise;
-    return job;
+    if (!job) return Effect.succeed(undefined);
+    if (!signal) return Effect.as(Effect.promise(() => job.promise), job);
+
+    return Effect.tryPromise({
+      try: () => new Promise<void>((resolve, reject) => {
+        if (signal.aborted) {
+          reject(new SubagentJobWaitInterrupted({ jobId: id }));
+          return;
+        }
+        const onAbort = () => reject(new SubagentJobWaitInterrupted({ jobId: id }));
+        signal.addEventListener("abort", onAbort, { once: true });
+        void job.promise.finally(() => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        });
+      }),
+      catch: (cause) => cause instanceof SubagentJobWaitInterrupted
+        ? cause
+        : new SubagentJobWaitInterrupted({ jobId: id }),
+    }).pipe(Effect.as(job));
+  }
+
+  wait(id: string, signal?: AbortSignal): Promise<SubagentJob | undefined> {
+    return Effect.runPromise(this.waitEffect(id, signal));
   }
 
   cancel(id: string): SubagentJob | undefined {
     const job = this.jobs.get(id);
     if (!job) return undefined;
-    if (job.status === SubagentJobStatus.Queued) {
-      job.status = SubagentJobStatus.Cancelled;
-      job.resolve();
-      this.record(job);
-    } else if (job.status === SubagentJobStatus.Running) {
-      job.controller.abort();
+    switch (job.status) {
+      case SubagentJobStatus.Queued:
+        job.status = SubagentJobStatus.Cancelled;
+        job.resolve();
+        this.record(job);
+        break;
+      case SubagentJobStatus.Running:
+        job.controller.abort();
+        break;
+      default:
+        break;
     }
     return job;
   }
 
-  shutdown(): void {
-    for (const job of this.jobs.values()) this.cancel(job.id);
+  shutdownEffect(): Effect.Effect<void> {
+    const manager = this;
+    return Effect.gen(function* () {
+      for (const job of manager.jobs.values()) manager.cancel(job.id);
+      const completion = Effect.all(
+        [...manager.jobs.values()].map((job) => Effect.promise(() => job.promise)),
+        { discard: true },
+      ).pipe(Effect.timeout("5 seconds"));
+      const exit = yield* Effect.exit(completion);
+      if (Exit.isSuccess(exit)) return;
+
+      // AbortSignal is cooperative. Do not let a non-cooperating provider or tool
+      // prevent the parent session from shutting down forever.
+      for (const job of manager.jobs.values()) {
+        if (job.status !== SubagentJobStatus.Running) continue;
+        job.status = SubagentJobStatus.Cancelled;
+        job.errorMessage = "Cancellation did not settle within 5 seconds.";
+        manager.record(job);
+      }
+    });
+  }
+
+  shutdown(): Promise<void> {
+    return Effect.runPromise(this.shutdownEffect());
   }
 
   private async pump(): Promise<void> {
@@ -102,49 +157,45 @@ export class SubagentJobManager {
       this.activeCount++;
       job.status = SubagentJobStatus.Running;
       this.record(job);
-      void this.run(job);
+      void Effect.runPromise(this.runEffect(job));
     }
   }
 
-  private runEffect(job: SubagentJob): Effect.Effect<void, never> {
-    const run = Effect.tryPromise({
-      try: () => runSubagent(job.params, job.ctx, this.registeredExtTools, this.registeredExtCaps, {
+  private runEffect(job: SubagentJob): Effect.Effect<void> {
+    return Effect.acquireUseRelease(
+      Effect.sync(() => undefined),
+      () => Effect.match(Effect.sandbox(this.runJob(job.params, job.ctx, this.registeredExtTools, this.registeredExtCaps, {
         signal: job.controller.signal,
+      })), {
+        onSuccess: (result) => {
+          job.result = result;
+          job.status = job.controller.signal.aborted
+            ? SubagentJobStatus.Cancelled
+            : result.details.isError ? SubagentJobStatus.Failed : SubagentJobStatus.Completed;
+        },
+        onFailure: (cause) => {
+          job.status = job.controller.signal.aborted
+            ? SubagentJobStatus.Cancelled
+            : SubagentJobStatus.Failed;
+          job.errorMessage = Cause.pretty(cause);
+        },
       }),
-      catch: (cause) => new SubagentJobError({ phase: SubagentJobPhase.Run, cause }),
-    });
-    return Effect.asVoid(Effect.catchAll(
-      Effect.tap(run, (result) => Effect.sync(() => {
-        job.result = result;
-        job.status = job.controller.signal.aborted
-          ? SubagentJobStatus.Cancelled
-          : result.details.isError ? SubagentJobStatus.Failed : SubagentJobStatus.Completed;
-      })),
-      (error) => Effect.sync(() => {
-        job.status = job.controller.signal.aborted ? SubagentJobStatus.Cancelled : SubagentJobStatus.Failed;
-        this.record(job, error.cause instanceof Error ? error.cause.message : String(error.cause));
+      () => Effect.sync(() => {
+        this.record(job);
+        job.resolve();
+        this.activeCount--;
+        void this.pump();
       }),
-    ));
+    );
   }
 
-  private async run(job: SubagentJob): Promise<void> {
-    try {
-      await Effect.runPromise(this.runEffect(job));
-    } finally {
-      this.record(job);
-      job.resolve();
-      this.activeCount--;
-      void this.pump();
-    }
-  }
-
-  private record(job: SubagentJob, errorMessage?: string): void {
+  private record(job: SubagentJob): void {
     this.pi.appendEntry("subagent-job", {
       jobId: job.id,
       name: job.name,
       status: job.status,
       sessionFile: job.result?.details.sessionFile,
-      errorMessage,
+      errorMessage: job.errorMessage ?? job.result?.details.errorMessage,
     });
   }
 }
@@ -152,6 +203,6 @@ export class SubagentJobManager {
 export function renderJob(job: SubagentJob): string {
   const session = job.result?.details.sessionFile ? `\nsession: ${job.result.details.sessionFile}` : "";
   const output = job.result?.content[0];
-  const text = output?.type === "text" ? output.text : "";
+  const text = output?.type === "text" ? output.text : job.errorMessage ?? "";
   return `[${job.status}] ${job.id} ${job.name}${session}${text ? `\n${text}` : ""}`;
 }

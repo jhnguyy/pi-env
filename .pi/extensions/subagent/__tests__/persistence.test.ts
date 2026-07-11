@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Effect, Either } from "effect";
 
 import {
   createPersistentSubagentSession,
@@ -58,5 +59,59 @@ describe("persistent subagent sessions", () => {
     await jobs.wait(job.id);
     expect(job.status).toBe("failed");
     expect(entries.map((entry) => entry.data.status)).toEqual(["queued", "running", "failed"]);
+  });
+
+  it("records unexpected Effect failures for later status inspection", async () => {
+    const entries: Array<{ data: any }> = [];
+    const runner = () => Effect.fail(new Error("provider unavailable"));
+    const jobs = new SubagentJobManager({
+      appendEntry: (_type: string, data: any) => entries.push({ data }),
+    } as any, new Map(), undefined, runner);
+    const job = jobs.start({ name: "failure", task: "x" }, {} as any);
+
+    await jobs.wait(job.id);
+
+    expect(job.status).toBe("failed");
+    expect(job.errorMessage).toContain("provider unavailable");
+    expect(entries.at(-1)?.data.errorMessage).toContain("provider unavailable");
+  });
+
+  it("interrupts a wait without cancelling the job", async () => {
+    const runner = (_params: any, _ctx: any, _tools: any, _caps: any, options: any) => Effect.async<any>((resume) => {
+      const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
+    });
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), undefined, runner);
+    const job = jobs.start({ name: "long", task: "x" }, {} as any);
+    const waitController = new AbortController();
+    waitController.abort();
+
+    const outcome = await Effect.runPromise(Effect.either(jobs.waitEffect(job.id, waitController.signal)));
+    expect(Either.isLeft(outcome)).toBe(true);
+    if (Either.isLeft(outcome)) {
+      expect(outcome.left).toMatchObject({ _tag: "SubagentJobWaitInterrupted", jobId: job.id });
+    }
+    expect(job.status).toBe("running");
+    await jobs.shutdown();
+    expect(job.status).toBe("cancelled");
+  });
+
+  it("waits for running jobs to record cancellation during shutdown", async () => {
+    const entries: Array<{ data: any }> = [];
+    const runner = (_params: any, _ctx: any, _tools: any, _caps: any, options: any) => Effect.async<any>((resume) => {
+      const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
+    });
+    const jobs = new SubagentJobManager({
+      appendEntry: (_type: string, data: any) => entries.push({ data }),
+    } as any, new Map(), undefined, runner);
+    const job = jobs.start({ name: "shutdown", task: "x" }, {} as any);
+
+    await jobs.shutdown();
+
+    expect(job.status).toBe("cancelled");
+    expect(entries.at(-1)?.data.status).toBe("cancelled");
   });
 });

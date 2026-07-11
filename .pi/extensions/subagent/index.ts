@@ -17,12 +17,14 @@
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Effect, Either } from "effect";
+import { Type, type Static } from "typebox";
 
 import { discoverAgents } from "./agents";
 import { createExecuteSubagent } from "./execute";
 import { renderJob, SubagentJobManager } from "./jobs";
+import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentCall, renderSubagentResult } from "./render";
 import { listenForAgentTools, PiEvent, type ToolCapability } from "../_shared/agent-tools";
@@ -72,6 +74,9 @@ const SUBAGENT_JOB_PARAMETERS = Type.Object({
   job_id: Type.Optional(Type.String({ description: "Job ID (required except for list)." })),
 });
 
+type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
+type SubagentJobParams = Static<typeof SUBAGENT_JOB_PARAMETERS>;
+
 // ─── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -87,24 +92,32 @@ export default function (pi: ExtensionAPI) {
   // Named execute function — stable reference (no recreation on re-register)
   const executeSubagent = createExecuteSubagent(registeredExtTools, extToolCaps);
   const jobs = new SubagentJobManager(pi, registeredExtTools, extToolCaps);
-  const executeAsyncSubagent = async (_id: string, params: any, _signal: AbortSignal | undefined, _onUpdate: unknown, ctx: any): Promise<AgentToolResult<any>> => {
-    const job = jobs.start(params, ctx);
+  const executeAsyncSubagent = async (_id: string, params: SubagentStartParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<AgentToolResult<{ jobId: string; status: string }>> => {
+    if (signal?.aborted) throw new Error("Subagent start aborted.");
+    const job = jobs.start(params as SubagentParams, ctx);
     return {
       content: [{ type: "text", text: `Started subagent job ${job.id} (${job.name}).` }],
       details: { jobId: job.id, status: job.status },
     };
   };
-  const executeSubagentJob = async (_id: string, params: { action: string; job_id?: string }): Promise<AgentToolResult<any>> => {
+  const executeSubagentJob = async (_id: string, params: SubagentJobParams, signal?: AbortSignal): Promise<AgentToolResult<{ jobId?: string; status?: string }>> => {
     if (params.action === "list") {
       const output = jobs.list().map(renderJob).join("\n") || "No subagent jobs.";
       return { content: [{ type: "text", text: output }], details: {} };
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, and cancel.");
-    const job = params.action === "wait"
-      ? await jobs.wait(params.job_id)
-      : params.action === "cancel"
-        ? jobs.cancel(params.job_id)
-        : jobs.get(params.job_id);
+    if (params.action === "wait") {
+      const outcome = await Effect.runPromise(Effect.either(jobs.waitEffect(params.job_id, signal)));
+      if (Either.isLeft(outcome)) {
+        return {
+          content: [{ type: "text", text: `Stopped waiting for subagent job ${params.job_id}; it is still running.` }],
+          details: { jobId: params.job_id, status: "running" },
+        };
+      }
+      if (!outcome.right) throw new Error(`Unknown subagent job: ${params.job_id}`);
+      return { content: [{ type: "text", text: renderJob(outcome.right) }], details: { jobId: outcome.right.id, status: outcome.right.status } };
+    }
+    const job = params.action === "cancel" ? jobs.cancel(params.job_id) : jobs.get(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return { content: [{ type: "text", text: renderJob(job) }], details: { jobId: job.id, status: job.status } };
   };
@@ -134,7 +147,7 @@ export default function (pi: ExtensionAPI) {
     parameters: SUBAGENT_JOB_PARAMETERS,
     execute: executeSubagentJob,
   });
-  pi.on("session_shutdown", () => jobs.shutdown());
+  pi.on("session_shutdown", async () => jobs.shutdown());
   // Re-register last so consumers that retain the latest registration continue
   // to receive the primary synchronous tool.
   pi.registerTool({

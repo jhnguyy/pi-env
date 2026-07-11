@@ -15,8 +15,10 @@ import type {
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { Effect } from "effect";
 
 import { slugify } from "../_shared/slug";
+import { SubagentExecutionError, SubagentExecutionPhase } from "./errors";
 import { ToolCapability, type SubagentDetails, type UsageStats } from "./types";
 import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
 
@@ -84,7 +86,7 @@ export interface RunSubagentOptions {
 }
 
 /** Execute one subagent and record its complete transcript in a child session. */
-export async function runSubagent(
+async function runSubagentPromise(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: Map<string, AgentTool<any, any>>,
@@ -198,6 +200,43 @@ export async function runSubagent(
   return { content: [{ type: "text", text: resultText }], details: details(resultText, isError) };
 }
 
+export function runSubagentEffect(
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  registeredExtTools: Map<string, AgentTool<any, any>>,
+  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  options: RunSubagentOptions = {},
+): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+  return Effect.tryPromise({
+    try: () => runSubagentPromise(params, ctx, registeredExtTools, registeredExtCaps, options),
+    catch: (cause) => new SubagentExecutionError({
+      phase: SubagentExecutionPhase.Session,
+      cause,
+    }),
+  });
+}
+
+/** Promise compatibility boundary for callers outside the Effect workflow. */
+export function runSubagent(
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  registeredExtTools: Map<string, AgentTool<any, any>>,
+  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  options: RunSubagentOptions = {},
+): Promise<AgentToolResult<SubagentDetails>> {
+  return Effect.runPromise(runSubagentEffect(params, ctx, registeredExtTools, registeredExtCaps, options));
+}
+
+function unexpectedErrorResult(params: SubagentParams, error: SubagentExecutionError): AgentToolResult<SubagentDetails> {
+  const cause = error.cause instanceof Error ? error.cause.message : String(error.cause);
+  const details = buildErrorDetails(params, [], params.model, error.phase);
+  details.errorMessage = cause;
+  return {
+    content: [{ type: "text", text: `Subagent ${error.phase} error: ${cause}` }],
+    details,
+  };
+}
+
 export function createExecuteSubagent(
   registeredExtTools: Map<string, AgentTool<any, any>>,
   registeredExtCaps?: Map<string, ToolCapability[]>,
@@ -209,6 +248,9 @@ export function createExecuteSubagent(
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentDetails>> {
-    return runSubagent(params, ctx, registeredExtTools, registeredExtCaps, { signal, onUpdate });
+    return Effect.runPromise(Effect.catchAll(
+      runSubagentEffect(params, ctx, registeredExtTools, registeredExtCaps, { signal, onUpdate }),
+      (error) => Effect.succeed(unexpectedErrorResult(params, error)),
+    ));
   };
 }
