@@ -14,11 +14,14 @@ import { discoverAgents } from "./agents";
 import { ToolCapability } from "./types";
 
 export interface SubagentParams {
+  /** Human-readable child-session name; required by the public tool schema and persisted as `sub-<slug>`. */
+  name?: string;
   agent?: string;
   task: string;
   tools?: string[];
   model?: string;
   system_prompt?: string;
+  max_turns?: number;
 }
 
 export interface ToolDef {

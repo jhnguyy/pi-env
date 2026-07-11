@@ -1,8 +1,5 @@
 /**
- * execute.ts — core execution logic for the subagent tool.
- *
- * createExecuteSubagent() returns the tool execute function, with
- * registeredExtTools injected via closure so the pi tool signature stays clean.
+ * Core execution for persistent in-process subagents.
  */
 
 import { agentLoop } from "@earendil-works/pi-agent-core";
@@ -15,37 +12,63 @@ import type {
   AgentToolResult,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-agent-core";
-import { convertToLlm } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
-import { ToolCapability, MAX_TURNS, type SubagentDetails, type UsageStats } from "./types";
+import { slugify } from "../_shared/slug";
+import { ToolCapability, type SubagentDetails, type UsageStats } from "./types";
 import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getFinalOutput(messages: AgentMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as any;
-    if (msg.role === "assistant") {
-      for (const part of msg.content) {
-        if (part.type === "text") return part.text as string;
-      }
+    if (msg.role !== "assistant") continue;
+    for (const part of msg.content) {
+      if (part.type === "text") return part.text as string;
     }
   }
   return "";
 }
 
+export function getSubagentSessionName(name: string): string {
+  return `sub-${slugify(name, { fallback: "agent" })}`;
+}
+
+export function hasReachedTurnLimit(turns: number, maxTurns: number | undefined): boolean {
+  return maxTurns !== undefined && turns >= maxTurns;
+}
+
+interface PersistentSubagentSession {
+  manager: SessionManager;
+  file?: string;
+  id: string;
+  name: string;
+}
+
+export function createPersistentSubagentSession(name: string, ctx: ExtensionContext): PersistentSubagentSession {
+  const manager = SessionManager.create(ctx.cwd, ctx.sessionManager.getSessionDir(), {
+    parentSession: ctx.sessionManager.getSessionFile(),
+  });
+  const sessionName = getSubagentSessionName(name);
+  manager.appendSessionInfo(sessionName);
+  manager.appendThinkingLevelChange("off");
+  return { manager, file: manager.getSessionFile(), id: manager.getSessionId(), name: sessionName };
+}
+
 export function buildErrorDetails(
-  task: string,
+  params: SubagentParams,
   toolNames: string[],
   modelOverride: string | undefined,
   reason: string,
 ): SubagentDetails {
   return {
-    task,
+    name: params.name ?? "unnamed",
+    task: params.task,
+    agent: params.agent,
     toolNames,
     modelOverride,
+    maxTurns: params.max_turns,
     finalOutput: "",
     toolCallCount: 0,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
@@ -55,12 +78,126 @@ export function buildErrorDetails(
   };
 }
 
-// ─── Execute factory ──────────────────────────────────────────────────────────
+export interface RunSubagentOptions {
+  onUpdate?: AgentToolUpdateCallback<SubagentDetails>;
+  signal?: AbortSignal;
+}
 
-/**
- * Returns the tool execute function with registeredExtTools injected via closure.
- * Keeps the pi tool signature clean while supporting extension tool injection.
- */
+/** Execute one subagent and record its complete transcript in a child session. */
+export async function runSubagent(
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  registeredExtTools: Map<string, AgentTool<any, any>>,
+  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  options: RunSubagentOptions = {},
+): Promise<AgentToolResult<SubagentDetails>> {
+  const plan = resolveSubagentExecutionPlan(params, ctx, registeredExtTools, registeredExtCaps);
+  if (!isResolutionOk(plan)) {
+    return {
+      content: [{ type: "text", text: plan.error.message }],
+      details: buildErrorDetails(params, plan.error.toolNames, plan.error.modelOverride ?? params.model, plan.error.reason),
+    };
+  }
+
+  const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt } = plan.value;
+  const name = params.name ?? "unnamed";
+  const maxTurns = params.max_turns;
+  const childSession = createPersistentSubagentSession(name, ctx);
+  childSession.manager.appendModelChange(
+    (resolvedModel as AgentLoopConfig["model"]).provider,
+    (resolvedModel as AgentLoopConfig["model"]).id,
+  );
+
+  const usage: UsageStats = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+  let toolCallCount = 0;
+  let lastModelId: string | undefined;
+  let lastStopReason: string | undefined;
+  let lastErrorMessage: string | undefined;
+  let turnLimitExceeded = false;
+  let finalMessages: AgentMessage[] = [];
+
+  const details = (finalOutput: string, isError: boolean): SubagentDetails => ({
+    name,
+    task: params.task,
+    agent: params.agent,
+    toolNames,
+    modelOverride: params.model,
+    maxTurns,
+    sessionFile: childSession.file,
+    sessionId: childSession.id,
+    sessionName: childSession.name,
+    finalOutput,
+    toolCallCount,
+    usage: { ...usage },
+    model: lastModelId,
+    stopReason: turnLimitExceeded ? "turn_limit" : lastStopReason,
+    errorMessage: lastErrorMessage,
+    isError,
+    turnLimitExceeded,
+  });
+
+  const emitUpdate = (partialMessages: AgentMessage[]) => {
+    const output = getFinalOutput(partialMessages) || "(running...)";
+    options.onUpdate?.({ content: [{ type: "text", text: output }], details: details(output, false) });
+  };
+
+  const config: AgentLoopConfig = {
+    model: resolvedModel as AgentLoopConfig["model"],
+    convertToLlm,
+    getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
+    headers: { "X-Initiator": "agent" },
+    shouldStopAfterTurn: () => hasReachedTurnLimit(usage.turns, maxTurns),
+  };
+  const agentContext: AgentContext = { systemPrompt, messages: [], tools: resolvedTools };
+  const prompts: AgentMessage[] = [{
+    role: "user",
+    content: [{ type: "text", text: params.task }],
+    timestamp: Date.now(),
+  } as any];
+
+  try {
+    const stream = agentLoop(prompts, agentContext, config, options.signal);
+    for await (const event of stream) {
+      const ev = event as AgentEvent;
+      if (ev.type === "message_end") {
+        childSession.manager.appendMessage(ev.message as any);
+        const msg = ev.message as AssistantMessage;
+        if (msg.role === "assistant") {
+          usage.turns++;
+          usage.input += msg.usage?.input ?? 0;
+          usage.output += msg.usage?.output ?? 0;
+          usage.cacheRead += msg.usage?.cacheRead ?? 0;
+          usage.cacheWrite += msg.usage?.cacheWrite ?? 0;
+          usage.cost += msg.usage?.cost?.total ?? 0;
+          lastModelId ??= msg.model;
+          lastStopReason = msg.stopReason;
+          lastErrorMessage = msg.errorMessage;
+          turnLimitExceeded = hasReachedTurnLimit(usage.turns, maxTurns);
+        }
+      } else if (ev.type === "tool_execution_start") {
+        toolCallCount++;
+      } else if (ev.type === "turn_end") {
+        emitUpdate(agentContext.messages);
+      }
+    }
+    finalMessages = await stream.result();
+  } catch (error: unknown) {
+    const aborted = options.signal?.aborted;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    lastErrorMessage = aborted ? undefined : errorMessage;
+    lastStopReason = aborted ? "aborted" : "error";
+    const output = aborted ? "Subagent aborted." : `Subagent error: ${errorMessage}`;
+    return { content: [{ type: "text", text: output }], details: details(getFinalOutput(agentContext.messages), true) };
+  }
+
+  const output = getFinalOutput(finalMessages.length > 0 ? finalMessages : agentContext.messages);
+  const isError = lastStopReason === "error" || lastStopReason === "aborted" || Boolean(lastErrorMessage);
+  const resultText = turnLimitExceeded
+    ? `${output || "(no output)"}\n\n[Note: Turn limit (${maxTurns}) reached. Output may be incomplete.]`
+    : output || "(no output)";
+  return { content: [{ type: "text", text: resultText }], details: details(resultText, isError) };
+}
+
 export function createExecuteSubagent(
   registeredExtTools: Map<string, AgentTool<any, any>>,
   registeredExtCaps?: Map<string, ToolCapability[]>,
@@ -72,194 +209,6 @@ export function createExecuteSubagent(
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentDetails>> {
-    // ── 1. Resolve execution plan ───────────────────────────────────────
-    const plan = resolveSubagentExecutionPlan(params, ctx, registeredExtTools, registeredExtCaps);
-    if (!isResolutionOk(plan)) {
-      return {
-        content: [{ type: "text", text: plan.error.message }],
-        details: buildErrorDetails(
-          params.task,
-          plan.error.toolNames,
-          plan.error.modelOverride ?? params.model,
-          plan.error.reason,
-        ),
-      };
-    }
-
-    const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt } = plan.value;
-
-    // ── 2. Build config ─────────────────────────────────────────────────
-    const config: AgentLoopConfig = {
-      model: resolvedModel as AgentLoopConfig["model"],
-      convertToLlm,
-      getApiKey: (provider: string) => ctx.modelRegistry.getApiKeyForProvider(provider),
-      headers: { "X-Initiator": "agent" },
-    };
-
-    // ── 6. Build context + prompts ──────────────────────────────────────
-    const agentContext: AgentContext = {
-      systemPrompt,
-      messages: [],
-      tools: resolvedTools,
-    };
-
-    const prompts: AgentMessage[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: params.task }],
-        timestamp: Date.now(),
-      } as any,
-    ];
-
-    // ── 7. Track state ──────────────────────────────────────────────────
-    const usage: UsageStats = {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      cost: 0,
-      turns: 0,
-    };
-    let toolCallCount = 0;
-    let lastModelId: string | undefined;
-    let lastStopReason: string | undefined;
-    let lastErrorMessage: string | undefined;
-    let turnLimitExceeded = false;
-    let finalMessages: AgentMessage[] = [];
-
-    const emitUpdate = (partialMessages: AgentMessage[]) => {
-      if (!onUpdate) return;
-      const output = getFinalOutput(partialMessages) || "(running...)";
-      const partial: AgentToolResult<SubagentDetails> = {
-        content: [{ type: "text", text: output }],
-        details: {
-          task: params.task,
-          agent: params.agent,
-          toolNames: toolNames,
-          modelOverride: params.model,
-          finalOutput: output,
-          toolCallCount,
-          usage: { ...usage },
-          model: lastModelId,
-          stopReason: lastStopReason,
-          isError: false,
-          turnLimitExceeded: false,
-        },
-      };
-      (onUpdate as AgentToolUpdateCallback<SubagentDetails>)(partial);
-    };
-
-    // ── 8. Run agentLoop ────────────────────────────────────────────────
-    try {
-      const stream = agentLoop(prompts, agentContext, config, signal);
-
-      for await (const event of stream) {
-        if (signal?.aborted) break;
-
-        const ev = event as AgentEvent;
-
-        if (ev.type === "message_end") {
-          const msg = ev.message as any;
-          if (msg.role === "assistant") {
-            const asst = msg as AssistantMessage;
-            usage.turns++;
-            if (asst.usage) {
-              usage.input += asst.usage.input ?? 0;
-              usage.output += asst.usage.output ?? 0;
-              usage.cacheRead += asst.usage.cacheRead ?? 0;
-              usage.cacheWrite += asst.usage.cacheWrite ?? 0;
-              usage.cost += asst.usage.cost?.total ?? 0;
-            }
-            if (!lastModelId && asst.model) lastModelId = asst.model;
-            if (asst.stopReason) lastStopReason = asst.stopReason;
-            if (asst.errorMessage) lastErrorMessage = asst.errorMessage;
-
-            if (usage.turns >= MAX_TURNS) {
-              turnLimitExceeded = true;
-              break;
-            }
-          }
-        }
-
-        if (ev.type === "tool_execution_start") {
-          toolCallCount++;
-        }
-
-        if (ev.type === "turn_end") {
-          emitUpdate(agentContext.messages);
-        }
-      }
-
-      finalMessages = await stream.result();
-    } catch (err: unknown) {
-      if (signal?.aborted) {
-        return {
-          content: [{ type: "text", text: "Subagent aborted." }],
-          details: {
-            task: params.task,
-            agent: params.agent,
-            toolNames: toolNames,
-            modelOverride: params.model,
-            finalOutput: getFinalOutput(agentContext.messages),
-            toolCallCount,
-            usage,
-            model: lastModelId,
-            stopReason: "aborted",
-            isError: true,
-            turnLimitExceeded: false,
-          },
-        };
-      }
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text", text: `Subagent error: ${msg}` }],
-        details: {
-          task: params.task,
-          agent: params.agent,
-          toolNames: toolNames,
-          modelOverride: params.model,
-          finalOutput: "",
-          toolCallCount,
-          usage,
-          model: lastModelId,
-          errorMessage: msg,
-          isError: true,
-          turnLimitExceeded: false,
-        },
-      };
-    }
-
-    // ── 9. Extract result ───────────────────────────────────────────────
-    const output = getFinalOutput(
-      finalMessages.length > 0 ? finalMessages : agentContext.messages,
-    );
-
-    const isError =
-      lastStopReason === "error" ||
-      lastStopReason === "aborted" ||
-      Boolean(lastErrorMessage);
-
-    let resultText = output || "(no output)";
-    if (turnLimitExceeded) {
-      resultText += `\n\n[Note: Turn limit (${MAX_TURNS}) reached. Output may be incomplete.]`;
-    }
-
-    return {
-      content: [{ type: "text", text: resultText }],
-      details: {
-        task: params.task,
-        agent: params.agent,
-        toolNames: toolNames,
-        modelOverride: params.model,
-        finalOutput: resultText,
-        toolCallCount,
-        usage,
-        model: lastModelId,
-        stopReason: lastStopReason,
-        errorMessage: lastErrorMessage,
-        isError,
-        turnLimitExceeded,
-      },
-    };
+    return runSubagent(params, ctx, registeredExtTools, registeredExtCaps, { signal, onUpdate });
   };
 }

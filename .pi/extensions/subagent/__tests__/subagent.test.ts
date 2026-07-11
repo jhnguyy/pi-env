@@ -655,6 +655,17 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
       expect(t).toContain("scout");
     });
+
+    it("shows the persisted child session name", () => {
+      const t = extractText(
+        registeredTool.renderResult(
+          { content: [], details: { ...successDetails, sessionName: "sub-auth-audit" } },
+          {},
+          mockTheme,
+        ),
+      );
+      expect(t).toContain("sub-auth-audit");
+    });
   });
 
   // ─── renderResult — expanded ─────────────────────────────────────────────
