@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { performance } from "node:perf_hooks";
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
 import { runBenchmarkEffect, type BenchmarkConfig } from "./benchmark.js";
 import {
   AnalyzerName,
@@ -8,6 +7,7 @@ import {
   ProgramError,
   ScopeError,
   type AnalyzeError,
+  type AnalysisProfile,
   type AnalysisResult,
   type AnalyzerFailure,
   type BenchmarkResult,
@@ -15,8 +15,8 @@ import {
   type MemorySnapshot,
   type ScopeMode,
 } from "./model.js";
-import { createAnalysisProject, createProject, ProjectRequirement, type Project } from "./program.js";
-import type { streamProcessEffect } from "./process.js";
+import { createAnalysisProjectEffect, ProjectRequirement, type Project } from "./program.js";
+import { ProcessService, processServiceLayer, type streamProcessEffect } from "./process.js";
 import { analyzerDescriptor, defaultAnalyzerNames, projectRequirement, runAnalyzer } from "./registry.js";
 import { resolveScopeEffect, type Scope } from "./scope.js";
 
@@ -34,336 +34,282 @@ export interface AnalyzeOptions {
   externalTimeoutMs?: number;
 }
 
-export interface EngineSeams {
-  /** @deprecated Prefer createAnalysisProject so tests preserve project planning. */
-  createProject?: typeof createProject;
-  createAnalysisProject?: typeof createAnalysisProject;
-  processRunner?: typeof streamProcessEffect;
+/** The only runtime dependency of the analysis workflow: suitable for deterministic tests. */
+export interface AnalysisRuntime {
+  now(): number;
+  memory(): MemorySnapshot;
 }
 
-interface ProfileRecorder {
-  timings: Record<string, number>;
-  memory: Record<string, MemorySnapshot>;
-  peak: MemorySnapshot;
-  snapshot: (name: string) => MemorySnapshot;
-  measure: <Value>(name: string, operation: () => Value) => Value;
+export const AnalysisRuntime = Context.GenericTag<AnalysisRuntime>("pi-env/AnalysisRuntime");
+
+const liveAnalysisRuntime: AnalysisRuntime = {
+  now: () => performance.now(),
+  memory: () => {
+    const memory = process.memoryUsage();
+    return { rssBytes: memory.rss, heapUsedBytes: memory.heapUsed, externalBytes: memory.external };
+  },
+};
+
+type ProjectFactoryResult = Project | undefined | Effect.Effect<Project | undefined, ProgramError>;
+
+export interface EngineSeams {
+  /** Supports both the current Effect seam and the original synchronous factory. */
+  createAnalysisProject?: (cwd: string, scope: Scope, requirement: ProjectRequirement) => ProjectFactoryResult;
+  /** @deprecated The full-project seam is retained for existing integrations. */
+  createProject?: (cwd: string) => Project | Effect.Effect<Project, ProgramError>;
+  processRunner?: typeof streamProcessEffect;
+  /** Additive seam; existing project and process seams remain supported. */
+  runtime?: AnalysisRuntime;
+}
+
+interface AnalysisState {
+  findings: readonly Finding[];
+  failures: readonly AnalyzerFailure[];
+  benchmarks: readonly BenchmarkResult[];
+  profile: AnalysisProfile;
+  stopped: boolean;
+}
+
+interface AnalysisPlan {
+  budget: number;
+  checks: readonly AnalyzerName[];
+  scope: Scope;
+  started: number;
+  state: AnalysisState;
 }
 
 const DEFAULT_MEMORY_MB = 2048;
 export const MAX_TOTAL_FINDINGS = 2_000 as const;
 
-export function capFindings(findings: readonly Finding[], max: number): {
-  kept: Finding[];
-  truncated: boolean;
-  truncatedCount: number;
-} {
+export function capFindings(findings: readonly Finding[], max: number): { kept: Finding[]; truncated: boolean; truncatedCount: number } {
   const kept = findings.slice(0, max);
-  return {
-    kept,
-    truncated: findings.length > max,
-    truncatedCount: Math.max(0, findings.length - kept.length),
-  };
+  return { kept, truncated: findings.length > max, truncatedCount: Math.max(0, findings.length - kept.length) };
 }
 
-const stable = (value: unknown): string => JSON.stringify(
-  value,
-  (_key, item) => item && typeof item === "object" && !Array.isArray(item)
-    ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)))
-    : item,
-);
+const stable = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+  ? Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right))) : item);
 
-export const findingId = (finding: Finding): string => createHash("sha256")
-  .update(stable({
-    analyzer: finding.analyzer,
-    kind: finding.kind,
-    message: finding.message,
-    location: finding.location,
-    related: finding.related ?? [],
-  }))
-  .digest("hex")
-  .slice(0, 20);
+export const findingId = (finding: Finding): string => createHash("sha256").update(stable({
+  analyzer: finding.analyzer, kind: finding.kind, message: finding.message, location: finding.location, related: finding.related ?? [],
+})).digest("hex").slice(0, 20);
 
-export const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean =>
-  rssBytes > maxMemoryMb * 1024 * 1024;
+export const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean => rssBytes > maxMemoryMb * 1024 * 1024;
+export const needsInternalProject = (checks: readonly AnalyzerName[]): boolean => projectRequirement(checks) !== ProjectRequirement.None;
 
-export const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
-  projectRequirement(checks) !== ProjectRequirement.None;
-
-function validateOptions(options: AnalyzeOptions): number {
+function validateOptionsEffect(options: AnalyzeOptions): Effect.Effect<number, ConfigError> {
   const threshold = options.typeSimilarityThreshold;
   if (threshold !== undefined && (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)) {
-    throw new ConfigError({ message: "Type similarity threshold must be between 0 and 1" });
+    return Effect.fail(new ConfigError({ message: "Type similarity threshold must be between 0 and 1" }));
   }
   const budget = options.maxMemoryMb ?? DEFAULT_MEMORY_MB;
-  if (!Number.isInteger(budget) || budget <= 0) throw new ConfigError({ message: "maxMemoryMb must be a positive integer" });
+  if (!Number.isInteger(budget) || budget <= 0) return Effect.fail(new ConfigError({ message: "maxMemoryMb must be a positive integer" }));
   if (options.externalTimeoutMs !== undefined && (!Number.isInteger(options.externalTimeoutMs) || options.externalTimeoutMs < 1)) {
-    throw new ConfigError({ message: "externalTimeoutMs must be an integer >= 1" });
+    return Effect.fail(new ConfigError({ message: "externalTimeoutMs must be an integer >= 1" }));
   }
-  return budget;
+  return Effect.succeed(budget);
 }
 
-function selectedChecks(options: AnalyzeOptions): AnalyzerName[] {
+function selectedChecksEffect(options: AnalyzeOptions): Effect.Effect<readonly AnalyzerName[], ConfigError> {
   const requested = options.checks ?? defaultAnalyzerNames;
   const valid = new Set<string>(Object.values(AnalyzerName));
   const unknown = requested.filter((name) => !valid.has(name));
-  if (unknown.length > 0) {
-    throw new ConfigError({
-      message: `Unknown checks: ${unknown.join(", ")}. Valid checks: ${Object.values(AnalyzerName).join(", ")}`,
-    });
-  }
+  if (unknown.length > 0) return Effect.fail(new ConfigError({
+    message: `Unknown checks: ${unknown.join(", ")}. Valid checks: ${Object.values(AnalyzerName).join(", ")}`,
+  }));
   const selected = [...requested] as AnalyzerName[];
   if (options.bundle && !selected.includes(AnalyzerName.Bundle)) selected.push(AnalyzerName.Bundle);
-  return selected;
+  return Effect.succeed(selected);
 }
 
-function memorySnapshot(): MemorySnapshot {
-  const memory = process.memoryUsage();
+const emptyProfile = (): AnalysisProfile => ({ timings: {}, memory: {}, peak: { rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 } });
+const initialState = (): AnalysisState => ({ findings: [], failures: [], benchmarks: [], profile: emptyProfile(), stopped: false });
+const failure = (analyzer: AnalyzerFailure["analyzer"], message: string): AnalyzerFailure => ({ analyzer, message });
+const toProgramError = (cause: unknown): ProgramError => cause instanceof ProgramError
+  ? cause
+  : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
+
+function snapshot(state: AnalysisState, enabled: boolean, name: string, value: MemorySnapshot): AnalysisState {
+  if (!enabled) return state;
   return {
-    rssBytes: memory.rss,
-    heapUsedBytes: memory.heapUsed,
-    externalBytes: memory.external,
-  };
-}
-
-function createProfileRecorder(enabled: boolean): ProfileRecorder {
-  const recorder: ProfileRecorder = {
-    timings: {},
-    memory: {},
-    peak: { rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 },
-    snapshot(name) {
-      const value = memorySnapshot();
-      if (enabled) {
-        recorder.memory[name] = value;
-        recorder.peak = {
-          rssBytes: Math.max(recorder.peak.rssBytes, value.rssBytes),
-          heapUsedBytes: Math.max(recorder.peak.heapUsedBytes, value.heapUsedBytes),
-          externalBytes: Math.max(recorder.peak.externalBytes, value.externalBytes),
-        };
-      }
-      return value;
-    },
-    measure(name, operation) {
-      const start = performance.now();
-      try {
-        return operation();
-      } finally {
-        if (enabled) recorder.timings[name] = performance.now() - start;
-      }
+    ...state,
+    profile: {
+      ...state.profile,
+      memory: { ...state.profile.memory, [name]: value },
+      peak: {
+        rssBytes: Math.max(state.profile.peak.rssBytes, value.rssBytes),
+        heapUsedBytes: Math.max(state.profile.peak.heapUsedBytes, value.heapUsedBytes),
+        externalBytes: Math.max(state.profile.peak.externalBytes, value.externalBytes),
+      },
     },
   };
-  return recorder;
 }
 
-function toConfigError(cause: unknown): ConfigError {
-  return cause instanceof ConfigError ? cause : new ConfigError({ message: String(cause) });
+function timing(state: AnalysisState, enabled: boolean, name: string, started: number, ended: number): AnalysisState {
+  return enabled ? { ...state, profile: { ...state.profile, timings: { ...state.profile.timings, [name]: ended - started } } } : state;
 }
 
-function toProgramError(cause: unknown): ProgramError {
-  return cause instanceof ProgramError ? cause : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
+function addFailure(state: AnalysisState, analyzer: AnalyzerFailure["analyzer"], message: string): AnalysisState {
+  return { ...state, failures: [...state.failures, failure(analyzer, message)] };
 }
 
-function toAnalyzerFailure(analyzer: AnalyzerFailure["analyzer"], message: string): AnalyzerFailure {
-  return { analyzer, message };
+function addFindings(state: AnalysisState, analyzer: AnalyzerName, findings: readonly Finding[]): AnalysisState {
+  const capped = capFindings(findings, Math.max(0, MAX_TOTAL_FINDINGS - state.findings.length));
+  const next = { ...state, findings: [...state.findings, ...capped.kept] };
+  return capped.truncated
+    ? addFailure(next, analyzer, `Global finding limit reached; dropped ${capped.truncatedCount} additional finding(s) after keeping ${MAX_TOTAL_FINDINGS} total deterministically`)
+    : next;
 }
 
-function recordMemoryBudgetFailure(
-  failures: AnalyzerFailure[],
-  analyzer: AnalyzerFailure["analyzer"],
-  message: string,
-): void {
-  failures.push(toAnalyzerFailure(analyzer, message));
+function memoryGuard(state: AnalysisState, enabled: boolean, budget: number, name: AnalyzerName, value: MemorySnapshot): AnalysisState {
+  const sampled = snapshot(state, enabled, `before:${name}`, value);
+  if (!isMemoryBudgetExceeded(value.rssBytes, budget) || sampled.stopped) return sampled;
+  return { ...addFailure(sampled, name, `Memory budget exceeded: RSS ${value.rssBytes} bytes > ${budget} MiB guard; remaining expensive stages skipped`), stopped: true };
 }
 
-function finalizeResult(
-  findings: readonly Finding[],
-  failures: readonly AnalyzerFailure[],
-  benchmarks: AnalysisResult["benchmarks"],
-  options: AnalyzeOptions,
-  recorder: ProfileRecorder,
-): AnalysisResult {
-  const orderedFindings = findings
-    .map((finding) => ({ ...finding, id: findingId(finding) }))
-    .sort((left, right) => left.location.path.localeCompare(right.location.path)
-      || left.location.line - right.location.line
-      || left.id.localeCompare(right.id));
+function finalizeResult(state: AnalysisState, options: AnalyzeOptions): AnalysisResult {
+  const findings = state.findings.map((item) => ({ ...item, id: findingId(item) })).sort((left, right) => left.location.path.localeCompare(right.location.path)
+    || left.location.line - right.location.line || left.id.localeCompare(right.id));
   return {
     version: 1,
     summary: {
-      info: orderedFindings.filter((finding) => finding.severity === "info").length,
-      warning: orderedFindings.filter((finding) => finding.severity === "warning").length,
-      error: orderedFindings.filter((finding) => finding.severity === "error").length,
-      failures: failures.length,
+      info: findings.filter((item) => item.severity === "info").length,
+      warning: findings.filter((item) => item.severity === "warning").length,
+      error: findings.filter((item) => item.severity === "error").length,
+      failures: state.failures.length,
     },
-    findings: orderedFindings,
-    analyzerFailures: [...failures],
-    benchmarks,
-    ...(options.profile
-      ? { profile: { timings: recorder.timings, memory: recorder.memory, peak: recorder.peak } }
-      : {}),
+    findings,
+    analyzerFailures: state.failures,
+    benchmarks: state.benchmarks,
+    ...(options.profile ? { profile: state.profile } : {}),
   };
 }
 
-function setupAnalysis(options: AnalyzeOptions): Effect.Effect<{ budget: number; checks: AnalyzerName[]; scope: Scope; recorder: ProfileRecorder; started: number }, AnalyzeError> {
-  const started = performance.now();
-  const recorder = createProfileRecorder(options.profile === true);
+function setupAnalysis(options: AnalyzeOptions): Effect.Effect<AnalysisPlan, AnalyzeError, ProcessService | AnalysisRuntime> {
   return Effect.gen(function* () {
-    const budget = yield* Effect.try({ try: () => validateOptions(options), catch: toConfigError });
-    const checks = yield* Effect.try({ try: () => selectedChecks(options), catch: toConfigError });
-    const scopeStarted = performance.now();
+    const runtime = yield* AnalysisRuntime;
+    const started = runtime.now();
+    const budget = yield* validateOptionsEffect(options);
+    const checks = yield* selectedChecksEffect(options);
+    const scopeStarted = runtime.now();
     const scope = yield* resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref);
-    if (options.profile) recorder.timings.scope = performance.now() - scopeStarted;
-    recorder.snapshot("after:scope");
-    return { budget, checks, scope, recorder, started };
+    let state = timing(initialState(), options.profile === true, "scope", scopeStarted, runtime.now());
+    state = snapshot(state, options.profile === true, "after:scope", runtime.memory());
+    return { budget, checks, scope, started, state };
   });
 }
 
-function createMemoryGuard(recorder: ProfileRecorder, failures: AnalyzerFailure[], budget: number): { guard: (name: AnalyzerName) => boolean; stop: () => void; isStopped: () => boolean } {
-  let stopped = false;
+function loadProjectIfNeeded(options: AnalyzeOptions, seams: EngineSeams, plan: AnalysisPlan): Effect.Effect<{ project?: Project; state: AnalysisState }, ProgramError, AnalysisRuntime> {
+  const requirement = projectRequirement(plan.checks);
+  if (requirement === ProjectRequirement.None) return Effect.succeed({ state: plan.state });
+  const first = plan.checks.find((name) => analyzerDescriptor(name).project !== ProjectRequirement.None)!;
+  return Effect.gen(function* () {
+    const runtime = yield* AnalysisRuntime;
+    let state = memoryGuard(plan.state, options.profile === true, plan.budget, first, runtime.memory());
+    if (state.stopped) return { state };
+    const started = runtime.now();
+    const created = yield* Effect.try({
+      try: () => seams.createAnalysisProject !== undefined
+        ? seams.createAnalysisProject(options.cwd, plan.scope, requirement)
+        : seams.createProject !== undefined
+          ? seams.createProject(options.cwd)
+          : createAnalysisProjectEffect(options.cwd, plan.scope, requirement),
+      catch: toProgramError,
+    });
+    const project = yield* (Effect.isEffect(created) ? created : Effect.succeed(created));
+    state = timing(state, options.profile === true, "program", started, runtime.now());
+    state = snapshot(state, options.profile === true, "after:program", runtime.memory());
+    return { project, state };
+  });
+}
+
+/** A synchronous bundle hook is required by the bundle implementation; it records its single transition for the workflow to apply. */
+function bundleGate(runtime: AnalysisRuntime, budget: number): { beforeEntry: () => boolean; samples: readonly MemorySnapshot[]; exceeded?: MemorySnapshot } {
+  const samples: MemorySnapshot[] = [];
+  let exceeded: MemorySnapshot | undefined;
   return {
-    guard(name) {
-      const value = recorder.snapshot(`before:${name}`);
-      if (!isMemoryBudgetExceeded(value.rssBytes, budget)) return true;
-      if (!stopped) recordMemoryBudgetFailure(failures, name, `Memory budget exceeded: RSS ${value.rssBytes} bytes > ${budget} MiB guard; remaining expensive stages skipped`);
-      stopped = true;
-      return false;
+    beforeEntry: () => {
+      const value = runtime.memory();
+      samples.push(value);
+      if (isMemoryBudgetExceeded(value.rssBytes, budget)) {
+        exceeded ??= value;
+        return false;
+      }
+      return true;
     },
-    stop: () => { stopped = true; },
-    isStopped: () => stopped,
+    get samples() { return samples; },
+    get exceeded() { return exceeded; },
   };
 }
 
-function loadProjectIfNeeded(
-  options: AnalyzeOptions,
-  seams: EngineSeams,
-  checks: readonly AnalyzerName[],
-  scope: Scope,
-  recorder: ProfileRecorder,
-  guard: (name: AnalyzerName) => boolean,
-): Effect.Effect<Project | undefined, ProgramError> {
-  const requirement = projectRequirement(checks);
-  if (requirement === ProjectRequirement.None) return Effect.succeed(undefined);
-  const firstInternal = checks.find((name) => analyzerDescriptor(name).project !== ProjectRequirement.None)!;
-  if (!guard(firstInternal)) return Effect.succeed(undefined);
-  const factory = seams.createAnalysisProject
-    ?? (seams.createProject === undefined
-      ? createAnalysisProject
-      : (cwd: string) => seams.createProject!(cwd));
-  return Effect.try({
-    try: () => recorder.measure("program", () => factory(options.cwd, scope, requirement)),
-    catch: toProgramError,
-  }).pipe(Effect.tap(() => Effect.sync(() => { recorder.snapshot("after:program"); })));
-}
-
-function orderedChecks(checks: readonly AnalyzerName[]): AnalyzerName[] {
-  return [
-    ...checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None),
-    ...checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None),
-  ];
-}
-
-function runAnalyzers(
-  options: AnalyzeOptions,
-  checks: readonly AnalyzerName[],
-  scope: Scope,
-  project: Project | undefined,
-  recorder: ProfileRecorder,
-  failures: AnalyzerFailure[],
-  findings: Finding[],
-  budget: number,
-  state: { guard: (name: AnalyzerName) => boolean; stop: () => void; isStopped: () => boolean },
-  seams: EngineSeams,
-): Effect.Effect<void, never> {
+function runStage(options: AnalyzeOptions, checks: readonly AnalyzerName[], scope: Scope, project: Project | undefined, budget: number, initial: AnalysisState): Effect.Effect<AnalysisState, never, ProcessService | AnalysisRuntime> {
   return Effect.gen(function* () {
-    let currentProject = project;
-    for (const name of orderedChecks(checks)) {
-      if (analyzerDescriptor(name).project === ProjectRequirement.None) currentProject = undefined;
-      if (state.isStopped() || !state.guard(name)) break;
-      const analyzerStarted = performance.now();
+    const runtime = yield* AnalysisRuntime;
+    let state = initial;
+    for (const name of checks) {
+      if (state.stopped) break;
+      state = memoryGuard(state, options.profile === true, budget, name, runtime.memory());
+      if (state.stopped) break;
+      const started = runtime.now();
+      const gate = name === AnalyzerName.Bundle ? bundleGate(runtime, budget) : undefined;
       const outcome = yield* Effect.either(runAnalyzer(name, {
-        cwd: options.cwd,
-        scope,
-        project: currentProject,
-        typeSimilarityThreshold: options.typeSimilarityThreshold,
-        maxMemoryMb: budget,
-        externalTimeoutMs: options.externalTimeoutMs,
-        beforeBundleEntry: () => state.guard(name),
-        processRunner: seams.processRunner,
+        cwd: options.cwd, scope, project, typeSimilarityThreshold: options.typeSimilarityThreshold, maxMemoryMb: budget,
+        externalTimeoutMs: options.externalTimeoutMs, beforeBundleEntry: gate?.beforeEntry ?? (() => true),
       }));
-      if (outcome._tag === "Right") {
-        const capped = capFindings(outcome.right, Math.max(0, MAX_TOTAL_FINDINGS - findings.length));
-        findings.push(...capped.kept);
-        if (capped.truncated) failures.push(toAnalyzerFailure(name, `Global finding limit reached; dropped ${capped.truncatedCount} additional finding(s) after keeping ${MAX_TOTAL_FINDINGS} total deterministically`));
-      } else failures.push(toAnalyzerFailure(outcome.left.analyzer, outcome.left.message));
-      if (options.profile) recorder.timings[name] = performance.now() - analyzerStarted;
-      recorder.snapshot(`after:${name}`);
-      if (isMemoryBudgetExceeded(process.memoryUsage().rss, budget)) {
-        recordMemoryBudgetFailure(failures, name, "Memory budget exceeded after analyzer; remaining expensive stages skipped");
-        state.stop();
-        break;
+      for (const sample of gate?.samples ?? []) state = snapshot(state, options.profile === true, `before:${name}`, sample);
+      if (gate?.exceeded !== undefined) state = { ...addFailure(state, name, `Memory budget exceeded: RSS ${gate.exceeded.rssBytes} bytes > ${budget} MiB guard; remaining expensive stages skipped`), stopped: true };
+      state = outcome._tag === "Right" ? addFindings(state, name, outcome.right) : addFailure(state, outcome.left.analyzer, outcome.left.message);
+      state = timing(state, options.profile === true, name, started, runtime.now());
+      state = snapshot(state, options.profile === true, `after:${name}`, runtime.memory());
+      const after = runtime.memory();
+      if (isMemoryBudgetExceeded(after.rssBytes, budget)) {
+        state = { ...addFailure(state, name, "Memory budget exceeded after analyzer; remaining expensive stages skipped"), stopped: true };
       }
     }
+    return state;
   });
 }
 
-function runBenchmarks(
-  options: AnalyzeOptions,
-  failures: AnalyzerFailure[],
-  benchmarks: BenchmarkResult[],
-): Effect.Effect<void, never> {
+function runInternalStages(options: AnalyzeOptions, seams: EngineSeams, plan: AnalysisPlan, checks: readonly AnalyzerName[]): Effect.Effect<AnalysisState, ProgramError, ProcessService | AnalysisRuntime> {
   return Effect.gen(function* () {
+    const loaded = yield* loadProjectIfNeeded(options, seams, { ...plan, checks });
+    // Keep the Project inside this scope so it is releasable before external tools start.
+    return yield* runStage(options, checks, plan.scope, loaded.project, plan.budget, loaded.state);
+  });
+}
+
+function runBenchmarks(options: AnalyzeOptions, initial: AnalysisState): Effect.Effect<AnalysisState, never, ProcessService> {
+  return Effect.gen(function* () {
+    let state = initial;
     for (const config of options.benchmarks ?? []) {
       const outcome = yield* Effect.either(runBenchmarkEffect(config));
-      if (outcome._tag === "Right") benchmarks.push(outcome.right);
-      else {
-        benchmarks.push({ command: [config.command, ...config.args].join(" "), runs: outcome.left.runs ?? [], failure: outcome.left.message });
-        failures.push(toAnalyzerFailure("benchmark", outcome.left.message));
-      }
+      if (outcome._tag === "Right") state = { ...state, benchmarks: [...state.benchmarks, outcome.right] };
+      else state = addFailure({ ...state, benchmarks: [...state.benchmarks, { command: [config.command, ...config.args].join(" "), runs: outcome.left.runs ?? [], failure: outcome.left.message }] }, "benchmark", outcome.left.message);
     }
+    return state;
   });
 }
 
-function finalizeAnalysis(
-  options: AnalyzeOptions,
-  recorder: ProfileRecorder,
-  started: number,
-  findings: readonly Finding[],
-  failures: readonly AnalyzerFailure[],
-  benchmarks: readonly BenchmarkResult[],
-): AnalysisResult {
-  if (options.profile) recorder.timings.totalMs = performance.now() - started;
-  recorder.snapshot("complete");
-  return finalizeResult(findings, failures, benchmarks, options, recorder);
-}
-
-export function analyzeEffect(
-  options: AnalyzeOptions,
-  seams: EngineSeams = {},
-): Effect.Effect<AnalysisResult, AnalyzeError> {
-  return Effect.gen(function* () {
-    const { budget, checks, scope, recorder, started } = yield* setupAnalysis(options);
-    const findings: Finding[] = [];
-    const failures: AnalyzerFailure[] = [];
-    const benchmarks: BenchmarkResult[] = [];
-    const state = createMemoryGuard(recorder, failures, budget);
-    const internalChecks = checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None);
-    const externalChecks = checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None);
-    let project = yield* loadProjectIfNeeded(options, seams, internalChecks, scope, recorder, state.guard);
-    yield* runAnalyzers(options, internalChecks, scope, project, recorder, failures, findings, budget, state, seams);
-    project = undefined; // Release the sole Project reference before any external analyzer.
-    if (!state.isStopped()) yield* runAnalyzers(options, externalChecks, scope, undefined, recorder, failures, findings, budget, state, seams);
-    if (!state.isStopped()) yield* runBenchmarks(options, failures, benchmarks);
-    return finalizeAnalysis(options, recorder, started, findings, failures, benchmarks);
+export function analyzeEffect(options: AnalyzeOptions, seams: EngineSeams = {}): Effect.Effect<AnalysisResult, AnalyzeError> {
+  const workflow = Effect.gen(function* () {
+    const plan = yield* setupAnalysis(options);
+    const internal = plan.checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None);
+    const external = plan.checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None);
+    const afterInternal = yield* runInternalStages(options, seams, plan, internal);
+    const afterExternal = yield* runStage(options, external, plan.scope, undefined, plan.budget, afterInternal);
+    const afterBenchmarks = afterExternal.stopped ? afterExternal : yield* runBenchmarks(options, afterExternal);
+    const runtime = yield* AnalysisRuntime;
+    let state = timing(afterBenchmarks, options.profile === true, "totalMs", plan.started, runtime.now());
+    state = snapshot(state, options.profile === true, "complete", runtime.memory());
+    return finalizeResult(state, options);
   });
+  return workflow.pipe(Effect.provideService(AnalysisRuntime, seams.runtime ?? liveAnalysisRuntime), Effect.provide(processServiceLayer(seams.processRunner)));
 }
 
 export function analyze(options: AnalyzeOptions, seams: EngineSeams = {}): Effect.Effect<AnalysisResult, never> {
-  const failureResult = (analyzer: AnalyzerFailure["analyzer"], message: string): AnalysisResult => {
-    const recorder = createProfileRecorder(options.profile === true);
-    return finalizeResult([], [toAnalyzerFailure(analyzer, message)], [], options, recorder);
-  };
+  const failed = (analyzer: AnalyzerFailure["analyzer"], message: string): AnalysisResult => finalizeResult(addFailure(initialState(), analyzer, message), options);
   return analyzeEffect(options, seams).pipe(Effect.catchTags({
-    ConfigError: (error) => Effect.succeed(failureResult("configuration", error.message)),
-    ScopeError: (error) => Effect.succeed(failureResult("scope", error.message)),
-    ProgramError: (error) => Effect.succeed(failureResult("program", error.message)),
+    ConfigError: (error) => Effect.succeed(failed("configuration", error.message)),
+    ScopeError: (error) => Effect.succeed(failed("scope", error.message)),
+    ProgramError: (error) => Effect.succeed(failed("program", error.message)),
   }));
 }

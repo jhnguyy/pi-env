@@ -1,25 +1,23 @@
 import { relative, resolve } from "node:path";
 import { Effect } from "effect";
-import { AnalyzerName, AnalyzerRunError, type Finding } from "../model.js";
-import { DEFAULT_EXTERNAL_TIMEOUT_MS, nodeAnalyzerEnvironment, streamProcessEffect, type StreamProcessOptions } from "../process.js";
-import { tsconfigFileNames } from "../program.js";
+import { AnalyzerName, AnalyzerRunError, type Finding, type ProgramError } from "../model.js";
+import { DEFAULT_EXTERNAL_TIMEOUT_MS, nodeAnalyzerEnvironment, ProcessService, type StreamProcessOptions } from "../process.js";
+import { tsconfigFileNamesEffect } from "../program.js";
 import type { Scope } from "../scope.js";
 import { parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "./parsers.js";
 
 const OUTPUT_LIMIT_BYTES = 20 * 1024 * 1024;
 const MAX_ARGUMENT_BYTES = 128 * 1024;
 const slash = (value: string): string => value.replaceAll("\\", "/");
-const selectedTsPaths = (cwd: string, scope: Scope): string[] => tsconfigFileNames(cwd)
-  .map((file) => slash(relative(cwd, file)))
-  .filter((file) => !file.includes("node_modules/") && (scope.mode === "all" || scope.files.includes(file)));
+const selectedTsPathsEffect = (cwd: string, scope: Scope): Effect.Effect<string[], ProgramError> =>
+  tsconfigFileNamesEffect(cwd).pipe(
+    Effect.map((files) => files
+      .map((file) => slash(relative(cwd, file)))
+      .filter((file) => !file.includes("node_modules/") && (scope.mode === "all" || scope.files.includes(file)))),
+  );
 
-type ExternalProcessRunner = (
-  command: string,
-  args: readonly string[],
-  options: StreamProcessOptions,
-) => Effect.Effect<{ stdout: string; stderr: string }, import("../model.js").ProcessError>;
-
-export interface ExternalAnalyzerControls { process?: ExternalProcessRunner }
+const runProcess = (command: string, args: readonly string[], options: StreamProcessOptions) =>
+  Effect.flatMap(ProcessService, ({ run }) => run(command, args, options));
 
 const parseEffect = (
   analyzer: AnalyzerName,
@@ -57,17 +55,18 @@ function argumentBatches(values: readonly string[], fixed: readonly string[]): s
   return batches;
 }
 
-export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS, controls: ExternalAnalyzerControls = {}): Effect.Effect<Finding[], AnalyzerRunError> {
-  const run = controls.process ?? streamProcessEffect;
+export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
   return Effect.gen(function* () {
     const script = resolve(cwd, "node_modules/eslint/bin/eslint.js");
     const fixed = [script, "--format", "json", "--"];
-    const files = yield* Effect.try({ try: () => selectedTsPaths(cwd, scope), catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause instanceof Error ? cause.message : String(cause) }) });
+    const files = yield* selectedTsPathsEffect(cwd, scope).pipe(
+      Effect.mapError((cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message })),
+    );
     const batches = yield* Effect.try({ try: () => argumentBatches(files, fixed), catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause instanceof Error ? cause.message : String(cause) }) });
     const findings: Finding[] = [];
     // analyze: allow-sequential
     for (const batch of batches) {
-      const parsed = yield* run(resolve(cwd, "scripts/node-run.sh"), [...fixed, ...batch], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
+      const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [...fixed, ...batch], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(stdout, cwd))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
           ? parseEffect(AnalyzerName.Eslint, "ESLint", () => parseEslintJson(cause.stdout!, cwd))
@@ -80,10 +79,9 @@ export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
   });
 }
 
-export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS, controls: ExternalAnalyzerControls = {}): Effect.Effect<Finding[], AnalyzerRunError> {
+export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
   const targets = scope.mode === "all" ? ["."] : scope.files.map((path) => path.startsWith("-") ? `./${path}` : path);
   if (targets.length === 0) return Effect.succeed([]);
-  const run = controls.process ?? streamProcessEffect;
   return Effect.gen(function* () {
     const script = resolve(cwd, "node_modules/dependency-cruiser/bin/dependency-cruise.mjs");
     const suffix = ["--output-type", "json", "--progress", "none"];
@@ -91,7 +89,7 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
     const findings: Finding[] = [];
     // analyze: allow-sequential
     for (const batch of batches) {
-      const parsed = yield* run(resolve(cwd, "scripts/node-run.sh"), [script, ...batch, ...suffix], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
+      const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [script, ...batch, ...suffix], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(stdout))),
         Effect.catchTag("ProcessError", (cause) => cause.stdout
           ? parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(cause.stdout!))
@@ -104,9 +102,8 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
   });
 }
 
-export function knipAnalyzerEffect(cwd: string, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS, controls: ExternalAnalyzerControls = {}): Effect.Effect<Finding[], AnalyzerRunError> {
-  const run = controls.process ?? streamProcessEffect;
-  return run(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/knip/bin/knip.js"), "--reporter", "compact", "--no-progress", "--no-exit-code"], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
+export function knipAnalyzerEffect(cwd: string, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
+  return runProcess(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/knip/bin/knip.js"), "--reporter", "compact", "--no-progress", "--no-exit-code"], processOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
     Effect.flatMap(({ stdout, stderr }) => parseEffect(AnalyzerName.Knip, "Knip", () => parseKnipOutput(`${stdout}\n${stderr}`))),
     Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Knip, message: processFailureMessage(cause) })),
   );

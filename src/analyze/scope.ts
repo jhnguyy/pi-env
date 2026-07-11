@@ -2,7 +2,7 @@ import { readdir, stat } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import { Effect } from "effect";
 import { ScopeError, ScopeMode } from "./model.js";
-import { DEFAULT_EXTERNAL_TIMEOUT_MS, streamProcessEffect } from "./process.js";
+import { DEFAULT_EXTERNAL_TIMEOUT_MS, ProcessService } from "./process.js";
 
 export interface Hunk { start: number; end: number }
 export interface Scope { mode: ScopeMode; files: readonly string[]; hunks: ReadonlyMap<string, readonly Hunk[]> }
@@ -106,19 +106,19 @@ export function expandExplicitPathsEffect(cwd: string, paths: readonly string[],
   }).pipe(Effect.mapError(scopeError));
 }
 
-function gitEffect(cwd: string, args: readonly string[]): Effect.Effect<string, ScopeError> {
-  return streamProcessEffect("git", args, {
+function gitEffect(cwd: string, args: readonly string[]): Effect.Effect<string, ScopeError, ProcessService> {
+  return Effect.flatMap(ProcessService, ({ run }) => run("git", args, {
     cwd,
     timeoutMs: DEFAULT_EXTERNAL_TIMEOUT_MS,
     stdoutLimitBytes: MAX_GIT_OUTPUT_BYTES,
     stderrLimitBytes: MAX_GIT_OUTPUT_BYTES,
-  }).pipe(
+  })).pipe(
     Effect.map(({ stdout }) => stdout),
     Effect.mapError((cause) => new ScopeError({ message: `git ${args.join(" ")} failed or exceeded ${MAX_GIT_OUTPUT_BYTES} bytes: ${cause.message}` })),
   );
 }
 
-export function resolveScopeEffect(cwd: string, mode: ScopeMode, paths: readonly string[], ref = "main"): Effect.Effect<Scope, ScopeError> {
+export function resolveScopeEffect(cwd: string, mode: ScopeMode, paths: readonly string[], ref = "main"): Effect.Effect<Scope, ScopeError, ProcessService> {
   if (mode === ScopeMode.Paths) return expandExplicitPathsEffect(cwd, paths).pipe(Effect.map((files) => ({ mode, files, hunks: new Map() })));
   if (mode === ScopeMode.All) return Effect.succeed({ mode, files: [], hunks: new Map() });
   return Effect.gen(function* () {

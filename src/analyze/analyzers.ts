@@ -153,18 +153,12 @@ function analyzeComplexityFile(file: ts.SourceFile, cwd: string, scope: Scope, o
   }
 }
 
-export function complexity(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
-  const output: Finding[] = [];
-  for (const file of project.files) analyzeComplexityFile(file, cwd, scope, output);
-  return output;
-}
-
 function cooperativeFileAnalysis(
   files: readonly ts.SourceFile[],
   analyzeFile: (file: ts.SourceFile, output: Finding[]) => void,
 ): Effect.Effect<Finding[], unknown> {
-  const output: Finding[] = [];
   return Effect.gen(function* () {
+    const output: Finding[] = [];
     for (const file of files) {
       yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => cause });
       yield* Effect.yieldNow();
@@ -201,15 +195,6 @@ function collectDuplicateFile(file: ts.SourceFile, cwd: string, state: Duplicate
     if (prior === undefined) state.groups.set(hash, { canonical: result.canonical, locations: [location(cwd, file, fn)] });
     else if (prior.canonical === result.canonical) prior.locations.push(location(cwd, file, fn));
   }
-}
-
-function collectDuplicateGroups(project: SyntaxProject, cwd: string): DuplicateCollection {
-  const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
-  for (const file of project.files) {
-    collectDuplicateFile(file, cwd, state);
-    if (state.truncated) break;
-  }
-  return state;
 }
 
 function duplicateFinding(group: DuplicateGroup, scope: Scope): Finding | undefined {
@@ -259,13 +244,9 @@ function duplicateFindings(collected: DuplicateCollection, scope: Scope): Findin
   return output;
 }
 
-export function duplicates(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
-  return duplicateFindings(collectDuplicateGroups(project, cwd), scope);
-}
-
 export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
-  const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
   return Effect.gen(function* () {
+    const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
     for (const file of project.files) {
       yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => cause });
       if (state.truncated) break;
@@ -411,12 +392,6 @@ function collectTypeFile(project: TypeProject, cwd: string, file: ts.SourceFile,
   }
 }
 
-function collectTypeCandidates(project: TypeProject, cwd: string): TypeCollection {
-  const state: TypeCollection = { candidates: [], truncated: false };
-  for (const file of project.files) collectTypeFile(project, cwd, file, state);
-  return state;
-}
-
 interface TypeCandidateIndex {
   bands: ReadonlyMap<string, readonly TypeCandidate[]>;
   counts: ReadonlyMap<string, readonly TypeCandidate[]>;
@@ -519,19 +494,9 @@ function finishTypeMatches(state: TypeMatchingState): Finding[] {
   return state.output.sort((left, right) => compareLocations(left.location, right.location));
 }
 
-export function similarTypes(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Finding[] {
-  const collected = collectTypeCandidates(project, cwd);
-  const index = indexTypeCandidates(collected.candidates);
-  const state: TypeMatchingState = { output: [], seen: new Set(), truncated: collected.truncated };
-  for (const seed of collected.candidates.filter((candidate) => changed(scope, candidate.loc))) {
-    if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) { state.truncated = true; break; }
-  }
-  return finishTypeMatches(state);
-}
-
 export function similarTypesEffect(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Effect.Effect<Finding[], unknown> {
-  const collected: TypeCollection = { candidates: [], truncated: false };
   return Effect.gen(function* () {
+    const collected: TypeCollection = { candidates: [], truncated: false };
     for (const file of project.files) {
       yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => cause });
       yield* Effect.yieldNow();
@@ -658,12 +623,6 @@ function visitAsyncRisks(
     ts.forEachChild(node, (child) => visit(child, loopDepth, suppressed));
   };
   visit(file, 0, false);
-}
-
-export function asyncRisks(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
-  const output: Finding[] = [];
-  for (const file of project.files) visitAsyncRisks(file, cwd, scope, output);
-  return output;
 }
 
 export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {

@@ -17,7 +17,7 @@ export interface Finding { id: string; analyzer: AnalyzerName; kind: FindingKind
 export interface AnalyzerFailure { analyzer: AnalyzerName | "benchmark" | "configuration" | "scope" | "program"; message: string }
 export interface BenchmarkResult { command: string; runs: readonly number[]; meanMs?: number; failure?: string }
 export interface MemorySnapshot { rssBytes: number; heapUsedBytes: number; externalBytes: number }
-interface AnalysisProfile { timings: Readonly<Record<string, number>>; memory: Readonly<Record<string, MemorySnapshot>>; peak: MemorySnapshot }
+export interface AnalysisProfile { timings: Readonly<Record<string, number>>; memory: Readonly<Record<string, MemorySnapshot>>; peak: MemorySnapshot }
 export interface AnalysisResult { version: 1; summary: { info: number; warning: number; error: number; failures: number }; findings: readonly Finding[]; analyzerFailures: readonly AnalyzerFailure[]; benchmarks: readonly BenchmarkResult[]; profile?: AnalysisProfile }
 export class ConfigError extends Data.TaggedError("ConfigError")<{ message: string }>{}
 export class ScopeError extends Data.TaggedError("ScopeError")<{ message: string }>{}

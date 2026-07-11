@@ -1,5 +1,5 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { Effect } from "effect";
+import { spawn, type ChildProcess } from "node:child_process";
+import { Context, Effect, Layer } from "effect";
 import { ProcessError, ProcessErrorKind } from "./model.js";
 
 export const DEFAULT_EXTERNAL_TIMEOUT_MS = 120_000 as const;
@@ -98,28 +98,17 @@ export function streamProcessEffect(command: string, args: readonly string[], op
   });
 }
 
-export function execFileEffect(command: string, args: readonly string[], options: ProcessOptions = {}): Effect.Effect<ProcessOutput, ProcessError> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
-  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) return Effect.fail(new ProcessError({ kind: ProcessErrorKind.Spawn, command, message: "timeoutMs must be a positive integer" }));
-  return Effect.tryPromise({
-    try: (signal) => new Promise<ProcessOutput>((resolve, reject) => {
-      const controller = new AbortController();
-      let timedOut = false;
-      const interrupt = (): void => controller.abort();
-      const cleanup = (): void => { clearTimeout(timer); signal.removeEventListener("abort", interrupt); };
-      signal.addEventListener("abort", interrupt, { once: true });
-      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
-      try {
-        execFile(command, [...args], { cwd: options.cwd, env: options.env, maxBuffer: options.maxBuffer, signal: controller.signal, encoding: "utf8" }, (error, stdout, stderr) => {
-          cleanup();
-          if (error !== null) reject(new ProcessError({ kind: timedOut ? ProcessErrorKind.Timeout : ProcessErrorKind.Exit, command, message: timedOut ? `Process timed out after ${timeoutMs}ms: ${command}` : error.message, exitCode: typeof error.code === "number" ? error.code : undefined, stdout, stderr }));
-          else resolve({ stdout, stderr });
-        });
-      } catch (cause) { cleanup(); reject(cause); }
-    }),
-    catch: (cause) => cause instanceof ProcessError ? cause : new ProcessError({ kind: ProcessErrorKind.Spawn, command, message: cause instanceof Error ? cause.message : String(cause) }),
-  });
-}
+/** The single cross-module seam for bounded, cancellable subprocess execution. */
+export class ProcessService extends Context.Tag("pi/analyze/ProcessService")<
+  ProcessService,
+  { readonly run: typeof streamProcessEffect }
+>() {}
+
+export const ProcessServiceLive = Layer.succeed(ProcessService, { run: streamProcessEffect });
+
+/** Builds the service layer used by engine compatibility seams and tests. */
+export const processServiceLayer = (run: typeof streamProcessEffect = streamProcessEffect) =>
+  Layer.succeed(ProcessService, { run });
 
 /** Leaves parent/headroom space and never grants an analyzer more than 1 GiB. */
 export function childHeapLimitMb(maxMemoryMb: number, parentRssBytes: number): number {

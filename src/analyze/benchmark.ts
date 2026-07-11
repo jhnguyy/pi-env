@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { Effect } from "effect";
 import { BenchmarkError, type BenchmarkResult } from "./model.js";
-import { DEFAULT_BENCHMARK_TIMEOUT_MS, execFileEffect } from "./process.js";
+import { DEFAULT_BENCHMARK_TIMEOUT_MS, ProcessService } from "./process.js";
 
 export interface BenchmarkConfig {
   command: string;
@@ -48,21 +48,23 @@ export function validateBenchmark(value: unknown): BenchmarkConfig {
 }
 
 const commandLabel = (config: BenchmarkConfig): string => [config.command, ...config.args].join(" ");
-const execute = (config: BenchmarkConfig) => execFileEffect(config.command, config.args, {
+const execute = (config: BenchmarkConfig) => Effect.flatMap(ProcessService, ({ run }) => run(config.command, config.args, {
   cwd: config.cwd,
   timeoutMs: config.timeoutMs ?? DEFAULT_BENCHMARK_TIMEOUT_MS,
-});
+}));
 
-export function runBenchmarkEffect(config: BenchmarkConfig): Effect.Effect<BenchmarkResult, BenchmarkError> {
-  const runs: number[] = [];
-  return Effect.gen(function* () {
-    // Sequential execution is required for stable measurements and bounded memory.
-    for (let index = 0; index < (config.warmups ?? 0); index++) yield* execute(config);
-    for (let index = 0; index < (config.runs ?? 1); index++) {
-      const start = performance.now();
-      yield* execute(config);
-      runs.push(performance.now() - start);
-    }
-    return { command: commandLabel(config), runs, meanMs: runs.reduce((sum, value) => sum + value, 0) / runs.length };
-  }).pipe(Effect.mapError((cause) => new BenchmarkError({ message: cause.message, runs: [...runs] })));
+export function runBenchmarkEffect(config: BenchmarkConfig): Effect.Effect<BenchmarkResult, BenchmarkError, ProcessService> {
+  return Effect.suspend(() => {
+    const runs: number[] = [];
+    return Effect.gen(function* () {
+      // Sequential execution is required for stable measurements and bounded memory.
+      for (let index = 0; index < (config.warmups ?? 0); index++) yield* execute(config);
+      for (let index = 0; index < (config.runs ?? 1); index++) {
+        const start = performance.now();
+        yield* execute(config);
+        runs.push(performance.now() - start);
+      }
+      return { command: commandLabel(config), runs, meanMs: runs.reduce((sum, value) => sum + value, 0) / runs.length };
+    }).pipe(Effect.mapError((cause) => new BenchmarkError({ message: cause.message, runs: [...runs] })));
+  });
 }
