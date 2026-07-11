@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import ts from "typescript";
 import { AnalyzerName, FindingKind, Severity, type Finding, type Location } from "./model.js";
-import type { Project } from "./program.js";
+import type { SyntaxProject, TypeProject } from "./program.js";
 import type { Scope } from "./scope.js";
 import { intersectsHunks } from "./scope.js";
 
@@ -140,7 +140,7 @@ function functionComplexity(root: BodyFunction): { cyclomatic: number; cognitive
 
 const COMPLEXITY_ADVISORY = { cyclomatic: 15, cognitive: 20 } as const;
 
-export function complexity(project: Project, cwd: string, scope: Scope): Finding[] {
+export function complexity(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
   const output: Finding[] = [];
   for (const file of project.files) {
     for (const fn of functions(file)) {
@@ -175,7 +175,7 @@ const ANALYZER_CAPS = {
 const compareLocations = (left: Location, right: Location): number =>
   left.path.localeCompare(right.path) || left.line - right.line || left.column - right.column;
 
-function collectDuplicateGroups(project: Project, cwd: string): {
+function collectDuplicateGroups(project: SyntaxProject, cwd: string): {
   groups: Map<string, DuplicateGroup>;
   truncated: boolean;
 } {
@@ -236,7 +236,7 @@ function truncationFinding(analyzer: AnalyzerName): Finding {
   };
 }
 
-export function duplicates(project: Project, cwd: string, scope: Scope): Finding[] {
+export function duplicates(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
   const collected = collectDuplicateGroups(project, cwd);
   const output: Finding[] = [];
   let truncated = collected.truncated;
@@ -377,7 +377,7 @@ interface TypeCandidate {
   name: string;
 }
 
-function collectTypeCandidates(project: Project, cwd: string): {
+function collectTypeCandidates(project: TypeProject, cwd: string): {
   candidates: TypeCandidate[];
   truncated: boolean;
 } {
@@ -403,14 +403,37 @@ function collectTypeCandidates(project: Project, cwd: string): {
   return { candidates, truncated };
 }
 
-function bucketTypeCandidates(candidates: readonly TypeCandidate[]): Map<string, TypeCandidate[]> {
-  const buckets = new Map<string, TypeCandidate[]>();
+interface TypeCandidateIndex {
+  bands: ReadonlyMap<string, readonly TypeCandidate[]>;
+  counts: ReadonlyMap<string, readonly TypeCandidate[]>;
+}
+
+function indexTypeCandidates(candidates: readonly TypeCandidate[]): TypeCandidateIndex {
+  const bands = new Map<string, TypeCandidate[]>();
+  const counts = new Map<string, TypeCandidate[]>();
   for (const candidate of candidates) {
-    const bucket = buckets.get(candidate.shape.bucket);
-    if (bucket === undefined) buckets.set(candidate.shape.bucket, [candidate]);
-    else bucket.push(candidate);
+    const bandCandidates = bands.get(candidate.shape.bucket);
+    if (bandCandidates === undefined) bands.set(candidate.shape.bucket, [candidate]);
+    else bandCandidates.push(candidate);
+    const countKey = `${candidate.shape.propertyCount}:${candidate.shape.signatureCount}`;
+    const countCandidates = counts.get(countKey);
+    if (countCandidates === undefined) counts.set(countKey, [candidate]);
+    else countCandidates.push(candidate);
   }
-  return buckets;
+  return { bands, counts };
+}
+
+function comparableTypeCandidates(seed: TypeCandidate, index: TypeCandidateIndex): TypeCandidate[] {
+  const peers = new Set(index.bands.get(seed.shape.bucket) ?? []);
+  for (let propertyDelta = -1; propertyDelta <= 1; propertyDelta++) {
+    for (let signatureDelta = -1; signatureDelta <= 1; signatureDelta++) {
+      const propertyCount = seed.shape.propertyCount + propertyDelta;
+      const signatureCount = seed.shape.signatureCount + signatureDelta;
+      if (propertyCount < 0 || signatureCount < 0) continue;
+      for (const candidate of index.counts.get(`${propertyCount}:${signatureCount}`) ?? []) peers.add(candidate);
+    }
+  }
+  return [...peers];
 }
 
 function typePairKey(left: TypeCandidate, right: TypeCandidate): string {
@@ -455,40 +478,38 @@ function shouldTruncateTypeMatches(output: readonly Finding[]): boolean {
 
 function emitTypeMatches(
   seed: TypeCandidate,
-  buckets: ReadonlyMap<string, TypeCandidate[]>,
+  index: TypeCandidateIndex,
   threshold: number,
   seen: Set<string>,
   output: Finding[],
 ): boolean {
   let comparisons = 0;
-  for (const candidates of buckets.values()) {
-    for (const peer of candidates) {
-      if (!isTypeMatchCandidate(seed, peer)) continue;
-      if (comparisons++ >= ANALYZER_CAPS.typeBucketComparisons) return true;
-      const score = similarity(seed.shape, peer.shape);
-      if (score < threshold || !recordTypePair(seed, peer, seen)) continue;
-      output.push(typeSimilarityFinding(seed, peer, score));
-      if (shouldTruncateTypeMatches(output)) return true;
-    }
+  for (const peer of comparableTypeCandidates(seed, index)) {
+    if (!isTypeMatchCandidate(seed, peer)) continue;
+    if (comparisons++ >= ANALYZER_CAPS.typeBucketComparisons) return true;
+    const score = similarity(seed.shape, peer.shape);
+    if (score < threshold || !recordTypePair(seed, peer, seen)) continue;
+    output.push(typeSimilarityFinding(seed, peer, score));
+    if (shouldTruncateTypeMatches(output)) return true;
   }
   return false;
 }
 
 export function similarTypes(
-  project: Project,
+  project: TypeProject,
   cwd: string,
   scope: Scope,
   threshold = 0.8,
 ): Finding[] {
   const collected = collectTypeCandidates(project, cwd);
-  const buckets = bucketTypeCandidates(collected.candidates);
+  const index = indexTypeCandidates(collected.candidates);
   const changedSeeds = collected.candidates.filter((candidate) => changed(scope, candidate.loc));
   const output: Finding[] = [];
   const seen = new Set<string>();
   let truncated = collected.truncated;
 
   for (const seed of changedSeeds) {
-    if (emitTypeMatches(seed, buckets, threshold, seen, output)) {
+    if (emitTypeMatches(seed, index, threshold, seen, output)) {
       truncated = true;
       break;
     }
@@ -614,7 +635,7 @@ function visitAsyncRisks(
   visit(file, 0, false);
 }
 
-export function asyncRisks(project: Project, cwd: string, scope: Scope): Finding[] {
+export function asyncRisks(project: SyntaxProject, cwd: string, scope: Scope): Finding[] {
   const output: Finding[] = [];
   for (const file of project.files) visitAsyncRisks(file, cwd, scope, output);
   return output;

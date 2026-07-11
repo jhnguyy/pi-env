@@ -1,12 +1,9 @@
 import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { Effect } from "effect";
-import { asyncRisks, complexity, duplicates, similarTypes } from "./analyzers.js";
 import { runBenchmarkEffect, type BenchmarkConfig } from "./benchmark.js";
-import { bundleAnalyzer, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import {
   AnalyzerName,
-  AnalyzerRunError,
   ConfigError,
   ProgramError,
   ScopeError,
@@ -18,7 +15,8 @@ import {
   type MemorySnapshot,
   type ScopeMode,
 } from "./model.js";
-import { createProject, type Project } from "./program.js";
+import { createAnalysisProject, createProject, ProjectRequirement, type Project } from "./program.js";
+import { analyzerDescriptor, defaultAnalyzerNames, projectRequirement, runAnalyzer } from "./registry.js";
 import { resolveScope, type Scope } from "./scope.js";
 
 export interface AnalyzeOptions {
@@ -36,7 +34,9 @@ export interface AnalyzeOptions {
 }
 
 export interface EngineSeams {
+  /** @deprecated Prefer createAnalysisProject so tests preserve project planning. */
   createProject?: typeof createProject;
+  createAnalysisProject?: typeof createAnalysisProject;
 }
 
 interface ProfileRecorder {
@@ -47,15 +47,8 @@ interface ProfileRecorder {
   measure: <Value>(name: string, operation: () => Value) => Value;
 }
 
-const INTERNAL = new Set<AnalyzerName>([
-  AnalyzerName.Complexity,
-  AnalyzerName.Duplicates,
-  AnalyzerName.Types,
-  AnalyzerName.AsyncRisk,
-]);
 const DEFAULT_MEMORY_MB = 2048;
 export const MAX_TOTAL_FINDINGS = 2_000 as const;
-const defaultChecks = Object.values(AnalyzerName).filter((name) => name !== AnalyzerName.Bundle);
 
 export function capFindings(findings: readonly Finding[], max: number): {
   kept: Finding[];
@@ -91,8 +84,8 @@ export const findingId = (finding: Finding): string => createHash("sha256")
 export const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean =>
   rssBytes > maxMemoryMb * 1024 * 1024;
 
-export const needsInternalProgram = (checks: readonly AnalyzerName[]): boolean =>
-  checks.some((check) => INTERNAL.has(check));
+export const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
+  projectRequirement(checks) !== ProjectRequirement.None;
 
 function validateOptions(options: AnalyzeOptions): number {
   const threshold = options.typeSimilarityThreshold;
@@ -108,7 +101,7 @@ function validateOptions(options: AnalyzeOptions): number {
 }
 
 function selectedChecks(options: AnalyzeOptions): AnalyzerName[] {
-  const requested = options.checks ?? defaultChecks;
+  const requested = options.checks ?? defaultAnalyzerNames;
   const valid = new Set<string>(Object.values(AnalyzerName));
   const unknown = requested.filter((name) => !valid.has(name));
   if (unknown.length > 0) {
@@ -157,26 +150,6 @@ function createProfileRecorder(enabled: boolean): ProfileRecorder {
     },
   };
   return recorder;
-}
-
-function dispatchAnalyzer(
-  name: AnalyzerName,
-  options: AnalyzeOptions,
-  scope: Scope,
-  project: Project | undefined,
-  guard: () => boolean,
-  budget: number,
-): Effect.Effect<Finding[], AnalyzerRunError> {
-  switch (name) {
-    case AnalyzerName.Complexity: return Effect.sync(() => complexity(project!, options.cwd, scope));
-    case AnalyzerName.Duplicates: return Effect.sync(() => duplicates(project!, options.cwd, scope));
-    case AnalyzerName.Types: return Effect.sync(() => similarTypes(project!, options.cwd, scope, options.typeSimilarityThreshold));
-    case AnalyzerName.AsyncRisk: return Effect.sync(() => asyncRisks(project!, options.cwd, scope));
-    case AnalyzerName.Dependencies: return dependencyAnalyzerEffect(options.cwd, scope, budget, options.externalTimeoutMs);
-    case AnalyzerName.Knip: return knipAnalyzerEffect(options.cwd, budget, options.externalTimeoutMs);
-    case AnalyzerName.Eslint: return eslintAnalyzerEffect(options.cwd, scope, budget, options.externalTimeoutMs);
-    case AnalyzerName.Bundle: return Effect.tryPromise({ try: () => bundleAnalyzer(options.cwd, scope, { beforeEntry: guard }), catch: (cause) => new AnalyzerRunError({ analyzer: name, message: cause instanceof Error ? cause.message : String(cause) }) });
-  }
 }
 
 function toConfigError(cause: unknown): ConfigError {
@@ -266,20 +239,29 @@ function loadProjectIfNeeded(
   options: AnalyzeOptions,
   seams: EngineSeams,
   checks: readonly AnalyzerName[],
+  scope: Scope,
   recorder: ProfileRecorder,
   guard: (name: AnalyzerName) => boolean,
 ): Effect.Effect<Project | undefined, ProgramError> {
-  if (!needsInternalProgram(checks)) return Effect.succeed(undefined);
-  const firstInternal = checks.find((name) => INTERNAL.has(name))!;
+  const requirement = projectRequirement(checks);
+  if (requirement === ProjectRequirement.None) return Effect.succeed(undefined);
+  const firstInternal = checks.find((name) => analyzerDescriptor(name).project !== ProjectRequirement.None)!;
   if (!guard(firstInternal)) return Effect.succeed(undefined);
+  const factory = seams.createAnalysisProject
+    ?? (seams.createProject === undefined
+      ? createAnalysisProject
+      : (cwd: string) => seams.createProject!(cwd));
   return Effect.try({
-    try: () => recorder.measure("program", () => (seams.createProject ?? createProject)(options.cwd)),
+    try: () => recorder.measure("program", () => factory(options.cwd, scope, requirement)),
     catch: toProgramError,
   }).pipe(Effect.tap(() => Effect.sync(() => { recorder.snapshot("after:program"); })));
 }
 
 function orderedChecks(checks: readonly AnalyzerName[]): AnalyzerName[] {
-  return [...checks.filter((name) => INTERNAL.has(name)), ...checks.filter((name) => !INTERNAL.has(name))];
+  return [
+    ...checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None),
+    ...checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None),
+  ];
 }
 
 function runAnalyzers(
@@ -296,10 +278,18 @@ function runAnalyzers(
   return Effect.gen(function* () {
     let currentProject = project;
     for (const name of orderedChecks(checks)) {
-      if (!INTERNAL.has(name)) currentProject = undefined;
+      if (analyzerDescriptor(name).project === ProjectRequirement.None) currentProject = undefined;
       if (state.isStopped() || !state.guard(name)) break;
       const analyzerStarted = performance.now();
-      const outcome = yield* Effect.either(dispatchAnalyzer(name, options, scope, currentProject, () => state.guard(name), budget));
+      const outcome = yield* Effect.either(runAnalyzer(name, {
+        cwd: options.cwd,
+        scope,
+        project: currentProject,
+        typeSimilarityThreshold: options.typeSimilarityThreshold,
+        maxMemoryMb: budget,
+        externalTimeoutMs: options.externalTimeoutMs,
+        beforeBundleEntry: () => state.guard(name),
+      }));
       if (outcome._tag === "Right") {
         const capped = capFindings(outcome.right, Math.max(0, MAX_TOTAL_FINDINGS - findings.length));
         findings.push(...capped.kept);
@@ -356,9 +346,9 @@ export function analyzeEffect(
     const failures: AnalyzerFailure[] = [];
     const benchmarks: BenchmarkResult[] = [];
     const state = createMemoryGuard(recorder, failures, budget);
-    const internalChecks = checks.filter((name) => INTERNAL.has(name));
-    const externalChecks = checks.filter((name) => !INTERNAL.has(name));
-    let project = yield* loadProjectIfNeeded(options, seams, internalChecks, recorder, state.guard);
+    const internalChecks = checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None);
+    const externalChecks = checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None);
+    let project = yield* loadProjectIfNeeded(options, seams, internalChecks, scope, recorder, state.guard);
     yield* runAnalyzers(options, internalChecks, scope, project, recorder, failures, findings, budget, state);
     project = undefined; // Release the sole Project reference before any external analyzer.
     if (!state.isStopped()) yield* runAnalyzers(options, externalChecks, scope, undefined, recorder, failures, findings, budget, state);

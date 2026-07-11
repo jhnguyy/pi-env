@@ -6,12 +6,13 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { asyncRisks, canonicalizeWithCap, complexity, duplicates, similarTypes } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
-import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProgram } from "../engine.js";
+import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
 import { bundleAnalyzer, discoverExtensionEntrypoints, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
-import { createProject } from "../program.js";
+import { createAnalysisProject, createProject, isTypeProject, ProjectRequirement } from "../program.js";
+import { projectRequirement, runAnalyzer } from "../registry.js";
 import { childHeapLimitMb, execFileEffect } from "../process.js";
 import { expandExplicitPaths, intersectsHunks, parseUnifiedHunks, resolveScope, type Scope } from "../scope.js";
 
@@ -84,7 +85,7 @@ describe("analyze contracts", () => {
     expect(profiled.profile?.peak.rssBytes).toBeGreaterThan(0);
     expect(profiled.profile?.timings.scope).toBeGreaterThanOrEqual(0);
     expect(profiled.profile?.memory["after:scope"]?.rssBytes).toBeGreaterThan(0);
-    expect(needsInternalProgram([AnalyzerName.Eslint, AnalyzerName.Bundle])).toBe(false);
+    expect(needsInternalProject([AnalyzerName.Eslint, AnalyzerName.Bundle])).toBe(false);
   });
 
   it("makes deterministic memory and child heap decisions", () => {
@@ -92,6 +93,30 @@ describe("analyze contracts", () => {
     expect(isMemoryBudgetExceeded(100 * 1024 * 1024, 100)).toBe(false);
     expect(childHeapLimitMb(2048, 512 * 1024 * 1024)).toBe(1024);
     expect(childHeapLimitMb(1024, 400 * 1024 * 1024)).toBe(112);
+  });
+
+  it("plans the least expensive project capability for selected analyzers", () => {
+    const cwd = writeProject({
+      "src/changed.ts": "export const changed = 1;",
+      "src/global.ts": "export const global = 1;",
+    });
+    const scope = pathScope(["src/changed.ts"]);
+    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.AsyncRisk])).toBe(ProjectRequirement.ScopedSyntax);
+    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.Duplicates])).toBe(ProjectRequirement.CorpusSyntax);
+    expect(projectRequirement([AnalyzerName.Duplicates, AnalyzerName.Types])).toBe(ProjectRequirement.Types);
+    const scoped = createAnalysisProject(cwd, scope, ProjectRequirement.ScopedSyntax)!;
+    const corpus = createAnalysisProject(cwd, scope, ProjectRequirement.CorpusSyntax)!;
+    expect(scoped.files.map((file) => file.fileName)).toHaveLength(1);
+    expect(corpus.files.map((file) => file.fileName)).toHaveLength(2);
+    expect(isTypeProject(scoped)).toBe(false);
+  });
+
+  it("captures internal analyzer exceptions in the typed error channel", async () => {
+    const outcome = await Effect.runPromise(Effect.either(runAnalyzer(AnalyzerName.Complexity, {
+      cwd: fixtureRoot(), scope: allScope, maxMemoryMb: 256, beforeBundleEntry: () => true,
+    })));
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") expect(outcome.left).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
   });
 
   it("returns structured results for unknown checks and missing tsconfig", async () => {

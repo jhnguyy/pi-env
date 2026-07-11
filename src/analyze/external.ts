@@ -101,18 +101,24 @@ export function parseEslintJson(text: string, cwd: string): Finding[] {
 }
 
 export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError> {
-  const files = selectedTsPaths(cwd, scope);
-  if (files.length === 0) return Effect.succeed([]);
-  return execFileEffect(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/eslint/bin/eslint.js"), "--format", "json", "--", ...files], {
-    cwd, timeoutMs, maxBuffer: 20 * 1024 * 1024, env: nodeAnalyzerEnvironment(maxMemoryMb),
-  }).pipe(
-    Effect.map(({ stdout }) => parseEslintJson(stdout, cwd)),
-    // ESLint exits 1 when lint findings exist; its JSON is still a successful analyzer result.
-    Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
-      ? Effect.try({ try: () => parseEslintJson(cause.stdout!, cwd), catch: () => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }) })
-      : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }))),
-    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: String(cause) })),
-  );
+  return Effect.try({
+    try: () => selectedTsPaths(cwd, scope),
+    catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause instanceof Error ? cause.message : String(cause) }),
+  }).pipe(Effect.flatMap((files) => {
+    if (files.length === 0) return Effect.succeed([]);
+    return execFileEffect(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/eslint/bin/eslint.js"), "--format", "json", "--", ...files], {
+      cwd, timeoutMs, maxBuffer: 20 * 1024 * 1024, env: nodeAnalyzerEnvironment(maxMemoryMb),
+    }).pipe(
+      Effect.flatMap(({ stdout }) => Effect.try({
+        try: () => parseEslintJson(stdout, cwd),
+        catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: `Invalid ESLint output: ${cause instanceof Error ? cause.message : String(cause)}` }),
+      })),
+      // ESLint exits 1 when lint findings exist; its JSON is still a successful analyzer result.
+      Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
+        ? Effect.try({ try: () => parseEslintJson(cause.stdout!, cwd), catch: () => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }) })
+        : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }))),
+    );
+  }));
 }
 
 export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError> {
@@ -123,11 +129,13 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
   return execFileEffect(executable, [script, ...targets, "--output-type", "json", "--progress", "none"], {
     cwd, maxBuffer: 20 * 1024 * 1024, timeoutMs, env: nodeAnalyzerEnvironment(maxMemoryMb),
   }).pipe(
-    Effect.map(({ stdout }) => parseDependencyCruiserJson(stdout)),
+    Effect.flatMap(({ stdout }) => Effect.try({
+      try: () => parseDependencyCruiserJson(stdout),
+      catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: `Invalid dependency-cruiser output: ${cause instanceof Error ? cause.message : String(cause)}` }),
+    })),
     Effect.catchTag("ProcessError", (cause) => cause.stdout
       ? Effect.try({ try: () => parseDependencyCruiserJson(cause.stdout!), catch: () => new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause.message }) })
       : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause.message }))),
-    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: String(cause) })),
   );
 }
 
