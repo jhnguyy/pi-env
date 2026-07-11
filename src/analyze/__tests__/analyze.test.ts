@@ -60,6 +60,8 @@ describe("analyze contracts", () => {
     expect(plain.profile).toBeUndefined();
     const profiled = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All, checks: [], profile: true }));
     expect(profiled.profile?.peak.rssBytes).toBeGreaterThan(0);
+    expect(profiled.profile?.timings.scope).toBeGreaterThanOrEqual(0);
+    expect(profiled.profile?.memory["after:scope"]?.rssBytes).toBeGreaterThan(0);
     expect(needsInternalProgram([AnalyzerName.Eslint, AnalyzerName.Bundle])).toBe(false);
   });
 
@@ -145,8 +147,10 @@ describe("ast analyzers", () => {
       export function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
     ` });
     const findings = duplicates(createProject(cwd), cwd, allScope);
-    expect(findings).toHaveLength(2);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.line).toBe(2);
     expect(findings[0]?.related).toHaveLength(1);
+    expect(findings[0]?.related?.[0]?.line).toBe(3);
   });
 
   it("detects await and repeated scans inside loops", () => {
