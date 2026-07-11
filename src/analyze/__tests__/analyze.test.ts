@@ -1,20 +1,20 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import ts from "typescript";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { asyncRisks, complexity, duplicates, similarTypes } from "../analyzers.js";
-import { validateBenchmark } from "../benchmark.js";
-import { analyze, isMemoryBudgetExceeded, needsInternalProgram } from "../engine.js";
-import { bundleAnalyzer, discoverExtensionEntrypoints, eslintAnalyzer, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput } from "../external.js";
+import { asyncRisks, canonicalizeWithCap, complexity, duplicates, similarTypes } from "../analyzers.js";
+import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
+import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProgram } from "../engine.js";
+import { bundleAnalyzer, discoverExtensionEntrypoints, normalizeBundleMetafile, parseDependencyCruiserJson, parseEslintJson, parseKnipOutput } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
 import { createProject } from "../program.js";
-import { intersectsHunks, parseUnifiedHunks, type Scope } from "../scope.js";
+import { childHeapLimitMb, execFileEffect } from "../process.js";
+import { expandExplicitPaths, intersectsHunks, parseUnifiedHunks, resolveScope, type Scope } from "../scope.js";
 
-const repo = resolve(import.meta.dirname, "../../../");
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
@@ -33,6 +33,28 @@ const finding: Finding = { id: "", analyzer: AnalyzerName.Complexity, kind: Find
 const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ ...finding, id: findingId(finding) }], analyzerFailures: [], benchmarks: [] };
 
 describe("analyze contracts", () => {
+  it("keeps missing tsconfig typed in analyzeEffect and reports it in analyze", async () => {
+    const cwd = fixtureRoot();
+    const typed = await Effect.runPromise(Effect.either(analyzeEffect({ cwd, scope: ScopeMode.All })));
+    expect(typed._tag).toBe("Left");
+    if (typed._tag === "Left") expect(typed.left._tag).toBe("ProgramError");
+    const reported = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
+    expect(reported.analyzerFailures[0]?.analyzer).toBe("program");
+  });
+
+  it("runs subprocesses and types exit and timeout failures", async () => {
+    await expect(Effect.runPromise(execFileEffect("/bin/echo", ["ok"]))).resolves.toMatchObject({ stdout: "ok\n" });
+    const exited = await Effect.runPromise(Effect.either(execFileEffect("/bin/false", [])));
+    expect(exited._tag === "Left" && exited.left.kind).toBe("exit");
+    const timed = await Effect.runPromise(Effect.either(execFileEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
+    expect(timed._tag === "Left" && timed.left.kind).toBe("timeout");
+  });
+
+  it("preserves typed benchmark failures", async () => {
+    const outcome = await Effect.runPromise(Effect.either(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 })));
+    expect(outcome._tag).toBe("Left");
+    if (outcome._tag === "Left") expect(outcome.left._tag).toBe("BenchmarkError");
+  });
   it("creates deterministic related-location IDs and stable formats", () => {
     expect(findingId(finding)).toBe(findingId({ ...finding }));
     expect(formatResult(result, OutputMode.Compact)).toContain("warning\tcomplexity\ta.ts:2:1");
@@ -65,9 +87,11 @@ describe("analyze contracts", () => {
     expect(needsInternalProgram([AnalyzerName.Eslint, AnalyzerName.Bundle])).toBe(false);
   });
 
-  it("makes deterministic memory budget decisions", () => {
+  it("makes deterministic memory and child heap decisions", () => {
     expect(isMemoryBudgetExceeded(101 * 1024 * 1024, 100)).toBe(true);
     expect(isMemoryBudgetExceeded(100 * 1024 * 1024, 100)).toBe(false);
+    expect(childHeapLimitMb(2048, 512 * 1024 * 1024)).toBe(1024);
+    expect(childHeapLimitMb(1024, 400 * 1024 * 1024)).toBe(112);
   });
 
   it("returns structured results for unknown checks and missing tsconfig", async () => {
@@ -123,22 +147,33 @@ describe("ast analyzers", () => {
         return 0;
       }
       export function changed(value: number) {
-        if (value > 1) {}
-        if (value > 2) {}
-        if (value > 3) {}
-        if (value > 4) {}
-        if (value > 5) {}
-        if (value > 6) {}
-        if (value > 7) {}
-        if (value > 8) {}
-        if (value > 9) {}
-        return value;
+        if (value > 1) {
+          if (value > 2) {
+            if (value > 3) {
+              if (value > 4) {
+                if (value > 5) {
+                  if (value > 6) return value;
+                }
+              }
+            }
+          }
+        }
+        return 0;
       }
     ` });
     const scope = pathScope(["src/complex.ts"], new Map([["src/complex.ts", [{ start: 8, end: 8 }]]]));
     const findings = complexity(createProject(cwd), cwd, scope);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.line).toBe(7);
+  });
+
+  it("does not warn for a small flat boolean predicate", () => {
+    const cwd = writeProject({ "src/flat.ts": `
+      export function matches(a: boolean, b: boolean, c: boolean, d: boolean) {
+        return a && b && c && d;
+      }
+    ` });
+    expect(complexity(createProject(cwd), cwd, allScope)).toEqual([]);
   });
 
   it("detects renamed duplicate functions, same-file clones, and full canonical traversal", () => {
@@ -153,13 +188,32 @@ describe("ast analyzers", () => {
     expect(findings[0]?.related?.[0]?.line).toBe(3);
   });
 
-  it("detects await and repeated scans inside loops", () => {
+  it("ignores for-of initializers but finds risks in the body", () => {
     const cwd = writeProject({ "src/async.ts": `
-      export async function work(items: number[]) { for (const item of items) { await Promise.resolve(item); items.sort(); } }
+      export async function work(items: number[]) {
+        for (const item of items.filter(Boolean)) {
+          await Promise.resolve(item);
+          items.sort();
+        }
+      }
     ` });
     const messages = asyncRisks(createProject(cwd), cwd, allScope).map((item) => item.message);
+    expect(messages).not.toContain("filter call inside loop may repeat a scan");
     expect(messages).toContain("Await inside loop may serialize work");
     expect(messages).toContain("sort call inside loop may repeat a scan");
+  });
+
+  it("suppresses only a loop immediately led by allow-sequential", () => {
+    const cwd = writeProject({ "src/async.ts": `
+      export async function work(items: number[]) {
+        // analyze: allow-sequential
+        for (const item of items) await Promise.resolve(item);
+        for (const item of items) await Promise.resolve(item);
+      }
+    ` });
+    const findings = asyncRisks(createProject(cwd), cwd, allScope);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toBe("Await inside loop may serialize work");
   });
 });
 
@@ -171,15 +225,26 @@ describe("external analyzers and parsers", () => {
   });
 
   it("rejects benchmark runs=0", () => {
-    expect(() => validateBenchmark({ command: "echo", args: [], runs: 0 })).toThrow(/runs must be an integer >= 1/);
+    expect(() => validateBenchmark({ command: "echo", args: [], runs: 0 })).toThrow(/runs must be an integer between 1 and 100/);
   });
 
-  it("finds ESLint floating promises from a fixture", async () => {
-    const cwd = writeProject({ "src/floating.ts": "async function f() {}\nexport function g() { f(); }\n" });
-    const tseslint = pathToFileURL(join(repo, "node_modules/typescript-eslint/dist/index.js")).href;
-    writeFileSync(join(cwd, "eslint.config.js"), `import tseslint from ${JSON.stringify(tseslint)}; export default tseslint.config({ files:["**/*.ts"], languageOptions:{parser:tseslint.parser,parserOptions:{project:"./tsconfig.json",tsconfigRootDir:import.meta.dirname}}, plugins:{"@typescript-eslint":tseslint.plugin}, rules:{"@typescript-eslint/no-floating-promises":"error"} });`);
-    const findings = await eslintAnalyzer(cwd, allScope);
-    expect(findings.some((item) => item.message.includes("no-floating-promises"))).toBe(true);
+  it("rejects benchmark timeoutMs=0", () => {
+    expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: 0 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
+  });
+
+  it("rejects benchmark values above bounded limits", () => {
+    expect(() => validateBenchmark({ command: "echo", args: [], warmups: BENCHMARK_LIMITS.warmups.max + 1 })).toThrow(/warmups must be an integer between 0 and 10/);
+    expect(() => validateBenchmark({ command: "echo", args: [], runs: BENCHMARK_LIMITS.runs.max + 1 })).toThrow(/runs must be an integer between 1 and 100/);
+    expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: BENCHMARK_LIMITS.timeoutMs.max + 1 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
+  });
+
+  it("parses only the configured ESLint rules from structured JSON", () => {
+    const findings = parseEslintJson(JSON.stringify([{ filePath: "/repo/src/a.ts", messages: [
+      { ruleId: "@typescript-eslint/no-floating-promises", severity: 2, message: "promise", line: 2, column: 3 },
+      { ruleId: "other", severity: 2, message: "ignored", line: 1, column: 1 },
+    ] }]), "/repo");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: Severity.Error, location: { path: "src/a.ts", line: 2, column: 3 } });
   });
 });
 
@@ -212,5 +277,75 @@ describe("bundle entrypoints", () => {
     const findings = await bundleAnalyzer(cwd, pathScope([".pi/extensions/alpha/index.ts"]));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.path).toBe(".pi/extensions/alpha/index.ts");
+  });
+});
+
+describe("bounded hardening", () => {
+  it("bounds explicit path walking to analyzable files and skipped directories", () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const a = 1;",
+      "src/b.md": "ignored",
+      "dist/out.ts": "ignored",
+      "coverage/out.ts": "ignored",
+      "node_modules/pkg/index.ts": "ignored",
+      ".git/config.ts": "ignored",
+      ".analyze-bundle/out.ts": "ignored",
+      ".pi/extensions/demo/index.ts": "export const demo = 1;",
+      "config/app.json": "{}",
+    });
+    const scope = resolveScope(cwd, ScopeMode.Paths, ["src", ".pi", "config", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]);
+    expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts"]);
+  });
+
+  it("throws ScopeError when explicit path walking exceeds the file cap seam", () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const a = 1;",
+      "src/b.ts": "export const b = 1;",
+      "src/c.ts": "export const c = 1;",
+      "src/d.ts": "export const d = 1;",
+    });
+    expect(() => expandExplicitPaths(cwd, ["src"], 3)).toThrow(/Scope file limit exceeded/);
+    expect(() => expandExplicitPaths(cwd, [".."])).toThrow(/outside cwd/);
+    expect(() => expandExplicitPaths(cwd, [tmpdir()])).toThrow(/outside cwd/);
+  });
+
+  it("caps duplicate canonicalization by nodes or bytes", () => {
+    const source = ts.createSourceFile("sample.ts", `function huge(){${"value + ".repeat(20_000)}1}`, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+    const fn = source.statements.find(ts.isFunctionDeclaration);
+    expect(fn?.body).toBeDefined();
+    const result = canonicalizeWithCap(fn!.body!, { nodesPerFunction: 100, bytesPerFunction: 1_000, minimumNodeCount: 1, minimumTokenCount: 1 });
+    expect(result.truncated).toBe(true);
+    expect(result.nodeCount).toBeGreaterThan(100);
+    expect(result.tokenCount).toBeGreaterThan(0);
+  });
+
+  it("does not treat tiny generic error-adapter lambdas as duplicate candidates", () => {
+    const source = ts.createSourceFile("sample.ts", `
+      const toScopeError = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+      const toProgramError = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
+    `, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+    const arrows = source.statements
+      .filter(ts.isVariableStatement)
+      .flatMap((statement) => statement.declarationList.declarations)
+      .map((declaration) => declaration.initializer)
+      .filter((value): value is ts.ArrowFunction => value !== undefined && ts.isArrowFunction(value));
+    expect(arrows).toHaveLength(2);
+    const left = canonicalizeWithCap(arrows[0]!.body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
+    const right = canonicalizeWithCap(arrows[1]!.body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
+    expect(left.canonical).toBe(right.canonical);
+    expect(left.nodeCount).toBeLessThan(20);
+    expect(left.tokenCount).toBeLessThan(24);
+  });
+
+  it("caps total findings with explicit truncation metadata", () => {
+    const findings: Finding[] = [
+      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-0", location: { path: "src/0.ts", line: 1, column: 1 } },
+      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-1", location: { path: "src/1.ts", line: 1, column: 1 } },
+      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-2", location: { path: "src/2.ts", line: 1, column: 1 } },
+    ];
+    const capped = capFindings(findings, 2);
+    expect(capped.kept.map((item) => item.message)).toEqual(["finding-0", "finding-1"]);
+    expect(capped.truncated).toBe(true);
+    expect(capped.truncatedCount).toBe(1);
   });
 });

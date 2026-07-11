@@ -31,6 +31,7 @@ async function buildFile(entry, outfile, options = {}) {
   });
 }
 
+// analyze: allow-sequential
 for (const ext of extensions) {
   const outdir = join(ext.absPath, "dist");
   if (!existsSync(ext.sourceEntry)) {

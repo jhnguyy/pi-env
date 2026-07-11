@@ -40,7 +40,7 @@ try {
     bundle: has("--bundle"),
     typeSimilarityThreshold: value("--type-threshold") === undefined ? undefined : Number(value("--type-threshold")),
     profile: has("--profile"),
-    maxMemoryMb: value("--max-memory-mb") === undefined ? 3072 : Number(value("--max-memory-mb")),
+    maxMemoryMb: value("--max-memory-mb") === undefined ? 2048 : Number(value("--max-memory-mb")),
     benchmarks,
   }));
 } catch (cause) {

@@ -2,11 +2,15 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { Effect } from "effect";
 import { asyncRisks, complexity, duplicates, similarTypes } from "./analyzers.js";
-import { runBenchmark, type BenchmarkConfig } from "./benchmark.js";
-import { bundleAnalyzer, dependencyAnalyzer, eslintAnalyzer, knipAnalyzer } from "./external.js";
+import { runBenchmarkEffect, type BenchmarkConfig } from "./benchmark.js";
+import { bundleAnalyzer, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import {
   AnalyzerName,
+  AnalyzerRunError,
   ConfigError,
+  ProgramError,
+  ScopeError,
+  type AnalyzeError,
   type AnalysisResult,
   type AnalyzerFailure,
   type BenchmarkResult,
@@ -28,6 +32,7 @@ export interface AnalyzeOptions {
   profile?: boolean;
   benchmarks?: readonly BenchmarkConfig[];
   maxMemoryMb?: number;
+  externalTimeoutMs?: number;
 }
 
 export interface EngineSeams {
@@ -48,8 +53,22 @@ const INTERNAL = new Set<AnalyzerName>([
   AnalyzerName.Types,
   AnalyzerName.AsyncRisk,
 ]);
-const DEFAULT_MEMORY_MB = 3072;
+const DEFAULT_MEMORY_MB = 2048;
+export const MAX_TOTAL_FINDINGS = 2_000 as const;
 const defaultChecks = Object.values(AnalyzerName).filter((name) => name !== AnalyzerName.Bundle);
+
+export function capFindings(findings: readonly Finding[], max: number): {
+  kept: Finding[];
+  truncated: boolean;
+  truncatedCount: number;
+} {
+  const kept = findings.slice(0, max);
+  return {
+    kept,
+    truncated: findings.length > max,
+    truncatedCount: Math.max(0, findings.length - kept.length),
+  };
+}
 
 const stable = (value: unknown): string => JSON.stringify(
   value,
@@ -81,8 +100,9 @@ function validateOptions(options: AnalyzeOptions): number {
     throw new ConfigError({ message: "Type similarity threshold must be between 0 and 1" });
   }
   const budget = options.maxMemoryMb ?? DEFAULT_MEMORY_MB;
-  if (!Number.isInteger(budget) || budget <= 0) {
-    throw new ConfigError({ message: "maxMemoryMb must be a positive integer" });
+  if (!Number.isInteger(budget) || budget <= 0) throw new ConfigError({ message: "maxMemoryMb must be a positive integer" });
+  if (options.externalTimeoutMs !== undefined && (!Number.isInteger(options.externalTimeoutMs) || options.externalTimeoutMs < 1)) {
+    throw new ConfigError({ message: "externalTimeoutMs must be an integer >= 1" });
   }
   return budget;
 }
@@ -139,31 +159,48 @@ function createProfileRecorder(enabled: boolean): ProfileRecorder {
   return recorder;
 }
 
-async function dispatchAnalyzer(
+function dispatchAnalyzer(
   name: AnalyzerName,
   options: AnalyzeOptions,
   scope: Scope,
   project: Project | undefined,
   guard: () => boolean,
-): Promise<Finding[]> {
+  budget: number,
+): Effect.Effect<Finding[], AnalyzerRunError> {
   switch (name) {
-    case AnalyzerName.Complexity:
-      return complexity(project!, options.cwd, scope);
-    case AnalyzerName.Duplicates:
-      return duplicates(project!, options.cwd, scope);
-    case AnalyzerName.Types:
-      return similarTypes(project!, options.cwd, scope, options.typeSimilarityThreshold);
-    case AnalyzerName.AsyncRisk:
-      return asyncRisks(project!, options.cwd, scope);
-    case AnalyzerName.Eslint:
-      return eslintAnalyzer(options.cwd, scope);
-    case AnalyzerName.Dependencies:
-      return dependencyAnalyzer(options.cwd, scope);
-    case AnalyzerName.Knip:
-      return knipAnalyzer(options.cwd);
-    case AnalyzerName.Bundle:
-      return bundleAnalyzer(options.cwd, scope, { beforeEntry: guard });
+    case AnalyzerName.Complexity: return Effect.sync(() => complexity(project!, options.cwd, scope));
+    case AnalyzerName.Duplicates: return Effect.sync(() => duplicates(project!, options.cwd, scope));
+    case AnalyzerName.Types: return Effect.sync(() => similarTypes(project!, options.cwd, scope, options.typeSimilarityThreshold));
+    case AnalyzerName.AsyncRisk: return Effect.sync(() => asyncRisks(project!, options.cwd, scope));
+    case AnalyzerName.Dependencies: return dependencyAnalyzerEffect(options.cwd, scope, budget, options.externalTimeoutMs);
+    case AnalyzerName.Knip: return knipAnalyzerEffect(options.cwd, budget, options.externalTimeoutMs);
+    case AnalyzerName.Eslint: return eslintAnalyzerEffect(options.cwd, scope, budget, options.externalTimeoutMs);
+    case AnalyzerName.Bundle: return Effect.tryPromise({ try: () => bundleAnalyzer(options.cwd, scope, { beforeEntry: guard }), catch: (cause) => new AnalyzerRunError({ analyzer: name, message: cause instanceof Error ? cause.message : String(cause) }) });
   }
+}
+
+function toConfigError(cause: unknown): ConfigError {
+  return cause instanceof ConfigError ? cause : new ConfigError({ message: String(cause) });
+}
+
+function toScopeError(cause: unknown): ScopeError {
+  return cause instanceof ScopeError ? cause : new ScopeError({ message: cause instanceof Error ? cause.message : String(cause) });
+}
+
+function toProgramError(cause: unknown): ProgramError {
+  return cause instanceof ProgramError ? cause : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
+}
+
+function toAnalyzerFailure(analyzer: AnalyzerFailure["analyzer"], message: string): AnalyzerFailure {
+  return { analyzer, message };
+}
+
+function recordMemoryBudgetFailure(
+  failures: AnalyzerFailure[],
+  analyzer: AnalyzerFailure["analyzer"],
+  message: string,
+): void {
+  failures.push(toAnalyzerFailure(analyzer, message));
 }
 
 function finalizeResult(
@@ -195,99 +232,149 @@ function finalizeResult(
   };
 }
 
-export function analyze(
+function setupAnalysis(options: AnalyzeOptions): Effect.Effect<{ budget: number; checks: AnalyzerName[]; scope: Scope; recorder: ProfileRecorder; started: number }, AnalyzeError> {
+  const started = performance.now();
+  const recorder = createProfileRecorder(options.profile === true);
+  return Effect.gen(function* () {
+    const budget = yield* Effect.try({ try: () => validateOptions(options), catch: toConfigError });
+    const checks = yield* Effect.try({ try: () => selectedChecks(options), catch: toConfigError });
+    const scope = yield* Effect.try({
+      try: () => recorder.measure("scope", () => resolveScope(options.cwd, options.scope, options.paths ?? [], options.ref)),
+      catch: toScopeError,
+    });
+    recorder.snapshot("after:scope");
+    return { budget, checks, scope, recorder, started };
+  });
+}
+
+function createMemoryGuard(recorder: ProfileRecorder, failures: AnalyzerFailure[], budget: number): { guard: (name: AnalyzerName) => boolean; stop: () => void; isStopped: () => boolean } {
+  let stopped = false;
+  return {
+    guard(name) {
+      const value = recorder.snapshot(`before:${name}`);
+      if (!isMemoryBudgetExceeded(value.rssBytes, budget)) return true;
+      if (!stopped) recordMemoryBudgetFailure(failures, name, `Memory budget exceeded: RSS ${value.rssBytes} bytes > ${budget} MiB guard; remaining expensive stages skipped`);
+      stopped = true;
+      return false;
+    },
+    stop: () => { stopped = true; },
+    isStopped: () => stopped,
+  };
+}
+
+function loadProjectIfNeeded(
+  options: AnalyzeOptions,
+  seams: EngineSeams,
+  checks: readonly AnalyzerName[],
+  recorder: ProfileRecorder,
+  guard: (name: AnalyzerName) => boolean,
+): Effect.Effect<Project | undefined, ProgramError> {
+  if (!needsInternalProgram(checks)) return Effect.succeed(undefined);
+  const firstInternal = checks.find((name) => INTERNAL.has(name))!;
+  if (!guard(firstInternal)) return Effect.succeed(undefined);
+  return Effect.try({
+    try: () => recorder.measure("program", () => (seams.createProject ?? createProject)(options.cwd)),
+    catch: toProgramError,
+  }).pipe(Effect.tap(() => Effect.sync(() => { recorder.snapshot("after:program"); })));
+}
+
+function orderedChecks(checks: readonly AnalyzerName[]): AnalyzerName[] {
+  return [...checks.filter((name) => INTERNAL.has(name)), ...checks.filter((name) => !INTERNAL.has(name))];
+}
+
+function runAnalyzers(
+  options: AnalyzeOptions,
+  checks: readonly AnalyzerName[],
+  scope: Scope,
+  project: Project | undefined,
+  recorder: ProfileRecorder,
+  failures: AnalyzerFailure[],
+  findings: Finding[],
+  budget: number,
+  state: { guard: (name: AnalyzerName) => boolean; stop: () => void; isStopped: () => boolean },
+): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    let currentProject = project;
+    for (const name of orderedChecks(checks)) {
+      if (!INTERNAL.has(name)) currentProject = undefined;
+      if (state.isStopped() || !state.guard(name)) break;
+      const analyzerStarted = performance.now();
+      const outcome = yield* Effect.either(dispatchAnalyzer(name, options, scope, currentProject, () => state.guard(name), budget));
+      if (outcome._tag === "Right") {
+        const capped = capFindings(outcome.right, Math.max(0, MAX_TOTAL_FINDINGS - findings.length));
+        findings.push(...capped.kept);
+        if (capped.truncated) failures.push(toAnalyzerFailure(name, `Global finding limit reached; dropped ${capped.truncatedCount} additional finding(s) after keeping ${MAX_TOTAL_FINDINGS} total deterministically`));
+      } else failures.push(toAnalyzerFailure(outcome.left.analyzer, outcome.left.message));
+      if (options.profile) recorder.timings[name] = performance.now() - analyzerStarted;
+      recorder.snapshot(`after:${name}`);
+      if (isMemoryBudgetExceeded(process.memoryUsage().rss, budget)) {
+        recordMemoryBudgetFailure(failures, name, "Memory budget exceeded after analyzer; remaining expensive stages skipped");
+        state.stop();
+        break;
+      }
+    }
+  });
+}
+
+function runBenchmarks(
+  options: AnalyzeOptions,
+  failures: AnalyzerFailure[],
+  benchmarks: BenchmarkResult[],
+): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    for (const config of options.benchmarks ?? []) {
+      const outcome = yield* Effect.either(runBenchmarkEffect(config));
+      if (outcome._tag === "Right") benchmarks.push(outcome.right);
+      else {
+        benchmarks.push({ command: [config.command, ...config.args].join(" "), runs: outcome.left.runs ?? [], failure: outcome.left.message });
+        failures.push(toAnalyzerFailure("benchmark", outcome.left.message));
+      }
+    }
+  });
+}
+
+function finalizeAnalysis(
+  options: AnalyzeOptions,
+  recorder: ProfileRecorder,
+  started: number,
+  findings: readonly Finding[],
+  failures: readonly AnalyzerFailure[],
+  benchmarks: readonly BenchmarkResult[],
+): AnalysisResult {
+  if (options.profile) recorder.timings.totalMs = performance.now() - started;
+  recorder.snapshot("complete");
+  return finalizeResult(findings, failures, benchmarks, options, recorder);
+}
+
+export function analyzeEffect(
   options: AnalyzeOptions,
   seams: EngineSeams = {},
-): Effect.Effect<AnalysisResult, never> {
-  return Effect.promise(async () => {
-    const started = performance.now();
-    const recorder = createProfileRecorder(options.profile === true);
+): Effect.Effect<AnalysisResult, AnalyzeError> {
+  return Effect.gen(function* () {
+    const { budget, checks, scope, recorder, started } = yield* setupAnalysis(options);
     const findings: Finding[] = [];
     const failures: AnalyzerFailure[] = [];
     const benchmarks: BenchmarkResult[] = [];
-    let stopped = false;
-
-    try {
-      const budget = validateOptions(options);
-      const checks = selectedChecks(options);
-      const scope = recorder.measure("scope", () =>
-        resolveScope(options.cwd, options.scope, options.paths ?? [], options.ref));
-      recorder.snapshot("after:scope");
-
-      const guard = (name: AnalyzerName): boolean => {
-        const value = recorder.snapshot(`before:${name}`);
-        if (!isMemoryBudgetExceeded(value.rssBytes, budget)) return true;
-        if (!stopped) {
-          failures.push({
-            analyzer: name,
-            message: `Memory budget exceeded: RSS ${value.rssBytes} bytes > ${budget} MiB guard; remaining expensive stages skipped`,
-          });
-        }
-        stopped = true;
-        return false;
-      };
-
-      let project: Project | undefined;
-      if (needsInternalProgram(checks)) {
-        const firstInternal = checks.find((name) => INTERNAL.has(name))!;
-        if (guard(firstInternal)) {
-          project = recorder.measure("program", () =>
-            (seams.createProject ?? createProject)(options.cwd));
-          recorder.snapshot("after:program");
-        }
-      }
-
-      const ordered = [
-        ...checks.filter((name) => INTERNAL.has(name)),
-        ...checks.filter((name) => !INTERNAL.has(name)),
-      ];
-      // Analyzer stages intentionally remain sequential so the internal Program
-      // can be released before external tools claim their own large heaps.
-      for (const name of ordered) {
-        if (!INTERNAL.has(name)) project = undefined;
-        if (stopped || !guard(name)) break;
-        const analyzerStarted = performance.now();
-        try {
-          findings.push(...await dispatchAnalyzer(name, options, scope, project, () => guard(name)));
-        } catch (cause) {
-          failures.push({
-            analyzer: name,
-            message: cause instanceof Error ? cause.message : String(cause),
-          });
-        }
-        if (options.profile) recorder.timings[name] = performance.now() - analyzerStarted;
-        recorder.snapshot(`after:${name}`);
-        if (isMemoryBudgetExceeded(process.memoryUsage().rss, budget)) {
-          failures.push({
-            analyzer: name,
-            message: "Memory budget exceeded after analyzer; remaining expensive stages skipped",
-          });
-          stopped = true;
-        }
-      }
-
-      // Benchmark runs are also intentionally sequential for stable measurements
-      // and bounded peak memory. Sequential-await findings are review signals,
-      // not mandates to parallelize memory-sensitive work.
-      if (!stopped) {
-        for (const config of options.benchmarks ?? []) {
-          const value = await runBenchmark(config);
-          benchmarks.push(value);
-          if (value.failure) failures.push({ analyzer: "benchmark", message: value.failure });
-        }
-      }
-      if (options.profile) recorder.timings.totalMs = performance.now() - started;
-      recorder.snapshot("complete");
-      return finalizeResult(findings, failures, benchmarks, options, recorder);
-    } catch (cause) {
-      const tag = (cause as { _tag?: string })._tag;
-      const failure: AnalyzerFailure = {
-        analyzer: tag === "ConfigError" ? "configuration" : tag === "ScopeError" ? "scope" : "program",
-        message: cause instanceof Error ? cause.message : String(cause),
-      };
-      if (options.profile) recorder.timings.totalMs = performance.now() - started;
-      recorder.snapshot("complete");
-      return finalizeResult([], [failure], [], options, recorder);
-    }
+    const state = createMemoryGuard(recorder, failures, budget);
+    const internalChecks = checks.filter((name) => INTERNAL.has(name));
+    const externalChecks = checks.filter((name) => !INTERNAL.has(name));
+    let project = yield* loadProjectIfNeeded(options, seams, internalChecks, recorder, state.guard);
+    yield* runAnalyzers(options, internalChecks, scope, project, recorder, failures, findings, budget, state);
+    project = undefined; // Release the sole Project reference before any external analyzer.
+    if (!state.isStopped()) yield* runAnalyzers(options, externalChecks, scope, undefined, recorder, failures, findings, budget, state);
+    if (!state.isStopped()) yield* runBenchmarks(options, failures, benchmarks);
+    return finalizeAnalysis(options, recorder, started, findings, failures, benchmarks);
   });
+}
+
+export function analyze(options: AnalyzeOptions, seams: EngineSeams = {}): Effect.Effect<AnalysisResult, never> {
+  const failureResult = (analyzer: AnalyzerFailure["analyzer"], message: string): AnalysisResult => {
+    const recorder = createProfileRecorder(options.profile === true);
+    return finalizeResult([], [toAnalyzerFailure(analyzer, message)], [], options, recorder);
+  };
+  return analyzeEffect(options, seams).pipe(Effect.catchTags({
+    ConfigError: (error) => Effect.succeed(failureResult("configuration", error.message)),
+    ScopeError: (error) => Effect.succeed(failureResult("scope", error.message)),
+    ProgramError: (error) => Effect.succeed(failureResult("program", error.message)),
+  }));
 }

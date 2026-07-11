@@ -17,10 +17,21 @@ export interface Finding { id: string; analyzer: AnalyzerName; kind: FindingKind
 export interface AnalyzerFailure { analyzer: AnalyzerName | "benchmark" | "configuration" | "scope" | "program"; message: string }
 export interface BenchmarkResult { command: string; runs: readonly number[]; meanMs?: number; failure?: string }
 export interface MemorySnapshot { rssBytes: number; heapUsedBytes: number; externalBytes: number }
-export interface AnalysisProfile { timings: Readonly<Record<string, number>>; memory: Readonly<Record<string, MemorySnapshot>>; peak: MemorySnapshot }
+interface AnalysisProfile { timings: Readonly<Record<string, number>>; memory: Readonly<Record<string, MemorySnapshot>>; peak: MemorySnapshot }
 export interface AnalysisResult { version: 1; summary: { info: number; warning: number; error: number; failures: number }; findings: readonly Finding[]; analyzerFailures: readonly AnalyzerFailure[]; benchmarks: readonly BenchmarkResult[]; profile?: AnalysisProfile }
 export class ConfigError extends Data.TaggedError("ConfigError")<{ message: string }>{}
 export class ScopeError extends Data.TaggedError("ScopeError")<{ message: string }>{}
 export class ProgramError extends Data.TaggedError("ProgramError")<{ message: string }>{}
-export class AnalyzerError extends Data.TaggedError("AnalyzerError")<{ analyzer: AnalyzerName; message: string }>{}
-export class BenchmarkError extends Data.TaggedError("BenchmarkError")<{ message: string }>{}
+export class AnalyzerRunError extends Data.TaggedError("AnalyzerRunError")<{ analyzer: AnalyzerName; message: string }>{}
+export class BenchmarkError extends Data.TaggedError("BenchmarkError")<{ message: string; runs?: readonly number[] }>{}
+export const ProcessErrorKind = { Spawn: "spawn", Exit: "exit", Timeout: "timeout" } as const;
+export type ProcessErrorKind = typeof ProcessErrorKind[keyof typeof ProcessErrorKind];
+export class ProcessError extends Data.TaggedError("ProcessError")<{
+  kind: ProcessErrorKind;
+  command: string;
+  message: string;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+}>{}
+export type AnalyzeError = ConfigError | ScopeError | ProgramError;

@@ -1,22 +1,22 @@
-import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile, readdir } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
-import { promisify } from "node:util";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { build, type BuildOptions, type Metafile } from "esbuild";
-import { ESLint } from "eslint";
+import { Effect } from "effect";
 import {
   AnalyzerName,
+  AnalyzerRunError,
   FindingKind,
   Severity,
   type Finding,
 } from "./model.js";
+import { DEFAULT_EXTERNAL_TIMEOUT_MS, execFileEffect, nodeAnalyzerEnvironment } from "./process.js";
 import { tsconfigFileNames } from "./program.js";
 import type { Scope } from "./scope.js";
 
-const execute = promisify(execFile);
 const slash = (value: string): string => value.replaceAll("\\", "/");
-export const selectedTsPaths = (cwd: string, scope: Scope): string[] =>
+const selectedTsPaths = (cwd: string, scope: Scope): string[] =>
   tsconfigFileNames(cwd)
     .map((file) => slash(relative(cwd, file)))
     .filter((file) => !file.includes("node_modules/") && (scope.mode === "all" || scope.files.includes(file)));
@@ -87,60 +87,59 @@ export function normalizeBundleMetafile(metafile: Metafile): BundleInputSummary 
   };
 }
 
-export async function eslintAnalyzer(cwd: string, scope: Scope): Promise<Finding[]> {
-  const files = selectedTsPaths(cwd, scope);
-  if (files.length === 0) return [];
-  const eslint = new ESLint({ cwd });
-  const results = await eslint.lintFiles(files);
-  return results.flatMap((result) => result.messages
-    .filter((message) => [
-      "@typescript-eslint/no-floating-promises",
-      "@typescript-eslint/no-misused-promises",
-      "@typescript-eslint/await-thenable",
-    ].includes(message.ruleId ?? ""))
-    .map((message) => ({
-      id: "",
-      analyzer: AnalyzerName.Eslint,
-      kind: FindingKind.Lint,
-      severity: message.severity === 2 ? Severity.Error : Severity.Warning,
-      message: `${message.ruleId}: ${message.message}`,
-      location: {
-        path: slash(relative(cwd, result.filePath)),
-        line: message.line,
-        column: message.column,
-        endLine: message.endLine,
-        endColumn: message.endColumn,
-      },
-      data: { ruleId: message.ruleId },
-    })));
+interface EslintJsonResult { filePath: string; messages: readonly { ruleId: string | null; severity: number; message: string; line: number; column: number; endLine?: number; endColumn?: number }[] }
+const ESLINT_RULES = new Set(["@typescript-eslint/no-floating-promises", "@typescript-eslint/no-misused-promises", "@typescript-eslint/await-thenable"]);
+export function parseEslintJson(text: string, cwd: string): Finding[] {
+  const results = JSON.parse(text) as readonly EslintJsonResult[];
+  return results.flatMap((result) => result.messages.filter((message) => message.ruleId !== null && ESLINT_RULES.has(message.ruleId)).map((message) => ({
+    id: "", analyzer: AnalyzerName.Eslint, kind: FindingKind.Lint,
+    severity: message.severity === 2 ? Severity.Error : Severity.Warning,
+    message: `${message.ruleId}: ${message.message}`,
+    location: { path: slash(relative(cwd, result.filePath)), line: message.line, column: message.column, endLine: message.endLine, endColumn: message.endColumn },
+    data: { ruleId: message.ruleId },
+  })));
 }
 
-export async function dependencyAnalyzer(cwd: string, scope: Scope): Promise<Finding[]> {
+export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError> {
+  const files = selectedTsPaths(cwd, scope);
+  if (files.length === 0) return Effect.succeed([]);
+  return execFileEffect(resolve(cwd, "scripts/node-run.sh"), [resolve(cwd, "node_modules/eslint/bin/eslint.js"), "--format", "json", "--", ...files], {
+    cwd, timeoutMs, maxBuffer: 20 * 1024 * 1024, env: nodeAnalyzerEnvironment(maxMemoryMb),
+  }).pipe(
+    Effect.map(({ stdout }) => parseEslintJson(stdout, cwd)),
+    // ESLint exits 1 when lint findings exist; its JSON is still a successful analyzer result.
+    Effect.catchTag("ProcessError", (cause) => cause.stdout && cause.kind === "exit"
+      ? Effect.try({ try: () => parseEslintJson(cause.stdout!, cwd), catch: () => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }) })
+      : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause.message }))),
+    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: String(cause) })),
+  );
+}
+
+export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError> {
   const targets = scope.mode === "all" ? ["."] : scope.files;
-  if (targets.length === 0) return [];
+  if (targets.length === 0) return Effect.succeed([]);
   const executable = resolve(cwd, "scripts/node-run.sh");
   const script = resolve(cwd, "node_modules/dependency-cruiser/bin/dependency-cruise.mjs");
-  try {
-    const { stdout } = await execute(executable, [script, ...targets, "--output-type", "json", "--progress", "none"], {
-      cwd,
-      maxBuffer: 20 * 1024 * 1024,
-    });
-    return parseDependencyCruiserJson(stdout);
-  } catch (cause) {
-    const output = cause as { stdout?: string };
-    if (output.stdout) return parseDependencyCruiserJson(output.stdout);
-    throw cause;
-  }
+  return execFileEffect(executable, [script, ...targets, "--output-type", "json", "--progress", "none"], {
+    cwd, maxBuffer: 20 * 1024 * 1024, timeoutMs, env: nodeAnalyzerEnvironment(maxMemoryMb),
+  }).pipe(
+    Effect.map(({ stdout }) => parseDependencyCruiserJson(stdout)),
+    Effect.catchTag("ProcessError", (cause) => cause.stdout
+      ? Effect.try({ try: () => parseDependencyCruiserJson(cause.stdout!), catch: () => new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause.message }) })
+      : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause.message }))),
+    Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: String(cause) })),
+  );
 }
 
-export async function knipAnalyzer(cwd: string): Promise<Finding[]> {
+export function knipAnalyzerEffect(cwd: string, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError> {
   const executable = resolve(cwd, "scripts/node-run.sh");
   const script = resolve(cwd, "node_modules/knip/bin/knip.js");
-  const { stdout, stderr } = await execute(executable, [script, "--reporter", "compact", "--no-progress", "--no-exit-code"], {
-    cwd,
-    maxBuffer: 20 * 1024 * 1024,
-  });
-  return parseKnipOutput(`${stdout}\n${stderr}`);
+  return execFileEffect(executable, [script, "--reporter", "compact", "--no-progress", "--no-exit-code"], {
+    cwd, maxBuffer: 20 * 1024 * 1024, timeoutMs, env: nodeAnalyzerEnvironment(maxMemoryMb),
+  }).pipe(
+    Effect.map(({ stdout, stderr }) => parseKnipOutput(`${stdout}\n${stderr}`)),
+    Effect.mapError((cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Knip, message: cause.message })),
+  );
 }
 
 interface PackageSideEffectsResult {
@@ -221,15 +220,23 @@ function scopedExtensionEntrypoints(cwd: string, scope: Scope, allEntrypoints: r
   return [...scoped].sort();
 }
 
-export type BundleBuild = (options: BuildOptions) => Promise<{ metafile?: Metafile }>;
-export interface BundleControls { build?: BundleBuild; beforeEntry?: (entrypoint: string) => boolean }
+type BundleBuild = (options: BuildOptions) => Promise<{ metafile?: Metafile }>;
+interface BundleControls { build?: BundleBuild; beforeEntry?: (entrypoint: string) => boolean }
 export async function bundleAnalyzer(cwd: string, scope: Scope, controls: BundleControls = {}): Promise<Finding[]> {
   const entryPoints = scopedExtensionEntrypoints(cwd, scope, await discoverExtensionEntrypoints(cwd));
   const { externals, configured } = await readConfiguredExternals(cwd);
   const findings: Finding[] = [];
+  // analyze: allow-sequential
   for (const entryPoint of entryPoints) {
     if (controls.beforeEntry?.(entryPoint) === false) break;
-    const result = await (controls.build ?? build)({ absWorkingDir: cwd, entryPoints: [entryPoint], bundle: true, write: false, metafile: true, outdir: ".analyze-bundle", platform: "node", format: "esm", external: [...externals] });
+    // esbuild's JS API is non-cancellable; deliberately do not timeout and overlap builds.
+    const outputDirectory = await mkdtemp(join(tmpdir(), "pi-analyze-bundle-"));
+    let result: { metafile?: Metafile };
+    try {
+      result = await (controls.build ?? build)({ absWorkingDir: cwd, entryPoints: [entryPoint], bundle: true, write: true, metafile: true, outdir: outputDirectory, platform: "node", format: "esm", external: [...externals] });
+    } finally {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
     const summary = normalizeBundleMetafile(result.metafile!);
     const sideEffects = await packageSideEffects(cwd, entryPoint);
     findings.push({ id: "", analyzer: AnalyzerName.Bundle, kind: FindingKind.Bundle, severity: Severity.Info,

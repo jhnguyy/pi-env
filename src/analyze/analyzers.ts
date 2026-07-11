@@ -8,6 +8,12 @@ import { intersectsHunks } from "./scope.js";
 
 type BodyFunction = ts.FunctionLikeDeclaration & { body: ts.ConciseBody };
 type DuplicateGroup = { canonical: string; locations: Location[] };
+interface CanonicalizationResult {
+  canonical: string;
+  truncated: boolean;
+  nodeCount: number;
+  tokenCount: number;
+}
 
 const hasBody = (node: ts.Node): node is BodyFunction =>
   ts.isFunctionLike(node) && "body" in node && node.body !== undefined;
@@ -39,24 +45,63 @@ const changed = (scope: Scope, value: Location): boolean =>
   || scope.files.includes(value.path)
     && intersectsHunks(value.line, value.endLine ?? value.line, scope.hunks.get(value.path));
 
-function canonical(node: ts.Node): string {
+const DUPLICATE_CANONICAL_CAPS = {
+  nodesPerFunction: 10_000,
+  bytesPerFunction: 256 * 1024,
+  minimumNodeCount: 40,
+  minimumTokenCount: 40,
+} as const;
+
+export interface DuplicateCanonicalCaps {
+  nodesPerFunction: number;
+  bytesPerFunction: number;
+  minimumNodeCount: number;
+  minimumTokenCount: number;
+}
+
+export function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLICATE_CANONICAL_CAPS): CanonicalizationResult {
   const parts: string[] = [];
+  let nodeCount = 0;
+  let tokenCount = 0;
+  let bytes = 0;
+  let truncated = false;
+  const push = (value: string): void => {
+    if (truncated) return;
+    bytes += value.length + 1;
+    if (bytes > caps.bytesPerFunction) {
+      truncated = true;
+      return;
+    }
+    parts.push(value);
+    tokenCount++;
+  };
   const visit = (child: ts.Node): void => {
-    parts.push(String(child.kind));
-    if (ts.isIdentifier(child)) parts.push("#id");
-    else if (ts.isStringLiteral(child) || ts.isNumericLiteral(child)) parts.push("#literal");
-    else if (child.getChildCount() === 0) parts.push(child.getText());
+    if (truncated) return;
+    nodeCount++;
+    if (nodeCount > caps.nodesPerFunction) {
+      truncated = true;
+      return;
+    }
+    push(String(child.kind));
+    if (truncated) return;
+    if (ts.isIdentifier(child)) push("#id");
+    else if (ts.isStringLiteral(child) || ts.isNumericLiteral(child)) push("#literal");
+    else if (child.getChildCount() === 0) push(child.getText());
+    if (truncated) return;
     ts.forEachChild(child, visit);
   };
   visit(node);
-  return parts.join("|");
+  return { canonical: parts.join("|"), truncated, nodeCount, tokenCount };
 }
 
-function isBranch(node: ts.Node): boolean {
-  if (ts.isBinaryExpression(node)) {
-    return node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-      || node.operatorToken.kind === ts.SyntaxKind.BarBarToken;
-  }
+const logicalOperator = (node: ts.Node): ts.SyntaxKind | undefined =>
+  ts.isBinaryExpression(node)
+    && (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || node.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+    ? node.operatorToken.kind
+    : undefined;
+
+function isControlBranch(node: ts.Node): boolean {
   return ts.isIfStatement(node)
     || ts.isForStatement(node)
     || ts.isForInStatement(node)
@@ -71,21 +116,29 @@ function isBranch(node: ts.Node): boolean {
 function functionComplexity(root: BodyFunction): { cyclomatic: number; cognitive: number } {
   let cyclomatic = 1;
   let cognitive = 0;
-  let depth = 0;
-  const visit = (node: ts.Node): void => {
+  const visit = (node: ts.Node, controlDepth: number, parentLogical?: ts.SyntaxKind): void => {
     if (node !== root && ts.isFunctionLike(node)) return;
-    const branch = isBranch(node);
-    if (branch) {
+    const logical = logicalOperator(node);
+    if (logical !== undefined) {
       cyclomatic++;
-      cognitive += 1 + depth;
-      depth++;
+      // A flat predicate is one cognitive sequence, even though each operator is
+      // still a defensible cyclomatic branch. Mixed operators start a new sequence.
+      if (logical !== parentLogical) cognitive++;
+      ts.forEachChild(node, (child) => visit(child, controlDepth, logical));
+      return;
     }
-    ts.forEachChild(node, visit);
-    if (branch) depth--;
+    const control = isControlBranch(node);
+    if (control) {
+      cyclomatic++;
+      cognitive += 1 + controlDepth;
+    }
+    ts.forEachChild(node, (child) => visit(child, control ? controlDepth + 1 : controlDepth));
   };
-  visit(root);
+  visit(root, 0);
   return { cyclomatic, cognitive };
 }
+
+const COMPLEXITY_ADVISORY = { cyclomatic: 15, cognitive: 20 } as const;
 
 export function complexity(project: Project, cwd: string, scope: Scope): Finding[] {
   const output: Finding[] = [];
@@ -94,7 +147,8 @@ export function complexity(project: Project, cwd: string, scope: Scope): Finding
       const loc = location(cwd, file, fn);
       if (!changed(scope, loc)) continue;
       const score = functionComplexity(fn);
-      if (score.cyclomatic >= 10) {
+      if (score.cyclomatic >= COMPLEXITY_ADVISORY.cyclomatic
+        || score.cognitive >= COMPLEXITY_ADVISORY.cognitive) {
         output.push({
           id: "",
           analyzer: AnalyzerName.Complexity,
@@ -110,7 +164,7 @@ export function complexity(project: Project, cwd: string, scope: Scope): Finding
   return output;
 }
 
-export const ANALYZER_CAPS = {
+const ANALYZER_CAPS = {
   duplicateCandidates: 10_000,
   duplicateFindings: 100,
   typeCandidates: 5_000,
@@ -133,13 +187,16 @@ function collectDuplicateGroups(project: Project, cwd: string): {
         return { groups, truncated: true };
       }
       candidates++;
-      const text = canonical(fn.body);
-      if (text.length < 80) continue;
-      const hash = createHash("sha256").update(text).digest("hex");
+      const result = canonicalizeWithCap(fn.body);
+      if (result.truncated
+        || result.canonical.length < 80
+        || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount
+        || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
+      const hash = createHash("sha256").update(result.canonical).digest("hex");
       const prior = groups.get(hash);
       if (prior === undefined) {
-        groups.set(hash, { canonical: text, locations: [location(cwd, file, fn)] });
-      } else if (prior.canonical === text) {
+        groups.set(hash, { canonical: result.canonical, locations: [location(cwd, file, fn)] });
+      } else if (prior.canonical === result.canonical) {
         // Verify the canonical text because hashes are only bucket keys.
         prior.locations.push(location(cwd, file, fn));
       }
@@ -379,6 +436,23 @@ function typeSimilarityFinding(seed: TypeCandidate, peer: TypeCandidate, score: 
   };
 }
 
+function isTypeMatchCandidate(seed: TypeCandidate, peer: TypeCandidate): boolean {
+  return comparableBuckets(seed.shape, peer.shape)
+    && seed !== peer
+    && seed.name !== peer.name;
+}
+
+function recordTypePair(seed: TypeCandidate, peer: TypeCandidate, seen: Set<string>): boolean {
+  const key = typePairKey(seed, peer);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
+}
+
+function shouldTruncateTypeMatches(output: readonly Finding[]): boolean {
+  return output.length >= ANALYZER_CAPS.typeFindings;
+}
+
 function emitTypeMatches(
   seed: TypeCandidate,
   buckets: ReadonlyMap<string, TypeCandidate[]>,
@@ -389,16 +463,12 @@ function emitTypeMatches(
   let comparisons = 0;
   for (const candidates of buckets.values()) {
     for (const peer of candidates) {
-      if (!comparableBuckets(seed.shape, peer.shape)) continue;
+      if (!isTypeMatchCandidate(seed, peer)) continue;
       if (comparisons++ >= ANALYZER_CAPS.typeBucketComparisons) return true;
-      if (seed === peer || seed.name === peer.name) continue;
       const score = similarity(seed.shape, peer.shape);
-      if (score < threshold) continue;
-      const key = typePairKey(seed, peer);
-      if (seen.has(key)) continue;
-      seen.add(key);
+      if (score < threshold || !recordTypePair(seed, peer, seen)) continue;
       output.push(typeSimilarityFinding(seed, peer, score));
-      if (output.length >= ANALYZER_CAPS.typeFindings) return true;
+      if (shouldTruncateTypeMatches(output)) return true;
     }
   }
   return false;
@@ -444,17 +514,78 @@ function repeatedScanName(node: ts.Node): string | undefined {
   return ["sort", "find", "filter", "some", "every", "reduce"].includes(name) ? name : undefined;
 }
 
+function allowsSequential(file: ts.SourceFile, loop: ts.Node): boolean {
+  const text = file.getFullText();
+  const comments = ts.getLeadingCommentRanges(text, loop.getFullStart()) ?? [];
+  const last = comments.at(-1);
+  if (last === undefined || text.slice(last.end, loop.getStart(file)).trim() !== "") return false;
+  return /^\/\/\s*analyze:\s*allow-sequential\s*$/.test(text.slice(last.pos, last.end));
+}
+
+function visitForInOrOfLoop(
+  node: ts.ForInOrOfStatement,
+  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  loopDepth: number,
+  suppressed: boolean,
+  bodySuppressed: boolean,
+): void {
+  // For-of/in operands are evaluated once before iteration begins.
+  visit(node.initializer, loopDepth, suppressed);
+  visit(node.expression, loopDepth, suppressed);
+  visit(node.statement, loopDepth + 1, bodySuppressed);
+}
+
+function visitForLoop(
+  node: ts.ForStatement,
+  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  loopDepth: number,
+  suppressed: boolean,
+  bodySuppressed: boolean,
+): void {
+  if (node.initializer !== undefined) visit(node.initializer, loopDepth, suppressed);
+  if (node.condition !== undefined) visit(node.condition, loopDepth + 1, bodySuppressed);
+  if (node.incrementor !== undefined) visit(node.incrementor, loopDepth + 1, bodySuppressed);
+  visit(node.statement, loopDepth + 1, bodySuppressed);
+}
+
+function visitWhileOrDoLoop(
+  node: ts.WhileStatement | ts.DoStatement,
+  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  loopDepth: number,
+  bodySuppressed: boolean,
+): void {
+  visit(node.expression, loopDepth + 1, bodySuppressed);
+  visit(node.statement, loopDepth + 1, bodySuppressed);
+}
+
+function visitLoop(
+  node: ts.Node,
+  file: ts.SourceFile,
+  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  loopDepth: number,
+  suppressed: boolean,
+): boolean {
+  if (!isLoop(node)) return false;
+  const bodySuppressed = suppressed || allowsSequential(file, node);
+  if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+    visitForInOrOfLoop(node, visit, loopDepth, suppressed, bodySuppressed);
+  } else if (ts.isForStatement(node)) {
+    visitForLoop(node, visit, loopDepth, suppressed, bodySuppressed);
+  } else if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+    visitWhileOrDoLoop(node, visit, loopDepth, bodySuppressed);
+  }
+  return true;
+}
+
 function visitAsyncRisks(
   file: ts.SourceFile,
   cwd: string,
   scope: Scope,
   output: Finding[],
 ): void {
-  let loopDepth = 0;
-  const visit = (node: ts.Node): void => {
-    const loop = isLoop(node);
-    if (loop) loopDepth++;
-    if (loopDepth > 0) {
+  const visit = (node: ts.Node, loopDepth: number, suppressed: boolean): void => {
+    if (visitLoop(node, file, visit, loopDepth, suppressed)) return;
+    if (loopDepth > 0 && !suppressed) {
       const loc = location(cwd, file, node);
       if (changed(scope, loc) && ts.isAwaitExpression(node)) {
         output.push({
@@ -478,10 +609,9 @@ function visitAsyncRisks(
         });
       }
     }
-    ts.forEachChild(node, visit);
-    if (loop) loopDepth--;
+    ts.forEachChild(node, (child) => visit(child, loopDepth, suppressed));
   };
-  visit(file);
+  visit(file, 0, false);
 }
 
 export function asyncRisks(project: Project, cwd: string, scope: Scope): Finding[] {
