@@ -1,13 +1,5 @@
-/**
- * Shared types for the subagent extension.
- */
+/** Shared types for the subagent extension. */
 export { formatCapabilities, ToolCapability } from "../_shared/agent-tools";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-export const MAX_TURNS = 20;
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface UsageStats {
   input: number;
@@ -19,10 +11,16 @@ export interface UsageStats {
 }
 
 export interface SubagentDetails {
+  name: string;
   task: string;
   agent?: string;
   toolNames: string[];
   modelOverride: string | undefined;
+  /** Optional caller-selected limit; omitted means the loop is not turn-limited. */
+  maxTurns?: number;
+  sessionFile?: string;
+  sessionId?: string;
+  sessionName?: string;
   finalOutput: string;
   toolCallCount: number;
   usage: UsageStats;

@@ -11,14 +11,18 @@ import {
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { discoverAgents } from "./agents";
+import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { ToolCapability } from "./types";
 
 export interface SubagentParams {
+  /** Human-readable child-session name; required by the public tool schema and persisted as `sub-<slug>`. */
+  name?: string;
   agent?: string;
   task: string;
   tools?: string[];
   model?: string;
   system_prompt?: string;
+  max_turns?: number;
 }
 
 export interface ToolDef {
@@ -122,8 +126,7 @@ export function resolveAgentConfig(
 export function resolveTools(
   params: SubagentParams,
   agentConfig: AgentConfig | undefined,
-  registeredExtTools: Map<string, AgentTool<any, any>>,
-  registeredExtCaps: Map<string, ToolCapability[]> | undefined,
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   cwd: string,
 ): ResolutionResult<ToolResolution> {
   // Two mechanisms, unioned when both present:
@@ -148,9 +151,9 @@ export function resolveTools(
     for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
       if (def.capabilities.every((c) => capSet.has(c))) resolvedToolNames.add(toolName);
     }
-    if (registeredExtCaps) {
-      for (const [toolName, caps] of registeredExtCaps) {
-        if (caps.every((c) => capSet.has(c))) resolvedToolNames.add(toolName);
+    for (const [toolName, registration] of registeredExtTools) {
+      if (registration.capabilities.every((capability) => capSet.has(capability))) {
+        resolvedToolNames.add(toolName);
       }
     }
   }
@@ -163,7 +166,7 @@ export function resolveTools(
   const unknownTools: string[] = [];
   for (const name of resolvedToolNames) {
     if (name in BUILT_IN_TOOLS) tools.push(BUILT_IN_TOOLS[name].factory(cwd));
-    else if (registeredExtTools.has(name)) tools.push(registeredExtTools.get(name)!);
+    else if (registeredExtTools.has(name)) tools.push(registeredExtTools.get(name)!.tool);
     else unknownTools.push(name);
   }
 
@@ -223,13 +226,12 @@ export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentC
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
   ctx: ExtensionContext,
-  registeredExtTools: Map<string, AgentTool<any, any>>,
-  registeredExtCaps?: Map<string, ToolCapability[]>,
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
 ): ResolutionResult<SubagentExecutionPlan> {
   const agent = resolveAgentConfig(params, ctx.cwd);
   if (!isResolutionOk(agent)) return agent;
 
-  const tools = resolveTools(params, agent.value.agentConfig, registeredExtTools, registeredExtCaps, ctx.cwd);
+  const tools = resolveTools(params, agent.value.agentConfig, registeredExtTools, ctx.cwd);
   if (!isResolutionOk(tools)) return tools;
 
   const model = resolveModel(params.model ?? agent.value.agentConfig?.model, ctx.modelRegistry, tools.value.toolNames);

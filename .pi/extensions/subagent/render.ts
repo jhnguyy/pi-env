@@ -9,7 +9,7 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
-import { MAX_TURNS, type SubagentDetails } from "./types";
+import type { SubagentDetails } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +103,7 @@ export function renderSubagentResult(
       header += ` ${theme.fg("error", `[${details.stopReason}]`)}`;
     }
     if (details.turnLimitExceeded) {
-      header += ` ${theme.fg("warning", `[turn limit: ${MAX_TURNS}]`)}`;
+      header += ` ${theme.fg("warning", `[turn limit: ${details.maxTurns ?? "configured"}]`)}`;
     }
     container.addChild(new Text(header, 0, 0));
 
@@ -111,6 +111,8 @@ export function renderSubagentResult(
     const statParts: string[] = [];
     if (toolsStr) statParts.push(toolsStr);
     if (details.modelOverride) statParts.push(`model: ${details.modelOverride}`);
+    if (details.sessionName) statParts.push(`session: ${details.sessionName}`);
+    if (details.sessionFile) statParts.push(details.sessionFile);
     if (statParts.length > 0) {
       container.addChild(new Text(theme.fg("muted", statParts.join(" · ")), 0, 0));
     }
@@ -169,6 +171,7 @@ export function renderSubagentResult(
   const statsLine: string[] = [];
   if (toolsStr) statsLine.push(toolsStr);
   if (usageStr) statsLine.push(usageStr);
+  if (details.sessionName) statsLine.push(details.sessionName);
   if (statsLine.length > 0) {
     text += `\n${theme.fg("dim", statsLine.join(" · "))}`;
   }
