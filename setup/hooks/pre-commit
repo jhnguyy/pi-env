@@ -15,8 +15,8 @@ bash -n setup/*.sh setup/__tests__/*.sh scripts/*.sh
 echo "pre-commit: package manifest"
 nub --node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8"))'
 
-echo "pre-commit: code-quality harness"
-nub run check:all
+echo "pre-commit: quality analysis"
+nub run check:quality
 
 echo "pre-commit: typecheck"
 nub run typecheck

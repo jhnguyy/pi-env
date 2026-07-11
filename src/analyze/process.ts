@@ -5,7 +5,7 @@ import { ProcessError, ProcessErrorKind } from "./model.js";
 export const DEFAULT_EXTERNAL_TIMEOUT_MS = 120_000 as const;
 export const DEFAULT_BENCHMARK_TIMEOUT_MS = 30_000 as const;
 
-export interface ProcessOptions { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxBuffer?: number }
+interface ProcessOptions { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; maxBuffer?: number }
 export interface StreamProcessOptions extends ProcessOptions { stdin?: string; stdoutLimitBytes?: number; stderrLimitBytes?: number }
 export interface ProcessOutput { stdout: string; stderr: string }
 

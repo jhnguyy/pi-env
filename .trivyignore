@@ -1,4 +1,0 @@
-# oxlint-tsgolint 0.24.0 is the latest available release but its bundled
-# tsgolint executable was built with an affected Go runtime. Remove this
-# temporary exception when a release built with a fixed Go version is available.
-CVE-2026-39822 exp:2026-08-01

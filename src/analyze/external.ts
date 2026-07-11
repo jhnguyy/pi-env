@@ -1,9 +1,4 @@
 export {
-  ProcessService,
-  ProcessServiceLive,
-  processServiceLayer,
-} from "./process.js";
-export {
   dependencyAnalyzerEffect,
   eslintAnalyzerEffect,
   knipAnalyzerEffect,

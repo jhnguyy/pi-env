@@ -206,7 +206,7 @@ describe("analyze contracts", () => {
       cwd, scope: ScopeMode.All, maxMemoryMb: 1536, checks: [AnalyzerName.Eslint],
     }, { processRunner: (command, args, options) => { invocation = { command, args, options }; return Effect.succeed({ stdout: JSON.stringify({ diagnostics: [] }), stderr: "" }); } }));
     expect(result.analyzerFailures).toEqual([]);
-    expect(invocation?.command).toBe("node");
+    expect(invocation?.command).toBe(resolve(cwd, "scripts/tool-node-run.sh"));
     expect(invocation?.args[0]).toBe(resolve(cwd, "node_modules/oxlint/bin/oxlint"));
     expect(invocation?.options?.env?.PATH).toMatch(/^\/bin:\/usr\/bin:/);
     expect(invocation?.options?.env?.NODE_OPTIONS ?? "").not.toContain("--max-old-space-size");
@@ -505,6 +505,8 @@ describe("external analyzers and parsers", () => {
   it("smoke tests the type-aware Oxlint backend", async () => {
     const cwd = writeProject({ "src/a.ts": "async function f() { Promise.resolve(1); }\nf();" });
     symlinkSync(join(process.cwd(), "node_modules"), join(cwd, "node_modules"), "junction");
+    mkdirSync(join(cwd, "scripts"), { recursive: true });
+    writeFileSync(join(cwd, "scripts/tool-node-run.sh"), readFileSync(join(process.cwd(), "scripts/tool-node-run.sh")), { mode: 0o755 });
     writeFileSync(join(cwd, ".oxlintrc.json"), readFileSync(join(process.cwd(), ".oxlintrc.json")));
     const findings = await Effect.runPromise(eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(ProcessServiceLive)));
     expect(findings).toEqual(expect.arrayContaining([expect.objectContaining({ analyzer: AnalyzerName.Eslint, data: { ruleId: "@typescript-eslint/no-floating-promises" } })]));

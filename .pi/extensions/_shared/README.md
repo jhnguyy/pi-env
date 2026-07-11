@@ -12,13 +12,11 @@ Grep for `@purpose` in the source files for per-module context.
 | Return success/failure from a tool        | `ok()`, `err()`, `txt()`              | result.ts    |
 | Format a caught error in a catch block    | `formatError(e, "label")`             | errors.ts    |
 | Define a typed extension error class      | `extends BaseExtensionError<Code>`    | errors.ts    |
-| Render success/error in the TUI           | `defaultRenderResult(result, theme)`  | render.ts    |
 | Build code frame snippets / stack remap   | `buildCodeFrame()`, `mapGeneratedStackToUserLine()` | code-frame.ts |
 | Format compact params preview             | `formatParamsPreview(params)`         | code-frame.ts |
 | Run a git command synchronously           | `gitSync(cwd, args)`                  | git.ts       |
 | Get current branch / dirty count         | `getCurrentBranch()`, `getDirtyCount()` | git.ts    |
 | Generate a random hex ID                  | `generateId()`                        | id.ts        |
-| Ensure bus exit-signal shim exists        | `ensureExitShim()`                    | exit-shim.ts |
 | Guard widget/status rendering             | `isHeadless(ctx)`                     | context.ts   |
 | Guard LLM context injection in workers   | `isOrchWorker()`                      | context.ts   |
 | Set a named UI slot (widget or status)   | `setSlot(key, content, ctx)`          | ui-render.ts |

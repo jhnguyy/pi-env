@@ -35,7 +35,7 @@ const toProgramError = (cause: unknown): ProgramError => cause instanceof Progra
   : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
 
 /** Parses the project's tsconfig at the typed filesystem/compiler boundary. */
-export const parseTsconfigEffect = (cwd: string): Effect.Effect<ParsedConfig, ProgramError> => Effect.try({
+const parseTsconfigEffect = (cwd: string): Effect.Effect<ParsedConfig, ProgramError> => Effect.try({
   try: () => {
     const configPath = ts.findConfigFile(cwd, existsSync, "tsconfig.json");
     if (!configPath) throw new ProgramError({ message: "tsconfig.json not found" });

@@ -6,10 +6,7 @@ export const SafeVerificationPhaseId = {
   TypeAwareLint: "type-aware-lint",
   UnitTests: "unit-tests",
   Build: "build",
-  Dependencies: "analyzer-dependencies",
-  Clones: "analyzer-clones",
-  Unused: "analyzer-unused",
-  Patterns: "analyzer-patterns",
+  QualityAnalysis: "quality-analysis",
 };
 
 export const SAFE_VERIFICATION_PHASES = [
@@ -44,28 +41,10 @@ export const SAFE_VERIFICATION_PHASES = [
     args: ["run", "build"],
   },
   {
-    id: SafeVerificationPhaseId.Dependencies,
-    label: "dependency analyzer",
+    id: SafeVerificationPhaseId.QualityAnalysis,
+    label: "quality analysis",
     command: "nub",
-    args: ["run", "check:deps"],
-  },
-  {
-    id: SafeVerificationPhaseId.Clones,
-    label: "clone analyzer",
-    command: "nub",
-    args: ["run", "check:clones"],
-  },
-  {
-    id: SafeVerificationPhaseId.Unused,
-    label: "unused analyzer",
-    command: "nub",
-    args: ["run", "check:unused"],
-  },
-  {
-    id: SafeVerificationPhaseId.Patterns,
-    label: "pattern analyzer",
-    command: "nub",
-    args: ["run", "check:patterns"],
+    args: ["run", "check:quality"],
   },
 ];
 

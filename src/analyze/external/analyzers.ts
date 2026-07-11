@@ -34,9 +34,9 @@ function nodeProcessOptions(cwd: string, maxMemoryMb: number, timeoutMs: number)
 
 /** Oxlint's launcher starts native workers; do not apply a synthetic Node heap cap. */
 function nativeProcessOptions(cwd: string, timeoutMs: number): StreamProcessOptions {
-  // Prefer a directly executable host Node for launchers that spawn process.execPath.
-  // Nub may run its downloaded Node through a dynamic loader, which is not itself a
-  // valid Node executable for Oxlint's child processes.
+  // tool-node-run.sh selects a directly executable host Node for launchers that
+  // spawn process.execPath. Nub may run its downloaded Node through a dynamic
+  // loader, which is not itself a valid Node executable for Oxlint's children.
   return {
     cwd,
     timeoutMs,
@@ -79,7 +79,7 @@ function argumentBatches(values: readonly string[], fixed: readonly string[]): s
 // The public analyzer/check name remains `eslint` for v1 compatibility; Oxlint is its implementation.
 export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: number, timeoutMs: number = DEFAULT_EXTERNAL_TIMEOUT_MS): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
   return Effect.gen(function* () {
-    const command = "node";
+    const command = resolve(cwd, "scripts/tool-node-run.sh");
     const launcher = resolve(cwd, "node_modules/oxlint/bin/oxlint");
     // Keep batches serial and Oxlint single-threaded: type-aware analysis can otherwise multiply
     // TypeScript program memory use. Do not add --type-check: this analyzer reports lint rules only.

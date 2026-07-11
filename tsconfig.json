@@ -13,8 +13,7 @@
     ".pi/extensions/**/*.ts",
     ".agents/**/*.ts",
     "src/**/*.ts",
-    "scripts/**/*.ts",
-    "eslint.config.js"
+    "scripts/**/*.ts"
   ],
   "exclude": [
     "node_modules",
