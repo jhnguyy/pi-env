@@ -70,12 +70,15 @@ interface AnalysisState {
   stopped: boolean;
 }
 
-interface AnalysisPlan {
+interface PreflightPlan {
   budget: number;
   checks: readonly AnalyzerName[];
-  scope: Scope;
   started: number;
   state: AnalysisState;
+}
+
+interface AnalysisPlan extends PreflightPlan {
+  scope: Scope;
 }
 
 const DEFAULT_MEMORY_MB = 2048;
@@ -184,7 +187,7 @@ function finalizeResult(state: AnalysisState, options: AnalyzeOptions): Analysis
   };
 }
 
-function setupAnalysis(options: AnalyzeOptions): Effect.Effect<AnalysisPlan, AnalyzeError, ProcessService | AnalysisRuntime> {
+function setupAnalysis(options: AnalyzeOptions): Effect.Effect<PreflightPlan | AnalysisPlan, AnalyzeError, ProcessService | AnalysisRuntime> {
   return Effect.gen(function* () {
     const runtime = yield* AnalysisRuntime;
     const started = runtime.now();
@@ -199,6 +202,9 @@ function setupAnalysis(options: AnalyzeOptions): Effect.Effect<AnalysisPlan, Ana
       state = addFailure(state, name, `Insufficient memory budget: maxMemoryMb ${budget} MiB is below this analyzer's ${minimum} MiB minimum`);
       return false;
     });
+    // If every requested check was rejected, preserve that structured
+    // preflight result without requiring the cwd to be a Git worktree.
+    if (selected.length > 0 && checks.length === 0) return { budget, checks, started, state };
     const scopeStarted = runtime.now();
     const scope = yield* resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref);
     state = timing(state, options.profile === true, "scope", scopeStarted, runtime.now());
@@ -301,6 +307,12 @@ function runBenchmarks(options: AnalyzeOptions, initial: AnalysisState): Effect.
 export function analyzeEffect(options: AnalyzeOptions, seams: EngineSeams = {}): Effect.Effect<AnalysisResult, AnalyzeError> {
   const workflow = Effect.gen(function* () {
     const plan = yield* setupAnalysis(options);
+    if (!("scope" in plan)) {
+      const runtime = yield* AnalysisRuntime;
+      let state = timing(plan.state, options.profile === true, "totalMs", plan.started, runtime.now());
+      state = snapshot(state, options.profile === true, "complete", runtime.memory());
+      return finalizeResult(state, options);
+    }
     const internal = plan.checks.filter((name) => analyzerDescriptor(name).project !== ProjectRequirement.None);
     const external = plan.checks.filter((name) => analyzerDescriptor(name).project === ProjectRequirement.None);
     const afterInternal = yield* runInternalStages(options, seams, plan, internal);

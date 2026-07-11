@@ -7,23 +7,51 @@ const slash = (value: string): string => value.replaceAll("\\", "/");
 interface DependencyViolation {
   from?: string;
   to?: string;
-  rule?: { name?: string; severity?: string };
+  rule: { name: string; severity: "error" | "warn" | "info" | "ignore" };
   cycle?: readonly string[];
 }
 
+function invalidDependencyCruiserJson(message: string): never { throw new Error(`Invalid dependency-cruiser report: ${message}`); }
+function dependencyObject(value: unknown, context: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalidDependencyCruiserJson(`${context} must be an object`);
+  return value as Record<string, unknown>;
+}
+function optionalDependencyString(value: unknown, context: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") invalidDependencyCruiserJson(`${context} must be a string`);
+  return value;
+}
+function dependencyViolation(value: unknown, context: string): DependencyViolation {
+  const item = dependencyObject(value, context);
+  const rule = dependencyObject(item.rule, `${context}.rule`);
+  const severity = optionalDependencyString(rule.severity, `${context}.rule.severity`) ?? "warn";
+  if (severity !== "error" && severity !== "warn" && severity !== "info" && severity !== "ignore") invalidDependencyCruiserJson(`${context}.rule.severity is not supported`);
+  const cycle = item.cycle;
+  if (cycle !== undefined && (!Array.isArray(cycle) || !cycle.every((entry) => typeof entry === "string"))) invalidDependencyCruiserJson(`${context}.cycle must be an array of strings`);
+  const cycleValues = cycle === undefined ? undefined : cycle as string[];
+  return {
+    from: optionalDependencyString(item.from, `${context}.from`),
+    to: optionalDependencyString(item.to, `${context}.to`),
+    rule: { name: optionalDependencyString(rule.name, `${context}.rule.name`) ?? "dependency violation", severity },
+    cycle: cycleValues,
+  };
+}
+
 export function parseDependencyCruiserJson(text: string): Finding[] {
-  const report = JSON.parse(text) as { summary?: { violations?: readonly DependencyViolation[] } };
-  return (report.summary?.violations ?? []).map((violation) => {
+  const report = dependencyObject(JSON.parse(text), "dependency-cruiser report");
+  const summary = dependencyObject(report.summary, "dependency-cruiser report.summary");
+  if (!Array.isArray(summary.violations)) invalidDependencyCruiserJson("dependency-cruiser report.summary.violations must be an array");
+  return summary.violations.map((value, index) => dependencyViolation(value, `dependency-cruiser report.summary.violations[${index}]`)).map((violation) => {
     const from = slash(violation.from ?? violation.cycle?.[0] ?? ".");
     const target = violation.to ?? violation.cycle?.[1] ?? "unknown target";
     return {
       id: "",
       analyzer: AnalyzerName.Dependencies,
       kind: FindingKind.Dependency,
-      severity: violation.rule?.severity === "error" ? Severity.Error : Severity.Warning,
-      message: `${violation.rule?.name ?? "dependency violation"}: ${from} -> ${target}`,
+      severity: violation.rule.severity === "error" ? Severity.Error : Severity.Warning,
+      message: `${violation.rule.name}: ${from} -> ${target}`,
       location: { path: from, line: 1, column: 1 },
-      data: { rule: violation.rule?.name, target, cycle: violation.cycle },
+      data: { rule: violation.rule.name, target, cycle: violation.cycle },
     };
   });
 }

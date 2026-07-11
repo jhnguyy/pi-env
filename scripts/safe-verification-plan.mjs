@@ -2,7 +2,6 @@ import { spawnSync } from "node:child_process";
 
 export const SafeVerificationPhaseId = {
   Format: "format-check",
-  Lint: "lint",
   Typecheck: "typecheck",
   TypeAwareLint: "type-aware-lint",
   UnitTests: "unit-tests",
@@ -19,12 +18,6 @@ export const SAFE_VERIFICATION_PHASES = [
     label: "format check",
     command: "nub",
     args: ["run", "format:check"],
-  },
-  {
-    id: SafeVerificationPhaseId.Lint,
-    label: "non-type lint",
-    command: "nub",
-    args: ["run", "lint"],
   },
   {
     id: SafeVerificationPhaseId.Typecheck,

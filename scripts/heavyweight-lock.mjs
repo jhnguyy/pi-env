@@ -57,17 +57,24 @@ export async function acquireHeavyweightLock({
   pid = process.pid,
   token = randomUUID(),
   now = () => new Date().toISOString(),
+  nowMs = Date.now,
   isPidAlive = pidIsAlive,
+  writeOwnerFile = writeOwner,
 } = {}) {
   const lockPath = resolve(commonDir, LOCK_NAME);
   const inheritedToken = env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
-  const deadline = Date.now() + timeoutMs;
+  const deadline = nowMs() + timeoutMs;
 
   for (;;) {
     try {
       await mkdir(lockPath, { mode: 0o700 });
       const owner = { token, pid, acquiredAt: now() };
-      await writeOwner(lockPath, owner);
+      try {
+        await writeOwnerFile(lockPath, owner);
+      } catch (error) {
+        await rm(lockPath, { recursive: true, force: true });
+        throw error;
+      }
       return makeLease(lockPath, token, false);
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
@@ -78,8 +85,10 @@ export async function acquireHeavyweightLock({
       return makeLease(lockPath, inheritedToken, true);
     }
 
-    // A lock creator may have made the directory but not yet atomically
-    // published owner.json. Never reclaim that short-lived state.
+    // Recover only a published owner whose process is gone. A live creator may
+    // have made the directory but not yet atomically published owner.json, so a
+    // genuinely ownerless directory is left in place for manual/conservative
+    // recovery instead of being stolen by time.
     if (owner && !isPidAlive(owner.pid)) {
       const stalePath = `${lockPath}.stale-${token}`;
       try {
@@ -91,7 +100,7 @@ export async function acquireHeavyweightLock({
       }
     }
 
-    if (Date.now() >= deadline) {
+    if (nowMs() >= deadline) {
       const holder = owner ? ` (held by pid ${owner.pid})` : "";
       throw new Error(`Timed out waiting for heavyweight-operation lock${holder}.`);
     }

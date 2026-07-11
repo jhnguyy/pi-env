@@ -58,6 +58,47 @@ describe("heavyweight lock", () => {
     await lease.release();
   });
 
+  it("does not recover an ownerless directory by age", async () => {
+    const directory = await commonDir();
+    const lockPath = resolve(directory, heavyweightLockName);
+    await mkdir(lockPath);
+
+    await expect(acquireHeavyweightLock({
+      commonDir: directory, timeoutMs: 0, nowMs: () => 100,
+    })).rejects.toThrow("Timed out waiting");
+  });
+
+  it("does not steal from a live creator delayed before owner publication", async () => {
+    const directory = await commonDir();
+    let publishOwner;
+    const delayed = acquireHeavyweightLock({
+      commonDir: directory,
+      token: "creator",
+      writeOwnerFile: (lockPath, owner) => new Promise((resolveWrite, rejectWrite) => {
+        publishOwner = () => writeFile(resolve(lockPath, "owner.json"), JSON.stringify(owner)).then(resolveWrite, rejectWrite);
+      }),
+    });
+
+    while (publishOwner === undefined) await new Promise((resolveReady) => setTimeout(resolveReady, 1));
+    await expect(acquireHeavyweightLock({ commonDir: directory, timeoutMs: 0, nowMs: () => 100 }))
+      .rejects.toThrow("Timed out waiting");
+    publishOwner();
+    const lease = await delayed;
+    expect(lease.token).toBe("creator");
+    await lease.release();
+  });
+
+  it("recovers an ownerless directory left when publishing its owner fails", async () => {
+    const directory = await commonDir();
+    await expect(acquireHeavyweightLock({
+      commonDir: directory,
+      writeOwnerFile: async () => { throw new Error("owner write failed"); },
+    })).rejects.toThrow("owner write failed");
+
+    const lease = await acquireHeavyweightLock({ commonDir: directory });
+    await lease.release();
+  });
+
   it("cleans up when the protected operation throws", async () => {
     const directory = await commonDir();
     await expect(withHeavyweightLock(async () => { throw new Error("boom"); }, { commonDir: directory })).rejects.toThrow("boom");

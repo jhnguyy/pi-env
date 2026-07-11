@@ -379,6 +379,8 @@ interface TypeCandidate {
   shape: TypeShape;
   loc: Location;
   name: string;
+  extends?: string;
+  typeReference?: string;
 }
 
 interface TypeCollection { candidates: TypeCandidate[]; truncated: boolean }
@@ -388,7 +390,17 @@ function collectTypeFile(project: TypeProject, cwd: string, file: ts.SourceFile,
     if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue;
     if (state.candidates.length >= ANALYZER_CAPS.typeCandidates) { state.truncated = true; continue; }
     const shape = typeShape(project.checker, statement);
-    if (shape !== undefined) state.candidates.push({ shape, loc: location(cwd, file, statement), name: statement.name.text });
+    if (shape === undefined) continue;
+    const candidate: TypeCandidate = { shape, loc: location(cwd, file, statement), name: statement.name.text };
+    if (ts.isInterfaceDeclaration(statement) && statement.heritageClauses !== undefined) {
+      const parent = statement.heritageClauses.flatMap((clause) => clause.types).at(0)?.expression;
+      if (parent !== undefined) candidate.extends = parent.getText(file);
+    }
+    if (ts.isTypeAliasDeclaration(statement)) {
+      const typeNode = statement.type;
+      if (ts.isTypeReferenceNode(typeNode)) candidate.typeReference = typeNode.getText(file);
+    }
+    state.candidates.push(candidate);
   }
 }
 
@@ -449,9 +461,12 @@ function typeSimilarityFinding(seed: TypeCandidate, peer: TypeCandidate, score: 
 }
 
 function isTypeMatchCandidate(seed: TypeCandidate, peer: TypeCandidate): boolean {
-  return comparableBuckets(seed.shape, peer.shape)
-    && seed !== peer
-    && seed.name !== peer.name;
+  if (seed === peer || seed.name === peer.name) return false;
+  if (seed.extends !== undefined && seed.extends === peer.name) return false;
+  if (peer.extends !== undefined && peer.extends === seed.name) return false;
+  if (seed.typeReference !== undefined && seed.typeReference === peer.name) return false;
+  if (peer.typeReference !== undefined && peer.typeReference === seed.name) return false;
+  return comparableBuckets(seed.shape, peer.shape);
 }
 
 function recordTypePair(seed: TypeCandidate, peer: TypeCandidate, seen: Set<string>): boolean {

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
-import { bundleAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
+import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
@@ -183,14 +183,31 @@ describe("analyze contracts", () => {
     ]));
   });
 
+  it("returns all-rejected preflight results before resolving a non-Git scope", async () => {
+    const cwd = fixtureRoot();
+    const rejected = await Effect.runPromise(analyze({
+      cwd, scope: ScopeMode.Diff, maxMemoryMb: 1, checks: [AnalyzerName.Types, AnalyzerName.Eslint],
+    }));
+    expect(rejected.analyzerFailures).toEqual([
+      expect.objectContaining({ analyzer: AnalyzerName.Types, message: expect.stringContaining("1024 MiB") }),
+      expect.objectContaining({ analyzer: AnalyzerName.Eslint, message: expect.stringContaining("1536 MiB") }),
+    ]);
+    expect(rejected.analyzerFailures).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ analyzer: "scope" }),
+    ]));
+  });
+
   it("accepts the exact external budget boundary and does not give native Oxlint NODE_OPTIONS", async () => {
     const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    let options: import("../process.js").StreamProcessOptions | undefined;
+    let invocation: { command: string; args: readonly string[]; options?: import("../process.js").StreamProcessOptions } | undefined;
     const result = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 1536, checks: [AnalyzerName.Eslint],
-    }, { processRunner: (_command, _args, value) => { options = value; return Effect.succeed({ stdout: JSON.stringify({ diagnostics: [] }), stderr: "" }); } }));
+    }, { processRunner: (command, args, options) => { invocation = { command, args, options }; return Effect.succeed({ stdout: JSON.stringify({ diagnostics: [] }), stderr: "" }); } }));
     expect(result.analyzerFailures).toEqual([]);
-    expect(options?.env?.NODE_OPTIONS).toBeUndefined();
+    expect(invocation?.command).toBe("node");
+    expect(invocation?.args[0]).toBe(resolve(cwd, "node_modules/oxlint/bin/oxlint"));
+    expect(invocation?.options?.env?.PATH).toMatch(/^\/bin:\/usr\/bin:/);
+    expect(invocation?.options?.env?.NODE_OPTIONS).toBeUndefined();
   });
 
   it("plans external-only runs without creating a Program and profiles only on request", async () => {
@@ -256,6 +273,20 @@ describe("structural type similarity", () => {
     ` });
     const findings = await Effect.runPromise(similarTypesEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope, 0.6));
     expect(findings.some((item) => item.message.includes("Exact structural type duplicate: UserDto / AccountDto"))).toBe(true);
+    expect(findings.some((item) => item.message.includes("Near structural type duplicate"))).toBe(true);
+  });
+
+  it("does not report direct interface inheritance or type aliases as duplicates", async () => {
+    const cwd = writeProject({ "src/types.ts": `
+      export interface PreflightPlan { budget: number; checks: string[]; }
+      export interface AnalysisPlan extends PreflightPlan { scope: string; }
+      export type AliasPlan = PreflightPlan;
+      export interface NearDto { id: string; name: string; active: boolean; total: number; }
+      export interface AlsoNearDto { id: string; name: string; active: boolean; count: number; }
+    ` });
+    const findings = await Effect.runPromise(similarTypesEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope, 0.6));
+    expect(findings.some((item) => item.message.includes("PreflightPlan / AnalysisPlan"))).toBe(false);
+    expect(findings.some((item) => item.message.includes("PreflightPlan / AliasPlan"))).toBe(false);
     expect(findings.some((item) => item.message.includes("Near structural type duplicate"))).toBe(true);
   });
 
@@ -439,6 +470,34 @@ describe("external analyzers and parsers", () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ data: { ruleId: "@typescript-eslint/no-floating-promises" }, severity: Severity.Error, location: { path: "src/a.ts", line: 2, column: 3 }, related: [{ path: "src/a.ts", line: 4, column: 5 }, { path: "src/b.ts", line: 6, column: 7 }] });
     expect(() => parseOxlintJson('{"diagnostics":[{}]}', "/repo")).toThrow("Invalid Oxlint diagnostic");
+    expect(() => parseDependencyCruiserJson('{"summary":{}}')).toThrow("Invalid dependency-cruiser report");
+  });
+
+  it("only recovers documented external-analyzer findings exits", async () => {
+    const cwd = writeProject({ "src/a.ts": "async function f() { Promise.resolve(1); }" });
+    const oxlintStdout = JSON.stringify({ diagnostics: [{ code: "typescript(no-floating-promises)", severity: "error", message: "promise", filename: "src/a.ts", labels: [{ span: { line: 1, column: 22 } }], related: [] }] });
+    const depcruiseStdout = JSON.stringify({ summary: { violations: [{ from: "src/a.ts", to: "src/b.ts", rule: { name: "no-cycle", severity: "error" } }] } });
+    const cases = [
+      { name: "Oxlint findings exit", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Exit, command: "oxlint", message: "exit 1", exitCode: 1, stdout: oxlintStdout }), succeeds: true },
+      { name: "Oxlint unexpected exit", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Exit, command: "oxlint", message: "exit 2", exitCode: 2, stdout: oxlintStdout }), succeeds: false },
+      { name: "Oxlint timeout", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Timeout, command: "oxlint", message: "timeout", stdout: oxlintStdout }), succeeds: false },
+      { name: "Oxlint output limit", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.OutputLimit, command: "oxlint", message: "limit", stdout: oxlintStdout }), succeeds: false },
+      { name: "Oxlint interrupted", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Interrupted, command: "oxlint", message: "interrupted", stdout: oxlintStdout }), succeeds: false },
+      { name: "Oxlint spawn", effect: eslintAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Spawn, command: "oxlint", message: "spawn", stdout: oxlintStdout }), succeeds: false },
+      { name: "dependency-cruiser findings stdout on nonzero", effect: dependencyAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Exit, command: "depcruise", message: "exit 1", exitCode: 1, stdout: depcruiseStdout }), succeeds: false },
+      { name: "dependency-cruiser timeout", effect: dependencyAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Timeout, command: "depcruise", message: "timeout", stdout: depcruiseStdout }), succeeds: false },
+      { name: "dependency-cruiser output limit", effect: dependencyAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.OutputLimit, command: "depcruise", message: "limit", stdout: depcruiseStdout }), succeeds: false },
+      { name: "dependency-cruiser interrupted", effect: dependencyAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Interrupted, command: "depcruise", message: "interrupted", stdout: depcruiseStdout }), succeeds: false },
+      { name: "dependency-cruiser spawn", effect: dependencyAnalyzerEffect(cwd, allScope, 256, 100), error: new ProcessError({ kind: ProcessErrorKind.Spawn, command: "depcruise", message: "spawn", stdout: depcruiseStdout }), succeeds: false },
+    ];
+
+    for (const item of cases) {
+      const outcome = await Effect.runPromise(Effect.either(item.effect.pipe(
+        Effect.provide(processServiceLayer(() => Effect.fail(item.error))),
+      )));
+      expect(outcome._tag, item.name).toBe(item.succeeds ? "Right" : "Left");
+      if (item.succeeds && outcome._tag === "Right") expect(outcome.right).toHaveLength(1);
+    }
   });
 
   it("smoke tests the type-aware Oxlint backend", async () => {
