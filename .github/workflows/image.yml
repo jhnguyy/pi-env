@@ -58,6 +58,7 @@ jobs:
           results_dir="$RUNNER_TEMP/trivy-results"
           results="$results_dir/trivy-image-results.json"
           cache_dir="$RUNNER_TEMP/trivy-cache"
+          ignore_file="$GITHUB_WORKSPACE/.trivyignore"
           docker save pi-env:ci --output "$image_tar"
           chmod 0644 "$image_tar"
           mkdir -p "$cache_dir" "$results_dir"
@@ -71,12 +72,14 @@ jobs:
             -v "$image_tar:/image/pi-env-image.tar:ro" \
             -v "$cache_dir:/cache:rw" \
             -v "$results_dir:/results:rw" \
+            -v "$ignore_file:/etc/trivy/.trivyignore:ro" \
             aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
             image \
             --input /image/pi-env-image.tar \
             --scanners vuln,secret,misconfig \
             --file-patterns pnpm:lock.yaml \
             --severity HIGH,CRITICAL \
+            --ignorefile /etc/trivy/.trivyignore \
             --format json \
             --output /results/trivy-image-results.json \
             --exit-code 0 \
