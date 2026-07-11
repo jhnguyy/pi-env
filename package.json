@@ -50,7 +50,9 @@
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
     "sensor:deps": "nub run check:deps",
     "sensor:dup": "nub run check:clones",
-    "sensors": "nub run check:all",
+    "analyze": "scripts/node-run.sh scripts/analyze.ts",
+    "sensors": "nub run analyze -- --diff",
+    "check:sensors": "nub run check:all",
     "verify": "scripts/node-run.sh scripts/verify.mjs",
     "verify:install": "nub run build && scripts/node-run.sh scripts/verify-install.mjs",
     "postinstall": "sh scripts/restart-lsp-daemon.sh && scripts/node-run.sh scripts/build-extensions.mjs",
@@ -86,10 +88,12 @@
     "cpd-linux-x64-musl": "5.0.11",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
+    "eslint": "^10.7.0",
     "jscpd": "5.0.11",
     "knip": "^6.24.0",
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.63.0",
     "vitest": "^4.1.9"
   },
   "overrides": {

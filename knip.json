@@ -2,12 +2,15 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
     "scripts/*.mjs",
+    "scripts/analyze.ts",
     "setup/*.mjs",
     "vitest.config.ts",
     ".pi/extensions/*/index.ts"
   ],
   "project": [
     "scripts/**/*.mjs",
+    "scripts/**/*.ts",
+    "src/**/*.ts",
     "setup/**/*.mjs",
     ".pi/extensions/**/*.ts",
     ".agents/skills/**/*.ts",
