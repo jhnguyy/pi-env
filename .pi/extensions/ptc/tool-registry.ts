@@ -28,18 +28,10 @@ import type {
   ToolDefinition,
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import {
-  createBashToolDefinition,
-  createEditToolDefinition,
-  createFindToolDefinition,
-  createGrepToolDefinition,
-  createLsToolDefinition,
-  createReadToolDefinition,
-  createWriteToolDefinition,
-} from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
 import { BLOCKED_TOOLS } from "./types";
 import { listenForAgentTools } from "../_shared/agent-tools";
+import { BUILT_IN_TOOL_CONTRACTS, BUILT_IN_TOOL_NAMES } from "../_shared/built-in-tools";
 
 type ExecuteFn = (
   toolCallId: string,
@@ -63,16 +55,10 @@ export type DispatchContext = { cwd: string } | ExtensionContext;
 // Availability filtering uses sourceInfo.source === "builtin" from pi.getAllTools() instead,
 // so new built-in tools are automatically included without updating this map.
 // Cast required: each factory has distinct generic ToolDefinition return types.
-const BUILTIN_FACTORIES = {
-  read:  createReadToolDefinition,
-  bash:  createBashToolDefinition,
-  edit:  createEditToolDefinition,
-  write: createWriteToolDefinition,
-  grep:  createGrepToolDefinition,
-  find:  createFindToolDefinition,
-  ls:    createLsToolDefinition,
-} as Record<string, (cwd: string) => ToolDefinition<any, any, any>>;  // eslint-disable-line @typescript-eslint/no-explicit-any
-const BUILTIN_NAMES = new Set(Object.keys(BUILTIN_FACTORIES));
+const BUILTIN_FACTORIES = Object.fromEntries(
+  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [name, contract.definitionFactory]),
+) as Record<string, (cwd: string) => ToolDefinition<any, any, any>>;  // eslint-disable-line @typescript-eslint/no-explicit-any
+const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
   /**

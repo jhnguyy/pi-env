@@ -1,0 +1,159 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } from "../../_shared/agent-tools";
+import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
+import jitCatchExtension from "../index";
+import { createJitCatchContract, JIT_CATCH_DESCRIPTION, JIT_CATCH_PARAMETERS } from "../contract";
+
+const runnerState = vi.hoisted(() => ({
+  runResult: { extName: "demo", passed: true, testOutput: "ok" } as any,
+  runCalls: [] as any[],
+}));
+
+vi.mock("../runner", () => ({
+  resolveGitRoot: vi.fn(async (_exec, cwd: string) => `${cwd}/root`),
+  captureDiff: vi.fn(async (_source, _exec, cwd: string) => [
+    "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
+    "+++ b/.pi/extensions/demo/index.ts",
+    "diff --git a/README.md b/README.md",
+    "+++ b/README.md",
+  ].join("\n")),
+  runForExtension: vi.fn(async (...args: any[]) => {
+    runnerState.runCalls.push(args);
+    args[5]?.("running tests…");
+    return runnerState.runResult;
+  }),
+}));
+
+function createPi() {
+  const tools: any[] = [];
+  const registrations: ExtToolRegistration[] = [];
+  const sessionHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
+  const execCwds: string[] = [];
+  return {
+    tools,
+    registrations,
+    execCwds,
+    pi: {
+      exec: async (_cmd: string, _args: string[], opts?: { cwd?: string }) => {
+        execCwds.push(opts?.cwd ?? "");
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      registerTool(tool: any) {
+        tools.push(tool);
+      },
+      events: {
+        emit(event: typeof AgentToolEvent.Register, data: ExtToolRegistration) {
+          if (event === AgentToolEvent.Register) registrations.push(data);
+        },
+      },
+      on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void) {
+        if (event === PiEvent.SessionStart) sessionHandlers.push(handler);
+      },
+    },
+    startSession(cwd: string) {
+      for (const handler of sessionHandlers) handler({ type: PiEvent.SessionStart, reason: "startup" }, { cwd } as ExtensionContext);
+    },
+  };
+}
+
+describe("jit_catch tool contract", () => {
+  beforeEach(() => {
+    resetAgentToolRegistryForTests();
+    runnerState.runResult = { extName: "demo", passed: true, testOutput: "ok" };
+    runnerState.runCalls = [];
+  });
+
+  it("uses one schema and description across Pi and AgentTool registration", () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    expect(harness.tools[0].parameters).toBe(JIT_CATCH_PARAMETERS);
+    expect(harness.tools[0].description).toBe(JIT_CATCH_DESCRIPTION);
+    expect(harness.registrations[0].tool.parameters).toBe(JIT_CATCH_PARAMETERS);
+    expect(harness.registrations[0].tool.description).toBe(harness.tools[0].description);
+  });
+
+  it("preserves jit_catch capabilities", () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    expect(harness.registrations[0].capabilities).toEqual([
+      ToolCapability.Write,
+      ToolCapability.Execute,
+    ]);
+  });
+
+  it("uses Pi cwd per invocation and captured Agent session cwd", async () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/pi/context" });
+    await harness.registrations[0].tool.execute("agent", {}, undefined);
+
+    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/pi/context/root", "/agent/session/root"]);
+  });
+
+  it("keeps each AgentTool bound to the session that registered it", async () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/session/one");
+    const firstSessionTool = harness.registrations[0].tool;
+    harness.startSession("/session/two");
+    const secondSessionTool = harness.registrations[1].tool;
+
+    await firstSessionTool.execute("first", {}, undefined);
+    await secondSessionTool.execute("second", {}, undefined);
+
+    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/session/one/root", "/session/two/root"]);
+  });
+
+  it("lets explicit git_cwd override adapter cwd", async () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    await harness.tools[0].execute("pi", { git_cwd: "/explicit" }, undefined, undefined, { cwd: "/pi/context" });
+    await harness.registrations[0].tool.execute("agent", { git_cwd: "/explicit" }, undefined);
+
+    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/explicit/root", "/explicit/root"]);
+  });
+
+  it("forwards signal and matching progress shape through both adapters", async () => {
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+    const signal = new AbortController().signal;
+    const piUpdates: unknown[] = [];
+    const agentUpdates: unknown[] = [];
+
+    await harness.tools[0].execute("pi", {}, signal, (update: unknown) => piUpdates.push(update), { cwd: "/pi/context" });
+    await harness.registrations[0].tool.execute("agent", {}, signal, (update: unknown) => agentUpdates.push(update));
+
+    expect(runnerState.runCalls.map((call) => call[3])).toEqual([signal, signal]);
+    expect(piUpdates).toContainEqual({ content: [{ type: "text", text: "demo: running tests…" }], details: { phase: "demo: running tests…" } });
+    expect(agentUpdates).toContainEqual({ content: [{ type: "text", text: "demo: running tests…" }], details: { phase: "demo: running tests…" } });
+  });
+
+  it("returns equivalent final result/details for the same domain scenario", async () => {
+    runnerState.runResult = { extName: "demo", passed: false, testPath: "/tmp/demo.catching.test.ts", testOutput: "line1\nline2" };
+    const harness = createPi();
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    const piResult = await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/same" });
+    const agentResult = await harness.registrations[0].tool.execute("agent", {}, undefined);
+    const contractResult = await createJitCatchContract(harness.pi.exec as any).execute({}, { cwd: "/same" });
+
+    expect(piResult.content[0].text).toContain("Note: diff also contains non-extension files (ignored).\n");
+    expect(piResult.content[0].text).toContain("✗ demo — tests FAILED.");
+    expect(piResult.content[0].text).toContain("  Test file kept at: /tmp/demo.catching.test.ts");
+    expect(piResult.content[0].text).toContain("  Output:\n  line1\n  line2");
+    expect(piResult.details).toEqual(contractResult.details);
+    expect(agentResult.details).toEqual(piResult.details);
+  });
+});

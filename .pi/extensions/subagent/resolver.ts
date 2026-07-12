@@ -1,17 +1,9 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import {
-  createBashTool,
-  createEditTool,
-  createFindTool,
-  createGrepTool,
-  createLsTool,
-  createReadTool,
-  createWriteTool,
-} from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { discoverAgents } from "./agents";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import { BUILT_IN_TOOL_CONTRACTS } from "../_shared/built-in-tools";
 import { ToolCapability } from "./types";
 
 export interface SubagentParams {
@@ -30,15 +22,12 @@ export interface ToolDef {
   capabilities: ToolCapability[];
 }
 
-export const BUILT_IN_TOOLS: Record<string, ToolDef> = {
-  read:  { factory: (cwd) => createReadTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  bash:  { factory: (cwd) => createBashTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] },
-  edit:  { factory: (cwd) => createEditTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Write] },
-  write: { factory: (cwd) => createWriteTool(cwd) as AgentTool<any, any>, capabilities: [ToolCapability.Write] },
-  grep:  { factory: (cwd) => createGrepTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  find:  { factory: (cwd) => createFindTool(cwd) as AgentTool<any, any>,  capabilities: [ToolCapability.Read] },
-  ls:    { factory: (cwd) => createLsTool(cwd) as AgentTool<any, any>,    capabilities: [ToolCapability.Read] },
-};
+export const BUILT_IN_TOOLS: Record<string, ToolDef> = Object.fromEntries(
+  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
+    name,
+    { factory: contract.agentFactory, capabilities: [...contract.capabilities] },
+  ]),
+);
 
 export type AgentConfig = ReturnType<typeof discoverAgents>["agents"][number];
 
