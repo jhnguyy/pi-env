@@ -1,11 +1,10 @@
-import type { ChildProcess } from "node:child_process";
 import { Effect, Either } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   cleanupTempScript,
   createTempScript,
   PtcExecutionPhase,
-  spawnSubprocess,
+  resolvePtcNodeCommand,
   type PtcNodeRuntime,
 } from "../node-runtime";
 
@@ -14,7 +13,6 @@ function fakeRuntime(overrides: Partial<PtcNodeRuntime> = {}): PtcNodeRuntime {
     tmpdir: () => "/tmp",
     writeFile: () => {},
     unlink: () => {},
-    spawn: () => ({}) as ChildProcess,
     ...overrides,
   };
 }
@@ -51,15 +49,11 @@ describe("ptc node runtime", () => {
     })))).resolves.toBeUndefined();
   });
 
-  it("maps spawn failures to run errors", async () => {
-    const result = await Effect.runPromise(Effect.either(spawnSubprocess("/tmp/script.mjs", "/repo", fakeRuntime({
-      spawn: () => { throw new Error("spawn failed"); },
-    }))));
+  it("uses process.execPath when PI_ENV_NODE_BIN is empty", () => {
+    expect(resolvePtcNodeCommand({ PI_ENV_NODE_BIN: "" }, "/nix/store/ld-linux-x86-64.so.2")).toBe("/nix/store/ld-linux-x86-64.so.2");
+  });
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.phase).toBe(PtcExecutionPhase.Run);
-      expect(result.left.message).toBe("PTC run failed: spawn failed");
-    }
+  it("uses PI_ENV_NODE_BIN when present, including ld-linux execPath launchers", () => {
+    expect(resolvePtcNodeCommand({ PI_ENV_NODE_BIN: "/selected/node" }, "/nix/store/ld-linux-x86-64.so.2")).toBe("/selected/node");
   });
 });

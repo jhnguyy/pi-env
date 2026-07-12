@@ -3,13 +3,12 @@
  * @purpose Effect wrappers around the Node IO used by the PTC executor.
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Data, Effect } from "effect";
 import { generateId } from "../_shared/id";
-import { buildSubprocessEnv } from "./types";
+import { resolveNodeCommand } from "../../../src/process/platform.js";
 
 export const PtcExecutionPhase = {
   Prepare: "prepare",
@@ -32,15 +31,15 @@ export interface PtcNodeRuntime {
   tmpdir(): string;
   writeFile(path: string, data: string, options: { encoding: "utf-8"; mode: number }): void;
   unlink(path: string): void;
-  spawn(command: string, args: string[], options: Parameters<typeof spawn>[2]): ChildProcess;
 }
 
 const defaultRuntime: PtcNodeRuntime = {
   tmpdir,
   writeFile: writeFileSync,
   unlink: unlinkSync,
-  spawn,
 };
+
+export const resolvePtcNodeCommand = resolveNodeCommand;
 
 export function createTempScript(
   code: string,
@@ -63,20 +62,5 @@ export function cleanupTempScript(path: string, runtime: PtcNodeRuntime = defaul
     } catch {
       /* best-effort cleanup */
     }
-  });
-}
-
-export function spawnSubprocess(
-  scriptPath: string,
-  cwd: string,
-  runtime: PtcNodeRuntime = defaultRuntime,
-): Effect.Effect<ChildProcess, PtcExecutionError> {
-  return Effect.try({
-    try: () => runtime.spawn(process.execPath, [scriptPath], {
-      cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: buildSubprocessEnv(),
-    }),
-    catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause }),
   });
 }

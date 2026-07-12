@@ -17,11 +17,12 @@ import { buildCodeFrame, mapGeneratedStackToUserLine } from "../_shared/code-fra
 import { RpcBridge } from "./rpc-bridge";
 import { generateWrappers } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
-import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, killGracefully } from "./types";
+import { scopedChildProcess } from "../../../src/process/platform.js";
+import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv } from "./types";
 import {
   createTempScript,
   cleanupTempScript,
-  spawnSubprocess,
+  resolvePtcNodeCommand,
   PtcExecutionError,
   PtcExecutionPhase,
 } from "./node-runtime";
@@ -63,21 +64,21 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
   ): Effect.Effect<string, PtcExecutionError> {
-    return Effect.acquireUseRelease(
-      spawnSubprocess(scriptPath, cwd),
-      (proc) => Effect.tryPromise({
-        try: () => this.awaitSubprocess(proc, scriptPath, userCode, cwd, signal, onUpdate, ctx),
-        catch: (cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause }),
-      }),
-      (proc) => Effect.sync(() => {
-        if (proc.exitCode === null && proc.signalCode === null) {
-          killGracefully(proc);
-        }
-      }),
+    return Effect.scoped(
+      scopedChildProcess(resolvePtcNodeCommand(), [scriptPath], {
+        cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: buildSubprocessEnv(),
+        timeoutMs: MAX_TIMEOUT_MS,
+        killGraceMs: 5_000,
+      }).pipe(
+        Effect.mapError((cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause })),
+        Effect.flatMap((proc) => this.awaitSubprocessEffect(proc, scriptPath, userCode, cwd, signal, onUpdate, ctx)),
+      ),
     );
   }
 
-  private async awaitSubprocess(
+  private awaitSubprocessEffect(
     proc: ChildProcess,
     scriptPath: string,
     userCode: string,
@@ -85,35 +86,38 @@ export class PtcExecutor {
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
-  ): Promise<string> {
+  ): Effect.Effect<string, PtcExecutionError> {
+    const nestedController = new AbortController();
+    const abortNested = (): void => nestedController.abort(signal?.reason);
+    if (signal?.aborted) abortNested();
+    else signal?.addEventListener("abort", abortNested, { once: true });
     const dispatch = (tool: string, params: Record<string, unknown>) =>
-      this.registry.dispatch(tool, params, cwd, undefined, ctx);
+      this.registry.dispatch(tool, params, cwd, nestedController.signal, ctx);
 
-    const bridge = new RpcBridge(proc, dispatch, signal, onUpdate);
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<string>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        killGracefully(proc);
-        const calls = bridge.getToolCallCount();
-        const lastCall = bridge.getLastToolCallLabel();
-        const detail = [
-          `PTC timed out after ${Math.round(MAX_TIMEOUT_MS / 1000)}s`,
-          `Completed nested tool calls: ${calls}`,
-          ...(lastCall ? [`Last call: ${lastCall}`] : []),
-        ].join("\n");
-        reject(new Error(detail));
-      }, MAX_TIMEOUT_MS);
-    });
-
-    try {
-      const raw = await Promise.race([bridge.completion, timeoutPromise]);
-      return truncateOutput(raw);
-    } catch (err) {
-      throw enhancePtcError(err, scriptPath, userCode);
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-    }
+    let bridge: RpcBridge | undefined;
+    return Effect.tryPromise({
+      try: async () => {
+        bridge = new RpcBridge(proc, dispatch, nestedController.signal, onUpdate);
+        return truncateOutput(await bridge.completion);
+      },
+      catch: (cause) => new PtcExecutionError({
+        phase: PtcExecutionPhase.Run,
+        cause: enhancePtcError(cause, scriptPath, userCode),
+      }),
+    }).pipe(
+      Effect.timeoutFail({
+        duration: MAX_TIMEOUT_MS,
+        onTimeout: () => new PtcExecutionError({
+          phase: PtcExecutionPhase.Run,
+          cause: enhancePtcError(new Error(formatTimeoutDetail(bridge)), scriptPath, userCode),
+        }),
+      }),
+      Effect.ensuring(Effect.sync(() => {
+        signal?.removeEventListener("abort", abortNested);
+        nestedController.abort(new Error("PTC execution scope closed"));
+        bridge?.dispose();
+      })),
+    );
   }
 }
 
@@ -160,6 +164,16 @@ function transformSubprocessCode(code: string): string {
   }).code;
 }
 
+function formatTimeoutDetail(bridge: RpcBridge | undefined): string {
+  const calls = bridge?.getToolCallCount() ?? 0;
+  const lastCall = bridge?.getLastToolCallLabel();
+  return [
+    `PTC timed out after ${Math.round(MAX_TIMEOUT_MS / 1000)}s`,
+    `Completed nested tool calls: ${calls}`,
+    ...(lastCall ? [`Last call: ${lastCall}`] : []),
+  ].join("\n");
+}
+
 function truncateOutput(output: string): string {
   const result = truncateHead(output, {
     maxLines: DEFAULT_MAX_LINES,
@@ -191,6 +205,5 @@ function enhancePtcError(err: unknown, scriptPath: string, userCode: string): Er
 }
 
 function findUserCodeStartLine(): number {
-  // In buildSubprocessCode, user code starts immediately after this marker + function line.
   return 8;
 }
