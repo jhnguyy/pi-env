@@ -15,8 +15,10 @@
  * subprocesses). Format backends are invoked directly by the agent_end hook
  * and are never passed to the daemon.
  */
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { extname } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { resolveNodeCommand } from "../../../src/process/platform.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,10 @@ export interface LspBackendConfig extends BackendConfigBase {
   mode: typeof BackendMode.Lsp;
   /** Args passed to the language server binary, e.g. ["--stdio"]. */
   binaryArgs: string[];
+  /** Command and args used to spawn the backend. Node-module servers use Node plus their JS entrypoint. */
+  launchCommand: string;
+  launchArgs: string[];
+  nodeExecPathShim?: string;
   /** LSP initialize capabilities sent during handshake. */
   capabilities: object;
   /** Server-specific options sent during the initialize handshake. */
@@ -95,6 +101,27 @@ const STANDARD_CAPABILITIES = {
 };
 
 const require = createRequire(import.meta.url);
+
+function packageBinEntry(packageName: string, binName: string): string {
+  const packageJsonPath = require.resolve(`${packageName}/package.json`);
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { bin?: string | Record<string, string> };
+  const bin = typeof packageJson.bin === "string" ? packageJson.bin : packageJson.bin?.[binName];
+  if (!bin) throw new Error(`${packageName} package.json has no ${binName} bin entry`);
+  return join(dirname(packageJsonPath), bin);
+}
+
+function nodeExecPathShim(): string {
+  return `data:text/javascript,${encodeURIComponent("const configured = process.env.PI_ENV_NODE_BIN?.trim(); if (configured) Object.defineProperty(process, 'execPath', { value: configured, configurable: true, writable: true });")}`;
+}
+
+function nodeModuleLaunch(packageName: string, binName: string, args: string[]): { launchCommand: string; launchArgs: string[]; nodeExecPathShim: string } {
+  const shim = nodeExecPathShim();
+  return { launchCommand: resolveNodeCommand(), launchArgs: [packageBinEntry(packageName, binName), ...args], nodeExecPathShim: shim };
+}
+
+function nativeLaunch(binaryName: string, args: string[]): { launchCommand: string; launchArgs: string[] } {
+  return { launchCommand: binaryName, launchArgs: args };
+}
 
 /** Use Nub's workspace TypeScript, which prepare patches with Effect diagnostics. */
 function resolveTypeScriptServerPath(): string {
@@ -146,6 +173,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     name: BackendName.TypeScript,
     binaryName: "typescript-language-server",
     binaryArgs: ["--stdio"],
+    ...nodeModuleLaunch("typescript-language-server", "typescript-language-server", ["--stdio"]),
     extensions: new Map([
       [".ts", "typescript"], [".tsx", "typescriptreact"],
       [".js", "javascript"], [".jsx", "javascriptreact"],
@@ -170,6 +198,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     name: BackendName.Bash,
     binaryName: "bash-language-server",
     binaryArgs: ["start"],
+    ...nodeModuleLaunch("bash-language-server", "bash-language-server", ["start"]),
     extensions: new Map([
       [".sh", "shellscript"], [".bash", "shellscript"],
       [".zsh", "shellscript"], [".ksh", "shellscript"],
@@ -184,6 +213,7 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     name: BackendName.Nil,
     binaryName: "nil",
     binaryArgs: [],
+    ...nativeLaunch("nil", []),
     extensions: new Map([
       [".nix", "nix"],
     ]),

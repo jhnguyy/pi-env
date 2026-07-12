@@ -52,6 +52,7 @@ const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
 export class LspDaemon {
   private backends: LspBackend[];
   private server: Server | null = null;
+  private sockets = new Set<Socket>();
   private fileCache = new FileCache();
 
   /** Timestamp of the activity *before* the current request. Used for accurate idle reporting. */
@@ -103,6 +104,8 @@ export class LspDaemon {
 
   private handleConnection(socket: Socket): void {
     let buf = "";
+    this.sockets.add(socket);
+    socket.once("close", () => this.sockets.delete(socket));
     socket.setEncoding("utf8");
 
     socket.on("data", (chunk: string) => {
@@ -142,7 +145,12 @@ export class LspDaemon {
       response = errorResponse(req.id, err instanceof Error ? err.message : "Unknown error");
     }
 
-    socket.write(serializeResponse(response));
+    const serialized = serializeResponse(response);
+    if (req.action === "shutdown") {
+      socket.end(serialized, () => { void this.shutdown(); });
+    } else {
+      socket.write(serialized);
+    }
   }
 
   private async dispatch(req: DaemonRequest): Promise<DaemonResponse> {
@@ -156,7 +164,6 @@ export class LspDaemon {
 
     // Shutdown is handled inline — not a registered action
     if (req.action === "shutdown") {
-      this.shutdown();
       return okResponse(req.id, {
         action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       } as StatusResult);
@@ -173,15 +180,25 @@ export class LspDaemon {
 
   private resetIdleTimer(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => this.shutdown(), this.idleTimeoutMs);
+    this.idleTimer = setTimeout(() => void this.shutdown(), this.idleTimeoutMs);
   }
 
-  shutdown(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    for (const backend of this.backends) backend.shutdown();
-    this.server?.close();
-    removeStaleArtifacts([this.socketPath, this.pidPath]);
-    process.exit(0);
+  private shutdownPromise: Promise<void> | null = null;
+
+  async shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shutdownPromise = (async () => {
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+      await Promise.all(this.backends.map((backend) => backend.shutdown()));
+      const server = this.server;
+      this.server = null;
+      for (const socket of this.sockets) socket.destroy();
+      this.sockets.clear();
+      if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+      removeStaleArtifacts([this.socketPath, this.pidPath]);
+    })();
+    return this.shutdownPromise;
   }
 }
 
@@ -191,8 +208,8 @@ const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMain) {
   const daemon = new LspDaemon();
-  process.on("SIGTERM", () => daemon.shutdown());
-  process.on("SIGINT", () => daemon.shutdown());
+  process.on("SIGTERM", () => void daemon.shutdown().then(() => process.exit(0)));
+  process.on("SIGINT", () => void daemon.shutdown().then(() => process.exit(0)));
   daemon.start().catch((err) => {
     console.error("Daemon failed to start:", err);
     process.exit(1);

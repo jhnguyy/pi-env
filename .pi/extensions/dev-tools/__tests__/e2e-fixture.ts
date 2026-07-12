@@ -14,7 +14,7 @@ export interface TypeScriptE2EProject {
 export interface LspE2EFixture extends TypeScriptE2EProject {
   callDaemon(req: object): Promise<any>;
   writeFile(relativePath: string, lines: string[] | string): string;
-  cleanup(): void;
+  cleanup(): Promise<void>;
 }
 
 export async function createLspE2EFixture(): Promise<LspE2EFixture> {
@@ -83,9 +83,9 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
       client.close();
       return result;
     },
-    cleanup(): void {
+    async cleanup(): Promise<void> {
       try {
-        daemon?.shutdown();
+        await daemon?.shutdown();
       } catch {}
       try {
         if (existsSync(socketPath)) unlinkSync(socketPath);
