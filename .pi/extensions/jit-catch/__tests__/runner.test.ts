@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { captureDiff, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
-import type { ExecFn } from "../runner";
+import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform.js";
+import { captureDiff, legacyExecJitRunner, platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
+import type { ExecResult, JitRunner } from "../runner";
 
 const tempDirs: string[] = [];
 
@@ -57,13 +59,13 @@ describe("readSourceFiles", () => {
 
 describe("resolveGitRoot", () => {
   it("uses git rev-parse output when available", async () => {
-    const exec: ExecFn = async () => ({ code: 0, stdout: "/repo/root\n", stderr: "" });
+    const exec: JitRunner = () => Effect.succeed({ code: 0, stdout: "/repo/root\n", stderr: "" });
 
     await expect(resolveGitRoot(exec, "/repo/root/subdir")).resolves.toBe("/repo/root");
   });
 
   it("falls back to gitCwd when rev-parse fails", async () => {
-    const exec: ExecFn = async () => ({ code: 128, stdout: "", stderr: "not a repo" });
+    const exec: JitRunner = () => Effect.succeed({ code: 128, stdout: "", stderr: "not a repo" });
 
     await expect(resolveGitRoot(exec, "/not/repo")).resolves.toBe("/not/repo");
   });
@@ -71,11 +73,50 @@ describe("resolveGitRoot", () => {
 
 describe("captureDiff", () => {
   it("returns user-facing capture-diff failures unchanged", async () => {
-    const exec: ExecFn = async () => ({ code: 1, stdout: "", stderr: "fatal: bad revision" });
+    const exec: JitRunner = () => Effect.succeed({ code: 1, stdout: "", stderr: "fatal: bad revision" });
 
     await expect(captureDiff("commit", exec, "/repo", "deadbeef")).rejects.toThrow(
       "git show failed (exit 1): fatal: bad revision",
     );
+  });
+});
+
+describe("legacyExecJitRunner", () => {
+  it("adapts promise exec and propagates Effect interruption through AbortSignal", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const aborted = new Promise<void>((resolve) => {
+      const runner = legacyExecJitRunner((_cmd, _args, opts) => {
+        observedSignal = opts?.signal;
+        opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
+        return new Promise(() => {});
+      });
+      const fiber = Effect.runFork(runner("cmd", [], {}));
+      void Effect.runPromise(Fiber.interrupt(fiber));
+    });
+
+    await expect(aborted).resolves.toBeUndefined();
+    expect(observedSignal?.aborted).toBe(true);
+  });
+});
+
+describe("platformJitRunner", () => {
+  const node = resolveNodeCommand();
+
+  it("returns normal nonzero exit code and output as command data", async () => {
+    const result = await Effect.runPromise(platformJitRunner(node, ["-e", "console.log('out'); console.error('err'); process.exit(5)"], { timeout: 5_000 }));
+    expect(result).toEqual({ code: 5, stdout: "out\n", stderr: "err\n" });
+  });
+
+  it("fails timeouts as operational ProcessFailure errors", async () => {
+    const result = await Effect.runPromise(Effect.either(platformJitRunner(node, ["-e", "setInterval(()=>{}, 1000)"], { timeout: 50 })));
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
+  });
+
+  it.runIf(process.platform !== "win32")("fails self-signal termination as operational ProcessFailure errors", async () => {
+    const result = await Effect.runPromise(Effect.either(platformJitRunner(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeout: 5_000 })));
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") expect(result.left.kind).toBe(ProcessFailureKind.Exit);
   });
 });
 
@@ -96,18 +137,12 @@ describe("runForExtension", () => {
       signalAbortObservedResolve = resolve;
     });
 
-    const exec: ExecFn = async (cmd, _args, opts) => {
-      if (cmd === "pi") return { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" };
+    const exec: JitRunner = (cmd, _args, _opts) => {
+      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
 
-      const signal = opts?.signal;
-      if (!signal) throw new Error("expected injected abort signal");
-
-      return await new Promise<never>((_resolve, reject) => {
-        signal.addEventListener("abort", () => {
-          signalAbortObservedResolve();
-          reject(new Error("exec observed abort"));
-        }, { once: true });
-        setTimeout(() => controller.abort(), 0);
+      setTimeout(() => controller.abort(), 0);
+      return Effect.async<ExecResult, never>(() => {
+        return Effect.sync(() => signalAbortObservedResolve());
       });
     };
 
@@ -125,9 +160,9 @@ describe("runForExtension", () => {
 
   it("deletes the generated catching test after a passing run", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: ExecFn = async (cmd) => cmd === "pi"
+    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
       ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
-      : { code: 0, stdout: "pass", stderr: "" };
+      : { code: 0, stdout: "pass", stderr: "" });
 
     const result = await runForExtension(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
@@ -143,10 +178,10 @@ describe("runForExtension", () => {
 
   it("keeps passing runs passing when best-effort deletion fails", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: ExecFn = async (cmd) => {
-      if (cmd === "pi") return { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" };
+    const exec: JitRunner = (cmd) => {
+      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
       rmSync(testPath, { force: true });
-      return { code: 0, stdout: "pass", stderr: "" };
+      return Effect.succeed({ code: 0, stdout: "pass", stderr: "" });
     };
 
     const result = await runForExtension(
@@ -160,11 +195,33 @@ describe("runForExtension", () => {
     expect(result).toMatchObject({ passed: true, testPath: null });
   });
 
-  it("keeps the generated catching test after a test failure", async () => {
+  it("keeps generator nonzero behavior and stderr in the user-facing result", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: ExecFn = async (cmd) => cmd === "pi"
+    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
+      ? { code: 2, stdout: "", stderr: "generator failed exactly" }
+      : { code: 0, stdout: "pass", stderr: "" });
+
+    const result = await runForExtension(
+      { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
+      "diff",
+      exec,
+      undefined,
+      root,
+    );
+
+    expect(result).toMatchObject({
+      passed: false,
+      testPath: null,
+      testOutput: "Test generation failed: Test-writer subagent failed (exit 2): generator failed exactly",
+    });
+    expect(existsSync(testPath)).toBe(false);
+  });
+
+  it("keeps npm nonzero as a failed-test result with retained output and file", async () => {
+    const { root, testPath } = makeExtensionRoot();
+    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
       ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
-      : { code: 1, stdout: "", stderr: "failed" };
+      : { code: 1, stdout: "", stderr: "failed" });
 
     const result = await runForExtension(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
@@ -176,14 +233,15 @@ describe("runForExtension", () => {
 
     expect(result.passed).toBe(false);
     expect(result.testPath).toBe(testPath);
+    expect(result.testOutput).toBe("failed");
     expect(existsSync(testPath)).toBe(true);
   });
 
   it("returns typed subprocess phase failures and keeps generated diagnostics", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: ExecFn = async (cmd) => {
-      if (cmd === "pi") return { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" };
-      throw new Error("spawn ENOENT");
+    const exec: JitRunner = (cmd) => {
+      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
+      return Effect.fail(new ProcessFailure({ kind: ProcessFailureKind.Spawn, command: "npm test", message: "spawn ENOENT" }));
     };
 
     const result = await runForExtension(

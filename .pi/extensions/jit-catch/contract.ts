@@ -9,7 +9,10 @@ import {
   phaseErrorToRunResult,
   resolveGitRootEffect,
   runForExtensionEffect,
+  legacyExecJitRunner,
+  platformJitRunner,
   type ExecFn,
+  type JitRunner,
 } from "./runner";
 import { err } from "../_shared/result";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
@@ -77,19 +80,23 @@ export const JIT_CATCH_DESCRIPTION = [
   "for promoting criteria.",
 ].join("\n");
 
-export function createJitCatchContract(exec: ExecFn): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
+export function createJitCatchContract(exec?: ExecFn): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
+  return createJitCatchContractWithRunner(exec ? legacyExecJitRunner(exec) : platformJitRunner);
+}
+
+export function createJitCatchContractWithRunner(runner: JitRunner): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
   return {
     name: "jit_catch",
     label: "JiT-Catch",
     description: JIT_CATCH_DESCRIPTION,
     parameters: JIT_CATCH_PARAMETERS,
-    execute: (params, context) => Effect.runPromise(executeJitCatchEffect(params, exec, context), { signal: context.signal }),
+    execute: (params, context) => Effect.runPromise(executeJitCatchEffect(params, runner, context), { signal: context.signal }),
   };
 }
 
 export function executeJitCatchEffect(
   params: JitCatchParams,
-  exec: ExecFn,
+  runner: JitRunner,
   context: DomainToolContext,
 ) {
   const progress = context.progress ?? (() => {});
@@ -100,15 +107,14 @@ export function executeJitCatchEffect(
     progress("Acquiring diff…");
 
     const acquisition = yield* Effect.either(Effect.gen(function*() {
-      if (params.diff) {
-        workspaceRoot = yield* resolveGitRootEffect(exec, workspaceRoot);
+      if (params.diff !== undefined) {
         return params.diff;
       }
 
       const source = params.diff_source ?? "unstaged";
       const gitCwd = params.git_cwd ?? context.cwd;
-      workspaceRoot = yield* resolveGitRootEffect(exec, gitCwd);
-      return yield* captureDiffEffect(source, exec, gitCwd, params.commit);
+      workspaceRoot = yield* resolveGitRootEffect(runner, gitCwd);
+      return yield* captureDiffEffect(source, runner, gitCwd, params.commit);
     }));
 
     if (acquisition._tag === "Left") return err(formatRunnerError(acquisition.left));
@@ -139,7 +145,7 @@ export function executeJitCatchEffect(
     const results = [];
     for (const ext of targets) {
       progress(`${ext.name}: generating tests…`);
-      const result = yield* Effect.either(runForExtensionEffect(ext, diffText, exec, workspaceRoot, (phase) => {
+      const result = yield* Effect.either(runForExtensionEffect(ext, diffText, runner, workspaceRoot, (phase) => {
         progress(`${ext.name}: ${phase}`);
       }));
       results.push(result._tag === "Right" ? result.right : phaseErrorToRunResult(ext, result.left, workspaceRoot));

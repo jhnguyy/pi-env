@@ -6,7 +6,8 @@ import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } fro
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
 import { err } from "../../_shared/result";
 import jitCatchExtension from "../index";
-import { createJitCatchContract, executeJitCatchEffect, JIT_CATCH_DESCRIPTION, JIT_CATCH_PARAMETERS } from "../contract";
+import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
+import { createJitCatchContract, createJitCatchContractWithRunner, executeJitCatchEffect, JIT_CATCH_DESCRIPTION, JIT_CATCH_PARAMETERS } from "../contract";
 import * as runner from "../runner";
 
 const runnerState = vi.hoisted(() => ({
@@ -118,6 +119,16 @@ describe("jit_catch tool contract", () => {
     ]);
   });
 
+  it("does not depend on pi.exec for production registration", async () => {
+    const harness = createPi();
+    harness.pi.exec = async () => { throw new Error("pi.exec should not be called"); };
+    jitCatchExtension(harness.pi as any);
+    harness.startSession("/agent/session");
+
+    await expect(harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/pi/context" })).resolves.toBeDefined();
+    await expect(harness.registrations[0].tool.execute("agent", {}, undefined)).resolves.toBeDefined();
+  });
+
   it("uses Pi cwd per invocation and captured Agent session cwd", async () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
@@ -154,6 +165,27 @@ describe("jit_catch tool contract", () => {
     expect(runnerState.runCalls.map((call) => call[3])).toEqual(["/explicit/root", "/explicit/root"]);
   });
 
+  it("raw diff skips git helpers entirely and uses git_cwd or context cwd as workspace root", async () => {
+    const rawDiff = [
+      "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
+      "+++ b/.pi/extensions/demo/index.ts",
+    ].join("\n");
+
+    await Effect.runPromise(executeJitCatchEffect({ diff: rawDiff, git_cwd: "/raw" }, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/context" }));
+
+    expect(runner.resolveGitRootEffect).not.toHaveBeenCalled();
+    expect(runner.captureDiffEffect).not.toHaveBeenCalled();
+    expect(runnerState.runCalls[0][3]).toBe("/raw");
+  });
+
+  it("empty raw diff skips git helpers and returns no changed files", async () => {
+    const result = await Effect.runPromise(executeJitCatchEffect({ diff: "", git_cwd: "/raw" }, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/context" }));
+
+    expect(runner.resolveGitRootEffect).not.toHaveBeenCalled();
+    expect(runner.captureDiffEffect).not.toHaveBeenCalled();
+    expect(result).toEqual(err("No changed files found in the diff."));
+  });
+
   it("preserves matching progress shape through both adapters", async () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
@@ -172,7 +204,7 @@ describe("jit_catch tool contract", () => {
   it("interrupts contract execution through the single Effect.runPromise signal adapter", async () => {
     runnerState.runEffect = Effect.never;
     const harness = createPi();
-    const contract = createJitCatchContract(harness.pi.exec as any);
+    const contract = createJitCatchContractWithRunner(() => Effect.never);
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 0);
 
@@ -181,8 +213,7 @@ describe("jit_catch tool contract", () => {
   });
 
   it("exposes an Effect-native execution seam without using Promise runner wrappers", async () => {
-    const harness = createPi();
-    const result = await Effect.runPromise(executeJitCatchEffect({}, harness.pi.exec as any, { cwd: "/effect" }));
+    const result = await Effect.runPromise(executeJitCatchEffect({}, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/effect" }));
 
     expect(result.details).toEqual({
       results: [{ extName: "demo", passed: true, testOutput: "ok" }],
@@ -197,10 +228,10 @@ describe("jit_catch tool contract", () => {
     vi.mocked(runner.captureDiffEffect).mockReturnValueOnce(Effect.fail(new runner.ExecPhaseError({
       phase: "capture diff",
       command: "git diff",
-      cause: new Error("spawn ENOENT"),
+      cause: new ProcessFailure({ kind: ProcessFailureKind.Spawn, command: "git diff", message: "spawn ENOENT" }),
     })));
 
-    const result = await Effect.runPromise(executeJitCatchEffect({}, createPi().pi.exec as any, { cwd: "/same" }));
+    const result = await Effect.runPromise(executeJitCatchEffect({}, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/same" }));
 
     expect(result).toEqual(err("Operational subprocess failure during capture diff: git diff: spawn ENOENT"));
   });
@@ -213,7 +244,7 @@ describe("jit_catch tool contract", () => {
 
     const piResult = await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/same" });
     const agentResult = await harness.registrations[0].tool.execute("agent", {}, undefined);
-    const contractResult = await createJitCatchContract(harness.pi.exec as any).execute({}, { cwd: "/same" });
+    const contractResult = await createJitCatchContractWithRunner(() => Effect.succeed({ code: 0, stdout: "", stderr: "" })).execute({}, { cwd: "/same" });
 
     expect(piResult.content[0].text).toContain("Note: diff also contains non-extension files (ignored).\n");
     expect(piResult.content[0].text).toContain("✗ demo — tests FAILED.");

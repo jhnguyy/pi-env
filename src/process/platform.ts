@@ -41,6 +41,7 @@ export interface ScopedChildProcessOptions extends ProcessOptions {
   readonly stdio?: SpawnOptions["stdio"];
 }
 export interface ProcessOutput { readonly stdout: string; readonly stderr: string }
+export interface ProcessCommandResult extends ProcessOutput { readonly exitCode: number }
 
 export function resolveNodeCommand(
   env: Partial<Pick<NodeJS.ProcessEnv, "PI_ENV_NODE_BIN">> = process.env,
@@ -180,12 +181,24 @@ export function scopedChildProcess(
   );
 }
 
-/** Streams bounded output and waits for child-tree cleanup on timeout, limit, or interruption. */
-export function streamProcess(
+function collectProcess(
+  command: string,
+  args: readonly string[],
+  options: StreamProcessOptions,
+  preserveExit: false,
+): Effect.Effect<ProcessOutput, ProcessFailure>;
+function collectProcess(
+  command: string,
+  args: readonly string[],
+  options: StreamProcessOptions,
+  preserveExit: true,
+): Effect.Effect<ProcessCommandResult, ProcessFailure>;
+function collectProcess(
   command: string,
   args: readonly string[],
   options: StreamProcessOptions = {},
-): Effect.Effect<ProcessOutput, ProcessFailure> {
+  preserveExit: boolean,
+): Effect.Effect<ProcessOutput | ProcessCommandResult, ProcessFailure> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
   const stdoutLimit = options.stdoutLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
   const stderrLimit = options.stderrLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
@@ -266,6 +279,15 @@ export function streamProcess(
       const value = output();
       if (terminalError) {
         void (termination ?? Promise.resolve()).then(() => settle(Effect.fail(new ProcessFailure({ ...terminalError!, ...value }))));
+      } else if (code === null && closeSignal) {
+        settle(Effect.fail(new ProcessFailure({
+          kind: ProcessFailureKind.Exit,
+          command,
+          message: `Process exited with code unknown (${closeSignal}): ${command}`,
+          ...value,
+        })));
+      } else if (preserveExit) {
+        settle(Effect.succeed({ ...value, exitCode: code ?? 1 }));
       } else if (code !== 0) {
         settle(Effect.fail(new ProcessFailure({
           kind: ProcessFailureKind.Exit,
@@ -317,4 +339,22 @@ export function streamProcess(
       removeListeners();
     });
   });
+}
+
+/** Streams bounded output and waits for child-tree cleanup on timeout, limit, or interruption. */
+export function streamProcess(
+  command: string,
+  args: readonly string[],
+  options: StreamProcessOptions = {},
+): Effect.Effect<ProcessOutput, ProcessFailure> {
+  return collectProcess(command, args, options, false);
+}
+
+/** Runs a bounded command, preserving stdout/stderr and exit code (including nonzero) as data. */
+export function runProcess(
+  command: string,
+  args: readonly string[],
+  options: StreamProcessOptions = {},
+): Effect.Effect<ProcessCommandResult, ProcessFailure> {
+  return collectProcess(command, args, options, true);
 }

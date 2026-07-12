@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Either, Fiber } from "effect";
 import { describe, expect, it } from "vitest";
-import { ProcessFailureKind, resolveNodeCommand, streamProcess } from "../platform";
+import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
 
 const node = resolveNodeCommand();
 
@@ -54,6 +54,26 @@ describe("process platform streamProcess", () => {
       expect(result.left.kind).toBe(ProcessFailureKind.Exit);
       expect(result.left.exitCode).toBe(7);
       expect(result.left.stdout?.trim()).toBe("partial");
+    }
+  });
+
+  it("runProcess preserves nonzero exit, stdout, and stderr as data", async () => {
+    const result = await Effect.runPromise(runProcess(node, ["-e", "console.log('partial'); console.error('warn'); process.exit(7)"], { timeoutMs: 5_000 }));
+    expect(result).toMatchObject({ exitCode: 7, stdout: "partial\n", stderr: "warn\n" });
+  });
+
+  it("runProcess shares timeout failures", async () => {
+    const result = await Effect.runPromise(Effect.either(runProcess(node, ["-e", "setInterval(()=>{}, 1000)"], { timeoutMs: 50, killGraceMs: 50 })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
+  });
+
+  it.runIf(process.platform !== "win32")("runProcess treats self-signal termination as signal-aware exit failure", async () => {
+    const result = await Effect.runPromise(Effect.either(runProcess(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeoutMs: 5_000 })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.kind).toBe(ProcessFailureKind.Exit);
+      expect(result.left.message).toContain("Process exited with code unknown (SIGTERM)");
     }
   });
 
