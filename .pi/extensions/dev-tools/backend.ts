@@ -9,7 +9,7 @@ import { dirname, extname, resolve as resolvePath } from "node:path";
 import { Deferred, Effect, Exit, Scope } from "effect";
 import type { CloseableScope } from "effect/Scope";
 
-import { scopedChildProcess, type ProcessFailure } from "../../../src/process/platform.js";
+import { scopedChildProcess } from "../../../src/process/platform.js";
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { DiagnosticsCache } from "./diagnostics-cache";

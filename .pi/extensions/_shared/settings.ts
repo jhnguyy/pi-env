@@ -73,10 +73,6 @@ export function loadSettingsSnapshotEffect(cwd = process.cwd(), env: SettingsEnv
   });
 }
 
-export function readSettingsEffect(cwd = process.cwd(), env: SettingsEnv = defaultSettingsEnv): Effect.Effect<SettingsBlock, SettingsError> {
-  return Effect.map(loadSettingsSnapshotEffect(cwd, env), (snapshot) => snapshot.merged);
-}
-
 export function readSettingsBlockEffect(key: string, cwd = process.cwd(), env: SettingsEnv = defaultSettingsEnv): Effect.Effect<SettingsBlock, SettingsError> {
   return Effect.map(loadSettingsSnapshotEffect(cwd, env), (snapshot) => mergeBlockFromSnapshot(snapshot, key));
 }
@@ -128,7 +124,7 @@ export function decodeSettingsBlockSync<S extends Schema.Schema.AnyNoContext>(ke
   return Effect.runSync(decodeSettingsBlockEffect(key, schema, cwd, env));
 }
 
-export function objectAt(root: SettingsBlock, key: string): SettingsBlock {
+function objectAt(root: SettingsBlock, key: string): SettingsBlock {
   const value = root[key];
   return isObject(value) ? value : {};
 }
@@ -143,10 +139,6 @@ export function parseBooleanSetting(value: unknown): boolean | undefined {
 
 export function booleanSetting(value: unknown, envValue: unknown, defaultValue: boolean): boolean {
   return parseBooleanSetting(envValue) ?? parseBooleanSetting(value) ?? defaultValue;
-}
-
-export function positiveIntegerSetting(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : undefined;
 }
 
 export function isObject(value: unknown): value is SettingsBlock {

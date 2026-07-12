@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyManagedSettingsTransforms,
-  mergeManaged,
   parseJsonRelaxedText,
   renderSettings,
 } from "../managed-settings-core.mjs";
@@ -11,10 +10,15 @@ describe("managed settings core", () => {
     expect(parseJsonRelaxedText('{ // keep\n "theme": "x", /* drop */ }')).toEqual({ theme: "x" });
   });
 
-  it("merges managed settings without comment keys", () => {
+  it("merges managed settings without comment keys through the aggregate transform", () => {
     expect(
-      mergeManaged({ nested: { keep: true } }, { _comment: "ignored", nested: { add: 1 } }),
-    ).toEqual({
+      applyManagedSettingsTransforms(
+        { nested: { keep: true } },
+        { _comment: "ignored", nested: { add: 1 } },
+        "/repo",
+        "/repo",
+      ),
+    ).toMatchObject({
       nested: { keep: true, add: 1 },
     });
   });

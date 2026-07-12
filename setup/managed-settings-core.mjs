@@ -1,9 +1,9 @@
 const DEFAULT_LIGHT_THEME = "gruvbox-light";
 const DEFAULT_DARK_THEME = "gruvbox-dark";
-export const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
-export const DISABLED_EXTENSIONS = ["playwright-client", "work-tracker"];
+const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
+const DISABLED_EXTENSIONS = ["playwright-client", "work-tracker"];
 
-export function stripJsonComments(input) {
+function stripJsonComments(input) {
   let output = "";
   let inString = false;
   let escaped = false;
@@ -55,7 +55,7 @@ export function stripJsonComments(input) {
   return output;
 }
 
-export function stripTrailingCommas(input) {
+function stripTrailingCommas(input) {
   let output = "";
   let inString = false;
   let escaped = false;
@@ -94,11 +94,11 @@ export function parseJsonRelaxedText(raw) {
   }
 }
 
-export function isPlainObject(value) {
+function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-export function mergeManaged(target, managed) {
+function mergeManaged(target, managed) {
   for (const [key, value] of Object.entries(managed)) {
     if (key.startsWith("_comment")) continue;
     if (isPlainObject(value) && isPlainObject(target[key])) mergeManaged(target[key], value);
@@ -107,21 +107,21 @@ export function mergeManaged(target, managed) {
   return target;
 }
 
-export function packageSource(pkg) {
+function packageSource(pkg) {
   return typeof pkg === "string" ? pkg : isPlainObject(pkg) ? pkg.source : undefined;
 }
 
-export function ensurePiUpdateDefault(settings) {
+function ensurePiUpdateDefault(settings) {
   if (!isPlainObject(settings.piUpdate)) settings.piUpdate = {};
   if (settings.piUpdate.enabled !== true) settings.piUpdate.enabled = false;
 }
 
-export function ensureDefaultTheme(settings) {
+function ensureDefaultTheme(settings) {
   if (typeof settings.theme !== "string" || settings.theme.trim() === "")
     settings.theme = DEFAULT_AUTO_THEME;
 }
 
-export function migrateDefaultNpmCommand(settings) {
+function migrateDefaultNpmCommand(settings) {
   if (
     Array.isArray(settings.npmCommand) &&
     settings.npmCommand.length === 1 &&
@@ -130,7 +130,7 @@ export function migrateDefaultNpmCommand(settings) {
     settings.npmCommand = ["nub"];
 }
 
-export function ensureDisabledExtensions(settings) {
+function ensureDisabledExtensions(settings) {
   const existing = Array.isArray(settings.extensions) ? settings.extensions : [];
   settings.extensions = [
     ...existing.filter(

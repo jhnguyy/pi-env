@@ -1,16 +1,15 @@
 import { keyHint, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
-import { createJitCatchContract, type JitCatchParams } from "./contract";
+import { createJitCatchContract } from "./contract";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
-import { contextFromPiSession, toAgentTool, toPiTool } from "../_shared/tool-contract";
+import { toAgentTool, toPiTool } from "../_shared/tool-contract";
 
 export default function (pi: ExtensionAPI) {
   const contract = createJitCatchContract(pi.exec.bind(pi));
 
-  pi.registerTool(toPiTool<JitCatchParams>(contract, {
-    renderCall(args, theme, _ctx) {
-      const params = args as JitCatchParams;
+  pi.registerTool(toPiTool(contract, {
+    renderCall(params, theme, _ctx) {
       let text = theme.fg("toolTitle", theme.bold("jit_catch"));
       const source = params.diff ? "raw diff" : (params.diff_source ?? "unstaged");
       text += " " + theme.fg("accent", source);
@@ -42,9 +41,8 @@ export default function (pi: ExtensionAPI) {
   }));
 
   pi.on(PiEvent.SessionStart, (_event, ctx: ExtensionContext) => {
-    const sessionContext = contextFromPiSession(ctx);
     registerAgentTools(pi, {
-      tool: toAgentTool(contract, () => sessionContext),
+      tool: toAgentTool(contract, () => ctx),
       capabilities: [ToolCapability.Write, ToolCapability.Execute],
     });
   });

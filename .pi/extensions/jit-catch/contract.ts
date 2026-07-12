@@ -69,7 +69,7 @@ export const JIT_CATCH_DESCRIPTION = [
   "for promoting criteria.",
 ].join("\n");
 
-export function createJitCatchContract(exec: ExecFn): ToolContract<JitCatchParams> {
+export function createJitCatchContract(exec: ExecFn): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
   return {
     name: "jit_catch",
     label: "JiT-Catch",

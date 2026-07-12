@@ -1,5 +1,5 @@
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
 export type ToolProgress = (message: string) => void;
@@ -15,16 +15,15 @@ export type DomainToolExecutor<Params, Details = unknown> = (
   context: DomainToolContext,
 ) => Promise<AgentToolResult<Details>>;
 
-export interface ToolContract<Params, Details = unknown, Schema extends TSchema = TSchema> {
-  name: string;
-  label: string;
-  description: string;
-  parameters: Schema;
+export type ToolContract<Params, Details = unknown, Schema extends TSchema = TSchema> = Pick<
+  ToolDefinition<Schema, Details>,
+  "name" | "label" | "description" | "parameters"
+> & {
   execute: DomainToolExecutor<Params, Details>;
-}
+};
 
-export type PiToolUi<Params, Details = unknown> = Pick<
-  Parameters<ExtensionAPI["registerTool"]>[0],
+export type PiToolUi<Schema extends TSchema, Details = unknown> = Pick<
+  ToolDefinition<Schema, Details, any>,
   "renderCall" | "renderResult"
 >;
 
@@ -32,31 +31,27 @@ function progressResult(message: string): AgentToolResult<{ phase: string }> {
   return { content: [{ type: "text", text: message }], details: { phase: message } };
 }
 
-export function toPiTool<Params, Details = unknown>(
-  contract: ToolContract<Params, Details>,
-  ui: PiToolUi<Params, Details> = {},
-): Parameters<ExtensionAPI["registerTool"]>[0] {
+export function toPiTool<Params, Details = unknown, Schema extends TSchema = TSchema>(
+  contract: ToolContract<Params, Details, Schema>,
+  ui: PiToolUi<Schema, Details> = {},
+): ToolDefinition<Schema, Details, any> {
   return {
     name: contract.name,
     label: contract.label,
     description: contract.description,
-    parameters: contract.parameters as Parameters<ExtensionAPI["registerTool"]>[0]["parameters"],
+    parameters: contract.parameters,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       return contract.execute(params as Params, {
         cwd: ctx.cwd,
         signal,
-        progress: (message) => onUpdate?.(progressResult(message)),
+        progress: (message) => onUpdate?.(progressResult(message) as AgentToolResult<Details>),
       });
     },
     ...ui,
   };
 }
 
-export interface AgentToolAdapterContext {
-  cwd: string;
-}
-
-export type AgentToolContextProvider = () => AgentToolAdapterContext;
+type AgentToolContextProvider = () => Pick<ExtensionContext, "cwd">;
 
 export function toAgentTool<Params, Details = unknown>(
   contract: ToolContract<Params, Details>,
@@ -72,12 +67,8 @@ export function toAgentTool<Params, Details = unknown>(
       return contract.execute(params as Params, {
         cwd: context.cwd,
         signal,
-        progress: (message) => onUpdate?.(progressResult(message)),
+        progress: (message) => onUpdate?.(progressResult(message) as AgentToolResult<Details>),
       });
     },
   };
-}
-
-export function contextFromPiSession(ctx: ExtensionContext): AgentToolAdapterContext {
-  return { cwd: ctx.cwd };
 }

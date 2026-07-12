@@ -13,7 +13,7 @@ const runnerState = vi.hoisted(() => ({
 
 vi.mock("../runner", () => ({
   resolveGitRoot: vi.fn(async (_exec, cwd: string) => `${cwd}/root`),
-  captureDiff: vi.fn(async (_source, _exec, cwd: string) => [
+  captureDiff: vi.fn(async (_source, _exec, _cwd: string) => [
     "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
     "+++ b/.pi/extensions/demo/index.ts",
     "diff --git a/README.md b/README.md",
