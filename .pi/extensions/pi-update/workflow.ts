@@ -22,7 +22,7 @@ export function isPiUpdateEnabled(cwd = process.cwd()): boolean {
 function runEffect(exec: Exec, command: string, args: string[], options: { cwd?: string; timeout?: number } = {}): Effect.Effect<ExecResult, PiUpdateError> {
   return Effect.flatMap(
     Effect.tryPromise({
-      try: () => exec(command, args, { timeout: options.timeout ?? 120000, cwd: options.cwd }),
+      try: (signal) => exec(command, args, { timeout: options.timeout ?? 120000, cwd: options.cwd, signal }),
       catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Command, detail: [command, ...args].join(" "), cause }),
     }),
     (result) => {
@@ -69,7 +69,7 @@ function prepareWorktreeEffect(exec: Exec, repo: string, version: string, reques
     if (worktrees.split(/\r?\n/).includes(`worktree ${worktree}`)) return { branch, worktree };
 
     const branchExists = (yield* Effect.tryPromise({
-      try: () => exec("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repo, timeout: 30000 }),
+      try: (signal) => exec("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repo, timeout: 30000, signal }),
       catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Worktree, detail: `checking ${branch}`, cause }),
     })).code === 0;
     yield* runEffect(exec, "git", branchExists ? ["worktree", "add", worktree, branch] : ["worktree", "add", worktree, "-b", branch], { cwd: repo });
@@ -87,23 +87,34 @@ function fetchReleaseArtifactsEffect(exec: Exec, prep: PiUpdatePrep): Effect.Eff
     });
 
     const temp = join(tmpdir(), `pi-update-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    yield* Effect.try({
-      try: () => mkdirSync(temp, { recursive: true }),
-      catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `creating ${temp}`, cause }),
-    });
-
-    try {
-      yield* runEffect(exec, "npm", ["pack", `${PI_PACKAGE}@${prep.version}`, "--silent"], { cwd: temp });
-      const tarball = readdirSync(temp).find((entry) => entry.endsWith(".tgz"));
-      if (!tarball) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "npm pack did not produce a tarball" });
-      yield* runEffect(exec, "tar", ["-xzf", join(temp, tarball), ...PI_UPDATE_DOC_PATHS], { cwd: temp });
-      yield* Effect.try({
-        try: () => cpSync(join(temp, "package"), packageDir, { recursive: true }),
-        catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `copying package docs to ${packageDir}`, cause }),
-      });
-    } finally {
-      rmSync(temp, { recursive: true, force: true });
-    }
+    yield* Effect.acquireUseRelease(
+      Effect.try({
+        try: () => {
+          mkdirSync(temp, { recursive: true });
+          return temp;
+        },
+        catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `creating ${temp}`, cause }),
+      }),
+      (temp) =>
+        Effect.gen(function* () {
+          yield* runEffect(exec, "npm", ["pack", `${PI_PACKAGE}@${prep.version}`, "--silent"], { cwd: temp });
+          const tarball = readdirSync(temp).find((entry) => entry.endsWith(".tgz"));
+          if (!tarball) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "npm pack did not produce a tarball" });
+          yield* runEffect(exec, "tar", ["-xzf", join(temp, tarball), ...PI_UPDATE_DOC_PATHS], { cwd: temp });
+          yield* Effect.try({
+            try: () => cpSync(join(temp, "package"), packageDir, { recursive: true }),
+            catch: (cause) => new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `copying package docs to ${packageDir}`, cause }),
+          });
+        }),
+      (temp) =>
+        Effect.sync(() => {
+          try {
+            rmSync(temp, { recursive: true, force: true });
+          } catch (cause) {
+            console.warn(`pi-update warning: failed to remove temporary release artifact directory ${temp}: ${cause instanceof Error ? cause.message : String(cause)}`);
+          }
+        }),
+    );
 
     const changelogPath = join(packageDir, "CHANGELOG.md");
     if (!existsSync(changelogPath)) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "package changelog not found" });
