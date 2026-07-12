@@ -11,10 +11,20 @@ describe("safe verification plan", () => {
 
     expect(exitCode).toBe(0);
     expect(SAFE_VERIFICATION_PHASES.map((phase) => phase.id)).toEqual([
-      "format-check", "typecheck", "type-aware-lint", "unit-tests", "build",
+      "format-check",
+      "typecheck",
+      "type-aware-lint",
+      "pattern-check",
+      "unit-tests",
+      "build",
     ]);
     expect(calls).toEqual([
-      "nub run format:check", "nub run typecheck", "nub run lint:type", "nub run test:safe", "nub run build",
+      "nub run format:check",
+      "nub run typecheck",
+      "nub run lint:type",
+      "nub run check:patterns",
+      "nub run test:safe",
+      "nub run build",
     ]);
   });
 });
