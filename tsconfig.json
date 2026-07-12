@@ -12,6 +12,8 @@
     "noImplicitOverride": true,
     "skipLibCheck": true,
     "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo",
     "types": ["node", "vitest/globals"],
     "plugins": [
       {

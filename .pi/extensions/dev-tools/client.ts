@@ -22,6 +22,17 @@ const SPAWN_RETRY_INTERVAL_MS = 200;
 const SPAWN_RETRY_MAX_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Resolve the Node executable used for the detached daemon.
+ *
+ * Nix-managed pi can run Node through its dynamic loader. In that case
+ * process.execPath is the loader itself, so spawning it with a JavaScript file
+ * silently fails. Setup supplies PI_ENV_NODE_BIN as the reusable Node wrapper.
+ */
+export function resolveDaemonNodeBinary(env: NodeJS.ProcessEnv = process.env): string {
+  return env["PI_ENV_NODE_BIN"] || process.execPath;
+}
+
 // ─── LspClient ────────────────────────────────────────────────────────────────
 
 export class LspClient {
@@ -218,7 +229,7 @@ export class LspClient {
 
   private spawnDaemon(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [this.daemonScript], {
+      const child = spawn(resolveDaemonNodeBinary(), [this.daemonScript], {
         detached: true,
         stdio: "ignore",
         env: { ...process.env },

@@ -58,14 +58,14 @@ async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: str
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
 /** Max concurrent LSP operations to avoid overwhelming the language server. */
-const BULK_CONCURRENCY = 8;
+const BULK_CONCURRENCY = 32;
 
 /** Fetch diagnostics for a single file path (shared by single and bulk paths). */
 async function diagForPath(path: string, deps: HandlerDeps): Promise<DiagnosticsResult> {
   if (!existsSync(path)) throw new Error(`File not found: ${path}`);
   const backend = deps.getBackend(path);
   const uri = await backend.ensureFile(path);
-  await backend.waitForFirstDiagnostics(uri);
+  await backend.waitForDiagnostics(uri);
   const items = backend.getDiagnostics(uri);
   const errors = items.filter((d) => d.severity === "error");
   const warns = items.filter((d) => d.severity === "warning");

@@ -7,6 +7,15 @@ import { loadExtensionManifest } from "./extension-manifest.mjs";
 import { esbuildNodeTarget } from "./node-policy.mjs";
 
 const { config, extensions } = loadExtensionManifest();
+const requestedNames = new Set(process.argv.slice(2));
+const unknownNames = [...requestedNames].filter((name) => !extensions.some((ext) => ext.name === name));
+if (unknownNames.length > 0) {
+  console.error(`Unknown extension name(s): ${unknownNames.join(", ")}`);
+  process.exit(2);
+}
+const selectedExtensions = requestedNames.size === 0
+  ? extensions
+  : extensions.filter((ext) => requestedNames.has(ext.name));
 const common = {
   bundle: true,
   format: "esm",
@@ -32,7 +41,7 @@ async function buildFile(entry, outfile, options = {}) {
 }
 
 // analyze: allow-sequential
-for (const ext of extensions) {
+for (const ext of selectedExtensions) {
   const outdir = join(ext.absPath, "dist");
   if (!existsSync(ext.sourceEntry)) {
     console.log(`  skip  ${ext.name} (no index.ts)`);

@@ -82,6 +82,7 @@ SH
   run_pi_cli_setup
 
   grep -qF "NODE_BIN='$fake_node'" "$PI_BIN_DIR/pi" || fail "wrapper should pin configured node path"
+  grep -qF 'export PI_ENV_NODE_BIN="$NODE_BIN"' "$PI_BIN_DIR/pi" || fail "wrapper should expose the selected Node runtime to sidecars"
   grep -qF "PI_NODE_ARGV0=pi exec \"\$NODE_BIN\" \"\$PI_ENTRY\" \"\$@\"" "$PI_BIN_DIR/pi" || fail "wrapper should request pi argv0 for title detection"
   local wrapper_output
   wrapper_output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")

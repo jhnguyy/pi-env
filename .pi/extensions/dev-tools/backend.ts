@@ -62,6 +62,7 @@ export class LspBackend {
   /** File extension → LSP languageId */
   private readonly extensionMap: Map<string, string>;
   private readonly lspCapabilities: object;
+  private readonly initializationOptions: object | undefined;
   private readonly codePrefix: string;
   private readonly rootMarkers: string[];
   readonly supportsWorkspaceSymbols: boolean;
@@ -72,6 +73,7 @@ export class LspBackend {
     this.binaryArgs = config.binaryArgs;
     this.extensionMap = config.extensions;
     this.lspCapabilities = config.capabilities;
+    this.initializationOptions = config.initializationOptions;
     this.codePrefix = config.codePrefix;
     this.rootMarkers = config.rootMarkers;
     this.supportsWorkspaceSymbols = config.supportsWorkspaceSymbols;
@@ -170,6 +172,7 @@ export class LspBackend {
         processId: process.pid,
         rootUri: null,
         capabilities: this.lspCapabilities,
+        initializationOptions: this.initializationOptions,
         workspaceFolders: null,
       },
     });
@@ -199,6 +202,7 @@ export class LspBackend {
     }
 
     if (notification) {
+      this.diagnostics.delete(uri);
       this.sendLsp({ jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params });
     }
 
@@ -252,9 +256,9 @@ export class LspBackend {
 
   // ─── Diagnostics ────────────────────────────────────────────────────────────
 
-  /** Wait for the first diagnostics publish for this URI (with timeout). */
-  async waitForFirstDiagnostics(uri: string): Promise<void> {
-    return this.diagnostics.waitForFirst(uri);
+  /** Wait for syntax, semantic, and plugin diagnostics to settle. */
+  async waitForDiagnostics(uri: string): Promise<void> {
+    return this.diagnostics.waitForSettled(uri);
   }
 
   getDiagnostics(uri: string): DiagnosticItem[] {

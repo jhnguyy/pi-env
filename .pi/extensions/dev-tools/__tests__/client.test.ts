@@ -4,7 +4,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { LspClient } from "../client";
+import { LspClient, resolveDaemonNodeBinary } from "../client";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +25,16 @@ describeIfEnabled("dev-tools", "LspClient", () => {
   afterEach(async () => {
     await closeServer();
     try { rmSync(tmpDir, { recursive: true }); } catch {}
+  });
+
+  describe("resolveDaemonNodeBinary", () => {
+    it("prefers the configured reusable Node wrapper", () => {
+      expect(resolveDaemonNodeBinary({ PI_ENV_NODE_BIN: "/opt/pi/node" })).toBe("/opt/pi/node");
+    });
+
+    it("falls back to the current runtime without a configured wrapper", () => {
+      expect(resolveDaemonNodeBinary({})).toBe(process.execPath);
+    });
   });
 
   // ─── Helpers ────────────────────────────────────────────────────────────
@@ -162,8 +172,8 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       };
 
       // Start server 300ms after client tries to connect
-      setTimeout(async () => {
-        await startMockServer((req, sock) => {
+      setTimeout(() => {
+        void startMockServer((req, sock) => {
           sock.write(serializeResponse(okResponse(req.id, statusResult)));
         });
       }, 300);
