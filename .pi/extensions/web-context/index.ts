@@ -229,9 +229,9 @@ export function fetchWebTextEffect(rawUrl: string, options: WebFetchOptions | nu
 }
 
 export async function fetchWebText(rawUrl: string, options: WebFetchOptions | number = {}, signal?: AbortSignal, dependencies: WebFetchDependencies = {}): Promise<WebFetchResult> {
-  const result = await Effect.runPromise(Effect.either(fetchWebTextEffect(rawUrl, options, { ...dependencies, signal })));
-  if (result._tag === "Left") throw result.left;
-  return result.right;
+  const result = await Effect.runPromise(Effect.result(fetchWebTextEffect(rawUrl, options, { ...dependencies, signal })));
+  if (result._tag === "Failure") throw result.failure;
+  return result.success;
 }
 
 function transformFetchedText(text: string, contentType: string | null, mode: WebFetchMode): string {

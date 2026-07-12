@@ -46,7 +46,7 @@ export class SettingsDecodeError extends Data.TaggedError("SettingsDecodeError")
 
 export type SettingsError = SettingsReadError | SettingsDecodeError;
 
-const SettingsObjectSchema = Schema.Record({ key: Schema.String, value: Schema.Unknown });
+const SettingsObjectSchema = Schema.Record(Schema.String, Schema.Unknown);
 
 export const defaultSettingsEnv: SettingsEnv = {
   globalSettingsPath: () => join(getAgentDir(), "settings.json"),
@@ -77,20 +77,20 @@ export function readSettingsBlockEffect(key: string, cwd = process.cwd(), env: S
   return Effect.map(loadSettingsSnapshotEffect(cwd, env), (snapshot) => mergeBlockFromSnapshot(snapshot, key));
 }
 
-export function decodeSettingsBlockEffect<S extends Schema.Schema.AnyNoContext>(
+export function decodeSettingsBlockEffect<S extends Schema.Constraint & { readonly DecodingServices: never }>(
   key: string,
   schema: S,
   cwd = process.cwd(),
   env: SettingsEnv = defaultSettingsEnv,
-): Effect.Effect<Schema.Schema.Type<S>, SettingsError> {
+): Effect.Effect<S["Type"], SettingsError> {
   return Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), (snapshot) => decodeSettingsBlockFromSnapshotEffect(snapshot, key, schema));
 }
 
-export function decodeSettingsBlockFromSnapshotEffect<S extends Schema.Schema.AnyNoContext>(
+export function decodeSettingsBlockFromSnapshotEffect<S extends Schema.Constraint & { readonly DecodingServices: never }>(
   snapshot: SettingsSnapshot,
   key: string,
   schema: S,
-): Effect.Effect<Schema.Schema.Type<S>, SettingsDecodeError> {
+): Effect.Effect<S["Type"], SettingsDecodeError> {
   const invalidSource = invalidBlockSource(snapshot, key);
   if (invalidSource) {
     const path = invalidSource === SettingsSource.Global ? snapshot.paths.global : snapshot.paths.project;
@@ -105,7 +105,7 @@ export function decodeSettingsBlockFromSnapshotEffect<S extends Schema.Schema.An
   }
 
   const block = mergeBlockFromSnapshot(snapshot, key);
-  return Schema.decodeUnknown(schema)(block).pipe(
+  return Schema.decodeUnknownEffect(schema)(block).pipe(
     Effect.mapError((cause) => new SettingsDecodeError({
       source: SettingsSource.Overlay,
       path: `${snapshot.paths.global} + ${snapshot.paths.project}`,
@@ -120,7 +120,7 @@ export function readSettingsBlock(key: string, cwd = process.cwd(), env: Setting
   return Effect.runSync(readSettingsBlockEffect(key, cwd, env));
 }
 
-export function decodeSettingsBlockSync<S extends Schema.Schema.AnyNoContext>(key: string, schema: S, cwd = process.cwd(), env: SettingsEnv = defaultSettingsEnv): Schema.Schema.Type<S> {
+export function decodeSettingsBlockSync<S extends Schema.Constraint & { readonly DecodingServices: never }>(key: string, schema: S, cwd = process.cwd(), env: SettingsEnv = defaultSettingsEnv): S["Type"] {
   return Effect.runSync(decodeSettingsBlockEffect(key, schema, cwd, env));
 }
 
@@ -163,7 +163,7 @@ function readSettingsDocumentEffect(path: string, source: SettingsSource, env: S
 }
 
 function readOptionalFileEffect(path: string, source: SettingsSource, env: SettingsEnv): Effect.Effect<string | null, SettingsReadError> {
-  return Effect.catchAll(
+  return Effect.catch(
     Effect.try({
       try: () => env.readFile(path, "utf8"),
       catch: (cause) => new SettingsReadError({ source, path, cause }),
@@ -178,7 +178,7 @@ function decodeJsonObjectEffect(content: string, path: string, source: SettingsS
       try: () => JSON.parse(content) as unknown,
       catch: (cause) => new SettingsDecodeError({ source, path, cause }),
     }),
-    (parsed) => Schema.decodeUnknown(SettingsObjectSchema)(parsed).pipe(
+    (parsed) => Schema.decodeUnknownEffect(SettingsObjectSchema)(parsed).pipe(
       Effect.mapError((cause) => new SettingsDecodeError({ source, path, cause })),
     ),
   );

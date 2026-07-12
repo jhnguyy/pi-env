@@ -100,7 +100,7 @@ function configureEffect() {
 
 NodeRuntime.runMain(
   configureEffect().pipe(
-    Effect.catchAll((error) =>
+    Effect.catch((error) =>
       Effect.sync(() => {
         console.error(renderSetupError(error));
         process.exitCode = setupErrorExitCode(error);

@@ -11,20 +11,20 @@ import {
 
 const StringArraySchema = Schema.mutable(Schema.Array(Schema.String));
 
-export const WorkTrackerSettingsSchema = Schema.mutable(Schema.Struct({
+export const WorkTrackerSettingsSchema = Schema.Struct({
   repos: Schema.optional(StringArraySchema),
   protectedBranches: Schema.optional(StringArraySchema),
-}));
+});
 
-export const AgentSettingsSchema = Schema.mutable(Schema.Struct({
+export const AgentSettingsSchema = Schema.Struct({
   enabledModels: Schema.optional(StringArraySchema),
-  modelAnnotations: Schema.optional(Schema.Record({ key: Schema.String, value: StringArraySchema })),
+  modelAnnotations: Schema.optional(Schema.Record(Schema.String, StringArraySchema)),
   workTracker: Schema.optional(WorkTrackerSettingsSchema),
   extensions: Schema.optional(StringArraySchema),
-}));
+});
 
-export type AgentSettings = Schema.Schema.Type<typeof AgentSettingsSchema>;
-export type WorkTrackerSettings = Schema.Schema.Type<typeof WorkTrackerSettingsSchema>;
+export type AgentSettings = typeof AgentSettingsSchema.Type;
+export type WorkTrackerSettings = typeof WorkTrackerSettingsSchema.Type;
 export type AgentSettingsEnv = SettingsEnv;
 export type AgentSettingsReadError = SettingsError;
 
@@ -39,7 +39,7 @@ function readOptionalAgentSettingsEffect(
   env: AgentSettingsEnv = defaultSettingsEnv,
   cwd = process.cwd(),
 ): Effect.Effect<AgentSettings | null> {
-  return Effect.catchAll(
+  return Effect.catch(
     Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), (snapshot) => {
       if (!snapshot.exists.global && !snapshot.exists.project) return Effect.succeed(null);
       return decodeAgentSettingsSnapshotEffect(snapshot);
@@ -55,7 +55,7 @@ export function readOptionalAgentSettings(env: AgentSettingsEnv = defaultSetting
 function decodeAgentSettingsSnapshotEffect(
   snapshot: SettingsSnapshot,
 ): Effect.Effect<AgentSettings, SettingsDecodeError> {
-  return Schema.decodeUnknown(AgentSettingsSchema)(snapshot.merged).pipe(
+  return Schema.decodeUnknownEffect(AgentSettingsSchema)(snapshot.merged).pipe(
     Effect.mapError((cause) => new SettingsDecodeError({
       source: SettingsSource.Overlay,
       path: `${snapshot.paths.global} + ${snapshot.paths.project}`,

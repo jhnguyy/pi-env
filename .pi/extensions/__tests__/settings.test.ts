@@ -47,24 +47,24 @@ describe("settings boundary", () => {
   });
 
   it("reports malformed global JSON and project JSON with exact source/path", async () => {
-    const global = await Effect.runPromise(Effect.either(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "{" }))));
-    const project = await Effect.runPromise(Effect.either(loadSettingsSnapshotEffect("/repo", envWith({
+    const global = await Effect.runPromise(Effect.result(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "{" }))));
+    const project = await Effect.runPromise(Effect.result(loadSettingsSnapshotEffect("/repo", envWith({
       "/global/settings.json": "{}",
       "/repo/.pi/settings.json": "{",
     }))));
 
-    expect(global._tag).toBe("Left");
-    if (global._tag === "Left") expect(global.left).toMatchObject({ _tag: "SettingsDecodeError", source: SettingsSource.Global, path: "/global/settings.json" });
-    expect(project._tag).toBe("Left");
-    if (project._tag === "Left") expect(project.left).toMatchObject({ _tag: "SettingsDecodeError", source: SettingsSource.Project, path: "/repo/.pi/settings.json" });
+    expect(global._tag).toBe("Failure");
+    if (global._tag === "Failure") expect(global.failure).toMatchObject({ _tag: "SettingsDecodeError", source: SettingsSource.Global, path: "/global/settings.json" });
+    expect(project._tag).toBe("Failure");
+    if (project._tag === "Failure") expect(project.failure).toMatchObject({ _tag: "SettingsDecodeError", source: SettingsSource.Project, path: "/repo/.pi/settings.json" });
   });
 
   it("reports non-object roots as exact-source decode errors", async () => {
-    const result = await Effect.runPromise(Effect.either(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "[]" }))));
+    const result = await Effect.runPromise(Effect.result(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "[]" }))));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left).toBeInstanceOf(SettingsDecodeError);
-    if (result._tag === "Left") expect(result.left).toMatchObject({ source: SettingsSource.Global, path: "/global/settings.json" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure).toBeInstanceOf(SettingsDecodeError);
+    if (result._tag === "Failure") expect(result.failure).toMatchObject({ source: SettingsSource.Global, path: "/global/settings.json" });
   });
 
   it("reports non-ENOENT read failures as SettingsReadError with source/path", async () => {
@@ -73,21 +73,21 @@ describe("settings boundary", () => {
       if (path === "/global/settings.json") throw Object.assign(new Error("denied"), { code: "EACCES" });
       throw Object.assign(new Error("missing"), { code: "ENOENT" });
     };
-    const result = await Effect.runPromise(Effect.either(loadSettingsSnapshotEffect("/repo", env)));
+    const result = await Effect.runPromise(Effect.result(loadSettingsSnapshotEffect("/repo", env)));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left).toBeInstanceOf(SettingsReadError);
-    if (result._tag === "Left") expect(result.left).toMatchObject({ source: SettingsSource.Global, path: "/global/settings.json" });
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure).toBeInstanceOf(SettingsReadError);
+    if (result._tag === "Failure") expect(result.failure).toMatchObject({ source: SettingsSource.Global, path: "/global/settings.json" });
   });
 
   it("rejects present non-object blocks with their exact source", async () => {
-    const result = await Effect.runPromise(Effect.either(decodeSettingsBlockEffect("tool", Schema.Struct({ enabled: Schema.optional(Schema.Boolean) }), "/repo", envWith({
+    const result = await Effect.runPromise(Effect.result(decodeSettingsBlockEffect("tool", Schema.Struct({ enabled: Schema.optional(Schema.Boolean) }), "/repo", envWith({
       "/global/settings.json": JSON.stringify({ tool: { enabled: true } }),
       "/repo/.pi/settings.json": JSON.stringify({ tool: "invalid" }),
     }))));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left).toMatchObject({
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure).toMatchObject({
       _tag: "SettingsDecodeError",
       source: SettingsSource.Project,
       path: "/repo/.pi/settings.json",
@@ -96,13 +96,13 @@ describe("settings boundary", () => {
   });
 
   it("reports schema-invalid merged blocks with key and overlay paths", async () => {
-    const result = await Effect.runPromise(Effect.either(decodeSettingsBlockEffect("tool", Schema.Struct({ enabled: Schema.Boolean }), "/repo", envWith({
+    const result = await Effect.runPromise(Effect.result(decodeSettingsBlockEffect("tool", Schema.Struct({ enabled: Schema.Boolean }), "/repo", envWith({
       "/global/settings.json": JSON.stringify({ tool: { enabled: true } }),
       "/repo/.pi/settings.json": JSON.stringify({ tool: { enabled: "yes" } }),
     }))));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left).toMatchObject({
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure).toMatchObject({
       _tag: "SettingsDecodeError",
       source: SettingsSource.Overlay,
       key: "tool",
