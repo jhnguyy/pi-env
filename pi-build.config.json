@@ -7,11 +7,21 @@
     "@earendil-works/pi-agent-core",
     "typebox",
     "@sinclair/typebox",
+    "@effect/opentelemetry",
+    "@opentelemetry/api",
+    "@opentelemetry/exporter-trace-otlp-http",
+    "@opentelemetry/sdk-trace-node",
     "effect",
     "esbuild",
     "playwright"
   ],
   "sidecars": {
+    "analyze": [
+      {
+        "entry": "worker-main.ts",
+        "outfile": "dist/worker.js"
+      }
+    ],
     "dev-tools": [
       {
         "entry": "daemon.ts",

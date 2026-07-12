@@ -156,13 +156,13 @@ YAML
 const fs = require('node:fs');
 const path = process.argv[2];
 const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-pkg.allowBuilds = { '@trusted/build-tool': true, 'missing-build-tool': true, 'false-positive': false };
+pkg.allowBuilds = { '@trusted/build-tool': true, 'missing-build-tool': true, 'invalid-build-tool': 'yes' };
 pkg.patchedDependencies = { 'protobufjs@7.6.4': 'patches/protobufjs@7.6.4.patch' };
 fs.writeFileSync(path, JSON.stringify(pkg));
 JS
 output="$(run_verify || true)"
 if grep -q 'package allowBuilds package is not present in lock.yaml: missing-build-tool' <<<"$output" && \
-  grep -q 'package allowBuilds entry must be true: false-positive' <<<"$output" && \
+  grep -q 'package allowBuilds entry must be boolean: invalid-build-tool' <<<"$output" && \
   grep -q 'package patchedDependencies patch file is missing: patches/protobufjs@7.6.4.patch' <<<"$output" && \
   grep -q 'package patchedDependencies patch is not recorded in lock.yaml: protobufjs@7.6.4' <<<"$output"; then
   echo 'ok: package install policy is enforced'

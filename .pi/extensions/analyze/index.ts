@@ -4,9 +4,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { Effect } from "effect";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
-import { analyze, type AnalyzeOptions } from "../../../src/analyze/engine";
+import { runPublicAnalyze } from "../../../src/analyze/public";
 import { AnalyzerName, ScopeMode, type AnalysisResult } from "../../../src/analyze/model";
 
 const analyzerNames = Object.values(AnalyzerName);
@@ -14,18 +13,18 @@ const scopeNames = Object.values(ScopeMode);
 
 export const analyzeToolSchema = Type.Object({
   worktree: Type.String({ description: "Absolute path to the worktree or project to analyze." }),
-  scope: Type.Optional(StringEnum(scopeNames, { description: "Analysis scope. Defaults to diff." })),
-  paths: Type.Optional(Type.Array(Type.String(), { description: "Files or directories for paths scope." })),
+  scope: Type.Optional(StringEnum(scopeNames, { description: "Analysis scope. Safe local mode supports diff and non-empty explicit paths; all requires strict containment." })),
+  paths: Type.Optional(Type.Array(Type.String(), { description: "Workspace-relative files or directories for paths scope." })),
   ref: Type.Optional(Type.String({ description: "Diff base ref. Defaults to main." })),
-  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks to run. Defaults to the analyzer registry defaults." })),
-  type_threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1, description: "Structural type similarity threshold." })),
-  max_memory_mb: Type.Optional(Type.Integer({ minimum: 1, description: "Parent RSS budget. Defaults to 2048 MiB." })),
-  profile: Type.Optional(Type.Boolean({ description: "Include timings and memory snapshots." })),
+  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks must be explicit. Safe local mode permits only complexity and async-risk; other checks require strict containment." })),
+  type_threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1, description: "Structural type similarity threshold; requires strict containment." })),
+  max_memory_mb: Type.Optional(Type.Integer({ minimum: 1, description: "Requested worker heap cap. Safe local mode always clamps to 512 MiB." })),
+  profile: Type.Optional(Type.Boolean({ description: "Include timings and memory snapshots; requires strict containment." })),
   max_findings: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, description: "Maximum findings returned. Defaults to 25." })),
 });
 
 export type AnalyzeToolInput = Static<typeof analyzeToolSchema>;
-type AnalyzeRunner = (options: AnalyzeOptions, signal?: AbortSignal) => Promise<AnalysisResult>;
+type AnalyzeRunner = (options: Parameters<typeof runPublicAnalyze>[0], signal?: AbortSignal) => Promise<AnalysisResult>;
 interface AnalyzeToolDetails {
   summary: AnalysisResult["summary"];
   findings: AnalysisResult["findings"];
@@ -34,7 +33,7 @@ interface AnalyzeToolDetails {
   profile?: AnalysisResult["profile"];
 }
 
-const runAnalysis: AnalyzeRunner = (options, signal) => Effect.runPromise(analyze(options), signal ? { signal } : undefined);
+const runAnalysis: AnalyzeRunner = (options, signal) => runPublicAnalyze(options, { signal });
 
 async function resolveWorktree(path: string): Promise<string> {
   if (!isAbsolute(path)) throw new Error("worktree must be an absolute path");
@@ -65,7 +64,7 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
   return {
     name: "analyze",
     label: "Analyze",
-    description: "Run bounded code analysis against an absolute worktree path. Supports diff, paths, and all scopes; returns a compact summary while retaining the complete structured result in details.",
+    description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity/async-risk checks on diff or workspace-relative paths; heavy checks and all scope fail closed without strict containment.",
     parameters: analyzeToolSchema,
     execute: async (_toolCallId, params, signal) => {
       signal?.throwIfAborted();
@@ -79,9 +78,9 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
         paths: params.paths,
         ref: params.ref,
         checks: params.checks,
-        typeSimilarityThreshold: params.type_threshold,
         maxMemoryMb: params.max_memory_mb,
         profile: params.profile,
+        typeSimilarityThreshold: params.type_threshold,
       }, signal);
       const compact = compactResult(result, params.max_findings ?? 25);
       return { content: [{ type: "text", text: compact.text }], details: compact.details };
@@ -94,7 +93,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...tool,
     promptSnippet: "Run bounded code analysis against a worktree or project path",
-    promptGuidelines: ["Use analyze when code-review or implementation work would benefit from structured diff, path, or whole-project analysis."],
+    promptGuidelines: ["Use explicit complexity and/or async-risk checks with diff or paths scope. Heavy checks and all scope require strict containment and otherwise fail closed."],
   });
   registerAgentToolsOnSessionStart(pi, { tool, capabilities: [ToolCapability.Read, ToolCapability.Execute] });
 }

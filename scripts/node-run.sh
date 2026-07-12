@@ -15,4 +15,6 @@ node_run_repo="${PI_ENV_REPO:-$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)}"
 # shellcheck source=setup/node-runtime.sh
 . "$node_run_repo/setup/node-runtime.sh"
 
-PI_ENV_REPO="$node_run_repo" pi_env_exec_node "$script" "$@"
+PI_ENV_NODE_BIN="$(pi_env_select_node_bin "$node_run_repo")"
+export PI_ENV_NODE_BIN
+exec "$PI_ENV_NODE_BIN" "$script" "$@"

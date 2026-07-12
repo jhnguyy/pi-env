@@ -1,56 +1,100 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
-import { Effect } from "effect";
-import { validateBenchmark } from "../src/analyze/benchmark.js";
-import { analyze } from "../src/analyze/engine.js";
+import { runPublicAnalyze } from "../src/analyze/public.js";
 import { formatResult, shouldFail } from "../src/analyze/format.js";
 import { FailPolicy, OutputMode, ScopeMode, type AnalysisResult } from "../src/analyze/model.js";
 
 const args = process.argv.slice(2);
-const has = (flag: string): boolean => args.includes(flag);
-const value = (flag: string): string | undefined => {
-  const index = args.indexOf(flag);
-  return index < 0 ? undefined : args[index + 1];
-};
-const optionsWithValues = ["--ref", "--fail-on", "--checks", "--bench", "--type-threshold", "--max-memory-mb"];
-const positional = args.filter((argument, index) =>
-  !argument.startsWith("--") && (index === 0 || !optionsWithValues.includes(args[index - 1]!)));
-const scope = has("--diff") ? ScopeMode.Diff : has("--all") ? ScopeMode.All : ScopeMode.Paths;
-const mode = has("--json") ? OutputMode.Json : has("--pretty") ? OutputMode.Pretty : OutputMode.Compact;
-const parseFailPolicy = (raw: string): FailPolicy => {
-  const values = Object.values(FailPolicy);
-  if (values.includes(raw as FailPolicy)) return raw as FailPolicy;
-  throw new Error(`Unknown --fail-on value: ${raw}. Valid values: ${values.join(", ")}`);
-};
+const valueFlags = new Set([
+  "--bench",
+  "--checks",
+  "--fail-on",
+  "--max-memory-mb",
+  "--ref",
+  "--type-similarity-threshold",
+  "--type-threshold",
+]);
+const booleanFlags = new Set([
+  "--all",
+  "--bundle",
+  "--ci",
+  "--diff",
+  "--json",
+  "--pretty",
+  "--profile",
+]);
+const values = new Map<string, string>();
+const flags = new Set<string>();
+const paths: string[] = [];
+let parseError: string | undefined;
+
+for (let index = 0; index < args.length; index++) {
+  const argument = args[index]!;
+  if (argument === "--") {
+    continue;
+  }
+  if (valueFlags.has(argument)) {
+    const value = args[++index];
+    if (value === undefined || value.startsWith("--")) {
+      parseError = `${argument} requires a value`;
+      break;
+    }
+    values.set(argument, value);
+  } else if (booleanFlags.has(argument)) {
+    flags.add(argument);
+  } else if (argument.startsWith("--")) {
+    parseError = `Unknown option: ${argument}`;
+    break;
+  } else {
+    paths.push(argument);
+  }
+}
+
+const failure = (message: string): AnalysisResult => ({
+  version: 1,
+  summary: { info: 0, warning: 0, error: 0, failures: 1 },
+  findings: [],
+  analyzerFailures: [{ analyzer: "configuration", message }],
+  benchmarks: [],
+});
+
+const requestedFailPolicy =
+  values.get("--fail-on") ?? (flags.has("--ci") ? FailPolicy.Warning : FailPolicy.Never);
+const failPolicy = Object.values(FailPolicy).includes(requestedFailPolicy as FailPolicy)
+  ? (requestedFailPolicy as FailPolicy)
+  : undefined;
+if (failPolicy === undefined) {
+  parseError ??= `Unknown --fail-on value: ${requestedFailPolicy}. Valid values: ${Object.values(FailPolicy).join(", ")}`;
+}
 
 let result: AnalysisResult;
-let fail: FailPolicy = FailPolicy.Never;
-try {
-  fail = parseFailPolicy(value("--fail-on") ?? (has("--ci") ? FailPolicy.Warning : FailPolicy.Never));
-  const benchmarkPath = value("--bench");
-  const benchmarks = benchmarkPath
-    ? [validateBenchmark(JSON.parse(readFileSync(benchmarkPath, "utf8")))]
-    : [];
-  result = await Effect.runPromise(analyze({
+if (parseError !== undefined) {
+  result = failure(parseError);
+} else if (flags.has("--all") && (flags.has("--diff") || paths.length > 0)) {
+  result = failure("--all cannot be combined with --diff or explicit paths");
+} else {
+  const threshold = values.get("--type-similarity-threshold") ?? values.get("--type-threshold");
+  result = await runPublicAnalyze({
     cwd: process.cwd(),
-    scope,
-    paths: positional,
-    ref: value("--ref"),
-    checks: value("--checks")?.split(",").filter(Boolean),
-    bundle: has("--bundle"),
-    typeSimilarityThreshold: value("--type-threshold") === undefined ? undefined : Number(value("--type-threshold")),
-    profile: has("--profile"),
-    maxMemoryMb: value("--max-memory-mb") === undefined ? 2048 : Number(value("--max-memory-mb")),
-    benchmarks,
-  }));
-} catch (cause) {
-  result = {
-    version: 1,
-    summary: { info: 0, warning: 0, error: 0, failures: 1 },
-    findings: [],
-    analyzerFailures: [{ analyzer: "configuration", message: cause instanceof Error ? cause.message : String(cause) }],
-    benchmarks: [],
-  };
+    scope: flags.has("--all") ? ScopeMode.All : paths.length > 0 ? ScopeMode.Paths : ScopeMode.Diff,
+    paths: paths.length > 0 ? paths : undefined,
+    ref: values.get("--ref"),
+    checks: values.get("--checks")?.split(",").filter(Boolean),
+    maxMemoryMb:
+      values.get("--max-memory-mb") === undefined
+        ? undefined
+        : Number(values.get("--max-memory-mb")),
+    profile: flags.has("--profile"),
+    bundle: flags.has("--bundle"),
+    typeSimilarityThreshold: threshold === undefined ? undefined : Number(threshold),
+    benchmarks: values.has("--bench") ? [values.get("--bench")] : undefined,
+  });
 }
+
+const mode = flags.has("--json")
+  ? OutputMode.Json
+  : flags.has("--pretty")
+    ? OutputMode.Pretty
+    : OutputMode.Compact;
 console.log(formatResult(result, mode));
-process.exitCode = shouldFail(result, fail) ? 1 : 0;
+process.exitCode =
+  result.summary.failures > 0 || shouldFail(result, failPolicy ?? FailPolicy.Never) ? 1 : 0;

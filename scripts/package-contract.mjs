@@ -28,15 +28,15 @@ function requireAllowBuildsContract(pkg, errors, root) {
   const allowBuilds = pkg.allowBuilds;
   if (allowBuilds === undefined) return;
   if (!isRecord(allowBuilds)) {
-    errors.push("package allowBuilds must be an object of package names approved for install build scripts");
+    errors.push("package allowBuilds must be an object of package names mapped to boolean install-build decisions");
     return;
   }
 
   const lockText = readLockfile(root, errors, "allowBuilds");
   if (lockText === undefined) return;
   for (const [packageName, approved] of Object.entries(allowBuilds)) {
-    if (approved !== true) {
-      errors.push(`package allowBuilds entry must be true: ${packageName}`);
+    if (typeof approved !== "boolean") {
+      errors.push(`package allowBuilds entry must be boolean: ${packageName}`);
     }
     if (!hasLockedPackage(lockText, packageName)) {
       errors.push(`package allowBuilds package is not present in lock.yaml: ${packageName}`);

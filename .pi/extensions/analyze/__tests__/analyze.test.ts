@@ -55,6 +55,14 @@ describe("analyze tool", () => {
     expect(output.details).toMatchObject({ summary: result.summary, findings: [result.findings[0]], omittedFindings: 1 });
   });
 
+  it("fails closed when public checks are omitted", async () => {
+    const worktree = mkdtempSync(join(tmpdir(), "analyze-tool-"));
+    const tool = createAnalyzeTool();
+    const output = await tool.execute("call", { worktree }, new AbortController().signal, undefined);
+    expect(output.details?.summary.failures).toBe(1);
+    expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("checks must explicitly") });
+  });
+
   it("stops before filesystem or analyzer work when cancelled", async () => {
     const controller = new AbortController();
     const runner = vi.fn(async () => result);
