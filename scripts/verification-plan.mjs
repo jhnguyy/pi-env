@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { listPlan, runPlan } from "./verification-runner.mjs";
 
 export const VerificationPhaseId = {
   SetupTests: "setup-tests",
@@ -41,23 +41,10 @@ export const VERIFICATION_PHASES = [
   },
 ];
 
-export function formatPhaseCommand(phase) {
-  return [phase.command, ...phase.args].join(" ");
-}
-
 export function listVerificationPlan(phases = VERIFICATION_PHASES) {
-  return phases.map((phase) => `${phase.id}: ${phase.label} — ${formatPhaseCommand(phase)}`);
+  return listPlan(phases);
 }
 
-export function runVerificationPlan(phases = VERIFICATION_PHASES) {
-  for (const phase of phases) {
-    console.log(`\n==> ${phase.label}`);
-    const result = spawnSync(phase.command, phase.args, { stdio: "inherit" });
-    if (result.error) {
-      console.error(`verify: ${phase.label} failed to start: ${result.error.message}`);
-      return 1;
-    }
-    if (result.status !== 0) return result.status ?? 1;
-  }
-  return 0;
+export function runVerificationPlan(phases = VERIFICATION_PHASES, run) {
+  return runPlan(phases, { run, name: "verify" });
 }
