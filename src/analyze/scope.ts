@@ -82,7 +82,7 @@ function walkDirectoryEffect(cwd: string, root: string, files: Set<string>, maxF
         },
         catch: scopeError,
       });
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
   });
 }

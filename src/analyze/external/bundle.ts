@@ -22,21 +22,21 @@ interface PackageManifest { workspaces?: readonly string[]; pi?: { extensions?: 
 /** Missing or malformed optional JSON deliberately behaves like an absent configuration. */
 function readJsonOrEffect<A>(path: string, fallback: A): Effect.Effect<A> {
   return Effect.tryPromise(() => readFile(path, "utf8").then((text) => JSON.parse(text) as A)).pipe(
-    Effect.catchAll(() => Effect.succeed(fallback)),
+    Effect.catch(() => Effect.succeed(fallback)),
   );
 }
 
 function fileExistsEffect(path: string): Effect.Effect<boolean> {
   return Effect.tryPromise(() => access(path)).pipe(
     Effect.as(true),
-    Effect.catchAll(() => Effect.succeed(false)),
+    Effect.catch(() => Effect.succeed(false)),
   );
 }
 
 function extensionDirectoriesEffect(cwd: string): Effect.Effect<readonly string[]> {
   return Effect.tryPromise(() => readdir(resolve(cwd, ".pi/extensions"), { withFileTypes: true })).pipe(
     Effect.map((entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => `.pi/extensions/${entry.name}`)),
-    Effect.catchAll(() => Effect.succeed<readonly string[]>([])),
+    Effect.catch(() => Effect.succeed<readonly string[]>([])),
   );
 }
 
@@ -124,7 +124,7 @@ function workerMetafileEffect(cwd: string, entryPoint: string, externals: readon
       );
     },
     // Cleanup is best-effort, matching the previous force-remove behavior.
-    (outputDirectory) => Effect.tryPromise(() => rm(outputDirectory, { recursive: true, force: true })).pipe(Effect.catchAll(() => Effect.void)),
+    (outputDirectory) => Effect.tryPromise(() => rm(outputDirectory, { recursive: true, force: true })).pipe(Effect.catch(() => Effect.void)),
   );
 }
 
@@ -150,7 +150,7 @@ export function bundleAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
         location: { path: entryPoint, line: 1, column: 1 },
         data: { ...summary, ...(sideEffects.sideEffects !== undefined ? { packageSideEffects: sideEffects.sideEffects, treeShakeable: sideEffects.sideEffects === false, sideEffectsSource: sideEffects.source } : { sideEffectsSource: sideEffects.source }), externals, externalsConfigured: configured },
       });
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return findings;
   });

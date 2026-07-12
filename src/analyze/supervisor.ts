@@ -135,9 +135,9 @@ export async function superviseAnalyze(
     ...process.env,
     ...options.env,
   };
-  const configured = await Effect.runPromise(Effect.either(resolveAnalyzeOtelConfig(env)));
-  if (configured._tag === "Left") {
-    throw new AnalyzeSupervisorError("configuration", configured.left.message);
+  const configured = await Effect.runPromise(Effect.result(resolveAnalyzeOtelConfig(env)));
+  if (configured._tag === "Failure") {
+    throw new AnalyzeSupervisorError("configuration", configured.failure.message);
   }
 
   const configuredJournalDirectory = env.PI_ENV_ANALYZE_JOURNAL_DIR?.trim();
@@ -153,7 +153,7 @@ export async function superviseAnalyze(
       : undefined;
   const journal = options.journal ?? ownedJournal;
   const diagnostics = makeEffectAnalysisDiagnostics({
-    telemetryEnabled: configured.right.enabled,
+    telemetryEnabled: configured.success.enabled,
     sink: journal === undefined ? undefined : journalSink(journal),
   });
   const runId = randomUUID();
@@ -349,7 +349,7 @@ export async function superviseAnalyze(
     return await Effect.runPromise(
       diagnostics
         .span(AnalyzeSpanName.Run, analysisRunAttributes(request), Effect.promise(lifecycle))
-        .pipe(Effect.provide(makeAnalyzeOtelLayer(configured.right, options.otelExporter))),
+        .pipe(Effect.provide(makeAnalyzeOtelLayer(configured.success, options.otelExporter))),
     );
   } finally {
     if (ownedJournal !== undefined) await ownedJournal.close();

@@ -167,7 +167,7 @@ function cooperativeFileAnalysis(
     const output: Finding[] = [];
     for (const file of files) {
       yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => analyzerFailure(analyzer, cause) });
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return output;
   });
@@ -256,7 +256,7 @@ export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Sco
     for (const file of project.files) {
       yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => analyzerFailure(AnalyzerName.Duplicates, cause) });
       if (state.truncated) break;
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return duplicateFindings(state, scope);
   });
@@ -520,13 +520,13 @@ export function similarTypesEffect(project: TypeProject, cwd: string, scope: Sco
     const collected: TypeCollection = { candidates: [], truncated: false };
     for (const file of project.files) {
       yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => analyzerFailure(AnalyzerName.Types, cause) });
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     const index = indexTypeCandidates(collected.candidates);
     const state: TypeMatchingState = { output: [], seen: new Set(), truncated: collected.truncated };
     for (const seed of collected.candidates.filter((candidate) => changed(scope, candidate.loc))) {
       if (emitTypeMatches(seed, index, threshold, state.seen, state.output)) { state.truncated = true; break; }
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return finishTypeMatches(state);
   });
