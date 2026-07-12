@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { formatPhase, runPlan } from "./verification-runner.mjs";
 
 export const SafeVerificationPhaseId = {
   Format: "format-check",
@@ -42,24 +42,9 @@ export const SAFE_VERIFICATION_PHASES = [
 ];
 
 export function formatSafePhase(phase) {
-  return phase.skip
-    ? `${phase.id}: ${phase.label} — skipped (${phase.skip})`
-    : `${phase.id}: ${phase.label} — ${[phase.command, ...phase.args].join(" ")}`;
+  return formatPhase(phase);
 }
 
-export function runSafeVerificationPlan(phases = SAFE_VERIFICATION_PHASES, run = spawnSync) {
-  for (const phase of phases) {
-    if (phase.skip) {
-      console.log(`\n==> ${phase.label} (skipped: ${phase.skip})`);
-      continue;
-    }
-    console.log(`\n==> ${phase.label}`);
-    const result = run(phase.command, phase.args, { stdio: "inherit" });
-    if (result.error) {
-      console.error(`verify:safe: ${phase.label} failed to start: ${result.error.message}`);
-      return 1;
-    }
-    if (result.status !== 0) return result.status ?? 1;
-  }
-  return 0;
+export function runSafeVerificationPlan(phases = SAFE_VERIFICATION_PHASES, run) {
+  return runPlan(phases, { run, name: "verify:safe" });
 }
