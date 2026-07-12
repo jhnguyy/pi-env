@@ -20,7 +20,7 @@ import { EventEmitter } from "events";
 import { PassThrough } from "stream";
 import type { ChildProcess } from "child_process";
 import { RpcBridge } from "../rpc-bridge";
-import { MAX_OUTPUT_BYTES } from "../types";
+import { MAX_OUTPUT_BYTES, MAX_STDERR_BYTES } from "../types";
 
 // ─── Mock ChildProcess ────────────────────────────────────────────────────────
 
@@ -30,10 +30,12 @@ interface MockProc {
   send: (msg: object) => void;
   /** Write a plain text line to subprocess stdout (console.log simulation). */
   log: (text: string) => void;
-  /** Close stdout and emit exit(code). Order matches Node's real behaviour: close first. */
+  /** Close stdout and emit exit(code, null). Order matches Node's real behaviour: close first. */
   exit: (code: number) => void;
-  /** Emit exit(code) THEN close stdout (reversed order, for race testing). */
+  /** Emit exit(code, null) THEN close stdout (reversed order, for race testing). */
   exitThenClose: (code: number) => void;
+  /** Close stdout and report signal termination. */
+  terminate: (signal: NodeJS.Signals) => void;
   /** Write to stderr. */
   err: (text: string) => void;
 }
@@ -58,13 +60,18 @@ function makeMock(): MockProc {
     log: (text) => stdout.write(text + "\n"),
     exit: (code) => {
       (proc as any).exitCode = code;
-      stdout.end();           // close fires rl.close
-      ee.emit("exit", code);  // then exit event
+      stdout.end();                 // close fires rl.close
+      ee.emit("exit", code, null);  // then exit event
     },
     exitThenClose: (code) => {
       (proc as any).exitCode = code;
-      ee.emit("exit", code);  // exit fires first
-      stdout.end();           // rl.close fires after
+      ee.emit("exit", code, null);  // exit fires first
+      stdout.end();                 // rl.close fires after
+    },
+    terminate: (signal) => {
+      (proc as any).signalCode = signal;
+      stdout.end();
+      ee.emit("exit", null, signal);
     },
     err: (text) => stderr.write(text),
   };
@@ -189,6 +196,29 @@ describe("race fix: non-zero exit always rejects", () => {
     await flush();
     await expect(bridge.completion).rejects.toThrow("exited with code 2");
   });
+
+  it("rejects signal-terminated subprocesses instead of treating null code as success", async () => {
+    const m = makeMock();
+    const bridge = new RpcBridge(m.proc, noDispatch);
+    bridge.completion.catch(() => {});
+    m.terminate("SIGKILL");
+    await flush();
+    await expect(bridge.completion).rejects.toThrow("terminated by SIGKILL");
+  });
+
+  it("caps stderr by bytes before including it in an exit failure", async () => {
+    const m = makeMock();
+    const bridge = new RpcBridge(m.proc, noDispatch);
+    bridge.completion.catch(() => {});
+    m.err("界".repeat(MAX_STDERR_BYTES));
+    await flush();
+    m.exit(1);
+    await flush();
+    const error = await bridge.completion.catch((cause: Error) => cause);
+    expect(error).toBeInstanceOf(Error);
+    expect(Buffer.byteLength((error as Error).message)).toBeLessThanOrEqual(MAX_STDERR_BYTES);
+    expect((error as Error).message).toContain("stderr truncated");
+  });
 });
 
 // ─── Concurrent tool_call dispatch ───────────────────────────────────────────
@@ -230,8 +260,23 @@ describe("concurrent tool_call dispatch", () => {
 
 // ─── Output cap ──────────────────────────────────────────────────────────────
 
-describe("output cap", () => {
-  it("stops accumulating userOutput past MAX_OUTPUT_BYTES", async () => {
+describe("terminal settlement and output cap", () => {
+  it("settles once, suppresses late terminal events, and removes process listeners", async () => {
+    const m = makeMock();
+    const bridge = new RpcBridge(m.proc, noDispatch);
+    m.send({ type: "complete", output: "first" });
+    await flush();
+    m.send({ type: "error", message: "late" });
+    m.exit(1);
+    await flush();
+
+    expect(await bridge.completion).toBe("first");
+    expect(m.proc.listenerCount("exit")).toBe(0);
+    expect(m.proc.listenerCount("error")).toBe(0);
+    expect(m.proc.stderr?.listenerCount("data")).toBe(0);
+  });
+
+  it("stops accumulating userOutput at MAX_OUTPUT_BYTES", async () => {
     const m = makeMock();
     const bridge = new RpcBridge(m.proc, noDispatch);
 
@@ -243,7 +288,7 @@ describe("output cap", () => {
     await flush();
 
     const result = await bridge.completion;
-    expect(result.length).toBeLessThan(MAX_OUTPUT_BYTES + 200); // 200 slack for truncation message
+    expect(Buffer.byteLength(result)).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
     expect(result).toContain("[output truncated");
   });
 });
