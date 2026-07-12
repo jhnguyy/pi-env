@@ -45,6 +45,16 @@ Short version:
 3. Keep `scripts/extension-manifest.mjs` as the shared lifecycle contract for build, cleanup, and install verification.
 4. Use `package.json` scripts for build, test, cleanup, and verification.
 
+During iteration, validate the delta instead of repeatedly checking every workspace package:
+
+```bash
+nub run test:unit .pi/extensions/<name>/__tests__/<file>.test.ts
+nub run test:changed main
+nub run build <name>
+```
+
+Arguments to `nub run` are forwarded directly; do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness but uses incremental build information. Run `nub run verify:safe` before integration when the full workspace contract is required.
+
 ## Worktree Isolation
 
 **Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.

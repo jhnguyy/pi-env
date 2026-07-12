@@ -15,6 +15,7 @@
  * subprocesses). Format backends are invoked directly by the agent_end hook
  * and are never passed to the daemon.
  */
+import { createRequire } from "node:module";
 import { extname } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -53,6 +54,8 @@ export interface LspBackendConfig extends BackendConfigBase {
   binaryArgs: string[];
   /** LSP initialize capabilities sent during handshake. */
   capabilities: object;
+  /** Server-specific options sent during the initialize handshake. */
+  initializationOptions?: object;
   /** Prefix prepended to numeric diagnostic codes, e.g. "TS" → "TS2339". */
   codePrefix: string;
   /** Whether this backend supports workspace/symbol queries. */
@@ -90,6 +93,13 @@ const STANDARD_CAPABILITIES = {
     symbol: {},
   },
 };
+
+const require = createRequire(import.meta.url);
+
+/** Use Nub's workspace TypeScript, which prepare patches with Effect diagnostics. */
+function resolveTypeScriptServerPath(): string {
+  return require.resolve("typescript/lib/tsserver.js");
+}
 
 const TS_CAPABILITIES = {
   ...STANDARD_CAPABILITIES,
@@ -143,6 +153,14 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
       [".mjs", "javascript"], [".cjs", "javascript"],
     ]),
     capabilities: TS_CAPABILITIES,
+    initializationOptions: {
+      disableAutomaticTypingAcquisition: true,
+      maxTsServerMemory: 768,
+      tsserver: {
+        path: resolveTypeScriptServerPath(),
+        useSyntaxServer: "never",
+      },
+    },
     codePrefix: "TS",
     rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json", "bunfig.toml"],
     supportsWorkspaceSymbols: true,

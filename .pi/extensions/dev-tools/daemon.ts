@@ -15,7 +15,7 @@
  *   - Spawned by client.ts if socket not available
  *   - Writes PID to /tmp/pi-lsp-$UID.pid
  *   - Listens on /tmp/pi-lsp-$UID.sock
- *   - Auto-shuts down after IDLE_TIMEOUT_MS of inactivity (default: 30 min)
+ *   - Auto-shuts down after inactivity (default: 10 min, PI_LSP_IDLE_TIMEOUT_MS overrides)
  *
  * Run directly after build: node dist/daemon.js
  */
@@ -36,7 +36,12 @@ import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+function lspIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const configured = Number(env["PI_LSP_IDLE_TIMEOUT_MS"]);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_IDLE_TIMEOUT_MS;
+}
 /** Max bytes to buffer per connection before disconnecting. Prevents OOM from malformed clients. */
 const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
 
@@ -57,7 +62,7 @@ export class LspDaemon {
   constructor(
     private socketPath = SOCKET_PATH,
     private pidPath = PID_PATH,
-    private idleTimeoutMs = IDLE_TIMEOUT_MS,
+    private idleTimeoutMs = lspIdleTimeoutMs(),
   ) {
     this.backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[])
       .map((config) => new LspBackend(config));
@@ -110,7 +115,7 @@ export class LspDaemon {
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.trim()) this.handleRequest(socket, line);
+        if (line.trim()) void this.handleRequest(socket, line);
       }
     });
 

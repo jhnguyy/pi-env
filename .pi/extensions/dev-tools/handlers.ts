@@ -57,15 +57,25 @@ async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: str
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
 
-/** Max concurrent LSP operations to avoid overwhelming the language server. */
-const BULK_CONCURRENCY = 8;
+/** Max concurrent document opens; diagnostic waits are overlapped separately. */
+const BULK_OPEN_CONCURRENCY = 4;
 
-/** Fetch diagnostics for a single file path (shared by single and bulk paths). */
-async function diagForPath(path: string, deps: HandlerDeps): Promise<DiagnosticsResult> {
+interface PendingDiagnostics {
+  path: string;
+  backend: LspBackend;
+  uri: string;
+}
+
+async function prepareDiagnostics(path: string, deps: HandlerDeps): Promise<PendingDiagnostics> {
   if (!existsSync(path)) throw new Error(`File not found: ${path}`);
   const backend = deps.getBackend(path);
   const uri = await backend.ensureFile(path);
-  await backend.waitForFirstDiagnostics(uri);
+  return { path, backend, uri };
+}
+
+async function finishDiagnostics(pending: PendingDiagnostics): Promise<DiagnosticsResult> {
+  const { path, backend, uri } = pending;
+  await backend.waitForDiagnostics(uri);
   const items = backend.getDiagnostics(uri);
   const errors = items.filter((d) => d.severity === "error");
   const warns = items.filter((d) => d.severity === "warning");
@@ -77,6 +87,21 @@ async function diagForPath(path: string, deps: HandlerDeps): Promise<Diagnostics
     items,
     language: backend.name,
   };
+}
+
+async function diagForPath(path: string, deps: HandlerDeps): Promise<DiagnosticsResult> {
+  return finishDiagnostics(await prepareDiagnostics(path, deps));
+}
+
+async function finishPreparedDiagnostics(
+  prepared: PromiseSettledResult<PendingDiagnostics>,
+): Promise<PromiseSettledResult<DiagnosticsResult>> {
+  if (prepared.status === "rejected") return prepared;
+  try {
+    return { status: "fulfilled", value: await finishDiagnostics(prepared.value) };
+  } catch (reason) {
+    return { status: "rejected", reason };
+  }
 }
 
 /**
@@ -110,7 +135,8 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
   // ── Bulk: paths[] ────────────────────────────────────────────────────────
   if (req.paths && req.paths.length > 0) {
     const unique = [...new Set(req.paths)];
-    const settled = await mapConcurrent(unique, BULK_CONCURRENCY, (p) => diagForPath(p, deps));
+    const prepared = await mapConcurrent(unique, BULK_OPEN_CONCURRENCY, (p) => prepareDiagnostics(p, deps));
+    const settled = await Promise.all(prepared.map(finishPreparedDiagnostics));
 
     const files: DiagnosticsResult[] = [];
     const errors: string[] = [];

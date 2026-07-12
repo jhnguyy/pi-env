@@ -91,6 +91,9 @@ if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package
 fi
 PI_ENTRY="$PI_PACKAGE_DIR/${PiPackage.Entry}"
 NODE_BIN='${shSingleQuote(setupNodeBin)}'
+# Sidecars cannot reliably reuse process.execPath when Node is launched through
+# a Nix dynamic-loader wrapper. Preserve setup's Nub-backed runtime selection.
+export PI_ENV_NODE_BIN="$NODE_BIN"
 if [ ! -x "$NODE_BIN" ]; then
   echo "pi-env: configured Node is not executable: $NODE_BIN" >&2
   echo "pi-env: rerun setup through nix run .#setup or set PI_ENV_NODE_BIN before setup." >&2

@@ -4,7 +4,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isSupported, getBackendConfig, BACKEND_CONFIGS, BackendMode, type LspBackendConfig } from "../backend-configs";
+import {
+  isSupported,
+  getBackendConfig,
+  BACKEND_CONFIGS,
+  BackendMode,
+  type LspBackendConfig,
+} from "../backend-configs";
 import { LspBackend, findBinary } from "../backend";
 
 // ─── isSupported ──────────────────────────────────────────────────────────────
@@ -125,6 +131,25 @@ describe("LspBackend.handles and getLanguageId (via configs)", () => {
   });
   it("no backend handles .tf (format-only, not LSP)", () => {
     expect(getBackend("foo.tf")).toBeUndefined();
+  });
+});
+
+describe("TypeScript runtime", () => {
+  it("uses the workspace TypeScript patched by the Effect language service", () => {
+    const config = getBackendConfig("foo.ts");
+    expect(config?.mode).toBe(BackendMode.Lsp);
+    if (config?.mode !== BackendMode.Lsp) return;
+
+    const options = config.initializationOptions as {
+      disableAutomaticTypingAcquisition: boolean;
+      maxTsServerMemory: number;
+      tsserver: { path: string; useSyntaxServer: string };
+    };
+    expect(options.disableAutomaticTypingAcquisition).toBe(true);
+    expect(options.maxTsServerMemory).toBe(768);
+    expect(options.tsserver.path).toContain("typescript");
+    expect(options.tsserver.path).toMatch(/lib\/tsserver\.js$/);
+    expect(options.tsserver.useSyntaxServer).toBe("never");
   });
 });
 
