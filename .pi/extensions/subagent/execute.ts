@@ -48,8 +48,8 @@ interface PersistentSubagentSession {
   name: string;
 }
 
-export function createPersistentSubagentSession(name: string, ctx: ExtensionContext): PersistentSubagentSession {
-  const manager = SessionManager.create(ctx.cwd, ctx.sessionManager.getSessionDir(), {
+export function createPersistentSubagentSession(name: string, ctx: ExtensionContext, cwd = ctx.cwd): PersistentSubagentSession {
+  const manager = SessionManager.create(cwd, ctx.sessionManager.getSessionDir(), {
     parentSession: ctx.sessionManager.getSessionFile(),
   });
   const sessionName = getSubagentSessionName(name);
@@ -71,6 +71,7 @@ export function buildErrorDetails(
     toolNames,
     modelOverride,
     maxTurns: params.max_turns,
+    cwd: params.cwd,
     finalOutput: "",
     toolCallCount: 0,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
@@ -100,10 +101,10 @@ async function runSubagentPromise(
     };
   }
 
-  const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt } = plan.value;
+  const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt, effectiveCwd } = plan.value;
   const name = params.name ?? "unnamed";
   const maxTurns = params.max_turns;
-  const childSession = createPersistentSubagentSession(name, ctx);
+  const childSession = createPersistentSubagentSession(name, ctx, effectiveCwd);
   childSession.manager.appendModelChange(
     (resolvedModel as AgentLoopConfig["model"]).provider,
     (resolvedModel as AgentLoopConfig["model"]).id,
@@ -116,6 +117,7 @@ async function runSubagentPromise(
   let lastErrorMessage: string | undefined;
   let turnLimitExceeded = false;
   let finalMessages: AgentMessage[] = [];
+  const transcript: AgentMessage[] = [];
 
   const details = (finalOutput: string, isError: boolean): SubagentDetails => ({
     name,
@@ -127,6 +129,7 @@ async function runSubagentPromise(
     sessionFile: childSession.file,
     sessionId: childSession.id,
     sessionName: childSession.name,
+    cwd: effectiveCwd,
     finalOutput,
     toolCallCount,
     usage: { ...usage },
@@ -162,6 +165,7 @@ async function runSubagentPromise(
       const ev = event as AgentEvent;
       if (ev.type === "message_end") {
         childSession.manager.appendMessage(ev.message as any);
+        transcript.push(ev.message as AgentMessage);
         const msg = ev.message as AssistantMessage;
         if (msg.role === "assistant") {
           usage.turns++;
@@ -178,7 +182,7 @@ async function runSubagentPromise(
       } else if (ev.type === "tool_execution_start") {
         toolCallCount++;
       } else if (ev.type === "turn_end") {
-        emitUpdate(agentContext.messages);
+        emitUpdate(transcript);
       }
     }
     finalMessages = await stream.result();
@@ -188,10 +192,10 @@ async function runSubagentPromise(
     lastErrorMessage = aborted ? undefined : errorMessage;
     lastStopReason = aborted ? "aborted" : "error";
     const output = aborted ? "Subagent aborted." : `Subagent error: ${errorMessage}`;
-    return { content: [{ type: "text", text: output }], details: details(getFinalOutput(agentContext.messages), true) };
+    return { content: [{ type: "text", text: output }], details: details(getFinalOutput(transcript), true) };
   }
 
-  const output = getFinalOutput(finalMessages.length > 0 ? finalMessages : agentContext.messages);
+  const output = getFinalOutput(finalMessages.length > 0 ? finalMessages : transcript);
   const isError = lastStopReason === "error" || lastStopReason === "aborted" || Boolean(lastErrorMessage);
   const resultText = turnLimitExceeded
     ? `${output || "(no output)"}\n\n[Note: Turn limit (${maxTurns}) reached. Output may be incomplete.]`

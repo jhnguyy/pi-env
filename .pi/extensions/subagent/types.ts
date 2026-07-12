@@ -21,6 +21,7 @@ export interface SubagentDetails {
   sessionFile?: string;
   sessionId?: string;
   sessionName?: string;
+  cwd?: string;
   finalOutput: string;
   toolCallCount: number;
   usage: UsageStats;
