@@ -115,13 +115,12 @@
     }
   },
   "dependencies": {
-    "@effect/opentelemetry": "0.63.0",
-    "@effect/platform": "0.96.2",
-    "@effect/platform-node": "0.107.0",
+    "@effect/opentelemetry": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.97",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.220.0",
     "@opentelemetry/sdk-trace-node": "2.9.0",
-    "effect": "^3.21.4"
+    "effect": "4.0.0-beta.97"
   },
   "allowBuilds": {
     "@google/genai": true,
