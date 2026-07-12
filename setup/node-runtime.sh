@@ -22,15 +22,9 @@ pi_env_setup_nix_managed() {
 
 pi_env_select_node_bin() {
   repo="${1:-$(pwd)}"
-  if [ -n "${NODE_EXECUTABLE:-}" ]; then
-    if pi_env_node_candidate_works "$NODE_EXECUTABLE" "$repo"; then
-      printf '%s\n' "$NODE_EXECUTABLE"
-      return 0
-    fi
-    echo "pi-env: NODE_EXECUTABLE is not usable: $NODE_EXECUTABLE" >&2
-    return 127
-  fi
-
+  # Setup and the pi wrapper publish PI_ENV_NODE_BIN as the reusable runtime
+  # boundary. Prefer it over ambient launcher metadata such as
+  # NODE_EXECUTABLE, which Nub may set to an ELF loader rather than Node.
   if [ -n "${PI_ENV_NODE_BIN:-}" ]; then
     if pi_env_node_candidate_works "$PI_ENV_NODE_BIN" "$repo"; then
       printf '%s\n' "$PI_ENV_NODE_BIN"
@@ -38,6 +32,11 @@ pi_env_select_node_bin() {
     fi
     echo "pi-env: PI_ENV_NODE_BIN is not usable: $PI_ENV_NODE_BIN" >&2
     return 127
+  fi
+
+  if [ -n "${NODE_EXECUTABLE:-}" ] && pi_env_node_candidate_works "$NODE_EXECUTABLE" "$repo"; then
+    printf '%s\n' "$NODE_EXECUTABLE"
+    return 0
   fi
 
   nub_node="$(pi_env_nub_node_candidate "$repo" || true)"
