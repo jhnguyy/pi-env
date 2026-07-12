@@ -76,7 +76,7 @@ For algebraic data types or error/result variants, prefer tagged objects/classes
 
 ## Effect seams and compatibility wrappers
 
-For IO-heavy orchestration, boundary validation, or workflows with multiple expected failure modes, prefer an Effect/Either-returning core API and keep throwing or Promise-returning wrappers at compatibility edges.
+For IO-heavy orchestration, boundary validation, or workflows with multiple expected failure modes, prefer an Effect- or Result-returning core API and keep throwing or Promise-returning wrappers at compatibility edges.
 
 Good candidates:
 
@@ -96,6 +96,6 @@ export function prepareThing(input: Input): Promise<Thing> {
 }
 ```
 
-Use `Either` for synchronous validation or pure parsing. Use `Effect` when the operation performs IO, needs acquire/use/release, or composes async steps. Do not convert every local helper mechanically; add the Effect seam where typed errors improve locality, test leverage, or boundary clarity.
+Use `Result` for synchronous validation or pure parsing. Use `Effect` when the operation performs IO, needs acquire/use/release, or composes async steps. Do not convert every local helper mechanically; add the Effect seam where typed errors improve locality, test leverage, or boundary clarity.
 
 Bootstrap scripts that run before dependencies are installed must not import dependency-backed Effect modules at top level. Keep a dependency-free compatibility boundary for preinstall/runtime bootstrap, then enter Effect-based modules after install has made dependencies available.
