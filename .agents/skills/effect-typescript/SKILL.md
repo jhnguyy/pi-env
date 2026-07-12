@@ -1,6 +1,6 @@
 ---
 name: effect-typescript
-description: Use for TypeScript work involving Effect APIs, design, migration, diagnostics, schemas, errors, services, or resource lifecycles.
+description: Use for TypeScript work where Effect is in use or proposed for use.
 ---
 
 # Effect TypeScript
