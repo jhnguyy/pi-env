@@ -157,17 +157,8 @@ export function renderSubagentResult(
     text += ` ${theme.fg("warning", "[turn limit]")}`;
   }
 
-  let hiddenOutputLines = 0;
-
-  // Output preview (first 3 lines)
-  if (details.finalOutput && details.finalOutput !== "(no output)") {
-    const outputLines = details.finalOutput.split("\n");
-    const lines = outputLines.slice(0, 3).join("\n");
-    hiddenOutputLines = Math.max(0, outputLines.length - 3);
-    text += `\n${theme.fg("toolOutput", lines)}`;
-  }
-
-  // Stats
+  // Keep the collapsed row mechanical. The call renderer above already shows
+  // the truncated task; full subagent output belongs in the expanded view.
   const statsLine: string[] = [];
   if (toolsStr) statsLine.push(toolsStr);
   if (usageStr) statsLine.push(usageStr);
@@ -176,10 +167,6 @@ export function renderSubagentResult(
     text += `\n${theme.fg("dim", statsLine.join(" · "))}`;
   }
 
-  if (hiddenOutputLines > 0) {
-    text += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines, ${expandKeyText()} to expand)`)}`;
-  } else {
-    text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
-  }
+  text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
   return new Text(text, 0, 0);
 }

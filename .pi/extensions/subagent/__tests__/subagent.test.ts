@@ -549,15 +549,17 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(t).not.toContain("Read the auth flow");
     });
 
-    it("shows output preview (first 3 lines)", () => {
+    it("keeps final output out of the collapsed summary", () => {
+      const longSingleLineOutput = `sensitive context: ${"A".repeat(500)}`;
       const t = extractText(
         registeredTool.renderResult(
-          { content: [], details: successDetails },
+          { content: [], details: { ...successDetails, finalOutput: longSingleLineOutput } },
           {},
           mockTheme,
         ),
       );
-      expect(t).toContain("The auth flow is JWT-based");
+      expect(t).not.toContain("sensitive context");
+      expect(t).not.toContain("A".repeat(100));
     });
 
     it("shows success icon (✓) for success", () => {
@@ -624,7 +626,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(t).toContain("[turn limit]");
     });
 
-    it("shows tool call count in stats", () => {
+    it("shows mechanical stats and turns", () => {
       const t = extractText(
         registeredTool.renderResult(
           { content: [], details: successDetails },
@@ -633,6 +635,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
         ),
       );
       expect(t).toContain("3 tool calls");
+      expect(t).toContain("2 turns");
     });
 
     it("shows ctrl+o hint in collapsed view", () => {
@@ -772,7 +775,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(t).toContain("Task");
     });
 
-    it("expanded view contains Output section header", () => {
+    it("expanded view contains the full output", () => {
       const result = registeredTool.renderResult(
         { content: [], details: successDetails },
         { expanded: true },
@@ -780,6 +783,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
       const t = extractText(result);
       expect(t).toContain("Output");
+      expect(t).toContain(successDetails.finalOutput);
     });
 
     it("expanded view shows '(no output)' when finalOutput is empty", () => {
