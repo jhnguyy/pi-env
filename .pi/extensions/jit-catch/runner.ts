@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Data, Effect } from "effect";
+import { Data, Effect, Result } from "effect";
 import { ProcessFailure, ProcessFailureKind, runProcess } from "../../../src/process/platform.js";
 import type { ExtensionDiff, ExtensionRunResult } from "./types";
 
@@ -456,19 +456,19 @@ export function runForExtensionEffect(
     // 3. Build prompt and generate tests via subagent
     onProgress?.("generating tests via subagent…");
     const prompt = buildTestPrompt(ext, diffText, sourceContent, extDir);
-    const generated = yield* Effect.either(generateTestContentEffect(prompt, runner));
-    if (generated._tag === "Left") {
+    const generated = yield* Effect.result(generateTestContentEffect(prompt, runner));
+    if (Result.isFailure(generated)) {
       return {
         extName: ext.name,
         passed: false,
-        testOutput: `Test generation failed: ${generationErrorMessage(generated.left)}`,
+        testOutput: `Test generation failed: ${generationErrorMessage(generated.failure)}`,
         testPath: null,
       };
     }
 
     // 4. Write the test file
     const testPath = join(extDir, "__tests__", `${ext.name}.catching.test.ts`);
-    yield* fsEffect("write catching test", testPath, () => writeFileSync(testPath, generated.right + "\n"));
+    yield* fsEffect("write catching test", testPath, () => writeFileSync(testPath, generated.success + "\n"));
 
     // 5. Run tests
     onProgress?.("running npm test…");
@@ -494,10 +494,10 @@ export async function runForExtension(
   onProgress?: (phase: string) => void,
 ): Promise<ExtensionRunResult> {
   const result = await Effect.runPromise(
-    Effect.either(runForExtensionEffect(ext, diffText, runner, workspaceRoot, onProgress)),
+    Effect.result(runForExtensionEffect(ext, diffText, runner, workspaceRoot, onProgress)),
     { signal },
   );
 
-  if (result._tag === "Right") return result.right;
-  return phaseErrorToRunResult(ext, result.left, workspaceRoot);
+  if (Result.isSuccess(result)) return result.success;
+  return phaseErrorToRunResult(ext, result.failure, workspaceRoot);
 }

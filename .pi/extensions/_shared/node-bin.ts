@@ -39,7 +39,7 @@ function findLocalBinary(name: string, fromUrl: string, env: BinaryLookupEnv): s
 }
 
 function findPathBinaryEffect(name: string, env: BinaryLookupEnv): Effect.Effect<string | null> {
-  return Effect.async<string | null>((resume) => {
+  return Effect.callback<string | null>((resume) => {
     let settled = false;
     const complete = (value: string | null) => {
       if (settled) return;

@@ -12,7 +12,7 @@ export {
   isPiPackageName,
   packageManagerName,
   packageNames,
-  packageNamesEither,
+  packageNamesResult,
   writeInstallCommand,
   writeReport,
 } from "./artifacts";

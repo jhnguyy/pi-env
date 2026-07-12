@@ -1,5 +1,5 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { Type, type Static } from "typebox";
 
 import { parseDiff } from "./parser";
@@ -106,7 +106,7 @@ export function executeJitCatchEffect(
     let workspaceRoot = params.git_cwd ?? context.cwd;
     progress("Acquiring diff…");
 
-    const acquisition = yield* Effect.either(Effect.gen(function*() {
+    const acquisition = yield* Effect.result(Effect.gen(function* () {
       if (params.diff !== undefined) {
         return params.diff;
       }
@@ -117,8 +117,8 @@ export function executeJitCatchEffect(
       return yield* captureDiffEffect(source, runner, gitCwd, params.commit);
     }));
 
-    if (acquisition._tag === "Left") return err(formatRunnerError(acquisition.left));
-    diffText = acquisition.right;
+    if (Result.isFailure(acquisition)) return err(formatRunnerError(acquisition.failure));
+    diffText = acquisition.success;
 
     const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
 
@@ -145,10 +145,10 @@ export function executeJitCatchEffect(
     const results = [];
     for (const ext of targets) {
       progress(`${ext.name}: generating tests…`);
-      const result = yield* Effect.either(runForExtensionEffect(ext, diffText, runner, workspaceRoot, (phase) => {
+      const result = yield* Effect.result(runForExtensionEffect(ext, diffText, runner, workspaceRoot, (phase: string) => {
         progress(`${ext.name}: ${phase}`);
       }));
-      results.push(result._tag === "Right" ? result.right : phaseErrorToRunResult(ext, result.left, workspaceRoot));
+      results.push(Result.isSuccess(result) ? result.success : phaseErrorToRunResult(ext, result.failure, workspaceRoot));
     }
 
     const lines: string[] = [];
@@ -164,7 +164,7 @@ export function executeJitCatchEffect(
         anyFailed = true;
         lines.push(`✗ ${r.extName} — tests FAILED.`);
         if (r.testPath) lines.push(`  Test file kept at: ${r.testPath}`);
-        lines.push(`  Output:\n${r.testOutput.split("\n").map((l) => "  " + l).join("\n")}`);
+        lines.push(`  Output:\n${r.testOutput.split("\n").map((l: string) => "  " + l).join("\n")}`);
       }
     }
 

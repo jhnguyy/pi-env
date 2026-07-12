@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Effect, Either, Fiber } from "effect";
+import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   buildDecisionPrompt,
@@ -11,7 +11,7 @@ import {
   isPiPackageName,
   packageManagerName,
   packageNames,
-  packageNamesEither,
+  packageNamesResult,
   parseArgs,
   PiUpdatePhase,
   writeInstallCommand,
@@ -116,11 +116,11 @@ describe("pi-update", () => {
     const pkg = join(dir, "package.json");
     writeFileSync(pkg, JSON.stringify({ devDependencies: { vitest: "^4" } }));
 
-    const result = packageNamesEither(pkg, isPiPackageName);
+    const result = packageNamesResult(pkg, isPiPackageName);
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.phase).toBe(PiUpdatePhase.PackageDiscovery);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.phase).toBe(PiUpdatePhase.PackageDiscovery);
     }
   });
 

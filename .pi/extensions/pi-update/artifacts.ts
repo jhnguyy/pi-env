@@ -1,5 +1,5 @@
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { Either } from "effect";
+import { Result } from "effect";
 import type { PiUpdatePrep } from "./contract";
 import { PI_PACKAGE_PREFIX } from "./contract";
 import { PiUpdateError, PiUpdatePhase } from "./errors";
@@ -18,7 +18,7 @@ export function isPiPackageName(name: string): boolean {
   return name.startsWith(PI_PACKAGE_PREFIX);
 }
 
-export function packageNamesEither(packageJsonPath: string, targetPackage: (name: string) => boolean): Either.Either<string[], PiUpdateError> {
+export function packageNamesResult(packageJsonPath: string, targetPackage: (name: string) => boolean): Result.Result<string[], PiUpdateError> {
   try {
     const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8")) as Record<string, Record<string, string> | undefined>;
     const names = [];
@@ -28,17 +28,17 @@ export function packageNamesEither(packageJsonPath: string, targetPackage: (name
       }
     }
     return names.length === 0
-      ? Either.left(new PiUpdateError({ phase: PiUpdatePhase.PackageDiscovery, detail: "no matching packages found" }))
-      : Either.right(names);
+      ? Result.fail(new PiUpdateError({ phase: PiUpdatePhase.PackageDiscovery, detail: "no matching packages found" }))
+      : Result.succeed(names);
   } catch (cause) {
-    return Either.left(new PiUpdateError({ phase: PiUpdatePhase.PackageDiscovery, detail: `failed to read ${packageJsonPath}`, cause }));
+    return Result.fail(new PiUpdateError({ phase: PiUpdatePhase.PackageDiscovery, detail: `failed to read ${packageJsonPath}`, cause }));
   }
 }
 
 export function packageNames(packageJsonPath: string, targetPackage: (name: string) => boolean): string[] {
-  const result = packageNamesEither(packageJsonPath, targetPackage);
-  if (Either.isLeft(result)) throw result.left;
-  return result.right;
+  const result = packageNamesResult(packageJsonPath, targetPackage);
+  if (Result.isFailure(result)) throw result.failure;
+  return result.success;
 }
 
 export function packageManagerName(packageJsonPath: string): string | undefined {
