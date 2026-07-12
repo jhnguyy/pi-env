@@ -80,7 +80,7 @@ export class SubagentJobManager {
 
   waitEffect(id: string, signal?: AbortSignal): Effect.Effect<SubagentJob | undefined, SubagentJobWaitInterrupted> {
     const job = this.jobs.get(id);
-    if (!job) return Effect.succeed(undefined);
+    if (!job) return Effect.void as Effect.Effect<undefined>;
     if (!signal) return Effect.as(Effect.promise(() => job.promise), job);
 
     return Effect.tryPromise({

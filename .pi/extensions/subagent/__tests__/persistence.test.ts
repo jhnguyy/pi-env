@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Effect, Either } from "effect";
+import { Data, Effect, Either } from "effect";
 
 import {
   createPersistentSubagentSession,
@@ -11,6 +11,8 @@ import {
   hasReachedTurnLimit,
 } from "../execute";
 import { SubagentJobManager } from "../jobs";
+
+class TestProviderUnavailable extends Data.TaggedError("TestProviderUnavailable")<{ readonly message: string }> {}
 
 describe("persistent subagent sessions", () => {
   it("names child sessions with a sub- prefix", () => {
@@ -63,7 +65,7 @@ describe("persistent subagent sessions", () => {
 
   it("records unexpected Effect failures for later status inspection", async () => {
     const entries: Array<{ data: any }> = [];
-    const runner = () => Effect.fail(new Error("provider unavailable"));
+    const runner = () => Effect.fail(new TestProviderUnavailable({ message: "provider unavailable" }));
     const jobs = new SubagentJobManager({
       appendEntry: (_type: string, data: any) => entries.push({ data }),
     } as any, new Map(), runner);
