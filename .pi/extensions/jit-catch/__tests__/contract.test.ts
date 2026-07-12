@@ -1,30 +1,59 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
 
 import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } from "../../_shared/agent-tools";
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
+import { err } from "../../_shared/result";
 import jitCatchExtension from "../index";
-import { createJitCatchContract, JIT_CATCH_DESCRIPTION, JIT_CATCH_PARAMETERS } from "../contract";
+import { createJitCatchContract, executeJitCatchEffect, JIT_CATCH_DESCRIPTION, JIT_CATCH_PARAMETERS } from "../contract";
+import * as runner from "../runner";
 
 const runnerState = vi.hoisted(() => ({
   runResult: { extName: "demo", passed: true, testOutput: "ok" } as any,
   runCalls: [] as any[],
+  runEffect: null as any,
 }));
 
-vi.mock("../runner", () => ({
-  resolveGitRoot: vi.fn(async (_exec, cwd: string) => `${cwd}/root`),
-  captureDiff: vi.fn(async (_source, _exec, _cwd: string) => [
-    "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
-    "+++ b/.pi/extensions/demo/index.ts",
-    "diff --git a/README.md b/README.md",
-    "+++ b/README.md",
-  ].join("\n")),
-  runForExtension: vi.fn(async (...args: any[]) => {
-    runnerState.runCalls.push(args);
-    args[5]?.("running tests…");
-    return runnerState.runResult;
-  }),
-}));
+vi.mock("../runner", async () => {
+  const actual = await vi.importActual<typeof import("../runner")>("../runner");
+  return {
+    ...actual,
+    resolveGitRoot: vi.fn(async (_exec, cwd: string) => `${cwd}/root`),
+    resolveGitRootEffect: vi.fn((_exec, cwd: string) => Effect.succeed(`${cwd}/root`)),
+    captureDiff: vi.fn(async (_source, _exec, _cwd: string) => [
+      "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
+      "+++ b/.pi/extensions/demo/index.ts",
+      "diff --git a/README.md b/README.md",
+      "+++ b/README.md",
+    ].join("\n")),
+    captureDiffEffect: vi.fn((_source, _exec, _cwd: string) => Effect.succeed([
+      "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
+      "+++ b/.pi/extensions/demo/index.ts",
+      "diff --git a/README.md b/README.md",
+      "+++ b/README.md",
+    ].join("\n"))),
+    runForExtension: vi.fn(async (...args: any[]) => {
+      runnerState.runCalls.push(args);
+      args[5]?.("running tests…");
+      return runnerState.runResult;
+    }),
+    runForExtensionEffect: vi.fn((...args: any[]) => {
+      runnerState.runCalls.push(args);
+      if (runnerState.runEffect) return runnerState.runEffect;
+      return Effect.sync(() => {
+        args[4]?.("running tests…");
+        return runnerState.runResult;
+      });
+    }),
+    phaseErrorToRunResult: vi.fn((ext: any, error: any) => ({
+      extName: ext.name,
+      passed: false,
+      testOutput: String(error),
+      testPath: null,
+    })),
+  };
+});
 
 function createPi() {
   const tools: any[] = [];
@@ -63,6 +92,8 @@ describe("jit_catch tool contract", () => {
     resetAgentToolRegistryForTests();
     runnerState.runResult = { extName: "demo", passed: true, testOutput: "ok" };
     runnerState.runCalls = [];
+    runnerState.runEffect = null;
+    vi.clearAllMocks();
   });
 
   it("uses one schema and description across Pi and AgentTool registration", () => {
@@ -95,7 +126,7 @@ describe("jit_catch tool contract", () => {
     await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/pi/context" });
     await harness.registrations[0].tool.execute("agent", {}, undefined);
 
-    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/pi/context/root", "/agent/session/root"]);
+    expect(runnerState.runCalls.map((call) => call[3])).toEqual(["/pi/context/root", "/agent/session/root"]);
   });
 
   it("keeps each AgentTool bound to the session that registered it", async () => {
@@ -109,7 +140,7 @@ describe("jit_catch tool contract", () => {
     await firstSessionTool.execute("first", {}, undefined);
     await secondSessionTool.execute("second", {}, undefined);
 
-    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/session/one/root", "/session/two/root"]);
+    expect(runnerState.runCalls.map((call) => call[3])).toEqual(["/session/one/root", "/session/two/root"]);
   });
 
   it("lets explicit git_cwd override adapter cwd", async () => {
@@ -120,10 +151,10 @@ describe("jit_catch tool contract", () => {
     await harness.tools[0].execute("pi", { git_cwd: "/explicit" }, undefined, undefined, { cwd: "/pi/context" });
     await harness.registrations[0].tool.execute("agent", { git_cwd: "/explicit" }, undefined);
 
-    expect(runnerState.runCalls.map((call) => call[4])).toEqual(["/explicit/root", "/explicit/root"]);
+    expect(runnerState.runCalls.map((call) => call[3])).toEqual(["/explicit/root", "/explicit/root"]);
   });
 
-  it("forwards signal and matching progress shape through both adapters", async () => {
+  it("preserves matching progress shape through both adapters", async () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
@@ -134,9 +165,44 @@ describe("jit_catch tool contract", () => {
     await harness.tools[0].execute("pi", {}, signal, (update: unknown) => piUpdates.push(update), { cwd: "/pi/context" });
     await harness.registrations[0].tool.execute("agent", {}, signal, (update: unknown) => agentUpdates.push(update));
 
-    expect(runnerState.runCalls.map((call) => call[3])).toEqual([signal, signal]);
     expect(piUpdates).toContainEqual({ content: [{ type: "text", text: "demo: running tests…" }], details: { phase: "demo: running tests…" } });
     expect(agentUpdates).toContainEqual({ content: [{ type: "text", text: "demo: running tests…" }], details: { phase: "demo: running tests…" } });
+  });
+
+  it("interrupts contract execution through the single Effect.runPromise signal adapter", async () => {
+    runnerState.runEffect = Effect.never;
+    const harness = createPi();
+    const contract = createJitCatchContract(harness.pi.exec as any);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 0);
+
+    await expect(contract.execute({}, { cwd: "/cancel", signal: controller.signal })).rejects.toBeDefined();
+    expect(runnerState.runCalls).toHaveLength(1);
+  });
+
+  it("exposes an Effect-native execution seam without using Promise runner wrappers", async () => {
+    const harness = createPi();
+    const result = await Effect.runPromise(executeJitCatchEffect({}, harness.pi.exec as any, { cwd: "/effect" }));
+
+    expect(result.details).toEqual({
+      results: [{ extName: "demo", passed: true, testOutput: "ok" }],
+      anyFailed: false,
+    });
+    expect(runner.resolveGitRoot).not.toHaveBeenCalled();
+    expect(runner.captureDiff).not.toHaveBeenCalled();
+    expect(runner.runForExtension).not.toHaveBeenCalled();
+  });
+
+  it("returns operational acquisition throws with phase/command/cause details", async () => {
+    vi.mocked(runner.captureDiffEffect).mockReturnValueOnce(Effect.fail(new runner.ExecPhaseError({
+      phase: "capture diff",
+      command: "git diff",
+      cause: new Error("spawn ENOENT"),
+    })));
+
+    const result = await Effect.runPromise(executeJitCatchEffect({}, createPi().pi.exec as any, { cwd: "/same" }));
+
+    expect(result).toEqual(err("Operational subprocess failure during capture diff: git diff: spawn ENOENT"));
   });
 
   it("returns equivalent final result/details for the same domain scenario", async () => {
