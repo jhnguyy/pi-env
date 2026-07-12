@@ -7,7 +7,3 @@ Use the repo docs as the navigation path:
 3. Follow `docs/` links for area-specific conventions.
 
 Avoid duplicating those docs here; update the source doc instead.
-
-<!-- effect-solutions:start -->
-For Effect work, follow [`docs/conventions/effect.md`](docs/conventions/effect.md) before writing code.
-<!-- effect-solutions:end -->

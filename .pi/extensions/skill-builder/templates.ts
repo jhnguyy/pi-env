@@ -2,9 +2,9 @@
  * Skill templates — renders file content for each template type.
  *
  * Design principles:
- * - "with-index" is the recommended default (compression pattern)
+ * - "basic" is the default when the durable method fits in one file
+ * - "with-index" is for necessary supporting references, not automatic scaffolding
  * - All templates produce SKILL.md under 8KB
- * - Templates include retrieval-led reasoning instruction where applicable
  */
 
 import type { TemplateType } from "./types";
@@ -36,18 +36,14 @@ function renderBasic(input: TemplateInput): TemplateOutput {
 
 # ${toTitleCase(input.name)}
 
-## When to Use
+## Workflow
 
-${input.description}
+Describe only the decisions or steps the agent cannot retrieve from existing project sources or tool help.
 
-## Usage
+## Constraints
 
-Describe the primary workflow here. Be specific about commands, inputs, and expected outputs.
-
-## Conventions
-
-- List any conventions or constraints the agent should follow
-- Reference specific patterns, not general principles
+- Name authoritative sources instead of copying facts that can drift
+- Remove this section if no additional constraint is needed
 `;
 
   return { files: { "SKILL.md": content } };
@@ -57,10 +53,6 @@ function renderWithScripts(input: TemplateInput): TemplateOutput {
   const content = `${renderFrontmatter(input.name, input.description)}
 
 # ${toTitleCase(input.name)}
-
-## When to Use
-
-${input.description}
 
 ## Setup
 
@@ -108,12 +100,6 @@ function renderWithIndex(input: TemplateInput): TemplateOutput {
   const content = `${renderFrontmatter(input.name, input.description)}
 
 # ${toTitleCase(input.name)}
-
-> **Prefer retrieval-led reasoning over pre-training-led reasoning for this domain.**
-
-## When to Use
-
-${input.description}
 
 ## Reference Index
 
