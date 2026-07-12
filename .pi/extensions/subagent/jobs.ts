@@ -46,7 +46,7 @@ export type SubagentJobRunner = (
 export class SubagentJobManager {
   private readonly jobs = new Map<string, SubagentJob>();
   private readonly queue: Queue.Queue<string>;
-  private readonly scope: Scope.CloseableScope;
+  private readonly scope: Scope.Closeable;
   private shutdownStarted = false;
   private shutdownPromise: Promise<void> | undefined;
 
@@ -60,7 +60,7 @@ export class SubagentJobManager {
     this.queue = queue;
     this.scope = scope;
     for (let index = 0; index < MAX_CONCURRENT_SUBAGENT_JOBS; index++) {
-      Effect.runSync(Effect.forkIn(this.worker(), this.scope));
+      Effect.runSync(Effect.forkIn(this.worker(), this.scope, { startImmediately: true }));
     }
   }
 
@@ -98,7 +98,7 @@ export class SubagentJobManager {
 
     return Effect.raceFirst(
       waitForDone,
-      Effect.async<never, SubagentJobWaitInterrupted>((resume) => {
+      Effect.callback<never, SubagentJobWaitInterrupted>((resume) => {
         if (signal.aborted) {
           resume(Effect.fail(new SubagentJobWaitInterrupted({ jobId: id })));
           return;
@@ -141,7 +141,7 @@ export class SubagentJobManager {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownStarted = true;
     for (const job of this.jobs.values()) this.cancel(job.id);
-    this.shutdownPromise = Effect.runPromise(Effect.gen(this, function* () {
+    this.shutdownPromise = Effect.runPromise(Effect.gen({ self: this }, function* () {
       yield* Effect.all([...this.jobs.values()].map((job) => Deferred.await(job.done)), { discard: true });
       yield* Scope.close(this.scope, Exit.void);
     }));
@@ -149,7 +149,7 @@ export class SubagentJobManager {
   }
 
   private worker(): Effect.Effect<void> {
-    return Effect.forever(Effect.gen(this, function* () {
+    return Effect.forever(Effect.gen({ self: this }, function* () {
       const id = yield* Queue.take(this.queue);
       const job = this.jobs.get(id);
       const started = yield* Effect.sync(() => {
@@ -190,18 +190,15 @@ export class SubagentJobManager {
           }
         },
       }),
-      () => Effect.zipRight(
-        Effect.yieldNow(),
-        Effect.sync(() => {
-          if (job.status === SubagentJobStatus.Running) {
-            job.status = SubagentJobStatus.Cancelled;
-            job.errorMessage = "Cancelled.";
-          }
-          if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
-          this.record(job);
-          Effect.runSync(Deferred.succeed(job.done, undefined));
-        }),
-      ),
+      () => Effect.yieldNow.pipe(Effect.andThen(Effect.sync(() => {
+        if (job.status === SubagentJobStatus.Running) {
+          job.status = SubagentJobStatus.Cancelled;
+          job.errorMessage = "Cancelled.";
+        }
+        if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
+        this.record(job);
+        Effect.runSync(Deferred.succeed(job.done, undefined));
+      }))),
     );
   }
 

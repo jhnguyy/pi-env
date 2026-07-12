@@ -18,7 +18,7 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { Type, type Static } from "typebox";
 
 import { discoverAgents } from "./agents";
@@ -158,15 +158,15 @@ export default function (pi: ExtensionAPI) {
     if (params.action === SubagentJobAction.Wait) {
       const manager = jobs;
       if (!manager) throw new Error(`Unknown subagent job: ${params.job_id}`);
-      const outcome = await Effect.runPromise(Effect.either(manager.waitEffect(params.job_id, signal)));
-      if (Either.isLeft(outcome)) {
+      const outcome = await Effect.runPromise(Effect.result(manager.waitEffect(params.job_id, signal)));
+      if (Result.isFailure(outcome)) {
         return {
           content: [{ type: "text", text: `Stopped waiting for subagent job ${params.job_id}; it is still running.` }],
           details: { jobId: params.job_id, status: "running" },
         };
       }
-      if (!outcome.right) throw new Error(`Unknown subagent job: ${params.job_id}`);
-      return { content: [{ type: "text", text: renderJob(outcome.right) }], details: { jobId: outcome.right.id, status: outcome.right.status } };
+      if (!outcome.success) throw new Error(`Unknown subagent job: ${params.job_id}`);
+      return { content: [{ type: "text", text: renderJob(outcome.success) }], details: { jobId: outcome.success.id, status: outcome.success.status } };
     }
     const manager = jobs;
     const job = params.action === SubagentJobAction.Cancel ? manager?.cancel(params.job_id) : manager?.get(params.job_id);
