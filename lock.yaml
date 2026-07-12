@@ -28,6 +28,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 0.80.6
         version: 0.80.6
+      '@effect/language-service':
+        specifier: ^0.86.6
+        version: 0.86.6
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
@@ -222,6 +225,10 @@ packages:
   '@earendil-works/pi-tui@0.80.6':
     resolution: {integrity: sha512-bSuzS4EVSqEPj/Qr/p9eqCESfKsGuDNbl77EGci8Iaqqt/C/XCBZL1MjXaxSWW1NsT5afjp/Cb0NTPzOLv/aPA==}
     engines: {node: '>=22.19.0'}
+
+  '@effect/language-service@0.86.6':
+    resolution: {integrity: sha512-uwXbp+lWzt60bZnm6lG6S5DWy0m6TthUzV2hcQoiS6NzieEDm07tuBakscxOXoO+AU9+yTH+0TSIa9mEDt9dFA==}
+    hasBin: true
 
   '@emnapi/core@1.11.0':
     resolution: {integrity: sha512-l9Oo58x0HOP5znGzVhYW9U3e5wVuA4LAZU2AGezTmkhO1CgQRFDhDg4nneHsu/t3WniXg9QrG2nIXL/ZS8ln8Q==}
@@ -2422,6 +2429,8 @@ snapshots:
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
+
+  '@effect/language-service@0.86.6': {}
 
   '@emnapi/core@1.11.0':
     dependencies:

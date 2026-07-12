@@ -5,6 +5,7 @@ This directory holds repo-specific implementation conventions. It is intentional
 ## Index
 
 - [TypeScript](typescript.md) — exported domain values, enums, module boundaries, and type-shape preferences.
+- [Effect](effect.md) — Effect Solutions workflow, current Effect 3 authority, and the Effect v4 reference boundary.
 - [Extensions](extensions.md) — extension runtime shape, lifecycle manifest, tool output, and cross-bundle singleton conventions.
 
 ## How to use this directory
