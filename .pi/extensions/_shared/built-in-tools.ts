@@ -18,7 +18,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ToolCapability, type ToolCapability as ToolCapabilityType } from "./agent-tools";
 
-export interface BuiltInToolContract {
+interface BuiltInToolContract {
   capabilities: ToolCapabilityType[];
   agentFactory: (cwd: string) => AgentTool<any, any>;
   definitionFactory: (cwd: string) => ToolDefinition<any, any, any>;
@@ -62,5 +62,4 @@ export const BUILT_IN_TOOL_CONTRACTS = {
   },
 } as const satisfies Record<string, BuiltInToolContract>;
 
-export type BuiltInToolName = keyof typeof BUILT_IN_TOOL_CONTRACTS;
 export const BUILT_IN_TOOL_NAMES = new Set<string>(Object.keys(BUILT_IN_TOOL_CONTRACTS));

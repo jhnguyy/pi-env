@@ -76,7 +76,7 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
     writeFile,
     async callDaemon(req: object): Promise<any> {
       const { LspClient } = await import("../client");
-      const client = new LspClient(socketPath, pidPath);
+      const client = new LspClient(socketPath);
       // Daemon is already fixture-owned; prevent client auto-spawn during tests.
       (client as any).spawnDaemon = async () => {};
       const result = await client.call(req as any);

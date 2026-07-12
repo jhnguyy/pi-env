@@ -9,7 +9,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { serializeResponse, okResponse, errorResponse, type DaemonResponse, type StatusResult } from "../protocol";
+import { serializeResponse, okResponse, errorResponse, type StatusResult } from "../protocol";
 
 describeIfEnabled("dev-tools", "LspClient", () => {
   let tmpDir: string;
@@ -70,7 +70,7 @@ describeIfEnabled("dev-tools", "LspClient", () => {
 
   function createClient(): LspClient {
     // Use a no-op spawnDaemon since we manage the server ourselves
-    const client = new LspClient(socketPath, join(tmpDir, "test.pid"), join(tmpDir, "daemon.ts"));
+    const client = new LspClient(socketPath, join(tmpDir, "daemon.ts"));
     (client as any).spawnDaemon = async () => {};
     return client;
   }
@@ -199,6 +199,18 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       client.close();
 
       await expect(reqPromise).rejects.toThrow("Client closed");
+    });
+
+    it("rejects requests still waiting for a connection", async () => {
+      const client = createClient();
+      (client as any).tryConnect = () => new Promise<boolean>(() => {});
+
+      const reqPromise = client.request({ action: "status" });
+      await Promise.resolve();
+      client.close();
+
+      await expect(reqPromise).rejects.toThrow("Client closed");
+      await expect(client.request({ action: "status" })).rejects.toThrow("Client closed");
     });
   });
 });

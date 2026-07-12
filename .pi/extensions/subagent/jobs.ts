@@ -10,6 +10,7 @@ import { SubagentJobWaitInterrupted } from "./errors";
 import { runSubagentEffect, type RunSubagentOptions } from "./execute";
 import type { SubagentParams } from "./resolver";
 import type { SubagentDetails } from "./types";
+import { formatUsageCompact, SubagentUsageLedger, SubagentUsageMode } from "./usage";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = 4;
 export const SubagentJobStatus = {
@@ -28,6 +29,7 @@ export interface SubagentJob {
   params: SubagentParams;
   ctx: ExtensionContext;
   result?: AgentToolResult<SubagentDetails>;
+  latestDetails?: SubagentDetails;
   errorMessage?: string;
   readonly done: Deferred.Deferred<void>;
   readonly cancelRequested: Deferred.Deferred<void>;
@@ -52,6 +54,7 @@ export class SubagentJobManager {
     private readonly pi: ExtensionAPI,
     private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     private readonly runJob: SubagentJobRunner = runSubagentEffect,
+    private readonly ledger?: SubagentUsageLedger,
   ) {
     const [queue, scope] = Effect.runSync(Effect.all([Queue.unbounded<string>(), Scope.make()]));
     this.queue = queue;
@@ -162,9 +165,10 @@ export class SubagentJobManager {
   private runEffect(job: SubagentJob): Effect.Effect<void> {
     const controller = new AbortController();
     const cancel = Deferred.await(job.cancelRequested).pipe(Effect.tap(() => Effect.sync(() => controller.abort())), Effect.flatMap(() => Effect.interrupt));
-    const run = this.runJob(job.params, job.ctx, this.registeredExtTools, { signal: controller.signal }).pipe(
-      Effect.raceFirst(cancel),
-    );
+    const run = this.runJob(job.params, job.ctx, this.registeredExtTools, {
+      signal: controller.signal,
+      onUsage: (details) => { job.latestDetails = details; },
+    }).pipe(Effect.raceFirst(cancel));
 
     return Effect.acquireUseRelease(
       Effect.void,
@@ -174,6 +178,7 @@ export class SubagentJobManager {
       }))), {
         onSuccess: (result) => {
           job.result = result;
+          job.latestDetails = result.details;
           job.status = controller.signal.aborted
             ? SubagentJobStatus.Cancelled
             : result.details.isError ? SubagentJobStatus.Failed : SubagentJobStatus.Completed;
@@ -192,6 +197,7 @@ export class SubagentJobManager {
             job.status = SubagentJobStatus.Cancelled;
             job.errorMessage = "Cancelled.";
           }
+          if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
           this.record(job);
           Effect.runSync(Deferred.succeed(job.done, undefined));
         }),
@@ -205,15 +211,18 @@ export class SubagentJobManager {
       name: job.name,
       status: job.status,
       cwd: job.params.cwd ?? job.ctx.cwd,
-      sessionFile: job.result?.details.sessionFile,
-      errorMessage: job.errorMessage ?? job.result?.details.errorMessage,
+      sessionFile: job.latestDetails?.sessionFile ?? job.result?.details.sessionFile,
+      usage: job.latestDetails?.usage ?? job.result?.details.usage,
+      errorMessage: job.errorMessage ?? job.latestDetails?.errorMessage ?? job.result?.details.errorMessage,
     });
   }
 }
 
 export function renderJob(job: SubagentJob): string {
-  const session = job.result?.details.sessionFile ? `\nsession: ${job.result.details.sessionFile}` : "";
+  const details = job.latestDetails ?? job.result?.details;
+  const session = details?.sessionFile ? `\nsession: ${details.sessionFile}` : "";
+  const usage = details?.usage ? `\nusage: ${formatUsageCompact(details.usage)}` : "";
   const output = job.result?.content[0];
   const text = output?.type === "text" ? output.text : job.errorMessage ?? "";
-  return `[${job.status}] ${job.id} ${job.name}${session}${text ? `\n${text}` : ""}`;
+  return `[${job.status}] ${job.id} ${job.name}${session}${usage}${text ? `\n${text}` : ""}`;
 }

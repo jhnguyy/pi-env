@@ -4,7 +4,6 @@ import {
   SettingsSource,
   defaultSettingsEnv,
   loadSettingsSnapshotEffect,
-  settingsPaths,
   type SettingsEnv,
   type SettingsError,
   type SettingsSnapshot,
@@ -36,7 +35,7 @@ export function readAgentSettingsEffect(
   return Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), decodeAgentSettingsSnapshotEffect);
 }
 
-export function readOptionalAgentSettingsEffect(
+function readOptionalAgentSettingsEffect(
   env: AgentSettingsEnv = defaultSettingsEnv,
   cwd = process.cwd(),
 ): Effect.Effect<AgentSettings | null> {
@@ -51,10 +50,6 @@ export function readOptionalAgentSettingsEffect(
 
 export function readOptionalAgentSettings(env: AgentSettingsEnv = defaultSettingsEnv, cwd = process.cwd()): AgentSettings | null {
   return Effect.runSync(readOptionalAgentSettingsEffect(env, cwd));
-}
-
-export function agentSettingsPaths(env: AgentSettingsEnv = defaultSettingsEnv, cwd = process.cwd()): { global: string; project: string } {
-  return settingsPaths(cwd, env);
 }
 
 function decodeAgentSettingsSnapshotEffect(

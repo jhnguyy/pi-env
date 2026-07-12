@@ -41,6 +41,7 @@ describe("subagent live progress", () => {
   it("uses the execution transcript for turn_end updates and final fallback", async () => {
     sessionDir = mkdtempSync(join(tmpdir(), "pi-subagent-progress-"));
     const updates: string[] = [];
+    const usageUpdates: number[] = [];
     const parent = SessionManager.create("/tmp", sessionDir);
     const result = await runSubagent(
       { name: "progress", task: "x", tools: ["notes"], model: "test/model" },
@@ -56,10 +57,14 @@ describe("subagent live progress", () => {
         capabilities: [],
         tool: { name: "notes", label: "Notes", description: "", parameters: {}, execute: async () => ({ content: [], details: null }) },
       }]]),
-      { onUpdate: (update) => updates.push(update.content[0]?.type === "text" ? update.content[0].text : "") },
+      {
+        onUpdate: (update) => updates.push(update.content[0]?.type === "text" ? update.content[0].text : ""),
+        onUsage: (details) => usageUpdates.push(details.usage.input),
+      },
     );
 
     expect(updates.at(-1)).toBe("latest assistant text");
+    expect(usageUpdates).toEqual([1]);
     expect(result.content[0]?.type === "text" ? result.content[0].text : "").toBe("latest assistant text");
   });
 });

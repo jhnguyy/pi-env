@@ -104,6 +104,13 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(typeof registeredTool.description).toBe("string");
       expect(registeredTool.description.length).toBeGreaterThan(0);
     });
+
+    it("supports compact usage reporting for the active session", async () => {
+      const usageTool = registeredTools.get("subagent_job");
+      const result = await usageTool.execute("usage-1", { action: "usage" }, undefined, undefined, mockCtx);
+      expect(result.content[0].text).toBe("No subagent usage recorded.");
+      expect(result.details.status).toBe("usage");
+    });
   });
 
   // ─── Extension tool registration ─────────────────────────────────────────

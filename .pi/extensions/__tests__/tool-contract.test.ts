@@ -6,7 +6,7 @@ import { toAgentTool, toPiTool, type ToolContract } from "../_shared/tool-contra
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
 
-function createContract(seen: Array<{ params: Params; cwd: string; signal?: AbortSignal }>): ToolContract<Params, { cwd: string }> {
+function createContract(seen: Array<{ params: Params; cwd: string; signal?: AbortSignal }>): ToolContract<Params, { cwd: string }, typeof PARAMETERS> {
   return {
     name: "sample",
     label: "Sample",

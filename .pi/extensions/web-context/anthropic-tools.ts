@@ -17,31 +17,21 @@ const WebContextSettingKey = {
   Root: "webContext",
   HostedTools: "anthropicHostedTools",
 } as const;
-type WebContextSettingKey = typeof WebContextSettingKey[keyof typeof WebContextSettingKey];
-
 const AnthropicHostedToolSettingKey = {
   Enabled: "enabled",
   Tools: "tools",
   MaxUses: "maxUses",
 } as const;
-type AnthropicHostedToolSettingKey = typeof AnthropicHostedToolSettingKey[keyof typeof AnthropicHostedToolSettingKey];
-
 const AnthropicHostedToolEnvVar = {
   Enabled: "PI_ANTHROPIC_WEB_TOOLS",
 } as const;
-type AnthropicHostedToolEnvVar = typeof AnthropicHostedToolEnvVar[keyof typeof AnthropicHostedToolEnvVar];
-
 const ProviderName = {
   Anthropic: "anthropic",
   GitHubCopilot: "github-copilot",
 } as const;
-type ProviderName = typeof ProviderName[keyof typeof ProviderName];
-
 const ModelApi = {
   AnthropicMessages: "anthropic-messages",
 } as const;
-type ModelApi = typeof ModelApi[keyof typeof ModelApi];
-
 export interface AnthropicWebToolSettings {
   enabled: boolean;
   tools: AnthropicHostedToolName[];

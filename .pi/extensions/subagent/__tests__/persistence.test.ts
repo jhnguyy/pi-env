@@ -11,6 +11,7 @@ import {
   hasReachedTurnLimit,
 } from "../execute";
 import { SubagentJobManager } from "../jobs";
+import { SubagentUsageLedger, zeroUsage } from "../usage";
 
 class TestProviderUnavailable extends Data.TaggedError("TestProviderUnavailable")<{ readonly message: string }> {}
 
@@ -155,6 +156,49 @@ describe("persistent subagent sessions", () => {
     const late = jobs.start({ name: "late", task: "x" }, {} as any);
     expect(late.status).toBe("cancelled");
     expect(running.status).toBe("cancelled");
+  });
+
+  it("does not double count async usage when cancellation races with progress", async () => {
+    const ledger = new SubagentUsageLedger();
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
+      options.onUsage({
+        name: "race",
+        task: "x",
+        toolNames: [],
+        modelOverride: undefined,
+        finalOutput: "partial",
+        toolCallCount: 0,
+        usage: { ...zeroUsage(), input: 3, output: 4, turns: 1 },
+        isError: false,
+        turnLimitExceeded: false,
+      });
+      const onAbort = () => resume(Effect.succeed({
+        content: [{ type: "text", text: "cancelled" }],
+        details: {
+          name: "race",
+          task: "x",
+          toolNames: [],
+          modelOverride: undefined,
+          finalOutput: "partial",
+          toolCallCount: 0,
+          usage: { ...zeroUsage(), input: 3, output: 4, turns: 1 },
+          isError: true,
+          turnLimitExceeded: false,
+        },
+      }));
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
+    });
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner, ledger);
+    const job = jobs.start({ name: "race", task: "x" }, {} as any);
+    await expect.poll(() => job.latestDetails?.usage.input).toBe(3);
+
+    jobs.cancel(job.id);
+    await jobs.wait(job.id);
+    ledger.record(job.id, "async", job.latestDetails!);
+
+    expect(ledger.rows()).toHaveLength(1);
+    expect(ledger.total()).toMatchObject({ input: 3, output: 4, turns: 1 });
   });
 
   it("waits for running jobs to record cancellation during shutdown", async () => {

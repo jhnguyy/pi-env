@@ -12,7 +12,14 @@ import { connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseResponse, serializeRequest, SOCKET_PATH, PID_PATH, type DaemonRequest, type DaemonResponse, type LspResult } from "./protocol";
+import {
+  parseResponse,
+  serializeRequest,
+  SOCKET_PATH,
+  type DaemonRequest,
+  type DaemonResponse,
+  type LspResult,
+} from "./protocol";
 import { sleep } from "./utils";
 import { removeStaleArtifact } from "./socket-artifacts";
 
@@ -37,19 +44,22 @@ export function resolveDaemonNodeBinary(env: NodeJS.ProcessEnv = process.env): s
 
 export class LspClient {
   private socket: Socket | null = null;
-  private pendingRequests = new Map<number, {
+  private pendingRequests = new Map<
+    number,
+    {
     resolve: (res: DaemonResponse) => void;
     reject: (err: Error) => void;
     timer: ReturnType<typeof setTimeout>;
-  }>();
+    }
+  >();
   private nextId = 1;
   private buf = "";
-  private connecting = false;
   private connectPromise: Promise<void> | null = null;
+  private readonly closeController = new AbortController();
+  private closed = false;
 
   constructor(
     private socketPath = SOCKET_PATH,
-    private pidPath = PID_PATH,
     private daemonScript = resolve(__dirname, "daemon.js"),
   ) {}
 
@@ -73,6 +83,7 @@ export class LspClient {
     isRetry: boolean,
   ): Promise<DaemonResponse> {
     await this.ensureConnected();
+    this.assertOpen();
 
     const id = this.nextId++;
     const fullReq: DaemonRequest = { id, ...req };
@@ -93,11 +104,7 @@ export class LspClient {
         this.socket!.write(serializeRequest(fullReq));
       });
     } catch (err) {
-      if (
-        !isRetry &&
-        err instanceof Error &&
-        err.message.startsWith("LSP request timed out")
-      ) {
+      if (!isRetry && err instanceof Error && err.message.startsWith("LSP request timed out")) {
         // Remove stale socket so doConnect() spawns a fresh daemon.
         removeStaleArtifact(this.socketPath);
         // Tear down for reconnect on retry path
@@ -118,34 +125,35 @@ export class LspClient {
 
   /** Close the socket connection. Does not shut down the daemon. */
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.closeController.abort();
     if (this.socket) {
       this.socket.destroy();
       this.socket = null;
     }
-    for (const { reject, timer } of this.pendingRequests.values()) {
-      clearTimeout(timer);
-      reject(new Error("Client closed"));
-    }
-    this.pendingRequests.clear();
+    this.settlePending(new Error("Client closed"));
   }
 
   // ─── Connection management ───────────────────────────────────────────────
 
   private async ensureConnected(): Promise<void> {
+    this.assertOpen();
     if (this.socket && !this.socket.destroyed) return;
 
-    // Serialize connection attempts
-    if (this.connectPromise) return this.connectPromise;
-
+    // Serialize connection attempts while allowing close() to reject every waiter.
+    if (!this.connectPromise) {
     this.connectPromise = this.doConnect().finally(() => {
       this.connectPromise = null;
     });
-    return this.connectPromise;
+    }
+    return this.raceWithClose(this.connectPromise);
   }
 
   private async doConnect(): Promise<void> {
     // Try to connect directly first
     const connected = await this.tryConnect();
+    this.assertOpen();
     if (connected) return;
 
     // Remove stale socket file if present
@@ -153,6 +161,7 @@ export class LspClient {
 
     // Spawn daemon
     await this.spawnDaemon();
+    this.assertOpen();
 
     // Retry with backoff until connected or timeout
     const deadline = Date.now() + SPAWN_RETRY_MAX_MS;
@@ -160,7 +169,9 @@ export class LspClient {
 
     while (Date.now() < deadline) {
       await sleep(delay);
+      this.assertOpen();
       const ok = await this.tryConnect();
+      this.assertOpen();
       if (ok) return;
       delay = Math.min(delay * 1.5, 1000);
     }
@@ -168,9 +179,35 @@ export class LspClient {
     throw new Error(`Failed to connect to LSP daemon after ${SPAWN_RETRY_MAX_MS}ms`);
   }
 
+  private assertOpen(): void {
+    if (!this.closed) return;
+    this.socket?.destroy();
+    this.socket = null;
+    throw new Error("Client closed");
+  }
+
+  private raceWithClose<T>(promise: Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error("Client closed"));
+    return new Promise<T>((resolve, reject) => {
+      const onClose = () => settle(() => reject(new Error("Client closed")));
+      const settle = (complete: () => void) => {
+        this.closeController.signal.removeEventListener("abort", onClose);
+        complete();
+      };
+      this.closeController.signal.addEventListener("abort", onClose, { once: true });
+      promise.then(
+        (value) => settle(() => resolve(value)),
+        (error) => settle(() => reject(error)),
+      );
+    });
+  }
+
   private tryConnect(): Promise<boolean> {
     return new Promise((resolve) => {
-      if (!existsSync(this.socketPath)) { resolve(false); return; }
+      if (!existsSync(this.socketPath)) {
+        resolve(false);
+        return;
+      }
 
       const sock = connect(this.socketPath);
       const onConnect = () => {
@@ -178,8 +215,14 @@ export class LspClient {
         this.setupSocket(sock);
         resolve(true);
       };
-      const onError = () => { cleanup(); resolve(false); };
-      const cleanup = () => { sock.off("connect", onConnect); sock.off("error", onError); };
+      const onError = () => {
+        cleanup();
+        resolve(false);
+      };
+      const cleanup = () => {
+        sock.off("connect", onConnect);
+        sock.off("error", onError);
+      };
       sock.once("connect", onConnect);
       sock.once("error", onError);
     });
@@ -258,4 +301,3 @@ export class LspClient {
     });
   }
 }
-

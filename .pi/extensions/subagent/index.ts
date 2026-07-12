@@ -27,6 +27,7 @@ import { renderJob, SubagentJobManager } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentCall, renderSubagentResult } from "./render";
+import { SubagentUsageLedger } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 
@@ -70,11 +71,27 @@ const SUBAGENT_PARAMETERS = Type.Object({
   })),
 });
 
+const SubagentSessionState = {
+  Inactive: "inactive",
+  Active: "active",
+  ShuttingDown: "shutting-down",
+} as const;
+type SubagentSessionState = typeof SubagentSessionState[keyof typeof SubagentSessionState];
+
+const SubagentJobAction = {
+  Status: "status",
+  Wait: "wait",
+  Cancel: "cancel",
+  List: "list",
+  Usage: "usage",
+} as const;
+type SubagentJobAction = typeof SubagentJobAction[keyof typeof SubagentJobAction];
+
 const SUBAGENT_JOB_PARAMETERS = Type.Object({
-  action: StringEnum(["status", "wait", "cancel", "list"] as const, {
-    description: "Inspect, wait for, cancel, or list asynchronous subagent jobs.",
+  action: StringEnum(Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]], {
+    description: "Inspect, wait for, cancel, list, or summarize asynchronous subagent jobs.",
   }),
-  job_id: Type.Optional(Type.String({ description: "Job ID (required except for list)." })),
+  job_id: Type.Optional(Type.String({ description: "Job ID (required except for list/usage)." })),
 });
 
 type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
@@ -92,9 +109,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Named execute function — stable reference (no recreation on re-register)
-  const executeSubagent = createExecuteSubagent(registeredExtTools);
+  const ledger = new SubagentUsageLedger();
+  const executeSubagent = createExecuteSubagent(registeredExtTools, ledger);
   let jobs: SubagentJobManager | undefined;
-  let sessionState: "inactive" | "active" | "shutting-down" = "inactive";
+  let sessionState: SubagentSessionState = SubagentSessionState.Inactive;
   let lifecycleGeneration = 0;
   const registerSubagentTool = (description: string) => pi.registerTool({
     name: "subagent",
@@ -107,7 +125,7 @@ export default function (pi: ExtensionAPI) {
   });
   const executeAsyncSubagent = async (_id: string, params: SubagentStartParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<AgentToolResult<{ jobId?: string; status: string }>> => {
     if (signal?.aborted) throw new Error("Subagent start aborted.");
-    if (sessionState !== "active" || !jobs) {
+    if (sessionState !== SubagentSessionState.Active || !jobs) {
       return {
         content: [{ type: "text", text: "Cannot start a subagent job without an active parent session." }],
         details: { status: sessionState },
@@ -129,12 +147,15 @@ export default function (pi: ExtensionAPI) {
     };
   };
   const executeSubagentJob = async (_id: string, params: SubagentJobParams, signal?: AbortSignal): Promise<AgentToolResult<{ jobId?: string; status?: string }>> => {
-    if (params.action === "list") {
+    if (params.action === SubagentJobAction.Usage) {
+      return { content: [{ type: "text", text: ledger.render() }], details: { status: "usage" } };
+    }
+    if (params.action === SubagentJobAction.List) {
       const output = jobs?.list().map(renderJob).join("\n") || "No subagent jobs.";
       return { content: [{ type: "text", text: output }], details: {} };
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, and cancel.");
-    if (params.action === "wait") {
+    if (params.action === SubagentJobAction.Wait) {
       const manager = jobs;
       if (!manager) throw new Error(`Unknown subagent job: ${params.job_id}`);
       const outcome = await Effect.runPromise(Effect.either(manager.waitEffect(params.job_id, signal)));
@@ -148,7 +169,7 @@ export default function (pi: ExtensionAPI) {
       return { content: [{ type: "text", text: renderJob(outcome.right) }], details: { jobId: outcome.right.id, status: outcome.right.status } };
     }
     const manager = jobs;
-    const job = params.action === "cancel" ? manager?.cancel(params.job_id) : manager?.get(params.job_id);
+    const job = params.action === SubagentJobAction.Cancel ? manager?.cancel(params.job_id) : manager?.get(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return { content: [{ type: "text", text: renderJob(job) }], details: { jobId: job.id, status: job.status } };
   };
@@ -166,19 +187,22 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "subagent_job",
     label: "Subagent Job",
-    description: "Inspect, wait for, cancel, or list in-process asynchronous subagent jobs.",
+    description: "Inspect, wait for, cancel, list, or summarize in-process asynchronous subagent jobs.",
     parameters: SUBAGENT_JOB_PARAMETERS,
     execute: executeSubagentJob,
   });
   pi.on("session_shutdown", async () => {
     const generation = ++lifecycleGeneration;
-    sessionState = "shutting-down";
+    sessionState = SubagentSessionState.ShuttingDown;
     const manager = jobs;
     jobs = undefined;
     try {
       await manager?.shutdown();
     } finally {
-      if (generation === lifecycleGeneration) sessionState = "inactive";
+      if (generation === lifecycleGeneration) {
+        ledger.clear();
+        sessionState = SubagentSessionState.Inactive;
+      }
     }
   });
 
@@ -186,13 +210,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {
     const generation = ++lifecycleGeneration;
-    sessionState = "shutting-down";
+    sessionState = SubagentSessionState.ShuttingDown;
     const old = jobs;
     jobs = undefined;
     if (old) await old.shutdown();
     if (generation !== lifecycleGeneration) return;
-    jobs = new SubagentJobManager(pi, registeredExtTools);
-    sessionState = "active";
+    ledger.clear();
+    jobs = new SubagentJobManager(pi, registeredExtTools, undefined, ledger);
+    sessionState = SubagentSessionState.Active;
     // 1. Read enabled models and annotations from settings.json
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
     const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
