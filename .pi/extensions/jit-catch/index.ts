@@ -6,7 +6,7 @@ import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-to
 import { toAgentTool, toPiTool } from "../_shared/tool-contract";
 
 export default function (pi: ExtensionAPI) {
-  const contract = createJitCatchContract(pi.exec.bind(pi));
+  const contract = createJitCatchContract();
 
   pi.registerTool(toPiTool(contract, {
     renderCall(params, theme, _ctx) {

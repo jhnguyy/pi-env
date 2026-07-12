@@ -9,22 +9,30 @@
  * - Run `npm test` and return pass/fail + output
  * - Auto-discard on pass
  *
- * ExecFn is injected for testability (same pattern as jit-catch).
+ * JitRunner is injected for testability; production uses the shared process platform.
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Data, Effect } from "effect";
+import { ProcessFailure, ProcessFailureKind, runProcess } from "../../../src/process/platform.js";
 import type { ExtensionDiff, ExtensionRunResult } from "./types";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
 
+/** Compatibility edge for legacy pi.exec-like callers. Prefer JitRunner internally. */
 export type ExecFn = (
   cmd: string,
   args: string[],
   opts?: { cwd?: string; timeout?: number; signal?: AbortSignal },
 ) => Promise<ExecResult>;
+
+export type JitRunner = (
+  cmd: string,
+  args: readonly string[],
+  opts?: { cwd?: string; timeout?: number },
+) => Effect.Effect<ExecResult, ProcessFailure>;
 
 export class ExecPhaseError extends Data.TaggedError("ExecPhaseError")<{
   readonly phase: string;
@@ -46,18 +54,36 @@ export class UserPhaseError extends Data.TaggedError("UserPhaseError")<{
 export type JitCatchPhaseError = ExecPhaseError | FsPhaseError;
 export type JitCatchUserFacingError = UserPhaseError | JitCatchPhaseError;
 
-function execEffect(
+
+function runWithPhase(
   phase: string,
-  exec: ExecFn,
+  runner: JitRunner,
   cmd: string,
-  args: string[],
+  args: readonly string[],
   opts?: { cwd?: string; timeout?: number },
 ): Effect.Effect<ExecResult, ExecPhaseError> {
-  return Effect.tryPromise({
-    try: (signal) => exec(cmd, args, { ...opts, signal }),
-    catch: (cause) => new ExecPhaseError({ phase, command: [cmd, ...args].join(" "), cause }),
+  return runner(cmd, args, opts).pipe(
+    Effect.mapError((error) => new ExecPhaseError({ phase, command: [cmd, ...args].join(" "), cause: error })),
+  );
+}
+
+export function legacyExecJitRunner(exec: ExecFn): JitRunner {
+  return (cmd, args, opts = {}) => Effect.tryPromise({
+    try: (signal) => exec(cmd, [...args], { ...opts, signal }),
+    catch: (cause) => cause instanceof ProcessFailure
+      ? cause
+      : new ProcessFailure({
+        kind: ProcessFailureKind.Spawn,
+        command: [cmd, ...args].join(" "),
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
   });
 }
+
+export const platformJitRunner: JitRunner = (cmd, args, opts = {}) =>
+  runProcess(cmd, args, { cwd: opts.cwd, timeoutMs: opts.timeout }).pipe(
+    Effect.map((result) => ({ code: result.exitCode, stdout: result.stdout, stderr: result.stderr })),
+  );
 
 function fsEffect<A>(phase: string, path: string, run: () => A): Effect.Effect<A, FsPhaseError> {
   return Effect.try({
@@ -111,15 +137,15 @@ export const EXTENSIONS_DIR = join(homedir(), ".pi", "agent", "extensions");
  * Resolve the git repository root for project-local extension diffs.
  * Falls back to gitCwd so raw/non-git callers still get deterministic paths.
  */
-export function resolveGitRootEffect(exec: ExecFn, gitCwd: string): Effect.Effect<string, ExecPhaseError> {
+export function resolveGitRootEffect(runner: JitRunner, gitCwd: string): Effect.Effect<string, ExecPhaseError> {
   return Effect.map(
-    execEffect("resolve git root", exec, "git", ["rev-parse", "--show-toplevel"], { cwd: gitCwd }),
+    runWithPhase("resolve git root", runner, "git", ["rev-parse", "--show-toplevel"], { cwd: gitCwd }),
     (result) => result.code === 0 && result.stdout.trim() ? result.stdout.trim() : gitCwd,
   );
 }
 
-export async function resolveGitRoot(exec: ExecFn, gitCwd: string): Promise<string> {
-  return await Effect.runPromise(resolveGitRootEffect(exec, gitCwd));
+export async function resolveGitRoot(runner: JitRunner, gitCwd: string): Promise<string> {
+  return await Effect.runPromise(resolveGitRootEffect(runner, gitCwd));
 }
 
 /**
@@ -152,7 +178,7 @@ export function resolveExtensionDir(ext: ExtensionDiff, workspaceRoot: string): 
  */
 export function captureDiffEffect(
   source: "unstaged" | "staged" | "commit",
-  exec: ExecFn,
+  runner: JitRunner,
   gitCwd: string,
   commit?: string,
 ): Effect.Effect<string, UserPhaseError | ExecPhaseError> {
@@ -177,7 +203,7 @@ export function captureDiffEffect(
   }
 
   return Effect.flatMap(
-    execEffect("capture diff", exec, "git", args, { cwd: gitCwd }),
+    runWithPhase("capture diff", runner, "git", args, { cwd: gitCwd }),
     (result) => {
       if (result.code !== 0) {
         return Effect.fail(new UserPhaseError({
@@ -201,11 +227,11 @@ export function captureDiffEffect(
 
 export async function captureDiff(
   source: "unstaged" | "staged" | "commit",
-  exec: ExecFn,
+  runner: JitRunner,
   gitCwd: string,
   commit?: string,
 ): Promise<string> {
-  return await Effect.runPromise(captureDiffEffect(source, exec, gitCwd, commit));
+  return await Effect.runPromise(captureDiffEffect(source, runner, gitCwd, commit));
 }
 
 // ─── Environment prep ─────────────────────────────────────────────────────────
@@ -325,10 +351,10 @@ export function buildTestPrompt(
  */
 export function generateTestContentEffect(
   prompt: string,
-  exec: ExecFn,
+  runner: JitRunner,
 ): Effect.Effect<string, UserPhaseError | ExecPhaseError> {
   return Effect.flatMap(
-    execEffect("generate tests", exec, "pi", [
+    runWithPhase("generate tests", runner, "pi", [
       "--print",
       "--no-session",
       "--no-skills",
@@ -356,10 +382,10 @@ export function generateTestContentEffect(
 
 export async function generateTestContent(
   prompt: string,
-  exec: ExecFn,
+  runner: JitRunner,
   signal: AbortSignal | undefined,
 ): Promise<string> {
-  return await Effect.runPromise(generateTestContentEffect(prompt, exec), { signal });
+  return await Effect.runPromise(generateTestContentEffect(prompt, runner), { signal });
 }
 
 // ─── Test execution ───────────────────────────────────────────────────────────
@@ -371,12 +397,12 @@ export async function generateTestContent(
 export function runCatchingTestsEffect(
   extDir: string,
   extName: string,
-  exec: ExecFn,
+  runner: JitRunner,
 ): Effect.Effect<{ passed: boolean; output: string }, ExecPhaseError> {
   const testFile = join("__tests__", `${extName}.catching.test.ts`);
 
   return Effect.map(
-    execEffect("run catching tests", exec, "npm", ["test", "--", testFile], {
+    runWithPhase("run catching tests", runner, "npm", ["test", "--", testFile], {
       cwd: extDir,
       timeout: 60_000,
     }),
@@ -390,9 +416,9 @@ export function runCatchingTestsEffect(
 export async function runCatchingTests(
   extDir: string,
   extName: string,
-  exec: ExecFn,
+  runner: JitRunner,
 ): Promise<{ passed: boolean; output: string }> {
-  return await Effect.runPromise(runCatchingTestsEffect(extDir, extName, exec));
+  return await Effect.runPromise(runCatchingTestsEffect(extDir, extName, runner));
 }
 
 // ─── High-level orchestrator ──────────────────────────────────────────────────
@@ -404,7 +430,7 @@ export async function runCatchingTests(
 export function runForExtensionEffect(
   ext: ExtensionDiff,
   diffText: string,
-  exec: ExecFn,
+  runner: JitRunner,
   workspaceRoot: string,
   onProgress?: (phase: string) => void,
 ): Effect.Effect<ExtensionRunResult, FsPhaseError | ExecPhaseError> {
@@ -430,7 +456,7 @@ export function runForExtensionEffect(
     // 3. Build prompt and generate tests via subagent
     onProgress?.("generating tests via subagent…");
     const prompt = buildTestPrompt(ext, diffText, sourceContent, extDir);
-    const generated = yield* Effect.either(generateTestContentEffect(prompt, exec));
+    const generated = yield* Effect.either(generateTestContentEffect(prompt, runner));
     if (generated._tag === "Left") {
       return {
         extName: ext.name,
@@ -446,7 +472,7 @@ export function runForExtensionEffect(
 
     // 5. Run tests
     onProgress?.("running npm test…");
-    const { passed, output } = yield* runCatchingTestsEffect(extDir, ext.name, exec);
+    const { passed, output } = yield* runCatchingTestsEffect(extDir, ext.name, runner);
 
     // 6. Auto-discard on pass only. Deletion is best-effort: failures must not
     // turn a passing run into a failed run. Failed or interrupted runs retain the file.
@@ -462,13 +488,13 @@ export function runForExtensionEffect(
 export async function runForExtension(
   ext: ExtensionDiff,
   diffText: string,
-  exec: ExecFn,
+  runner: JitRunner,
   signal: AbortSignal | undefined,
   workspaceRoot: string,
   onProgress?: (phase: string) => void,
 ): Promise<ExtensionRunResult> {
   const result = await Effect.runPromise(
-    Effect.either(runForExtensionEffect(ext, diffText, exec, workspaceRoot, onProgress)),
+    Effect.either(runForExtensionEffect(ext, diffText, runner, workspaceRoot, onProgress)),
     { signal },
   );
 
