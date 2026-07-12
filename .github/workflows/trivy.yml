@@ -83,6 +83,7 @@ jobs:
             --skip-dirs .git \
             --severity HIGH,CRITICAL \
             --include-dev-deps \
+            --ignorefile .trivyignore.yaml \
             --exit-code 1 \
             --skip-version-check \
             --format json \

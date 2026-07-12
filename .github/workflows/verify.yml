@@ -51,9 +51,9 @@ jobs:
         shell: bash
         run: nub run --node typecheck
 
-      - name: Verify quality harness
+      - name: Verify quality analysis
         shell: bash
-        run: nub run --node check:all
+        run: nub run --node check:quality
 
       - name: Verify build
         shell: bash

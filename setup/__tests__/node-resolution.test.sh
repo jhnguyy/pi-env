@@ -64,6 +64,33 @@ SH
   rm -rf "$tmp"
 }
 
+test_tool_node_run_enforces_tool_runtime_range() {
+  local tmp output status
+  tmp="$(with_temp_dir)"
+  cat > "$tmp/supported-node" <<'SH'
+#!/usr/bin/env sh
+if [ "${1:-}" = "-p" ]; then printf '22.12.0\n'; exit 0; fi
+printf 'tool:%s\n' "$*"
+SH
+  cat > "$tmp/unsupported-node" <<'SH'
+#!/usr/bin/env sh
+if [ "${1:-}" = "-p" ]; then printf '22.11.0\n'; exit 0; fi
+printf 'unexpected tool execution\n'
+SH
+  chmod +x "$tmp/supported-node" "$tmp/unsupported-node"
+
+  output="$(PI_ENV_TOOL_NODE="$tmp/supported-node" "$ROOT/scripts/tool-node-run.sh" tool-script --check)"
+  [ "$output" = "tool:tool-script --check" ] || fail "tool-node-run should execute a supported host Node, got $output"
+
+  set +e
+  output="$(PI_ENV_TOOL_NODE="$tmp/unsupported-node" "$ROOT/scripts/tool-node-run.sh" tool-script 2>&1)"
+  status=$?
+  set -e
+  [ "$status" -eq 1 ] || fail "tool-node-run should reject Node 22.11, got $status"
+  printf '%s' "$output" | grep -q 'must be executable and satisfy' || fail "tool-node-run should explain its runtime range"
+  rm -rf "$tmp"
+}
+
 test_falls_back_when_nub_node_is_broken() {
   local tmp old_path resolved
   tmp="$(with_temp_dir)"
@@ -133,6 +160,7 @@ SH
 test_node_run_honors_valid_node_executable
 test_node_run_honors_valid_pi_env_node_bin
 test_node_run_rejects_invalid_pi_env_node_bin
+test_tool_node_run_enforces_tool_runtime_range
 test_falls_back_when_nub_node_is_broken
 test_prefers_nub_node_before_path_node
 test_no_node_points_to_nix_next_step_when_nix_exists

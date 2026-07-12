@@ -7,7 +7,7 @@ export default defineConfig({
     setupFiles: [".pi/extensions/__tests__/setup.ts"],
     include: e2e
       ? [".pi/extensions/**/__tests__/e2e.test.ts"]
-      : [".pi/extensions/**/__tests__/**/*.test.ts"],
+      : [".pi/extensions/**/__tests__/**/*.test.ts", "src/analyze/__tests__/**/*.test.ts", "scripts/__tests__/**/*.test.mjs"],
     exclude: [
       "**/node_modules/**",
       "**/dist/**",

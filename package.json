@@ -10,6 +10,7 @@
     "node": ">=24.0.0"
   },
   "workspaces": [
+    ".pi/extensions/analyze",
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
@@ -22,6 +23,7 @@
   ],
   "pi": {
     "extensions": [
+      ".pi/extensions/analyze",
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
       ".pi/extensions/introspection",
@@ -45,13 +47,18 @@
     "clean:extensions": "scripts/node-run.sh scripts/clean-extension-artifacts.mjs",
     "test": "nub run test:unit",
     "test:unit": "scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads",
+    "test:safe": "scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads --maxWorkers=1",
     "test:setup": "bash setup/__tests__/run.sh",
     "test:e2e": "E2E=1 scripts/node-run.sh node_modules/vitest/vitest.mjs run",
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
-    "sensor:deps": "nub run check:deps",
-    "sensor:dup": "nub run check:clones",
-    "sensors": "nub run check:all",
+    "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings",
+    "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
+    "format:check": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 --check scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
+    "analyze": "scripts/node-run.sh scripts/analyze.ts",
+    "sensors": "nub run analyze -- --diff",
+    "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "scripts/node-run.sh scripts/verify.mjs",
+    "verify:safe": "scripts/node-run.sh scripts/verify-safe.mjs",
     "verify:install": "nub run build && scripts/node-run.sh scripts/verify-install.mjs",
     "postinstall": "sh scripts/restart-lsp-daemon.sh && scripts/node-run.sh scripts/build-extensions.mjs",
     "prebuild": "nub run check:node",
@@ -60,14 +67,7 @@
     "pretest:e2e": "nub run check:node",
     "pretypecheck": "nub run check:node",
     "preinstall": "nub run check:node",
-    "check:deps": "NODE_PATH=node_modules scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs .pi/extensions --include-only '^\\.pi/extensions' --output-type err --progress none",
-    "check:clones": "scripts/node-run.sh scripts/run-jscpd.js .pi/extensions --config .jscpd.json --exit-code 0",
-    "check:unused": "NODE_PATH=node_modules scripts/node-run.sh node_modules/knip/bin/knip.js --reporter compact --no-progress --no-exit-code",
-    "check:all": "nub run check:deps && nub run check:clones && nub run check:unused && nub run check:patterns",
-    "harness:report": "scripts/node-run.sh scripts/harness-report.js",
-    "sensor:unused": "nub run check:unused",
     "check:patterns": "scripts/node-run.sh scripts/check-patterns.js",
-    "harness:files": "scripts/node-run.sh scripts/harness-report.js --files",
     "security:trivy": "bash scripts/trivy-scan.sh"
   },
   "peerDependencies": {
@@ -83,14 +83,15 @@
     "@earendil-works/pi-coding-agent": "0.80.6",
     "@earendil-works/pi-tui": "0.80.6",
     "@types/node": "^24.0.0",
-    "cpd-linux-x64-musl": "5.0.11",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
-    "jscpd": "5.0.11",
     "knip": "^6.24.0",
     "typebox": "^1.2.18",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
+    "oxlint-tsgolint": "0.24.0"
   },
   "overrides": {
     "minimatch": "10.2.3",
@@ -115,8 +116,5 @@
   "allowBuilds": {
     "@google/genai": true,
     "esbuild": true
-  },
-  "optionalDependencies": {
-    "cpd-linux-x64-gnu": "5.0.11"
   }
 }

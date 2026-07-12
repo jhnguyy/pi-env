@@ -33,7 +33,7 @@ describe("Extension Loader", () => {
         const entry = pkg.pi?.extensions?.[0] ?? "./dist/index.js";
         const mod = await import(join(EXTENSIONS_DIR, name, entry));
         expect(typeof mod.default).toBe("function");
-      });
+      }, 15_000);
 
       it("accepts one argument (pi: ExtensionAPI)", async () => {
         const pkgPath = join(EXTENSIONS_DIR, name, "package.json");

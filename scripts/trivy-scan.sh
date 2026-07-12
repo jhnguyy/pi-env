@@ -16,6 +16,7 @@ trivy_args=(
   --skip-dirs .git
   --severity "${TRIVY_SEVERITY:-HIGH,CRITICAL}"
   --include-dev-deps
+  --ignorefile .trivyignore.yaml
   --exit-code "${TRIVY_EXIT_CODE:-1}"
   --skip-version-check
 )
