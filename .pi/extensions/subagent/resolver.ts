@@ -1,3 +1,5 @@
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -15,6 +17,8 @@ export interface SubagentParams {
   model?: string;
   system_prompt?: string;
   max_turns?: number;
+  /** Optional absolute working directory for child discovery, tools, and execution. */
+  cwd?: string;
 }
 
 export interface ToolDef {
@@ -37,6 +41,7 @@ export const ResolutionErrorReason = {
   InvalidTools: "invalid_tools",
   NoModel: "no_model",
   ModelNotFound: "model_not_found",
+  InvalidCwd: "invalid_cwd",
 } as const;
 export type ResolutionErrorReason = typeof ResolutionErrorReason[keyof typeof ResolutionErrorReason];
 
@@ -89,6 +94,39 @@ export interface SubagentExecutionPlan {
   toolNames: string[];
   model: unknown;
   systemPrompt: string;
+  effectiveCwd: string;
+}
+
+export function resolveEffectiveCwd(params: SubagentParams, ctxCwd: string): ResolutionResult<string> {
+  if (!params.cwd) return resolutionOk(ctxCwd);
+  if (!isAbsolute(params.cwd)) {
+    return resolutionError({
+      reason: ResolutionErrorReason.InvalidCwd,
+      message: `Invalid cwd: "${params.cwd}" is not an absolute path.`,
+      toolNames: params.tools ?? [],
+      modelOverride: params.model,
+    });
+  }
+  try {
+    const canonical = realpathSync(params.cwd);
+    if (!statSync(canonical).isDirectory()) {
+      return resolutionError({
+        reason: ResolutionErrorReason.InvalidCwd,
+        message: `Invalid cwd: "${params.cwd}" is not a directory.`,
+        toolNames: params.tools ?? [],
+        modelOverride: params.model,
+      });
+    }
+    return resolutionOk(canonical);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return resolutionError({
+      reason: ResolutionErrorReason.InvalidCwd,
+      message: `Invalid cwd: "${params.cwd}" could not be resolved: ${message}`,
+      toolNames: params.tools ?? [],
+      modelOverride: params.model,
+    });
+  }
 }
 
 export function resolveAgentConfig(
@@ -217,10 +255,13 @@ export function resolveSubagentExecutionPlan(
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
 ): ResolutionResult<SubagentExecutionPlan> {
-  const agent = resolveAgentConfig(params, ctx.cwd);
+  const effectiveCwd = resolveEffectiveCwd(params, ctx.cwd);
+  if (!isResolutionOk(effectiveCwd)) return effectiveCwd;
+
+  const agent = resolveAgentConfig(params, effectiveCwd.value);
   if (!isResolutionOk(agent)) return agent;
 
-  const tools = resolveTools(params, agent.value.agentConfig, registeredExtTools, ctx.cwd);
+  const tools = resolveTools(params, agent.value.agentConfig, registeredExtTools, effectiveCwd.value);
   if (!isResolutionOk(tools)) return tools;
 
   const model = resolveModel(params.model ?? agent.value.agentConfig?.model, ctx.modelRegistry, tools.value.toolNames);
@@ -232,5 +273,6 @@ export function resolveSubagentExecutionPlan(
     toolNames: tools.value.toolNames,
     model: model.value.model,
     systemPrompt: resolveSystemPrompt(params, agent.value.agentConfig),
+    effectiveCwd: effectiveCwd.value,
   });
 }

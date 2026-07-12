@@ -115,6 +115,7 @@ describe("persistent subagent sessions", () => {
     );
     const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
     const started = Array.from({ length: 5 }, (_, index) => jobs.start({ name: `job-${index}`, task: "x" }, {} as any));
+    await expect.poll(() => completions.length).toBe(4);
 
     expect(peak).toBe(4);
     completions[0]!();
@@ -124,6 +125,36 @@ describe("persistent subagent sessions", () => {
     for (const complete of completions.slice(1)) complete();
     await Promise.all(started.slice(1).map((job) => jobs.wait(job.id)));
     expect(peak).toBe(4);
+  });
+
+  it("cancels a queued job before it can start", async () => {
+    const releases: Array<() => void> = [];
+    let ranQueued = false;
+    const runner = (params: any) => Effect.async<any>((resume) => {
+      if (params.name === "queued") ranQueued = true;
+      releases.push(() => resume(Effect.succeed({ content: [], details: { isError: false } })));
+    });
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
+    const blockers = Array.from({ length: 4 }, (_, index) => jobs.start({ name: `block-${index}`, task: "x" }, {} as any));
+    await expect.poll(() => releases.length).toBe(4);
+    const queued = jobs.start({ name: "queued", task: "x" }, {} as any);
+    jobs.cancel(queued.id);
+    for (const release of releases) release();
+    await Promise.all(blockers.map((job) => jobs.wait(job.id)));
+    await jobs.wait(queued.id);
+    expect(queued.status).toBe("cancelled");
+    expect(ranQueued).toBe(false);
+  });
+
+  it("is safe under concurrent shutdown and post-shutdown start", async () => {
+    const runner = () => Effect.async<any>(() => Effect.sync(() => undefined));
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
+    const running = jobs.start({ name: "running", task: "x" }, {} as any);
+    await expect.poll(() => running.status).toBe("running");
+    await Promise.all([jobs.shutdown(), jobs.shutdown()]);
+    const late = jobs.start({ name: "late", task: "x" }, {} as any);
+    expect(late.status).toBe("cancelled");
+    expect(running.status).toBe("cancelled");
   });
 
   it("waits for running jobs to record cancellation during shutdown", async () => {

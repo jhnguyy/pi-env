@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Cause, Effect, Fiber } from "effect";
+import { Cause, Deferred, Effect, Exit, Queue, Scope } from "effect";
 
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { SubagentJobWaitInterrupted } from "./errors";
@@ -25,14 +25,12 @@ export interface SubagentJob {
   id: string;
   name: string;
   status: SubagentJobStatus;
-  controller: AbortController;
   params: SubagentParams;
   ctx: ExtensionContext;
   result?: AgentToolResult<SubagentDetails>;
   errorMessage?: string;
-  fiber?: Fiber.RuntimeFiber<void>;
-  promise: Promise<void>;
-  resolve: () => void;
+  readonly done: Deferred.Deferred<void>;
+  readonly cancelRequested: Deferred.Deferred<void>;
 }
 
 export type SubagentJobRunner = (
@@ -42,36 +40,47 @@ export type SubagentJobRunner = (
   options: RunSubagentOptions,
 ) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
 
-/**
- * Owns job state and persistence. The scheduler is deliberately small and pure;
- * Effect owns asynchronous execution, interruption, and finalization.
- */
+/** Effect-owned FIFO scheduler scoped to one Pi session. */
 export class SubagentJobManager {
   private readonly jobs = new Map<string, SubagentJob>();
-  private activeCount = 0;
+  private readonly queue: Queue.Queue<string>;
+  private readonly scope: Scope.CloseableScope;
+  private shutdownStarted = false;
+  private shutdownPromise: Promise<void> | undefined;
 
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     private readonly runJob: SubagentJobRunner = runSubagentEffect,
-  ) {}
+  ) {
+    const [queue, scope] = Effect.runSync(Effect.all([Queue.unbounded<string>(), Scope.make()]));
+    this.queue = queue;
+    this.scope = scope;
+    for (let index = 0; index < MAX_CONCURRENT_SUBAGENT_JOBS; index++) {
+      Effect.runSync(Effect.forkIn(this.worker(), this.scope));
+    }
+  }
 
   start(params: SubagentParams, ctx: ExtensionContext): SubagentJob {
     const id = randomUUID().slice(0, 8);
-    let resolve = () => {};
+    const [done, cancelRequested] = Effect.runSync(Effect.all([Deferred.make<void>(), Deferred.make<void>()]));
     const job: SubagentJob = {
       id,
       name: params.name ?? "unnamed",
-      status: SubagentJobStatus.Queued,
-      controller: new AbortController(),
+      status: this.shutdownStarted ? SubagentJobStatus.Cancelled : SubagentJobStatus.Queued,
       params,
       ctx,
-      promise: new Promise<void>((done) => { resolve = done; }),
-      resolve: () => resolve(),
+      done,
+      cancelRequested,
     };
     this.jobs.set(id, job);
     this.record(job);
-    void this.pump();
+    if (this.shutdownStarted) {
+      Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
+      Effect.runSync(Deferred.succeed(job.done, undefined));
+    } else {
+      Effect.runSync(Queue.offer(this.queue, id));
+    }
     return job;
   }
 
@@ -80,26 +89,22 @@ export class SubagentJobManager {
 
   waitEffect(id: string, signal?: AbortSignal): Effect.Effect<SubagentJob | undefined, SubagentJobWaitInterrupted> {
     const job = this.jobs.get(id);
-    if (!job) return Effect.void as Effect.Effect<undefined>;
-    if (!signal) return Effect.as(Effect.promise(() => job.promise), job);
+    if (!job) return Effect.sync(() => undefined);
+    const waitForDone = Deferred.await(job.done).pipe(Effect.as(job));
+    if (!signal) return waitForDone;
 
-    return Effect.tryPromise({
-      try: () => new Promise<void>((resolve, reject) => {
+    return Effect.raceFirst(
+      waitForDone,
+      Effect.async<never, SubagentJobWaitInterrupted>((resume) => {
         if (signal.aborted) {
-          reject(new SubagentJobWaitInterrupted({ jobId: id }));
+          resume(Effect.fail(new SubagentJobWaitInterrupted({ jobId: id })));
           return;
         }
-        const onAbort = () => reject(new SubagentJobWaitInterrupted({ jobId: id }));
+        const onAbort = () => resume(Effect.fail(new SubagentJobWaitInterrupted({ jobId: id })));
         signal.addEventListener("abort", onAbort, { once: true });
-        void job.promise.finally(() => {
-          signal.removeEventListener("abort", onAbort);
-          resolve();
-        });
+        return Effect.sync(() => signal.removeEventListener("abort", onAbort));
       }),
-      catch: (cause) => cause instanceof SubagentJobWaitInterrupted
-        ? cause
-        : new SubagentJobWaitInterrupted({ jobId: id }),
-    }).pipe(Effect.as(job));
+    );
   }
 
   wait(id: string, signal?: AbortSignal): Promise<SubagentJob | undefined> {
@@ -112,12 +117,12 @@ export class SubagentJobManager {
     switch (job.status) {
       case SubagentJobStatus.Queued:
         job.status = SubagentJobStatus.Cancelled;
-        job.resolve();
         this.record(job);
+        Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
+        Effect.runSync(Deferred.succeed(job.done, undefined));
         break;
       case SubagentJobStatus.Running:
-        job.controller.abort();
-        if (job.fiber) void Effect.runFork(Fiber.interruptFork(job.fiber));
+        Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
         break;
       default:
         break;
@@ -126,68 +131,69 @@ export class SubagentJobManager {
   }
 
   shutdownEffect(): Effect.Effect<void> {
-    const manager = this;
-    return Effect.gen(function* () {
-      for (const job of manager.jobs.values()) manager.cancel(job.id);
-      yield* Fiber.interruptAll(
-        [...manager.jobs.values()]
-          .flatMap((job) => job.fiber ? [job.fiber] : []),
-      );
-      yield* Effect.all(
-        [...manager.jobs.values()].map((job) => Effect.promise(() => job.promise)),
-        { discard: true },
-      );
-    });
+    return Effect.promise(() => this.shutdown());
   }
 
   shutdown(): Promise<void> {
-    return Effect.runPromise(this.shutdownEffect());
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shutdownStarted = true;
+    for (const job of this.jobs.values()) this.cancel(job.id);
+    this.shutdownPromise = Effect.runPromise(Effect.gen(this, function* () {
+      yield* Effect.all([...this.jobs.values()].map((job) => Deferred.await(job.done)), { discard: true });
+      yield* Scope.close(this.scope, Exit.void);
+    }));
+    return this.shutdownPromise;
   }
 
-  private async pump(): Promise<void> {
-    while (this.activeCount < MAX_CONCURRENT_SUBAGENT_JOBS) {
-      const job = this.list().find((candidate) => candidate.status === SubagentJobStatus.Queued);
-      if (!job) return;
-      this.activeCount++;
-      job.status = SubagentJobStatus.Running;
-      this.record(job);
-      job.fiber = Effect.runFork(this.runEffect(job));
-    }
+  private worker(): Effect.Effect<void> {
+    return Effect.forever(Effect.gen(this, function* () {
+      const id = yield* Queue.take(this.queue);
+      const job = this.jobs.get(id);
+      const started = yield* Effect.sync(() => {
+        if (this.shutdownStarted || !job || job.status !== SubagentJobStatus.Queued) return false;
+        job.status = SubagentJobStatus.Running;
+        this.record(job);
+        return true;
+      });
+      if (job && started) yield* this.runEffect(job);
+    }));
   }
 
   private runEffect(job: SubagentJob): Effect.Effect<void> {
+    const controller = new AbortController();
+    const cancel = Deferred.await(job.cancelRequested).pipe(Effect.tap(() => Effect.sync(() => controller.abort())), Effect.flatMap(() => Effect.interrupt));
+    const run = this.runJob(job.params, job.ctx, this.registeredExtTools, { signal: controller.signal }).pipe(
+      Effect.raceFirst(cancel),
+    );
+
     return Effect.acquireUseRelease(
-      Effect.sync(() => undefined),
-      () => Effect.match(Effect.sandbox(Effect.onInterrupt(
-        this.runJob(job.params, job.ctx, this.registeredExtTools, {
-          signal: job.controller.signal,
-        }),
-        () => Effect.sync(() => {
-          job.status = SubagentJobStatus.Cancelled;
-          job.errorMessage = "Cancelled.";
-        }),
-      )), {
+      Effect.void,
+      () => Effect.match(Effect.sandbox(Effect.onInterrupt(run, () => Effect.sync(() => {
+        job.status = SubagentJobStatus.Cancelled;
+        job.errorMessage = "Cancelled.";
+      }))), {
         onSuccess: (result) => {
           job.result = result;
-          job.status = job.controller.signal.aborted
+          job.status = controller.signal.aborted
             ? SubagentJobStatus.Cancelled
             : result.details.isError ? SubagentJobStatus.Failed : SubagentJobStatus.Completed;
         },
         onFailure: (cause) => {
-          job.status = job.controller.signal.aborted
-            ? SubagentJobStatus.Cancelled
-            : SubagentJobStatus.Failed;
-          job.errorMessage = Cause.pretty(cause);
+          if (job.status !== SubagentJobStatus.Cancelled) {
+            job.status = SubagentJobStatus.Failed;
+            job.errorMessage = Cause.pretty(cause);
+          }
         },
       }),
       () => Effect.zipRight(
-        // Let the runner release its own resources before opening another slot.
         Effect.yieldNow(),
         Effect.sync(() => {
+          if (job.status === SubagentJobStatus.Running) {
+            job.status = SubagentJobStatus.Cancelled;
+            job.errorMessage = "Cancelled.";
+          }
           this.record(job);
-          job.resolve();
-          this.activeCount--;
-          void this.pump();
+          Effect.runSync(Deferred.succeed(job.done, undefined));
         }),
       ),
     );
@@ -198,6 +204,7 @@ export class SubagentJobManager {
       jobId: job.id,
       name: job.name,
       status: job.status,
+      cwd: job.params.cwd ?? job.ctx.cwd,
       sessionFile: job.result?.details.sessionFile,
       errorMessage: job.errorMessage ?? job.result?.details.errorMessage,
     });
