@@ -5,7 +5,7 @@ import { applyCleanupPlan, buildCleanupPlan, formatCleanupPlan, parseCleanupArgs
 export function registerCleanupCommand(pi: ExtensionAPI) {
   pi.registerCommand("cleanup", {
     description:
-      "Plan or apply cleanup of merged local git worktrees and branches. Dry-run by default; runs git fetch --prune origin unless --no-fetch is passed. Use `/cleanup apply` for safe ancestry-proven cleanup, `/cleanup apply --force` for remote-gone squash-merge cleanup, and `--repo <path>` outside the session cwd.",
+      "Plan or apply cleanup of merged local git worktrees and branches. Dry-run by default; runs git fetch --prune origin unless --no-fetch is passed. Pass a repo path directly (for example, `/cleanup /path/to/repo`) or with `--repo <path>`. Use `apply` for safe ancestry-proven cleanup and `apply --force` for remote-gone squash-merge cleanup.",
     handler: async (args, ctx) => {
       try {
         const options = parseCleanupArgs(args);

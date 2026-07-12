@@ -64,6 +64,19 @@ describeIfEnabled("dev-tools", "/cleanup command", () => {
       baseRef: "upstream/main",
       repoPath: "/tmp/repo",
     });
+    expect(parseCleanupArgs("/mnt/tank/code/pi-env")).toMatchObject({
+      apply: false,
+      repoPath: "/mnt/tank/code/pi-env",
+    });
+    expect(parseCleanupArgs("apply /mnt/tank/code/pi-env --no-fetch")).toMatchObject({
+      apply: true,
+      fetch: false,
+      repoPath: "/mnt/tank/code/pi-env",
+    });
+    expect(parseCleanupArgs("--base origin/develop /mnt/tank/code/pi-env")).toMatchObject({
+      baseRef: "origin/develop",
+      repoPath: "/mnt/tank/code/pi-env",
+    });
   });
 
   it("parses git worktree porcelain output", () => {
@@ -136,6 +149,7 @@ describeIfEnabled("dev-tools", "/cleanup command", () => {
     expect(command).toBeDefined();
     expect(command!.opts.description).toContain("worktrees");
     expect(command!.opts.description).toContain("fetch --prune");
+    expect(command!.opts.description).toContain("/cleanup /path/to/repo");
   });
 
   it("classifies ancestor, dirty worktree, and remote-gone squash cleanup paths", () => {

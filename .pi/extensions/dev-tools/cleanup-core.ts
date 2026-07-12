@@ -71,8 +71,20 @@ export function parseCleanupArgs(args: string | undefined): CleanupOptions {
     force: tokens.includes("--force") || tokens.includes("force"),
     fetch: !tokens.includes("--no-fetch"),
     baseRef: valueAfter(tokens, "--base") ?? valueAfterPrefix(tokens, "--base="),
-    repoPath: valueAfter(tokens, "--repo") ?? valueAfterPrefix(tokens, "--repo="),
+    repoPath: valueAfter(tokens, "--repo") ?? valueAfterPrefix(tokens, "--repo=") ?? positionalRepoPath(tokens),
   };
+}
+
+function positionalRepoPath(tokens: string[]): string | undefined {
+  const valuesForFlags = new Set([valueAfter(tokens, "--base"), valueAfter(tokens, "--repo")].filter(Boolean));
+  return tokens.find(
+    (token) =>
+      !["apply", "--apply", "force", "--force", "--no-fetch"].includes(token) &&
+      !token.startsWith("--base=") &&
+      !token.startsWith("--repo=") &&
+      !token.startsWith("--") &&
+      !valuesForFlags.has(token),
+  );
 }
 
 function valueAfter(tokens: string[], flag: string): string | undefined {
