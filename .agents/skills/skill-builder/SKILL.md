@@ -17,9 +17,9 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 
 | Template | When to Use |
 |---|---|
-| `with-index` | **Default choice.** Large domains, or anything with significant supporting detail. SKILL.md stays as a compressed map; detailed docs live in `references/`. |
-| `with-scripts` | Skills that need executable helpers. |
-| `basic` | Self-contained skills where everything fits in one file. |
+| `basic` | Default when the complete durable method is short. |
+| `with-index` | Use only when necessary supporting detail is stable and worth retrieving separately. |
+| `with-scripts` | Use when executable helpers are part of the capability. |
 
 ### 2. Create
 
@@ -27,7 +27,7 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 skill_build({ name: "...", description: "...", template: "with-index" })
 ```
 
-Runs the full pipeline: scaffold → validate → evaluate. Returns combined result.
+Scaffolds and validates the structure. Replace the placeholders with the smallest sufficient method, then review the finished skill by path.
 
 Description must be specific and actionable: "Extracts text from PDFs and fills forms" not "Helps with PDFs".
 
@@ -37,7 +37,7 @@ Description must be specific and actionable: "Extracts text from PDFs and fills 
 skill_build({ path: "/path/to/skill-dir" })
 ```
 
-Runs validate → evaluate. Returns combined result. Fix errors first, then warnings.
+Runs validate → evaluate. Validation errors are requirements; evaluation findings are advisory. Apply only findings that improve the user's actual scope.
 
 Pass `diff` to focus evaluation on what changed:
 
@@ -47,10 +47,9 @@ skill_build({ path: "...", diff: "<unified diff>" })
 
 **Context engineering principles:**
 
-- **Index > embed.** Keep SKILL.md as a compressed navigational map. Move detailed docs to `references/`.
-- **Progressive disclosure.** Description loads by default. Full SKILL.md loads on-demand. Reference files load only when needed. Each layer must justify its token cost.
-- **Finite instruction budget.** Every directive competes with the system prompt and AGENTS.md. Prefer fewer, precise instructions over broad coverage.
-- **Retrieval-led > pre-training-led.** For domains with evolving specs or APIs, include the instruction to prefer retrieval over memory.
+- **Brevity and delegation are defaults.** Include only decisions the skill must own; delegate the rest to authoritative files, tools, or references.
+- **Retrieve changing facts.** Do not copy versions, inventories, commands, or policy that can drift.
+- **Evaluation is advisory.** Reject findings that add speculative scope, duplicate a source of truth, or reduce concision.
 
 ## After Editing Extension Files
 

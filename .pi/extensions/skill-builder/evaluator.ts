@@ -47,39 +47,22 @@ const VALID_SEVERITIES = new Set(["error", "warning", "info"]);
 
 const RUBRIC = `## Evaluation Rubric
 
-Evaluate the skill against these categories:
+Judge only the capability promised by the description. Brevity and delegation are paramount; do not infer a tutorial, setup guide, or reference manual.
 
 ### clarity
-Are instructions unambiguous at the right level of abstraction? Can an agent follow the policy without inventing requirements?
-- Operational detail is appropriate to the skill's purpose; command snippets are required only when exact syntax is essential or non-obvious
-- Conditions for use are explicit
-- No jargon without definition
-- Avoid requesting examples that would duplicate common tool help or turn a policy skill into a tutorial
+Can an agent act without inventing requirements? Keep only non-obvious decisions, constraints, and retrieval steps.
 
 ### completeness
-Does the skill cover its stated purpose without over-specifying routine mechanics?
-- Setup instructions present if needed
-- Edge cases covered when they change the intended decision or safety boundary
-- Lifecycle coverage is proportionate to the skill: policy skills may state invariants and decision rules rather than full command recipes
+Is the stated capability minimally sufficient? Missing detail matters only when the skill owns it and cannot delegate it.
 
 ### context-efficiency
-Does the skill minimize token consumption?
-- SKILL.md body is proportionate to what the skill covers — inline only what agents need on every invocation; move reference material to references/ for on-demand loading
-- Detailed docs live in references/ and are loaded on-demand
-- Compressed index pattern used for large knowledge domains
-- No redundant information that could be retrieved instead
+Does every instruction earn its recurring cost? Prefer authoritative sources over copied facts, and direct instructions over unnecessary indexes or references.
 
 ### correctness
-Are the instructions technically accurate?
-- Commands and paths are valid
-- Referenced files exist (or are clearly marked as placeholders)
-- Conventions match the stated ecosystem
+Are stable claims accurate and changing facts retrieved at task time? Do references resolve where used?
 
 ### jit-catch (only when diff provided)
-Do the changes introduce problems?
-- New instructions don't contradict existing ones
-- Changes maintain context efficiency
-- Removed content isn't still referenced elsewhere`;
+Do changes preserve scope, consistency, and context efficiency without leaving broken references?`;
 
 /**
  * Build the evaluation prompt for the LLM judge.
@@ -133,13 +116,11 @@ Respond with a JSON object (no markdown wrapping needed, but it's okay if you us
 }
 
 Rules:
-- "pass" = no errors or blocking warnings; ready to use
-- "needs-revision" = warnings for issues that materially reduce reliability, safety, or usability
-- "fail" = errors that prevent the skill from working
-- Use severity "info" for optional enhancements, stylistic preferences, or suggestions that conflict with the skill's deliberate scope
-- Every finding must have a specific, actionable message
-- Only use "jit-catch" category when a diff is provided
-- Be concise. One finding per issue.`;
+- "pass" = the stated capability is usable and concise
+- "needs-revision" = a material in-scope issue reduces reliability, safety, or usability
+- "fail" = errors prevent the skill from working
+- Do not request copied facts or out-of-scope detail; use "info" for genuinely optional suggestions
+- Be concise and actionable. Use "jit-catch" only when a diff is provided.`;
 
   return prompt;
 }

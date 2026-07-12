@@ -2,8 +2,8 @@
  * Skill Builder Extension
  *
  * Provides:
- * - `skill_build` tool — create (scaffold → validate → evaluate) or
- *   review (validate → evaluate) a pi skill in one call
+ * - `skill_build` tool — scaffold and validate a new skill, or run validation
+ *   plus advisory evaluation for an existing skill
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -133,7 +133,7 @@ const SKILL_BUILD_PARAMETERS = Type.Object({
   ),
   template: Type.Optional(
     StringEnum(["basic", "with-scripts", "with-index"] as const, {
-      description: '"with-index" recommended — compressed index pattern for context efficiency.',
+      description: 'Use "basic" for concise skills; use "with-index" only when supporting references are necessary.',
     }),
   ),
   targetDir: Type.Optional(
@@ -245,6 +245,12 @@ async function executeSkillBuild(
     );
   }
 
+  if (creating) {
+    lines.push("");
+    lines.push("Next: replace the scaffold placeholders, then review the skill by path.");
+    return textResult(lines.join("\n"), { skillDir, validation });
+  }
+
   const skillMdPath = join(skillDir, "SKILL.md");
   if (!existsSync(skillMdPath)) {
     return textResult(lines.join("\n"), { skillDir, validation });
@@ -311,8 +317,8 @@ export default function (pi: ExtensionAPI) {
     label: "Skill Build",
     description:
       "Create or review a pi skill. " +
-      "Create mode (pass name + description + template): scaffold → validate → evaluate. " +
-      "Review mode (pass path): validate → evaluate. " +
+      "Create mode (pass name + description + template): scaffold → validate. " +
+      "Review mode (pass path): validate → advisory evaluation. " +
       "Pass diff to focus evaluation on what changed.",
     parameters: SKILL_BUILD_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -336,7 +342,7 @@ export default function (pi: ExtensionAPI) {
     const skillBuildAgentTool: AgentTool<any, any> = {
       name: "skill_build",
       label: "Skill Build",
-      description: "Create or review a pi skill. Create mode: scaffold → validate → evaluate. Review mode: validate → evaluate.",
+      description: "Create or review a pi skill. Create mode scaffolds and validates; review mode validates and runs advisory evaluation.",
       parameters: SKILL_BUILD_PARAMETERS,
       execute: async (_toolCallId, params, signal) => executeSkillBuild(pi, params as SkillBuildParams, {
         cwd: process.cwd(),

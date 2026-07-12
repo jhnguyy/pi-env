@@ -102,14 +102,15 @@ describeIfEnabled("skill-builder", "Templates", () => {
       expect(content).toMatch(/index|Index/i);
     });
 
-    it("SKILL.md includes retrieval-led reasoning instruction", () => {
+    it("does not repeat the activation description in the body", () => {
       const result = renderTemplate({
         name: "api-docs",
         description: "API documentation.",
         template: "with-index",
       });
       const content = result.files["SKILL.md"];
-      expect(content).toMatch(/retrieval-led|retrieval over pre-training/i);
+      expect(content).not.toContain("## When to Use");
+      expect(content.match(/API documentation\./g)).toHaveLength(1);
     });
 
     it("SKILL.md body stays under 8KB", () => {
