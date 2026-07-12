@@ -1,68 +1,71 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+import {
+  SettingsDecodeError,
+  SettingsSource,
+  defaultSettingsEnv,
+  loadSettingsSnapshotEffect,
+  settingsPaths,
+  type SettingsEnv,
+  type SettingsError,
+  type SettingsSnapshot,
+} from "./settings";
 
-export interface AgentSettings {
-  enabledModels?: string[];
-  modelAnnotations?: Record<string, string[]>;
-  workTracker?: {
-    repos?: string[];
-    protectedBranches?: string[];
-  };
-  extensions?: string[];
-}
+const StringArraySchema = Schema.mutable(Schema.Array(Schema.String));
 
-export interface AgentSettingsEnv {
-  settingsPath(): string;
-  readFile(path: string, encoding: BufferEncoding): string;
-}
+export const WorkTrackerSettingsSchema = Schema.mutable(Schema.Struct({
+  repos: Schema.optional(StringArraySchema),
+  protectedBranches: Schema.optional(StringArraySchema),
+}));
 
-export interface AgentSettingsReadError {
-  readonly _tag: "AgentSettingsReadError";
-  readonly path: string;
-  readonly cause: unknown;
-}
+export const AgentSettingsSchema = Schema.mutable(Schema.Struct({
+  enabledModels: Schema.optional(StringArraySchema),
+  modelAnnotations: Schema.optional(Schema.Record({ key: Schema.String, value: StringArraySchema })),
+  workTracker: Schema.optional(WorkTrackerSettingsSchema),
+  extensions: Schema.optional(StringArraySchema),
+}));
 
-const defaultEnv: AgentSettingsEnv = {
-  settingsPath: () => join(getAgentDir(), "settings.json"),
-  readFile: readFileSync,
-};
-
-function asAgentSettings(value: unknown): AgentSettings {
-  return value !== null && typeof value === "object" ? value as AgentSettings : {};
-}
+export type AgentSettings = Schema.Schema.Type<typeof AgentSettingsSchema>;
+export type WorkTrackerSettings = Schema.Schema.Type<typeof WorkTrackerSettingsSchema>;
+export type AgentSettingsEnv = SettingsEnv;
+export type AgentSettingsReadError = SettingsError;
 
 export function readAgentSettingsEffect(
-  env: AgentSettingsEnv = defaultEnv,
+  env: AgentSettingsEnv = defaultSettingsEnv,
+  cwd = process.cwd(),
 ): Effect.Effect<AgentSettings, AgentSettingsReadError> {
-  return Effect.try({
-    try: () => {
-      const path = env.settingsPath();
-      return asAgentSettings(JSON.parse(env.readFile(path, "utf-8")));
-    },
-    catch: (cause) => ({
-      _tag: "AgentSettingsReadError" as const,
-      path: safeSettingsPath(env),
-      cause,
-    }),
-  });
+  return Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), decodeAgentSettingsSnapshotEffect);
 }
 
 export function readOptionalAgentSettingsEffect(
-  env: AgentSettingsEnv = defaultEnv,
+  env: AgentSettingsEnv = defaultSettingsEnv,
+  cwd = process.cwd(),
 ): Effect.Effect<AgentSettings | null> {
-  return Effect.catchAll(readAgentSettingsEffect(env), () => Effect.succeed(null));
+  return Effect.catchAll(
+    Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), (snapshot) => {
+      if (!snapshot.exists.global && !snapshot.exists.project) return Effect.succeed(null);
+      return decodeAgentSettingsSnapshotEffect(snapshot);
+    }),
+    () => Effect.succeed(null),
+  );
 }
 
-export function readOptionalAgentSettings(env: AgentSettingsEnv = defaultEnv): AgentSettings | null {
-  return Effect.runSync(readOptionalAgentSettingsEffect(env));
+export function readOptionalAgentSettings(env: AgentSettingsEnv = defaultSettingsEnv, cwd = process.cwd()): AgentSettings | null {
+  return Effect.runSync(readOptionalAgentSettingsEffect(env, cwd));
 }
 
-function safeSettingsPath(env: AgentSettingsEnv): string {
-  try {
-    return env.settingsPath();
-  } catch {
-    return "<unresolved>";
-  }
+export function agentSettingsPaths(env: AgentSettingsEnv = defaultSettingsEnv, cwd = process.cwd()): { global: string; project: string } {
+  return settingsPaths(cwd, env);
+}
+
+function decodeAgentSettingsSnapshotEffect(
+  snapshot: SettingsSnapshot,
+): Effect.Effect<AgentSettings, SettingsDecodeError> {
+  return Schema.decodeUnknown(AgentSettingsSchema)(snapshot.merged).pipe(
+    Effect.mapError((cause) => new SettingsDecodeError({
+      source: SettingsSource.Overlay,
+      path: `${snapshot.paths.global} + ${snapshot.paths.project}`,
+      paths: snapshot.paths,
+      cause,
+    })),
+  );
 }

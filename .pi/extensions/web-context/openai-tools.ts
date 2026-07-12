@@ -1,4 +1,5 @@
-import { booleanSetting, isObject, objectAt, parseBooleanSetting, readSettingsBlock } from "../_shared/settings";
+import { Schema } from "effect";
+import { booleanSetting, decodeSettingsBlockSync, isObject, parseBooleanSetting } from "../_shared/settings";
 
 export const OpenAIHostedToolName = {
   WebSearch: "web_search",
@@ -45,12 +46,24 @@ export interface OpenAIWebToolSettings {
   externalWebAccess?: boolean;
 }
 
+const OpenAIHostedToolsSettingsSchema = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean),
+  searchContextSize: Schema.optional(Schema.Literal(OpenAISearchContextSize.Low, OpenAISearchContextSize.Medium, OpenAISearchContextSize.High)),
+  externalWebAccess: Schema.optional(Schema.Boolean),
+});
+
+const OpenAIWebContextSettingsSchema = Schema.Struct({
+  openaiHostedTools: Schema.optional(OpenAIHostedToolsSettingsSchema),
+});
+
+type OpenAIHostedToolsSettings = Schema.Schema.Type<typeof OpenAIHostedToolsSettingsSchema>;
+
 export function loadOpenAIWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): OpenAIWebToolSettings {
-  const settings = objectAt(readSettingsBlock(WebContextSettingKey.Root, cwd), WebContextSettingKey.HostedTools);
+  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, OpenAIWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({} as OpenAIHostedToolsSettings);
 
   return {
     enabled: booleanSetting(settings[OpenAIHostedToolSettingKey.Enabled], env[OpenAIHostedToolEnvVar.Enabled], true),
-    searchContextSize: searchContextSizeSetting(settings[OpenAIHostedToolSettingKey.SearchContextSize]) ?? OpenAISearchContextSize.Low,
+    searchContextSize: settings[OpenAIHostedToolSettingKey.SearchContextSize] ?? OpenAISearchContextSize.Low,
     externalWebAccess: parseBooleanSetting(settings[OpenAIHostedToolSettingKey.ExternalWebAccess]),
   };
 }
@@ -94,8 +107,4 @@ function isOpenAIWebSearchCapableModel(model: unknown): boolean {
   if (!isObject(model)) return false;
   const id = typeof model.id === "string" ? model.id : "";
   return id === "gpt-5.5" || id.startsWith("gpt-5.5-");
-}
-
-function searchContextSizeSetting(value: unknown): OpenAISearchContextSize | undefined {
-  return typeof value === "string" && Object.values(OpenAISearchContextSize).includes(value as OpenAISearchContextSize) ? (value as OpenAISearchContextSize) : undefined;
 }

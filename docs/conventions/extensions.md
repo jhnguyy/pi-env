@@ -29,6 +29,23 @@ Keep tools context-economical:
 - use opt-in detail views for larger data
 - never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced
 
+## Settings boundary
+
+Use `.pi/extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.
+
+Settings paths are:
+
+- global: `getAgentDir()/settings.json`
+- project: `<cwd>/.pi/settings.json`
+
+Missing files are absent empty layers. `loadSettingsSnapshotEffect` records `exists.global` and `exists.project`, so callers can distinguish both-missing from an existing empty `{}` without probing or rereading files. Non-`ENOENT` read failures fail as `SettingsReadError` with exact `source` and `path`. Malformed JSON and non-object JSON roots fail as `SettingsDecodeError` with exact local `source` and `path`.
+
+Overlay order is global then project with shallow replacement only. `readSettingsBlock(key)` overlays matching keys inside that block; nested objects are replaced, not deep-merged. Whole agent settings overlay top-level keys the same way.
+
+Schema decoding should happen once at the consumer boundary with `decodeSettingsBlockEffect`/`decodeSettingsBlockSync` or a snapshot decode helper. Block schema failures are overlay errors that include the block `key` and both participating paths; JSON/root failures remain exact-source local errors. Compatibility sync wrappers may throw these typed errors and should be allowed to reach existing rendering boundaries.
+
+Agent settings use Effect Schema for `enabledModels`, `modelAnnotations`, `workTracker` (`repos`/`protectedBranches`), and `extensions`. Required reads return typed settings errors. Optional reads return `null` only when both files are missing, and continue to recover to `null` on malformed/invalid settings for subagent/work-tracker behavior while using a single snapshot load.
+
 ## Cross-extension singletons
 
 Store shared services on `globalThis`, not at module level. Module-level variables are per-bundle; `globalThis` is process-wide.

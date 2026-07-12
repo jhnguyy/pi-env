@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Either } from "effect";
@@ -16,8 +16,26 @@ import {
   writeInstallCommand,
   type PiUpdatePrep,
 } from "../index";
+import { isPiUpdateEnabled } from "../workflow";
 
 describe("pi-update", () => {
+  it("loads enabled setting through typed settings schema", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-update-test-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ piUpdate: { enabled: true } }));
+
+    expect(isPiUpdateEnabled(dir)).toBe(true);
+  });
+
+  it("defaults disabled and rejects malformed persisted enabled field", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-update-test-"));
+    mkdirSync(join(dir, ".pi"));
+
+    expect(isPiUpdateEnabled(dir)).toBe(false);
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ piUpdate: { enabled: "true" } }));
+    expect(() => isPiUpdateEnabled(dir)).toThrow();
+  });
+
   it("parses version and optional paths", () => {
     expect(parseArgs("0.80.0 --repo /repo --worktree-dir /tmp/wt")).toEqual({
       version: "0.80.0",

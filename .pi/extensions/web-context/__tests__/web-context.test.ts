@@ -1,7 +1,10 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { WebFetchMode, buildContextPlan, fetchWebText, parseWebUrl, selectAdapter } from "../index";
-import { AnthropicHostedToolName, injectAnthropicHostedWebTools, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
-import { OpenAISearchContextSize, injectOpenAIHostedWebTools, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
+import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
+import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
 describe("web context", () => {
   it("selects the GitHub adapter", () => {
@@ -48,6 +51,23 @@ describe("web context", () => {
 describe("openai hosted web tools", () => {
   const settings: OpenAIWebToolSettings = { enabled: true, searchContextSize: OpenAISearchContextSize.Low, externalWebAccess: false };
 
+  it("loads typed settings with defaults and env enabled precedence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: false, searchContextSize: "high", externalWebAccess: true } } }));
+
+    expect(loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toEqual({ enabled: true, searchContextSize: "high", externalWebAccess: true });
+    expect(loadOpenAIWebToolSettings(mkdtempSync(join(tmpdir(), "web-context-test-")), {})).toEqual({ enabled: true, searchContextSize: "low", externalWebAccess: undefined });
+  });
+
+  it("rejects malformed persisted OpenAI hosted tool fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { openaiHostedTools: { enabled: "yes" } } }));
+
+    expect(() => loadOpenAIWebToolSettings(dir, { PI_OPENAI_WEB_TOOLS: "true" })).toThrow();
+  });
+
   it("injects hosted web_search for GPT-5.5 responses payloads", () => {
     const payload = injectOpenAIHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
 
@@ -69,6 +89,23 @@ describe("openai hosted web tools", () => {
 
 describe("anthropic hosted web tools", () => {
   const settings: AnthropicWebToolSettings = { enabled: true, tools: [AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch], maxUses: 3 };
+
+  it("loads typed settings with defaults and env enabled precedence", () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { enabled: false, tools: ["web_search", "web_fetch", "web_search"], maxUses: 5 } } }));
+
+    expect(loadAnthropicWebToolSettings(dir, { PI_ANTHROPIC_WEB_TOOLS: "true" })).toEqual({ enabled: true, tools: ["web_search", "web_fetch"], maxUses: 5 });
+    expect(loadAnthropicWebToolSettings(mkdtempSync(join(tmpdir(), "web-context-test-")), {})).toEqual({ enabled: true, tools: ["web_search"], maxUses: undefined });
+  });
+
+  it("rejects malformed persisted Anthropic hosted tool fields", () => {
+    const dir = mkdtempSync(join(tmpdir(), "web-context-test-"));
+    mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ webContext: { anthropicHostedTools: { tools: ["bad"] } } }));
+
+    expect(() => loadAnthropicWebToolSettings(dir, {})).toThrow();
+  });
 
   it("injects hosted search/fetch tools without replacing existing tools", () => {
     const payload = injectAnthropicHostedWebTools({ tools: [{ name: "read", input_schema: { type: "object" } }] }, settings) as { tools: Array<Record<string, unknown>> };
