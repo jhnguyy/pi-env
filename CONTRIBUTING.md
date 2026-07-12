@@ -61,8 +61,6 @@ Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test cla
 
 Canonical verification phases live in `scripts/verification-phases.mjs`. Run one standard phase with `nub run verify:phase <phase-id>`; use the complete standard or safe portfolio before integration.
 
-Effect v4 migration readiness and its dependency trust gate are documented in [`docs/effect-v4-readiness.md`](docs/effect-v4-readiness.md).
-
 ## Worktree Isolation
 
 **Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.

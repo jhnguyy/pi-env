@@ -4,8 +4,6 @@ Effect is for IO/resource/concurrency boundaries and workflows with expected ope
 
 ## Coverage and inventory
 
-Effect v4 preparation, the current dependency trust gate, and the staged migration order live in [`../effect-v4-readiness.md`](../effect-v4-readiness.md). Until migration begins, `nub run check:effect-v4` prevents known v3-only API usage from growing and requires the baseline to decrease with source migrations.
-
 - Type-aware Effect diagnostics cover authored TypeScript included by `tsconfig`.
 - The syntax checker covers tracked TS/JS/MJS under `.pi/extensions`, `src`, `scripts`, `setup`, and `.agents`.
 - Historical P0 inventory is point-in-time review data. Do not rewrite it as a current complete inventory; refresh or supersede it explicitly when taking a new inventory.

@@ -15,7 +15,6 @@ describe("safe verification plan", () => {
       "typecheck",
       "type-aware-lint",
       "pattern-check",
-      "effect-v4-readiness",
       "unit-tests",
       "build",
     ]);
@@ -24,7 +23,6 @@ describe("safe verification plan", () => {
       "nub run typecheck",
       "nub run lint:type",
       "nub run check:patterns",
-      "nub run check:effect-v4",
       "nub run test:safe",
       "nub run build",
     ]);

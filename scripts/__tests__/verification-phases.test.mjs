@@ -12,7 +12,6 @@ describe("verification phase registry", () => {
       "setup-tests",
       "typecheck",
       "pattern-check",
-      "effect-v4-readiness",
       "build",
       "install-readiness",
       "unit-tests",
@@ -25,7 +24,7 @@ describe("verification phase registry", () => {
   });
 
   it("reuses shared phase objects across standard and safe portfolios", () => {
-    const sharedIds = ["typecheck", "pattern-check", "effect-v4-readiness", "build"];
+    const sharedIds = ["typecheck", "pattern-check", "build"];
     for (const id of sharedIds) {
       expect(SAFE_VERIFICATION_PHASES.find((phase) => phase.id === id)).toBe(
         STANDARD_VERIFICATION_PHASES.find((phase) => phase.id === id),

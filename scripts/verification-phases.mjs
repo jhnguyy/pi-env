@@ -34,14 +34,6 @@ export const VerificationPhase = Object.freeze({
     VerificationClass.Static,
     VerificationCapability.SourcePolicy,
   ),
-  EffectV4Readiness: phase(
-    "effect-v4-readiness",
-    "Effect v4 readiness",
-    "nub",
-    ["run", "check:effect-v4"],
-    VerificationClass.Static,
-    VerificationCapability.SourcePolicy,
-  ),
   PatternCheck: phase(
     "pattern-check",
     "pattern guardrails",
@@ -112,7 +104,6 @@ export const STANDARD_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.SetupTests,
   VerificationPhase.Typecheck,
   VerificationPhase.PatternCheck,
-  VerificationPhase.EffectV4Readiness,
   VerificationPhase.Build,
   VerificationPhase.InstallReadiness,
   VerificationPhase.UnitTests,
@@ -123,7 +114,6 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.Typecheck,
   VerificationPhase.TypeAwareLint,
   VerificationPhase.PatternCheck,
-  VerificationPhase.EffectV4Readiness,
   VerificationPhase.SafeUnitTests,
   VerificationPhase.Build,
 ]);

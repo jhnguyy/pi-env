@@ -50,7 +50,7 @@ nub run verify:safe
 
 It takes a repository-wide lock in Git's common directory, so all worktrees run heavyweight phases one at a time. The lane runs format checking, typecheck, type-aware Oxlint, source-policy checks, one-worker unit tests, and build. Analyze is intentionally excluded from both verification plans while strict aggregate containment is unavailable. The non-type Oxlint phase was removed because its configured categories are disabled; only the preserved type-aware rules are currently enforced. It waits up to 10 minutes for another owner by default (`PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS` overrides this). If owner publication fails after creating the lock directory, the creator removes that directory immediately before failing; genuinely ownerless lock directories are not stolen by age and require conservative/manual cleanup. Normal `build` and `test` commands remain unchanged for everyday use.
 
-Canonical verification phases are shared by local plans and CI and report elapsed time. Use `nub run verify:phase <phase-id>` for one focused standard phase. Testing policy and Effect v4 migration readiness are documented in [`docs/conventions/testing.md`](docs/conventions/testing.md) and [`docs/effect-v4-readiness.md`](docs/effect-v4-readiness.md).
+Canonical verification phases are shared by local plans and CI and report elapsed time. Use `nub run verify:phase <phase-id>` for one focused standard phase. Testing policy is documented in [`docs/conventions/testing.md`](docs/conventions/testing.md).
 
 Analyze provides a bounded worker safe mode for explicit `complexity`/`async-risk` diff or path requests. Whole-workspace and heavier checks fail closed until a strict containment adapter exists. See [`docs/analyze.md`](docs/analyze.md).
 
