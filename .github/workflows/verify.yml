@@ -43,26 +43,10 @@ jobs:
         shell: bash
         run: nub install --frozen-lockfile
 
-      - name: Verify setup tests
+      - name: Verify canonical portfolio
         shell: bash
-        run: nub run --node test:setup
-
-      - name: Verify typecheck
-        shell: bash
-        run: nub run --node typecheck
-
-      - name: Verify build
-        shell: bash
-        run: nub run --node build
+        run: scripts/node-run.sh scripts/verify.mjs
 
       - name: Verify safe Analyze canary
         shell: bash
         run: nub run --node analyze -- --checks complexity src/analyze/policy.ts
-
-      - name: Verify install readiness
-        shell: bash
-        run: scripts/node-run.sh scripts/verify-install.mjs
-
-      - name: Verify unit tests
-        shell: bash
-        run: nub run --node test:unit

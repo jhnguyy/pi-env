@@ -55,6 +55,14 @@ nub run build <name>
 
 Arguments to `nub run` are forwarded directly; do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness but uses incremental build information. Run `nub run verify:safe` before integration when the full workspace contract is required.
 
+## Testing
+
+Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, independent hardening-test design, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed. Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request.
+
+Canonical verification phases live in `scripts/verification-phases.mjs`. Run one standard phase with `nub run verify:phase <phase-id>`; use the complete standard or safe portfolio before integration.
+
+Effect v4 migration readiness and its dependency trust gate are documented in [`docs/effect-v4-readiness.md`](docs/effect-v4-readiness.md).
+
 ## Worktree Isolation
 
 **Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
