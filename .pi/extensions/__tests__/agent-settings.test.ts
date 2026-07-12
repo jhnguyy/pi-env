@@ -6,44 +6,61 @@ import {
   type AgentSettingsEnv,
 } from "../_shared/agent-settings";
 
-function envWith(content: string): AgentSettingsEnv {
+function envWith(files: Record<string, string>, onRead?: (path: string) => void): AgentSettingsEnv {
   return {
-    settingsPath: () => "/tmp/pi-settings.json",
-    readFile: () => content,
+    globalSettingsPath: () => "/global/settings.json",
+    projectSettingsPath: () => "/repo/.pi/settings.json",
+    readFile: (path) => {
+      onRead?.(path);
+      if (path in files) return files[path];
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
   };
 }
 
 describe("agent settings", () => {
-  it("parses shared settings blocks from settings.json", async () => {
-    const settings = await Effect.runPromise(readAgentSettingsEffect(envWith(JSON.stringify({
-      enabledModels: ["provider/model"],
+  it("parses shared settings from overlaid settings.json files", async () => {
+    const settings = await Effect.runPromise(readAgentSettingsEffect(envWith({
+      "/global/settings.json": JSON.stringify({
+        enabledModels: ["global/model"],
+        modelAnnotations: { "provider/model": ["preferred"] },
+        workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
+      }),
+      "/repo/.pi/settings.json": JSON.stringify({ enabledModels: ["project/model"], extensions: ["web-context"] }),
+    }), "/repo"));
+
+    expect(settings).toEqual({
+      enabledModels: ["project/model"],
       modelAnnotations: { "provider/model": ["preferred"] },
       workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
-    }))));
-
-    expect(settings.enabledModels).toEqual(["provider/model"]);
-    expect(settings.modelAnnotations).toEqual({ "provider/model": ["preferred"] });
-    expect(settings.workTracker).toEqual({ repos: ["/repo"], protectedBranches: ["main"] });
-  });
-
-  it("keeps malformed or missing settings optional at extension call sites", () => {
-    const malformed = readOptionalAgentSettings(envWith("not json"));
-    const missing = readOptionalAgentSettings({
-      settingsPath: () => "/tmp/missing-settings.json",
-      readFile: () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); },
+      extensions: ["web-context"],
     });
-
-    expect(malformed).toBeNull();
-    expect(missing).toBeNull();
   });
 
-  it("reports the settings path on Effect failures", async () => {
-    const result = await Effect.runPromise(Effect.either(readAgentSettingsEffect(envWith("not json"))));
+  it("distinguishes both-missing from existing-empty for optional settings", () => {
+    expect(readOptionalAgentSettings(envWith({}), "/repo")).toBeNull();
+    expect(readOptionalAgentSettings(envWith({ "/global/settings.json": "{}" }), "/repo")).toEqual({});
+  });
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left.path).toBe("/tmp/pi-settings.json");
-      expect(result.left._tag).toBe("AgentSettingsReadError");
-    }
+  it("keeps malformed settings optional at extension call sites", () => {
+    expect(readOptionalAgentSettings(envWith({ "/global/settings.json": "not json" }), "/repo")).toBeNull();
+  });
+
+  it("reports typed errors for required settings", async () => {
+    const malformed = await Effect.runPromise(Effect.either(readAgentSettingsEffect(envWith({ "/global/settings.json": "not json" }), "/repo")));
+    const invalid = await Effect.runPromise(Effect.either(readAgentSettingsEffect(envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }), "/repo")));
+
+    expect(malformed._tag).toBe("Left");
+    if (malformed._tag === "Left") expect(malformed.left).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });
+    expect(invalid._tag).toBe("Left");
+    if (invalid._tag === "Left") expect(invalid.left).toMatchObject({ _tag: "SettingsDecodeError", source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
+  });
+
+  it("loads optional settings with one snapshot and no duplicate reads", () => {
+    const reads: string[] = [];
+    const settings = readOptionalAgentSettings(envWith({ "/global/settings.json": "{}" }, (path) => reads.push(path)), "/repo");
+
+    expect(settings).toEqual({});
+    expect(reads).toEqual(["/global/settings.json", "/repo/.pi/settings.json"]);
   });
 });

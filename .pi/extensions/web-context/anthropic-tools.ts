@@ -1,4 +1,5 @@
-import { booleanSetting, isObject, objectAt, positiveIntegerSetting, readSettingsBlock } from "../_shared/settings";
+import { Schema } from "effect";
+import { booleanSetting, decodeSettingsBlockSync, isObject } from "../_shared/settings";
 
 export const AnthropicHostedToolName = {
   WebSearch: "web_search",
@@ -48,18 +49,31 @@ export interface AnthropicWebToolSettings {
 }
 
 const DEFAULT_TOOLS = [AnthropicHostedToolName.WebSearch] as const;
+const AnthropicHostedToolNameSchema = Schema.Literal(AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch);
+const AnthropicHostedToolsSettingsSchema = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean),
+  tools: Schema.optional(Schema.mutable(Schema.Array(AnthropicHostedToolNameSchema))),
+  maxUses: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.positive())),
+});
+const AnthropicWebContextSettingsSchema = Schema.Struct({
+  anthropicHostedTools: Schema.optional(AnthropicHostedToolsSettingsSchema),
+});
+type AnthropicHostedToolsSettings = Schema.Schema.Type<typeof AnthropicHostedToolsSettingsSchema>;
+
 const TOOL_TYPES: Record<AnthropicHostedToolName, AnthropicHostedToolType> = {
   [AnthropicHostedToolName.WebSearch]: AnthropicHostedToolType.WebSearch,
   [AnthropicHostedToolName.WebFetch]: AnthropicHostedToolType.WebFetch,
 };
 
 export function loadAnthropicWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): AnthropicWebToolSettings {
-  const settings = objectAt(readSettingsBlock(WebContextSettingKey.Root, cwd), WebContextSettingKey.HostedTools);
+  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, AnthropicWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({} as AnthropicHostedToolsSettings);
 
   return {
     enabled: booleanSetting(settings[AnthropicHostedToolSettingKey.Enabled], env[AnthropicHostedToolEnvVar.Enabled], true),
-    tools: parseToolList(settings[AnthropicHostedToolSettingKey.Tools]) ?? [...DEFAULT_TOOLS],
-    maxUses: positiveIntegerSetting(settings[AnthropicHostedToolSettingKey.MaxUses]),
+    tools: settings[AnthropicHostedToolSettingKey.Tools]
+      ? [...new Set(settings[AnthropicHostedToolSettingKey.Tools])]
+      : [...DEFAULT_TOOLS],
+    maxUses: settings[AnthropicHostedToolSettingKey.MaxUses],
   };
 }
 
@@ -98,11 +112,5 @@ function buildHostedTool(name: AnthropicHostedToolName, settings: AnthropicWebTo
 function isAnthropicProviderModel(model: unknown): boolean {
   if (!isObject(model)) return false;
   return model.provider === ProviderName.Anthropic || (model.api === ModelApi.AnthropicMessages && model.provider !== ProviderName.GitHubCopilot);
-}
-
-function parseToolList(value: unknown): AnthropicHostedToolName[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const tools = value.filter((item): item is AnthropicHostedToolName => Object.values(AnthropicHostedToolName).includes(item));
-  return tools.length > 0 ? [...new Set(tools)] : undefined;
 }
 

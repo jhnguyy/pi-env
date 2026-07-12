@@ -2,8 +2,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Effect, Either } from "effect";
-import { readSettingsBlock } from "../_shared/settings";
+import { Effect, Either, Schema } from "effect";
+import { decodeSettingsBlockSync } from "../_shared/settings";
 import { slugify } from "../_shared/slug";
 import { extractChangelogSection, isPiPackageName, packageManagerName, packageNamesEither, writeInstallCommand, writeReport } from "./artifacts";
 import { DEFAULT_REPO, PI_PACKAGE, PI_UPDATE_DOC_PATHS, type PiUpdateOptions, type PiUpdatePrep } from "./contract";
@@ -11,8 +11,12 @@ import { PiUpdateError, PiUpdatePhase } from "./errors";
 
 type Exec = ExtensionAPI["exec"];
 
+const PiUpdateSettingsSchema = Schema.Struct({
+  enabled: Schema.optional(Schema.Boolean),
+});
+
 export function isPiUpdateEnabled(cwd = process.cwd()): boolean {
-  return readSettingsBlock("piUpdate", cwd).enabled === true;
+  return decodeSettingsBlockSync("piUpdate", PiUpdateSettingsSchema, cwd).enabled === true;
 }
 
 function runEffect(exec: Exec, command: string, args: string[], options: { cwd?: string; timeout?: number } = {}): Effect.Effect<ExecResult, PiUpdateError> {
