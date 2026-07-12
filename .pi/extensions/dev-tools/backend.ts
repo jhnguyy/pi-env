@@ -18,7 +18,7 @@ import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
-import { findNodeBinary } from "../_shared/node-bin";
+import { findNodeBinaryLite } from "../_shared/node-bin-lite";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ export const LSP_REQUEST_TIMEOUT_MS = 5_000;
 // ─── Binary discovery ─────────────────────────────────────────────────────────
 
 export async function findBinary(name: string): Promise<string | null> {
-  return findNodeBinary(name, import.meta.url);
+  return findNodeBinaryLite(name, import.meta.url);
 }
 
 // ─── LspBackend ───────────────────────────────────────────────────────────────

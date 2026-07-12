@@ -154,7 +154,12 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     ]),
     capabilities: TS_CAPABILITIES,
     initializationOptions: {
-      tsserver: { path: resolveTypeScriptServerPath() },
+      disableAutomaticTypingAcquisition: true,
+      maxTsServerMemory: 768,
+      tsserver: {
+        path: resolveTypeScriptServerPath(),
+        useSyntaxServer: "never",
+      },
     },
     codePrefix: "TS",
     rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json", "bunfig.toml"],
