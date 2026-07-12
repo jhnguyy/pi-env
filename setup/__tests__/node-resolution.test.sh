@@ -47,6 +47,45 @@ test_node_run_honors_valid_pi_env_node_bin() {
   [ "$output" = "ok" ] || fail "node-run should execute with PI_ENV_NODE_BIN, got $output"
 }
 
+test_pi_env_node_bin_precedes_invalid_node_executable() {
+  local tmp output
+  tmp="$(with_temp_dir)"
+  cat > "$tmp/not-node" <<'SH'
+#!/usr/bin/env sh
+exit 127
+SH
+  chmod +x "$tmp/not-node"
+  output="$(
+    NODE_EXECUTABLE="$tmp/not-node" \
+      PI_ENV_NODE_BIN="$(real_node_bin)" \
+      "$ROOT/scripts/node-run.sh" -e 'console.log(process.argv[1])' ok
+  )"
+  [ "$output" = "ok" ] || fail "PI_ENV_NODE_BIN should precede invalid NODE_EXECUTABLE, got $output"
+  rm -rf "$tmp"
+}
+
+test_invalid_node_executable_falls_back_to_nub_node() {
+  local tmp old_path resolved
+  tmp="$(with_temp_dir)"
+  old_path="$PATH"
+  REPO="$tmp/repo"
+  mkdir -p "$REPO" "$tmp/bin"
+  make_fake_node "$tmp/nub-node" 0
+  make_fake_node "$tmp/not-node" 127
+  make_fake_nub "$tmp/bin/nub" "$tmp/nub-node"
+
+  PATH="$tmp/bin:$PATH"
+  resolved="$(
+    PI_ENV_NODE_BIN= \
+      NODE_EXECUTABLE="$tmp/not-node" \
+      resolve_setup_node_bin
+  )"
+  [ "$resolved" = "$tmp/nub-node" ] || fail "invalid NODE_EXECUTABLE should fall back to Nub Node, got $resolved"
+
+  PATH="$old_path"
+  rm -rf "$tmp"
+}
+
 test_node_run_rejects_invalid_pi_env_node_bin() {
   local tmp output status
   tmp="$(with_temp_dir)"
@@ -159,6 +198,8 @@ SH
 
 test_node_run_honors_valid_node_executable
 test_node_run_honors_valid_pi_env_node_bin
+test_pi_env_node_bin_precedes_invalid_node_executable
+test_invalid_node_executable_falls_back_to_nub_node
 test_node_run_rejects_invalid_pi_env_node_bin
 test_tool_node_run_enforces_tool_runtime_range
 test_falls_back_when_nub_node_is_broken
