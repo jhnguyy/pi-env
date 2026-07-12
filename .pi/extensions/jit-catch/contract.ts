@@ -1,8 +1,16 @@
 import { StringEnum } from "@earendil-works/pi-ai";
+import { Effect } from "effect";
 import { Type, type Static } from "typebox";
 
 import { parseDiff } from "./parser";
-import { captureDiff, resolveGitRoot, runForExtension, type ExecFn } from "./runner";
+import {
+  captureDiffEffect,
+  formatRunnerError,
+  phaseErrorToRunResult,
+  resolveGitRootEffect,
+  runForExtensionEffect,
+  type ExecFn,
+} from "./runner";
 import { err } from "../_shared/result";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
 
@@ -75,84 +83,88 @@ export function createJitCatchContract(exec: ExecFn): ToolContract<JitCatchParam
     label: "JiT-Catch",
     description: JIT_CATCH_DESCRIPTION,
     parameters: JIT_CATCH_PARAMETERS,
-    execute: (params, context) => executeJitCatch(params, exec, context),
+    execute: (params, context) => Effect.runPromise(executeJitCatchEffect(params, exec, context), { signal: context.signal }),
   };
 }
 
-async function executeJitCatch(
+export function executeJitCatchEffect(
   params: JitCatchParams,
   exec: ExecFn,
   context: DomainToolContext,
 ) {
   const progress = context.progress ?? (() => {});
 
-  let diffText: string;
-  let workspaceRoot = params.git_cwd ?? context.cwd;
-  progress("Acquiring diff…");
-  try {
-    if (params.diff) {
-      workspaceRoot = await resolveGitRoot(exec, workspaceRoot);
-      diffText = params.diff;
-    } else {
+  return Effect.gen(function*() {
+    let diffText: string;
+    let workspaceRoot = params.git_cwd ?? context.cwd;
+    progress("Acquiring diff…");
+
+    const acquisition = yield* Effect.either(Effect.gen(function*() {
+      if (params.diff) {
+        workspaceRoot = yield* resolveGitRootEffect(exec, workspaceRoot);
+        return params.diff;
+      }
+
       const source = params.diff_source ?? "unstaged";
       const gitCwd = params.git_cwd ?? context.cwd;
-      workspaceRoot = await resolveGitRoot(exec, gitCwd);
-      diffText = await captureDiff(source, exec, gitCwd, params.commit);
+      workspaceRoot = yield* resolveGitRootEffect(exec, gitCwd);
+      return yield* captureDiffEffect(source, exec, gitCwd, params.commit);
+    }));
+
+    if (acquisition._tag === "Left") return err(formatRunnerError(acquisition.left));
+    diffText = acquisition.right;
+
+    const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
+
+    if (extensions.length === 0) {
+      const hint = hasNonExtensionFiles
+        ? "Diff only touches non-extension files — jit-catch does not apply."
+        : "No changed files found in the diff.";
+      return err(hint);
     }
-  } catch (e) {
-    return err(String(e));
-  }
 
-  const { extensions, hasNonExtensionFiles } = parseDiff(diffText);
+    const targets = params.ext_name
+      ? extensions.filter((e) => e.name === params.ext_name)
+      : extensions;
 
-  if (extensions.length === 0) {
-    const hint = hasNonExtensionFiles
-      ? "Diff only touches non-extension files — jit-catch does not apply."
-      : "No changed files found in the diff.";
-    return err(hint);
-  }
-
-  const targets = params.ext_name
-    ? extensions.filter((e) => e.name === params.ext_name)
-    : extensions;
-
-  if (targets.length === 0) {
-    return err(
-      `Extension '${params.ext_name}' not found in diff. ` +
-      `Extensions present: ${extensions.map((e) => e.name).join(", ")}`,
-    );
-  }
-
-  progress(`Found ${targets.length} extension(s): ${targets.map((e) => e.name).join(", ")}`);
-
-  const results = [];
-  for (const ext of targets) {
-    progress(`${ext.name}: generating tests…`);
-    const result = await runForExtension(ext, diffText, exec, context.signal, workspaceRoot, (phase) => {
-      progress(`${ext.name}: ${phase}`);
-    });
-    results.push(result);
-  }
-
-  const lines: string[] = [];
-  if (hasNonExtensionFiles) {
-    lines.push("Note: diff also contains non-extension files (ignored).\n");
-  }
-
-  let anyFailed = false;
-  for (const r of results) {
-    if (r.passed) {
-      lines.push(`✓ ${r.extName} — tests passed, catching test discarded.`);
-    } else {
-      anyFailed = true;
-      lines.push(`✗ ${r.extName} — tests FAILED.`);
-      if (r.testPath) lines.push(`  Test file kept at: ${r.testPath}`);
-      lines.push(`  Output:\n${r.testOutput.split("\n").map((l) => "  " + l).join("\n")}`);
+    if (targets.length === 0) {
+      return err(
+        `Extension '${params.ext_name}' not found in diff. ` +
+        `Extensions present: ${extensions.map((e) => e.name).join(", ")}`,
+      );
     }
-  }
 
-  return {
-    content: [{ type: "text" as const, text: lines.join("\n") }],
-    details: { results, anyFailed },
-  };
+    progress(`Found ${targets.length} extension(s): ${targets.map((e) => e.name).join(", ")}`);
+
+    const results = [];
+    for (const ext of targets) {
+      progress(`${ext.name}: generating tests…`);
+      const result = yield* Effect.either(runForExtensionEffect(ext, diffText, exec, workspaceRoot, (phase) => {
+        progress(`${ext.name}: ${phase}`);
+      }));
+      results.push(result._tag === "Right" ? result.right : phaseErrorToRunResult(ext, result.left, workspaceRoot));
+    }
+
+    const lines: string[] = [];
+    if (hasNonExtensionFiles) {
+      lines.push("Note: diff also contains non-extension files (ignored).\n");
+    }
+
+    let anyFailed = false;
+    for (const r of results) {
+      if (r.passed) {
+        lines.push(`✓ ${r.extName} — tests passed, catching test discarded.`);
+      } else {
+        anyFailed = true;
+        lines.push(`✗ ${r.extName} — tests FAILED.`);
+        if (r.testPath) lines.push(`  Test file kept at: ${r.testPath}`);
+        lines.push(`  Output:\n${r.testOutput.split("\n").map((l) => "  " + l).join("\n")}`);
+      }
+    }
+
+    return {
+      content: [{ type: "text" as const, text: lines.join("\n") }],
+      details: { results, anyFailed },
+    };
+  });
 }
