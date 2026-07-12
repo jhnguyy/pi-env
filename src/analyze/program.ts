@@ -103,7 +103,7 @@ export const createAnalysisProjectEffect = (
   scope: Scope,
   requirement: ProjectRequirement,
 ): Effect.Effect<Project | undefined, ProgramError> => requirement === ProjectRequirement.None
-  ? Effect.succeed(undefined)
+  ? Effect.as(Effect.void, undefined as Project | undefined)
   : Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
     try: () => {
       switch (requirement) {

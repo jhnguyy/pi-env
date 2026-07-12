@@ -14,7 +14,7 @@ export const AnalyzerName = { Complexity: "complexity", Duplicates: "duplicates"
 export type AnalyzerName = typeof AnalyzerName[keyof typeof AnalyzerName];
 export interface Location { path: string; line: number; column: number; endLine?: number; endColumn?: number }
 export interface Finding { id: string; analyzer: AnalyzerName; kind: FindingKind; severity: Severity; message: string; location: Location; related?: readonly Location[]; data?: Readonly<Record<string, unknown>> }
-export interface AnalyzerFailure { analyzer: AnalyzerName | "benchmark" | "configuration" | "scope" | "program"; message: string }
+export interface AnalyzerFailure { analyzer: AnalyzerName | "benchmark" | "configuration" | "containment" | "scope" | "program" | "supervisor"; message: string }
 export interface BenchmarkResult { command: string; runs: readonly number[]; meanMs?: number; failure?: string }
 export interface MemorySnapshot { rssBytes: number; heapUsedBytes: number; externalBytes: number }
 export interface AnalysisProfile { timings: Readonly<Record<string, number>>; memory: Readonly<Record<string, MemorySnapshot>>; peak: MemorySnapshot }

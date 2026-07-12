@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { relative } from "node:path";
 import ts from "typescript";
 import { Effect } from "effect";
-import { AnalyzerName, FindingKind, Severity, type Finding, type Location } from "./model.js";
+import { AnalyzerName, AnalyzerRunError, FindingKind, Severity, type Finding, type Location } from "./model.js";
 import type { SyntaxProject, TypeProject } from "./program.js";
 import type { Scope } from "./scope.js";
 import { intersectsHunks } from "./scope.js";
@@ -153,22 +153,28 @@ function analyzeComplexityFile(file: ts.SourceFile, cwd: string, scope: Scope, o
   }
 }
 
+const analyzerFailure = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError => new AnalyzerRunError({
+  analyzer,
+  message: cause instanceof Error ? cause.message : String(cause),
+});
+
 function cooperativeFileAnalysis(
+  analyzer: AnalyzerName,
   files: readonly ts.SourceFile[],
   analyzeFile: (file: ts.SourceFile, output: Finding[]) => void,
-): Effect.Effect<Finding[], unknown> {
+): Effect.Effect<Finding[], AnalyzerRunError> {
   return Effect.gen(function* () {
     const output: Finding[] = [];
     for (const file of files) {
-      yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => cause });
+      yield* Effect.try({ try: () => analyzeFile(file, output), catch: (cause) => analyzerFailure(analyzer, cause) });
       yield* Effect.yieldNow();
     }
     return output;
   });
 }
 
-export function complexityEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
-  return cooperativeFileAnalysis(project.files, (file, output) => analyzeComplexityFile(file, cwd, scope, output));
+export function complexityEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+  return cooperativeFileAnalysis(AnalyzerName.Complexity, project.files, (file, output) => analyzeComplexityFile(file, cwd, scope, output));
 }
 
 const ANALYZER_CAPS = {
@@ -244,11 +250,11 @@ function duplicateFindings(collected: DuplicateCollection, scope: Scope): Findin
   return output;
 }
 
-export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
+export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
   return Effect.gen(function* () {
     const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
     for (const file of project.files) {
-      yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => cause });
+      yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => analyzerFailure(AnalyzerName.Duplicates, cause) });
       if (state.truncated) break;
       yield* Effect.yieldNow();
     }
@@ -509,11 +515,11 @@ function finishTypeMatches(state: TypeMatchingState): Finding[] {
   return state.output.sort((left, right) => compareLocations(left.location, right.location));
 }
 
-export function similarTypesEffect(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Effect.Effect<Finding[], unknown> {
+export function similarTypesEffect(project: TypeProject, cwd: string, scope: Scope, threshold = 0.8): Effect.Effect<Finding[], AnalyzerRunError> {
   return Effect.gen(function* () {
     const collected: TypeCollection = { candidates: [], truncated: false };
     for (const file of project.files) {
-      yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => cause });
+      yield* Effect.try({ try: () => collectTypeFile(project, cwd, file, collected), catch: (cause) => analyzerFailure(AnalyzerName.Types, cause) });
       yield* Effect.yieldNow();
     }
     const index = indexTypeCandidates(collected.candidates);
@@ -640,6 +646,6 @@ function visitAsyncRisks(
   visit(file, 0, false);
 }
 
-export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], unknown> {
-  return cooperativeFileAnalysis(project.files, (file, output) => visitAsyncRisks(file, cwd, scope, output));
+export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+  return cooperativeFileAnalysis(AnalyzerName.AsyncRisk, project.files, (file, output) => visitAsyncRisks(file, cwd, scope, output));
 }

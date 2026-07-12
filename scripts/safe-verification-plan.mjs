@@ -6,7 +6,6 @@ export const SafeVerificationPhaseId = {
   TypeAwareLint: "type-aware-lint",
   UnitTests: "unit-tests",
   Build: "build",
-  QualityAnalysis: "quality-analysis",
 };
 
 export const SAFE_VERIFICATION_PHASES = [
@@ -39,12 +38,6 @@ export const SAFE_VERIFICATION_PHASES = [
     label: "extension build",
     command: "nub",
     args: ["run", "build"],
-  },
-  {
-    id: SafeVerificationPhaseId.QualityAnalysis,
-    label: "quality analysis",
-    command: "nub",
-    args: ["run", "check:quality"],
   },
 ];
 

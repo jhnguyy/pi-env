@@ -35,6 +35,9 @@ const analyzerError = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError
 const internalEffect = (name: AnalyzerName, operation: Effect.Effect<Finding[], unknown>): Effect.Effect<Finding[], AnalyzerRunError> =>
   operation.pipe(Effect.mapError((cause) => analyzerError(name, cause)));
 
+const missingProject = (analyzer: AnalyzerName, message: string): Effect.Effect<never, AnalyzerRunError> =>
+  Effect.fail(new AnalyzerRunError({ analyzer, message }));
+
 const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Complexity,
@@ -42,7 +45,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
     minimumTotalMemoryMb: 512,
     project: ProjectRequirement.ScopedSyntax,
     run: (context) => internalEffect(AnalyzerName.Complexity, context.project === undefined
-      ? Effect.fail(new Error("Complexity analyzer requires a syntax project"))
+      ? missingProject(AnalyzerName.Complexity, "Complexity analyzer requires a syntax project")
       : complexityEffect(context.project, context.cwd, context.scope)),
   },
   {
@@ -51,7 +54,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
     minimumTotalMemoryMb: 768,
     project: ProjectRequirement.CorpusSyntax,
     run: (context) => internalEffect(AnalyzerName.Duplicates, context.project === undefined
-      ? Effect.fail(new Error("Duplicate analyzer requires a syntax project"))
+      ? missingProject(AnalyzerName.Duplicates, "Duplicate analyzer requires a syntax project")
       : duplicatesEffect(context.project, context.cwd, context.scope)),
   },
   {
@@ -60,7 +63,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
     minimumTotalMemoryMb: 1024,
     project: ProjectRequirement.Types,
     run: (context) => internalEffect(AnalyzerName.Types, context.project === undefined || !isTypeProject(context.project)
-      ? Effect.fail(new Error("Type analyzer requires a TypeScript type project"))
+      ? missingProject(AnalyzerName.Types, "Type analyzer requires a TypeScript type project")
       : similarTypesEffect(context.project, context.cwd, context.scope, context.typeSimilarityThreshold)),
   },
   {
@@ -69,7 +72,7 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
     minimumTotalMemoryMb: 512,
     project: ProjectRequirement.ScopedSyntax,
     run: (context) => internalEffect(AnalyzerName.AsyncRisk, context.project === undefined
-      ? Effect.fail(new Error("Async-risk analyzer requires a syntax project"))
+      ? missingProject(AnalyzerName.AsyncRisk, "Async-risk analyzer requires a syntax project")
       : asyncRisksEffect(context.project, context.cwd, context.scope)),
   },
   {

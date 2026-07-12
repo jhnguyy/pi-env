@@ -94,7 +94,7 @@ export function expandExplicitPathsEffect(cwd: string, paths: readonly string[],
       const absolute = resolve(cwd, path);
       const relativeRoot = normalize(relative(cwd, absolute));
       if (relativeRoot === ".." || relativeRoot.startsWith("../") || relativeRoot.startsWith("/")) {
-        return yield* Effect.fail(new ScopeError({ message: `Explicit path resolves outside cwd: ${path}` }));
+        return yield* new ScopeError({ message: `Explicit path resolves outside cwd: ${path}` });
       }
       if (isSkippedRoot(relativeRoot)) continue;
       const stats = yield* Effect.tryPromise({ try: () => pathStats(absolute), catch: scopeError });
