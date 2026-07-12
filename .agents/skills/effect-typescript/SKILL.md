@@ -12,7 +12,7 @@ description: Use for TypeScript work where Effect is in use or proposed for use.
 3. Inspect the project's Effect dependency, configuration, conventions, and nearby code.
 4. Verify APIs against installed types. Consult source only after confirming version compatibility.
 
-If Effect Solutions is unavailable, say so and continue from project evidence; do not guess APIs or patterns.
+If Effect Solutions is unavailable, say so and continue from project evidence.
 
 ## Apply
 
@@ -22,7 +22,3 @@ If Effect Solutions is unavailable, say so and continue from project evidence; d
 - Keep deterministic transforms plain TypeScript.
 - Add services or layers only for meaningful substitution or lifecycle ownership.
 - Preserve public adapters unless the task intentionally changes them; run the Effect program at the existing boundary.
-
-## Validate
-
-Run focused tests and the project typecheck. Do not suppress new Effect language-service diagnostics unless the project explicitly baselines them.
