@@ -7,12 +7,10 @@ description: Use for TypeScript work where Effect is in use or proposed for use.
 
 ## Retrieve
 
-1. Run `effect-solutions list`.
-2. Run `effect-solutions show <topic>...` for only the relevant guides.
-3. Inspect the project's Effect dependency, configuration, conventions, and nearby code.
-4. Verify APIs against installed types. Consult source only after confirming version compatibility.
-
-If Effect Solutions is unavailable, say so and continue from project evidence.
+1. Inspect the project's Effect dependency, configuration, conventions, and nearby code.
+2. Verify APIs against the project's installed declarations.
+3. Consult installed source only after confirming version compatibility.
+4. Treat the repository typecheck and runtime tests as authoritative when external guidance targets a different Effect release.
 
 ## Apply
 

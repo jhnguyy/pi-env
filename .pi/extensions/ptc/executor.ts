@@ -6,7 +6,7 @@
 import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "esbuild";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -105,13 +105,11 @@ export class PtcExecutor {
         cause: enhancePtcError(cause, scriptPath, userCode),
       }),
     }).pipe(
-      Effect.timeoutFail({
-        duration: MAX_TIMEOUT_MS,
-        onTimeout: () => new PtcExecutionError({
-          phase: PtcExecutionPhase.Run,
-          cause: enhancePtcError(new Error(formatTimeoutDetail(bridge)), scriptPath, userCode),
-        }),
-      }),
+      Effect.timeout(MAX_TIMEOUT_MS),
+      Effect.catchIf(Cause.isTimeoutError, () => Effect.fail(new PtcExecutionError({
+        phase: PtcExecutionPhase.Run,
+        cause: enhancePtcError(new Error(formatTimeoutDetail(bridge)), scriptPath, userCode),
+      }))),
       Effect.ensuring(Effect.sync(() => {
         signal?.removeEventListener("abort", abortNested);
         nestedController.abort(new Error("PTC execution scope closed"));

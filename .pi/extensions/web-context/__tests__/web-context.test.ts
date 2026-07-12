@@ -53,13 +53,13 @@ describe("web context", () => {
   });
 
   it("returns typed URL failures through the Effect seam", async () => {
-    const result = await Effect.runPromise(Effect.either(fetchWebTextEffect("file:///tmp/example.html")));
+    const result = await Effect.runPromise(Effect.result(fetchWebTextEffect("file:///tmp/example.html")));
 
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left._tag).toBe("WebFetchFailure");
-      expect(result.left.kind).toBe(WebFetchFailureKind.Url);
-      expect(result.left.message).toContain("Invalid web URL: Unsupported URL protocol: file:");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure._tag).toBe("WebFetchFailure");
+      expect(result.failure.kind).toBe(WebFetchFailureKind.Url);
+      expect(result.failure.message).toContain("Invalid web URL: Unsupported URL protocol: file:");
     }
   });
 
@@ -68,11 +68,11 @@ describe("web context", () => {
       throw new TypeError("socket closed");
     };
 
-    const result = await Effect.runPromise(Effect.either(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch })));
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") {
-      expect(result.left.kind).toBe(WebFetchFailureKind.Request);
-      expect(result.left.message).toBe("Web fetch request failed: socket closed");
+    const result = await Effect.runPromise(Effect.result(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch })));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.kind).toBe(WebFetchFailureKind.Request);
+      expect(result.failure.message).toBe("Web fetch request failed: socket closed");
     }
   });
 

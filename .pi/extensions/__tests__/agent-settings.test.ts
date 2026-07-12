@@ -47,13 +47,13 @@ describe("agent settings", () => {
   });
 
   it("reports typed errors for required settings", async () => {
-    const malformed = await Effect.runPromise(Effect.either(readAgentSettingsEffect(envWith({ "/global/settings.json": "not json" }), "/repo")));
-    const invalid = await Effect.runPromise(Effect.either(readAgentSettingsEffect(envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }), "/repo")));
+    const malformed = await Effect.runPromise(Effect.result(readAgentSettingsEffect(envWith({ "/global/settings.json": "not json" }), "/repo")));
+    const invalid = await Effect.runPromise(Effect.result(readAgentSettingsEffect(envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }), "/repo")));
 
-    expect(malformed._tag).toBe("Left");
-    if (malformed._tag === "Left") expect(malformed.left).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });
-    expect(invalid._tag).toBe("Left");
-    if (invalid._tag === "Left") expect(invalid.left).toMatchObject({ _tag: "SettingsDecodeError", source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
+    expect(malformed._tag).toBe("Failure");
+    if (malformed._tag === "Failure") expect(malformed.failure).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });
+    expect(invalid._tag).toBe("Failure");
+    if (invalid._tag === "Failure") expect(invalid.failure).toMatchObject({ _tag: "SettingsDecodeError", source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
   });
 
   it("loads optional settings with one snapshot and no duplicate reads", () => {

@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import {
   AnalyzeWorkerMessageType,
   parseAnalyzeWorkerRequest,
@@ -91,14 +91,14 @@ async function main(): Promise<void> {
     }
   }
   const line = input.endsWith("\n") ? input.slice(0, -1) : input;
-  const parsed = await Effect.runPromise(Effect.either(parseAnalyzeWorkerRequest(line)));
-  if (parsed._tag === "Left") {
+  const parsed = await Effect.runPromise(Effect.result(parseAnalyzeWorkerRequest(line)));
+  if (Result.isFailure(parsed)) {
     process.stderr.write("invalid request\n");
     process.exitCode = 2;
     return;
   }
 
-  const request = parsed.right;
+  const request = parsed.success;
   const emit = (value: unknown): void => {
     process.stdout.write(`${JSON.stringify(value)}\n`);
   };

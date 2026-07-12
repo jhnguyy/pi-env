@@ -202,9 +202,9 @@ export function createExecuteSubagent(
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentDetails>> {
-    return Effect.runPromise(Effect.catchAll(
+    return Effect.runPromise(Effect.catch(
       runSubagentEffect(params, ctx, registeredExtTools, { signal, onUpdate, ledger, runId: _toolCallId }),
-      (error) => Effect.succeed(unexpectedErrorResult(params, error)),
+      (error: SubagentExecutionError) => Effect.succeed(unexpectedErrorResult(params, error)),
     ));
   };
 }

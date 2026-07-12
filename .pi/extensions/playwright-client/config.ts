@@ -33,13 +33,13 @@ class BrowserConfigError extends Data.TaggedError("BrowserConfigError")<{
 
 const TargetSettingsSchema = Schema.Struct({
   host: Schema.String,
-  port: Schema.optional(Schema.Union(Schema.Number, Schema.String)),
-  protocol: Schema.optional(Schema.Literal("http", "https")),
+  port: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
+  protocol: Schema.optional(Schema.Literals(["http", "https"])),
   path: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
 });
-const TargetsSchema = Schema.Record({ key: Schema.String, value: TargetSettingsSchema });
-type TargetSettings = Schema.Schema.Type<typeof TargetSettingsSchema>;
+const TargetsSchema = Schema.Record(Schema.String, TargetSettingsSchema);
+type TargetSettings = typeof TargetSettingsSchema.Type;
 
 export function loadBrowserClientConfig(cwd = process.cwd()): BrowserClientConfig {
   const settings = readSettingsBlock("playwrightClient", cwd);

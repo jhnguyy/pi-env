@@ -7,7 +7,7 @@ import ts from "typescript";
 
 const ROOT = process.cwd();
 const SOURCE_ROOTS = [".pi/extensions", "src", "scripts", "setup", ".agents"];
-export const GUARDED_EFFECT_COMBINATORS = ["andThen", "catchAll", "flatMap", "map", "match", "tap"];
+export const GUARDED_EFFECT_COMBINATORS = ["andThen", "catch", "flatMap", "map", "match", "tap"];
 const GUARDED_EFFECT_COMBINATOR_SET = new Set(GUARDED_EFFECT_COMBINATORS);
 
 function trackedFiles(pathspecs = []) {

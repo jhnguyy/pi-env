@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Either, Fiber } from "effect";
+import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
 
@@ -42,18 +42,18 @@ describe("process platform streamProcess", () => {
   });
 
   it("maps spawn errors", async () => {
-    const result = await Effect.runPromise(Effect.either(streamProcess("/definitely/missing/pi-env-cmd", [], { timeoutMs: 1_000 })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left.kind).toBe(ProcessFailureKind.Spawn);
+    const result = await Effect.runPromise(Effect.result(streamProcess("/definitely/missing/pi-env-cmd", [], { timeoutMs: 1_000 })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) expect(result.failure.kind).toBe(ProcessFailureKind.Spawn);
   });
 
   it("maps nonzero exit and retains output", async () => {
-    const result = await Effect.runPromise(Effect.either(streamProcess(node, ["-e", "console.log('partial'); process.exit(7)"], { timeoutMs: 5_000 })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.kind).toBe(ProcessFailureKind.Exit);
-      expect(result.left.exitCode).toBe(7);
-      expect(result.left.stdout?.trim()).toBe("partial");
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "console.log('partial'); process.exit(7)"], { timeoutMs: 5_000 })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.kind).toBe(ProcessFailureKind.Exit);
+      expect(result.failure.exitCode).toBe(7);
+      expect(result.failure.stdout?.trim()).toBe("partial");
     }
   });
 
@@ -63,43 +63,43 @@ describe("process platform streamProcess", () => {
   });
 
   it("runProcess shares timeout failures", async () => {
-    const result = await Effect.runPromise(Effect.either(runProcess(node, ["-e", "setInterval(()=>{}, 1000)"], { timeoutMs: 50, killGraceMs: 50 })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
+    const result = await Effect.runPromise(Effect.result(runProcess(node, ["-e", "setInterval(()=>{}, 1000)"], { timeoutMs: 50, killGraceMs: 50 })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
   });
 
   it.runIf(process.platform !== "win32")("runProcess treats self-signal termination as signal-aware exit failure", async () => {
-    const result = await Effect.runPromise(Effect.either(runProcess(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeoutMs: 5_000 })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.kind).toBe(ProcessFailureKind.Exit);
-      expect(result.left.message).toContain("Process exited with code unknown (SIGTERM)");
+    const result = await Effect.runPromise(Effect.result(runProcess(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeoutMs: 5_000 })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.kind).toBe(ProcessFailureKind.Exit);
+      expect(result.failure.message).toContain("Process exited with code unknown (SIGTERM)");
     }
   });
 
   it("times out, terminates, and returns partial output", async () => {
-    const result = await Effect.runPromise(Effect.either(streamProcess(node, ["-e", "process.stdout.write('before\\n'); setInterval(()=>{}, 1000)"], { timeoutMs: 500, killGraceMs: 50 })));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
-      expect(result.left.stdout).toContain("before");
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "process.stdout.write('before\\n'); setInterval(()=>{}, 1000)"], { timeoutMs: 500, killGraceMs: 50 })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
+      expect(result.failure.stdout).toContain("before");
     }
   });
 
   it("enforces byte-accurate stdout and stderr caps with partial output", async () => {
-    const stdoutResult = await Effect.runPromise(Effect.either(streamProcess(node, ["-e", "process.stdout.write('abcdef')"], { stdoutLimitBytes: 3, timeoutMs: 5_000 })));
-    expect(Either.isLeft(stdoutResult)).toBe(true);
-    if (Either.isLeft(stdoutResult)) {
-      expect(stdoutResult.left.kind).toBe(ProcessFailureKind.OutputLimit);
-      expect(Buffer.byteLength(stdoutResult.left.stdout ?? "")).toBe(3);
-      expect(stdoutResult.left.stdout).toBe("abc");
+    const stdoutResult = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "process.stdout.write('abcdef')"], { stdoutLimitBytes: 3, timeoutMs: 5_000 })));
+    expect(Result.isFailure(stdoutResult)).toBe(true);
+    if (Result.isFailure(stdoutResult)) {
+      expect(stdoutResult.failure.kind).toBe(ProcessFailureKind.OutputLimit);
+      expect(Buffer.byteLength(stdoutResult.failure.stdout ?? "")).toBe(3);
+      expect(stdoutResult.failure.stdout).toBe("abc");
     }
-    const stderrResult = await Effect.runPromise(Effect.either(streamProcess(node, ["-e", "process.stderr.write('abcdef')"], { stderrLimitBytes: 2, timeoutMs: 5_000 })));
-    expect(Either.isLeft(stderrResult)).toBe(true);
-    if (Either.isLeft(stderrResult)) {
-      expect(stderrResult.left.kind).toBe(ProcessFailureKind.OutputLimit);
-      expect(Buffer.byteLength(stderrResult.left.stderr ?? "")).toBe(2);
-      expect(stderrResult.left.stderr).toBe("ab");
+    const stderrResult = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "process.stderr.write('abcdef')"], { stderrLimitBytes: 2, timeoutMs: 5_000 })));
+    expect(Result.isFailure(stderrResult)).toBe(true);
+    if (Result.isFailure(stderrResult)) {
+      expect(stderrResult.failure.kind).toBe(ProcessFailureKind.OutputLimit);
+      expect(Buffer.byteLength(stderrResult.failure.stderr ?? "")).toBe(2);
+      expect(stderrResult.failure.stderr).toBe("ab");
     }
   });
 
@@ -119,11 +119,11 @@ describe("process platform streamProcess", () => {
   it("kills a started SIGTERM-ignoring process via escalation", async () => {
     const directory = temporaryDirectory("pi-process-kill-");
     const pidFile = join(directory, "pid");
-    const result = await Effect.runPromise(Effect.either(streamProcess(node, ["-e", `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{},1000)`], { timeoutMs: 750, killGraceMs: 50 })));
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", `process.on('SIGTERM',()=>{}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{},1000)`], { timeoutMs: 750, killGraceMs: 50 })));
     expect(existsSync(pidFile)).toBe(true);
     const pid = Number(readFileSync(pidFile, "utf8"));
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
     await eventually(() => expect(isAlive(pid)).toBe(false));
     rmSync(directory, { recursive: true, force: true });
   });
@@ -141,9 +141,9 @@ describe("process platform streamProcess", () => {
     ].join(";");
     writeFileSync(script, `import { spawn } from 'node:child_process';\nspawn(${JSON.stringify(node)}, ['-e', ${JSON.stringify(childCode)}], { stdio: 'ignore' });\nsetInterval(()=>{}, 1000);\n`);
 
-    const result = await Effect.runPromise(Effect.either(streamProcess(node, [script], { timeoutMs: 1_000, killGraceMs: 100 })));
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, [script], { timeoutMs: 1_000, killGraceMs: 100 })));
 
-    expect(Either.isLeft(result)).toBe(true);
+    expect(Result.isFailure(result)).toBe(true);
     expect(existsSync(childPidFile)).toBe(true);
     expect(existsSync(marker)).toBe(true);
     const childPid = Number(readFileSync(childPidFile, "utf8"));

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import ts from "typescript";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
@@ -37,24 +37,24 @@ const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, err
 describe("analyze contracts", () => {
   it("keeps missing tsconfig typed in analyzeEffect and reports it in analyze", async () => {
     const cwd = fixtureRoot();
-    const typed = await Effect.runPromise(Effect.either(analyzeEffect({ cwd, scope: ScopeMode.All })));
-    expect(typed._tag).toBe("Left");
-    if (typed._tag === "Left") expect(typed.left._tag).toBe("ProgramError");
+    const typed = await Effect.runPromise(Effect.result(analyzeEffect({ cwd, scope: ScopeMode.All })));
+    expect(Result.isFailure(typed)).toBe(true);
+    if (Result.isFailure(typed)) expect(typed.failure._tag).toBe("ProgramError");
     const reported = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
     expect(reported.analyzerFailures[0]?.analyzer).toBe("program");
   });
 
   it("runs subprocesses and types exit, timeout, and streaming-limit failures", async () => {
     await expect(Effect.runPromise(streamProcessEffect("/bin/echo", ["ok"]))).resolves.toMatchObject({ stdout: "ok\n" });
-    const exited = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/false", [])));
-    expect(exited._tag === "Left" && exited.left.kind).toBe("exit");
-    const timed = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
-    expect(timed._tag === "Left" && timed.left.kind).toBe("timeout");
-    const streamTimed = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
-    expect(streamTimed._tag === "Left" && streamTimed.left.kind).toBe(ProcessErrorKind.Timeout);
-    const limited = await Effect.runPromise(Effect.either(streamProcessEffect("/bin/echo", ["x".repeat(10_000)], { stdoutLimitBytes: 100 })));
-    expect(limited._tag === "Left" && limited.left.kind).toBe(ProcessErrorKind.OutputLimit);
-    if (limited._tag === "Left") expect(Buffer.byteLength(limited.left.stdout ?? "")).toBeLessThanOrEqual(100);
+    const exited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/false", [])));
+    expect(Result.isFailure(exited) && exited.failure.kind).toBe("exit");
+    const timed = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
+    expect(Result.isFailure(timed) && timed.failure.kind).toBe("timeout");
+    const streamTimed = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
+    expect(Result.isFailure(streamTimed) && streamTimed.failure.kind).toBe(ProcessErrorKind.Timeout);
+    const limited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/echo", ["x".repeat(10_000)], { stdoutLimitBytes: 100 })));
+    expect(Result.isFailure(limited) && limited.failure.kind).toBe(ProcessErrorKind.OutputLimit);
+    if (Result.isFailure(limited)) expect(Buffer.byteLength(limited.failure.stdout ?? "")).toBeLessThanOrEqual(100);
     const interruptedAt = Date.now();
     const interrupted = await Effect.runPromiseExit(streamProcessEffect("/bin/sleep", ["10"]).pipe(Effect.timeout("20 millis")));
     expect(interrupted._tag).toBe("Failure");
@@ -70,11 +70,11 @@ describe("analyze contracts", () => {
       stderr: "configuration could not be loaded",
     });
     const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    const outcome = await Effect.runPromise(Effect.either(eslintAnalyzerEffect(cwd, allScope, 256, 100).pipe(
+    const outcome = await Effect.runPromise(Effect.result(eslintAnalyzerEffect(cwd, allScope, 256, 100).pipe(
       Effect.provide(processServiceLayer(() => Effect.fail(failure))),
     )));
-    expect(outcome._tag).toBe("Left");
-    if (outcome._tag === "Left") expect(outcome.left.message).toContain("stderr: configuration could not be loaded");
+    expect(Result.isFailure(outcome)).toBe(true);
+    if (Result.isFailure(outcome)) expect(outcome.failure.message).toContain("stderr: configuration could not be loaded");
   });
 
   it("adapts EngineSeams.processRunner through ProcessService", async () => {
@@ -90,9 +90,9 @@ describe("analyze contracts", () => {
   });
 
   it("preserves typed benchmark failures", async () => {
-    const outcome = await Effect.runPromise(Effect.either(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(ProcessServiceLive))));
-    expect(outcome._tag).toBe("Left");
-    if (outcome._tag === "Left") expect(outcome.left._tag).toBe("BenchmarkError");
+    const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(ProcessServiceLive))));
+    expect(Result.isFailure(outcome)).toBe(true);
+    if (Result.isFailure(outcome)) expect(outcome.failure._tag).toBe("BenchmarkError");
   });
 
   it("keeps repeated benchmark Effect executions independent", async () => {
@@ -249,11 +249,11 @@ describe("analyze contracts", () => {
   });
 
   it("captures internal analyzer exceptions in the typed error channel", async () => {
-    const outcome = await Effect.runPromise(Effect.either(analyzerDescriptor(AnalyzerName.Complexity).run({
+    const outcome = await Effect.runPromise(Effect.result(analyzerDescriptor(AnalyzerName.Complexity).run({
       cwd: fixtureRoot(), scope: allScope, maxMemoryMb: 256, beforeBundleEntry: () => true,
     }).pipe(Effect.provide(ProcessServiceLive))));
-    expect(outcome._tag).toBe("Left");
-    if (outcome._tag === "Left") expect(outcome.left).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
+    expect(outcome._tag).toBe("Failure");
+    if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
   });
 
   it("returns structured results for unknown checks and missing tsconfig", async () => {
@@ -494,11 +494,11 @@ describe("external analyzers and parsers", () => {
     ];
 
     for (const item of cases) {
-      const outcome = await Effect.runPromise(Effect.either(item.effect.pipe(
+      const outcome = await Effect.runPromise(Effect.result(item.effect.pipe(
         Effect.provide(processServiceLayer(() => Effect.fail(item.error))),
       )));
-      expect(outcome._tag, item.name).toBe(item.succeeds ? "Right" : "Left");
-      if (item.succeeds && outcome._tag === "Right") expect(outcome.right).toHaveLength(1);
+      expect(outcome._tag, item.name).toBe(item.succeeds ? "Success" : "Failure");
+      if (item.succeeds && outcome._tag === "Success") expect(outcome.success).toHaveLength(1);
     }
   });
 
@@ -551,11 +551,11 @@ describe("bundle entrypoints", () => {
   it("maps bundle worker timeouts into typed analyzer failures", async () => {
     const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
     writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }));
-    const outcome = await Effect.runPromise(Effect.either(bundleAnalyzerEffect(cwd, allScope, 256, 10).pipe(
+    const outcome = await Effect.runPromise(Effect.result(bundleAnalyzerEffect(cwd, allScope, 256, 10).pipe(
       Effect.provide(processServiceLayer((command) => Effect.fail(new ProcessError({ kind: ProcessErrorKind.Timeout, command, message: "timed out" })))),
     )));
-    expect(outcome._tag).toBe("Left");
-    if (outcome._tag === "Left") expect(outcome.left).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Bundle, message: "timed out" });
+    expect(outcome._tag).toBe("Failure");
+    if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Bundle, message: "timed out" });
   });
 
   it("bundles the owning extension for helper changes but ignores unrelated files", async () => {
@@ -592,12 +592,12 @@ describe("bounded hardening", () => {
       "src/c.ts": "export const c = 1;",
       "src/d.ts": "export const d = 1;",
     });
-    const capped = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, ["src"], 3)));
-    expect(capped._tag === "Left" && capped.left.message).toMatch(/Scope file limit exceeded/);
-    const parent = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, [".."])));
-    expect(parent._tag === "Left" && parent.left.message).toMatch(/outside cwd/);
-    const absolute = await Effect.runPromise(Effect.either(expandExplicitPathsEffect(cwd, [tmpdir()])));
-    expect(absolute._tag === "Left" && absolute.left.message).toMatch(/outside cwd/);
+    const capped = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, ["src"], 3)));
+    expect(capped._tag === "Failure" && capped.failure.message).toMatch(/Scope file limit exceeded/);
+    const parent = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, [".."])));
+    expect(parent._tag === "Failure" && parent.failure.message).toMatch(/outside cwd/);
+    const absolute = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, [tmpdir()])));
+    expect(absolute._tag === "Failure" && absolute.failure.message).toMatch(/outside cwd/);
   });
 
   it("caps duplicate canonicalization by nodes or bytes", () => {

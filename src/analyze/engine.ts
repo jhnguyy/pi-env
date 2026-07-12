@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { Context, Effect } from "effect";
+import { Context, Effect, Result } from "effect";
 import {
   AnalyzeDiagnosticEventType,
   AnalyzeOutcome,
@@ -57,7 +57,7 @@ export interface AnalysisRuntime {
   wallTime?(): number;
 }
 
-export const AnalysisRuntime = Context.GenericTag<AnalysisRuntime>("pi-env/AnalysisRuntime");
+export const AnalysisRuntime = Context.Service<AnalysisRuntime>("pi-env/AnalysisRuntime");
 
 const liveAnalysisRuntime: AnalysisRuntime = {
   now: () => performance.now(),
@@ -505,7 +505,7 @@ function runAnalyzerStage(
     const outcome = yield* diagnostics.span(
       AnalyzeSpanName.Check,
       analyzerAttributes(name),
-      Effect.either(
+      Effect.result(
         runAnalyzer(name, {
           cwd: options.cwd,
           scope,
@@ -529,9 +529,9 @@ function runAnalyzerStage(
         stopped: true,
       };
     state =
-      outcome._tag === "Right"
-        ? addFindings(state, name, outcome.right)
-        : addFailure(state, outcome.left.analyzer, outcome.left.message);
+      Result.isSuccess(outcome)
+        ? addFindings(state, name, outcome.success)
+        : addFailure(state, outcome.failure.analyzer, outcome.failure.message);
     const ended = runtime.now();
     state = timing(state, options.profile === true, name, started, ended);
     const after = runtime.memory();
@@ -545,8 +545,8 @@ function runAnalyzerStage(
         stage: "check",
         analyzer: name,
         duration_ms: ended - started,
-        finding_count: outcome._tag === "Right" ? outcome.right.length : 0,
-        outcome: outcome._tag === "Right" ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
+        finding_count: Result.isSuccess(outcome) ? outcome.success.length : 0,
+        outcome: Result.isSuccess(outcome) ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
       },
     );
     yield* recordDiagnostic(diagnostics, runtime, runId, AnalyzeDiagnosticEventType.MemorySample, {
@@ -554,7 +554,7 @@ function runAnalyzerStage(
       analyzer: name,
       ...memoryAttributes(after),
     });
-    if (outcome._tag === "Left") {
+    if (Result.isFailure(outcome)) {
       yield* recordDiagnostic(diagnostics, runtime, runId, AnalyzeDiagnosticEventType.Failure, {
         stage: "check",
         analyzer: name,
@@ -641,9 +641,9 @@ function runBenchmarks(
   return Effect.gen(function* () {
     let state = initial;
     for (const config of options.benchmarks ?? []) {
-      const outcome = yield* Effect.either(runBenchmarkEffect(config));
-      if (outcome._tag === "Right")
-        state = { ...state, benchmarks: [...state.benchmarks, outcome.right] };
+      const outcome = yield* Effect.result(runBenchmarkEffect(config));
+      if (Result.isSuccess(outcome))
+        state = { ...state, benchmarks: [...state.benchmarks, outcome.success] };
       else
         state = addFailure(
           {
@@ -652,13 +652,13 @@ function runBenchmarks(
               ...state.benchmarks,
               {
                 command: [config.command, ...config.args].join(" "),
-                runs: outcome.left.runs ?? [],
-                failure: outcome.left.message,
+                runs: outcome.failure.runs ?? [],
+                failure: outcome.failure.message,
               },
             ],
           },
           "benchmark",
-          outcome.left.message,
+          outcome.failure.message,
         );
     }
     return state;

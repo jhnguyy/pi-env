@@ -38,10 +38,9 @@ export function streamProcessEffect(command: string, args: readonly string[], op
 }
 
 /** The single cross-module seam for bounded, cancellable subprocess execution. */
-export class ProcessService extends Context.Tag("pi/analyze/ProcessService")<
-  ProcessService,
-  { readonly run: typeof streamProcessEffect }
->() {}
+export class ProcessService extends Context.Service<ProcessService, {
+  readonly run: typeof streamProcessEffect;
+}>()("pi/analyze/ProcessService") {}
 
 export const ProcessServiceLive = Layer.succeed(ProcessService, { run: streamProcessEffect });
 

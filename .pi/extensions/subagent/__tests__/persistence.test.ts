@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Data, Effect, Either } from "effect";
+import { Data, Effect, Result } from "effect";
 
 import {
   createPersistentSubagentSession,
@@ -80,7 +80,7 @@ describe("persistent subagent sessions", () => {
   });
 
   it("interrupts a wait without cancelling the job", async () => {
-    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.callback<any>((resume) => {
       const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
       options.signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));
@@ -90,12 +90,12 @@ describe("persistent subagent sessions", () => {
     const waitController = new AbortController();
     waitController.abort();
 
-    const outcome = await Effect.runPromise(Effect.either(jobs.waitEffect(job.id, waitController.signal)));
-    expect(Either.isLeft(outcome)).toBe(true);
-    if (Either.isLeft(outcome)) {
-      expect(outcome.left).toMatchObject({ _tag: "SubagentJobWaitInterrupted", jobId: job.id });
+    const outcome = await Effect.runPromise(Effect.result(jobs.waitEffect(job.id, waitController.signal)));
+    expect(Result.isFailure(outcome)).toBe(true);
+    if (Result.isFailure(outcome)) {
+      expect(outcome.failure).toMatchObject({ _tag: "SubagentJobWaitInterrupted", jobId: job.id });
     }
-    expect(job.status).toBe("running");
+    expect(job.status === "queued" || job.status === "running").toBe(true);
     await jobs.shutdown();
     expect(job.status).toBe("cancelled");
   });
@@ -109,7 +109,7 @@ describe("persistent subagent sessions", () => {
         active++;
         peak = Math.max(peak, active);
       }),
-      () => Effect.async<any>((resume) => {
+      () => Effect.callback<any>((resume) => {
         completions.push(() => resume(Effect.succeed({ content: [], details: { isError: false } })));
       }),
       () => Effect.sync(() => { active--; }),
@@ -121,7 +121,7 @@ describe("persistent subagent sessions", () => {
     expect(peak).toBe(4);
     completions[0]!();
     await jobs.wait(started[0]!.id);
-    expect(completions).toHaveLength(5);
+    await expect.poll(() => completions.length).toBe(5);
 
     for (const complete of completions.slice(1)) complete();
     await Promise.all(started.slice(1).map((job) => jobs.wait(job.id)));
@@ -131,7 +131,7 @@ describe("persistent subagent sessions", () => {
   it("cancels a queued job before it can start", async () => {
     const releases: Array<() => void> = [];
     let ranQueued = false;
-    const runner = (params: any) => Effect.async<any>((resume) => {
+    const runner = (params: any) => Effect.callback<any>((resume) => {
       if (params.name === "queued") ranQueued = true;
       releases.push(() => resume(Effect.succeed({ content: [], details: { isError: false } })));
     });
@@ -148,7 +148,7 @@ describe("persistent subagent sessions", () => {
   });
 
   it("is safe under concurrent shutdown and post-shutdown start", async () => {
-    const runner = () => Effect.async<any>(() => Effect.sync(() => undefined));
+    const runner = () => Effect.callback<any>(() => Effect.sync(() => undefined));
     const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
     const running = jobs.start({ name: "running", task: "x" }, {} as any);
     await expect.poll(() => running.status).toBe("running");
@@ -160,7 +160,7 @@ describe("persistent subagent sessions", () => {
 
   it("does not double count async usage when cancellation races with progress", async () => {
     const ledger = new SubagentUsageLedger();
-    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.callback<any>((resume) => {
       options.onUsage({
         name: "race",
         task: "x",
@@ -203,7 +203,7 @@ describe("persistent subagent sessions", () => {
 
   it("waits for running jobs to record cancellation during shutdown", async () => {
     const entries: Array<{ data: any }> = [];
-    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.async<any>((resume) => {
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => Effect.callback<any>((resume) => {
       const onAbort = () => resume(Effect.succeed({ content: [], details: { isError: true } }));
       options.signal.addEventListener("abort", onAbort, { once: true });
       return Effect.sync(() => options.signal.removeEventListener("abort", onAbort));

@@ -140,8 +140,8 @@ export type DiagnosticEventSink = (event: AnalysisDiagnosticEvent) => Effect.Eff
 
 const runCounter = Metric.counter("pi_env_analyze_runs_total", { incremental: true });
 const failureCounter = Metric.counter("pi_env_analyze_failures_total", { incremental: true });
-const runDuration = Metric.timer("pi_env_analyze_run_duration", "Analyze run duration");
-const stageDuration = Metric.timer("pi_env_analyze_stage_duration", "Analyze stage duration");
+const runDuration = Metric.timer("pi_env_analyze_run_duration", { description: "Analyze run duration" });
+const stageDuration = Metric.timer("pi_env_analyze_stage_duration", { description: "Analyze stage duration" });
 const currentRss = Metric.gauge("pi_env_analyze_rss_mib");
 const currentHeap = Metric.gauge("pi_env_analyze_heap_mib");
 const currentExternal = Metric.gauge("pi_env_analyze_external_mib");
@@ -150,17 +150,17 @@ function metricEffects(event: AnalysisDiagnosticEvent): Effect.Effect<void> {
   const attributes = event.attributes;
   switch (event.type) {
     case AnalyzeDiagnosticEventType.RunStarted:
-      return Metric.increment(
-        Metric.tagged(runCounter, "scope_mode", String(attributes.scope_mode ?? "unknown")),
+      return Metric.update(
+        Metric.withAttributes(runCounter, { scope_mode: String(attributes.scope_mode ?? "unknown") }),
+        1,
       );
     case AnalyzeDiagnosticEventType.Failure:
     case AnalyzeDiagnosticEventType.RunTerminated:
-      return Metric.increment(
-        Metric.tagged(
-          failureCounter,
-          "termination_reason",
-          String(attributes.termination_reason ?? "unknown"),
-        ),
+      return Metric.update(
+        Metric.withAttributes(failureCounter, {
+          termination_reason: String(attributes.termination_reason ?? "unknown"),
+        }),
+        1,
       );
     case AnalyzeDiagnosticEventType.RunCompleted:
       return typeof attributes.duration_ms === "number"
@@ -169,18 +169,18 @@ function metricEffects(event: AnalysisDiagnosticEvent): Effect.Effect<void> {
     case AnalyzeDiagnosticEventType.StageCompleted:
       return typeof attributes.duration_ms === "number"
         ? Metric.update(
-            Metric.tagged(stageDuration, "stage", String(attributes.stage ?? "unknown")),
+            Metric.withAttributes(stageDuration, { stage: String(attributes.stage ?? "unknown") }),
             Duration.millis(attributes.duration_ms),
           )
         : Effect.void;
     case AnalyzeDiagnosticEventType.MemorySample: {
       const updates: Effect.Effect<void>[] = [];
       if (typeof attributes.rss_mib === "number")
-        updates.push(Metric.set(currentRss, attributes.rss_mib));
+        updates.push(Metric.update(currentRss, attributes.rss_mib));
       if (typeof attributes.heap_mib === "number")
-        updates.push(Metric.set(currentHeap, attributes.heap_mib));
+        updates.push(Metric.update(currentHeap, attributes.heap_mib));
       if (typeof attributes.external_mib === "number")
-        updates.push(Metric.set(currentExternal, attributes.external_mib));
+        updates.push(Metric.update(currentExternal, attributes.external_mib));
       return Effect.all(updates, { discard: true });
     }
     case AnalyzeDiagnosticEventType.StageStarted:

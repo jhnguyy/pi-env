@@ -1,7 +1,7 @@
-import { Either } from "effect";
+import { Result } from "effect";
 import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { buildClientRequest, buildClientRequestEither, DevToolsAction } from "../request";
+import { buildClientRequest, buildClientRequestResult, DevToolsAction } from "../request";
 
 describeIfEnabled("dev-tools", "request builder", () => {
   it("keeps diagnostics paths as a bulk request", () => {
@@ -50,13 +50,13 @@ describeIfEnabled("dev-tools", "request builder", () => {
   });
 
   it("rejects multi-path requests for single-path actions", () => {
-    const result = buildClientRequestEither({
+    const result = buildClientRequestResult({
       action: DevToolsAction.References,
       path: ["/repo/a.ts", "/repo/b.ts"],
     });
 
-    expect(Either.isLeft(result)).toBe(true);
-    expect(Either.isLeft(result) ? result.left : null).toEqual({
+    expect(Result.isFailure(result)).toBe(true);
+    expect(Result.isFailure(result) ? result.failure : null).toEqual({
       _tag: "RequestBuildError",
       message: "references requires a single path — 2 were provided",
     });

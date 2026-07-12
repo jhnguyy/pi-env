@@ -3,7 +3,7 @@ import { readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   AnalyzeDiagnosticEventType,
@@ -44,8 +44,8 @@ function event(
 async function leftKind(
   effect: Effect.Effect<unknown, { readonly kind: string }>,
 ): Promise<string | undefined> {
-  const result = await Effect.runPromise(Effect.either(effect));
-  return result._tag === "Left" ? result.left.kind : undefined;
+  const result = await Effect.runPromise(Effect.result(effect));
+  return Result.isFailure(result) ? result.failure.kind : undefined;
 }
 
 describe("analyze diagnostic contracts", () => {

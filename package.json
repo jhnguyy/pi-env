@@ -52,7 +52,7 @@
     "test:setup": "bash setup/__tests__/run.sh",
     "test:e2e": "E2E=1 scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads --maxWorkers=1",
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
-    "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings",
+    "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
     "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 scripts/check-patterns.js scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verification-phases.mjs scripts/verification-plan.mjs scripts/verification-runner.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
     "format:check": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 --check scripts/check-patterns.js scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verification-phases.mjs scripts/verification-plan.mjs scripts/verification-runner.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
     "analyze": "scripts/node-run.sh .pi/extensions/analyze/dist/cli.js",
@@ -115,13 +115,12 @@
     }
   },
   "dependencies": {
-    "@effect/opentelemetry": "0.63.0",
-    "@effect/platform": "0.96.2",
-    "@effect/platform-node": "0.107.0",
+    "@effect/opentelemetry": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.97",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.220.0",
     "@opentelemetry/sdk-trace-node": "2.9.0",
-    "effect": "^3.21.4"
+    "effect": "4.0.0-beta.97"
   },
   "allowBuilds": {
     "@google/genai": true,

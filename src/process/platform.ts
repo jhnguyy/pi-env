@@ -127,7 +127,7 @@ function spawnStarted(
   args: readonly string[],
   options: ScopedChildProcessOptions,
 ): Effect.Effect<ChildProcess, ProcessFailure> {
-  return Effect.async<ChildProcess, ProcessFailure>((resume) => {
+  return Effect.callback<ChildProcess, ProcessFailure>((resume, signal) => {
     let proc: ChildProcess;
     let settled = false;
     const finish = (effect: Effect.Effect<ChildProcess, ProcessFailure>): void => {
@@ -160,7 +160,7 @@ function spawnStarted(
     return Effect.promise(async () => {
       proc.off("spawn", onSpawn);
       proc.off("error", onError);
-      if (!settled) await terminateAndWait(proc, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
+      if (!settled || signal.aborted) await terminateAndWait(proc, options.killGraceMs ?? DEFAULT_KILL_GRACE_MS);
     });
   });
 }
@@ -209,7 +209,7 @@ function collectProcess(
     ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
   if (invalid) return Effect.fail(invalid);
 
-  return Effect.async<ProcessOutput, ProcessFailure>((resume) => {
+  return Effect.callback<ProcessOutput, ProcessFailure>((resume, signal) => {
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let stdoutBytes = 0;
@@ -326,7 +326,7 @@ function collectProcess(
     }
 
     return Effect.promise(async () => {
-      if (!settled) {
+      if (!settled || signal.aborted) {
         terminalError ??= new ProcessFailure({
           kind: ProcessFailureKind.Interrupted,
           command,

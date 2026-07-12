@@ -48,7 +48,7 @@ export interface OpenAIWebToolSettings {
 
 const OpenAIHostedToolsSettingsSchema = Schema.Struct({
   enabled: Schema.optional(Schema.Boolean),
-  searchContextSize: Schema.optional(Schema.Literal(OpenAISearchContextSize.Low, OpenAISearchContextSize.Medium, OpenAISearchContextSize.High)),
+  searchContextSize: Schema.optional(Schema.Literals([OpenAISearchContextSize.Low, OpenAISearchContextSize.Medium, OpenAISearchContextSize.High])),
   externalWebAccess: Schema.optional(Schema.Boolean),
 });
 
@@ -56,7 +56,7 @@ const OpenAIWebContextSettingsSchema = Schema.Struct({
   openaiHostedTools: Schema.optional(OpenAIHostedToolsSettingsSchema),
 });
 
-type OpenAIHostedToolsSettings = Schema.Schema.Type<typeof OpenAIHostedToolsSettingsSchema>;
+type OpenAIHostedToolsSettings = typeof OpenAIHostedToolsSettingsSchema.Type;
 
 export function loadOpenAIWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): OpenAIWebToolSettings {
   const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, OpenAIWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({} as OpenAIHostedToolsSettings);

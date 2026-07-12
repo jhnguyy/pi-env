@@ -7,7 +7,6 @@ import { existsSync } from "node:fs";
 import { dirname, extname, resolve as resolvePath } from "node:path";
 
 import { Deferred, Effect, Exit, Scope } from "effect";
-import type { CloseableScope } from "effect/Scope";
 
 import { scopedChildProcess } from "../../../src/process/platform.js";
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
@@ -40,7 +39,7 @@ type ListenerSet = {
 
 export class LspBackend {
   private lsp: ChildProcess | null = null;
-  private scope: CloseableScope | null = null;
+  private scope: Scope.Closeable | null = null;
   private listeners: ListenerSet | null = null;
   private stderrTail = "";
   private lspReady = false;
@@ -146,7 +145,7 @@ export class LspBackend {
       const env = this.nodeExecPathShim
         ? { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS ? `${process.env.NODE_OPTIONS} ` : ""}--import ${this.nodeExecPathShim}` }
         : process.env;
-      const proc = await Effect.runPromise(Scope.extend(scopedChildProcess(command, args, { stdio: ["pipe", "pipe", "pipe"], env }), scope));
+      const proc = await Effect.runPromise(Scope.provide(scopedChildProcess(command, args, { stdio: ["pipe", "pipe", "pipe"], env }), scope));
       this.assertStartupGeneration(generation);
       this.attach(proc);
       await this.initialize();

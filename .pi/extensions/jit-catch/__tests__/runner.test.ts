@@ -108,15 +108,15 @@ describe("platformJitRunner", () => {
   });
 
   it("fails timeouts as operational ProcessFailure errors", async () => {
-    const result = await Effect.runPromise(Effect.either(platformJitRunner(node, ["-e", "setInterval(()=>{}, 1000)"], { timeout: 50 })));
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left.kind).toBe(ProcessFailureKind.Timeout);
+    const result = await Effect.runPromise(Effect.result(platformJitRunner(node, ["-e", "setInterval(()=>{}, 1000)"], { timeout: 50 })));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
   });
 
   it.runIf(process.platform !== "win32")("fails self-signal termination as operational ProcessFailure errors", async () => {
-    const result = await Effect.runPromise(Effect.either(platformJitRunner(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeout: 5_000 })));
-    expect(result._tag).toBe("Left");
-    if (result._tag === "Left") expect(result.left.kind).toBe(ProcessFailureKind.Exit);
+    const result = await Effect.runPromise(Effect.result(platformJitRunner(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeout: 5_000 })));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") expect(result.failure.kind).toBe(ProcessFailureKind.Exit);
   });
 });
 
@@ -141,7 +141,7 @@ describe("runForExtension", () => {
       if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
 
       setTimeout(() => controller.abort(), 0);
-      return Effect.async<ExecResult, never>(() => {
+      return Effect.callback<ExecResult>(() => {
         return Effect.sync(() => signalAbortObservedResolve());
       });
     };

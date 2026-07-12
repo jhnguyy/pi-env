@@ -1,4 +1,4 @@
-import { NodeSdk } from "@effect/opentelemetry";
+import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { BatchSpanProcessor, type SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect } from "effect";

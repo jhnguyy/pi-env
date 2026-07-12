@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   cleanupTempScript,
@@ -32,14 +32,14 @@ describe("ptc node runtime", () => {
   });
 
   it("maps temp script write failures to prepare errors", async () => {
-    const result = await Effect.runPromise(Effect.either(createTempScript("", fakeRuntime({
+    const result = await Effect.runPromise(Effect.result(createTempScript("", fakeRuntime({
       writeFile: () => { throw new Error("disk full"); },
     }))));
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left.phase).toBe(PtcExecutionPhase.Prepare);
-      expect(result.left.message).toBe("PTC prepare failed: disk full");
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.phase).toBe(PtcExecutionPhase.Prepare);
+      expect(result.failure.message).toBe("PTC prepare failed: disk full");
     }
   });
 

@@ -98,7 +98,7 @@ export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
           : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: processFailureMessage(cause) }))),
       );
       findings.push(...parsed);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return findings;
   });
@@ -121,7 +121,7 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
           : Effect.fail(new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: processFailureMessage(cause) }))),
       );
       findings.push(...parsed);
-      yield* Effect.yieldNow();
+      yield* Effect.yieldNow;
     }
     return findings;
   });
