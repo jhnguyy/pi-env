@@ -23,8 +23,8 @@ describeE2E("LSP E2E", () => {
     fixture = await createLspE2EFixture();
   });
 
-  afterAll(() => {
-    fixture?.cleanup();
+  afterAll(async () => {
+    await fixture?.cleanup();
   });
 
   // ─── Status ───────────────────────────────────────────────────────────

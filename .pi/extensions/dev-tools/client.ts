@@ -211,20 +211,21 @@ export class LspClient {
     });
 
     sock.on("error", (err) => this.onSocketError(err));
-    sock.on("close", () => {
-      this.socket = null;
-      // Reject all pending requests
-      for (const { reject, timer } of this.pendingRequests.values()) {
-        clearTimeout(timer);
-        reject(new Error("Socket closed"));
-      }
-      this.pendingRequests.clear();
-    });
+    sock.on("close", () => this.settlePending(new Error("Socket closed")));
   }
 
-  private onSocketError(_err: Error): void {
-    this.socket?.destroy();
+  private settlePending(err: Error): void {
     this.socket = null;
+    for (const { reject, timer } of this.pendingRequests.values()) {
+      clearTimeout(timer);
+      reject(err);
+    }
+    this.pendingRequests.clear();
+  }
+
+  private onSocketError(err: Error): void {
+    this.socket?.destroy();
+    this.settlePending(err);
   }
 
   private spawnDaemon(): Promise<void> {
@@ -234,12 +235,26 @@ export class LspClient {
         stdio: "ignore",
         env: { ...process.env },
       });
-
-      child.on("error", reject);
-      child.unref();
-
-      // Give it a moment to start up before resolving
-      setTimeout(resolve, 100);
+      let settled = false;
+      const cleanup = () => {
+        child.off("spawn", onSpawn);
+        child.off("error", onError);
+      };
+      const onSpawn = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        child.unref();
+        resolve();
+      };
+      const onError = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      };
+      child.once("spawn", onSpawn);
+      child.once("error", onError);
     });
   }
 }

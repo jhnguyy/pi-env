@@ -123,6 +123,30 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect((res.result as any).action).toBe("status");
       expect((res.result as any).running).toBe(true);
     });
+
+    it("closes active client sockets during idle-style shutdown", async () => {
+      daemon = createMockedDaemon();
+      const sock = await startAndConnect(daemon);
+      const closed = new Promise<void>((resolve) => sock.once("close", () => resolve()));
+
+      await daemon.shutdown();
+      await closed;
+
+      expect(sock.destroyed).toBe(true);
+      expect(existsSync(socketPath)).toBe(false);
+    });
+
+    it("responds to shutdown before awaiting server cleanup", async () => {
+      daemon = createMockedDaemon();
+      const sock = await startAndConnect(daemon);
+
+      const res = await send(sock, { id: 2, action: "shutdown" });
+
+      expect(res.ok).toBe(true);
+      expect((res.result as any).running).toBe(false);
+      await daemon.shutdown();
+      expect(existsSync(socketPath)).toBe(false);
+    });
   });
 
   // ─── Diagnostics ──────────────────────────────────────────────────────────
