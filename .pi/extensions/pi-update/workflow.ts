@@ -36,7 +36,7 @@ function resolveRepoEffect(exec: Exec, requestedRepo?: string): Effect.Effect<st
     const result = yield* runEffect(exec, "git", ["rev-parse", "--show-toplevel"]);
     const fallback = result.stdout.trim();
     if (fallback && existsSync(join(fallback, ".git"))) return fallback;
-    return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.ResolveRepo, detail: "repo not found; pass --repo PATH" }));
+    return yield* new PiUpdateError({ phase: PiUpdatePhase.ResolveRepo, detail: "repo not found; pass --repo PATH" });
   });
 }
 
@@ -52,11 +52,11 @@ function prepareWorktreeEffect(exec: Exec, repo: string, version: string, reques
 
     const currentBranch = (yield* runEffect(exec, "git", ["branch", "--show-current"], { cwd: repo })).stdout.trim();
     if (currentBranch !== "main") {
-      return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Worktree, detail: `base repo must be on main, found ${currentBranch}` }));
+      return yield* new PiUpdateError({ phase: PiUpdatePhase.Worktree, detail: `base repo must be on main, found ${currentBranch}` });
     }
 
     const status = (yield* runEffect(exec, "git", ["status", "--porcelain=v1"], { cwd: repo })).stdout.trim();
-    if (status) return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Worktree, detail: "base repo has uncommitted changes" }));
+    if (status) return yield* new PiUpdateError({ phase: PiUpdatePhase.Worktree, detail: "base repo has uncommitted changes" });
 
     yield* runEffect(exec, "git", ["fetch", "origin"], { cwd: repo });
     yield* runEffect(exec, "git", ["merge", "--ff-only", "origin/main"], { cwd: repo });
@@ -91,7 +91,7 @@ function fetchReleaseArtifactsEffect(exec: Exec, prep: PiUpdatePrep): Effect.Eff
     try {
       yield* runEffect(exec, "npm", ["pack", `${PI_PACKAGE}@${prep.version}`, "--silent"], { cwd: temp });
       const tarball = readdirSync(temp).find((entry) => entry.endsWith(".tgz"));
-      if (!tarball) return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "npm pack did not produce a tarball" }));
+      if (!tarball) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "npm pack did not produce a tarball" });
       yield* runEffect(exec, "tar", ["-xzf", join(temp, tarball), ...PI_UPDATE_DOC_PATHS], { cwd: temp });
       yield* Effect.try({
         try: () => cpSync(join(temp, "package"), packageDir, { recursive: true }),
@@ -102,13 +102,13 @@ function fetchReleaseArtifactsEffect(exec: Exec, prep: PiUpdatePrep): Effect.Eff
     }
 
     const changelogPath = join(packageDir, "CHANGELOG.md");
-    if (!existsSync(changelogPath)) return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "package changelog not found" }));
+    if (!existsSync(changelogPath)) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: "package changelog not found" });
     const section = extractChangelogSection(readFileSync(changelogPath, "utf8"), prep.version);
-    if (!section.trim()) return yield* Effect.fail(new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `changelog section for ${prep.version} not found` }));
+    if (!section.trim()) return yield* new PiUpdateError({ phase: PiUpdatePhase.Artifacts, detail: `changelog section for ${prep.version} not found` });
 
     const packageJsonPath = join(prep.worktree, "package.json");
     const names = packageNamesEither(packageJsonPath, isPiPackageName);
-    if (Either.isLeft(names)) return yield* Effect.fail(names.left);
+    if (Either.isLeft(names)) return yield* names.left;
     const packageManager = packageManagerName(packageJsonPath);
 
     yield* Effect.try({
