@@ -55,7 +55,7 @@
     "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings",
     "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
     "format:check": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 --check scripts/heavyweight-lock.mjs scripts/safe-verification-plan.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
-    "analyze": "scripts/node-run.sh scripts/analyze.ts",
+    "analyze": "scripts/node-run.sh .pi/extensions/analyze/dist/cli.js",
     "sensors": "nub run analyze -- --diff",
     "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "scripts/node-run.sh scripts/verify.mjs",

@@ -20,6 +20,10 @@
       {
         "entry": "worker-main.ts",
         "outfile": "dist/worker.js"
+      },
+      {
+        "entry": "cli-main.ts",
+        "outfile": "dist/cli.js"
       }
     ],
     "dev-tools": [

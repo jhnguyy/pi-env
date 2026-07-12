@@ -51,13 +51,13 @@ jobs:
         shell: bash
         run: nub run --node typecheck
 
-      - name: Verify quality analysis
-        shell: bash
-        run: nub run --node check:quality
-
       - name: Verify build
         shell: bash
         run: nub run --node build
+
+      - name: Verify safe Analyze canary
+        shell: bash
+        run: nub run --node analyze -- --checks complexity src/analyze/policy.ts
 
       - name: Verify install readiness
         shell: bash

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
@@ -51,10 +52,11 @@ export interface SupervisorOptions {
 export function analyzeWorkerPath(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
-  return (
-    env.PI_ENV_ANALYZE_WORKER ??
-    new URL("../../.pi/extensions/analyze/dist/worker.js", import.meta.url).pathname
-  );
+  if (env.PI_ENV_ANALYZE_WORKER !== undefined) return env.PI_ENV_ANALYZE_WORKER;
+  const adjacentWorker = new URL("./worker.js", import.meta.url).pathname;
+  return existsSync(adjacentWorker)
+    ? adjacentWorker
+    : new URL("../../.pi/extensions/analyze/dist/worker.js", import.meta.url).pathname;
 }
 
 function journalEnabled(value: string | undefined): boolean {
