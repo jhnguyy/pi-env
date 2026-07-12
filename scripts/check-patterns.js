@@ -36,17 +36,18 @@ function isEffectPropertyAccess(node) {
 
 export function analyzeText(file, text) {
   const findings = [];
-  if (file !== ".pi/extensions/_shared/errors.ts" && /function\s+formatError\s*\(/.test(text)) {
-    findings.push({
-      file,
-      message: "Local formatError helper found. Prefer .pi/extensions/_shared/errors.ts unless this is intentionally domain-specific.",
-    });
-  }
-
   const scriptKind = file.endsWith(".ts") ? ts.ScriptKind.TS : file.endsWith(".mjs") ? ts.ScriptKind.JS : ts.ScriptKind.JS;
   const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKind);
 
   function visit(node) {
+    if (file !== ".pi/extensions/_shared/errors.ts" && ts.isFunctionDeclaration(node) && node.name?.text === "formatError") {
+      findings.push({
+        file,
+        ...location(sourceFile, node.name),
+        message: "Local formatError helper found. Prefer .pi/extensions/_shared/errors.ts unless this is intentionally domain-specific.",
+      });
+    }
+
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "flow") {
       findings.push({
         file,

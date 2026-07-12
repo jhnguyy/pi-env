@@ -22,6 +22,10 @@ describe("check-patterns", () => {
       .toEqual([expect.objectContaining({ message: expect.stringContaining("Local formatError helper found") })]);
     expect(analyzeText(".pi/extensions/_shared/errors.ts", "function formatError(error) { return String(error); }"))
       .toEqual([]);
+    expect(analyzeText("scripts/example.ts", `
+      // function formatError(error) {}
+      const example = "function formatError(error) {}";
+    `)).toEqual([]);
   });
 
   it("rejects actual flow composition calls without matching comments, strings, or unrelated property calls", () => {
