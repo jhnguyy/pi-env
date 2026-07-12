@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
@@ -78,9 +79,29 @@ export function selectAdapter(url: URL): SiteAdapter | null {
   return SITE_ADAPTERS.find((adapter) => adapter.match(url)) ?? null;
 }
 
+export type WebFetch = typeof globalThis.fetch;
 export interface WebFetchOptions {
   maxBytes?: number;
   mode?: WebFetchMode;
+}
+
+export const WebFetchFailureKind = {
+  Url: "url",
+  Request: "request",
+  Body: "body",
+} as const;
+export type WebFetchFailureKind = typeof WebFetchFailureKind[keyof typeof WebFetchFailureKind];
+
+export class WebFetchFailure extends Data.TaggedError("WebFetchFailure")<{
+  readonly kind: WebFetchFailureKind;
+  readonly url: string;
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
+
+export interface WebFetchDependencies {
+  readonly fetch?: WebFetch;
+  readonly signal?: AbortSignal;
 }
 
 export interface WebFetchResult {
@@ -94,24 +115,123 @@ export interface WebFetchResult {
   outputBytes: number;
 }
 
-export async function fetchWebText(rawUrl: string, options: WebFetchOptions | number = {}, signal?: AbortSignal): Promise<WebFetchResult> {
+const webFetchAcceptHeader = "text/html, text/plain, application/json, application/xml, application/rss+xml, text/*;q=0.9, */*;q=0.1";
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function webFetchFailure(kind: WebFetchFailureKind, url: string, cause: unknown): WebFetchFailure {
+  const label = kind === WebFetchFailureKind.Url ? "Invalid web URL" : kind === WebFetchFailureKind.Request ? "Web fetch request failed" : "Web fetch body read failed";
+  return new WebFetchFailure({ kind, url, message: `${label}: ${errorMessage(cause)}`, cause });
+}
+
+function combinedAbortSignal(effectSignal: AbortSignal, callerSignal?: AbortSignal): { signal: AbortSignal; cleanup: () => void } {
+  if (!callerSignal) return { signal: effectSignal, cleanup: () => undefined };
+  const controller = new AbortController();
+  const abort = (signal: AbortSignal) => {
+    if (!controller.signal.aborted) controller.abort(signal.reason);
+  };
+  const onEffectAbort = () => abort(effectSignal);
+  const onCallerAbort = () => abort(callerSignal);
+  if (effectSignal.aborted) abort(effectSignal);
+  else effectSignal.addEventListener("abort", onEffectAbort, { once: true });
+  if (callerSignal.aborted) abort(callerSignal);
+  else callerSignal.addEventListener("abort", onCallerAbort, { once: true });
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      effectSignal.removeEventListener("abort", onEffectAbort);
+      callerSignal.removeEventListener("abort", onCallerAbort);
+    },
+  };
+}
+
+async function readResponseBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+  if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
+  if (!response.body) return new Uint8Array(await response.arrayBuffer());
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  const onAbort = () => {
+    void reader.cancel(signal.reason).catch(() => undefined);
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    while (true) {
+      if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
+      if (done) break;
+      chunks.push(value);
+    }
+  } catch (cause) {
+    if (signal.aborted) throw signal.reason ?? cause;
+    throw cause;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    try {
+      reader.releaseLock();
+    } catch {
+      // The lock may already be released by cancellation; ignore cleanup errors.
+    }
+  }
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+export function fetchWebTextEffect(rawUrl: string, options: WebFetchOptions | number = {}, dependencies: WebFetchDependencies = {}): Effect.Effect<WebFetchResult, WebFetchFailure> {
   const normalizedOptions = typeof options === "number" ? { maxBytes: options } : options;
   const mode = normalizedOptions.mode ?? WebFetchMode.Text;
-  const url = parseWebUrl(rawUrl);
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal,
-    headers: { accept: "text/html, text/plain, application/json, application/xml, application/rss+xml, text/*;q=0.9, */*;q=0.1" },
+  const fetchImpl = dependencies.fetch ?? globalThis.fetch;
+  return Effect.gen(function*() {
+    const url = yield* Effect.try({ try: () => parseWebUrl(rawUrl), catch: (cause) => webFetchFailure(WebFetchFailureKind.Url, rawUrl, cause) });
+    const response = yield* Effect.tryPromise({
+      try: async (effectSignal) => {
+        const { signal, cleanup } = combinedAbortSignal(effectSignal, dependencies.signal);
+        try {
+          return await fetchImpl(url, {
+            redirect: "follow",
+            signal,
+            headers: { accept: webFetchAcceptHeader },
+          });
+        } finally {
+          cleanup();
+        }
+      },
+      catch: (cause) => webFetchFailure(WebFetchFailureKind.Request, url.toString(), cause),
+    });
+    const contentType = response.headers.get("content-type");
+    const bytes = yield* Effect.tryPromise({
+      try: async (effectSignal) => {
+        const { signal, cleanup } = combinedAbortSignal(effectSignal, dependencies.signal);
+        try {
+          return await readResponseBytes(response, signal);
+        } finally {
+          cleanup();
+        }
+      },
+      catch: (cause) => webFetchFailure(WebFetchFailureKind.Body, url.toString(), cause),
+    });
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const transformed = transformFetchedText(decoded, contentType, mode);
+    const limit = Math.max(1, Math.min(normalizedOptions.maxBytes ?? 100_000, 1_000_000));
+    const encoded = new TextEncoder().encode(transformed);
+    const truncated = encoded.byteLength > limit;
+    const text = truncateUtf8(transformed, limit);
+    return { text, url: response.url, status: response.status, contentType, truncated, mode, rawBytes: bytes.byteLength, outputBytes: Math.min(encoded.byteLength, limit) };
   });
-  const contentType = response.headers.get("content-type");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
-  const transformed = transformFetchedText(decoded, contentType, mode);
-  const limit = Math.max(1, Math.min(normalizedOptions.maxBytes ?? 100_000, 1_000_000));
-  const encoded = new TextEncoder().encode(transformed);
-  const truncated = encoded.byteLength > limit;
-  const text = truncateUtf8(transformed, limit);
-  return { text, url: response.url, status: response.status, contentType, truncated, mode, rawBytes: bytes.byteLength, outputBytes: Math.min(encoded.byteLength, limit) };
+}
+
+export async function fetchWebText(rawUrl: string, options: WebFetchOptions | number = {}, signal?: AbortSignal, dependencies: WebFetchDependencies = {}): Promise<WebFetchResult> {
+  const result = await Effect.runPromise(Effect.either(fetchWebTextEffect(rawUrl, options, { ...dependencies, signal })));
+  if (result._tag === "Left") throw result.left;
+  return result.right;
 }
 
 function transformFetchedText(text: string, contentType: string | null, mode: WebFetchMode): string {

@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect, Fiber } from "effect";
 import { describe, expect, it } from "vitest";
-import { WebFetchMode, buildContextPlan, fetchWebText, parseWebUrl, selectAdapter } from "../index";
+import { WebFetchFailureKind, WebFetchMode, buildContextPlan, fetchWebText, fetchWebTextEffect, parseWebUrl, selectAdapter, type WebFetch } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
@@ -31,20 +32,167 @@ describe("web context", () => {
   });
 
   it("extracts compact text from HTML by default", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () =>
+    const injectedFetch: WebFetch = async () =>
       new Response("<html><head><style>.x{}</style><script>noise()</script><title>T</title></head><body><nav>skip</nav><main><h1>Hello</h1><p>Useful <b>text</b>.</p></main></body></html>", {
         headers: { "content-type": "text/html" },
       });
-    try {
-      const result = await fetchWebText("https://example.com", { mode: WebFetchMode.Text });
-      expect(result.text).toContain("Hello");
-      expect(result.text).toContain("Useful text.");
-      expect(result.text).not.toContain("noise");
-      expect(result.text).not.toContain("skip");
-    } finally {
-      globalThis.fetch = originalFetch;
+
+    const result = await Effect.runPromise(fetchWebTextEffect("https://example.com", { mode: WebFetchMode.Text }, { fetch: injectedFetch }));
+    expect(result.text).toContain("Hello");
+    expect(result.text).toContain("Useful text.");
+    expect(result.text).not.toContain("noise");
+    expect(result.text).not.toContain("skip");
+  });
+
+  it("preserves HTTP status responses without failing", async () => {
+    const injectedFetch: WebFetch = async () => new Response("missing", { status: 404, headers: { "content-type": "text/plain" } });
+
+    const result = await Effect.runPromise(fetchWebTextEffect("https://example.com/missing", {}, { fetch: injectedFetch }));
+    expect(result.status).toBe(404);
+    expect(result.text).toBe("missing");
+  });
+
+  it("returns typed URL failures through the Effect seam", async () => {
+    const result = await Effect.runPromise(Effect.either(fetchWebTextEffect("file:///tmp/example.html")));
+
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left._tag).toBe("WebFetchFailure");
+      expect(result.left.kind).toBe(WebFetchFailureKind.Url);
+      expect(result.left.message).toContain("Invalid web URL: Unsupported URL protocol: file:");
     }
+  });
+
+  it("returns typed request failures through the Effect seam", async () => {
+    const injectedFetch: WebFetch = async () => {
+      throw new TypeError("socket closed");
+    };
+
+    const result = await Effect.runPromise(Effect.either(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch })));
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      expect(result.left.kind).toBe(WebFetchFailureKind.Request);
+      expect(result.left.message).toBe("Web fetch request failed: socket closed");
+    }
+  });
+
+  it("returns typed body failures through the Promise seam", async () => {
+    const response = new Response(null);
+    response.arrayBuffer = async () => {
+      throw new Error("body stream reset");
+    };
+    const injectedFetch: WebFetch = async () => response;
+
+    await expect(fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch })).rejects.toMatchObject({
+      _tag: "WebFetchFailure",
+      kind: WebFetchFailureKind.Body,
+      message: "Web fetch body read failed: body stream reset",
+      cause: expect.any(Error),
+    });
+  });
+
+  it("passes caller cancellation to the Promise adapter as a typed failure", async () => {
+    const controller = new AbortController();
+    let listenerReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      listenerReady = resolve;
+    });
+    const injectedFetch: WebFetch = (_input, init) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        listenerReady();
+      });
+    };
+    const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
+
+    await ready;
+    controller.abort(new Error("caller aborted"));
+    await expect(promise).rejects.toMatchObject({
+      _tag: "WebFetchFailure",
+      kind: WebFetchFailureKind.Request,
+      message: "Web fetch request failed: caller aborted",
+    });
+  });
+
+  it("cancels a response body stream on Promise caller abort after headers", async () => {
+    const controller = new AbortController();
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    let bodyCancelled!: () => void;
+    const cancelled = new Promise<void>((resolve) => {
+      bodyCancelled = resolve;
+    });
+    let rejectRead: ((reason?: unknown) => void) | undefined;
+    const response = {
+      headers: new Headers(),
+      status: 200,
+      url: "https://example.com/",
+      body: {
+        getReader: () => {
+          bodyStarted();
+          return {
+            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
+              rejectRead = reject;
+            }),
+            cancel: (reason?: unknown) => {
+              bodyCancelled();
+              rejectRead?.(reason);
+              return Promise.resolve();
+            },
+            releaseLock: () => undefined,
+          };
+        },
+      },
+    } as unknown as Response;
+    const injectedFetch: WebFetch = async () => response;
+    const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
+    promise.catch(() => undefined);
+
+    await started;
+    controller.abort(new Error("caller aborted body"));
+    await expect(cancelled).resolves.toBeUndefined();
+    await expect(promise).rejects.toMatchObject({ kind: WebFetchFailureKind.Body, message: "Web fetch body read failed: caller aborted body" });
+  });
+
+  it("cancels a response body stream on direct Effect interruption after headers", async () => {
+    let bodyStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      bodyStarted = resolve;
+    });
+    let bodyCancelled!: () => void;
+    const cancelled = new Promise<void>((resolve) => {
+      bodyCancelled = resolve;
+    });
+    let rejectRead: ((reason?: unknown) => void) | undefined;
+    const response = {
+      headers: new Headers(),
+      status: 200,
+      url: "https://example.com/",
+      body: {
+        getReader: () => {
+          bodyStarted();
+          return {
+            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
+              rejectRead = reject;
+            }),
+            cancel: (reason?: unknown) => {
+              bodyCancelled();
+              rejectRead?.(reason);
+              return Promise.resolve();
+            },
+            releaseLock: () => undefined,
+          };
+        },
+      },
+    } as unknown as Response;
+    const injectedFetch: WebFetch = async () => response;
+    const fiber = Effect.runFork(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch }));
+
+    await started;
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    await expect(cancelled).resolves.toBeUndefined();
   });
 });
 
