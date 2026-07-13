@@ -137,6 +137,11 @@ async function main(): Promise<void> {
           ref: request.ref,
           checks: request.checks,
           maxMemoryMb: request.maxMemoryMb,
+          sourceBudget: {
+            maxFiles: request.maxSourceFiles,
+            maxFileBytes: request.maxSourceFileBytes,
+            maxTotalBytes: request.maxSourceBytes,
+          },
         },
         { diagnostics, runId: request.runId },
       ),

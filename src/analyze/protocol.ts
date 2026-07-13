@@ -47,6 +47,9 @@ export interface AnalyzeWorkerRequest {
   readonly ref?: string;
   readonly checks: readonly SafeAnalyzerName[];
   readonly maxMemoryMb: typeof ANALYZE_LIMITS.maxMemoryMb;
+  readonly maxSourceFiles: typeof ANALYZE_LIMITS.sourceFiles;
+  readonly maxSourceFileBytes: typeof ANALYZE_LIMITS.sourceFileBytes;
+  readonly maxSourceBytes: typeof ANALYZE_LIMITS.sourceBytes;
   readonly timeoutMs: number;
 }
 
@@ -187,6 +190,9 @@ function validRequestChecks(value: unknown): boolean {
 function validRequestLimits(value: Record<string, unknown>): boolean {
   return (
     value.maxMemoryMb === ANALYZE_LIMITS.maxMemoryMb &&
+    value.maxSourceFiles === ANALYZE_LIMITS.sourceFiles &&
+    value.maxSourceFileBytes === ANALYZE_LIMITS.sourceFileBytes &&
+    value.maxSourceBytes === ANALYZE_LIMITS.sourceBytes &&
     Number.isInteger(value.timeoutMs) &&
     (value.timeoutMs as number) >= 1_000 &&
     (value.timeoutMs as number) <= ANALYZE_LIMITS.timeoutMs

@@ -239,13 +239,58 @@ describe("analyze contracts", () => {
     });
     const scope = pathScope(["src/changed.ts"]);
     expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.AsyncRisk])).toBe(ProjectRequirement.ScopedSyntax);
-    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.Duplicates])).toBe(ProjectRequirement.CorpusSyntax);
+    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.Duplicates])).toBe(ProjectRequirement.ScopedSyntax);
     expect(projectRequirement([AnalyzerName.Duplicates, AnalyzerName.Types])).toBe(ProjectRequirement.Types);
     const scoped = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.ScopedSyntax)))!;
     const corpus = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.CorpusSyntax)))!;
     expect(scoped.files.map((file) => file.fileName)).toHaveLength(1);
     expect(corpus.files.map((file) => file.fileName)).toHaveLength(2);
     expect(isTypeProject(scoped)).toBe(false);
+  });
+
+  it("bounds syntax project files and source bytes before parsing", async () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const a = 'aaaaaaaaaaaaaaaa';",
+      "src/b.ts": "export const b = 'bbbbbbbbbbbbbbbb';",
+    });
+    const scope = pathScope(["src/a.ts", "src/b.ts"]);
+    const tooMany = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+      cwd,
+      scope,
+      ProjectRequirement.ScopedSyntax,
+      { maxFiles: 1, maxFileBytes: 1_000, maxTotalBytes: 2_000 },
+    )));
+    expect(Result.isFailure(tooMany) ? tooMany.failure.message : "").toContain("file limit exceeded");
+
+    const oversizedFile = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+      cwd,
+      scope,
+      ProjectRequirement.ScopedSyntax,
+      { maxFiles: 2, maxFileBytes: 10, maxTotalBytes: 2_000 },
+    )));
+    expect(Result.isFailure(oversizedFile) ? oversizedFile.failure.message : "").toContain("file byte limit exceeded");
+
+    const oversizedTotal = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+      cwd,
+      scope,
+      ProjectRequirement.ScopedSyntax,
+      { maxFiles: 2, maxFileBytes: 1_000, maxTotalBytes: 50 },
+    )));
+    expect(Result.isFailure(oversizedTotal) ? oversizedTotal.failure.message : "").toContain("aggregate byte limit exceeded");
+  });
+
+  it("rejects scoped syntax sources that resolve outside the worktree", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    const outside = join(fixtureRoot(), "outside.ts");
+    writeFileSync(outside, "export const outside = true;");
+    symlinkSync(outside, join(cwd, "src/link.ts"));
+    const outcome = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+      cwd,
+      pathScope(["src/link.ts"]),
+      ProjectRequirement.ScopedSyntax,
+      { maxFiles: 1, maxFileBytes: 1_000, maxTotalBytes: 1_000 },
+    )));
+    expect(Result.isFailure(outcome) ? outcome.failure.message : "").toContain("resolves outside cwd");
   });
 
   it("captures internal analyzer exceptions in the typed error channel", async () => {
@@ -594,10 +639,19 @@ describe("bounded hardening", () => {
     });
     const capped = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, ["src"], 3)));
     expect(capped._tag === "Failure" && capped.failure.message).toMatch(/Scope file limit exceeded/);
+    mkdirSync(join(cwd, "noise"));
+    for (let index = 0; index < 49; index++) writeFileSync(join(cwd, `noise/${index}.md`), "ignored");
+    const entryCapped = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, ["noise"], 3)));
+    expect(entryCapped._tag === "Failure" && entryCapped.failure.message).toMatch(/Scope entry limit exceeded/);
     const parent = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, [".."])));
     expect(parent._tag === "Failure" && parent.failure.message).toMatch(/outside cwd/);
     const absolute = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, [tmpdir()])));
     expect(absolute._tag === "Failure" && absolute.failure.message).toMatch(/outside cwd/);
+
+    const outside = writeProject({ "escape.ts": "export const escaped = true;" });
+    symlinkSync(outside, join(cwd, "linked"), "dir");
+    const symlinkDirectory = await Effect.runPromise(Effect.result(expandExplicitPathsEffect(cwd, ["linked"])));
+    expect(symlinkDirectory._tag === "Failure" && symlinkDirectory.failure.message).toMatch(/outside cwd/);
   });
 
   it("caps duplicate canonicalization by nodes or bytes", () => {

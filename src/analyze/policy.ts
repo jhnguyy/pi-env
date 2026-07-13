@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { AnalyzerName, ScopeMode, type ScopeMode as Scope } from "./model.js";
 
-export const SAFE_CHECKS = [AnalyzerName.Complexity, AnalyzerName.AsyncRisk] as const;
+export const SAFE_CHECKS = [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates] as const;
 export type SafeAnalyzerName = (typeof SAFE_CHECKS)[number];
 
 export const ANALYZE_LIMITS = {
@@ -13,6 +13,9 @@ export const ANALYZE_LIMITS = {
   resultBytes: 48 * 1024,
   findings: 200,
   failures: 64,
+  sourceFiles: 1_024,
+  sourceFileBytes: 256 * 1024,
+  sourceBytes: 2 * 1024 * 1024,
   relatedLocations: 16,
   paths: 128,
   pathLength: 1_024,
@@ -42,6 +45,9 @@ export interface SafeAnalyzeRequest {
   readonly ref?: string;
   readonly checks: readonly SafeAnalyzerName[];
   readonly maxMemoryMb: typeof ANALYZE_LIMITS.maxMemoryMb;
+  readonly maxSourceFiles: typeof ANALYZE_LIMITS.sourceFiles;
+  readonly maxSourceFileBytes: typeof ANALYZE_LIMITS.sourceFileBytes;
+  readonly maxSourceBytes: typeof ANALYZE_LIMITS.sourceBytes;
   readonly timeoutMs: number;
 }
 
@@ -135,7 +141,7 @@ function validateScopeAndPaths(
 
 function validateChecks(checks: readonly string[] | undefined): RejectedPolicy | undefined {
   if (!checks || checks.length === 0) {
-    return invalid("checks must explicitly select complexity and/or async-risk");
+    return invalid("checks must explicitly select complexity, async-risk, and/or duplicates");
   }
   if (new Set(checks).size !== checks.length) return invalid("checks must be unique");
   if (checks.some((check) => !SAFE_CHECKS.includes(check as SafeAnalyzerName))) {
@@ -178,6 +184,9 @@ export function classifyAnalyzeRequest(input: PublicAnalyzeRequest): AnalyzePoli
       ref: input.ref,
       checks: input.checks as readonly SafeAnalyzerName[],
       maxMemoryMb: ANALYZE_LIMITS.maxMemoryMb,
+      maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
+      maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
+      maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
       timeoutMs: Math.min(
         ANALYZE_LIMITS.timeoutMs,
         Math.max(1_000, input.timeoutMs ?? ANALYZE_LIMITS.timeoutMs),

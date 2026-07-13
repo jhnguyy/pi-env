@@ -8,7 +8,7 @@ import type { Scope } from "./scope.js";
 import { intersectsHunks } from "./scope.js";
 
 type BodyFunction = ts.FunctionLikeDeclaration & { body: ts.ConciseBody };
-type DuplicateGroup = { canonical: string; locations: Location[] };
+type DuplicateGroup = { sample: ts.ConciseBody; locations: Location[] };
 interface CanonicalizationResult {
   canonical: string;
   truncated: boolean;
@@ -188,7 +188,11 @@ const ANALYZER_CAPS = {
 const compareLocations = (left: Location, right: Location): number =>
   left.path.localeCompare(right.path) || left.line - right.line || left.column - right.column;
 
-interface DuplicateCollection { groups: Map<string, DuplicateGroup>; candidates: number; truncated: boolean }
+interface DuplicateCollection { groups: Map<string, DuplicateGroup[]>; candidates: number; truncated: boolean }
+
+function matchingDuplicateGroup(groups: readonly DuplicateGroup[], canonical: string): DuplicateGroup | undefined {
+  return groups.find((group) => canonicalizeWithCap(group.sample).canonical === canonical);
+}
 
 function collectDuplicateFile(file: ts.SourceFile, cwd: string, state: DuplicateCollection): void {
   for (const fn of functions(file)) {
@@ -197,9 +201,14 @@ function collectDuplicateFile(file: ts.SourceFile, cwd: string, state: Duplicate
     const result = canonicalizeWithCap(fn.body);
     if (result.truncated || result.canonical.length < 80 || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
     const hash = createHash("sha256").update(result.canonical).digest("hex");
-    const prior = state.groups.get(hash);
-    if (prior === undefined) state.groups.set(hash, { canonical: result.canonical, locations: [location(cwd, file, fn)] });
-    else if (prior.canonical === result.canonical) prior.locations.push(location(cwd, file, fn));
+    const groups = state.groups.get(hash) ?? [];
+    const prior = matchingDuplicateGroup(groups, result.canonical);
+    if (prior === undefined) {
+      groups.push({ sample: fn.body, locations: [location(cwd, file, fn)] });
+      state.groups.set(hash, groups);
+    } else {
+      prior.locations.push(location(cwd, file, fn));
+    }
   }
 }
 
@@ -237,11 +246,14 @@ function truncationFinding(analyzer: AnalyzerName): Finding {
 function duplicateFindings(collected: DuplicateCollection, scope: Scope): Finding[] {
   const output: Finding[] = [];
   let truncated = collected.truncated;
-  for (const group of collected.groups.values()) {
-    const finding = duplicateFinding(group, scope);
-    if (finding === undefined) continue;
-    if (output.length >= ANALYZER_CAPS.duplicateFindings) { truncated = true; break; }
-    output.push(finding);
+  for (const groups of collected.groups.values()) {
+    for (const group of groups) {
+      const finding = duplicateFinding(group, scope);
+      if (finding === undefined) continue;
+      if (output.length >= ANALYZER_CAPS.duplicateFindings) { truncated = true; break; }
+      output.push(finding);
+    }
+    if (truncated) break;
   }
   if (truncated) {
     if (output.length >= ANALYZER_CAPS.duplicateFindings) output.pop();

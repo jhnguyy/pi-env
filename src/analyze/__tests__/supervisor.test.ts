@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
@@ -20,6 +20,9 @@ function safeRequest(cwd: string, overrides: Partial<SafeAnalyzeRequest> = {}): 
     paths: ["src/example.ts"],
     checks: [AnalyzerName.Complexity],
     maxMemoryMb: ANALYZE_LIMITS.maxMemoryMb,
+    maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
+    maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
+    maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
     timeoutMs: 5_000,
     ...overrides,
   };
@@ -127,6 +130,23 @@ describe("safe analyze policy", () => {
         checks: [AnalyzerName.AsyncRisk],
       }),
     ).toMatchObject({ _tag: "safe" });
+    expect(
+      classifyAnalyzeRequest({
+        cwd,
+        scope: ScopeMode.Paths,
+        paths: ["src/a.ts"],
+        checks: [AnalyzerName.Duplicates],
+        maxMemoryMb: 8_192,
+      }),
+    ).toMatchObject({
+      _tag: "safe",
+      request: {
+        maxMemoryMb: 512,
+        maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
+        maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
+        maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
+      },
+    });
     for (const path of ["../outside.ts", "src/../../outside.ts", "src\\..\\outside.ts"]) {
       expect(
         classifyAnalyzeRequest({
@@ -147,6 +167,9 @@ describe("safe analyze policy", () => {
     ).toMatchObject({ _tag: "invalid" });
     expect(
       classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] }),
+    ).toMatchObject({ _tag: "strict" });
+    expect(
+      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Duplicates] }),
     ).toMatchObject({ _tag: "strict" });
     expect(classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Types] })).toMatchObject({
       _tag: "strict",
@@ -302,11 +325,15 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     expect(JSON.stringify(events)).not.toContain("secret");
   });
 
-  it("runs the real isolated worker for a safe explicit path", async () => {
+  it("runs the real isolated worker for safe scoped syntax checks", async () => {
     const cwd = process.cwd();
     expect(existsSync(analyzeWorkerPath())).toBe(true);
     const result = await superviseAnalyze(
-      safeRequest(cwd, { paths: ["src/analyze/policy.ts"], timeoutMs: 20_000 }),
+      safeRequest(cwd, {
+        paths: ["src/analyze"],
+        checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates],
+        timeoutMs: 20_000,
+      }),
       { env: disabledEnv },
     );
     expect(result.analyzerFailures).toEqual([]);
@@ -314,6 +341,22 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
 });
 
 describe("public analyze boundary", () => {
+  it("reports scoped duplicates through the bounded worker", async () => {
+    const cwd = fixtureRoot();
+    mkdirSync(join(cwd, "src"));
+    writeFileSync(join(cwd, "src/dupes.ts"), `
+      export function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
+      export function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
+    `);
+    const result = await runPublicAnalyze(
+      { cwd, scope: ScopeMode.Paths, paths: ["src"], checks: [AnalyzerName.Duplicates] },
+      { env: disabledEnv },
+    );
+    expect(result.analyzerFailures).toEqual([]);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({ analyzer: AnalyzerName.Duplicates, message: "Structurally duplicate function" });
+  }, 30_000);
+
   it("returns safe worker results and refuses heavy/all work before spawn", async () => {
     const cwd = fixtureRoot();
     const marker = join(cwd, "spawned");
