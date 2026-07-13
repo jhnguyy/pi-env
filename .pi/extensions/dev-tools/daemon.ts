@@ -186,6 +186,8 @@ export class LspDaemon {
             { operation: "daemon_request", action: telemetryAction(req.action) },
             dispatch,
             () => "dispatch",
+            (response) =>
+              response.ok ? { outcome: "success" } : { outcome: "failure", error_kind: "response" },
           ),
         ),
       );

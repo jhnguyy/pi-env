@@ -205,22 +205,28 @@ describe("dev-tools tooling telemetry", () => {
     expect(unknown).toMatchObject({ id: 2, ok: false });
     await daemon.shutdown();
 
-    const daemonSpan = finished.find((span) => span.name === DevToolsSpanName.DaemonRequest);
+    const hoverDaemonSpan = finished.find(
+      (span) => span.name === DevToolsSpanName.DaemonRequest && span.attributes.action === "hover",
+    );
     const backendSpan = finished.find(
       (span) => span.name === DevToolsSpanName.BackendRequest,
     );
-    expect(daemonSpan?.attributes).toMatchObject({
+    expect(hoverDaemonSpan?.attributes).toMatchObject({
       operation: "daemon_request",
       action: "hover",
-      outcome: "success",
+      outcome: "failure",
+      error_kind: "response",
     });
-    expect(backendSpan?.parentSpanContext?.spanId).toBe(daemonSpan?.spanContext().spanId);
+    expect(backendSpan?.parentSpanContext?.spanId).toBe(hoverDaemonSpan?.spanContext().spanId);
     expect(
       finished.find(
         (span) =>
           span.name === DevToolsSpanName.DaemonRequest && span.attributes.action === "unknown",
-      ),
-    ).toBeDefined();
+      )?.attributes,
+    ).toMatchObject({
+      outcome: "failure",
+      error_kind: "response",
+    });
     assertSafeSpans(finished, [
       root,
       socketPath,

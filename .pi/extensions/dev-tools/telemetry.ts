@@ -37,6 +37,9 @@ export function withSafeDevToolsSpan<A, E>(
   attributes: Readonly<Record<string, unknown>>,
   effect: Effect.Effect<A, E>,
   errorKind: (error: E) => string,
+  successAttributes: (value: A) => Readonly<Record<string, unknown>> = () => ({
+    outcome: "success",
+  }),
 ): Effect.Effect<A, E> {
   const observed = diagnostics.span(
     name,
@@ -47,7 +50,7 @@ export function withSafeDevToolsSpan<A, E>(
         diagnostics.annotate(
           Result.isFailure(result)
             ? { outcome: "failure", error_kind: errorKind(result.failure) }
-            : { outcome: "success" },
+            : successAttributes(result.success),
         ),
       ),
     ),
