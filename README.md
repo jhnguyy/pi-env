@@ -10,18 +10,11 @@ Core design rule:
 
 > Method and storage are separate.
 
-Portable components define reusable practice. Local adapters define storage, credentials, paths, indexes, privacy boundaries, and machine-specific defaults.
+Portable components define reusable practice. Local adapters define storage, credentials, paths, indexes, privacy boundaries, and machine-specific defaults. Reusable skills should discover local policy before reading or writing durable state.
 
-## Portability and local adapters
+## Setup choices
 
-Reusable skills should discover local policy before reading or writing durable state. `agentic-notes` defines portable note quality, rewrite, and retrieval practice. The current workspace supplies storage, paths, index conventions, and privacy boundaries.
-
-## Getting started
-
-Nub is the canonical JavaScript toolchain. Nix remains available for host/runtime provisioning. There are two Nix-backed setup paths:
-
-- **Local Nix** means this machine can run `nix run` and realize store paths.
-- **Externally Nix-managed** means tools such as `git`, Nub, and Node.js are already provisioned by Home Manager, nix-manager, a container image, or another host-level Nix system; setup should consume those tools and should not invoke `nix run`.
+Nub is the canonical JavaScript toolchain. Nix remains available for host/runtime provisioning.
 
 | Environment | Command |
 | --- | --- |
@@ -30,47 +23,20 @@ Nub is the canonical JavaScript toolchain. Nix remains available for host/runtim
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
 | No Nix | `./setup.sh` |
 
-`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses the existing `nub`, `node`, and `git` tools.
+`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses existing host tools.
 
-Portable fallback setup is still supported for hosts without Nix, but it intentionally uses whatever tools are already on `PATH`. See [`docs/nix.md`](docs/nix.md) for Nix details and [`docs/prerequisites.md`](docs/prerequisites.md) for the mode split.
+Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides.
 
-Source validation:
+See [`docs/prerequisites.md`](docs/prerequisites.md), [`docs/nix.md`](docs/nix.md), and [`setup.sh`](setup.sh).
 
-```bash
-nub install --frozen-lockfile
-nub run build
-nub run verify
-```
+## Source-owned workflows
 
-For memory-constrained hosts or concurrent worktrees, use the safe validation lane instead:
-
-```bash
-nub run verify:safe
-```
-
-It takes a repository-wide lock in Git's common directory, so all worktrees run heavyweight phases one at a time. The lane runs format checking, typecheck, type-aware Oxlint, source-policy checks, one-worker unit tests, and build. Analyze is intentionally excluded from both verification plans while strict aggregate containment is unavailable. The non-type Oxlint phase was removed because its configured categories are disabled; only the preserved type-aware rules are currently enforced. It waits up to 10 minutes for another owner by default (`PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS` overrides this). If owner publication fails after creating the lock directory, the creator removes that directory immediately before failing; genuinely ownerless lock directories are not stolen by age and require conservative/manual cleanup. Normal `build` and `test` commands remain unchanged for everyday use.
-
-Canonical verification phases are shared by local plans and CI and report elapsed time. Use `nub run verify:phase <phase-id>` for one focused standard phase. Testing policy is documented in [`docs/conventions/testing.md`](docs/conventions/testing.md).
-
-Analyze provides a bounded worker safe mode for explicit `complexity`, `async-risk`, and scoped `duplicates` diff or path requests. Safe syntax work is capped by file count plus per-file and aggregate source bytes; use path `.` for a bounded whole-source corpus. Semantic, external-tool, bundle, benchmark, profiling, and `all` requests fail closed until a strict containment adapter exists. See [`docs/analyze.md`](docs/analyze.md).
-
-See [`docs/container-image.md`](docs/container-image.md) for the container image contract.
-
-Setup is safe to re-run after moving between dev environments. It installs repo dependencies, rebuilds extension artifacts, registers this checkout as a pi package, and reapplies the safe subset in `setup/config/managed-settings.json` without overwriting machine-local settings such as auth, model choices, or a customized theme.
-
-## Terminal configs
-
-In portable mode, `setup.sh` sources `setup/templates/tmux.conf` from `~/.tmux.conf` because tmux is useful on hosts, VMs, and devcontainers. The template enables tmux QoL defaults, 1-based/renumbered windows, truecolor, OSC 8 passthrough, and Pi's recommended `extended-keys-format csi-u` for reliable modified keys. In Nix-managed mode, the Home Manager module owns tmux config and setup skips this write.
-
-Ghostty is only useful where a GUI terminal runs. Portable setup detects devcontainers/container-like environments and skips Ghostty linking there by default; GUI hosts and VMs get `ghostty/config` and `ghostty/themes/*` linked into `~/.config/ghostty/`. Nix-managed hosts can let the Home Manager module own these files. Set `PI_ENV_LINK_GHOSTTY=1 ./setup.sh` to force Ghostty linking in an unusual portable environment.
-
-Ghostty uses JetBrains Mono at 18pt and auto-switches between pi-env Gruvbox dark/light palettes. Put machine-only Ghostty overrides in `~/.config/ghostty/config.local`; the repo config imports it if present.
-
-Other Ghostty settings worth tuning per machine: window padding, cell-height adjustment, opacity/blur, cursor style, keybindings, and whether copy-on-select is desirable on shared machines.
-
-## Pi CLI install
-
-`setup.sh` runs `nub install --frozen-lockfile`, verifies the locked `@earendil-works/pi-coding-agent` package in this checkout, and writes a user-local `pi` wrapper that pins the Node executable selected during setup. That keeps later shell startup changes such as `nvm use` from silently changing the pi runtime. In local-Nix setup the flake app exports its Node path. In externally Nix-managed or portable setup, setup prefers an already working host Node and falls back to Nub's project Node only when needed. If no usable Node is found and Nix is available, setup points you at `./setup.sh --use-nix` or an externally Nix-managed toolchain before running any Node/Nub install steps.
+- Scripts and verification plans: [`package.json`](package.json), [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs), [`scripts/safe-verification-plan.mjs`](scripts/safe-verification-plan.mjs)
+- Analyze contract and source map: [`docs/analyze.md`](docs/analyze.md)
+- Container image contract: [`docs/container-image.md`](docs/container-image.md)
+- Testing policy: [`docs/conventions/testing.md`](docs/conventions/testing.md)
+- TypeScript conventions: [`docs/conventions/typescript.md`](docs/conventions/typescript.md)
+- Extension conventions: [`docs/conventions/extensions.md`](docs/conventions/extensions.md)
 
 ## Theme snippets
 
@@ -81,7 +47,7 @@ Slack custom theme strings:
 
 ## Further reading
 
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch conventions, building extensions, worktree workflow
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — branch, PR, worktree, and reviewer/test policy
 - **[agentic-notes](.agents/skills/agentic-notes/SKILL.md)** — portable note quality and adapter discovery practice
 - **[docs/nix.md](docs/nix.md)** — optional Nix dev shell and NixOS/Home Manager guidance
 - **[pi docs](https://github.com/badlogic/pi-mono)** — upstream reference for the extensions API, skills spec, and settings

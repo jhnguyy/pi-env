@@ -1,8 +1,5 @@
 #!/usr/bin/env sh
-# Gracefully stop the LSP daemon so the next dev-tools call spawns a fresh
-# one with updated packages. Invoked automatically via the postinstall hook.
-#
-# Safe to run when the daemon is already stopped — all operations are no-ops.
+# Postinstall stops the daemon so the next request loads the rebuilt bundle; missing artifacts are safe.
 
 set -e
 

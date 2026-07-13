@@ -1,43 +1,31 @@
-/**
- * discovery.ts — dynamic description builder for the subagent tool.
- *
- * Builds the session_start-time enriched description listing available
- * models (from settings + registry) and discovered agent files.
- */
-
 import type { AgentConfig } from "./agents";
 import { BUILT_IN_TOOLS } from "./resolver";
-import type { ToolCapability } from "./types";
-import { formatCapabilities } from "./types";
+import { formatCapabilities, type ToolCapability } from "./types";
 
-// ─── Tool listing with capabilities ───────────────────────────────────────────
+type AvailableModel = { provider: string; id: string; name: string };
 
 function formatToolList(
-  extToolNames?: string[],
-  extToolCaps?: Map<string, ToolCapability[]>,
+  extensionToolNames?: string[],
+  extensionToolCapabilities?: Map<string, ToolCapability[]>,
 ): string[] {
   const lines: string[] = [];
+  const builtInTools = Object.entries(BUILT_IN_TOOLS).map(
+    ([name, definition]) => `${name} (${formatCapabilities(definition.capabilities)})`,
+  );
+  lines.push(`Built-in tools: ${builtInTools.join(", ")}.`);
 
-  // Built-in tools with capabilities
-  const builtInParts = Object.entries(BUILT_IN_TOOLS)
-    .map(([name, def]) => `${name} (${formatCapabilities(def.capabilities)})`);
-  lines.push(`Built-in tools: ${builtInParts.join(", ")}.`);
-
-  // Extension tools (dynamically registered)
-  if (extToolNames && extToolNames.length > 0) {
-    const extParts = extToolNames.map((name) => {
-      const caps = extToolCaps?.get(name) ?? [];
-      return caps.length ? `${name} (${formatCapabilities(caps)})` : name;
+  if (extensionToolNames && extensionToolNames.length > 0) {
+    const extensionTools = extensionToolNames.map((name) => {
+      const capabilities = extensionToolCapabilities?.get(name) ?? [];
+      return capabilities.length ? `${name} (${formatCapabilities(capabilities)})` : name;
     });
-    lines.push(`Extension tools: ${extParts.join(", ")}.`);
+    lines.push(`Extension tools: ${extensionTools.join(", ")}.`);
   }
 
   return lines;
 }
 
-// ─── Static description (shown before session_start enrichment) ───────────────
-
-export const STATIC_DESCRIPTION = [
+const DESCRIPTION_INTRO = [
   "Delegate a focused task to an in-process subagent running via agentLoop().",
   "The subagent runs inside the parent tool call — abort propagates automatically,",
   "progress streams live to the TUI. No subprocess overhead.",
@@ -49,73 +37,72 @@ export const STATIC_DESCRIPTION = [
   '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
   '  max_turns is optional; omit it to run without a turn-count limit. Use subagent_start for non-blocking jobs and subagent_job to inspect them.',
   "",
+] as const;
+
+export const STATIC_DESCRIPTION = [
+  ...DESCRIPTION_INTRO,
   ...formatToolList(),
   "Extension tools are available when registered.",
 ].join("\n");
 
-// ─── Dynamic description builder ──────────────────────────────────────────────
+function selectModels(enabledModelIds: string[], availableModels: AvailableModel[]): AvailableModel[] {
+  if (enabledModelIds.length === 0) return availableModels;
+  const enabled = new Set(enabledModelIds);
+  return availableModels.filter((model) => enabled.has(`${model.provider}/${model.id}`));
+}
+
+function appendModels(
+  lines: string[],
+  models: AvailableModel[],
+  annotations?: Record<string, string[]>,
+): void {
+  if (models.length === 0) {
+    lines.push("", "Model: 'provider/model-id' format. Required — no default.");
+    return;
+  }
+
+  lines.push("", "Available models (use 'provider/model-id' format):");
+  for (const model of models) {
+    const modelKey = `${model.provider}/${model.id}`;
+    const tags = annotations?.[modelKey];
+    const tagSuffix = tags && tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+    lines.push(`  ${modelKey} — ${model.name}${tagSuffix}`);
+  }
+  lines.push(
+    "",
+    "Model selection: choose based on task complexity and cost.",
+    "  - Models tagged [preferred] are cost-effective — use for gathering, summarization, and mechanical edits.",
+    "  - Reserve heavier models for tasks requiring judgment, adversarial thinking, or subtle reasoning.",
+    "  - Always pass model explicitly — there is no default.",
+  );
+}
+
+function formatAgent(agent: AgentConfig): string {
+  const metadata: string[] = [];
+  if (agent.capabilities?.length) metadata.push(`capabilities: ${agent.capabilities.join(", ")}`);
+  if (agent.tools?.length) metadata.push(`tools: ${agent.tools.join(", ")}`);
+  metadata.push(agent.model ? `model: ${agent.model}` : "model: REQUIRED — pass model param");
+  return `  ${agent.name} (${agent.source}): ${agent.description} [${metadata.join(" | ")}]`;
+}
+
+function appendAgents(lines: string[], agents: AgentConfig[]): void {
+  if (agents.length === 0) return;
+  lines.push("", "Available agents:", ...agents.map(formatAgent));
+}
 
 export function buildDynamicDescription(
   enabledModelIds: string[],
-  availableModels: Array<{ provider: string; id: string; name: string }>,
+  availableModels: AvailableModel[],
   agents: AgentConfig[],
-  extToolNames?: string[],
-  extToolCaps?: Map<string, ToolCapability[]>,
+  extensionToolNames?: string[],
+  extensionToolCapabilities?: Map<string, ToolCapability[]>,
   modelAnnotations?: Record<string, string[]>,
 ): string {
   const lines = [
-    "Delegate a focused task to an in-process subagent running via agentLoop().",
-    "The subagent runs inside the parent tool call — abort propagates automatically,",
-    "progress streams live to the TUI. No subprocess overhead.",
-    "",
-    "Two modes:",
-    '  1. Agent file: subagent({ name: "recon", agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
-    '     `name` is required and creates a persistent `sub-<name>` session beside the parent.',
-    '     If the agent file omits model, you MUST pass model explicitly.',
-    '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
-    '  max_turns is optional; omit it to run without a turn-count limit. Use subagent_start for non-blocking jobs and subagent_job to inspect them.',
-    "",
-    ...formatToolList(extToolNames, extToolCaps),
+    ...DESCRIPTION_INTRO,
+    ...formatToolList(extensionToolNames, extensionToolCapabilities),
   ];
-
-  // Intersect enabled list with models that have working auth
-  const enabledSet = new Set(enabledModelIds);
-  const listedModels =
-    enabledSet.size > 0
-      ? availableModels.filter((m) => enabledSet.has(`${m.provider}/${m.id}`))
-      : availableModels;
-
-  if (listedModels.length > 0) {
-    lines.push("", "Available models (use 'provider/model-id' format):");
-    for (const m of listedModels) {
-      const modelKey = `${m.provider}/${m.id}`;
-      const tags = modelAnnotations?.[modelKey];
-      const tagSuffix = tags && tags.length > 0 ? ` [${tags.join(", ")}]` : "";
-      lines.push(`  ${modelKey} — ${m.name}${tagSuffix}`);
-    }
-    lines.push(
-      "",
-      "Model selection: choose based on task complexity and cost.",
-      "  - Models tagged [preferred] are cost-effective — use for gathering, summarization, and mechanical edits.",
-      "  - Reserve heavier models for tasks requiring judgment, adversarial thinking, or subtle reasoning.",
-      "  - Always pass model explicitly — there is no default.",
-    );
-  } else {
-    lines.push("", "Model: 'provider/model-id' format. Required — no default.");
-  }
-
-  if (agents.length > 0) {
-    lines.push("", "Available agents:");
-    for (const a of agents) {
-      const parts = [`${a.name} (${a.source}): ${a.description}`];
-      const meta: string[] = [];
-      if (a.capabilities?.length) meta.push(`capabilities: ${a.capabilities.join(", ")}`);
-      if (a.tools?.length) meta.push(`tools: ${a.tools.join(", ")}`);
-      meta.push(a.model ? `model: ${a.model}` : `model: REQUIRED — pass model param`);
-      if (meta.length > 0) parts.push(`[${meta.join(" | ")}]`);
-      lines.push(`  ${parts.join(" ")}`);
-    }
-  }
-
+  appendModels(lines, selectModels(enabledModelIds, availableModels), modelAnnotations);
+  appendAgents(lines, agents);
   return lines.join("\n");
 }

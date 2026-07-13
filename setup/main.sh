@@ -1,23 +1,6 @@
 #!/usr/bin/env bash
-# pi-env dotfiles setup
-#
-# Idempotent. Re-run after git pull to pick up new extensions/skills.
-#
-# Orchestration is grouped by domain/tool instead of by individual command:
-#   1. Environment: required software and context-specific recommendations
-#   2. Runtime: repo Nub-managed dependencies and the user-local pi CLI install
-#   3. Pi: settings/package registration, agent context, roles, test utilities
-#   4. Terminal tools: tmux plus Ghostty when running on a GUI host/VM
-#   5. Repo tools: git hooks
-#
-# Extensions and skills are loaded by pi's package manager from the repo
-# directory — no per-extension or per-skill symlinks needed. Local extensions
-# in ~/.pi/agent/extensions/ coexist via pi's auto-discovery.
-#
-# What stays local (never touched after first run):
-#   ~/.pi/agent/auth.json, models.json, sessions/
-# setup reapplies the small safe subset in setup/config/managed-settings.json to settings.json.
-#   ~/.pi/agent/extensions/my-extension/ (local-only extensions)
+# Re-runnable after pulls; preserves local auth, sessions, model choices, and extensions.
+# Only setup/config/managed-settings.json is reapplied to user settings.
 
 set -euo pipefail
 

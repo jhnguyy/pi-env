@@ -2,11 +2,10 @@
 
 Effect is for IO/resource/concurrency boundaries and workflows with expected operational failure. Deterministic transforms should stay plain TypeScript unless an Effect seam materially improves typed failure handling or resource safety. Not every repo file should use Effect; pure transforms and the dependency-free bootstrap path should remain plain when that is clearer.
 
-## Coverage and inventory
+## Coverage
 
 - Type-aware Effect diagnostics cover authored TypeScript included by `tsconfig`.
 - The syntax checker covers tracked TS/JS/MJS under `.pi/extensions`, `src`, `scripts`, `setup`, and `.agents`.
-- Historical P0 inventory is point-in-time review data. Do not rewrite it as a current complete inventory; refresh or supersede it explicitly when taking a new inventory.
 
 ## Failure model
 

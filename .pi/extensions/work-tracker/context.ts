@@ -1,82 +1,60 @@
-/**
- * context.ts — git status helpers and widget refresh utilities.
- *
- * Pure side-effect-free git utilities (loadConfig, getGitStatus,
- * getCurrentBranch, buildStatusLine) plus per-repo caches for git status
- * and active worktrees that avoid spawning subprocesses on every agent turn.
- *
- * Cache invalidation: call invalidateGitCache() after any bash command
- * that modifies git state (commit, checkout, merge, push, pull, etc.).
- * Worktree cache is cleared on the same invalidation since `git worktree`
- * is already matched by GIT_MUTATING_PATTERN.
- *
- * Config resolution order (first wins):
- *   1. WORK_TRACKER_REPOS / WORK_TRACKER_PROTECTED env vars  — CI / shell overrides
- *   2. settings.json `workTracker` key                        — normal user config
- *   3. process.cwd()                                          — fallback
- *
- * settings.json shape:
- *   {
- *     "workTracker": {
- *       "repos": ["/path/to/repo1", "/path/to/repo2"],
- *       "protectedBranches": ["main", "master"]   // optional, defaults to ["main","master"]
- *     }
- *   }
- */
-
 import type { Theme } from "@earendil-works/pi-coding-agent";
 
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 import { getCurrentBranch as gitGetCurrentBranch, getDirtyCount, gitSync } from "../_shared/git";
 import type { WorkTrackerConfig } from "./types";
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+const DEFAULT_PROTECTED_BRANCHES = ["main", "master"] as const;
 
-/** Read the `workTracker` block from settings.json, if present. */
+function splitEnvList(value: string): string[] {
+  return value.split(",").map((entry) => entry.trim());
+}
+
+function getProtectedBranchesFromEnv(): string[] | undefined {
+  return process.env.WORK_TRACKER_PROTECTED
+    ? splitEnvList(process.env.WORK_TRACKER_PROTECTED)
+    : undefined;
+}
+
 function readSettingsConfig(): { repos?: string[]; protectedBranches?: string[] } | null {
   return readOptionalAgentSettings()?.workTracker ?? null;
 }
 
-export function loadConfig(): WorkTrackerConfig {
-  // 1. Env vars take precedence (CI / shell overrides)
-  if (process.env.WORK_TRACKER_REPOS) {
-    return {
-      guardedRepos: process.env.WORK_TRACKER_REPOS.split(",").map((s) => s.trim()),
-      protectedBranches: process.env.WORK_TRACKER_PROTECTED
-        ? process.env.WORK_TRACKER_PROTECTED.split(",").map((s) => s.trim())
-        : ["main", "master"],
-    };
-  }
-
-  // 2. settings.json `workTracker` key
-  const fromSettings = readSettingsConfig();
-  if (fromSettings?.repos?.length) {
-    return {
-      guardedRepos: fromSettings.repos,
-      protectedBranches: fromSettings.protectedBranches ?? ["main", "master"],
-    };
-  }
-
-  // 3. Fallback: current working directory
+function getConfigFromEnv(): WorkTrackerConfig | null {
+  if (!process.env.WORK_TRACKER_REPOS) return null;
   return {
-    guardedRepos: [process.cwd()],
-    protectedBranches: process.env.WORK_TRACKER_PROTECTED
-      ? process.env.WORK_TRACKER_PROTECTED.split(",").map((s) => s.trim())
-      : ["main", "master"],
+    guardedRepos: splitEnvList(process.env.WORK_TRACKER_REPOS),
+    protectedBranches: getProtectedBranchesFromEnv() ?? [...DEFAULT_PROTECTED_BRANCHES],
   };
 }
 
-// ─── Git status cache ─────────────────────────────────────────────────────────
+function getConfigFromSettings(): WorkTrackerConfig | null {
+  const settings = readSettingsConfig();
+  if (!settings?.repos?.length) return null;
+  return {
+    guardedRepos: settings.repos,
+    protectedBranches: settings.protectedBranches ?? [...DEFAULT_PROTECTED_BRANCHES],
+  };
+}
+
+function getDefaultConfig(): WorkTrackerConfig {
+  return {
+    guardedRepos: [process.cwd()],
+    protectedBranches: getProtectedBranchesFromEnv() ?? [...DEFAULT_PROTECTED_BRANCHES],
+  };
+}
+
+export function loadConfig(): WorkTrackerConfig {
+  return getConfigFromEnv() ?? getConfigFromSettings() ?? getDefaultConfig();
+}
 
 interface CachedGitStatus {
   branch: string | null;
   dirty: number;
 }
 
-/** Cached git status per repo path. Cleared on git-mutating bash commands. */
 const gitStatusCache = new Map<string, CachedGitStatus>();
 
-/** Cached worktree list per repo path. Cleared alongside gitStatusCache. */
 const worktreeCache = new Map<string, string[]>();
 
 /**
@@ -89,32 +67,22 @@ const worktreeCache = new Map<string, string[]>();
  */
 const gitFailureCache = new Map<string, CachedGitStatus>();
 
-/** Pattern matching bash commands that modify git state. */
 const GIT_MUTATING_PATTERN = /\bgit\b.*\b(commit|checkout|switch|merge|rebase|pull|push|reset|stash|add|restore|cherry-pick|branch\s+-[dDmM]|worktree)\b/;
 
-/** Returns true if a bash command could modify git state. */
 export function isGitMutating(command: string): boolean {
   return GIT_MUTATING_PATTERN.test(command);
 }
 
-/** Clear both the per-turn git status cache and the worktree cache. */
 export function invalidateGitCache(): void {
   gitStatusCache.clear();
   worktreeCache.clear();
 }
 
-/**
- * Clear the failure cache so previously-unreachable repos are retried.
- * Call on session lifecycle boundaries (start / switch / shutdown).
- */
 export function resetGitFailureCache(): void {
   gitFailureCache.clear();
 }
 
-// ─── Git status ───────────────────────────────────────────────────────────────
-
 export function getGitStatus(repoPath: string): { branch: string | null; dirty: number } {
-  // If this repo failed on a previous turn, don't retry until the session resets.
   const failed = gitFailureCache.get(repoPath);
   if (failed) return failed;
 
@@ -127,7 +95,6 @@ export function getGitStatus(repoPath: string): { branch: string | null; dirty: 
   // "detached HEAD" (zero exit, empty stdout) to avoid false failure-cache hits.
   const branchResult = gitSync(repoPath, ["branch", "--show-current"]);
   if (branchResult.status !== 0) {
-    // Mount or repo unavailable — remember this so we skip future turns.
     const empty: CachedGitStatus = { branch: null, dirty: 0 };
     gitFailureCache.set(repoPath, empty);
     return empty;
@@ -141,12 +108,9 @@ export function getGitStatus(repoPath: string): { branch: string | null; dirty: 
   return status;
 }
 
-/** Get the branch of the current working directory. */
 export function getCurrentBranch(): string | null {
   return gitGetCurrentBranch(process.cwd());
 }
-
-// ─── Active worktrees ─────────────────────────────────────────────────────────
 
 /**
  * Return branch names of all active worktrees in repoPath, excluding the
@@ -163,8 +127,6 @@ export function getActiveWorktrees(repoPath: string): string[] {
     return [];
   }
 
-  // Each worktree block is separated by a blank line. The first block is the
-  // primary worktree — skip it. Collect branch names from the rest.
   const blocks = stdout.split(/\n\n+/).filter(Boolean);
   const branches: string[] = [];
   for (const block of blocks.slice(1)) {
@@ -174,15 +136,11 @@ export function getActiveWorktrees(repoPath: string): string[] {
         break;
       }
     }
-    // detached HEAD worktrees (no "branch" line) are skipped — they're not
-    // named branches another agent would conflict with.
   }
 
   worktreeCache.set(repoPath, branches);
   return branches;
 }
-
-// ─── Status line ──────────────────────────────────────────────────────────────
 
 /**
  * Build the per-repo status segments: worktrees (primary signal) and dirty
@@ -194,13 +152,12 @@ export function getActiveWorktrees(repoPath: string): string[] {
  */
 function buildRepoSegments(repoPath: string): { name: string; worktrees: string[]; dirty: number } | null {
   const { branch, dirty } = getGitStatus(repoPath);
-  if (!branch) return null; // not a git repo
+  if (!branch) return null;
   const worktrees = getActiveWorktrees(repoPath);
-  if (worktrees.length === 0 && dirty === 0) return null; // nothing to surface
+  if (worktrees.length === 0 && dirty === 0) return null;
   return { name: repoPath.split("/").pop() ?? repoPath, worktrees, dirty };
 }
 
-/** Plain-text status line for LLM context injection. */
 export function buildStatusLine(config: WorkTrackerConfig): string | null {
   const parts: string[] = [];
   for (const repoPath of config.guardedRepos) {
@@ -214,10 +171,6 @@ export function buildStatusLine(config: WorkTrackerConfig): string | null {
   return parts.length > 0 ? `[work-tracker] ${parts.join(" || ")}` : null;
 }
 
-/**
- * Themed status line for the TUI widget.
- * Worktrees in accent, dirty warning in warning color.
- */
 export function buildStatusLineThemed(config: WorkTrackerConfig, theme: Theme): string | null {
   const parts: string[] = [];
   for (const repoPath of config.guardedRepos) {

@@ -1,20 +1,3 @@
-/**
- * Subagent Extension — entry point.
- *
- * Thin wiring only. Business logic lives in:
- *   - execute.ts     — agentLoop execution, tool/model resolution
- *   - render.ts      — TUI renderCall / renderResult
- *   - discovery.ts   — dynamic description builder
- *   - types.ts       — shared types and constants
- *   - agents.ts      — agent file discovery and parsing
- *
- * Two modes:
- * 1. Agent file: subagent({ agent: "scout", task: "..." })
- *    — tools/model/prompt loaded from ~/.pi/agent/agents/<name>.md
- * 2. Inline: subagent({ task: "...", tools: [...], model: "provider/id" })
- *    — explicit config, no defaults applied
- */
-
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -39,8 +22,6 @@ import {
 import { SubagentSessionRuntime } from "./session-runtime";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
-
-// ─── Parameters schema (stable across re-registrations) ──────────────────────
 
 const SUBAGENT_PARAMETERS = Type.Object({
   name: Type.String({
@@ -121,12 +102,7 @@ function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
   };
 }
 
-// ─── Extension ────────────────────────────────────────────────────────────────
-
 export default function (pi: ExtensionAPI) {
-  // ── Extension tool registration ──────────────────────────────────────────
-  // The shared registry's atomic registration keeps a tool and its capabilities
-  // inseparable through discovery, resolution, and execution.
   const registeredExtTools = new Map<string, ExtToolRegistration>();
   listenForAgentTools(pi, (registration) => {
     registeredExtTools.set(registration.tool.name, registration);
@@ -134,15 +110,13 @@ export default function (pi: ExtensionAPI) {
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
 
-  // Named execute function — stable reference (no recreation on re-register)
-  const executeSubagent = runtime.execute;
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
       name: "subagent",
       label: "Subagent",
       description,
       parameters: SUBAGENT_PARAMETERS,
-      execute: executeSubagent,
+      execute: runtime.execute,
       renderCall: renderSubagentCall,
       renderResult: renderSubagentResult,
     });
@@ -208,8 +182,6 @@ export default function (pi: ExtensionAPI) {
     };
   };
 
-  // ── Initial registration (static description) ─────────────────────────────
-
   registerSubagentTool(STATIC_DESCRIPTION);
   pi.registerTool({
     name: "subagent_start",
@@ -233,26 +205,20 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("session_shutdown", async () => runtime.shutdownSession());
 
-  // ── session_start: re-register with dynamic model + agent list ────────────
-
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {
     if (!(await runtime.startSession())) return;
-    // 1. Read enabled models and annotations from settings.json
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
     const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
     const modelAnnotations = settings?.modelAnnotations ?? {};
 
-    // 2. Get models that have working auth
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{
       provider: string;
       id: string;
       name: string;
     }>;
 
-    // 3. Discover agents
     const { agents } = discoverAgents(ctx.cwd, "both");
 
-    // 4. Re-register with enriched description (including registered extension tools)
     const extToolNames = [...registeredExtTools.keys()];
     const extToolCaps = new Map(
       [...registeredExtTools].map(([name, registration]) => [name, registration.capabilities]),
@@ -265,7 +231,6 @@ export default function (pi: ExtensionAPI) {
       extToolCaps,
       modelAnnotations,
     );
-    // registerTool replaces this stable name with session-specific discovery text.
     registerSubagentTool(description);
   });
 }
