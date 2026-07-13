@@ -45,9 +45,9 @@ const MIN_DESCRIPTION_LENGTH = 30;
 
 /** Patterns that look like file references in markdown. */
 const FILE_REF_PATTERNS = [
-  /\.\/([\w./-]+)/g,           // ./path/to/file
-  /\]\(([\w./-]+)\)/g,         // [text](path)
-  /`\.\/([\w./-]+)`/g,         // `./path/to/file`
+  /\.\/([\w./-]+)/g, // ./path/to/file
+  /\]\(([\w./-]+)\)/g, // [text](path)
+  /`\.\/([\w./-]+)`/g, // `./path/to/file`
 ];
 
 /** Extract relative file references from markdown body. */
@@ -62,6 +62,115 @@ function extractFileReferences(body: string): string[] {
     }
   }
   return Array.from(refs);
+}
+
+function validateName(
+  frontmatter: SkillFrontmatter,
+  dirName: string,
+  issues: ValidationIssue[],
+): void {
+  if (!frontmatter.name) return;
+
+  const name = String(frontmatter.name);
+  if (!NAME_RE.test(name) || CONSECUTIVE_HYPHENS_RE.test(name)) {
+    issues.push({
+      rule: "name-format",
+      severity: "error",
+      message: `Name "${name}" must be lowercase a-z, 0-9, single hyphens only, no leading/trailing hyphens.`,
+      file: "SKILL.md",
+    });
+  }
+  if (name.length > 64) {
+    issues.push({
+      rule: "name-length",
+      severity: "error",
+      message: `Name exceeds 64 characters (${name.length}).`,
+      file: "SKILL.md",
+    });
+  }
+  if (name !== dirName) {
+    issues.push({
+      rule: "name-matches-dir",
+      severity: "warning",
+      message: `Frontmatter name "${name}" doesn't match directory name "${dirName}".`,
+      file: "SKILL.md",
+    });
+  }
+}
+
+function validateDescription(frontmatter: SkillFrontmatter, issues: ValidationIssue[]): void {
+  if (!frontmatter.description) {
+    issues.push({
+      rule: "description-exists",
+      severity: "error",
+      message: "Description is required in frontmatter.",
+      file: "SKILL.md",
+    });
+    return;
+  }
+
+  const description = String(frontmatter.description);
+  if (description.length > 1024) {
+    issues.push({
+      rule: "description-length",
+      severity: "error",
+      message: `Description exceeds 1024 characters (${description.length}).`,
+      file: "SKILL.md",
+    });
+  }
+
+  const descriptionLower = description.toLowerCase();
+  const isVague =
+    description.length < MIN_DESCRIPTION_LENGTH ||
+    VAGUE_WORDS.some((word) => {
+      const pattern = new RegExp(`\\b${word}\\b`, "i");
+      return pattern.test(descriptionLower);
+    });
+  if (isVague) {
+    issues.push({
+      rule: "description-quality",
+      severity: "warning",
+      message: "Description is vague. Be specific about what the skill does and when to use it.",
+      file: "SKILL.md",
+    });
+  }
+}
+
+function validateContextEfficiency(body: string, issues: ValidationIssue[]): void {
+  const bodyBytes = Buffer.byteLength(body, "utf-8");
+  if (bodyBytes > 8192) {
+    issues.push({
+      rule: "context-size",
+      severity: "info",
+      message: `SKILL.md body is ${(bodyBytes / 1024).toFixed(1)}KB. Consider: does this skill cover one cohesive concern, or could it decompose into smaller skills? If it's cohesive, the size is fine. If sections are independently useful, splitting reduces per-invocation context cost.`,
+      file: "SKILL.md",
+    });
+  }
+  if (bodyBytes <= 4096) return;
+
+  const refs = extractFileReferences(body);
+  const hasExternalRefs = refs.length > 0 || /references?\//i.test(body);
+  if (!hasExternalRefs) {
+    issues.push({
+      rule: "context-compression",
+      severity: "info",
+      message:
+        "SKILL.md body exceeds 4KB without referencing external files. Consider using the index pattern: keep SKILL.md as a compressed index and move detailed docs to references/.",
+      file: "SKILL.md",
+    });
+  }
+}
+
+function validateReferences(skillDir: string, body: string, issues: ValidationIssue[]): void {
+  for (const ref of extractFileReferences(body)) {
+    if (existsSync(join(skillDir, ref))) continue;
+    issues.push({
+      rule: "reference-exists",
+      severity: "warning",
+      message: `Referenced file "${ref}" does not exist.`,
+      file: "SKILL.md",
+    });
+  }
 }
 
 export function validateSkill(skillDir: string): ValidationResult {
@@ -107,123 +216,14 @@ export function validateSkill(skillDir: string): ValidationResult {
   const { frontmatter, body } = parsed;
   const dirName = basename(skillDir);
 
-  // ─── Name validation ──────────────────────────────────────────
-  if (frontmatter.name) {
-    const name = String(frontmatter.name);
-
-    if (!NAME_RE.test(name) || CONSECUTIVE_HYPHENS_RE.test(name)) {
-      issues.push({
-        rule: "name-format",
-        severity: "error",
-        message: `Name "${name}" must be lowercase a-z, 0-9, single hyphens only, no leading/trailing hyphens.`,
-        file: "SKILL.md",
-      });
-    }
-
-    if (name.length > 64) {
-      issues.push({
-        rule: "name-length",
-        severity: "error",
-        message: `Name exceeds 64 characters (${name.length}).`,
-        file: "SKILL.md",
-      });
-    }
-
-    if (name !== dirName) {
-      issues.push({
-        rule: "name-matches-dir",
-        severity: "warning",
-        message: `Frontmatter name "${name}" doesn't match directory name "${dirName}".`,
-        file: "SKILL.md",
-      });
-    }
-  }
-
-  // ─── Description validation ───────────────────────────────────
-  if (!frontmatter.description) {
-    issues.push({
-      rule: "description-exists",
-      severity: "error",
-      message: "Description is required in frontmatter.",
-      file: "SKILL.md",
-    });
-  } else {
-    const desc = String(frontmatter.description);
-
-    if (desc.length > 1024) {
-      issues.push({
-        rule: "description-length",
-        severity: "error",
-        message: `Description exceeds 1024 characters (${desc.length}).`,
-        file: "SKILL.md",
-      });
-    }
-
-    // Quality check: too short or contains vague words
-    const descLower = desc.toLowerCase();
-    const isVague =
-      desc.length < MIN_DESCRIPTION_LENGTH ||
-      VAGUE_WORDS.some((w) => {
-        // Match whole word
-        const re = new RegExp(`\\b${w}\\b`, "i");
-        return re.test(descLower);
-      });
-
-    if (isVague) {
-      issues.push({
-        rule: "description-quality",
-        severity: "warning",
-        message:
-          "Description is vague. Be specific about what the skill does and when to use it.",
-        file: "SKILL.md",
-      });
-    }
-  }
+  validateName(frontmatter, dirName, issues);
+  validateDescription(frontmatter, issues);
 
   // ─── Context efficiency ───────────────────────────────────────
-  const bodyBytes = Buffer.byteLength(body, "utf-8");
-
-  // No hard size limit — some skills are legitimately large.
-  // Surface size as info so the agent can decide whether decomposition makes sense.
-  if (bodyBytes > 8192) {
-    issues.push({
-      rule: "context-size",
-      severity: "info",
-      message: `SKILL.md body is ${(bodyBytes / 1024).toFixed(1)}KB. Consider: does this skill cover one cohesive concern, or could it decompose into smaller skills? If it's cohesive, the size is fine. If sections are independently useful, splitting reduces per-invocation context cost.`,
-      file: "SKILL.md",
-    });
-  }
-
-  // Check if large body lacks references to external files
-  if (bodyBytes > 4096) {
-    const refs = extractFileReferences(body);
-    // Also check for markdown link references to files
-    const hasExternalRefs = refs.length > 0 || /references?\//i.test(body);
-
-    if (!hasExternalRefs) {
-      issues.push({
-        rule: "context-compression",
-        severity: "info",
-        message:
-          "SKILL.md body exceeds 4KB without referencing external files. Consider using the index pattern: keep SKILL.md as a compressed index and move detailed docs to references/.",
-        file: "SKILL.md",
-      });
-    }
-  }
+  validateContextEfficiency(body, issues);
 
   // ─── Broken references ────────────────────────────────────────
-  const refs = extractFileReferences(body);
-  for (const ref of refs) {
-    const fullPath = join(skillDir, ref);
-    if (!existsSync(fullPath)) {
-      issues.push({
-        rule: "reference-exists",
-        severity: "warning",
-        message: `Referenced file "${ref}" does not exist.`,
-        file: "SKILL.md",
-      });
-    }
-  }
+  validateReferences(skillDir, body, issues);
 
   // ─── Aggregate ────────────────────────────────────────────────
   const hasErrors = issues.some((i) => i.severity === "error");

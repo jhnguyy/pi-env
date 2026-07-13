@@ -43,13 +43,14 @@ export const ResolutionErrorReason = {
   ModelNotFound: "model_not_found",
   InvalidCwd: "invalid_cwd",
 } as const;
-export type ResolutionErrorReason = typeof ResolutionErrorReason[keyof typeof ResolutionErrorReason];
+export type ResolutionErrorReason =
+  (typeof ResolutionErrorReason)[keyof typeof ResolutionErrorReason];
 
 export const ResolutionResultTag = {
   Ok: "ResolutionOk",
   Error: "ResolutionError",
 } as const;
-export type ResolutionResultTag = typeof ResolutionResultTag[keyof typeof ResolutionResultTag];
+export type ResolutionResultTag = (typeof ResolutionResultTag)[keyof typeof ResolutionResultTag];
 
 export interface ResolutionError {
   reason: ResolutionErrorReason;
@@ -70,7 +71,9 @@ export function resolutionError<T>(error: ResolutionError): ResolutionResult<T> 
   return { _tag: ResolutionResultTag.Error, error };
 }
 
-export function isResolutionOk<T>(result: ResolutionResult<T>): result is Extract<ResolutionResult<T>, { _tag: typeof ResolutionResultTag.Ok }> {
+export function isResolutionOk<T>(
+  result: ResolutionResult<T>,
+): result is Extract<ResolutionResult<T>, { _tag: typeof ResolutionResultTag.Ok }> {
   return result._tag === ResolutionResultTag.Ok;
 }
 
@@ -97,7 +100,10 @@ export interface SubagentExecutionPlan {
   effectiveCwd: string;
 }
 
-export function resolveEffectiveCwd(params: SubagentParams, ctxCwd: string): ResolutionResult<string> {
+export function resolveEffectiveCwd(
+  params: SubagentParams,
+  ctxCwd: string,
+): ResolutionResult<string> {
   if (!params.cwd) return resolutionOk(ctxCwd);
   if (!isAbsolute(params.cwd)) {
     return resolutionError({
@@ -150,6 +156,95 @@ export function resolveAgentConfig(
   return resolutionOk({ agentConfig });
 }
 
+type ToolCatalogEntry =
+  | { _tag: "built-in"; definition: ToolDef }
+  | { _tag: "extension"; registration: ExtToolRegistration };
+
+type ToolCatalog = {
+  byName: Map<string, ToolCatalogEntry>;
+  availableNames: string[];
+};
+
+function buildToolCatalog(
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+): ToolCatalog {
+  const byName = new Map<string, ToolCatalogEntry>();
+  for (const [name, definition] of Object.entries(BUILT_IN_TOOLS)) {
+    byName.set(name, { _tag: "built-in", definition });
+  }
+  for (const [name, registration] of registeredExtTools) {
+    if (!byName.has(name)) byName.set(name, { _tag: "extension", registration });
+  }
+  return {
+    byName,
+    availableNames: [...Object.keys(BUILT_IN_TOOLS), ...registeredExtTools.keys()],
+  };
+}
+
+function hasRequestedCapabilities(
+  capabilities: readonly ToolCapability[],
+  requested: ReadonlySet<string>,
+): boolean {
+  for (const capability of capabilities) {
+    if (!requested.has(capability)) return false;
+  }
+  return true;
+}
+
+function collectToolNames(
+  explicitNames: readonly string[],
+  requestedCapabilities: readonly string[],
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+): Set<string> {
+  const names = new Set<string>();
+  if (requestedCapabilities.length > 0) {
+    const requested = new Set(requestedCapabilities);
+    for (const [name, definition] of Object.entries(BUILT_IN_TOOLS)) {
+      if (hasRequestedCapabilities(definition.capabilities, requested)) names.add(name);
+    }
+    for (const [name, registration] of registeredExtTools) {
+      if (hasRequestedCapabilities(registration.capabilities, requested)) names.add(name);
+    }
+  }
+  for (const name of explicitNames) names.add(name);
+  return names;
+}
+
+function materializeTool(entry: ToolCatalogEntry, cwd: string): AgentTool<any, any> {
+  return entry._tag === "built-in" ? entry.definition.factory(cwd) : entry.registration.tool;
+}
+
+function materializeToolResolution(
+  names: ReadonlySet<string>,
+  explicitNames: readonly string[],
+  catalog: ToolCatalog,
+  cwd: string,
+  modelOverride: string | undefined,
+): ResolutionResult<ToolResolution> {
+  const explicitNameSet = new Set(explicitNames);
+  const tools: AgentTool<any, any>[] = [];
+  const unknownExplicitNames: string[] = [];
+
+  for (const name of names) {
+    const entry = catalog.byName.get(name);
+    if (entry) {
+      tools.push(materializeTool(entry, cwd));
+    } else if (explicitNameSet.has(name)) {
+      unknownExplicitNames.push(name);
+    }
+  }
+
+  if (unknownExplicitNames.length > 0) {
+    return resolutionError({
+      reason: ResolutionErrorReason.InvalidTools,
+      message: `Unknown tools: ${unknownExplicitNames.join(", ")}. Available: ${catalog.availableNames.join(", ")}`,
+      toolNames: [...explicitNames],
+      modelOverride,
+    });
+  }
+  return resolutionOk({ tools, toolNames: [...names] });
+}
+
 export function resolveTools(
   params: SubagentParams,
   agentConfig: AgentConfig | undefined,
@@ -159,57 +254,21 @@ export function resolveTools(
   // Two mechanisms, unioned when both present:
   //   capabilities: include all tools whose capability tags are a subset of the requested set.
   //   tools: include specific tools by name.
-  const requestedCaps = agentConfig?.capabilities;
-  const rawToolNames: string[] | undefined = agentConfig?.tools ?? params.tools;
-
-  if ((!rawToolNames || rawToolNames.length === 0) && (!requestedCaps || requestedCaps.length === 0)) {
+  const requestedCapabilities = agentConfig?.capabilities ?? [];
+  const explicitNames = agentConfig?.tools ?? params.tools ?? [];
+  if (explicitNames.length === 0 && requestedCapabilities.length === 0) {
     return resolutionError({
       reason: ResolutionErrorReason.NoTools,
-      message: "No tools or capabilities specified. Provide tools/capabilities in the agent file or pass the tools parameter.",
+      message:
+        "No tools or capabilities specified. Provide tools/capabilities in the agent file or pass the tools parameter.",
       toolNames: [],
       modelOverride: params.model,
     });
   }
 
-  const resolvedToolNames = new Set<string>();
-
-  if (requestedCaps && requestedCaps.length > 0) {
-    const capSet = new Set(requestedCaps);
-    for (const [toolName, def] of Object.entries(BUILT_IN_TOOLS)) {
-      if (def.capabilities.every((c) => capSet.has(c))) resolvedToolNames.add(toolName);
-    }
-    for (const [toolName, registration] of registeredExtTools) {
-      if (registration.capabilities.every((capability) => capSet.has(capability))) {
-        resolvedToolNames.add(toolName);
-      }
-    }
-  }
-
-  if (rawToolNames) {
-    for (const name of rawToolNames) resolvedToolNames.add(name);
-  }
-
-  const tools: AgentTool<any, any>[] = [];
-  const unknownTools: string[] = [];
-  for (const name of resolvedToolNames) {
-    if (name in BUILT_IN_TOOLS) tools.push(BUILT_IN_TOOLS[name].factory(cwd));
-    else if (registeredExtTools.has(name)) tools.push(registeredExtTools.get(name)!.tool);
-    else unknownTools.push(name);
-  }
-
-  const toolNames = [...resolvedToolNames];
-  const explicitUnknowns = unknownTools.filter((name) => rawToolNames?.includes(name));
-  if (explicitUnknowns.length > 0) {
-    const available = [...Object.keys(BUILT_IN_TOOLS), ...registeredExtTools.keys()].join(", ");
-    return resolutionError({
-      reason: ResolutionErrorReason.InvalidTools,
-      message: `Unknown tools: ${explicitUnknowns.join(", ")}. Available: ${available}`,
-      toolNames: rawToolNames ?? [],
-      modelOverride: params.model,
-    });
-  }
-
-  return resolutionOk({ tools, toolNames });
+  const names = collectToolNames(explicitNames, requestedCapabilities, registeredExtTools);
+  const catalog = buildToolCatalog(registeredExtTools);
+  return materializeToolResolution(names, explicitNames, catalog, cwd, params.model);
 }
 
 export function resolveModel(
@@ -231,7 +290,9 @@ export function resolveModel(
     model = modelRegistry.find(modelStr.slice(0, slashIdx), modelStr.slice(slashIdx + 1));
   } else {
     const available = modelRegistry.getAvailable ? modelRegistry.getAvailable() : [];
-    model = available.find((candidate: any) => candidate.id === modelStr || candidate.id.includes(modelStr));
+    model = available.find(
+      (candidate: any) => candidate.id === modelStr || candidate.id.includes(modelStr),
+    );
   }
 
   if (!model) {
@@ -247,7 +308,11 @@ export function resolveModel(
 }
 
 export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentConfig): string {
-  return params.system_prompt ?? agentConfig?.systemPrompt ?? "Complete the task using only the tools provided. Be concise and direct.";
+  return (
+    params.system_prompt ??
+    agentConfig?.systemPrompt ??
+    "Complete the task using only the tools provided. Be concise and direct."
+  );
 }
 
 export function resolveSubagentExecutionPlan(
@@ -261,10 +326,19 @@ export function resolveSubagentExecutionPlan(
   const agent = resolveAgentConfig(params, effectiveCwd.value);
   if (!isResolutionOk(agent)) return agent;
 
-  const tools = resolveTools(params, agent.value.agentConfig, registeredExtTools, effectiveCwd.value);
+  const tools = resolveTools(
+    params,
+    agent.value.agentConfig,
+    registeredExtTools,
+    effectiveCwd.value,
+  );
   if (!isResolutionOk(tools)) return tools;
 
-  const model = resolveModel(params.model ?? agent.value.agentConfig?.model, ctx.modelRegistry, tools.value.toolNames);
+  const model = resolveModel(
+    params.model ?? agent.value.agentConfig?.model,
+    ctx.modelRegistry,
+    tools.value.toolNames,
+  );
   if (!isResolutionOk(model)) return model;
 
   return resolutionOk({

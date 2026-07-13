@@ -20,9 +20,7 @@ function expandKeyText(): string {
 const PROMPT_PREVIEW_LENGTH = 70;
 
 function formatPromptPreview(task: string): string {
-  return task.length > PROMPT_PREVIEW_LENGTH
-    ? `${task.slice(0, PROMPT_PREVIEW_LENGTH)}...`
-    : task;
+  return task.length > PROMPT_PREVIEW_LENGTH ? `${task.slice(0, PROMPT_PREVIEW_LENGTH)}...` : task;
 }
 
 function textContent(result: AgentToolResult<unknown>): string {
@@ -39,10 +37,7 @@ function formatTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
-export function formatUsageStats(
-  usage: SubagentDetails["usage"],
-  model?: string,
-): string {
+export function formatUsageStats(usage: SubagentDetails["usage"], model?: string): string {
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns !== 1 ? "s" : ""}`);
   if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
@@ -63,9 +58,7 @@ export function renderSubagentCall(
 ) {
   const preview = formatPromptPreview(args.task ?? "");
   const nameStr = args.name ? `${theme.fg("accent", args.name)} ` : "";
-  const agentStr = args.agent
-    ? theme.fg("accent", args.agent as string) + " "
-    : "";
+  const agentStr = args.agent ? theme.fg("accent", args.agent as string) + " " : "";
   const tools = args.tools as string[] | undefined;
   const toolsStr = tools ? `[${tools.join(", ")}]` : "";
   const modelStr = args.model ? ` (${args.model})` : "";
@@ -81,6 +74,108 @@ export function renderSubagentCall(
 
 // ─── renderResult ──────────────────────────────────────────────────────────────
 
+function subagentResultIcon(details: SubagentDetails, theme: any): string {
+  if (details.isError) return theme.fg("error", "✗");
+  if (details.turnLimitExceeded) return theme.fg("warning", "⚠");
+  return theme.fg("success", "✓");
+}
+
+function toolCallSummary(details: SubagentDetails): string {
+  if (details.toolCallCount <= 0) return "";
+  return `${details.toolCallCount} tool call${details.toolCallCount !== 1 ? "s" : ""}`;
+}
+
+function expandedSubagentHeader(details: SubagentDetails, icon: string, theme: any): string {
+  let header = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
+  if (details.agent) header += ` ${theme.fg("accent", details.agent)}`;
+  if (details.isError && details.stopReason) {
+    header += ` ${theme.fg("error", `[${details.stopReason}]`)}`;
+  }
+  if (details.turnLimitExceeded) {
+    header += ` ${theme.fg("warning", `[turn limit: ${details.maxTurns ?? "configured"}]`)}`;
+  }
+  return header;
+}
+
+function expandedSubagentStats(details: SubagentDetails, tools: string): string[] {
+  const parts: string[] = [];
+  if (tools) parts.push(tools);
+  if (details.modelOverride) parts.push(`model: ${details.modelOverride}`);
+  if (details.sessionName) parts.push(`session: ${details.sessionName}`);
+  if (details.sessionFile) parts.push(details.sessionFile);
+  return parts;
+}
+
+function appendExpandedSubagentOutput(
+  container: Container,
+  details: SubagentDetails,
+  theme: any,
+): void {
+  container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
+  if (details.isError && details.errorMessage) {
+    container.addChild(new Text(theme.fg("error", `Error: ${details.errorMessage}`), 0, 0));
+    return;
+  }
+  if (!details.finalOutput || details.finalOutput === "(no output)") {
+    container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
+    return;
+  }
+  container.addChild(new Markdown(details.finalOutput.trim(), 0, 0, getMarkdownTheme()));
+}
+
+function renderExpandedSubagentResult(
+  details: SubagentDetails,
+  icon: string,
+  usage: string,
+  tools: string,
+  theme: any,
+): Container {
+  const container = new Container();
+  container.addChild(new Text(expandedSubagentHeader(details, icon, theme), 0, 0));
+
+  const statParts = expandedSubagentStats(details, tools);
+  if (statParts.length > 0) {
+    container.addChild(new Text(theme.fg("muted", statParts.join(" · ")), 0, 0));
+  }
+
+  container.addChild(new Spacer(1));
+  container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
+  container.addChild(new Text(theme.fg("dim", details.task), 0, 0));
+  container.addChild(new Spacer(1));
+  appendExpandedSubagentOutput(container, details, theme);
+
+  if (usage) {
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("dim", usage), 0, 0));
+  }
+  return container;
+}
+
+function renderCollapsedSubagentResult(
+  details: SubagentDetails,
+  icon: string,
+  usage: string,
+  tools: string,
+  theme: any,
+): Text {
+  // The call renderer already shows the truncated task; full output belongs in the expanded view.
+  let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
+  if (details.agent) text += ` ${theme.fg("accent", details.agent)}`;
+  if (details.isError) {
+    const message = details.errorMessage || details.stopReason || "error";
+    text += ` ${theme.fg("error", `[${message}]`)}`;
+  }
+  if (details.turnLimitExceeded) text += ` ${theme.fg("warning", "[turn limit]")}`;
+
+  const stats: string[] = [];
+  if (tools) stats.push(tools);
+  if (usage) stats.push(usage);
+  if (details.sessionName) stats.push(details.sessionName);
+  if (stats.length > 0) text += `\n${theme.fg("dim", stats.join(" · "))}`;
+  text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
+  return new Text(text, 0, 0);
+}
+
 export function renderSubagentResult(
   result: AgentToolResult<SubagentDetails>,
   { expanded }: { expanded: boolean },
@@ -88,103 +183,17 @@ export function renderSubagentResult(
   _ctx?: unknown,
 ) {
   const details = result.details as SubagentDetails | undefined;
-
   if (!details) {
     const text = result.content[0];
     return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
   }
 
-  const icon = details.isError
-    ? theme.fg("error", "✗")
-    : details.turnLimitExceeded
-      ? theme.fg("warning", "⚠")
-      : theme.fg("success", "✓");
-
-  const usageStr = formatUsageStats(details.usage, details.model);
-  const toolsStr =
-    details.toolCallCount > 0
-      ? `${details.toolCallCount} tool call${details.toolCallCount !== 1 ? "s" : ""}`
-      : "";
-
-  if (expanded) {
-    const mdTheme = getMarkdownTheme();
-    const container = new Container();
-
-    // Header
-    let header = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
-    if (details.agent) {
-      header += ` ${theme.fg("accent", details.agent)}`;
-    }
-    if (details.isError && details.stopReason) {
-      header += ` ${theme.fg("error", `[${details.stopReason}]`)}`;
-    }
-    if (details.turnLimitExceeded) {
-      header += ` ${theme.fg("warning", `[turn limit: ${details.maxTurns ?? "configured"}]`)}`;
-    }
-    container.addChild(new Text(header, 0, 0));
-
-    // Stats line
-    const statParts: string[] = [];
-    if (toolsStr) statParts.push(toolsStr);
-    if (details.modelOverride) statParts.push(`model: ${details.modelOverride}`);
-    if (details.sessionName) statParts.push(`session: ${details.sessionName}`);
-    if (details.sessionFile) statParts.push(details.sessionFile);
-    if (statParts.length > 0) {
-      container.addChild(new Text(theme.fg("muted", statParts.join(" · ")), 0, 0));
-    }
-
-    container.addChild(new Spacer(1));
-
-    // Task
-    container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
-    container.addChild(new Text(theme.fg("dim", details.task), 0, 0));
-    container.addChild(new Spacer(1));
-
-    // Output
-    container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
-    if (details.isError && details.errorMessage) {
-      container.addChild(new Text(theme.fg("error", `Error: ${details.errorMessage}`), 0, 0));
-    } else if (!details.finalOutput || details.finalOutput === "(no output)") {
-      container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
-    } else {
-      container.addChild(new Markdown(details.finalOutput.trim(), 0, 0, mdTheme));
-    }
-
-    // Usage
-    if (usageStr) {
-      container.addChild(new Spacer(1));
-      container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
-    }
-
-    return container;
-  }
-
-  // Collapsed view
-  // Note: task preview is omitted here — renderSubagentCall already shows it above.
-  let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
-  if (details.agent) {
-    text += ` ${theme.fg("accent", details.agent)}`;
-  }
-  if (details.isError) {
-    const msg = details.errorMessage || details.stopReason || "error";
-    text += ` ${theme.fg("error", `[${msg}]`)}`;
-  }
-  if (details.turnLimitExceeded) {
-    text += ` ${theme.fg("warning", "[turn limit]")}`;
-  }
-
-  // Keep the collapsed row mechanical. The call renderer above already shows
-  // the truncated task; full subagent output belongs in the expanded view.
-  const statsLine: string[] = [];
-  if (toolsStr) statsLine.push(toolsStr);
-  if (usageStr) statsLine.push(usageStr);
-  if (details.sessionName) statsLine.push(details.sessionName);
-  if (statsLine.length > 0) {
-    text += `\n${theme.fg("dim", statsLine.join(" · "))}`;
-  }
-
-  text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
-  return new Text(text, 0, 0);
+  const icon = subagentResultIcon(details, theme);
+  const usage = formatUsageStats(details.usage, details.model);
+  const tools = toolCallSummary(details);
+  return expanded
+    ? renderExpandedSubagentResult(details, icon, usage, tools, theme)
+    : renderCollapsedSubagentResult(details, icon, usage, tools, theme);
 }
 
 interface ToolRenderContext {
@@ -225,10 +234,11 @@ export function renderSubagentStartResult(
   const details = result.details;
   const status = details?.status;
   const jobId = details?.jobId;
-  const header = `${jobStatusIcon(status, theme)} ${theme.fg("toolTitle", theme.bold("subagent start"))}`
-    + (details?.name ? ` ${theme.fg("accent", details.name)}` : "")
-    + (status ? ` ${theme.fg("muted", `[${status}]`)}` : "")
-    + (jobId ? ` ${theme.fg("dim", jobId)}` : "");
+  const header =
+    `${jobStatusIcon(status, theme)} ${theme.fg("toolTitle", theme.bold("subagent start"))}` +
+    (details?.name ? ` ${theme.fg("accent", details.name)}` : "") +
+    (status ? ` ${theme.fg("muted", `[${status}]`)}` : "") +
+    (jobId ? ` ${theme.fg("dim", jobId)}` : "");
 
   if (!expanded) {
     return new Text(`${header}\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`, 0, 0);
@@ -236,9 +246,7 @@ export function renderSubagentStartResult(
 
   const container = new Container();
   container.addChild(new Text(header, 0, 0));
-  const task = typeof context?.args?.task === "string"
-    ? context.args.task
-    : details?.task ?? "";
+  const task = typeof context?.args?.task === "string" ? context.args.task : (details?.task ?? "");
   if (task) {
     container.addChild(new Spacer(1));
     container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
@@ -253,10 +261,7 @@ export function renderSubagentStartResult(
   return container;
 }
 
-export function renderSubagentJobCall(
-  args: { action?: string; job_id?: string },
-  theme: any,
-) {
+export function renderSubagentJobCall(args: { action?: string; job_id?: string }, theme: any) {
   const action = args.action ?? "inspect";
   const jobId = args.job_id ? ` ${theme.fg("dim", args.job_id)}` : "";
   return new Text(
