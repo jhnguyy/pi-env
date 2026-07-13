@@ -101,10 +101,8 @@ import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
 import type { ValidationResult } from "./types";
 import {
-  makeEffectToolingDiagnostics,
-  makeToolingOtelLayer,
+  makeToolingTelemetryRuntime,
   noopToolingDiagnostics,
-  resolveToolingOtelConfig,
   type ToolingDiagnostics,
 } from "../../../src/telemetry/tooling.js";
 
@@ -527,22 +525,16 @@ export function runSkillBuild(
   params: SkillBuildParams,
   options: SkillBuildOptions,
 ): Promise<TextResult> {
-  const program = resolveToolingOtelConfig(options.env ?? process.env).pipe(
-    Effect.flatMap((config) => {
-      const diagnostics = makeEffectToolingDiagnostics({ telemetryEnabled: config.enabled });
-      const workflow = executeSkillBuildEffect(pi, params, options, diagnostics);
-      return config.enabled
-        ? workflow.pipe(
-            Effect.provide(
-              makeToolingOtelLayer({
-                config,
-                exporter: options.telemetryExporter,
-                serviceName: "pi-env-skill-builder",
-              }),
-            ),
-          )
-        : workflow;
-    }),
+  const program = makeToolingTelemetryRuntime({
+    env: options.env ?? process.env,
+    exporter: options.telemetryExporter,
+    serviceName: "pi-env-skill-builder",
+  }).pipe(
+    Effect.flatMap((runtime) =>
+      runtime
+        .provide(executeSkillBuildEffect(pi, params, options, runtime.diagnostics))
+        .pipe(Effect.ensuring(runtime.disposeEffect)),
+    ),
   );
   return Effect.runPromise(program, { signal: options.signal });
 }
