@@ -70,7 +70,7 @@ describe("subagent extension session lifecycle", () => {
     await staleStart;
 
     const result = await startTool.execute("after", { name: "after", task: "x" }, undefined, undefined, ctx);
-    expect(result.details).toEqual({ status: "inactive" });
+    expect(result.details).toMatchObject({ status: "inactive", name: "after", task: "x" });
     if (oldManager) await originalShutdown.call(oldManager);
   });
 
@@ -81,23 +81,36 @@ describe("subagent extension session lifecycle", () => {
     const startSession = harness.handlers.get("session_start")!;
     const shutdownSession = harness.handlers.get("session_shutdown")!;
     const startTool = harness.tools.get("subagent_start");
+    const jobTool = harness.tools.get("subagent_job");
     const ctx = sessionContext(directory);
 
     const beforeStart = await startTool.execute("before", { name: "before", task: "x" }, undefined, undefined, ctx);
-    expect(beforeStart.details).toEqual({ status: "inactive" });
+    expect(beforeStart.details).toMatchObject({ status: "inactive", name: "before", task: "x" });
 
     await startSession({ type: "session_start" }, ctx);
     const shutdown = shutdownSession({ type: "session_shutdown" }, ctx);
     const duringShutdown = await startTool.execute("during", { name: "during", task: "x" }, undefined, undefined, ctx);
-    expect(duringShutdown.details).toEqual({ status: "shutting-down" });
+    expect(duringShutdown.details).toMatchObject({ status: "shutting-down" });
     await shutdown;
 
     const afterShutdown = await startTool.execute("after", { name: "after", task: "x" }, undefined, undefined, ctx);
-    expect(afterShutdown.details).toEqual({ status: "inactive" });
+    expect(afterShutdown.details).toMatchObject({ status: "inactive" });
 
     await startSession({ type: "session_start" }, ctx);
     const active = await startTool.execute("active", { name: "active", task: "x" }, undefined, undefined, ctx);
     expect(active.details.jobId).toEqual(expect.any(String));
+    const status = await jobTool.execute(
+      "status",
+      { action: "status", job_id: active.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(status.details).toMatchObject({
+      jobId: active.details.jobId,
+      name: "active",
+      task: "x",
+    });
     await shutdownSession({ type: "session_shutdown" }, ctx);
   });
 });

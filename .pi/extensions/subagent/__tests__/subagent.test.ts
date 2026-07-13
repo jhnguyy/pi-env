@@ -94,10 +94,12 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
     });
 
-    it("has execute, renderCall, and renderResult methods", () => {
-      expect(typeof registeredTool.execute).toBe("function");
-      expect(typeof registeredTool.renderCall).toBe("function");
-      expect(typeof registeredTool.renderResult).toBe("function");
+    it("registers bounded renderers for every subagent tool", () => {
+      for (const tool of registeredTools.values()) {
+        expect(typeof tool.execute).toBe("function");
+        expect(typeof tool.renderCall).toBe("function");
+        expect(typeof tool.renderResult).toBe("function");
+      }
     });
 
     it("has a description string", () => {
@@ -407,6 +409,88 @@ describeIfEnabled("subagent", "subagent extension", () => {
         mockCtx,
       );
       expect(result.details.task).toBe("original task text");
+    });
+  });
+
+  // ─── async tool rendering ────────────────────────────────────────────────
+
+  describe("async tool rendering", () => {
+    it("keeps subagent_start arguments bounded and omits the system prompt", () => {
+      const startTool = registeredTools.get("subagent_start");
+      const longTask = "A".repeat(500);
+      const rendered = startTool.renderCall(
+        { name: "audit", task: longTask, system_prompt: "private context" },
+        mockTheme,
+      );
+      const text = extractText(rendered);
+      expect(text).toContain("audit");
+      expect(text).toContain("...");
+      expect(text).not.toContain("A".repeat(100));
+      expect(text).not.toContain("private context");
+    });
+
+    it("expands subagent_start task and status without leaking them while collapsed", () => {
+      const startTool = registeredTools.get("subagent_start");
+      const result = {
+        content: [{ type: "text", text: "Started subagent job job-1 (audit)." }],
+        details: { jobId: "job-1", status: "queued", name: "audit" },
+      };
+      const context = { args: { task: "full delegated task" } };
+      const collapsed = extractText(startTool.renderResult(result, {}, mockTheme, context));
+      expect(collapsed).toContain("audit");
+      expect(collapsed).toContain("queued");
+      expect(collapsed).toContain("ctrl+o");
+      expect(collapsed).not.toContain("full delegated task");
+      expect(collapsed).not.toContain("Started subagent job");
+
+      const expanded = extractText(startTool.renderResult(result, { expanded: true }, mockTheme, context));
+      expect(expanded).toContain("full delegated task");
+      expect(expanded).toContain("Started subagent job");
+    });
+
+    it("keeps subagent_job output collapsed and reveals full content on expansion", () => {
+      const jobTool = registeredTools.get("subagent_job");
+      const longTask = `inspect ${"B".repeat(500)}`;
+      const fullOutput = `full child output\n${"C".repeat(500)}`;
+      const result = {
+        content: [{ type: "text", text: fullOutput }],
+        details: {
+          jobId: "job-1",
+          status: "completed",
+          name: "audit",
+          task: longTask,
+          toolCallCount: 6,
+          usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 4 },
+          model: "test/model",
+          sessionName: "sub-audit",
+        },
+      };
+
+      const collapsed = extractText(jobTool.renderResult(result, {}, mockTheme));
+      expect(collapsed).toContain("audit");
+      expect(collapsed).toContain("6 tool calls");
+      expect(collapsed).toContain("4 turns");
+      expect(collapsed).toContain("inspect");
+      expect(collapsed).toContain("ctrl+o");
+      expect(collapsed).not.toContain("B".repeat(100));
+      expect(collapsed).not.toContain("full child output");
+      expect(collapsed).not.toContain("C".repeat(100));
+
+      const expanded = extractText(jobTool.renderResult(result, { expanded: true }, mockTheme));
+      expect(expanded).toContain(longTask);
+      expect(expanded).toContain(fullOutput);
+    });
+
+    it("renders subagent_job calls without a JSON argument dump", () => {
+      const jobTool = registeredTools.get("subagent_job");
+      const text = extractText(jobTool.renderCall(
+        { action: "wait", job_id: "job-1" },
+        mockTheme,
+      ));
+      expect(text).toContain("subagent job");
+      expect(text).toContain("wait");
+      expect(text).toContain("job-1");
+      expect(text).not.toContain("{");
     });
   });
 
