@@ -165,6 +165,14 @@ describe("safe analyze policy", () => {
 });
 
 describe("analyze supervisor", () => {
+  it("reports worker spawn failures through the supervisor boundary", async () => {
+    await expect(
+      superviseAnalyze(safeRequest(fixtureRoot()), {
+        env: { ...disabledEnv, PI_ENV_NODE_BIN: "/definitely/missing/pi-env-node" },
+      }),
+    ).rejects.toMatchObject({ kind: "process" });
+  });
+
   it("accepts valid bounded worker protocol and ignores NODE_EXECUTABLE", async () => {
     const cwd = fixtureRoot();
     expect(process.env.PI_ENV_NODE_BIN).toBeTruthy();
@@ -206,6 +214,27 @@ describe("analyze supervisor", () => {
         env: disabledEnv,
       }),
     ).rejects.toThrow("invalid protocol");
+  });
+
+  it.runIf(process.platform !== "win32")("cleans descendants after a valid worker exits successfully", async () => {
+    const cwd = fixtureRoot();
+    const pidFile = join(cwd, "successful-descendant.pid");
+    const worker = writeWorker(
+      cwd,
+      `const { spawn } = await import("node:child_process");
+const { writeFileSync } = await import("node:fs");
+const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+descendant.unref();
+writeFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));
+emit({ version: 1, type: "started", runId: request.runId });
+emit({ version: 1, type: "result", runId: request.runId, result: ${emptyResult} });
+emit({ version: 1, type: "complete", runId: request.runId });`,
+    );
+    await expect(
+      superviseAnalyze(safeRequest(cwd), { workerPath: worker, env: disabledEnv }),
+    ).resolves.toMatchObject({ summary: { failures: 0 } });
+    const descendantPid = Number(readFileSync(pidFile, "utf8"));
+    await waitFor(() => !isAlive(descendantPid));
   });
 
   it("kills a worker that exceeds cumulative output bounds", async () => {

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
-import { Effect } from "effect";
+import { Effect, Exit, Scope } from "effect";
 import {
   AnalyzeWorkerMessageType,
   AnalyzeProtocolPhase,
@@ -26,6 +26,7 @@ import {
 } from "./diagnostics.js";
 import { AnalysisJournal, journalSink } from "./journal.js";
 import { makeAnalyzeOtelLayer, resolveAnalyzeOtelConfig } from "./otel.js";
+import { scopedChildProcess } from "../process/platform.js";
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -71,35 +72,6 @@ function defaultJournalDirectory(env: Readonly<Record<string, string | undefined
     "pi-env",
     "analyze",
   );
-}
-
-function processExists(pid: number, detached: boolean): boolean {
-  try {
-    process.kill(detached && process.platform !== "win32" ? -pid : pid, 0);
-    return true;
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ESRCH") return false;
-    return true;
-  }
-}
-
-function signalProcess(pid: number, detached: boolean, signal: NodeJS.Signals): void {
-  try {
-    process.kill(detached && process.platform !== "win32" ? -pid : pid, signal);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== "ESRCH") throw cause;
-  }
-}
-
-async function terminateProcessGroup(child: ChildProcess, detached: boolean): Promise<void> {
-  const pid = child.pid;
-  if (pid === undefined || !Number.isInteger(pid) || pid <= 0) return;
-  signalProcess(pid, detached, "SIGTERM");
-  const deadline = Date.now() + ANALYZE_LIMITS.terminationGraceMs;
-  while (Date.now() < deadline && processExists(pid, detached)) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  if (processExists(pid, detached)) signalProcess(pid, detached, "SIGKILL");
 }
 
 function terminationReason(error: AnalyzeSupervisorError): AnalyzeTerminationReason {
@@ -197,23 +169,32 @@ export async function superviseAnalyze(
     }
 
     const node = env.PI_ENV_NODE_BIN ?? process.execPath;
-    const detached = process.platform !== "win32";
+    const processScope = await Effect.runPromise(Scope.make());
+    let processScopeClosed: Promise<void> | undefined;
+    const closeProcessScope = (): Promise<void> => {
+      processScopeClosed ??= Effect.runPromise(Scope.close(processScope, Exit.void));
+      return processScopeClosed;
+    };
     let child: ChildProcess;
     try {
-      child = spawn(
-        node,
-        [
-          `--max-old-space-size=${ANALYZE_LIMITS.maxMemoryMb}`,
-          options.workerPath ?? analyzeWorkerPath(env),
-        ],
-        {
-          cwd: request.cwd,
-          detached,
-          env: { ...process.env, ...env },
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      );
+      child = await Effect.runPromise(Scope.provide(
+        scopedChildProcess(
+          node,
+          [
+            `--max-old-space-size=${ANALYZE_LIMITS.maxMemoryMb}`,
+            options.workerPath ?? analyzeWorkerPath(env),
+          ],
+          {
+            cwd: request.cwd,
+            env: { ...process.env, ...env },
+            stdio: ["pipe", "pipe", "pipe"],
+            killGraceMs: ANALYZE_LIMITS.terminationGraceMs,
+          },
+        ),
+        processScope,
+      ));
     } catch {
+      await closeProcessScope().catch(() => undefined);
       const error = new AnalyzeSupervisorError("process", "failed to spawn analyze worker");
       await finish(
         AnalyzeDiagnosticEventType.RunTerminated,
@@ -236,7 +217,7 @@ export async function superviseAnalyze(
       if (stopping !== undefined) return stopping;
       failure = new AnalyzeSupervisorError(kind, message);
       child.stdin?.destroy();
-      stopping = terminateProcessGroup(child, detached).catch(() => undefined);
+      stopping = closeProcessScope().catch(() => undefined);
       return stopping;
     };
 
@@ -248,6 +229,7 @@ export async function superviseAnalyze(
       void stop("cancelled", "analyze request was cancelled");
     };
     options.signal?.addEventListener("abort", abort, { once: true });
+    if (options.signal?.aborted) abort();
 
     child.once("error", () => {
       void stop("process", "analyze worker failed to spawn");
@@ -303,6 +285,7 @@ export async function superviseAnalyze(
     }
 
     await waitForClose(child);
+    await closeProcessScope().catch(() => undefined);
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
     await protocolQueue;
