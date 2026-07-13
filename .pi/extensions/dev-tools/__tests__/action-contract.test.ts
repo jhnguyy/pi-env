@@ -18,11 +18,11 @@ describeIfEnabled("dev-tools", "action contract", () => {
     expect(getRegisteredActions().sort()).toEqual([...DEV_TOOLS_ACTIONS].sort());
   });
 
-  it("defines path cardinality in one public contract table", () => {
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Diagnostics].pathMode).toBe(DevToolsPathMode.Many);
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Status].pathMode).toBe(DevToolsPathMode.None);
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.References].pathMode).toBe(DevToolsPathMode.Single);
-    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Symbols].pathMode).toBe(DevToolsPathMode.Single);
+  it("defines request requirements in one public contract table", () => {
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Diagnostics]).toMatchObject({ pathMode: DevToolsPathMode.Many, requiresPath: true });
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Status]).toMatchObject({ pathMode: DevToolsPathMode.None, requiresPath: false, needsPosition: false });
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.References]).toMatchObject({ pathMode: DevToolsPathMode.Single, requiresPath: true, needsPosition: true });
+    expect(DEV_TOOLS_ACTION_CONTRACTS[DevToolsAction.Symbols]).toMatchObject({ pathMode: DevToolsPathMode.Single, requiresPath: false, requiresPathOrQuery: true });
   });
 
   it("builds the tool schema from shared parameter descriptions", () => {
