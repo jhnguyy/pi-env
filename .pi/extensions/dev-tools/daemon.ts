@@ -24,6 +24,8 @@ import { createServer, type Socket, type Server } from "node:net";
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { Data, Effect, Result } from "effect";
+
 import { LspBackend } from "./backend";
 import { BACKEND_CONFIGS, BackendMode, type LspBackendConfig } from "./backend-configs";
 import { FileCache } from "./file-cache";
@@ -33,6 +35,16 @@ import "./register-actions"; // side-effect: populates the action registry
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
 import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
 import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
+import {
+  makeToolingTelemetryRuntime,
+  noopToolingTelemetryRuntime,
+  type ToolingTelemetryRuntime,
+} from "../../../src/telemetry/tooling.js";
+import {
+  DevToolsSpanName,
+  runWithDevToolsParentSpan,
+  withSafeDevToolsSpan,
+} from "./telemetry";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -44,6 +56,15 @@ function lspIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
 }
 /** Max bytes to buffer per connection before disconnecting. Prevents OOM from malformed clients. */
 const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
+
+function telemetryAction(action: string): string {
+  if (action === "shutdown") return action;
+  return getAction(action as Parameters<typeof getAction>[0]) ? action : "unknown";
+}
+
+class DaemonDispatchFailure extends Data.TaggedError("DaemonDispatchFailure")<{
+  readonly cause: unknown;
+}> {}
 
 // ─── Per-backend LSP capabilities ─────────────────────────────────────────────
 
@@ -64,9 +85,11 @@ export class LspDaemon {
     private socketPath = SOCKET_PATH,
     private pidPath = PID_PATH,
     private idleTimeoutMs = lspIdleTimeoutMs(),
+    private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
   ) {
-    this.backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[])
-      .map((config) => new LspBackend(config));
+    this.backends = (
+      BACKEND_CONFIGS.filter((config) => config.mode === BackendMode.Lsp) as LspBackendConfig[]
+    ).map((config) => new LspBackend(config, telemetry));
   }
 
   /** Return the backend that handles this file. Throws if no backend matches. */
@@ -140,9 +163,40 @@ export class LspDaemon {
 
     let response: DaemonResponse;
     try {
-      response = await this.dispatch(req);
-    } catch (err: unknown) {
-      response = errorResponse(req.id, err instanceof Error ? err.message : "Unknown error");
+      const dispatchWithoutParent = () =>
+        Effect.tryPromise({
+          try: () => this.dispatch(req),
+          catch: (cause) => new DaemonDispatchFailure({ cause }),
+        });
+      const dispatch = Effect.currentSpan.pipe(
+        Effect.matchEffect({
+          onFailure: dispatchWithoutParent,
+          onSuccess: (parent) =>
+            Effect.tryPromise({
+              try: () => runWithDevToolsParentSpan(parent, () => this.dispatch(req)),
+              catch: (cause) => new DaemonDispatchFailure({ cause }),
+            }),
+        }),
+      );
+      response = await Effect.runPromise(
+        this.telemetry.provide(
+          withSafeDevToolsSpan(
+            this.telemetry.diagnostics,
+            DevToolsSpanName.DaemonRequest,
+            { operation: "daemon_request", action: telemetryAction(req.action) },
+            dispatch,
+            () => "dispatch",
+            (response) =>
+              response.ok ? { outcome: "success" } : { outcome: "failure", error_kind: "response" },
+          ),
+        ),
+      );
+    } catch (error: unknown) {
+      const cause = error instanceof DaemonDispatchFailure ? error.cause : error;
+      response = errorResponse(
+        req.id,
+        cause instanceof Error ? cause.message : "Unknown error",
+      );
     }
 
     const serialized = serializeResponse(response);
@@ -197,6 +251,7 @@ export class LspDaemon {
       this.sockets.clear();
       if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
       removeStaleArtifacts([this.socketPath, this.pidPath]);
+      await Effect.runPromise(this.telemetry.disposeEffect);
     })();
     return this.shutdownPromise;
   }
@@ -207,11 +262,33 @@ export class LspDaemon {
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMain) {
-  const daemon = new LspDaemon();
-  process.on("SIGTERM", () => void daemon.shutdown().then(() => process.exit(0)));
-  process.on("SIGINT", () => void daemon.shutdown().then(() => process.exit(0)));
-  daemon.start().catch((err) => {
-    console.error("Daemon failed to start:", err);
+  const main = async () => {
+    const configured = await Effect.runPromise(
+      Effect.result(
+        makeToolingTelemetryRuntime({
+          env: process.env,
+          serviceName: "pi-env-dev-tools-daemon",
+        }),
+      ),
+    );
+    const telemetry = Result.isFailure(configured)
+      ? noopToolingTelemetryRuntime
+      : configured.success;
+    if (Result.isFailure(configured)) {
+      console.warn("[dev-tools-daemon] telemetry configuration invalid; telemetry disabled");
+    }
+    const daemon = new LspDaemon(undefined, undefined, undefined, telemetry);
+    process.on("SIGTERM", () => void daemon.shutdown().then(() => process.exit(0)));
+    process.on("SIGINT", () => void daemon.shutdown().then(() => process.exit(0)));
+    try {
+      await daemon.start();
+    } catch (error) {
+      await daemon.shutdown();
+      throw error;
+    }
+  };
+  main().catch((error) => {
+    console.error("Daemon failed to start:", error);
     process.exit(1);
   });
 }

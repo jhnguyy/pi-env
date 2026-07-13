@@ -141,6 +141,12 @@ export interface ToolingTelemetryRuntime {
   readonly disposeEffect: Effect.Effect<void>;
 }
 
+export const noopToolingTelemetryRuntime: ToolingTelemetryRuntime = {
+  diagnostics: noopToolingDiagnostics,
+  provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
+  disposeEffect: Effect.void,
+};
+
 export function makeToolingTelemetryRuntime(options: {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly serviceName: string;
@@ -149,13 +155,7 @@ export function makeToolingTelemetryRuntime(options: {
 }): Effect.Effect<ToolingTelemetryRuntime, ToolingOtelConfigError> {
   return resolveToolingOtelConfig(options.env).pipe(
     Effect.map((config) => {
-      if (!config.enabled) {
-        return {
-          diagnostics: noopToolingDiagnostics,
-          provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
-          disposeEffect: Effect.void,
-        } satisfies ToolingTelemetryRuntime;
-      }
+      if (!config.enabled) return noopToolingTelemetryRuntime;
 
       const runtime = ManagedRuntime.make(
         makeToolingOtelLayer({

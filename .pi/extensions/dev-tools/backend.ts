@@ -16,6 +16,15 @@ import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
 import { findNodeBinaryLite } from "../_shared/node-bin-lite";
+import {
+  noopToolingTelemetryRuntime,
+  type ToolingTelemetryRuntime,
+} from "../../../src/telemetry/tooling.js";
+import {
+  DevToolsSpanName,
+  inheritDevToolsParentSpan,
+  withSafeDevToolsSpan,
+} from "./telemetry";
 
 export const LSP_INIT_TIMEOUT_MS = 10_000;
 export const LSP_REQUEST_TIMEOUT_MS = 5_000;
@@ -126,7 +135,10 @@ export class LspBackend {
   private readonly rootMarkers: string[];
   readonly supportsWorkspaceSymbols: boolean;
 
-  constructor(config: LspBackendConfig) {
+  constructor(
+    config: LspBackendConfig,
+    private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
+  ) {
     this.name = config.name;
     this.binaryName = config.binaryName;
     this.binaryArgs = config.binaryArgs;
@@ -143,6 +155,10 @@ export class LspBackend {
       (path) => this.getLanguageId(path),
       (path) => this.findProjectRoot(path),
     );
+  }
+
+  private provideTelemetry<A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> {
+    return this.telemetry.provide(inheritDevToolsParentSpan(effect));
   }
 
   handles(filePath: string): boolean {
@@ -206,14 +222,20 @@ export class LspBackend {
             ready,
             resource: emptyResource(),
           };
-          return this.startEffect(generation, ready);
+          return withSafeDevToolsSpan(
+            this.telemetry.diagnostics,
+            DevToolsSpanName.BackendStartup,
+            { operation: "startup", backend: this.name },
+            this.startEffect(generation, ready),
+            (error) => error.kind,
+          );
         }
       }
     });
   }
 
   ensureStarted(): Promise<void> {
-    return Effect.runPromise(this.ensureStartedEffect());
+    return Effect.runPromise(this.provideTelemetry(this.ensureStartedEffect()));
   }
 
   private startEffect(
@@ -285,7 +307,13 @@ export class LspBackend {
       });
       owned.listeners = listeners;
       yield* this.installResourceEffect(generation, { listeners });
-      yield* this.initializeEffect(generation);
+      yield* withSafeDevToolsSpan(
+        this.telemetry.diagnostics,
+        DevToolsSpanName.BackendInitialize,
+        { operation: "initialize", backend: this.name, method: "initialize" },
+        this.initializeEffect(generation),
+        (error) => error.kind,
+      );
       yield* this.publishRunningEffect(generation, ready);
     });
 
@@ -541,7 +569,7 @@ export class LspBackend {
   }
 
   ensureFile(absolutePath: string): Promise<string> {
-    return Effect.runPromise(this.ensureFileEffect(absolutePath));
+    return Effect.runPromise(this.provideTelemetry(this.ensureFileEffect(absolutePath)));
   }
 
   closeFile(absolutePath: string): string | null {
@@ -557,7 +585,7 @@ export class LspBackend {
   }
 
   ensureReady(): Promise<void> {
-    return Effect.runPromise(this.ensureStartedEffect());
+    return Effect.runPromise(this.provideTelemetry(this.ensureStartedEffect()));
   }
 
   private addWorkspaceFolder(root: string): void {
@@ -608,15 +636,19 @@ export class LspBackend {
       }).pipe(
         Effect.tapError((error) => this.failRequestEffect(id, error, generation)),
       );
-      return send.pipe(
-        Effect.andThen(Deferred.await(deferred)),
-        Effect.catch(() => Effect.succeed(null)),
-      );
+      const request = send.pipe(Effect.andThen(Deferred.await(deferred)));
+      return withSafeDevToolsSpan(
+        this.telemetry.diagnostics,
+        DevToolsSpanName.BackendRequest,
+        { operation: "request", backend: this.name, method },
+        request,
+        (error) => error.kind,
+      ).pipe(Effect.catch(() => Effect.succeed(null)));
     });
   }
 
   lspRequest(method: string, params: unknown): Promise<LspMessage | null> {
-    return Effect.runPromise(this.lspRequestEffect(method, params));
+    return Effect.runPromise(this.provideTelemetry(this.lspRequestEffect(method, params)));
   }
 
   private onLspMessageEffect(message: LspMessage, generation: number): Effect.Effect<void> {
@@ -815,7 +847,7 @@ export class LspBackend {
       };
       this.lifecycle = stopping;
 
-      return Effect.gen({ self: this }, function* () {
+      const shutdown = Effect.gen({ self: this }, function* () {
         if (stopping.startup) {
           yield* Deferred.fail(
             stopping.startup,
@@ -854,10 +886,17 @@ export class LspBackend {
         });
         yield* Deferred.succeed(done, undefined).pipe(Effect.ignore);
       });
+      return withSafeDevToolsSpan(
+        this.telemetry.diagnostics,
+        DevToolsSpanName.BackendShutdown,
+        { operation: "shutdown", backend: this.name },
+        shutdown,
+        () => LspBackendErrorKind.Shutdown,
+      );
     });
   }
 
   shutdown(): Promise<void> {
-    return Effect.runPromise(this.shutdownEffect());
+    return Effect.runPromise(this.provideTelemetry(this.shutdownEffect()));
   }
 }
