@@ -55,9 +55,8 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
     const d = new LspDaemon(socketPath, pidPath, 60_000);
     const tsBackend = (d as any).backends[0];
 
-    // Mark TypeScript backend as ready without spawning a real process
-    tsBackend.lspReady = true;
-    tsBackend.started = true;
+    // Mark TypeScript backend as ready without coupling to lifecycle internals.
+    Object.defineProperty(tsBackend, "isRunning", { get: () => true });
 
     // Override lspRequest to return canned responses
     tsBackend.lspRequest = async (method: string, _params: any) => {
