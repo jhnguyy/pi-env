@@ -16,7 +16,7 @@ export const analyzeToolSchema = Type.Object({
   scope: Type.Optional(StringEnum(scopeNames, { description: "Analysis scope. Safe local mode supports diff and non-empty explicit paths; all requires strict containment." })),
   paths: Type.Optional(Type.Array(Type.String(), { description: "Workspace-relative files or directories for paths scope." })),
   ref: Type.Optional(Type.String({ description: "Diff base ref. Defaults to main." })),
-  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks must be explicit. Safe local mode permits only complexity and async-risk; other checks require strict containment." })),
+  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks must be explicit. Safe local mode permits complexity, async-risk, and scoped duplicates; other checks require strict containment." })),
   type_threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1, description: "Structural type similarity threshold; requires strict containment." })),
   max_memory_mb: Type.Optional(Type.Integer({ minimum: 1, description: "Requested worker heap cap. Safe local mode always clamps to 512 MiB." })),
   profile: Type.Optional(Type.Boolean({ description: "Include timings and memory snapshots; requires strict containment." })),
@@ -64,7 +64,7 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
   return {
     name: "analyze",
     label: "Analyze",
-    description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity/async-risk checks on diff or workspace-relative paths; heavy checks and all scope fail closed without strict containment.",
+    description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity, async-risk, and/or scoped duplicates checks on diff or workspace-relative paths; semantic/external checks and all scope fail closed without strict containment.",
     parameters: analyzeToolSchema,
     execute: async (_toolCallId, params, signal) => {
       signal?.throwIfAborted();
@@ -93,7 +93,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...tool,
     promptSnippet: "Run bounded code analysis against a worktree or project path",
-    promptGuidelines: ["Use explicit complexity and/or async-risk checks with diff or paths scope. Heavy checks and all scope require strict containment and otherwise fail closed."],
+    promptGuidelines: ["Use explicit complexity, async-risk, and/or scoped duplicates checks with diff or paths scope. Use path '.' for a bounded whole-source corpus. Semantic/external checks and all scope require strict containment and otherwise fail closed."],
   });
   registerAgentToolsOnSessionStart(pi, { tool, capabilities: [ToolCapability.Read, ToolCapability.Execute] });
 }

@@ -272,6 +272,9 @@ describe("analyze worker protocol", () => {
     scope: "diff",
     checks: ["complexity"],
     maxMemoryMb: 512,
+    maxSourceFiles: 1_024,
+    maxSourceFileBytes: 256 * 1024,
+    maxSourceBytes: 2 * 1024 * 1024,
     timeoutMs: 10_000,
   } as const;
 

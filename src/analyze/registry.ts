@@ -51,8 +51,8 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
   {
     name: AnalyzerName.Duplicates,
     defaultEnabled: true,
-    minimumTotalMemoryMb: 768,
-    project: ProjectRequirement.CorpusSyntax,
+    minimumTotalMemoryMb: 512,
+    project: ProjectRequirement.ScopedSyntax,
     run: (context) => internalEffect(AnalyzerName.Duplicates, context.project === undefined
       ? missingProject(AnalyzerName.Duplicates, "Duplicate analyzer requires a syntax project")
       : duplicatesEffect(context.project, context.cwd, context.scope)),

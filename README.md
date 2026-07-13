@@ -52,7 +52,7 @@ It takes a repository-wide lock in Git's common directory, so all worktrees run 
 
 Canonical verification phases are shared by local plans and CI and report elapsed time. Use `nub run verify:phase <phase-id>` for one focused standard phase. Testing policy is documented in [`docs/conventions/testing.md`](docs/conventions/testing.md).
 
-Analyze provides a bounded worker safe mode for explicit `complexity`/`async-risk` diff or path requests. Whole-workspace and heavier checks fail closed until a strict containment adapter exists. See [`docs/analyze.md`](docs/analyze.md).
+Analyze provides a bounded worker safe mode for explicit `complexity`, `async-risk`, and scoped `duplicates` diff or path requests. Safe syntax work is capped by file count plus per-file and aggregate source bytes; use path `.` for a bounded whole-source corpus. Semantic, external-tool, bundle, benchmark, profiling, and `all` requests fail closed until a strict containment adapter exists. See [`docs/analyze.md`](docs/analyze.md).
 
 See [`docs/container-image.md`](docs/container-image.md) for the container image contract.
 

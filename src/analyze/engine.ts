@@ -26,7 +26,7 @@ import {
   type MemorySnapshot,
   type ScopeMode,
 } from "./model.js";
-import { createAnalysisProjectEffect, ProjectRequirement, type Project } from "./program.js";
+import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget } from "./program.js";
 import { ProcessService, processServiceLayer, type streamProcessEffect } from "./process.js";
 import {
   analyzerDescriptor,
@@ -47,6 +47,7 @@ export interface AnalyzeOptions {
   profile?: boolean;
   benchmarks?: readonly BenchmarkConfig[];
   maxMemoryMb?: number;
+  sourceBudget?: SyntaxSourceBudget;
   externalTimeoutMs?: number;
 }
 
@@ -167,6 +168,14 @@ export const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): b
 export const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
   projectRequirement(checks) !== ProjectRequirement.None;
 
+const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0;
+
+function validSourceBudget(budget: SyntaxSourceBudget): boolean {
+  return positiveInteger(budget.maxFiles)
+    && positiveInteger(budget.maxFileBytes)
+    && positiveInteger(budget.maxTotalBytes);
+}
+
 function validateOptionsEffect(options: AnalyzeOptions): Effect.Effect<number, ConfigError> {
   const threshold = options.typeSimilarityThreshold;
   if (threshold !== undefined && (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)) {
@@ -177,6 +186,9 @@ function validateOptionsEffect(options: AnalyzeOptions): Effect.Effect<number, C
   const budget = options.maxMemoryMb ?? DEFAULT_MEMORY_MB;
   if (!Number.isInteger(budget) || budget <= 0)
     return Effect.fail(new ConfigError({ message: "maxMemoryMb must be a positive integer" }));
+  if (options.sourceBudget !== undefined && !validSourceBudget(options.sourceBudget)) {
+    return Effect.fail(new ConfigError({ message: "sourceBudget limits must be positive integers" }));
+  }
   if (
     options.externalTimeoutMs !== undefined &&
     (!Number.isInteger(options.externalTimeoutMs) || options.externalTimeoutMs < 1)
@@ -363,7 +375,7 @@ function setupAnalysis(
     const scope = yield* diagnostics.span(
       AnalyzeSpanName.Scope,
       { scope_mode: options.scope },
-      resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref),
+      resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref, options.sourceBudget?.maxFiles),
     );
     const scopeEnded = runtime.now();
     state = timing(state, options.profile === true, "scope", scopeStarted, scopeEnded);
@@ -423,7 +435,7 @@ function loadProjectIfNeeded(
           try: () =>
             seams.createAnalysisProject !== undefined
               ? seams.createAnalysisProject(options.cwd, plan.scope, requirement)
-              : createAnalysisProjectEffect(options.cwd, plan.scope, requirement),
+              : createAnalysisProjectEffect(options.cwd, plan.scope, requirement, options.sourceBudget),
           catch: toProgramError,
         });
         return yield* Effect.isEffect(created) ? created : Effect.succeed(created);
