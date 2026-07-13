@@ -13,6 +13,7 @@ import {
   SubagentJobStatus,
   type SubagentDetails,
   type SubagentJobRenderDetails,
+  type SubagentJobRenderStatus,
 } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -204,17 +205,19 @@ interface ToolRenderContext {
   args?: Record<string, unknown>;
 }
 
+const JobStatusPresentation: Partial<
+  Record<SubagentJobRenderStatus, { readonly color: string; readonly icon: string }>
+> = {
+  [SubagentJobStatus.Completed]: { color: "success", icon: "✓" },
+  [SubagentJobStatus.Failed]: { color: "error", icon: "✗" },
+  [SubagentJobStatus.Cancelled]: { color: "warning", icon: "⚠" },
+};
+
 function jobStatusIcon(status: SubagentJobRenderDetails["status"], theme: any): string {
-  switch (status) {
-    case SubagentJobStatus.Completed:
-      return theme.fg("success", "✓");
-    case SubagentJobStatus.Failed:
-      return theme.fg("error", "✗");
-    case SubagentJobStatus.Cancelled:
-      return theme.fg("warning", "⚠");
-    default:
-      return theme.fg("accent", "•");
-  }
+  const presentation = status === undefined ? undefined : JobStatusPresentation[status];
+  return presentation
+    ? theme.fg(presentation.color, presentation.icon)
+    : theme.fg("accent", "•");
 }
 
 function appendJobStats(parts: string[], details: SubagentJobRenderDetails): void {
