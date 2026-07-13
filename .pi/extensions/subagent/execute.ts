@@ -34,6 +34,8 @@ import {
   zeroUsage,
 } from "./usage";
 
+export const SUBAGENT_TELEMETRY_SERVICE_NAME = "pi-env-subagent" as const;
+
 const SubagentOperation = {
   Resolve: "resolve",
   Session: "session",
@@ -278,7 +280,7 @@ export function runSubagentEffect(
   return makeToolingTelemetryRuntime({
     env: options.env ?? process.env,
     exporter: options.telemetryExporter,
-    serviceName: "pi-env-subagent",
+    serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
   }).pipe(
     Effect.mapError(() => executionError(SubagentExecutionPhase.Session)),
     Effect.flatMap((runtime) => runWith(runtime).pipe(Effect.ensuring(runtime.disposeEffect))),

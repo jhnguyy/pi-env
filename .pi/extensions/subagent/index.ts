@@ -18,18 +18,11 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Effect, Result } from "effect";
 import { Type, type Static } from "typebox";
 
-import {
-  makeToolingTelemetryRuntime,
-  type ToolingTelemetryRuntime,
-} from "../../../src/telemetry/tooling";
-
 import { discoverAgents } from "./agents";
-import { createExecuteSubagent } from "./execute";
-import { formatJobToolContent, type SubagentJob, SubagentJobManager } from "./jobs";
-import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
+import { formatJobToolContent, type SubagentJob } from "./jobs";
+import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import {
   renderSubagentCall,
@@ -41,11 +34,9 @@ import {
 import {
   SubagentJobStatus,
   SubagentJobToolStatus,
-  SubagentSessionState,
   type SubagentJobRenderDetails,
-  type SubagentSessionState as SubagentSessionStateValue,
 } from "./types";
-import { SubagentUsageLedger } from "./usage";
+import { SubagentSessionRuntime } from "./session-runtime";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 
@@ -141,13 +132,10 @@ export default function (pi: ExtensionAPI) {
     registeredExtTools.set(registration.tool.name, registration);
   });
 
+  const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
+
   // Named execute function — stable reference (no recreation on re-register)
-  const ledger = new SubagentUsageLedger();
-  let telemetryRuntime: ToolingTelemetryRuntime | undefined;
-  const executeSubagent = createExecuteSubagent(registeredExtTools, ledger, () => telemetryRuntime);
-  let jobs: SubagentJobManager | undefined;
-  let sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
-  let lifecycleGeneration = 0;
+  const executeSubagent = runtime.execute.bind(runtime);
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
       name: "subagent",
@@ -166,28 +154,7 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (signal?.aborted) throw new Error("Subagent start aborted.");
-    if (sessionState !== SubagentSessionState.Active || !jobs) {
-      return {
-        content: [
-          { type: "text", text: "Cannot start a subagent job without an active parent session." },
-        ],
-        details: { status: sessionState, name: params.name, task: params.task },
-      };
-    }
-    const manager = jobs;
-    const cwd = resolveEffectiveCwd(params as SubagentParams, ctx.cwd);
-    if (!isResolutionOk(cwd)) {
-      return {
-        content: [{ type: "text", text: cwd.error.message }],
-        details: { status: cwd.error.reason, name: params.name, task: params.task },
-      };
-    }
-    const normalizedParams = { ...(params as SubagentParams), cwd: cwd.value };
-    const job = manager.start(normalizedParams, ctx);
-    return {
-      content: [{ type: "text", text: `Started subagent job ${job.id} (${job.name}).` }],
-      details: { jobId: job.id, status: job.status, name: job.name, task: params.task },
-    };
+    return runtime.startJob(params as SubagentParams, ctx);
   };
   const executeSubagentJob = async (
     _id: string,
@@ -196,12 +163,12 @@ export default function (pi: ExtensionAPI) {
   ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (params.action === SubagentJobAction.Usage) {
       return {
-        content: [{ type: "text", text: ledger.render() }],
+        content: [{ type: "text", text: runtime.usageText() }],
         details: { status: SubagentJobToolStatus.Usage },
       };
     }
     if (params.action === SubagentJobAction.List) {
-      const activeJobs = jobs?.list() ?? [];
+      const activeJobs = runtime.listJobs();
       const output = activeJobs.map(formatJobToolContent).join("\n") || "No subagent jobs.";
       return {
         content: [{ type: "text", text: output }],
@@ -210,13 +177,8 @@ export default function (pi: ExtensionAPI) {
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, and cancel.");
     if (params.action === SubagentJobAction.Wait) {
-      const manager = jobs;
-      if (!manager) throw new Error(`Unknown subagent job: ${params.job_id}`);
-      const outcome = await Effect.runPromise(
-        Effect.result(manager.waitEffect(params.job_id, signal)),
-      );
-      if (Result.isFailure(outcome)) {
-        const runningJob = manager.get(params.job_id);
+      const waited = await runtime.waitJob(params.job_id, signal);
+      if (waited.interrupted) {
         return {
           content: [
             {
@@ -224,22 +186,21 @@ export default function (pi: ExtensionAPI) {
               text: `Stopped waiting for subagent job ${params.job_id}; it is still running.`,
             },
           ],
-          details: runningJob
-            ? getJobRenderDetails(runningJob)
+          details: waited.job
+            ? getJobRenderDetails(waited.job)
             : { jobId: params.job_id, status: SubagentJobStatus.Running },
         };
       }
-      if (!outcome.success) throw new Error(`Unknown subagent job: ${params.job_id}`);
+      if (!waited.job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
-        content: [{ type: "text", text: formatJobToolContent(outcome.success) }],
-        details: getJobRenderDetails(outcome.success),
+        content: [{ type: "text", text: formatJobToolContent(waited.job) }],
+        details: getJobRenderDetails(waited.job),
       };
     }
-    const manager = jobs;
     const job =
       params.action === SubagentJobAction.Cancel
-        ? manager?.cancel(params.job_id)
-        : manager?.get(params.job_id);
+        ? runtime.cancelJob(params.job_id)
+        : runtime.getJob(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return {
       content: [{ type: "text", text: formatJobToolContent(job) }],
@@ -270,51 +231,12 @@ export default function (pi: ExtensionAPI) {
     renderCall: renderSubagentJobCall,
     renderResult: renderSubagentJobResult,
   });
-  pi.on("session_shutdown", async () => {
-    const generation = ++lifecycleGeneration;
-    sessionState = SubagentSessionState.ShuttingDown;
-    const manager = jobs;
-    const runtime = telemetryRuntime;
-    jobs = undefined;
-    telemetryRuntime = undefined;
-    try {
-      await manager?.shutdown();
-    } finally {
-      if (runtime) await Effect.runPromise(runtime.disposeEffect);
-      if (generation === lifecycleGeneration) {
-        ledger.clear();
-        sessionState = SubagentSessionState.Inactive;
-      }
-    }
-  });
+  pi.on("session_shutdown", async () => runtime.shutdownSession());
 
   // ── session_start: re-register with dynamic model + agent list ────────────
 
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {
-    const generation = ++lifecycleGeneration;
-    sessionState = SubagentSessionState.ShuttingDown;
-    const old = jobs;
-    const oldRuntime = telemetryRuntime;
-    jobs = undefined;
-    telemetryRuntime = undefined;
-    if (old) await old.shutdown();
-    if (oldRuntime) await Effect.runPromise(oldRuntime.disposeEffect);
-    if (generation !== lifecycleGeneration) return;
-
-    const nextRuntime = await Effect.runPromise(
-      makeToolingTelemetryRuntime({
-        env: process.env,
-        serviceName: "pi-env-subagent",
-      }),
-    );
-    if (generation !== lifecycleGeneration) {
-      await Effect.runPromise(nextRuntime.disposeEffect);
-      return;
-    }
-    ledger.clear();
-    telemetryRuntime = nextRuntime;
-    jobs = new SubagentJobManager(pi, registeredExtTools, undefined, ledger, nextRuntime);
-    sessionState = SubagentSessionState.Active;
+    if (!(await runtime.startSession())) return;
     // 1. Read enabled models and annotations from settings.json
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
     const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
