@@ -77,8 +77,6 @@ export interface EngineSeams {
     scope: Scope,
     requirement: ProjectRequirement,
   ) => ProjectFactoryResult;
-  /** @deprecated The full-project seam is retained for existing integrations. */
-  createProject?: (cwd: string) => Project | Effect.Effect<Project, ProgramError>;
   processRunner?: typeof streamProcessEffect;
   /** Additive seams; existing project and process seams remain supported. */
   runtime?: AnalysisRuntime;
@@ -425,9 +423,7 @@ function loadProjectIfNeeded(
           try: () =>
             seams.createAnalysisProject !== undefined
               ? seams.createAnalysisProject(options.cwd, plan.scope, requirement)
-              : seams.createProject !== undefined
-                ? seams.createProject(options.cwd)
-                : createAnalysisProjectEffect(options.cwd, plan.scope, requirement),
+              : createAnalysisProjectEffect(options.cwd, plan.scope, requirement),
           catch: toProgramError,
         });
         return yield* Effect.isEffect(created) ? created : Effect.succeed(created);
