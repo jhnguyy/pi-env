@@ -88,6 +88,34 @@ describe("persistent subagent sessions", () => {
     expect(entries.map((entry) => entry.data.status)).toEqual(["queued", "running", "failed"]);
   });
 
+  it("marks default job execution as asynchronous without changing custom runner ownership", async () => {
+    let executionMode: string | undefined;
+    const runner = (_params: any, _ctx: any, _tools: any, options: any) => {
+      executionMode = options.executionMode;
+      return Effect.succeed({
+        content: [],
+        details: {
+          name: "mode",
+          task: "x",
+          toolNames: [],
+          modelOverride: undefined,
+          finalOutput: "",
+          toolCallCount: 0,
+          usage: zeroUsage(),
+          isError: false,
+          turnLimitExceeded: false,
+        },
+      });
+    };
+    const jobs = new SubagentJobManager({ appendEntry: () => {} } as any, new Map(), runner);
+    const job = jobs.start({ name: "mode", task: "x" }, {} as any);
+
+    await jobs.wait(job.id);
+
+    expect(executionMode).toBe("async");
+    await jobs.shutdown();
+  });
+
   it("records unexpected Effect failures for later status inspection", async () => {
     const entries: Array<{ data: any }> = [];
     const runner = () => Effect.fail(new TestProviderUnavailable({ message: "provider unavailable" }));
@@ -99,8 +127,8 @@ describe("persistent subagent sessions", () => {
     await jobs.wait(job.id);
 
     expect(job.status).toBe("failed");
-    expect(job.errorMessage).toContain("provider unavailable");
-    expect(entries.at(-1)?.data.errorMessage).toContain("provider unavailable");
+    expect(job.errorMessage).toBe("TestProviderUnavailable");
+    expect(entries.at(-1)?.data.errorMessage).toBe("TestProviderUnavailable");
   });
 
   it("interrupts a wait without cancelling the job", async () => {

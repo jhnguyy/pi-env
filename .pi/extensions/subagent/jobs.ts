@@ -6,6 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Cause, Deferred, Effect, Exit, Queue, Scope } from "effect";
 
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
 import { SubagentJobWaitInterrupted } from "./errors";
 import { runSubagentEffect, type RunSubagentOptions } from "./execute";
 import type { SubagentParams } from "./resolver";
@@ -20,7 +21,7 @@ export const SubagentJobStatus = {
   Failed: "failed",
   Cancelled: "cancelled",
 } as const;
-export type SubagentJobStatus = typeof SubagentJobStatus[keyof typeof SubagentJobStatus];
+export type SubagentJobStatus = (typeof SubagentJobStatus)[keyof typeof SubagentJobStatus];
 
 export interface SubagentJob {
   id: string;
@@ -42,6 +43,17 @@ export type SubagentJobRunner = (
   options: RunSubagentOptions,
 ) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
 
+function safeJobFailureMessage(cause: Cause.Cause<unknown>): string {
+  for (const reason of cause.reasons) {
+    if (!Cause.isFailReason(reason)) continue;
+    const error = reason.error;
+    if (typeof error !== "object" || error === null || !("_tag" in error)) continue;
+    const tag = String(error._tag);
+    if (/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(tag)) return tag;
+  }
+  return "SubagentJobFailed";
+}
+
 /** Effect-owned FIFO scheduler scoped to one Pi session. */
 export class SubagentJobManager {
   private readonly jobs = new Map<string, SubagentJob>();
@@ -55,6 +67,7 @@ export class SubagentJobManager {
     private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     private readonly runJob: SubagentJobRunner = runSubagentEffect,
     private readonly ledger?: SubagentUsageLedger,
+    private readonly telemetryRuntime?: ToolingTelemetryRuntime,
   ) {
     const [queue, scope] = Effect.runSync(Effect.all([Queue.unbounded<string>(), Scope.make()]));
     this.queue = queue;
@@ -66,7 +79,9 @@ export class SubagentJobManager {
 
   start(params: SubagentParams, ctx: ExtensionContext): SubagentJob {
     const id = randomUUID().slice(0, 8);
-    const [done, cancelRequested] = Effect.runSync(Effect.all([Deferred.make<void>(), Deferred.make<void>()]));
+    const [done, cancelRequested] = Effect.runSync(
+      Effect.all([Deferred.make<void>(), Deferred.make<void>()]),
+    );
     const job: SubagentJob = {
       id,
       name: params.name ?? "unnamed",
@@ -87,10 +102,17 @@ export class SubagentJobManager {
     return job;
   }
 
-  get(id: string): SubagentJob | undefined { return this.jobs.get(id); }
-  list(): SubagentJob[] { return [...this.jobs.values()]; }
+  get(id: string): SubagentJob | undefined {
+    return this.jobs.get(id);
+  }
+  list(): SubagentJob[] {
+    return [...this.jobs.values()];
+  }
 
-  waitEffect(id: string, signal?: AbortSignal): Effect.Effect<SubagentJob | undefined, SubagentJobWaitInterrupted> {
+  waitEffect(
+    id: string,
+    signal?: AbortSignal,
+  ): Effect.Effect<SubagentJob | undefined, SubagentJobWaitInterrupted> {
     const job = this.jobs.get(id);
     if (!job) return Effect.sync(() => undefined);
     const waitForDone = Deferred.await(job.done).pipe(Effect.as(job));
@@ -137,64 +159,95 @@ export class SubagentJobManager {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownStarted = true;
     for (const job of this.jobs.values()) this.cancel(job.id);
-    this.shutdownPromise = Effect.runPromise(Effect.gen({ self: this }, function* () {
-      yield* Effect.all([...this.jobs.values()].map((job) => Deferred.await(job.done)), { discard: true });
-      yield* Scope.close(this.scope, Exit.void);
-    }));
+    this.shutdownPromise = Effect.runPromise(
+      Effect.gen({ self: this }, function* () {
+        yield* Effect.all(
+          [...this.jobs.values()].map((job) => Deferred.await(job.done)),
+          { discard: true },
+        );
+        yield* Scope.close(this.scope, Exit.void);
+      }),
+    );
     return this.shutdownPromise;
   }
 
   private worker(): Effect.Effect<void> {
-    return Effect.forever(Effect.gen({ self: this }, function* () {
-      const id = yield* Queue.take(this.queue);
-      const job = this.jobs.get(id);
-      const started = yield* Effect.sync(() => {
-        if (this.shutdownStarted || !job || job.status !== SubagentJobStatus.Queued) return false;
-        job.status = SubagentJobStatus.Running;
-        this.record(job);
-        return true;
-      });
-      if (job && started) yield* this.runEffect(job);
-    }));
+    return Effect.forever(
+      Effect.gen({ self: this }, function* () {
+        const id = yield* Queue.take(this.queue);
+        const job = this.jobs.get(id);
+        const started = yield* Effect.sync(() => {
+          if (this.shutdownStarted || !job || job.status !== SubagentJobStatus.Queued) return false;
+          job.status = SubagentJobStatus.Running;
+          this.record(job);
+          return true;
+        });
+        if (job && started) yield* this.runEffect(job);
+      }),
+    );
   }
 
   private runEffect(job: SubagentJob): Effect.Effect<void> {
     const controller = new AbortController();
-    const cancel = Deferred.await(job.cancelRequested).pipe(Effect.tap(() => Effect.sync(() => controller.abort())), Effect.flatMap(() => Effect.interrupt));
+    const cancel = Deferred.await(job.cancelRequested).pipe(
+      Effect.tap(() => Effect.sync(() => controller.abort())),
+      Effect.andThen(Effect.sleep(250)),
+      Effect.flatMap(() => Effect.interrupt),
+    );
     const run = this.runJob(job.params, job.ctx, this.registeredExtTools, {
       signal: controller.signal,
-      onUsage: (details) => { job.latestDetails = details; },
+      executionMode: "async",
+      telemetryRuntime: this.telemetryRuntime,
+      onUsage: (details) => {
+        job.latestDetails = details;
+      },
     }).pipe(Effect.raceFirst(cancel));
 
     return Effect.acquireUseRelease(
       Effect.void,
-      () => Effect.match(Effect.sandbox(Effect.onInterrupt(run, () => Effect.sync(() => {
-        job.status = SubagentJobStatus.Cancelled;
-        job.errorMessage = "Cancelled.";
-      }))), {
-        onSuccess: (result) => {
-          job.result = result;
-          job.latestDetails = result.details;
-          job.status = controller.signal.aborted
-            ? SubagentJobStatus.Cancelled
-            : result.details.isError ? SubagentJobStatus.Failed : SubagentJobStatus.Completed;
-        },
-        onFailure: (cause) => {
-          if (job.status !== SubagentJobStatus.Cancelled) {
-            job.status = SubagentJobStatus.Failed;
-            job.errorMessage = Cause.pretty(cause);
-          }
-        },
-      }),
-      () => Effect.yieldNow.pipe(Effect.andThen(Effect.sync(() => {
-        if (job.status === SubagentJobStatus.Running) {
-          job.status = SubagentJobStatus.Cancelled;
-          job.errorMessage = "Cancelled.";
-        }
-        if (job.latestDetails) this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
-        this.record(job);
-        Effect.runSync(Deferred.succeed(job.done, undefined));
-      }))),
+      () =>
+        Effect.match(
+          Effect.sandbox(
+            Effect.onInterrupt(run, () =>
+              Effect.sync(() => {
+                job.status = SubagentJobStatus.Cancelled;
+                job.errorMessage = "Cancelled.";
+              }),
+            ),
+          ),
+          {
+            onSuccess: (result) => {
+              job.result = result;
+              job.latestDetails = result.details;
+              job.status = controller.signal.aborted
+                ? SubagentJobStatus.Cancelled
+                : result.details.isError
+                  ? SubagentJobStatus.Failed
+                  : SubagentJobStatus.Completed;
+            },
+            onFailure: (cause) => {
+              if (job.status !== SubagentJobStatus.Cancelled) {
+                job.status = SubagentJobStatus.Failed;
+                job.errorMessage = safeJobFailureMessage(cause);
+              }
+            },
+          },
+        ),
+      () =>
+        Effect.yieldNow.pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              if (job.status === SubagentJobStatus.Running) {
+                job.status = SubagentJobStatus.Cancelled;
+                job.errorMessage = "Cancelled.";
+              }
+              if (job.latestDetails)
+                this.ledger?.record(job.id, SubagentUsageMode.Async, job.latestDetails);
+              this.record(job);
+              Effect.runSync(Deferred.succeed(job.done, undefined));
+            }),
+          ),
+        ),
     );
   }
 
@@ -206,7 +259,8 @@ export class SubagentJobManager {
       cwd: job.params.cwd ?? job.ctx.cwd,
       sessionFile: job.latestDetails?.sessionFile ?? job.result?.details.sessionFile,
       usage: job.latestDetails?.usage ?? job.result?.details.usage,
-      errorMessage: job.errorMessage ?? job.latestDetails?.errorMessage ?? job.result?.details.errorMessage,
+      errorMessage:
+        job.errorMessage ?? job.latestDetails?.errorMessage ?? job.result?.details.errorMessage,
     });
   }
 }
@@ -216,6 +270,6 @@ export function formatJobToolContent(job: SubagentJob): string {
   const session = details?.sessionFile ? `\nsession: ${details.sessionFile}` : "";
   const usage = details?.usage ? `\nusage: ${formatUsageCompact(details.usage)}` : "";
   const output = job.result?.content[0];
-  const text = output?.type === "text" ? output.text : job.errorMessage ?? "";
+  const text = output?.type === "text" ? output.text : (job.errorMessage ?? "");
   return `[${job.status}] ${job.id} ${job.name}${session}${usage}${text ? `\n${text}` : ""}`;
 }

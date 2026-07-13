@@ -13,14 +13,26 @@ import type {
 } from "@earendil-works/pi-agent-core";
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
+import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
+import { Data, Effect } from "effect";
 
+import {
+  makeToolingTelemetryRuntime,
+  type ToolingDiagnostics,
+  type ToolingTelemetryRuntime,
+} from "../../../src/telemetry/tooling";
 import { slugify } from "../_shared/slug";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { SubagentExecutionError, SubagentExecutionPhase } from "./errors";
 import type { SubagentDetails } from "./types";
 import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
-import { recordSubagentResult, SubagentRunAccumulator, SubagentUsageLedger, SubagentUsageMode, zeroUsage } from "./usage";
+import {
+  recordSubagentResult,
+  SubagentRunAccumulator,
+  SubagentUsageLedger,
+  SubagentUsageMode,
+  zeroUsage,
+} from "./usage";
 
 export function getSubagentSessionName(name: string): string {
   return `sub-${slugify(name, { fallback: "agent" })}`;
@@ -37,7 +49,11 @@ interface PersistentSubagentSession {
   name: string;
 }
 
-export function createPersistentSubagentSession(name: string, ctx: ExtensionContext, cwd = ctx.cwd): PersistentSubagentSession {
+export function createPersistentSubagentSession(
+  name: string,
+  ctx: ExtensionContext,
+  cwd = ctx.cwd,
+): PersistentSubagentSession {
   const manager = SessionManager.create(cwd, ctx.sessionManager.getSessionDir(), {
     parentSession: ctx.sessionManager.getSessionFile(),
   });
@@ -76,81 +92,161 @@ export interface RunSubagentOptions {
   signal?: AbortSignal;
   ledger?: SubagentUsageLedger;
   runId?: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  telemetryExporter?: SpanExporter;
+  telemetryRuntime?: ToolingTelemetryRuntime;
+  executionMode?: "sync" | "async";
 }
 
-/** Execute one subagent and record its complete transcript in a child session. */
-async function runSubagentPromise(
+class SubagentAgentLoopFailure extends Data.TaggedError("SubagentAgentLoopFailure")<{
+  readonly cause: unknown;
+}> {}
+
+function executionError(phase: SubagentExecutionPhase): SubagentExecutionError {
+  return new SubagentExecutionError({
+    phase,
+    message: `Subagent ${phase.replace("_", " ")} failed`,
+  });
+}
+
+function runSubagentWorkflow(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  options: RunSubagentOptions = {},
-): Promise<AgentToolResult<SubagentDetails>> {
-  const plan = resolveSubagentExecutionPlan(params, ctx, registeredExtTools);
-  if (!isResolutionOk(plan)) {
-    return {
-      content: [{ type: "text", text: plan.error.message }],
-      details: buildErrorDetails(params, plan.error.toolNames, plan.error.modelOverride ?? params.model, plan.error.reason),
-    };
-  }
-
-  const { tools: resolvedTools, toolNames, model: resolvedModel, systemPrompt, effectiveCwd } = plan.value;
-  const name = params.name ?? "unnamed";
-  const maxTurns = params.max_turns;
-  const childSession = createPersistentSubagentSession(name, ctx, effectiveCwd);
-  childSession.manager.appendModelChange(
-    (resolvedModel as AgentLoopConfig["model"]).provider,
-    (resolvedModel as AgentLoopConfig["model"]).id,
-  );
-
-  const accumulator = new SubagentRunAccumulator({
-    name,
-    task: params.task,
-    agent: params.agent,
-    toolNames,
-    modelOverride: params.model,
-    maxTurns,
-    sessionFile: childSession.file,
-    sessionId: childSession.id,
-    sessionName: childSession.name,
-    cwd: effectiveCwd,
-  }, (turns) => hasReachedTurnLimit(turns, maxTurns));
-  const config: AgentLoopConfig = {
-    model: resolvedModel as AgentLoopConfig["model"],
-    convertToLlm,
-    getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
-    headers: { "X-Initiator": "agent" },
-    shouldStopAfterTurn: () => hasReachedTurnLimit(accumulator.usage.turns, maxTurns),
-  };
-  const agentContext: AgentContext = { systemPrompt, messages: [], tools: resolvedTools };
-  const prompts: AgentMessage[] = [{
-    role: "user",
-    content: [{ type: "text", text: params.task }],
-    timestamp: Date.now(),
-  } as any];
-
-  try {
-    const stream = agentLoop(prompts, agentContext, config, options.signal);
-    for await (const event of stream) {
-      const ev = event as AgentEvent;
-      const appended = accumulator.acceptEvent(ev);
-      if (appended) childSession.manager.appendMessage(appended as any);
-      if (appended?.role === "assistant") options.onUsage?.(accumulator.progressResult().details);
-      if (ev.type === "turn_end") options.onUpdate?.(accumulator.progressResult());
+  options: RunSubagentOptions,
+  diagnostics: ToolingDiagnostics,
+): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+  const mode = options.executionMode ?? "sync";
+  const workflow = Effect.gen(function* () {
+    const plan = yield* diagnostics.span(
+      "tooling.subagent.resolve",
+      { operation: "resolve", mode },
+      Effect.try({
+        try: () => resolveSubagentExecutionPlan(params, ctx, registeredExtTools),
+        catch: () => executionError(SubagentExecutionPhase.Session),
+      }),
+    );
+    if (!isResolutionOk(plan)) {
+      yield* diagnostics.annotate({ outcome: "failure", error_kind: "resolution" });
+      const resolutionResult: AgentToolResult<SubagentDetails> = {
+        content: [{ type: "text", text: plan.error.message }],
+        details: buildErrorDetails(
+          params,
+          plan.error.toolNames,
+          plan.error.modelOverride ?? params.model,
+          plan.error.reason,
+        ),
+      };
+      return resolutionResult;
     }
-    return recordSubagentResult(
-      options.ledger,
-      options.runId,
-      SubagentUsageMode.Sync,
-      accumulator.success(await stream.result()),
+
+    const {
+      tools: resolvedTools,
+      toolNames,
+      model: resolvedModel,
+      systemPrompt,
+      effectiveCwd,
+    } = plan.value;
+    const name = params.name ?? "unnamed";
+    const maxTurns = params.max_turns;
+    const childSession = yield* diagnostics.span(
+      "tooling.subagent.session",
+      { operation: "session", mode },
+      Effect.try({
+        try: () => {
+          const session = createPersistentSubagentSession(name, ctx, effectiveCwd);
+          session.manager.appendModelChange(
+            (resolvedModel as AgentLoopConfig["model"]).provider,
+            (resolvedModel as AgentLoopConfig["model"]).id,
+          );
+          return session;
+        },
+        catch: () => executionError(SubagentExecutionPhase.Session),
+      }),
     );
-  } catch (error: unknown) {
-    return recordSubagentResult(
-      options.ledger,
-      options.runId,
-      SubagentUsageMode.Sync,
-      accumulator.failure(error, options.signal?.aborted === true),
+
+    const accumulator = new SubagentRunAccumulator(
+      {
+        name,
+        task: params.task,
+        agent: params.agent,
+        toolNames,
+        modelOverride: params.model,
+        maxTurns,
+        sessionFile: childSession.file,
+        sessionId: childSession.id,
+        sessionName: childSession.name,
+        cwd: effectiveCwd,
+      },
+      (turns) => hasReachedTurnLimit(turns, maxTurns),
     );
-  }
+    const config: AgentLoopConfig = {
+      model: resolvedModel as AgentLoopConfig["model"],
+      convertToLlm,
+      getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
+      headers: { "X-Initiator": "agent" },
+      shouldStopAfterTurn: () => hasReachedTurnLimit(accumulator.usage.turns, maxTurns),
+    };
+    const agentContext: AgentContext = { systemPrompt, messages: [], tools: resolvedTools };
+    const prompts: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: params.task }],
+        timestamp: Date.now(),
+      } as any,
+    ];
+
+    const result = yield* diagnostics.span(
+      "tooling.subagent.agent_loop",
+      {
+        operation: "agent_loop",
+        mode,
+        tool_count: toolNames.length,
+        provider: (resolvedModel as AgentLoopConfig["model"]).provider,
+        model: (resolvedModel as AgentLoopConfig["model"]).id,
+      },
+      Effect.tryPromise({
+        try: async (effectSignal) => {
+          const signal = options.signal
+            ? AbortSignal.any([options.signal, effectSignal])
+            : effectSignal;
+          const stream = agentLoop(prompts, agentContext, config, signal);
+          for await (const event of stream) {
+            const ev = event as AgentEvent;
+            const appended = accumulator.acceptEvent(ev);
+            if (appended) childSession.manager.appendMessage(appended as any);
+            if (appended?.role === "assistant")
+              options.onUsage?.(accumulator.progressResult().details);
+            if (ev.type === "turn_end") options.onUpdate?.(accumulator.progressResult());
+          }
+          return accumulator.success(await stream.result());
+        },
+        catch: (cause) => new SubagentAgentLoopFailure({ cause }),
+      }).pipe(
+        Effect.matchEffect({
+          onSuccess: (result) =>
+            diagnostics.annotate({ outcome: "success" }).pipe(Effect.as(result)),
+          onFailure: (error) =>
+            diagnostics
+              .annotate({ outcome: "failure", error_kind: "agent_loop" })
+              .pipe(Effect.as(accumulator.failure(error.cause, options.signal?.aborted === true))),
+        }),
+      ),
+    );
+    yield* diagnostics.annotate({
+      outcome: result.details.isError ? "failure" : "success",
+      error_kind: result.details.isError ? "agent_loop" : undefined,
+      tool_count: toolNames.length,
+      provider: (resolvedModel as AgentLoopConfig["model"]).provider,
+      model: (resolvedModel as AgentLoopConfig["model"]).id,
+    });
+    return recordSubagentResult(options.ledger, options.runId, SubagentUsageMode.Sync, result);
+  }).pipe(
+    Effect.tapError((error) =>
+      diagnostics.annotate({ outcome: "failure", error_kind: error.phase }),
+    ),
+  );
+  return diagnostics.span("tooling.subagent.run", { operation: "run", mode }, workflow);
 }
 
 export function runSubagentEffect(
@@ -159,16 +255,20 @@ export function runSubagentEffect(
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions = {},
 ): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
-  return Effect.tryPromise({
-    try: (effectSignal) => runSubagentPromise(params, ctx, registeredExtTools, {
-      ...options,
-      signal: options.signal ? AbortSignal.any([options.signal, effectSignal]) : effectSignal,
-    }),
-    catch: (cause) => new SubagentExecutionError({
-      phase: SubagentExecutionPhase.Session,
-      cause,
-    }),
-  });
+  const runWith = (runtime: ToolingTelemetryRuntime) =>
+    runtime.provide(
+      runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics),
+    );
+  if (options.telemetryRuntime) return runWith(options.telemetryRuntime);
+
+  return makeToolingTelemetryRuntime({
+    env: options.env ?? process.env,
+    exporter: options.telemetryExporter,
+    serviceName: "pi-env-subagent",
+  }).pipe(
+    Effect.mapError(() => executionError(SubagentExecutionPhase.Session)),
+    Effect.flatMap((runtime) => runWith(runtime).pipe(Effect.ensuring(runtime.disposeEffect))),
+  );
 }
 
 /** Promise compatibility boundary for callers outside the Effect workflow. */
@@ -181,12 +281,14 @@ export function runSubagent(
   return Effect.runPromise(runSubagentEffect(params, ctx, registeredExtTools, options));
 }
 
-function unexpectedErrorResult(params: SubagentParams, error: SubagentExecutionError): AgentToolResult<SubagentDetails> {
-  const cause = error.cause instanceof Error ? error.cause.message : String(error.cause);
+function unexpectedErrorResult(
+  params: SubagentParams,
+  error: SubagentExecutionError,
+): AgentToolResult<SubagentDetails> {
   const details = buildErrorDetails(params, [], params.model, error.phase);
-  details.errorMessage = cause;
+  details.errorMessage = error.message;
   return {
-    content: [{ type: "text", text: `Subagent ${error.phase} error: ${cause}` }],
+    content: [{ type: "text", text: `${error.message}.` }],
     details,
   };
 }
@@ -194,6 +296,7 @@ function unexpectedErrorResult(params: SubagentParams, error: SubagentExecutionE
 export function createExecuteSubagent(
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   ledger?: SubagentUsageLedger,
+  getTelemetryRuntime?: () => ToolingTelemetryRuntime | undefined,
 ) {
   return async function executeSubagent(
     _toolCallId: string,
@@ -202,9 +305,17 @@ export function createExecuteSubagent(
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentDetails>> {
-    return Effect.runPromise(Effect.catch(
-      runSubagentEffect(params, ctx, registeredExtTools, { signal, onUpdate, ledger, runId: _toolCallId }),
-      (error: SubagentExecutionError) => Effect.succeed(unexpectedErrorResult(params, error)),
-    ));
+    return Effect.runPromise(
+      Effect.catch(
+        runSubagentEffect(params, ctx, registeredExtTools, {
+          signal,
+          onUpdate,
+          ledger,
+          runId: _toolCallId,
+          telemetryRuntime: getTelemetryRuntime?.(),
+        }),
+        (error: SubagentExecutionError) => Effect.succeed(unexpectedErrorResult(params, error)),
+      ),
+    );
   };
 }
