@@ -133,10 +133,6 @@ export class SubagentJobManager {
     return job;
   }
 
-  shutdownEffect(): Effect.Effect<void> {
-    return Effect.promise(() => this.shutdown());
-  }
-
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.shutdownStarted = true;
@@ -215,7 +211,7 @@ export class SubagentJobManager {
   }
 }
 
-export function renderJob(job: SubagentJob): string {
+export function formatJobToolContent(job: SubagentJob): string {
   const details = job.latestDetails ?? job.result?.details;
   const session = details?.sessionFile ? `\nsession: ${details.sessionFile}` : "";
   const usage = details?.usage ? `\nusage: ${formatUsageCompact(details.usage)}` : "";

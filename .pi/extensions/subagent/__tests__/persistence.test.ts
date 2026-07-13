@@ -10,12 +10,36 @@ import {
   getSubagentSessionName,
   hasReachedTurnLimit,
 } from "../execute";
-import { SubagentJobManager } from "../jobs";
+import { formatJobToolContent, SubagentJobManager } from "../jobs";
 import { SubagentUsageLedger, zeroUsage } from "../usage";
 
 class TestProviderUnavailable extends Data.TaggedError("TestProviderUnavailable")<{ readonly message: string }> {}
 
 describe("persistent subagent sessions", () => {
+  it("keeps full child output in the model-visible job result", () => {
+    const fullOutput = `result\n${"context".repeat(200)}`;
+    const rendered = formatJobToolContent({
+      id: "job-1",
+      name: "audit",
+      status: "completed",
+      result: {
+        content: [{ type: "text", text: fullOutput }],
+        details: {
+          task: "audit task",
+          toolNames: [],
+          modelOverride: undefined,
+          finalOutput: fullOutput,
+          toolCallCount: 0,
+          usage: zeroUsage(),
+          isError: false,
+          turnLimitExceeded: false,
+        },
+      },
+    } as any);
+
+    expect(rendered).toContain(fullOutput);
+  });
+
   it("names child sessions with a sub- prefix", () => {
     expect(getSubagentSessionName("Recon: Auth Flow")).toBe("sub-recon-auth-flow");
   });

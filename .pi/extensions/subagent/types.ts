@@ -10,6 +10,18 @@ export interface UsageStats {
   turns: number;
 }
 
+export interface SubagentJobRenderDetails {
+  jobId?: string;
+  status?: string;
+  name?: string;
+  task?: string;
+  toolCallCount?: number;
+  usage?: UsageStats;
+  model?: string;
+  sessionName?: string;
+  count?: number;
+}
+
 export interface SubagentDetails {
   name: string;
   task: string;

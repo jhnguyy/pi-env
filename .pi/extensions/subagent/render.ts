@@ -9,12 +9,27 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
-import type { SubagentDetails } from "./types";
+import type { SubagentDetails, SubagentJobRenderDetails } from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function expandKeyText(): string {
   return keyText("app.tools.expand") || "ctrl+o";
+}
+
+const PROMPT_PREVIEW_LENGTH = 70;
+
+function formatPromptPreview(task: string): string {
+  return task.length > PROMPT_PREVIEW_LENGTH
+    ? `${task.slice(0, PROMPT_PREVIEW_LENGTH)}...`
+    : task;
+}
+
+function textContent(result: AgentToolResult<unknown>): string {
+  return result.content
+    .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
 }
 
 function formatTokens(count: number): string {
@@ -42,12 +57,12 @@ export function formatUsageStats(
 // ─── renderCall ───────────────────────────────────────────────────────────────
 
 export function renderSubagentCall(
-  args: { agent?: string; task?: string; tools?: string[]; model?: string },
+  args: { name?: string; agent?: string; task?: string; tools?: string[]; model?: string },
   theme: any,
   _ctx?: unknown,
 ) {
-  const task = args.task ?? "";
-  const preview = task.length > 70 ? `${task.slice(0, 70)}...` : task;
+  const preview = formatPromptPreview(args.task ?? "");
+  const nameStr = args.name ? `${theme.fg("accent", args.name)} ` : "";
   const agentStr = args.agent
     ? theme.fg("accent", args.agent as string) + " "
     : "";
@@ -56,6 +71,7 @@ export function renderSubagentCall(
   const modelStr = args.model ? ` (${args.model})` : "";
   const text =
     theme.fg("toolTitle", theme.bold("subagent ")) +
+    nameStr +
     agentStr +
     theme.fg("dim", `${toolsStr}${modelStr}`) +
     "\n  " +
@@ -169,4 +185,127 @@ export function renderSubagentResult(
 
   text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
   return new Text(text, 0, 0);
+}
+
+interface ToolRenderContext {
+  args?: Record<string, unknown>;
+}
+
+function jobStatusIcon(status: string | undefined, theme: any): string {
+  switch (status) {
+    case "completed":
+      return theme.fg("success", "✓");
+    case "failed":
+      return theme.fg("error", "✗");
+    case "cancelled":
+      return theme.fg("warning", "⚠");
+    default:
+      return theme.fg("accent", "•");
+  }
+}
+
+function appendJobStats(parts: string[], details: SubagentJobRenderDetails): void {
+  if (details.toolCallCount) {
+    parts.push(`${details.toolCallCount} tool call${details.toolCallCount === 1 ? "" : "s"}`);
+  }
+  if (details.usage) {
+    const usage = formatUsageStats(details.usage, details.model);
+    if (usage) parts.push(usage);
+  }
+  if (details.sessionName) parts.push(details.sessionName);
+}
+
+/** Render the non-blocking start acknowledgement without exposing raw arguments. */
+export function renderSubagentStartResult(
+  result: AgentToolResult<SubagentJobRenderDetails>,
+  { expanded }: { expanded: boolean },
+  theme: any,
+  context?: ToolRenderContext,
+) {
+  const details = result.details;
+  const status = details?.status;
+  const jobId = details?.jobId;
+  const header = `${jobStatusIcon(status, theme)} ${theme.fg("toolTitle", theme.bold("subagent start"))}`
+    + (details?.name ? ` ${theme.fg("accent", details.name)}` : "")
+    + (status ? ` ${theme.fg("muted", `[${status}]`)}` : "")
+    + (jobId ? ` ${theme.fg("dim", jobId)}` : "");
+
+  if (!expanded) {
+    return new Text(`${header}\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`, 0, 0);
+  }
+
+  const container = new Container();
+  container.addChild(new Text(header, 0, 0));
+  const task = typeof context?.args?.task === "string"
+    ? context.args.task
+    : details?.task ?? "";
+  if (task) {
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
+    container.addChild(new Text(theme.fg("dim", task), 0, 0));
+  }
+  const output = textContent(result);
+  if (output) {
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("muted", "─── Status ───"), 0, 0));
+    container.addChild(new Text(theme.fg("toolOutput", output), 0, 0));
+  }
+  return container;
+}
+
+export function renderSubagentJobCall(
+  args: { action?: string; job_id?: string },
+  theme: any,
+) {
+  const action = args.action ?? "inspect";
+  const jobId = args.job_id ? ` ${theme.fg("dim", args.job_id)}` : "";
+  return new Text(
+    `${theme.fg("toolTitle", theme.bold("subagent job"))} ${theme.fg("accent", action)}${jobId}`,
+    0,
+    0,
+  );
+}
+
+/** Render async job inspection compactly while preserving full content on expansion. */
+export function renderSubagentJobResult(
+  result: AgentToolResult<SubagentJobRenderDetails>,
+  { expanded }: { expanded: boolean },
+  theme: any,
+) {
+  const details = result.details ?? {};
+  const status = details.status;
+  let header = `${jobStatusIcon(status, theme)} ${theme.fg("toolTitle", theme.bold("subagent job"))}`;
+  if (details.name) header += ` ${theme.fg("accent", details.name)}`;
+  if (status) header += ` ${theme.fg("muted", `[${status}]`)}`;
+  if (details.jobId) header += ` ${theme.fg("dim", details.jobId)}`;
+  if (details.count !== undefined) header += ` ${theme.fg("dim", `${details.count} jobs`)}`;
+
+  const statParts: string[] = [];
+  appendJobStats(statParts, details);
+  const output = textContent(result);
+
+  if (!expanded) {
+    let text = header;
+    if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
+    if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
+    text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
+    return new Text(text, 0, 0);
+  }
+
+  const container = new Container();
+  container.addChild(new Text(header, 0, 0));
+  if (statParts.length > 0) {
+    container.addChild(new Text(theme.fg("muted", statParts.join(" · ")), 0, 0));
+  }
+  if (details.task) {
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
+    container.addChild(new Text(theme.fg("dim", details.task), 0, 0));
+  }
+  if (output) {
+    container.addChild(new Spacer(1));
+    container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
+    container.addChild(new Markdown(output.trim(), 0, 0, getMarkdownTheme()));
+  }
+  return container;
 }
