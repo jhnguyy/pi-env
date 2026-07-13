@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Single source of truth for setup paths and derived environment state.
-
 setup_init_context() {
   SETUP_DIR="$(cd "$1" && pwd)"
   REPO="$(cd "$SETUP_DIR/.." && pwd)"

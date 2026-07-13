@@ -1,10 +1,4 @@
-/**
- * handlers.ts — LSP action handlers for the daemon.
- *
- * Each handler is a standalone async function that receives the request and
- * a HandlerDeps object (backend accessor + state refs). Kept separate from
- * LspDaemon so the socket server wiring doesn't obscure the LSP semantics.
- */
+/** LSP handlers stay separate from socket lifecycle so protocol behavior is directly testable. */
 
 import { existsSync } from "node:fs";
 import {
@@ -22,8 +16,6 @@ import type {
 } from "./protocol";
 import type { LspBackend } from "./backend";
 
-// ─── Dependencies ─────────────────────────────────────────────────────────────
-
 export interface HandlerDeps {
   getBackend: (filePath: string) => LspBackend;
   getWorkspaceSymbolBackends: () => LspBackend[];
@@ -33,9 +25,6 @@ export interface HandlerDeps {
   getIdleMs: () => number;
 }
 
-// ─── Shared setup ─────────────────────────────────────────────────────────────
-
-/** Common context resolved for most single-file handlers. */
 interface RequestContext {
   backend: LspBackend;
   uri: string;
@@ -43,7 +32,6 @@ interface RequestContext {
   projectRoot: string;
 }
 
-/** Validate required params and resolve backend + URI + position + projectRoot. */
 async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: string): Promise<RequestContext> {
   if (!req.path || req.line == null || req.character == null) {
     throw new Error(`path, line, and character required for ${action}`);
@@ -55,9 +43,6 @@ async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: str
   return { backend, uri, pos, projectRoot };
 }
 
-// ─── Handlers ─────────────────────────────────────────────────────────────────
-
-/** Max concurrent document opens; diagnostic waits are overlapped separately. */
 const BULK_OPEN_CONCURRENCY = 4;
 
 interface PendingDiagnostics {
@@ -104,10 +89,6 @@ async function finishPreparedDiagnostics(
   }
 }
 
-/**
- * Run async tasks with bounded concurrency.
- * Returns results in the same order as the input array.
- */
 async function mapConcurrent<T, R>(
   items: T[],
   limit: number,
@@ -132,7 +113,6 @@ async function mapConcurrent<T, R>(
 }
 
 export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
-  // ── Bulk: paths[] ────────────────────────────────────────────────────────
   if (req.paths && req.paths.length > 0) {
     const unique = [...new Set(req.paths)];
     const prepared = await mapConcurrent(unique, BULK_OPEN_CONCURRENCY, (p) => prepareDiagnostics(p, deps));
@@ -165,7 +145,6 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
     } as DiagnosticsResult);
   }
 
-  // ── Single: path ─────────────────────────────────────────────────────────
   if (!req.path) return errorResponse(req.id, "path or paths required for diagnostics");
   return okResponse(req.id, await diagForPath(req.path, deps));
 }
@@ -194,8 +173,6 @@ export async function handleHover(req: DaemonRequest, deps: HandlerDeps): Promis
     ...(docs ? { docs } : {}),
   } as HoverResult);
 }
-
-// ─── Definition / Implementation (shared logic) ─────────────────────────────
 
 async function handleLocationAction(
   req: DaemonRequest,
@@ -255,8 +232,6 @@ export async function handleImplementation(req: DaemonRequest, deps: HandlerDeps
   return handleLocationAction(req, deps, "implementation", "textDocument/implementation", "No implementations found");
 }
 
-// ─── Call hierarchy (shared logic) ──────────────────────────────────────────
-
 async function handleCallHierarchy(
   req: DaemonRequest,
   deps: HandlerDeps,
@@ -268,7 +243,6 @@ async function handleCallHierarchy(
   try { ctx = await prepareRequest(req, deps, action); }
   catch (e) { return errorResponse(req.id, (e as Error).message); }
 
-  // Step 1: prepare call hierarchy item at position
   const prepareRes = await ctx.backend.lspRequest("textDocument/prepareCallHierarchy", {
     textDocument: { uri: ctx.uri },
     position: ctx.pos,
@@ -281,7 +255,6 @@ async function handleCallHierarchy(
   const item = prepareRes.result[0];
   const symbolName = item.name ?? "unknown";
 
-  // Step 2: get calls
   const callsRes = await ctx.backend.lspRequest(lspMethod, { item });
 
   const emptyResult = {
@@ -325,8 +298,6 @@ export async function handleOutgoingCalls(req: DaemonRequest, deps: HandlerDeps)
   return handleCallHierarchy(req, deps, "outgoing-calls", "callHierarchy/outgoingCalls", "to");
 }
 
-// ─── References ─────────────────────────────────────────────────────────────
-
 export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
   let ctx: RequestContext;
   try { ctx = await prepareRequest(req, deps, "references"); }
@@ -364,8 +335,6 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
     total: all.length, items, truncated: all.length > MAX,
   } as ReferencesResult);
 }
-
-// ─── Symbols ────────────────────────────────────────────────────────────────
 
 export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
   const MAX = 50;
@@ -421,8 +390,6 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
   return errorResponse(req.id, "symbols requires either path or query");
 }
 
-// ─── Status ─────────────────────────────────────────────────────────────────
-
 export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonResponse {
   const allOpenFiles = deps.backends.flatMap((b) => b.openUris.map(uriToPath));
   const allProjects = deps.backends.flatMap((b) => b.projectRoots);
@@ -437,8 +404,6 @@ export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonRespo
     idleMs: deps.getIdleMs(),
   } as StatusResult);
 }
-
-// ─── Private helpers ──────────────────────────────────────────────────────────
 
 function parseHoverContent(hover: any): { signature: string; docs?: string } {
   const contents = hover.contents;

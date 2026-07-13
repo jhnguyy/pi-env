@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Pi, terminal, and repo-tool configuration. Implementation lives in
-# configure.mjs; this shell bridge only passes setup context from Bash.
-
 setup_configure_all() {
   local setup_node_bin
   setup_node_bin=$(resolve_setup_node_bin)

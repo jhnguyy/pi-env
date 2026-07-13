@@ -1,15 +1,6 @@
-import { PiEvent } from "../_shared/agent-tools";
-/**
- * hooks.ts — pi lifecycle hook registrations for work-tracker.
- *
- *   tool_call hook       — branch guard (blocks git push to protected branches)
- *   tool_result hook     — handoff cleanup on merge / git pull
- *   session_start hook   — slot init, todo clear, session switch notice
- *   session_shutdown     — todo clear + slot state reset
- *   before_agent_start   — context injection (git status + todo list)
- */
-
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
+import { PiEvent } from "../_shared/agent-tools";
 import { getMergedBranches } from "../_shared/git";
 import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 
@@ -50,20 +41,17 @@ export function registerHooks(
   config: WorkTrackerConfig,
   store: TodoStore,
 ): void {
-  // ─── 1. Handoff cleanup on merge ────────────────────────────────────────────
   pi.on(PiEvent.ToolResult, async (event, ctx) => {
     if (event.toolName !== "bash" || event.isError) return;
 
     const command = (event.input as Record<string, string>).command ?? "";
 
-    // Invalidate git status cache when bash commands modify git state
     if (isGitMutating(command)) invalidateGitCache();
     const output = (event.content as Array<{ type: string; text?: string }>)
       .filter((c) => c.type === "text")
       .map((c) => c.text ?? "")
       .join("");
 
-    // Path A: local git merge
     const mergedBranch = detectMergedBranch(command, output);
     if (mergedBranch) {
       const deleted = cleanupHandoffs(mergedBranch);
@@ -76,7 +64,6 @@ export function registerHooks(
       return;
     }
 
-    // Path B: git pull on a protected branch
     if (!isGitPull(command)) return;
 
     const allMerged = new Set<string>();
@@ -98,7 +85,6 @@ export function registerHooks(
     }
   });
 
-  // ─── 3. Session start / switch ──────────────────────────────────────────────
   pi.on(PiEvent.SessionStart, async (event, ctx) => {
     const open = store.open().length;
     const isReplacementSession = REPLACEMENT_SESSION_REASONS.has(event.reason);
@@ -117,30 +103,26 @@ export function registerHooks(
     }
   });
 
-  // ─── 4. Session shutdown — clear todos + slot state ─────────────────────────
   pi.on(PiEvent.SessionShutdown, async () => {
     store.clear();
     resetGitFailureCache();
     resetSlots();
   });
 
-  // ─── 6. Widget refresh on turn_end ──────────────────────────────────────────
   pi.on(PiEvent.TurnEnd, async (_event, ctx) => {
     invalidateGitCache();
     batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
   });
 
-  // ─── 7. Widget refresh + context injection before agent start ───────────────
   pi.on(PiEvent.BeforeAgentStart, async (_event, ctx) => {
     store.purgeCompleted();
     batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
 
-    const line = buildStatusLine(config); // plain text for LLM
+    const line = buildStatusLine(config);
     if (!line) return {};
     return { message: { customType: "work-tracker", content: line, display: false } };
   });
 
-  // ─── 8. Todo context injection (root sessions only) ─────────────────────────
   pi.on(PiEvent.BeforeAgentStart, async () => {
     const context = store.renderContext();
     if (!context) return {};

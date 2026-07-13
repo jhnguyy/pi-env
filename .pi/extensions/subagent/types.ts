@@ -1,4 +1,3 @@
-/** Shared types and named value sets for the subagent extension. */
 export { formatCapabilities, ToolCapability } from "../_shared/agent-tools";
 
 export const SubagentJobStatus = {
@@ -69,7 +68,6 @@ export interface SubagentDetails {
   agent?: string;
   toolNames: string[];
   modelOverride: string | undefined;
-  /** Optional caller-selected limit; omitted means the loop is not turn-limited. */
   maxTurns?: number;
   sessionFile?: string;
   sessionId?: string;

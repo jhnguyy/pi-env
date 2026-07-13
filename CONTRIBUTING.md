@@ -2,66 +2,60 @@
 
 Solo project — these conventions exist so `git log --graph` stays readable and the work-tracker extension has a stable contract to enforce.
 
-## Branch Convention
+## Branch and PR convention
 
 ```
-feat/<name>    new extension, tool, or capability
-fix/<name>     bug fix
-chore/<name>   config, docs, cleanup (no behavior change)
+feat/<name>       new extension, tool, or capability
+fix/<name>        bug fix
+refactor/<name>   behavior-preserving structural change
+chore/<name>      config, docs, cleanup
 ```
 
-- `main` = stable. Direct commits only for trivial one-liners (typo, single-line comment).
-- Every piece of real work gets a branch, even solo.
-- Merge with `--no-ff` to preserve branch topology: `git merge --no-ff feat/<name>`
-- Delete branch after merge: `git branch -d feat/<name>`
+- `main` is stable; repository changes go through pull requests.
+- Every pull request uses a dedicated branch and worktree, even solo.
+- PRs are squash-merged into `main`.
+- Delete branches after merge.
 - Tag milestones on `main`: `v<major>.<minor>.0`
 
-## Documentation Changes
+## Documentation changes
 
-Implementation conventions live under [`docs/conventions/`](docs/conventions/README.md). Start with the overview and follow the area-specific page that matches the work, such as [`docs/conventions/typescript.md`](docs/conventions/typescript.md) for TypeScript style choices.
+Implementation conventions live under [`docs/conventions/`](docs/conventions/README.md). Start with the overview and follow the area-specific page that matches the work.
 
 Keep documentation targeted:
 
-- `README.md`: purpose, setup, design intent.
-- `CONTRIBUTING.md`: branch, build, test, packaging, extension process.
+- `README.md`: purpose, setup choices, navigation.
+- `CONTRIBUTING.md`: branch, PR, worktree, reviewer, and test policy.
 - `AGENTS.md`: coding-agent workflow.
 
-Cross-link when useful. Do not duplicate guidance.
+Cross-link when useful. Keep navigation docs as thin link chains. Do not duplicate guidance already owned by code, config, or scripts. Comments should record constraints, alternatives, or domain meaning rather than narrate control flow.
 
-## Runtime Requirements
+## Runtime requirements
 
-Use Nub with the Node.js version required by `package.json#engines.node`. The repo includes `.node-version` / `.nvmrc` for local tool provisioning; setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
+Use Nub with the Node.js version required by `package.json#engines.node`. Setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
 
-Before assuming a toolchain problem is a code problem, verify the environment boundary: whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
+Before assuming a toolchain problem is a code problem, verify whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
 
-## Extension Development
+## Extension development
 
 Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules.
 
-Short version:
+Source-owned contracts:
 
-1. Add source and package metadata under `.pi/extensions/<name>/`.
-2. Register active extensions in both `package.json#workspaces` and `package.json#pi.extensions`.
-3. Keep `scripts/extension-manifest.mjs` as the shared lifecycle contract for build, cleanup, and install verification.
-4. Use `package.json` scripts for build, test, cleanup, and verification.
+- active extensions: [`package.json`](package.json)
+- lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
+- scripts: [`package.json#scripts`](package.json)
 
-During iteration, validate the delta instead of repeatedly checking every workspace package:
+Arguments to `nub run` are forwarded directly; do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness. Run the safe verification portfolio before integration when the full workspace contract is required.
 
-```bash
-nub run test:unit .pi/extensions/<name>/__tests__/<file>.test.ts
-nub run test:changed main
-nub run build <name>
-```
+## Testing and review
 
-Arguments to `nub run` are forwarded directly; do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness but uses incremental build information. Run `nub run verify:safe` before integration when the full workspace contract is required.
+Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, independent hardening-test design, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed.
 
-## Testing
+Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request. Reviewers should verify that the chosen tests match the risk and that source-owned scripts/config remain the authority.
 
-Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, independent hardening-test design, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed. Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request.
+Canonical verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Safe verification lives in [`scripts/safe-verification-plan.mjs`](scripts/safe-verification-plan.mjs).
 
-Canonical verification phases live in `scripts/verification-phases.mjs`. Run one standard phase with `nub run verify:phase <phase-id>`; use the complete standard or safe portfolio before integration.
-
-## Worktree Isolation
+## Worktree isolation
 
 **Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
 
@@ -70,16 +64,17 @@ Canonical verification phases live in `scripts/verification-phases.mjs`. Run one
 git worktree add /tmp/pi-env-<branch> -b <branch>
 cd /tmp/pi-env-<branch>
 
-# Do work, commit, push ...
+# Do work, commit, push, open PR ...
 
-# Merge (from the main working tree)
+# After squash merge
 cd <repo-root>
-git merge --no-ff <branch>
-git push origin main
+git fetch --prune origin
+git switch main
+git pull --ff-only
 
-# Clean up
+# Clean up after confirming the PR is merged
 git worktree remove /tmp/pi-env-<branch>
-git branch -d <branch>
+git branch -D <branch>
 ```
 
 Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
