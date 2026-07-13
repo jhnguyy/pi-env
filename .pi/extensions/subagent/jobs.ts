@@ -10,23 +10,16 @@ import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
 import { SubagentJobWaitInterrupted } from "./errors";
 import { runSubagentEffect, type RunSubagentOptions } from "./execute";
 import type { SubagentParams } from "./resolver";
-import type { SubagentDetails } from "./types";
+import { SubagentJobStatus, type SubagentDetails, type SubagentJobStatus as SubagentJobStatusValue } from "./types";
 import { formatUsageCompact, SubagentUsageLedger, SubagentUsageMode } from "./usage";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = 4;
-export const SubagentJobStatus = {
-  Queued: "queued",
-  Running: "running",
-  Completed: "completed",
-  Failed: "failed",
-  Cancelled: "cancelled",
-} as const;
-export type SubagentJobStatus = (typeof SubagentJobStatus)[keyof typeof SubagentJobStatus];
+export { SubagentJobStatus } from "./types";
 
 export interface SubagentJob {
   id: string;
   name: string;
-  status: SubagentJobStatus;
+  status: SubagentJobStatusValue;
   params: SubagentParams;
   ctx: ExtensionContext;
   result?: AgentToolResult<SubagentDetails>;
@@ -196,7 +189,7 @@ export class SubagentJobManager {
     );
     const run = this.runJob(job.params, job.ctx, this.registeredExtTools, {
       signal: controller.signal,
-      executionMode: "async",
+      executionMode: SubagentUsageMode.Async,
       telemetryRuntime: this.telemetryRuntime,
       onUsage: (details) => {
         job.latestDetails = details;

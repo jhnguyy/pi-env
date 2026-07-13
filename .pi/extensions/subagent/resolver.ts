@@ -6,7 +6,11 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { discoverAgents } from "./agents";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { BUILT_IN_TOOL_CONTRACTS } from "../_shared/built-in-tools";
-import { ToolCapability } from "./types";
+import {
+  ResolutionErrorReason,
+  ToolCapability,
+  type ResolutionErrorReason as ResolutionErrorReasonValue,
+} from "./types";
 
 export interface SubagentParams {
   /** Human-readable child-session name; required by the public tool schema and persisted as `sub-<slug>`. */
@@ -35,16 +39,7 @@ export const BUILT_IN_TOOLS: Record<string, ToolDef> = Object.fromEntries(
 
 export type AgentConfig = ReturnType<typeof discoverAgents>["agents"][number];
 
-export const ResolutionErrorReason = {
-  AgentNotFound: "agent_not_found",
-  NoTools: "no_tools",
-  InvalidTools: "invalid_tools",
-  NoModel: "no_model",
-  ModelNotFound: "model_not_found",
-  InvalidCwd: "invalid_cwd",
-} as const;
-export type ResolutionErrorReason =
-  (typeof ResolutionErrorReason)[keyof typeof ResolutionErrorReason];
+export { ResolutionErrorReason } from "./types";
 
 export const ResolutionResultTag = {
   Ok: "ResolutionOk",
@@ -53,7 +48,7 @@ export const ResolutionResultTag = {
 export type ResolutionResultTag = (typeof ResolutionResultTag)[keyof typeof ResolutionResultTag];
 
 export interface ResolutionError {
-  reason: ResolutionErrorReason;
+  reason: ResolutionErrorReasonValue;
   message: string;
   toolNames: string[];
   modelOverride?: string;

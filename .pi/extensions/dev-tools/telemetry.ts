@@ -12,6 +12,14 @@ export const DevToolsSpanName = {
 } as const;
 export type DevToolsSpanName = (typeof DevToolsSpanName)[keyof typeof DevToolsSpanName];
 
+export const DevToolsOperation = {
+  Startup: "startup",
+  Initialize: "initialize",
+  Request: "request",
+  Shutdown: "shutdown",
+  DaemonRequest: "daemon_request",
+} as const;
+
 const parentSpanStorage = new AsyncLocalStorage<Tracer.AnySpan>();
 
 /** Bridge the daemon request span across Promise-based handler compatibility callbacks. */

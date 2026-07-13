@@ -41,6 +41,7 @@ import {
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling.js";
 import {
+  DevToolsOperation,
   DevToolsSpanName,
   runWithDevToolsParentSpan,
   withSafeDevToolsSpan,
@@ -50,8 +51,12 @@ import {
 
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
+const DevToolsEnvironmentName = {
+  LspIdleTimeoutMs: "PI_LSP_IDLE_TIMEOUT_MS",
+} as const;
+
 function lspIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const configured = Number(env["PI_LSP_IDLE_TIMEOUT_MS"]);
+  const configured = Number(env[DevToolsEnvironmentName.LspIdleTimeoutMs]);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_IDLE_TIMEOUT_MS;
 }
 /** Max bytes to buffer per connection before disconnecting. Prevents OOM from malformed clients. */
@@ -183,7 +188,7 @@ export class LspDaemon {
           withSafeDevToolsSpan(
             this.telemetry.diagnostics,
             DevToolsSpanName.DaemonRequest,
-            { operation: "daemon_request", action: telemetryAction(req.action) },
+            { operation: DevToolsOperation.DaemonRequest, action: telemetryAction(req.action) },
             dispatch,
             () => "dispatch",
             (response) =>

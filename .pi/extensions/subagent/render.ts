@@ -9,7 +9,11 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
-import type { SubagentDetails, SubagentJobRenderDetails } from "./types";
+import {
+  SubagentJobStatus,
+  type SubagentDetails,
+  type SubagentJobRenderDetails,
+} from "./types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -200,13 +204,13 @@ interface ToolRenderContext {
   args?: Record<string, unknown>;
 }
 
-function jobStatusIcon(status: string | undefined, theme: any): string {
+function jobStatusIcon(status: SubagentJobRenderDetails["status"], theme: any): string {
   switch (status) {
-    case "completed":
+    case SubagentJobStatus.Completed:
       return theme.fg("success", "✓");
-    case "failed":
+    case SubagentJobStatus.Failed:
       return theme.fg("error", "✗");
-    case "cancelled":
+    case SubagentJobStatus.Cancelled:
       return theme.fg("warning", "⚠");
     default:
       return theme.fg("accent", "•");

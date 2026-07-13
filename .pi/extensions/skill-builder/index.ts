@@ -135,8 +135,19 @@ const SkillBuildOperation = {
   FileCheck: "file_check",
   FileRead: "file_read",
   Evaluate: "evaluate",
+  Run: "skill_build",
 } as const;
-type SkillBuildOperation = (typeof SkillBuildOperation)[keyof typeof SkillBuildOperation];
+type SkillBuildOperation = Exclude<
+  (typeof SkillBuildOperation)[keyof typeof SkillBuildOperation],
+  typeof SkillBuildOperation.Run
+>;
+
+const SkillBuildSpanName = {
+  Workflow: "tooling.skill_build.workflow",
+  Scaffold: "tooling.skill_build.scaffold",
+  Validate: "tooling.skill_build.validate",
+  Evaluate: "tooling.skill_build.evaluate",
+} as const;
 
 export class SkillBuildOperationalError extends Data.TaggedError("SkillBuildOperationalError")<{
   readonly operation: SkillBuildOperation;
@@ -323,12 +334,12 @@ function runCreateWorkflowEffect(
   diagnostics: ToolingDiagnostics,
 ): Effect.Effect<TextResult, SkillBuildOperationalError> {
   return diagnostics.span(
-    "tooling.skill_build.workflow",
-    { operation: "skill_build", mode: "create", template: mode.template },
+    SkillBuildSpanName.Workflow,
+    { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Create, template: mode.template },
     Effect.gen(function* () {
       const scaffold = yield* diagnostics.span(
-        "tooling.skill_build.scaffold",
-        { operation: "skill_build", mode: "create", template: mode.template },
+        SkillBuildSpanName.Scaffold,
+        { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Create, template: mode.template },
         Effect.try({
           try: () =>
             scaffoldSkill({
@@ -343,16 +354,16 @@ function runCreateWorkflowEffect(
       );
       if (!scaffold.success) {
         yield* diagnostics.annotate({
-          operation: "skill_build",
-          mode: "create",
+          operation: SkillBuildOperation.Run,
+          mode: SkillBuildMode.Create,
           outcome: "failure",
         });
         return textResult(`✗ Scaffold failed: ${scaffold.error}`);
       }
 
       const validation = yield* diagnostics.span(
-        "tooling.skill_build.validate",
-        { operation: "skill_build", mode: "create" },
+        SkillBuildSpanName.Validate,
+        { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Create },
         Effect.try({
           try: () => validateSkill(scaffold.skillDir),
           catch: (cause) =>
@@ -360,8 +371,8 @@ function runCreateWorkflowEffect(
         }),
       );
       yield* diagnostics.annotate({
-        operation: "skill_build",
-        mode: "create",
+        operation: SkillBuildOperation.Run,
+        mode: SkillBuildMode.Create,
         outcome: validation.valid ? "success" : "failure",
         file_count: scaffold.filesCreated.length,
         ...validationCounts(validation),
@@ -423,13 +434,13 @@ function runReviewWorkflowEffect(
   diagnostics: ToolingDiagnostics,
 ): Effect.Effect<TextResult, SkillBuildOperationalError> {
   return diagnostics.span(
-    "tooling.skill_build.workflow",
-    { operation: "skill_build", mode: "review" },
+    SkillBuildSpanName.Workflow,
+    { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Review },
     Effect.gen(function* () {
       const skillDir = resolve(options.cwd, mode.path);
       const validation = yield* diagnostics.span(
-        "tooling.skill_build.validate",
-        { operation: "skill_build", mode: "review" },
+        SkillBuildSpanName.Validate,
+        { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Review },
         Effect.try({
           try: () => validateSkill(skillDir),
           catch: (cause) =>
@@ -447,8 +458,8 @@ function runReviewWorkflowEffect(
       });
       if (!hasSkillMd) {
         yield* diagnostics.annotate({
-          operation: "skill_build",
-          mode: "review",
+          operation: SkillBuildOperation.Run,
+          mode: SkillBuildMode.Review,
           outcome: validation.valid ? "success" : "failure",
           ...validationCounts(validation),
         });
@@ -463,10 +474,10 @@ function runReviewWorkflowEffect(
       const skillName = skillContent.match(/^name:\s*(.+)$/m)?.[1]?.trim() || basename(skillDir);
       const evalPrompt = buildEvalPrompt(skillContent, skillName, mode.diff);
       const result = yield* diagnostics.span(
-        "tooling.skill_build.evaluate",
+        SkillBuildSpanName.Evaluate,
         {
-          operation: "skill_build",
-          mode: "review",
+          operation: SkillBuildOperation.Run,
+          mode: SkillBuildMode.Review,
           provider: options.modelConfig.provider,
           model: options.modelConfig.model,
           cost_model: options.modelConfig.costModel,
@@ -490,8 +501,8 @@ function runReviewWorkflowEffect(
         options.modelConfig,
       );
       yield* diagnostics.annotate({
-        operation: "skill_build",
-        mode: "review",
+        operation: SkillBuildOperation.Run,
+        mode: SkillBuildMode.Review,
         outcome: result.code === 0 && validation.valid ? "success" : "failure",
         error_kind: evaluation.errorKind,
         verdict: evaluation.verdict,

@@ -18,7 +18,10 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, extname, join } from "node:path";
-import { resolveNodeCommand } from "../../../src/process/platform.js";
+import {
+  ProcessEnvironmentName,
+  resolveNodeCommand,
+} from "../../../src/process/platform.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -111,7 +114,7 @@ function packageBinEntry(packageName: string, binName: string): string {
 }
 
 function nodeExecPathShim(): string {
-  return `data:text/javascript,${encodeURIComponent("const configured = process.env.PI_ENV_NODE_BIN?.trim(); if (configured) Object.defineProperty(process, 'execPath', { value: configured, configurable: true, writable: true });")}`;
+  return `data:text/javascript,${encodeURIComponent(`const configured = process.env.${ProcessEnvironmentName.NodeBinary}?.trim(); if (configured) Object.defineProperty(process, 'execPath', { value: configured, configurable: true, writable: true });`)}`;
 }
 
 function nodeModuleLaunch(packageName: string, binName: string, args: string[]): { launchCommand: string; launchArgs: string[]; nodeExecPathShim: string } {

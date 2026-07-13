@@ -24,8 +24,8 @@ import {
 import { slugify } from "../_shared/slug";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { SubagentExecutionError, SubagentExecutionPhase } from "./errors";
-import type { SubagentDetails } from "./types";
 import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
+import type { SubagentDetails } from "./types";
 import {
   recordSubagentResult,
   SubagentRunAccumulator,
@@ -33,6 +33,20 @@ import {
   SubagentUsageMode,
   zeroUsage,
 } from "./usage";
+
+const SubagentOperation = {
+  Resolve: "resolve",
+  Session: "session",
+  AgentLoop: "agent_loop",
+  Run: "run",
+} as const;
+
+const SubagentSpanName = {
+  Resolve: "tooling.subagent.resolve",
+  Session: "tooling.subagent.session",
+  AgentLoop: "tooling.subagent.agent_loop",
+  Run: "tooling.subagent.run",
+} as const;
 
 export function getSubagentSessionName(name: string): string {
   return `sub-${slugify(name, { fallback: "agent" })}`;
@@ -95,7 +109,7 @@ export interface RunSubagentOptions {
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;
   telemetryRuntime?: ToolingTelemetryRuntime;
-  executionMode?: "sync" | "async";
+  executionMode?: SubagentUsageMode;
 }
 
 class SubagentAgentLoopFailure extends Data.TaggedError("SubagentAgentLoopFailure")<{
@@ -116,11 +130,11 @@ function runSubagentWorkflow(
   options: RunSubagentOptions,
   diagnostics: ToolingDiagnostics,
 ): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
-  const mode = options.executionMode ?? "sync";
+  const mode = options.executionMode ?? SubagentUsageMode.Sync;
   const workflow = Effect.gen(function* () {
     const plan = yield* diagnostics.span(
-      "tooling.subagent.resolve",
-      { operation: "resolve", mode },
+      SubagentSpanName.Resolve,
+      { operation: SubagentOperation.Resolve, mode },
       Effect.try({
         try: () => resolveSubagentExecutionPlan(params, ctx, registeredExtTools),
         catch: () => executionError(SubagentExecutionPhase.Session),
@@ -150,8 +164,8 @@ function runSubagentWorkflow(
     const name = params.name ?? "unnamed";
     const maxTurns = params.max_turns;
     const childSession = yield* diagnostics.span(
-      "tooling.subagent.session",
-      { operation: "session", mode },
+      SubagentSpanName.Session,
+      { operation: SubagentOperation.Session, mode },
       Effect.try({
         try: () => {
           const session = createPersistentSubagentSession(name, ctx, effectiveCwd);
@@ -197,9 +211,9 @@ function runSubagentWorkflow(
     ];
 
     const result = yield* diagnostics.span(
-      "tooling.subagent.agent_loop",
+      SubagentSpanName.AgentLoop,
       {
-        operation: "agent_loop",
+        operation: SubagentOperation.AgentLoop,
         mode,
         tool_count: toolNames.length,
         provider: (resolvedModel as AgentLoopConfig["model"]).provider,
@@ -246,7 +260,7 @@ function runSubagentWorkflow(
       diagnostics.annotate({ outcome: "failure", error_kind: error.phase }),
     ),
   );
-  return diagnostics.span("tooling.subagent.run", { operation: "run", mode }, workflow);
+  return diagnostics.span(SubagentSpanName.Run, { operation: SubagentOperation.Run, mode }, workflow);
 }
 
 export function runSubagentEffect(

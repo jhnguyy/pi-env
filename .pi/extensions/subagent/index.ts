@@ -38,7 +38,13 @@ import {
   renderSubagentResult,
   renderSubagentStartResult,
 } from "./render";
-import type { SubagentJobRenderDetails } from "./types";
+import {
+  SubagentJobStatus,
+  SubagentJobToolStatus,
+  SubagentSessionState,
+  type SubagentJobRenderDetails,
+  type SubagentSessionState as SubagentSessionStateValue,
+} from "./types";
 import { SubagentUsageLedger } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
@@ -87,13 +93,6 @@ const SUBAGENT_PARAMETERS = Type.Object({
     }),
   ),
 });
-
-const SubagentSessionState = {
-  Inactive: "inactive",
-  Active: "active",
-  ShuttingDown: "shutting-down",
-} as const;
-type SubagentSessionState = (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
 
 const SubagentJobAction = {
   Status: "status",
@@ -147,7 +146,7 @@ export default function (pi: ExtensionAPI) {
   let telemetryRuntime: ToolingTelemetryRuntime | undefined;
   const executeSubagent = createExecuteSubagent(registeredExtTools, ledger, () => telemetryRuntime);
   let jobs: SubagentJobManager | undefined;
-  let sessionState: SubagentSessionState = SubagentSessionState.Inactive;
+  let sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
   let lifecycleGeneration = 0;
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
@@ -198,7 +197,7 @@ export default function (pi: ExtensionAPI) {
     if (params.action === SubagentJobAction.Usage) {
       return {
         content: [{ type: "text", text: ledger.render() }],
-        details: { status: "usage" },
+        details: { status: SubagentJobToolStatus.Usage },
       };
     }
     if (params.action === SubagentJobAction.List) {
@@ -206,7 +205,7 @@ export default function (pi: ExtensionAPI) {
       const output = activeJobs.map(formatJobToolContent).join("\n") || "No subagent jobs.";
       return {
         content: [{ type: "text", text: output }],
-        details: { status: "list", count: activeJobs.length },
+        details: { status: SubagentJobToolStatus.List, count: activeJobs.length },
       };
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, and cancel.");
@@ -227,7 +226,7 @@ export default function (pi: ExtensionAPI) {
           ],
           details: runningJob
             ? getJobRenderDetails(runningJob)
-            : { jobId: params.job_id, status: "running" },
+            : { jobId: params.job_id, status: SubagentJobStatus.Running },
         };
       }
       if (!outcome.success) throw new Error(`Unknown subagent job: ${params.job_id}`);
