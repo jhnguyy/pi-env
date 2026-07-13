@@ -32,8 +32,12 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       expect(resolveDaemonNodeBinary({ PI_ENV_NODE_BIN: "/opt/pi/node" })).toBe("/opt/pi/node");
     });
 
-    it("falls back to the current runtime without a configured wrapper", () => {
+    it("uses the shared nonempty Node wrapper policy", () => {
       expect(resolveDaemonNodeBinary({})).toBe(process.execPath);
+      expect(resolveDaemonNodeBinary({ PI_ENV_NODE_BIN: "   " })).toBe(process.execPath);
+      expect(resolveDaemonNodeBinary({ PI_ENV_NODE_BIN: "  /opt/pi/node  " })).toBe(
+        "/opt/pi/node",
+      );
     });
   });
 

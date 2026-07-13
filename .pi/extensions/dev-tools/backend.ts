@@ -21,6 +21,7 @@ import {
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling.js";
 import {
+  DevToolsOperation,
   DevToolsSpanName,
   inheritDevToolsParentSpan,
   withSafeDevToolsSpan,
@@ -225,7 +226,7 @@ export class LspBackend {
           return withSafeDevToolsSpan(
             this.telemetry.diagnostics,
             DevToolsSpanName.BackendStartup,
-            { operation: "startup", backend: this.name },
+            { operation: DevToolsOperation.Startup, backend: this.name },
             this.startEffect(generation, ready),
             (error) => error.kind,
           );
@@ -310,7 +311,7 @@ export class LspBackend {
       yield* withSafeDevToolsSpan(
         this.telemetry.diagnostics,
         DevToolsSpanName.BackendInitialize,
-        { operation: "initialize", backend: this.name, method: "initialize" },
+        { operation: DevToolsOperation.Initialize, backend: this.name, method: "initialize" },
         this.initializeEffect(generation),
         (error) => error.kind,
       );
@@ -640,7 +641,7 @@ export class LspBackend {
       return withSafeDevToolsSpan(
         this.telemetry.diagnostics,
         DevToolsSpanName.BackendRequest,
-        { operation: "request", backend: this.name, method },
+        { operation: DevToolsOperation.Request, backend: this.name, method },
         request,
         (error) => error.kind,
       ).pipe(Effect.catch(() => Effect.succeed(null)));
@@ -889,7 +890,7 @@ export class LspBackend {
       return withSafeDevToolsSpan(
         this.telemetry.diagnostics,
         DevToolsSpanName.BackendShutdown,
-        { operation: "shutdown", backend: this.name },
+        { operation: DevToolsOperation.Shutdown, backend: this.name },
         shutdown,
         () => LspBackendErrorKind.Shutdown,
       );

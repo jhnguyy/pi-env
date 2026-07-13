@@ -43,11 +43,17 @@ export interface ScopedChildProcessOptions extends ProcessOptions {
 export interface ProcessOutput { readonly stdout: string; readonly stderr: string }
 export interface ProcessCommandResult extends ProcessOutput { readonly exitCode: number }
 
+export const ProcessEnvironmentName = {
+  NodeBinary: "PI_ENV_NODE_BIN",
+} as const;
+export type ProcessEnvironmentName =
+  (typeof ProcessEnvironmentName)[keyof typeof ProcessEnvironmentName];
+
 export function resolveNodeCommand(
-  env: Partial<Pick<NodeJS.ProcessEnv, "PI_ENV_NODE_BIN">> = process.env,
+  env: Partial<Record<ProcessEnvironmentName, string | undefined>> = process.env,
   execPath = process.execPath,
 ): string {
-  const configured = env.PI_ENV_NODE_BIN?.trim();
+  const configured = env[ProcessEnvironmentName.NodeBinary]?.trim();
   return configured ? configured : execPath;
 }
 

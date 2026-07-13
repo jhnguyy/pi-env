@@ -21,6 +21,7 @@ import {
   type LspResult,
 } from "./protocol";
 import { sleep } from "./utils";
+import { resolveNodeCommand } from "../../../src/process/platform.js";
 import { removeStaleArtifact } from "./socket-artifacts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * silently fails. Setup supplies PI_ENV_NODE_BIN as the reusable Node wrapper.
  */
 export function resolveDaemonNodeBinary(env: NodeJS.ProcessEnv = process.env): string {
-  return env["PI_ENV_NODE_BIN"] || process.execPath;
+  return resolveNodeCommand(env, process.execPath);
 }
 
 // ─── LspClient ────────────────────────────────────────────────────────────────
