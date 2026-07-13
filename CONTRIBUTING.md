@@ -29,6 +29,13 @@ Keep documentation targeted:
 
 Cross-link when useful. Keep navigation docs as thin link chains. Do not duplicate guidance already owned by code, config, or scripts. Comments should record constraints, alternatives, or domain meaning rather than narrate control flow.
 
+First-pass rule for prose/comments:
+
+1. Before adding prose, make names, types, decomposition, and tests explain behavior.
+2. Use comments only for constraints, alternatives, domain meaning, compatibility history, or safety rationale.
+3. Use docs only for an external/operator/agent contract, a durable decision, or a navigation road.
+4. Link to the source authority instead of repeating it.
+
 ## Runtime requirements
 
 Use Nub with the Node.js version required by `package.json#engines.node`. Setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
