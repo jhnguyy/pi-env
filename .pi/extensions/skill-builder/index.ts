@@ -101,8 +101,8 @@ import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
 import type { ValidationResult } from "./types";
 import {
-  makeToolingTelemetryRuntime,
   noopToolingDiagnostics,
+  withToolingTelemetryRuntime,
   type ToolingDiagnostics,
 } from "../../../src/telemetry/tooling.js";
 
@@ -536,16 +536,13 @@ export function runSkillBuild(
   params: SkillBuildParams,
   options: SkillBuildOptions,
 ): Promise<TextResult> {
-  const program = makeToolingTelemetryRuntime({
-    env: options.env ?? process.env,
-    exporter: options.telemetryExporter,
-    serviceName: "pi-env-skill-builder",
-  }).pipe(
-    Effect.flatMap((runtime) =>
-      runtime
-        .provide(executeSkillBuildEffect(pi, params, options, runtime.diagnostics))
-        .pipe(Effect.ensuring(runtime.disposeEffect)),
-    ),
+  const program = withToolingTelemetryRuntime(
+    {
+      env: options.env ?? process.env,
+      exporter: options.telemetryExporter,
+      serviceName: "pi-env-skill-builder",
+    },
+    (runtime) => executeSkillBuildEffect(pi, params, options, runtime.diagnostics),
   );
   return Effect.runPromise(program, { signal: options.signal });
 }

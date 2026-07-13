@@ -8,7 +8,8 @@ import {
 } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import {
-  createExecuteSubagent,
+  buildErrorDetails,
+  runSubagentEffect,
   SUBAGENT_TELEMETRY_SERVICE_NAME,
 } from "./execute";
 import { SubagentJobManager, type SubagentJob } from "./jobs";
@@ -23,7 +24,6 @@ import { SubagentUsageLedger } from "./usage";
 
 export class SubagentSessionRuntime {
   private readonly ledger = new SubagentUsageLedger();
-  private readonly executeBinding;
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private jobs: SubagentJobManager | undefined;
   private sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
@@ -33,28 +33,39 @@ export class SubagentSessionRuntime {
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  ) {
-    this.executeBinding = createExecuteSubagent(
-      registeredExtTools,
-      this.ledger,
-      () =>
-        this.sessionState === SubagentSessionState.Active ? this.telemetryRuntime : undefined,
-    );
-  }
+  ) {}
 
   get state(): SubagentSessionStateValue {
     return this.sessionState;
   }
 
-  execute(
+  readonly execute = (
     toolCallId: string,
     params: SubagentParams,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
-  ): Promise<AgentToolResult<SubagentDetails>> {
-    return this.executeBinding(toolCallId, params, signal, onUpdate, ctx);
-  }
+  ): Promise<AgentToolResult<SubagentDetails>> =>
+    Effect.runPromise(
+      Effect.catch(
+        runSubagentEffect(params, ctx, this.registeredExtTools, {
+          signal,
+          onUpdate,
+          ledger: this.ledger,
+          runId: toolCallId,
+          telemetryRuntime:
+            this.sessionState === SubagentSessionState.Active ? this.telemetryRuntime : undefined,
+        }),
+        (error) => {
+          const details = buildErrorDetails(params, [], params.model, error.phase);
+          details.errorMessage = error.message;
+          return Effect.succeed({
+            content: [{ type: "text", text: `${error.message}.` }],
+            details,
+          });
+        },
+      ),
+    );
 
   startSession(): Promise<boolean> {
     const generation = ++this.lifecycleGeneration;

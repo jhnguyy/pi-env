@@ -135,7 +135,7 @@ export default function (pi: ExtensionAPI) {
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
 
   // Named execute function — stable reference (no recreation on re-register)
-  const executeSubagent = runtime.execute.bind(runtime);
+  const executeSubagent = runtime.execute;
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
       name: "subagent",
