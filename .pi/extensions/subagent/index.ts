@@ -21,6 +21,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Effect, Result } from "effect";
 import { Type, type Static } from "typebox";
 
+import {
+  makeToolingTelemetryRuntime,
+  type ToolingTelemetryRuntime,
+} from "../../../src/telemetry/tooling";
+
 import { discoverAgents } from "./agents";
 import { createExecuteSubagent } from "./execute";
 import { formatJobToolContent, type SubagentJob, SubagentJobManager } from "./jobs";
@@ -42,7 +47,8 @@ import { readOptionalAgentSettings } from "../_shared/agent-settings";
 
 const SUBAGENT_PARAMETERS = Type.Object({
   name: Type.String({
-    description: "Required human-readable child-session name. Stored as a `sub-` prefixed session name.",
+    description:
+      "Required human-readable child-session name. Stored as a `sub-` prefixed session name.",
   }),
   agent: Type.Optional(
     Type.String({
@@ -70,12 +76,16 @@ const SUBAGENT_PARAMETERS = Type.Object({
   max_turns: Type.Optional(
     Type.Integer({
       minimum: 1,
-      description: "Optional maximum completed assistant turns. Omit to run without a turn-count limit.",
+      description:
+        "Optional maximum completed assistant turns. Omit to run without a turn-count limit.",
     }),
   ),
-  cwd: Type.Optional(Type.String({
-    description: "Optional absolute working directory for this subagent. Resolved with realpath and must be an existing directory.",
-  })),
+  cwd: Type.Optional(
+    Type.String({
+      description:
+        "Optional absolute working directory for this subagent. Resolved with realpath and must be an existing directory.",
+    }),
+  ),
 });
 
 const SubagentSessionState = {
@@ -83,7 +93,7 @@ const SubagentSessionState = {
   Active: "active",
   ShuttingDown: "shutting-down",
 } as const;
-type SubagentSessionState = typeof SubagentSessionState[keyof typeof SubagentSessionState];
+type SubagentSessionState = (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
 
 const SubagentJobAction = {
   Status: "status",
@@ -92,12 +102,15 @@ const SubagentJobAction = {
   List: "list",
   Usage: "usage",
 } as const;
-type SubagentJobAction = typeof SubagentJobAction[keyof typeof SubagentJobAction];
+type SubagentJobAction = (typeof SubagentJobAction)[keyof typeof SubagentJobAction];
 
 const SUBAGENT_JOB_PARAMETERS = Type.Object({
-  action: StringEnum(Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]], {
-    description: "Inspect, wait for, cancel, list, or summarize asynchronous subagent jobs.",
-  }),
+  action: StringEnum(
+    Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]],
+    {
+      description: "Inspect, wait for, cancel, list, or summarize asynchronous subagent jobs.",
+    },
+  ),
   job_id: Type.Optional(Type.String({ description: "Job ID (required except for list/usage)." })),
 });
 
@@ -131,24 +144,34 @@ export default function (pi: ExtensionAPI) {
 
   // Named execute function — stable reference (no recreation on re-register)
   const ledger = new SubagentUsageLedger();
-  const executeSubagent = createExecuteSubagent(registeredExtTools, ledger);
+  let telemetryRuntime: ToolingTelemetryRuntime | undefined;
+  const executeSubagent = createExecuteSubagent(registeredExtTools, ledger, () => telemetryRuntime);
   let jobs: SubagentJobManager | undefined;
   let sessionState: SubagentSessionState = SubagentSessionState.Inactive;
   let lifecycleGeneration = 0;
-  const registerSubagentTool = (description: string) => pi.registerTool({
-    name: "subagent",
-    label: "Subagent",
-    description,
-    parameters: SUBAGENT_PARAMETERS,
-    execute: executeSubagent,
-    renderCall: renderSubagentCall,
-    renderResult: renderSubagentResult,
-  });
-  const executeAsyncSubagent = async (_id: string, params: SubagentStartParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
+  const registerSubagentTool = (description: string) =>
+    pi.registerTool({
+      name: "subagent",
+      label: "Subagent",
+      description,
+      parameters: SUBAGENT_PARAMETERS,
+      execute: executeSubagent,
+      renderCall: renderSubagentCall,
+      renderResult: renderSubagentResult,
+    });
+  const executeAsyncSubagent = async (
+    _id: string,
+    params: SubagentStartParams,
+    signal: AbortSignal | undefined,
+    _onUpdate: unknown,
+    ctx: ExtensionContext,
+  ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (signal?.aborted) throw new Error("Subagent start aborted.");
     if (sessionState !== SubagentSessionState.Active || !jobs) {
       return {
-        content: [{ type: "text", text: "Cannot start a subagent job without an active parent session." }],
+        content: [
+          { type: "text", text: "Cannot start a subagent job without an active parent session." },
+        ],
         details: { status: sessionState, name: params.name, task: params.task },
       };
     }
@@ -167,7 +190,11 @@ export default function (pi: ExtensionAPI) {
       details: { jobId: job.id, status: job.status, name: job.name, task: params.task },
     };
   };
-  const executeSubagentJob = async (_id: string, params: SubagentJobParams, signal?: AbortSignal): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
+  const executeSubagentJob = async (
+    _id: string,
+    params: SubagentJobParams,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (params.action === SubagentJobAction.Usage) {
       return {
         content: [{ type: "text", text: ledger.render() }],
@@ -186,11 +213,18 @@ export default function (pi: ExtensionAPI) {
     if (params.action === SubagentJobAction.Wait) {
       const manager = jobs;
       if (!manager) throw new Error(`Unknown subagent job: ${params.job_id}`);
-      const outcome = await Effect.runPromise(Effect.result(manager.waitEffect(params.job_id, signal)));
+      const outcome = await Effect.runPromise(
+        Effect.result(manager.waitEffect(params.job_id, signal)),
+      );
       if (Result.isFailure(outcome)) {
         const runningJob = manager.get(params.job_id);
         return {
-          content: [{ type: "text", text: `Stopped waiting for subagent job ${params.job_id}; it is still running.` }],
+          content: [
+            {
+              type: "text",
+              text: `Stopped waiting for subagent job ${params.job_id}; it is still running.`,
+            },
+          ],
           details: runningJob
             ? getJobRenderDetails(runningJob)
             : { jobId: params.job_id, status: "running" },
@@ -203,7 +237,10 @@ export default function (pi: ExtensionAPI) {
       };
     }
     const manager = jobs;
-    const job = params.action === SubagentJobAction.Cancel ? manager?.cancel(params.job_id) : manager?.get(params.job_id);
+    const job =
+      params.action === SubagentJobAction.Cancel
+        ? manager?.cancel(params.job_id)
+        : manager?.get(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return {
       content: [{ type: "text", text: formatJobToolContent(job) }],
@@ -217,7 +254,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "subagent_start",
     label: "Start Subagent",
-    description: "Start a named persistent subagent without waiting. Use subagent_job to inspect, wait for, or cancel it. Jobs stop when the parent session shuts down.",
+    description:
+      "Start a named persistent subagent without waiting. Use subagent_job to inspect, wait for, or cancel it. Jobs stop when the parent session shuts down.",
     parameters: SUBAGENT_PARAMETERS,
     execute: executeAsyncSubagent,
     renderCall: renderSubagentCall,
@@ -226,7 +264,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "subagent_job",
     label: "Subagent Job",
-    description: "Inspect, wait for, cancel, list, or summarize in-process asynchronous subagent jobs.",
+    description:
+      "Inspect, wait for, cancel, list, or summarize in-process asynchronous subagent jobs.",
     parameters: SUBAGENT_JOB_PARAMETERS,
     execute: executeSubagentJob,
     renderCall: renderSubagentJobCall,
@@ -236,10 +275,13 @@ export default function (pi: ExtensionAPI) {
     const generation = ++lifecycleGeneration;
     sessionState = SubagentSessionState.ShuttingDown;
     const manager = jobs;
+    const runtime = telemetryRuntime;
     jobs = undefined;
+    telemetryRuntime = undefined;
     try {
       await manager?.shutdown();
     } finally {
+      if (runtime) await Effect.runPromise(runtime.disposeEffect);
       if (generation === lifecycleGeneration) {
         ledger.clear();
         sessionState = SubagentSessionState.Inactive;
@@ -253,11 +295,26 @@ export default function (pi: ExtensionAPI) {
     const generation = ++lifecycleGeneration;
     sessionState = SubagentSessionState.ShuttingDown;
     const old = jobs;
+    const oldRuntime = telemetryRuntime;
     jobs = undefined;
+    telemetryRuntime = undefined;
     if (old) await old.shutdown();
+    if (oldRuntime) await Effect.runPromise(oldRuntime.disposeEffect);
     if (generation !== lifecycleGeneration) return;
+
+    const nextRuntime = await Effect.runPromise(
+      makeToolingTelemetryRuntime({
+        env: process.env,
+        serviceName: "pi-env-subagent",
+      }),
+    );
+    if (generation !== lifecycleGeneration) {
+      await Effect.runPromise(nextRuntime.disposeEffect);
+      return;
+    }
     ledger.clear();
-    jobs = new SubagentJobManager(pi, registeredExtTools, undefined, ledger);
+    telemetryRuntime = nextRuntime;
+    jobs = new SubagentJobManager(pi, registeredExtTools, undefined, ledger, nextRuntime);
     sessionState = SubagentSessionState.Active;
     // 1. Read enabled models and annotations from settings.json
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
@@ -280,7 +337,12 @@ export default function (pi: ExtensionAPI) {
       [...registeredExtTools].map(([name, registration]) => [name, registration.capabilities]),
     );
     const description = buildDynamicDescription(
-      enabledModelIds, availableModels, agents, extToolNames, extToolCaps, modelAnnotations,
+      enabledModelIds,
+      availableModels,
+      agents,
+      extToolNames,
+      extToolCaps,
+      modelAnnotations,
     );
     // registerTool replaces this stable name with session-specific discovery text.
     registerSubagentTool(description);

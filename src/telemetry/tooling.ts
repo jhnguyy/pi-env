@@ -1,5 +1,5 @@
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
-import { Data, Effect } from "effect";
+import { Data, Effect, ManagedRuntime } from "effect";
 import {
   type BoundedOtelConfig,
   BoundedOtelConfigError,
@@ -133,4 +133,44 @@ export function makeToolingOtelLayer(options: {
     serviceName: options.serviceName,
     serviceVersion: options.serviceVersion ?? "0.1.0",
   });
+}
+
+export interface ToolingTelemetryRuntime {
+  readonly diagnostics: ToolingDiagnostics;
+  readonly provide: <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<A, E>;
+  readonly disposeEffect: Effect.Effect<void>;
+}
+
+export function makeToolingTelemetryRuntime(options: {
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly serviceName: string;
+  readonly serviceVersion?: string;
+  readonly exporter?: SpanExporter;
+}): Effect.Effect<ToolingTelemetryRuntime, ToolingOtelConfigError> {
+  return resolveToolingOtelConfig(options.env).pipe(
+    Effect.map((config) => {
+      if (!config.enabled) {
+        return {
+          diagnostics: noopToolingDiagnostics,
+          provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
+          disposeEffect: Effect.void,
+        } satisfies ToolingTelemetryRuntime;
+      }
+
+      const runtime = ManagedRuntime.make(
+        makeToolingOtelLayer({
+          config,
+          exporter: options.exporter,
+          serviceName: options.serviceName,
+          serviceVersion: options.serviceVersion,
+        }),
+      );
+      return {
+        diagnostics: makeEffectToolingDiagnostics({ telemetryEnabled: true }),
+        provide: <A, E>(effect: Effect.Effect<A, E>) =>
+          runtime.contextEffect.pipe(Effect.flatMap((context) => Effect.provide(effect, context))),
+        disposeEffect: runtime.disposeEffect,
+      } satisfies ToolingTelemetryRuntime;
+    }),
+  );
 }
