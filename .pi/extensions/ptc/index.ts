@@ -68,11 +68,14 @@ export default function ptcExtension(pi: ExtensionAPI) {
       // Find first meaningful line — skip blanks and comments.
       // Template literals start with a newline so [0] is always "".
       const firstCodeLine =
-        lines.find((l) => {
-          const t = l.trim();
-          return t.length > 0 && !t.startsWith("//") && !t.startsWith("/*") && !t.startsWith("*");
-        })?.trim() ?? "";
-      const preview = firstCodeLine.length > 72 ? firstCodeLine.substring(0, 72) + "…" : firstCodeLine;
+        lines
+          .find((l) => {
+            const t = l.trim();
+            return t.length > 0 && !t.startsWith("//") && !t.startsWith("/*") && !t.startsWith("*");
+          })
+          ?.trim() ?? "";
+      const preview =
+        firstCodeLine.length > 72 ? firstCodeLine.substring(0, 72) + "…" : firstCodeLine;
       return new Text(
         theme.fg("toolTitle", theme.bold("ptc")) +
           theme.fg("muted", ` ${lineCount}L`) +
@@ -83,73 +86,14 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
 
     renderResult(result, opts, theme, ctx) {
-      const { isPartial } = opts;
       const first = result.content[0];
       const text = first?.type === "text" ? (first.text ?? "") : "";
 
-      // isError is provided via ctx, not embedded in result
-      if (ctx.isError) {
-        if (opts.expanded) {
-          return new Text(theme.fg("error", "✗ ptc failed") + "\n" + theme.fg("error", text || "error"), 0, 0);
-        }
-        const summary = (text.split("\n").find((l) => l.trim().length > 0) ?? "error").slice(0, 120);
-        return new Text(theme.fg("error", "✗ ptc ") + theme.fg("error", summary), 0, 0);
-      }
-
-      if (isPartial) {
-        // Accumulate each tool-call label into a persistent chain stored in renderer state.
-        // Each onUpdate() replaces this.result in ToolExecutionComponent, so only the latest
-        // label would be visible without this accumulation.
-        if (!ctx.state.callChain) ctx.state.callChain = [];
-        const chain: string[] = ctx.state.callChain;
-        const lastLabel = chain[chain.length - 1];
-        if (text && lastLabel !== text) {
-          chain.push(text);
-        }
-        const lines = chain.length > 0 ? chain.join("\n") : "running…";
-        return new Text(theme.fg("muted", lines), 0, 0);
-      }
-
-      // Final result
-      const outputLines = text.split("\n").filter((l) => l.trim().length > 0);
-      const lineCount = outputLines.length;
-      const countLabel = `${lineCount} line${lineCount !== 1 ? "s" : ""}`;
-      const callCount = (ctx.state.callChain as string[] | undefined)?.length ?? 0;
-      const callSuffix =
-        callCount > 0
-          ? theme.fg("dim", ` · ${callCount} call${callCount !== 1 ? "s" : ""}`)
-          : "";
-
-      if (opts.expanded) {
-        // Expanded: show the code invocation, then the output
-        const code = ctx.args?.code ?? "";
-        const codeBlock = code.trim()
-          ? theme.fg("muted", "─── script ───") + "\n" + code.trim() + "\n" + theme.fg("muted", "─── output ───")
-          : "";
-        return new Text(
-          theme.fg("success", "✓ ") + theme.fg("muted", countLabel) + callSuffix +
-            (codeBlock ? "\n" + codeBlock : "") +
-            "\n" + (text || "(no output)"),
-          0,
-          0,
-        );
-      }
-
-      // Collapsed: icon + line count + call count + first non-empty output line
-      const firstLine = outputLines[0]?.substring(0, 72) ?? "";
-      const hiddenOutputLines = Math.max(0, outputLines.length - (firstLine ? 1 : 0));
-      let collapsed =
-        theme.fg("success", "✓ ") +
-        theme.fg("muted", countLabel) + callSuffix +
-        (firstLine ? "  " + theme.fg("text", firstLine) : "");
-
-      if (hiddenOutputLines > 0) {
-        collapsed += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-      } else {
-        collapsed += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
-      }
-
-      return new Text(collapsed, 0, 0);
+      if (ctx.isError) return renderPtcError(text, opts.expanded, theme);
+      if (opts.isPartial) return renderPtcPartial(text, ctx, theme);
+      return opts.expanded
+        ? renderPtcExpandedFinal(text, ctx, theme)
+        : renderPtcCollapsedFinal(text, ctx, theme);
     },
   });
 
@@ -178,7 +122,10 @@ export default function ptcExtension(pi: ExtensionAPI) {
         }
       },
     };
-    registerAgentTools(pi, { tool: ptcAgentTool, capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] });
+    registerAgentTools(pi, {
+      tool: ptcAgentTool,
+      capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
+    });
   });
 }
 
@@ -224,6 +171,87 @@ const DESCRIPTION = [
   "BLOCKED TOOLS (must be called directly, not inside ptc):",
   "  " + [...BLOCKED_TOOLS].join(", "),
 ].join("\n");
+
+interface PtcRenderTheme {
+  fg(style: string, text: string): string;
+}
+
+interface PtcRenderContext {
+  state: Record<string, unknown>;
+  args?: { code?: string };
+}
+
+function renderPtcError(text: string, expanded: boolean | undefined, theme: PtcRenderTheme): Text {
+  if (expanded) {
+    return new Text(
+      theme.fg("error", "✗ ptc failed") + "\n" + theme.fg("error", text || "error"),
+      0,
+      0,
+    );
+  }
+  const summary = (text.split("\n").find((line) => line.trim().length > 0) ?? "error").slice(
+    0,
+    120,
+  );
+  return new Text(theme.fg("error", "✗ ptc ") + theme.fg("error", summary), 0, 0);
+}
+
+function renderPtcPartial(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
+  // Accumulate each tool-call label into a persistent chain stored in renderer state.
+  // Each onUpdate() replaces this.result in ToolExecutionComponent, so only the latest
+  // label would be visible without this accumulation.
+  const chain = (ctx.state.callChain ??= []) as string[];
+  const lastLabel = chain[chain.length - 1];
+  if (text && lastLabel !== text) chain.push(text);
+  return new Text(theme.fg("muted", chain.length > 0 ? chain.join("\n") : "running…"), 0, 0);
+}
+
+function finalResultMetadata(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme) {
+  const outputLines = text.split("\n").filter((line) => line.trim().length > 0);
+  const lineCount = outputLines.length;
+  const countLabel = `${lineCount} line${lineCount !== 1 ? "s" : ""}`;
+  const callCount = (ctx.state.callChain as string[] | undefined)?.length ?? 0;
+  const callSuffix =
+    callCount > 0 ? theme.fg("dim", ` · ${callCount} call${callCount !== 1 ? "s" : ""}`) : "";
+  return { outputLines, countLabel, callSuffix };
+}
+
+function renderPtcExpandedFinal(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
+  const { countLabel, callSuffix } = finalResultMetadata(text, ctx, theme);
+  const code = ctx.args?.code ?? "";
+  const codeBlock = code.trim()
+    ? `${theme.fg("muted", "─── script ───")}\n${code.trim()}\n${theme.fg("muted", "─── output ───")}`
+    : "";
+  return new Text(
+    theme.fg("success", "✓ ") +
+      theme.fg("muted", countLabel) +
+      callSuffix +
+      (codeBlock ? "\n" + codeBlock : "") +
+      "\n" +
+      (text || "(no output)"),
+    0,
+    0,
+  );
+}
+
+function renderPtcCollapsedFinal(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
+  const { outputLines, countLabel, callSuffix } = finalResultMetadata(text, ctx, theme);
+  const firstLine = outputLines[0]?.substring(0, 72) ?? "";
+  const hiddenOutputLines = Math.max(0, outputLines.length - (firstLine ? 1 : 0));
+  let collapsed =
+    theme.fg("success", "✓ ") +
+    theme.fg("muted", countLabel) +
+    callSuffix +
+    (firstLine ? "  " + theme.fg("text", firstLine) : "");
+
+  if (hiddenOutputLines > 0) {
+    collapsed += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+  } else {
+    collapsed += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
+  }
+
+  return new Text(collapsed, 0, 0);
+}
 
 /** Parameter description: syntax contract. Tells any model exactly what to write. */
 const PARAM_DESCRIPTION = [
