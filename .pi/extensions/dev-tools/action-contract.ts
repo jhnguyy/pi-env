@@ -23,19 +23,28 @@ export type DevToolsPathMode = typeof DevToolsPathMode[keyof typeof DevToolsPath
 
 export interface DevToolsActionContract {
   readonly pathMode: DevToolsPathMode;
+  readonly requiresPath: boolean;
   readonly needsPosition: boolean;
+  readonly requiresPathOrQuery: boolean;
 }
 
+const POSITION_ACTION_CONTRACT = {
+  pathMode: DevToolsPathMode.Single,
+  requiresPath: true,
+  needsPosition: true,
+  requiresPathOrQuery: false,
+} as const;
+
 export const DEV_TOOLS_ACTION_CONTRACTS = {
-  [DevToolsAction.Diagnostics]: { pathMode: DevToolsPathMode.Many, needsPosition: false },
-  [DevToolsAction.Hover]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.Definition]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.Implementation]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.References]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.IncomingCalls]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.OutgoingCalls]: { pathMode: DevToolsPathMode.Single, needsPosition: true },
-  [DevToolsAction.Symbols]: { pathMode: DevToolsPathMode.Single, needsPosition: false },
-  [DevToolsAction.Status]: { pathMode: DevToolsPathMode.None, needsPosition: false },
+  [DevToolsAction.Diagnostics]: { pathMode: DevToolsPathMode.Many, requiresPath: true, needsPosition: false, requiresPathOrQuery: false },
+  [DevToolsAction.Hover]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.Definition]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.Implementation]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.References]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.IncomingCalls]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.OutgoingCalls]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.Symbols]: { pathMode: DevToolsPathMode.Single, requiresPath: false, needsPosition: false, requiresPathOrQuery: true },
+  [DevToolsAction.Status]: { pathMode: DevToolsPathMode.None, requiresPath: false, needsPosition: false, requiresPathOrQuery: false },
 } as const satisfies Record<DevToolsAction, DevToolsActionContract>;
 
 export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);

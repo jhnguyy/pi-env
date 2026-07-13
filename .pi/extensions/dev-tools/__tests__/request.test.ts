@@ -4,6 +4,20 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 import { buildClientRequest, buildClientRequestResult, DevToolsAction } from "../request";
 
 describeIfEnabled("dev-tools", "request builder", () => {
+  const positionActions = [
+    DevToolsAction.Hover,
+    DevToolsAction.Definition,
+    DevToolsAction.Implementation,
+    DevToolsAction.References,
+    DevToolsAction.IncomingCalls,
+    DevToolsAction.OutgoingCalls,
+  ] as const;
+
+  function failureMessage(params: Parameters<typeof buildClientRequestResult>[0]): string | undefined {
+    const result = buildClientRequestResult(params);
+    return Result.isFailure(result) ? result.failure.message : undefined;
+  }
+
   it("keeps diagnostics paths as a bulk request", () => {
     expect(buildClientRequest({
       action: DevToolsAction.Diagnostics,
@@ -47,6 +61,28 @@ describeIfEnabled("dev-tools", "request builder", () => {
       line: 3,
       character: 14,
     });
+  });
+
+  it("rejects missing paths before daemon work", () => {
+    expect(failureMessage({ action: DevToolsAction.Diagnostics })).toBe("diagnostics requires a path");
+
+    for (const action of positionActions) {
+      const params = { action, line: 1, character: 1 };
+      expect(failureMessage(params)).toBe(`${action} requires a path`);
+      expect(() => buildClientRequest(params)).toThrow(`${action} requires a path`);
+    }
+  });
+
+  it("rejects incomplete positions before daemon work", () => {
+    for (const action of positionActions) {
+      expect(failureMessage({ action, path: "/repo/a.ts", character: 1 })).toBe(`${action} requires line and character`);
+      expect(failureMessage({ action, path: "/repo/a.ts", line: 1 })).toBe(`${action} requires line and character`);
+    }
+  });
+
+  it("requires a path or query for symbols", () => {
+    expect(failureMessage({ action: DevToolsAction.Symbols })).toBe("symbols requires a path or query");
+    expect(failureMessage({ action: DevToolsAction.Symbols, query: "   " })).toBe("symbols requires a path or query");
   });
 
   it("rejects multi-path requests for single-path actions", () => {

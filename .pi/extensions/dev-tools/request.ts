@@ -25,13 +25,22 @@ function requestBuildError(message: string): RequestBuildError {
 function normalizePathsForAction(params: DevToolsParams): Result.Result<string[], RequestBuildError> {
   const rawPath = params.path;
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
-  const mode = getActionContract(params.action).pathMode;
+  const contract = getActionContract(params.action);
 
-  if (mode === DevToolsPathMode.Single && paths.length > 1) {
+  if (contract.pathMode === DevToolsPathMode.Single && paths.length > 1) {
     return Result.fail(requestBuildError(`${params.action} requires a single path — ${paths.length} were provided`));
   }
+  if (contract.requiresPath && paths.length === 0) {
+    return Result.fail(requestBuildError(`${params.action} requires a path`));
+  }
+  if (contract.requiresPathOrQuery && paths.length === 0 && !params.query?.trim()) {
+    return Result.fail(requestBuildError(`${params.action} requires a path or query`));
+  }
+  if (contract.needsPosition && (params.line === undefined || params.character === undefined)) {
+    return Result.fail(requestBuildError(`${params.action} requires line and character`));
+  }
 
-  return Result.succeed(mode === DevToolsPathMode.None ? [] : paths);
+  return Result.succeed(contract.pathMode === DevToolsPathMode.None ? [] : paths);
 }
 
 /**
