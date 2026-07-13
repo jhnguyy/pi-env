@@ -17,7 +17,7 @@ import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect } from "effect";
 
 import {
-  makeToolingTelemetryRuntime,
+  withToolingTelemetryRuntime,
   type ToolingDiagnostics,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
@@ -271,19 +271,23 @@ export function runSubagentEffect(
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions = {},
 ): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
-  const runWith = (runtime: ToolingTelemetryRuntime) =>
-    runtime.provide(
-      runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics),
-    );
-  if (options.telemetryRuntime) return runWith(options.telemetryRuntime);
+  const workflowWith = (runtime: ToolingTelemetryRuntime) =>
+    runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics);
+  if (options.telemetryRuntime) {
+    return options.telemetryRuntime.provide(workflowWith(options.telemetryRuntime));
+  }
 
-  return makeToolingTelemetryRuntime({
-    env: options.env ?? process.env,
-    exporter: options.telemetryExporter,
-    serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
-  }).pipe(
-    Effect.mapError(() => executionError(SubagentExecutionPhase.Session)),
-    Effect.flatMap((runtime) => runWith(runtime).pipe(Effect.ensuring(runtime.disposeEffect))),
+  return withToolingTelemetryRuntime(
+    {
+      env: options.env ?? process.env,
+      exporter: options.telemetryExporter,
+      serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
+    },
+    workflowWith,
+  ).pipe(
+    Effect.catchTag("ToolingOtelConfigError", () =>
+      Effect.fail(executionError(SubagentExecutionPhase.Session)),
+    ),
   );
 }
 
@@ -295,43 +299,4 @@ export function runSubagent(
   options: RunSubagentOptions = {},
 ): Promise<AgentToolResult<SubagentDetails>> {
   return Effect.runPromise(runSubagentEffect(params, ctx, registeredExtTools, options));
-}
-
-function unexpectedErrorResult(
-  params: SubagentParams,
-  error: SubagentExecutionError,
-): AgentToolResult<SubagentDetails> {
-  const details = buildErrorDetails(params, [], params.model, error.phase);
-  details.errorMessage = error.message;
-  return {
-    content: [{ type: "text", text: `${error.message}.` }],
-    details,
-  };
-}
-
-export function createExecuteSubagent(
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  ledger?: SubagentUsageLedger,
-  getTelemetryRuntime?: () => ToolingTelemetryRuntime | undefined,
-) {
-  return async function executeSubagent(
-    _toolCallId: string,
-    params: SubagentParams,
-    signal: AbortSignal | undefined,
-    onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
-    ctx: ExtensionContext,
-  ): Promise<AgentToolResult<SubagentDetails>> {
-    return Effect.runPromise(
-      Effect.catch(
-        runSubagentEffect(params, ctx, registeredExtTools, {
-          signal,
-          onUpdate,
-          ledger,
-          runId: _toolCallId,
-          telemetryRuntime: getTelemetryRuntime?.(),
-        }),
-        (error: SubagentExecutionError) => Effect.succeed(unexpectedErrorResult(params, error)),
-      ),
-    );
-  };
 }

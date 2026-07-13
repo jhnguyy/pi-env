@@ -147,12 +147,16 @@ export const noopToolingTelemetryRuntime: ToolingTelemetryRuntime = {
   disposeEffect: Effect.void,
 };
 
-export function makeToolingTelemetryRuntime(options: {
+export interface ToolingTelemetryRuntimeOptions {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly serviceName: string;
   readonly serviceVersion?: string;
   readonly exporter?: SpanExporter;
-}): Effect.Effect<ToolingTelemetryRuntime, ToolingOtelConfigError> {
+}
+
+export function makeToolingTelemetryRuntime(
+  options: ToolingTelemetryRuntimeOptions,
+): Effect.Effect<ToolingTelemetryRuntime, ToolingOtelConfigError> {
   return resolveToolingOtelConfig(options.env).pipe(
     Effect.map((config) => {
       if (!config.enabled) return noopToolingTelemetryRuntime;
@@ -172,5 +176,16 @@ export function makeToolingTelemetryRuntime(options: {
         disposeEffect: runtime.disposeEffect,
       } satisfies ToolingTelemetryRuntime;
     }),
+  );
+}
+
+export function withToolingTelemetryRuntime<A, E>(
+  options: ToolingTelemetryRuntimeOptions,
+  use: (runtime: ToolingTelemetryRuntime) => Effect.Effect<A, E>,
+): Effect.Effect<A, E | ToolingOtelConfigError> {
+  return Effect.acquireUseRelease(
+    makeToolingTelemetryRuntime(options),
+    (runtime) => runtime.provide(use(runtime)),
+    (runtime) => runtime.disposeEffect,
   );
 }
