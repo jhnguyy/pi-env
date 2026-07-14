@@ -93,16 +93,30 @@ fi
 cleanup_script="$ROOT/.effect-runtime-cleanup-$$.mjs"
 trap 'rm -rf "$tmp" "$cleanup_script"' EXIT
 cat >"$cleanup_script" <<'JS'
+import { appendFileSync } from 'node:fs';
 import { NodeRuntime } from '@effect/platform-node';
 import { Effect } from 'effect';
 const marker = process.argv[2];
+const cleanupMarker = process.argv[3];
 NodeRuntime.runMain(Effect.scoped(Effect.gen(function* () {
-  yield* Effect.addFinalizer(() => Effect.sync(() => console.log(`cleanup:${marker}`)));
+  yield* Effect.addFinalizer(() => Effect.sync(() => appendFileSync(cleanupMarker, `cleanup:${marker}\n`)));
+  yield* Effect.callback((resume) => {
+    const waitForSignalHandler = () => {
+      if (process.listenerCount('SIGINT') > 0) {
+        resume(Effect.void);
+        return;
+      }
+      setImmediate(waitForSignalHandler);
+    };
+    setImmediate(waitForSignalHandler);
+  });
   yield* Effect.sync(() => console.log(`ready:${marker}`));
   yield* Effect.never;
 })));
 JS
-"$NODE_BIN" "$cleanup_script" ok >"$tmp/cleanup.out" 2>"$tmp/cleanup.err" &
+cleanup_marker="$tmp/cleanup.marker"
+: >"$cleanup_marker"
+"$NODE_BIN" "$cleanup_script" ok "$cleanup_marker" >"$tmp/cleanup.out" 2>"$tmp/cleanup.err" &
 pid=$!
 ready=0
 for _ in $(seq 1 100); do
@@ -141,10 +155,11 @@ if [ "$exited" -ne 1 ]; then
   exit 1
 fi
 wait "$pid" || true
-if ! grep -q '^cleanup:ok$' "$tmp/cleanup.out"; then
+if ! grep -q '^cleanup:ok$' "$cleanup_marker"; then
   echo "FAIL: NodeRuntime interruption should run scoped cleanup" >&2
   cat "$tmp/cleanup.out" >&2
   cat "$tmp/cleanup.err" >&2
+  cat "$cleanup_marker" >&2
   exit 1
 fi
 
