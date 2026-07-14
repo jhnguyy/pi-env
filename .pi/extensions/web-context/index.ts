@@ -1,8 +1,14 @@
-import { formatSize, keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  formatSize,
+  keyHint,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
+import { registerPtcTools } from "../_shared/ptc-tools";
 import { txt } from "../_shared/result";
 import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
 import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
@@ -399,7 +405,7 @@ export default function webContext(pi: ExtensionAPI) {
     return undefined;
   });
 
-  pi.registerTool({
+  const webFetchTool = defineTool({
     name: "web_fetch",
     label: "Web Fetch",
     description: [
@@ -453,8 +459,10 @@ export default function webContext(pi: ExtensionAPI) {
       return new Text(`${summary}\n${expandHint}`, 0, 0);
     },
   });
+  pi.registerTool(webFetchTool);
+  registerPtcTools(pi, webFetchTool);
 
-  pi.registerTool({
+  const webContextTool = defineTool({
     name: "web_context",
     label: "Web Context",
     description: [
@@ -477,4 +485,6 @@ export default function webContext(pi: ExtensionAPI) {
       }
     },
   });
+  pi.registerTool(webContextTool);
+  registerPtcTools(pi, webContextTool);
 }

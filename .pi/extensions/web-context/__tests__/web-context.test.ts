@@ -13,7 +13,7 @@ const mockTheme = {
 
 function registeredWebFetchTool() {
   const registerTool = vi.fn();
-  webContextExtension({ on: vi.fn(), registerTool } as never);
+  webContextExtension({ on: vi.fn(), registerTool, events: { emit: vi.fn(), on: vi.fn() } } as never);
   return registerTool.mock.calls
     .map(([tool]) => tool)
     .find((tool) => tool.name === "web_fetch");

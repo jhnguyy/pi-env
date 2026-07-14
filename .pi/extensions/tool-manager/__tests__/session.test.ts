@@ -12,6 +12,7 @@ function extensionHarness(branch: unknown[]) {
       registerTool(tool: any) { tools.push({ ...tool, sourceInfo: { source: "extension" } }); },
       registerCommand() {},
       on(event: string, handler: Function) { handlers.set(event, handler); },
+      events: { emit() {}, on() {} },
       getAllTools: () => tools,
       getActiveTools: () => active,
       setActiveTools(next: string[]) { active = next; },

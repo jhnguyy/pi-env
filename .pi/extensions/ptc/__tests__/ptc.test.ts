@@ -126,8 +126,10 @@ describe("BLOCKED_TOOLS", () => {
     expect(BLOCKED_TOOLS.has("ptc")).toBe(true);
   });
 
-  it("blocks agent-spawning tools", () => {
+  it("blocks agent-spawning and process-management tools", () => {
     expect(BLOCKED_TOOLS.has("subagent")).toBe(true);
+    expect(BLOCKED_TOOLS.has("subagent_start")).toBe(true);
+    expect(BLOCKED_TOOLS.has("subagent_job")).toBe(true);
   });
 
   it("blocks tools that spawn subagents", () => {

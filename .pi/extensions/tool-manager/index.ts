@@ -1,9 +1,16 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type ExtensionContext,
+  type ToolInfo,
+} from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { Effect } from "effect";
 import { decodeSettingsBlockEffect } from "../_shared/settings";
+import { registerPtcTools } from "../_shared/ptc-tools";
 import {
   CUSTOM_TYPE,
   SEARCH_TOOL_NAME,
@@ -227,7 +234,7 @@ function restoreBranch(pi: ExtensionAPI, ctx: ExtensionContext, config: Resolved
 export default function toolManager(pi: ExtensionAPI) {
   let config = loadConfig();
 
-  pi.registerTool({
+  const searchTool = defineTool({
     name: SEARCH_TOOL_NAME,
     label: "Search Tools",
     description: "Find and activate inactive tools by exact name, capability group, or multiple strong terms. Additive only.",
@@ -247,6 +254,8 @@ export default function toolManager(pi: ExtensionAPI) {
       return { content: [{ type: "text", text }], details: result };
     },
   });
+  pi.registerTool(searchTool);
+  registerPtcTools(pi, searchTool);
 
   pi.registerCommand("tools", { description: "Manage soft tool availability. Usage: /tools [status|on|off|profile|reset]", handler: (args, ctx) => handleToolsCommand(pi, args, ctx, config) });
 
