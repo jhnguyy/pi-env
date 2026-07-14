@@ -6,7 +6,7 @@ import {
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
-import { Container, type SettingItem, SettingsList } from "@earendil-works/pi-tui";
+import { type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { Effect } from "effect";
 import { decodeSettingsBlockEffect } from "../_shared/settings";
@@ -15,7 +15,6 @@ import {
   CUSTOM_TYPE,
   SEARCH_TOOL_NAME,
   ToolManagerSettingsSchema,
-  expandEntries,
   expandRequestedEntries,
   latestStateFromEntries,
   profileTools,
@@ -43,10 +42,29 @@ function persist(pi: ExtensionAPI, active: string[], reason: "profile" | "toggle
   pi.appendEntry(CUSTOM_TYPE, { active, reason, profile, at: new Date().toISOString() });
 }
 
-function apply(pi: ExtensionAPI, names: string[], config: ResolvedConfig): string[] {
-  const available = new Set(pi.getAllTools().map((tool) => tool.name));
-  const next = [...new Set([...names, SEARCH_TOOL_NAME, ...config.alwaysActive])].filter((name) => available.has(name));
+interface ToolTransition {
+  base?: readonly string[];
+  add?: readonly string[];
+  remove?: readonly string[];
+  profile?: string;
+  reason?: "profile" | "toggle" | "auto" | "search" | "reset";
+  onlyIfAdded?: boolean;
+}
+
+function commitTools(pi: ExtensionAPI, config: ResolvedConfig, transition: ToolTransition): string[] {
+  const tools = all(pi);
+  const base = transition.profile ? profileTools(transition.profile, config, tools) : transition.base ?? pi.getActiveTools();
+  const additions = expandRequestedEntries(transition.add ?? [], config, tools);
+  const removals = new Set(expandRequestedEntries(transition.remove ?? [], config, tools).filter((name) => !config.alwaysActive.includes(name)));
+  const next = setAdditive(
+    base.filter((name) => !removals.has(name)),
+    additions,
+    config,
+    tools,
+  );
+  if (transition.onlyIfAdded && !next.some((name) => !base.includes(name))) return next;
   pi.setActiveTools(next);
+  if (transition.reason) persist(pi, next, transition.reason, transition.profile);
   return next;
 }
 
@@ -84,12 +102,9 @@ function enableTools(
   config: ResolvedConfig,
   names: readonly string[],
 ): void {
-  const tools = all(pi);
-  const unknown = unknownEntries(names, config, tools);
+  const unknown = unknownEntries(names, config, all(pi));
   const before = new Set(pi.getActiveTools());
-  const next = setAdditive(pi.getActiveTools(), expandEntries(names, config, tools), config, tools);
-  apply(pi, next, config);
-  persist(pi, next, "toggle");
+  const next = commitTools(pi, config, { add: names, reason: "toggle" });
   notifyChanges(ctx, "Enabled", next.filter((name) => !before.has(name)), unknown);
 }
 
@@ -99,20 +114,9 @@ function disableTools(
   config: ResolvedConfig,
   names: readonly string[],
 ): void {
-  const tools = all(pi);
-  const unknown = unknownEntries(names, config, tools);
-  const remove = new Set(
-    expandRequestedEntries(names, config, tools).filter((name) => !config.alwaysActive.includes(name)),
-  );
+  const unknown = unknownEntries(names, config, all(pi));
   const before = pi.getActiveTools();
-  const next = setAdditive(
-    before.filter((name) => !remove.has(name)),
-    [],
-    config,
-    tools,
-  );
-  apply(pi, next, config);
-  persist(pi, next, "toggle");
+  const next = commitTools(pi, config, { remove: names, reason: "toggle" });
   notifyChanges(ctx, "Disabled", before.filter((name) => !next.includes(name)), unknown);
 }
 
@@ -127,9 +131,7 @@ function applyProfile(
     notify(ctx, reason === "reset" ? `Unknown default profile: ${profile}` : `Unknown profile: ${profile}`, "error");
     return;
   }
-  const next = profileTools(profile, config, all(pi));
-  apply(pi, next, config);
-  persist(pi, next, reason, profile);
+  const next = commitTools(pi, config, { profile, reason });
   notify(ctx, `${reason === "reset" ? "Reset to" : "Applied profile"} ${profile}: ${next.join(", ") || "-"}`);
 }
 
@@ -172,7 +174,7 @@ export async function handleToolsCommand(
 }
 
 async function openToolsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext, config: ResolvedConfig): Promise<void> {
-  await ctx.ui.custom((tui, theme, _kb, done) => {
+  await ctx.ui.custom((tui, _theme, _kb, done) => {
     const locked = new Set(config.alwaysActive);
     const items: SettingItem[] = all(pi).map((tool) => {
       const isLocked = tool.name === SEARCH_TOOL_NAME || locked.has(tool.name);
@@ -188,34 +190,17 @@ async function openToolsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext, conf
       };
     });
 
-    const container = new Container();
-    container.addChild(
-      new (class {
-        render(_width: number) {
-          return [theme.fg("accent", theme.bold("Tool Manager")), theme.fg("muted", "Search, then Enter/Space to toggle. Changes persist immediately."), ""];
-        }
-        invalidate() {}
-      })(),
-    );
-
     const settingsList = new SettingsList(items, Math.min(items.length + 2, 18), getSettingsListTheme(), (id, newValue) => {
       if ((id === SEARCH_TOOL_NAME || locked.has(id)) && newValue !== "enabled") return;
-      const active = new Set(pi.getActiveTools());
-      if (newValue === "enabled") active.add(id);
-      else active.delete(id);
-      active.add(SEARCH_TOOL_NAME);
-      for (const name of locked) active.add(name);
-      const next = apply(pi, [...active], config);
-      persist(pi, next, "toggle");
+      commitTools(pi, config, newValue === "enabled" ? { add: [id], reason: "toggle" } : { remove: [id], reason: "toggle" });
     }, () => done(undefined), { enableSearch: true });
 
-    container.addChild(settingsList);
     return {
       render(width: number) {
-        return container.render(width);
+        return settingsList.render(width);
       },
       invalidate() {
-        container.invalidate();
+        settingsList.invalidate();
       },
       handleInput(data: string) {
         settingsList.handleInput?.(data);
@@ -227,8 +212,7 @@ async function openToolsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext, conf
 
 function restoreBranch(pi: ExtensionAPI, ctx: ExtensionContext, config: ResolvedConfig): void {
   const restored = latestStateFromEntries(branchEntries(ctx));
-  const next = restored ? setAdditive([], restored.active, config, all(pi)) : profileTools(config.defaultProfile, config, all(pi));
-  apply(pi, next, config);
+  commitTools(pi, config, restored ? { base: [], add: restored.active } : { profile: config.defaultProfile });
 }
 
 export default function toolManager(pi: ExtensionAPI) {
@@ -245,11 +229,7 @@ export default function toolManager(pi: ExtensionAPI) {
     parameters: Type.Object({ query: Type.String({ description: "Tool name, group, or capability terms to activate." }) }),
     async execute(_id, params) {
       const result = searchTools(params.query, pi.getActiveTools(), config, all(pi));
-      if (result.loaded.length > 0) {
-        const next = setAdditive(pi.getActiveTools(), result.loaded, config, all(pi));
-        pi.setActiveTools(next);
-        persist(pi, next, "search");
-      }
+      if (result.loaded.length > 0) commitTools(pi, config, { add: result.loaded, reason: "search" });
       const text = [`loaded: ${result.loaded.join(", ") || "-"}`, `already-active: ${result.alreadyActive.join(", ") || "-"}`, `no-match: ${result.noMatch ? "true" : "false"}`, `groups: ${result.groups.join(", ") || "-"}`].join("\n");
       return { content: [{ type: "text", text }], details: result };
     },
@@ -268,13 +248,8 @@ export default function toolManager(pi: ExtensionAPI) {
   pi.on("input", (event) => {
     const groups = triggerGroups({ text: event.text, source: event.source }, config.autoActivate);
     if (groups.length === 0) return { action: "continue" as const };
-    const additions = expandEntries(groups, config, all(pi)).filter((name) => !config.manualOnly.has(name));
-    const before = pi.getActiveTools();
-    const next = setAdditive(before, additions, config, all(pi));
-    if (next.some((name) => !before.includes(name))) {
-      pi.setActiveTools(next);
-      persist(pi, next, "auto");
-    }
+    const additions = expandRequestedEntries(groups, config, all(pi)).filter((name) => !config.manualOnly.has(name));
+    commitTools(pi, config, { add: additions, reason: "auto", onlyIfAdded: true });
     return { action: "continue" as const };
   });
 }

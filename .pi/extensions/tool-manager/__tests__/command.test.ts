@@ -42,21 +42,16 @@ describe("/tools command", () => {
     expect(h.notify).toHaveBeenCalledWith("Unknown profile: missing", "error");
   });
 
-  it("prevents alwaysActive tools from being disabled", async () => {
+  it("mutates through the transition seam while normalizing unknown and locked tools", async () => {
     const h = harness();
-    await handleToolsCommand(h.pi, "off notes", h.ctx, resolveConfig({ alwaysActive: ["notes"] }));
-    expect(h.active).toEqual(["read", SEARCH_TOOL_NAME, "notes"]);
-    expect(h.notify).toHaveBeenLastCalledWith(expect.stringContaining("Disabled: -"), "info");
-  });
+    const config = resolveConfig({ alwaysActive: ["notes"] });
 
-  it("reports actual on/off changes and unknown names", async () => {
-    const h = harness();
-    await handleToolsCommand(h.pi, "on analyze missing", h.ctx, resolveConfig());
-    expect(h.active).toContain("analyze");
+    await handleToolsCommand(h.pi, "on analyze missing", h.ctx, config);
+    expect(h.active).toEqual(["read", SEARCH_TOOL_NAME, "analyze", "notes"]);
     expect(h.notify).toHaveBeenLastCalledWith(expect.stringContaining("Unknown: missing"), "warning");
-    await handleToolsCommand(h.pi, "off analyze missing", h.ctx, resolveConfig());
-    expect(h.active).not.toContain("analyze");
-    expect(h.active).toContain(SEARCH_TOOL_NAME);
+
+    await handleToolsCommand(h.pi, "off analyze notes missing", h.ctx, config);
+    expect(h.active).toEqual(["read", SEARCH_TOOL_NAME, "notes"]);
     expect(h.notify).toHaveBeenLastCalledWith(expect.stringContaining("Disabled: analyze"), "warning");
   });
 

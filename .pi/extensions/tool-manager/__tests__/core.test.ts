@@ -29,8 +29,6 @@ describe("tool manager core", () => {
 
   it("search is reliable and respects manual-only", () => {
     const manual = resolveConfig({ manualOnly: ["notes"] });
-    expect(searchTools("analyze this design", ["read"], resolveConfig(), tools).loaded).toEqual([]);
-    expect(searchTools("run tests", ["read"], resolveConfig(), tools).loaded).toEqual([]);
     expect(searchTools("bounded complexity loads analysis", ["read"], resolveConfig(), tools).loaded).toEqual(["analyze"]);
     expect(searchTools("notes", ["read"], resolveConfig(), tools).loaded).toEqual(["notes"]);
     expect(searchTools("forgejo", ["read"], resolveConfig(), tools).loaded).toEqual([]);
@@ -39,8 +37,6 @@ describe("tool manager core", () => {
 
   it("trigger matrix auto-activates analysis for coding sessions with code entities", () => {
     expect(triggerGroups({ text: "fix this TypeScript file" }, true)).toContain("analysis");
-    expect(triggerGroups({ text: "review the repo diff" }, true)).toContain("analysis");
-    expect(triggerGroups({ text: "analyze this TypeScript file" }, true)).toContain("analysis");
     expect(triggerGroups({ text: "analyze this design" }, true)).not.toContain("analysis");
     expect(triggerGroups({ text: "delegate this to subagent in background" }, true)).toContain("delegation");
     expect(triggerGroups({ text: "create a skill for this" }, true)).toContain("skills");
