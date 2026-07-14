@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
+import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
 import { SubagentJobManager } from "../jobs";
 

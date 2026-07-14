@@ -19,7 +19,8 @@
     ".pi/extensions/ptc",
     ".pi/extensions/security",
     ".pi/extensions/skill-builder",
-    ".pi/extensions/subagent"
+    ".pi/extensions/subagent",
+    ".pi/extensions/tool-manager"
   ],
   "pi": {
     "extensions": [
@@ -32,7 +33,8 @@
       ".pi/extensions/ptc",
       ".pi/extensions/security",
       ".pi/extensions/skill-builder",
-      ".pi/extensions/subagent"
+      ".pi/extensions/subagent",
+      ".pi/extensions/tool-manager"
     ],
     "skills": [
       ".agents/skills"

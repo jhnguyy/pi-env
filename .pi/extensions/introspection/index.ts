@@ -101,11 +101,7 @@ export default function (pi: ExtensionAPI) {
     name: "list_sessions",
     label: "List Sessions",
     description:
-      "List pi sessions as compact navigation digests. Returns cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
-    promptSnippet: "Navigate prior pi sessions by compact metadata before reading a specific session.",
-    promptGuidelines: [
-      "Use list_sessions before reading past sessions; choose the smallest relevant set by cwd/query/limit instead of scanning raw JSONL files.",
-    ],
+      "List pi sessions as compact navigation digests before selecting one for read_session. Returns cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
     parameters: LIST_SCHEMA,
     async execute(_id, params, signal) {
       return executeListSessions(params, signal);
@@ -116,11 +112,7 @@ export default function (pi: ExtensionAPI) {
     name: "read_session",
     label: "Read Session",
     description:
-      "Read one pi session as a sparse navigation view. Default output includes metadata, user prompts, tool error summaries, labels, branch summaries, and compactions; it excludes raw tool outputs and full assistant narrative.",
-    promptSnippet: "Inspect a selected prior pi session in sparse form without raw tool output noise.",
-    promptGuidelines: [
-      "Use read_session only after list_sessions identifies a relevant session file; it returns structured session navigation signal and omits raw tool output.",
-    ],
+      "Read a session path selected with list_sessions as a sparse navigation view. Default output includes metadata, user prompts, tool error summaries, labels, branch summaries, and compactions; it excludes raw tool outputs and full assistant narrative.",
     parameters: READ_SCHEMA,
     async execute(_id, params, signal) {
       return executeReadSession(params, signal);

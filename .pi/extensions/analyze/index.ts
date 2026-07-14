@@ -90,10 +90,6 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
 
 export default function (pi: ExtensionAPI) {
   const tool = createAnalyzeTool();
-  pi.registerTool({
-    ...tool,
-    promptSnippet: "Run bounded code analysis against a worktree or project path",
-    promptGuidelines: ["Use explicit complexity, async-risk, and/or scoped duplicates checks with diff or paths scope. Use path '.' for a bounded whole-source corpus. Semantic/external checks and all scope require strict containment and otherwise fail closed."],
-  });
+  pi.registerTool(tool);
   registerAgentToolsOnSessionStart(pi, { tool, capabilities: [ToolCapability.Read, ToolCapability.Execute] });
 }

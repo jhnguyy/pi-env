@@ -1,8 +1,14 @@
-import { formatSize, keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  formatSize,
+  keyHint,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
+import { registerPtcTools } from "../_shared/ptc-tools";
 import { txt } from "../_shared/result";
 import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
 import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
@@ -399,19 +405,15 @@ export default function webContext(pi: ExtensionAPI) {
     return undefined;
   });
 
-  pi.registerTool({
+  const webFetchTool = defineTool({
     name: "web_fetch",
     label: "Web Fetch",
     description: [
       "Fetch an http(s) URL as bounded text; no JS, clicks, auth, or visual inspection.",
       "Default mode='text' strips HTML boilerplate for lower token use; use mode='raw' only when exact markup matters.",
       "Use mode='metadata' for a compact title/headings/links view.",
+      "Do not use for secrets, authenticated pages, forms, or side effects.",
     ].join("\n"),
-    promptSnippet: "Fetch an http(s) URL as compact text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
-    promptGuidelines: [
-      "Use web_fetch for direct URL retrieval; prefer default text/metadata modes to conserve tokens.",
-      "Do not use web_fetch for secrets, authenticated pages, forms, or side effects.",
-    ],
     parameters: Type.Object({
       url: Type.String({ description: "http(s) URL to fetch." }),
       maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return after extraction, capped at 1 MB. Default 100000." })),
@@ -457,8 +459,9 @@ export default function webContext(pi: ExtensionAPI) {
       return new Text(`${summary}\n${expandHint}`, 0, 0);
     },
   });
+  registerPtcTools(pi, webFetchTool);
 
-  pi.registerTool({
+  const webContextTool = defineTool({
     name: "web_context",
     label: "Web Context",
     description: [
@@ -481,4 +484,5 @@ export default function webContext(pi: ExtensionAPI) {
       }
     },
   });
+  registerPtcTools(pi, webContextTool);
 }

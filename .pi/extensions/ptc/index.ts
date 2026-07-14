@@ -1,20 +1,5 @@
 /**
  * ptc — Programmatic Tool Calling extension for pi-env
- *
- * Lets the model write a TypeScript script that calls tools as async functions
- * in a single round-trip. Only console.log() output and return values reach the
- * context window — intermediate tool results stay in subprocess memory.
- *
- * Design: see projects/homelab/ptc_extension_design.md in vault
- *
- * Architecture:
- *   index.ts        — extension entry, installs intercept, registers tool
- *   tool-registry.ts — registerTool intercept + createXxxToolDefinition dispatch
- *   executor.ts     — temp file + Node subprocess lifecycle
- *   rpc-bridge.ts   — parent-side JSON-over-stdio RPC dispatcher
- *   subprocess-preamble.ts — RPC client code running inside the subprocess
- *   wrapper-gen.ts  — generates async wrapper functions from ToolInfo[]
- *   types.ts        — constants, blocklist, RPC message types
  */
 
 import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -29,9 +14,6 @@ import { BLOCKED_TOOLS } from "./types";
 import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
 
 export default function ptcExtension(pi: ExtensionAPI) {
-  // ToolRegistry installs the registerTool intercept immediately — before any
-  // tool below is registered. Tools from extensions that load AFTER ptc will
-  // be captured. Built-in tools always work via createXxxToolDefinition().
   const registry = new ToolRegistry(pi);
   const executor = new PtcExecutor(pi, registry);
 
@@ -57,7 +39,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
         const output = await executor.execute(code, ctx.cwd, signal, onUpdate, ctx);
         return { content: [txt(output || "(no output)")], details: {} };
       } catch (e: unknown) {
-        // Throw so pi marks it isError: true and reports to the LLM
         throw new Error(formatError(e, "ptc"));
       }
     },
@@ -65,8 +46,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
     renderCall(args, theme, _ctx) {
       const lines = args.code.split("\n");
       const lineCount = lines.filter((l) => l.trim().length > 0).length;
-      // Find first meaningful line — skip blanks and comments.
-      // Template literals start with a newline so [0] is always "".
       const firstCodeLine =
         lines
           .find((l) => {
@@ -97,12 +76,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
   });
 
-  // ─── Agent tool registration ──────────────────────────────────────────────────
-  // Register ptc as an AgentTool so subagents can run multi-tool scripts.
-  // Captures cwd at session_start — subagents run in-process within the same
-  // session, so this is the correct project directory. No ctx available in the
-  // AgentTool execute signature, so extension tools called from ptc subagent
-  // scripts get a { cwd } stub (safe: ptc-eligible ext tools don't use ctx).
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
     const sessionCwd = ctx.cwd;
     const ptcAgentTool: AgentTool<any, any> = {
@@ -129,47 +102,25 @@ export default function ptcExtension(pi: ExtensionAPI) {
   });
 }
 
-// ─── Description and parameter description ───────────────────────────────────
-//
-// DESIGN RULE: both constants must be fully self-contained.
-// Any model (Claude, GPT, Gemini, local) should be able to write correct ptc
-// code from description + param_description alone, without relying on the
-// system prompt's Guidelines section or any model-specific intuition.
-//
-// Tool list is intentionally NOT embedded: this runs at extension load time,
-// before other extensions have called registerTool(). The system prompt's
-// "Available tools" section lists them — no duplication needed.
-
-/** Tool description: execution contract + example. Self-contained for any model. */
 const DESCRIPTION = [
-  "Run a TypeScript/JavaScript script where every available tool is an async function.",
-  "Only console.log() output and explicit return values are returned to you.",
-  "Intermediate tool results stay in the script's memory — they do NOT enter the context window.",
+  "Run a TypeScript/JavaScript script where active available tools are async functions.",
+  "Only console.log() output and explicit return values are returned; intermediate tool results stay out of context.",
+  "Tool calls must be awaited and use a single object argument; hyphens in tool names become underscores.",
+  "Limits: timeout 120 s, max output 50 KB, max tool calls per run 100.",
+  "Blocked tools must be called directly, not inside ptc: " + [...BLOCKED_TOOLS].join(", "),
+].join("\n");
+
+const PARAM_DESCRIPTION = [
+  "The script body to execute. Write it as if it is the body of an async function:",
+  "top-level await is supported, variables declared at the top level persist for the whole script.",
   "",
-  "CALLING TOOLS:",
-  "  Each tool is a function named after the tool, with hyphens replaced by underscores.",
-  "  Pass a single object argument with the tool's named parameters.",
-  "  All calls must be awaited.",
-  "  Example: await read({ path: 'src/index.ts' })",
-  "  Example: await bash({ command: 'git log --oneline -5' })",
-  "  Example: await dev_tools({ action: 'diagnostics', path: '/abs/path.ts' })",
+  "Tool names: hyphens become underscores (dev-tools → dev_tools).",
+  "Each tool accepts a single object argument: await toolName({ param1: val1, param2: val2 }).",
+  "All tool calls must be awaited — tools are async.",
   "",
-  "OUTPUT:",
-  "  Use console.log() to emit results — each call appends a line to the output.",
-  "  Alternatively, return a value from the script body; it becomes the output.",
-  "  Nothing else reaches you — all other computation is invisible.",
-  "",
-  "EXAMPLE:",
-  "  const raw = await grep({ pattern: 'TODO', path: 'src/' });",
-  "  const hits = raw.split('\\n').filter(l => l.trim().length > 0 && !l.includes('.test.'));",
-  "  console.log(hits.length + ' TODOs in non-test files');",
-  "  for (const h of hits.slice(0, 5)) console.log(h);",
-  "",
-  "LIMITS:",
-  "  Timeout: 120 s | Max output: 50 KB | Max tool calls per run: 100",
-  "",
-  "BLOCKED TOOLS (must be called directly, not inside ptc):",
-  "  " + [...BLOCKED_TOOLS].join(", "),
+  "Return a string to set the output, or use console.log(). Both are captured.",
+  "Throwing an error marks the result as failed.",
+  "For scripts that can fail, wrap calls in try/catch and rethrow with tool-specific context.",
 ].join("\n");
 
 interface PtcRenderTheme {
@@ -197,9 +148,6 @@ function renderPtcError(text: string, expanded: boolean | undefined, theme: PtcR
 }
 
 function renderPtcPartial(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
-  // Accumulate each tool-call label into a persistent chain stored in renderer state.
-  // Each onUpdate() replaces this.result in ToolExecutionComponent, so only the latest
-  // label would be visible without this accumulation.
   const chain = (ctx.state.callChain ??= []) as string[];
   const lastLabel = chain[chain.length - 1];
   if (text && lastLabel !== text) chain.push(text);
@@ -220,7 +168,9 @@ function renderPtcExpandedFinal(text: string, ctx: PtcRenderContext, theme: PtcR
   const { countLabel, callSuffix } = finalResultMetadata(text, ctx, theme);
   const code = ctx.args?.code ?? "";
   const codeBlock = code.trim()
-    ? `${theme.fg("muted", "─── script ───")}\n${code.trim()}\n${theme.fg("muted", "─── output ───")}`
+    ? `${theme.fg("muted", "─── script ───")}
+${code.trim()}
+${theme.fg("muted", "─── output ───")}`
     : "";
   return new Text(
     theme.fg("success", "✓ ") +
@@ -252,17 +202,3 @@ function renderPtcCollapsedFinal(text: string, ctx: PtcRenderContext, theme: Ptc
 
   return new Text(collapsed, 0, 0);
 }
-
-/** Parameter description: syntax contract. Tells any model exactly what to write. */
-const PARAM_DESCRIPTION = [
-  "The script body to execute. Write it as if it is the body of an async function:",
-  "top-level await is supported, variables declared at the top level persist for the whole script.",
-  "",
-  "Tool names: hyphens become underscores (dev-tools → dev_tools).",
-  "Each tool accepts a single object argument: await toolName({ param1: val1, param2: val2 }).",
-  "All tool calls must be awaited — tools are async.",
-  "",
-  "Return a string to set the output, or use console.log(). Both are captured.",
-  "Throwing an error marks the result as failed.",
-  "For scripts that can fail, wrap calls in try/catch and rethrow with tool-specific context.",
-].join("\n");

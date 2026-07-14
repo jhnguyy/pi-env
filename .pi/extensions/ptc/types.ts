@@ -59,16 +59,15 @@ export type DispatchFn = (tool: string, params: Record<string, unknown>) => Prom
  * Tools excluded from PTC because they involve recursive agent spawning,
  * long-running process management, or interactive TUI operations.
  *
- * TODO(upstream): when pi exposes pi.executeTool(name, params, ctx) as a
- * first-class API, the registerTool intercept in tool-registry.ts can be
- * removed entirely. The blocklist stays regardless — these tools are
- * intentionally unavailable inside a batch script.
+ * These tools are intentionally unavailable inside a batch script.
  */
 export const BLOCKED_TOOLS = new Set<string>([
-  "ptc",          // self — prevent recursion
-  "subagent",     // in-process agent loops
-  "jit_catch",    // spawns a subagent internally
-  "skill_build",  // spawns a subagent internally
+  "ptc",           // self — prevent recursion
+  "subagent",      // in-process agent loops
+  "subagent_start", // long-running process management
+  "subagent_job",  // long-running process management
+  "jit_catch",     // spawns a subagent internally
+  "skill_build",   // spawns a subagent internally
 ]);
 
 // ─── RPC message types ────────────────────────────────────────────────────────
