@@ -406,12 +406,8 @@ export default function webContext(pi: ExtensionAPI) {
       "Fetch an http(s) URL as bounded text; no JS, clicks, auth, or visual inspection.",
       "Default mode='text' strips HTML boilerplate for lower token use; use mode='raw' only when exact markup matters.",
       "Use mode='metadata' for a compact title/headings/links view.",
+      "Do not use for secrets, authenticated pages, forms, or side effects.",
     ].join("\n"),
-    promptSnippet: "Fetch an http(s) URL as compact text; no browser, JavaScript execution, clicks, auth, or visual inspection.",
-    promptGuidelines: [
-      "Use web_fetch for direct URL retrieval; prefer default text/metadata modes to conserve tokens.",
-      "Do not use web_fetch for secrets, authenticated pages, forms, or side effects.",
-    ],
     parameters: Type.Object({
       url: Type.String({ description: "http(s) URL to fetch." }),
       maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return after extraction, capped at 1 MB. Default 100000." })),

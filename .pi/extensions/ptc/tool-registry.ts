@@ -2,8 +2,9 @@
  * @module ptc/tool-registry
  * @purpose Manages tool execute functions for PTC dispatch.
  *
- * Built-in tools (read, bash, etc.) are resolved via createXxxToolDefinition(cwd)
- * from pi 0.62.0+. Extension tools are captured via two complementary paths:
+ * Only ACTIVE built-in and extension tools are available inside PTC.
+ * Built-ins are resolved via createXxxToolDefinition(cwd) from pi 0.62.0+.
+ * Extension tools are captured via two complementary paths:
  *
  * Path 1 — registerTool() intercept (installed at construction time):
  *   Captures execute functions for any extension that calls pi.registerTool()
@@ -44,39 +45,23 @@ type ExecuteFn = (
 /**
  * Minimal context sufficient for tool dispatch.
  * Built-in tools only need `cwd`. Extension tools receive the full ctx but
- * none of the ptc-eligible tools actually use anything beyond cwd (the ones
- * that do — skill_build, orch, etc. — are in BLOCKED_TOOLS). This allows
- * ptc to run as a subagent tool where full ExtensionContext isn't available.
+ * only ACTIVE captured tools can be dispatched. This allows ptc to run as a
+ * subagent tool where full ExtensionContext isn't available.
  */
 export type DispatchContext = { cwd: string } | ExtensionContext;
 
-// Single source of truth for built-in tools: name → factory function.
-// Used for dispatch routing (dispatch()) and intercept guarding (installRegisterToolIntercept()).
-// Availability filtering uses sourceInfo.source === "builtin" from pi.getAllTools() instead,
-// so new built-in tools are automatically included without updating this map.
-// Cast required: each factory has distinct generic ToolDefinition return types.
 const BUILTIN_FACTORIES = Object.fromEntries(
   Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [name, contract.definitionFactory]),
 ) as Record<string, (cwd: string) => ToolDefinition<any, any, any>>;  // eslint-disable-line @typescript-eslint/no-explicit-any
 const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
-  /**
-   * Execute functions for extension tools captured via registerTool intercept.
-   * Built-ins are NOT stored here — they're resolved via BUILTIN_FACTORIES.
-   */
+  private readonly pi: ExtensionAPI;
   private extensionTools = new Map<string, ExecuteFn>();
-
-  /**
-   * Cache of built-in ToolDefinitions keyed by `${cwd}:${toolName}`.
-   * Avoids recreating closures on each of up to 100 dispatch() calls/execution.
-   *
-   * Size: bounded by (unique cwds in session) × 7 built-ins. In practice
-   * sessions rarely span more than a handful of cwds, so this stays small.
-   */
   private builtinCache = new Map<string, ToolDefinition<any, any, any>>();  // eslint-disable-line @typescript-eslint/no-explicit-any
 
   constructor(pi: ExtensionAPI) {
+    this.pi = pi;
     this.installRegisterToolIntercept(pi);
     this.installAgentToolsListener(pi);
   }
@@ -96,8 +81,6 @@ export class ToolRegistry {
   private installAgentToolsListener(pi: ExtensionAPI): void {
     listenForAgentTools(pi, ({ tool }) => {
       if (BLOCKED_TOOLS.has(tool.name) || BUILTIN_NAMES.has(tool.name)) return;
-      // Adapt AgentTool's 4-arg execute to ExecuteFn's 5-arg shape.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.extensionTools.set(tool.name, (id, params, sig, _upd, _ctx) =>
         tool.execute(id, params as any, sig, undefined),
       );
@@ -124,21 +107,18 @@ export class ToolRegistry {
       }
       return original(tool);
     };
-    // Verify the patch landed — pi could seal its API object in a future version.
     if ((pi as unknown as { registerTool: unknown }).registerTool === original) {
       console.warn("[ptc] registerTool intercept failed — extension tools will be unavailable in PTC");
     }
   }
 
   /**
-   * Returns the tools available inside PTC: built-ins always, extension tools
-   * only if their execute was captured via the intercept (i.e. loaded after ptc).
-   *
-   * Uses sourceInfo.source === "builtin" (pi 0.62.0+) instead of a hardcoded name
-   * set for built-in detection, so newly added built-ins are included automatically.
+   * Returns the tools available inside PTC: active built-ins always, active
+   * extension tools only if their execute was captured via the intercept.
    */
   getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
-    const allTools = pi.getAllTools();
+    const activeNames = new Set(pi.getActiveTools());
+    const allTools = pi.getAllTools().filter((tool) => activeNames.has(tool.name));
     const unavailable: string[] = [];
     const available = allTools.filter((t) => {
       if (BLOCKED_TOOLS.has(t.name)) return false;
@@ -158,14 +138,6 @@ export class ToolRegistry {
     return available;
   }
 
-  /**
-   * Dispatch a tool call and return its concatenated text output.
-   * Single path for built-ins and extension tools — both use the 5-arg execute() signature.
-   *
-   * Accepts either a full ExtensionContext or a minimal { cwd } stub. Built-in
-   * tools get cwd from their factory; extension tools receive ctx but ptc-eligible
-   * ones don't use anything beyond cwd (blocked tools are filtered out).
-   */
   async dispatch(
     toolName: string,
     params: Record<string, unknown>,
@@ -173,9 +145,8 @@ export class ToolRegistry {
     signal: AbortSignal | undefined,
     ctx?: DispatchContext,
   ): Promise<string> {
+    this.assertActive(toolName);
     const toolCallId = `ptc_${generateId()}`;
-    // Build a minimal ctx stub when full ExtensionContext isn't available.
-    // Safe because ptc-eligible extension tools don't use ctx beyond cwd.
     const effectiveCtx = (ctx ?? { cwd }) as ExtensionContext;
     let result: AgentToolResult<unknown>;
 
@@ -201,9 +172,14 @@ export class ToolRegistry {
 
     return extractText(result);
   }
+
+  private assertActive(toolName: string): void {
+    if (!this.pi.getActiveTools().includes(toolName)) {
+      throw new Error(`[ptc] Tool "${toolName}" is inactive. Activate it before calling it through ptc.`);
+    }
+  }
 }
 
-/** Extract concatenated text from a tool result content array. */
 function extractText(result: AgentToolResult<unknown>): string {
   return result.content
     .filter((c): c is { type: "text"; text: string } => c.type === "text")
