@@ -2,12 +2,74 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
-import { describe, expect, it } from "vitest";
-import { WebFetchFailureKind, WebFetchMode, buildContextPlan, fetchWebText, fetchWebTextEffect, parseWebUrl, selectAdapter, type WebFetch } from "../index";
+import { describe, expect, it, vi } from "vitest";
+import webContextExtension, { WebFetchFailureKind, WebFetchMode, buildContextPlan, fetchWebText, fetchWebTextEffect, parseWebUrl, selectAdapter, type WebFetch } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
+const mockTheme = {
+  fg: (_color: string, text: string) => text,
+};
+
+function registeredWebFetchTool() {
+  const registerTool = vi.fn();
+  webContextExtension({ on: vi.fn(), registerTool } as never);
+  return registerTool.mock.calls
+    .map(([tool]) => tool)
+    .find((tool) => tool.name === "web_fetch");
+}
+
+function componentText(component: unknown): string {
+  return (component as { text: string }).text;
+}
+
+function webFetchToolResult() {
+  const body = `Fetched body\n${"full output ".repeat(40)}`;
+  return {
+    body,
+    result: {
+      content: [{ type: "text", text: `URL: https://example.com/\nStatus: 200\nContent-Type: text/html\nMode: text\nRaw-Bytes: 8192\nOutput-Bytes: 4096\nTruncated: false\n\n${body}` }],
+      details: {
+        text: body,
+        url: "https://example.com/",
+        status: 200,
+        contentType: "text/html; charset=utf-8",
+        truncated: false,
+        mode: WebFetchMode.Text,
+        rawBytes: 8192,
+        outputBytes: 4096,
+      },
+    },
+  };
+}
+
 describe("web context", () => {
+  it("keeps fetched output compact until the user expands it", () => {
+    const tool = registeredWebFetchTool();
+    const { body, result } = webFetchToolResult();
+    const beforeRender = structuredClone(result);
+
+    const collapsed = componentText(tool.renderResult(result, { expanded: false }, mockTheme));
+
+    expect(collapsed).toContain("HTTP 200");
+    expect(collapsed).toContain("text/html");
+    expect(collapsed).toContain("4.0KB");
+    expect(collapsed).toContain("ctrl+o");
+    expect(collapsed).not.toContain(body);
+    expect(result).toEqual(beforeRender);
+  });
+
+  it("reveals the full fetched output when expanded", () => {
+    const tool = registeredWebFetchTool();
+    const { body, result } = webFetchToolResult();
+
+    const expanded = componentText(tool.renderResult(result, { expanded: true }, mockTheme));
+
+    expect(expanded).toContain(body);
+    expect(expanded).toContain("URL: https://example.com/");
+    expect(expanded).not.toContain("ctrl+o");
+  });
+
   it("selects the GitHub adapter", () => {
     const adapter = selectAdapter(new URL("https://github.com/example/project/issues/1"));
     expect(adapter?.id).toBe("github");
