@@ -459,7 +459,6 @@ export default function webContext(pi: ExtensionAPI) {
       return new Text(`${summary}\n${expandHint}`, 0, 0);
     },
   });
-  pi.registerTool(webFetchTool);
   registerPtcTools(pi, webFetchTool);
 
   const webContextTool = defineTool({
@@ -485,6 +484,5 @@ export default function webContext(pi: ExtensionAPI) {
       }
     },
   });
-  pi.registerTool(webContextTool);
   registerPtcTools(pi, webContextTool);
 }

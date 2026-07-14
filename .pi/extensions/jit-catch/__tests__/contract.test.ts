@@ -3,7 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 
 import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } from "../../_shared/agent-tools";
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
+import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { err } from "../../_shared/result";
 import jitCatchExtension from "../index";
 import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";

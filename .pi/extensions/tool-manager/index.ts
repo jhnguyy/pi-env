@@ -254,7 +254,6 @@ export default function toolManager(pi: ExtensionAPI) {
       return { content: [{ type: "text", text }], details: result };
     },
   });
-  pi.registerTool(searchTool);
   registerPtcTools(pi, searchTool);
 
   pi.registerCommand("tools", { description: "Manage soft tool availability. Usage: /tools [status|on|off|profile|reset]", handler: (args, ctx) => handleToolsCommand(pi, args, ctx, config) });

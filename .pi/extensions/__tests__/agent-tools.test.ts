@@ -9,7 +9,7 @@ import {
   type AgentToolEvents,
   type ExtToolRegistration,
 } from "../_shared/agent-tools";
-import { resetAgentToolRegistryForTests } from "../_shared/agent-tool-registry";
+import { resetAgentToolRegistryForTests } from "../_shared/agent-tools";
 
 function createPi(): AgentToolEvents {
   const handlers: Array<(data: unknown) => void> = [];

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tool-registry";
+import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
 
 const state = vi.hoisted(() => ({

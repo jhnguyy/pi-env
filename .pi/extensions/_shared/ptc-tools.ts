@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { connectPtcToolEventBus, getPtcToolRegistry } from "./ptc-tool-registry";
+import { createRememberedRegistrationChannel } from "./remembered-registration-channel";
 
 export const PtcToolEvent = {
   Register: "ptc-tools:register",
@@ -17,24 +17,32 @@ export interface PtcToolEvents {
   };
 }
 
+export interface PtcToolRegistrar extends PtcToolEvents {
+  registerTool(tool: ToolDefinition<any, any, any>): void;
+}
+
 type PtcToolHandler = (registration: PtcToolRegistration) => void;
 
+const ptcToolChannel = createRememberedRegistrationChannel<PtcToolRegistration, typeof PtcToolEvent.Register>({
+  storeKey: "__piEnvPtcToolRegistry",
+  event: PtcToolEvent.Register,
+  isDuplicate: (previous, next) => previous?.tool === next.tool,
+});
+
 export function registerPtcTools(
-  pi: PtcToolEvents,
+  pi: PtcToolRegistrar,
   tools: ToolDefinition<any, any, any> | ToolDefinition<any, any, any>[],
 ): void {
   for (const tool of Array.isArray(tools) ? tools : [tools]) {
-    const registration = { tool };
-    const registry = getPtcToolRegistry();
-    const remembered = registry.remember(registration);
-    pi.events.emit(PtcToolEvent.Register, registration);
-    if (remembered && !pi.events.on) registry.notify(registration);
+    pi.registerTool(tool);
+    ptcToolChannel.publish(pi.events, { tool });
   }
 }
 
 export function listenForPtcTools(pi: PtcToolEvents, handler: PtcToolHandler): void {
-  const registry = getPtcToolRegistry();
-  registry.listen(handler);
-  registry.replay(handler);
-  connectPtcToolEventBus(pi, handler);
+  ptcToolChannel.subscribe(pi.events, handler);
+}
+
+export function resetPtcToolRegistryForTests(): void {
+  ptcToolChannel.reset();
 }

@@ -1,5 +1,5 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { connectAgentToolEventBus, getAgentToolRegistry } from "./agent-tool-registry";
+import { createRememberedRegistrationChannel } from "./remembered-registration-channel";
 
 export const PiEvent = {
   SessionStart: "session_start",
@@ -47,16 +47,20 @@ export interface AgentToolEvents {
 
 type AgentToolHandler = (registration: ExtToolRegistration) => void;
 
+const agentToolChannel = createRememberedRegistrationChannel<ExtToolRegistration, typeof AgentToolEvent.Register>({
+  storeKey: "__piEnvAgentToolRegistry",
+  legacyStoreKey: "__piEnvAgentToolStore",
+  event: AgentToolEvent.Register,
+  isDuplicate: (previous, next) => previous === next,
+});
+
 export function formatCapabilities(caps: ToolCapability[]): string {
   return caps.join(", ");
 }
 
 export function registerAgentTools(pi: AgentToolEvents, registrations: ExtToolRegistration | ExtToolRegistration[]): void {
   for (const registration of Array.isArray(registrations) ? registrations : [registrations]) {
-    const registry = getAgentToolRegistry();
-    const remembered = registry.remember(registration);
-    pi.events.emit(AgentToolEvent.Register, registration);
-    if (remembered && !pi.events.on) registry.notify(registration);
+    agentToolChannel.publish(pi.events, registration);
   }
 }
 
@@ -65,8 +69,9 @@ export function registerAgentToolsOnSessionStart(pi: AgentToolEvents, registrati
 }
 
 export function listenForAgentTools(pi: AgentToolEvents, handler: AgentToolHandler): void {
-  const registry = getAgentToolRegistry();
-  registry.listen(handler);
-  registry.replay(handler);
-  connectAgentToolEventBus(pi, handler);
+  agentToolChannel.subscribe(pi.events, handler);
+}
+
+export function resetAgentToolRegistryForTests(): void {
+  agentToolChannel.reset();
 }
