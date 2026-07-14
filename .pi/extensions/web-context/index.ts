@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { formatSize, keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
@@ -435,6 +436,25 @@ export default function webContext(pi: ExtensionAPI) {
         const message = error instanceof Error ? error.message : String(error);
         return { content: [txt(`Could not fetch URL: ${message}`)], details: { text: "", url: params.url, status: 0, contentType: null, truncated: false, mode: WebFetchMode.Text, rawBytes: 0, outputBytes: 0, error: message }, isError: true };
       }
+    },
+    renderResult(result, { expanded }, theme) {
+      const output = result.content
+        .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
+      if (expanded) return new Text(output || "(no output)", 0, 0);
+
+      const details = result.details as (WebFetchResult & { error?: string }) | undefined;
+      const expandHint = theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`);
+      if (!details) return new Text(`${theme.fg("muted", "Web fetch complete")}\n${expandHint}`, 0, 0);
+      if (details.error) return new Text(`${theme.fg("error", `✗ ${details.error}`)}\n${expandHint}`, 0, 0);
+
+      const contentType = details.contentType?.split(";", 1)[0] ?? "unknown";
+      const statusColor = details.status >= 400 ? "warning" : "success";
+      const icon = details.status >= 400 ? "⚠" : "✓";
+      let summary = `${theme.fg(statusColor, icon)} ${theme.fg("muted", `HTTP ${details.status} · ${details.mode} · ${contentType} · ${formatSize(details.outputBytes)}`)}`;
+      if (details.truncated) summary += ` ${theme.fg("warning", "[truncated]")}`;
+      return new Text(`${summary}\n${expandHint}`, 0, 0);
     },
   });
 
