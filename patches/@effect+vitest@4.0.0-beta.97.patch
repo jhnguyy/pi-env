@@ -1,0 +1,24 @@
+diff --git a/dist/internal/internal.js b/dist/internal/internal.js
+--- a/dist/internal/internal.js
++++ b/dist/internal/internal.js
+@@ -1,7 +1,7 @@
+ /**
+  * @since 4.0.0
+  */
+-import { getCurrentSuite } from "@vitest/runner";
++import { getCurrentSuite } from "vitest/suite";
+ import * as Cause from "effect/Cause";
+ import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+diff --git a/src/internal/internal.ts b/src/internal/internal.ts
+--- a/src/internal/internal.ts
++++ b/src/internal/internal.ts
+@@ -2,7 +2,7 @@
+  * @since 4.0.0
+  */
+
+-import { getCurrentSuite } from "@vitest/runner"
++import { getCurrentSuite } from "vitest/suite"
+ import * as Cause from "effect/Cause"
+ import * as Duration from "effect/Duration"
+ import * as Effect from "effect/Effect"

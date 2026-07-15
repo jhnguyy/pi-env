@@ -73,7 +73,3 @@ Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing 
 ## Effect-style tagged data
 
 For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
-
-## Effect integration
-
-Follow [Effect guardrails](effect-guardrails.md) for Effect-vs-Result selection, typed failure, services and layers, compatibility wrappers, lifecycle, and dependency-free bootstrap. This page owns the TypeScript representation guidance above.

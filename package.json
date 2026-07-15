@@ -89,6 +89,7 @@
     "@earendil-works/pi-coding-agent": "0.80.7",
     "@earendil-works/pi-tui": "0.80.7",
     "@effect/language-service": "^0.86.6",
+    "@effect/vitest": "4.0.0-beta.97",
     "@types/node": "^24.0.0",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
@@ -129,5 +130,8 @@
     "@google/genai": true,
     "esbuild": true,
     "msgpackr-extract": false
+  },
+  "patchedDependencies": {
+    "@effect/vitest@4.0.0-beta.97": "patches/@effect+vitest@4.0.0-beta.97.patch"
   }
 }

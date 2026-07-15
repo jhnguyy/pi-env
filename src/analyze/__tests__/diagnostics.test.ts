@@ -2,9 +2,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { it } from "@effect/vitest";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Effect, Result } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect } from "vitest";
 import {
   AnalyzeDiagnosticEventType,
   AnalyzeOutcome,
@@ -278,11 +279,11 @@ describe("analyze worker protocol", () => {
     timeoutMs: 10_000,
   } as const;
 
-  it("accepts a bounded versioned request", async () => {
-    await expect(
-      Effect.runPromise(parseAnalyzeWorkerRequest(JSON.stringify(request))),
-    ).resolves.toEqual(request);
-  });
+  it.effect("accepts a bounded versioned request", () =>
+    Effect.gen(function* () {
+      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify(request))).toEqual(request);
+    }),
+  );
 
   it("rejects malformed, wrong-version, oversized, and invalid-direction messages", async () => {
     expect(await leftKind(parseAnalyzeWorkerRequest("{"))).toBe(AnalyzeProtocolErrorKind.Malformed);
