@@ -36,6 +36,7 @@ See [`docs/prerequisites.md`](docs/prerequisites.md), [`docs/nix.md`](docs/nix.m
 - Container image contract: [`docs/container-image.md`](docs/container-image.md)
 - Testing policy: [`docs/conventions/testing.md`](docs/conventions/testing.md)
 - TypeScript conventions: [`docs/conventions/typescript.md`](docs/conventions/typescript.md)
+- Effect guardrails: [`docs/conventions/effect-guardrails.md`](docs/conventions/effect-guardrails.md)
 - Extension conventions: [`docs/conventions/extensions.md`](docs/conventions/extensions.md)
 
 ## Theme snippets
