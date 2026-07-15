@@ -41,12 +41,12 @@ export interface AnthropicWebToolSettings {
 const DEFAULT_TOOLS = [AnthropicHostedToolName.WebSearch] as const;
 const AnthropicHostedToolNameSchema = Schema.Literals([AnthropicHostedToolName.WebSearch, AnthropicHostedToolName.WebFetch]);
 const AnthropicHostedToolsSettingsSchema = Schema.Struct({
-  enabled: Schema.optional(Schema.Boolean),
-  tools: Schema.optional(Schema.mutable(Schema.Array(AnthropicHostedToolNameSchema))),
-  maxUses: Schema.optional(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
+  enabled: Schema.optionalKey(Schema.Boolean),
+  tools: Schema.optionalKey(Schema.mutable(Schema.Array(AnthropicHostedToolNameSchema))),
+  maxUses: Schema.optionalKey(Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))),
 });
 const AnthropicWebContextSettingsSchema = Schema.Struct({
-  anthropicHostedTools: Schema.optional(AnthropicHostedToolsSettingsSchema),
+  anthropicHostedTools: Schema.optionalKey(AnthropicHostedToolsSettingsSchema),
 });
 type AnthropicHostedToolsSettings = typeof AnthropicHostedToolsSettingsSchema.Type;
 

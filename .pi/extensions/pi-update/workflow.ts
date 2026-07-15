@@ -12,7 +12,7 @@ import { PiUpdateError, PiUpdatePhase } from "./errors";
 type Exec = ExtensionAPI["exec"];
 
 const PiUpdateSettingsSchema = Schema.Struct({
-  enabled: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
 });
 
 export function isPiUpdateEnabled(cwd = process.cwd()): boolean {
