@@ -73,29 +73,3 @@ Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing 
 ## Effect-style tagged data
 
 For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
-
-## Effect seams and compatibility wrappers
-
-For IO-heavy orchestration, boundary validation, or workflows with multiple expected failure modes, prefer an Effect- or Result-returning core API and keep throwing or Promise-returning wrappers at compatibility edges.
-
-Good candidates:
-
-- extension workflows that shell out, touch the filesystem, or prepare artifacts
-- request builders and validators that can fail from user/tool input
-- shared helpers where callers benefit from typed failure data in tests
-
-Pattern:
-
-```ts
-export function prepareThingEffect(input: Input): Effect.Effect<Thing, ThingError> {
-  // typed workflow
-}
-
-export function prepareThing(input: Input): Promise<Thing> {
-  return Effect.runPromise(prepareThingEffect(input));
-}
-```
-
-Use `Result` for synchronous validation or pure parsing. Use `Effect` when the operation performs IO, needs acquire/use/release, or composes async steps. Do not convert every local helper mechanically; add the Effect seam where typed errors improve locality, test leverage, or boundary clarity.
-
-Bootstrap scripts that run before dependencies are installed must not import dependency-backed Effect modules at top level. Keep a dependency-free compatibility boundary for preinstall/runtime bootstrap, then enter Effect-based modules after install has made dependencies available.
