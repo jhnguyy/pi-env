@@ -2,12 +2,12 @@ import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Schema } from "effect";
 
 export const ToolManagerSettingsSchema = Schema.Struct({
-  defaultProfile: Schema.optional(Schema.String),
-  profiles: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
-  groups: Schema.optional(Schema.Record(Schema.String, Schema.Array(Schema.String))),
-  alwaysActive: Schema.optional(Schema.Array(Schema.String)),
-  manualOnly: Schema.optional(Schema.Array(Schema.String)),
-  autoActivate: Schema.optional(Schema.Boolean),
+  defaultProfile: Schema.optionalKey(Schema.String),
+  profiles: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  groups: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  alwaysActive: Schema.optionalKey(Schema.Array(Schema.String)),
+  manualOnly: Schema.optionalKey(Schema.Array(Schema.String)),
+  autoActivate: Schema.optionalKey(Schema.Boolean),
 });
 export type ToolManagerSettings = typeof ToolManagerSettingsSchema.Type;
 

@@ -47,13 +47,13 @@ export interface OpenAIWebToolSettings {
 }
 
 const OpenAIHostedToolsSettingsSchema = Schema.Struct({
-  enabled: Schema.optional(Schema.Boolean),
-  searchContextSize: Schema.optional(Schema.Literals([OpenAISearchContextSize.Low, OpenAISearchContextSize.Medium, OpenAISearchContextSize.High])),
-  externalWebAccess: Schema.optional(Schema.Boolean),
+  enabled: Schema.optionalKey(Schema.Boolean),
+  searchContextSize: Schema.optionalKey(Schema.Literals([OpenAISearchContextSize.Low, OpenAISearchContextSize.Medium, OpenAISearchContextSize.High])),
+  externalWebAccess: Schema.optionalKey(Schema.Boolean),
 });
 
 const OpenAIWebContextSettingsSchema = Schema.Struct({
-  openaiHostedTools: Schema.optional(OpenAIHostedToolsSettingsSchema),
+  openaiHostedTools: Schema.optionalKey(OpenAIHostedToolsSettingsSchema),
 });
 
 type OpenAIHostedToolsSettings = typeof OpenAIHostedToolsSettingsSchema.Type;

@@ -12,15 +12,15 @@ import {
 const StringArraySchema = Schema.mutable(Schema.Array(Schema.String));
 
 export const WorkTrackerSettingsSchema = Schema.Struct({
-  repos: Schema.optional(StringArraySchema),
-  protectedBranches: Schema.optional(StringArraySchema),
+  repos: Schema.optionalKey(StringArraySchema),
+  protectedBranches: Schema.optionalKey(StringArraySchema),
 });
 
 export const AgentSettingsSchema = Schema.Struct({
-  enabledModels: Schema.optional(StringArraySchema),
-  modelAnnotations: Schema.optional(Schema.Record(Schema.String, StringArraySchema)),
-  workTracker: Schema.optional(WorkTrackerSettingsSchema),
-  extensions: Schema.optional(StringArraySchema),
+  enabledModels: Schema.optionalKey(StringArraySchema),
+  modelAnnotations: Schema.optionalKey(Schema.Record(Schema.String, StringArraySchema)),
+  workTracker: Schema.optionalKey(WorkTrackerSettingsSchema),
+  extensions: Schema.optionalKey(StringArraySchema),
 });
 
 export type AgentSettings = typeof AgentSettingsSchema.Type;
