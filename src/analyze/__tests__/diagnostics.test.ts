@@ -20,6 +20,7 @@ import { analyzeEffect } from "../engine.js";
 import { AnalysisJournal, readJournalEvents } from "../journal.js";
 import { ScopeMode } from "../model.js";
 import { ANALYZE_OTEL_BOUNDS, makeAnalyzeOtelLayer, resolveAnalyzeOtelConfig } from "../otel.js";
+import { ANALYZE_LIMITS } from "../policy.js";
 import {
   ANALYZE_WORKER_PROTOCOL_VERSION,
   AnalyzeProtocolErrorKind,
@@ -353,6 +354,72 @@ describe("analyze worker protocol", () => {
     expect(await leftKind(parseAnalyzeWorkerEvent(raw))).toBe(AnalyzeProtocolErrorKind.Malformed);
   });
 
+  it.effect("rejects malformed or forbidden fields from the bounded worker result", () =>
+    Effect.gen(function* () {
+      const validResult = {
+        version: 1,
+        summary: { info: 0, warning: 0, error: 0, failures: 0 },
+        findings: [],
+        analyzerFailures: [],
+        benchmarks: [],
+      };
+      for (const result of [
+        { ...validResult, summary: { ...validResult.summary, info: "0" } },
+        { ...validResult, profile: { timings: {} } },
+        { ...validResult, benchmarks: [{ command: "untrusted" }] },
+      ]) {
+        const outcome = yield* Effect.result(
+          parseAnalyzeWorkerEvent(
+            JSON.stringify({
+              version: 1,
+              type: "result",
+              runId: "protocol-run",
+              result,
+            }),
+          ),
+        );
+        expect(Result.isFailure(outcome) ? outcome.failure.kind : undefined).toBe(
+          AnalyzeProtocolErrorKind.Malformed,
+        );
+      }
+    }),
+  );
+
+  it.effect("rejects a structurally valid result above the trusted byte budget", () =>
+    Effect.gen(function* () {
+      const findings = Array.from({ length: 30 }, (_, index) => ({
+        id: String(index),
+        analyzer: "complexity",
+        kind: "complexity",
+        severity: "info",
+        message: "x".repeat(1_800),
+        location: { path: `src/file-${index}.ts`, line: 1, column: 1 },
+      }));
+      const result = {
+        version: 1,
+        summary: { info: findings.length, warning: 0, error: 0, failures: 0 },
+        findings,
+        analyzerFailures: [],
+        benchmarks: [],
+      };
+      const raw = JSON.stringify({
+        version: 1,
+        type: "result",
+        runId: "protocol-run",
+        result,
+      });
+      expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeGreaterThan(
+        ANALYZE_LIMITS.resultBytes,
+      );
+      expect(Buffer.byteLength(raw, "utf8")).toBeLessThanOrEqual(MAX_PROTOCOL_LINE_BYTES);
+
+      const outcome = yield* Effect.result(parseAnalyzeWorkerEvent(raw));
+      expect(Result.isFailure(outcome) ? outcome.failure.kind : undefined).toBe(
+        AnalyzeProtocolErrorKind.Malformed,
+      );
+    }),
+  );
+
   it("rejects untrusted absolute and traversal result locations", async () => {
     for (const path of [
       "/secret/file.ts",
@@ -383,5 +450,31 @@ describe("analyze worker protocol", () => {
       });
       expect(await leftKind(parseAnalyzeWorkerEvent(raw))).toBe(AnalyzeProtocolErrorKind.Malformed);
     }
+
+    const relatedLocation = JSON.stringify({
+      version: 1,
+      type: "result",
+      runId: "protocol-run",
+      result: {
+        version: 1,
+        summary: { info: 1, warning: 0, error: 0, failures: 0 },
+        findings: [
+          {
+            id: "x",
+            analyzer: "complexity",
+            kind: "complexity",
+            severity: "info",
+            message: "x",
+            location: { path: "src/file.ts", line: 1, column: 1 },
+            related: [{ path: "../outside.ts", line: 1, column: 1 }],
+          },
+        ],
+        analyzerFailures: [],
+        benchmarks: [],
+      },
+    });
+    expect(await leftKind(parseAnalyzeWorkerEvent(relatedLocation))).toBe(
+      AnalyzeProtocolErrorKind.Malformed,
+    );
   });
 });
