@@ -1,21 +1,29 @@
 /** DiagnosticsCache — manages per-URI diagnostic state and waiter queues. */
 
-import { Deferred, Effect } from "effect";
+import { Clock, Deferred, Effect } from "effect";
 import type { DiagnosticItem } from "./protocol";
 
 export const DIAG_WAIT_TIMEOUT_MS = 2_500;
 export const DIAG_SETTLE_MS = 2_000;
 
-type Waiter = {
-  deferred: Deferred.Deferred<void, never>;
-  timer: ReturnType<typeof setTimeout>;
+type Waiter = Deferred.Deferred<void>;
+
+type RegisteredWaiter = {
+  readonly deferred: Waiter;
+  readonly registered: boolean;
 };
 
 export class DiagnosticsCache {
   private cache = new Map<string, DiagnosticItem[]>();
-  private waiters = new Map<string, Waiter[]>();
+  private waiters = new Map<string, Set<Waiter>>();
   private revisions = new Map<string, number>();
   private settledRevisions = new Map<string, number>();
+  private waiterCount = 0;
+
+  /** Number of Effects currently waiting for a URI's first publication. */
+  get pendingWaiterCount(): number {
+    return this.waiterCount;
+  }
 
   publish(uri: string, items: DiagnosticItem[]): void {
     this.cache.set(uri, items);
@@ -23,37 +31,60 @@ export class DiagnosticsCache {
     this.settleWaiters(uri);
   }
 
-  async waitForFirst(uri: string, timeoutMs = DIAG_WAIT_TIMEOUT_MS): Promise<void> {
-    if (this.cache.has(uri)) return;
-    const deferred = Effect.runSync(Deferred.make<void>());
-    const waiter: Waiter = {
-      deferred,
-      timer: setTimeout(() => {
-        this.removeWaiter(uri, waiter);
-        Effect.runSync(Deferred.succeed(deferred, undefined));
-      }, timeoutMs),
-    };
-    const waiters = this.waiters.get(uri) ?? [];
-    waiters.push(waiter);
-    this.waiters.set(uri, waiters);
-    await Effect.runPromise(Deferred.await(deferred));
+  waitForFirstEffect(
+    uri: string,
+    timeoutMs = DIAG_WAIT_TIMEOUT_MS,
+  ): Effect.Effect<void> {
+    return Effect.acquireUseRelease(
+      Deferred.make<void>().pipe(
+        Effect.map((deferred): RegisteredWaiter => ({
+          deferred,
+          registered: this.addWaiter(uri, deferred),
+        })),
+      ),
+      ({ deferred, registered }) =>
+        registered
+          ? Deferred.await(deferred).pipe(Effect.timeoutOption(timeoutMs), Effect.asVoid)
+          : Effect.void,
+      ({ deferred, registered }) =>
+        registered ? Effect.sync(() => this.removeWaiter(uri, deferred)) : Effect.void,
+    );
   }
 
-  async waitForSettled(uri: string, settleMs = DIAG_SETTLE_MS, timeoutMs = DIAG_WAIT_TIMEOUT_MS): Promise<void> {
-    await this.waitForFirst(uri, timeoutMs);
-    const deadline = Date.now() + timeoutMs;
-    let revision = this.revisions.get(uri) ?? 0;
-    if (this.settledRevisions.get(uri) === revision) return;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, settleMs));
-      const current = this.revisions.get(uri) ?? 0;
-      if (current === revision) {
-        this.settledRevisions.set(uri, current);
-        return;
+  waitForFirst(uri: string, timeoutMs = DIAG_WAIT_TIMEOUT_MS): Promise<void> {
+    return Effect.runPromise(this.waitForFirstEffect(uri, timeoutMs));
+  }
+
+  waitForSettledEffect(
+    uri: string,
+    settleMs = DIAG_SETTLE_MS,
+    timeoutMs = DIAG_WAIT_TIMEOUT_MS,
+  ): Effect.Effect<void> {
+    const cache = this;
+    return Effect.gen(function* () {
+      yield* cache.waitForFirstEffect(uri, timeoutMs);
+      const deadline = (yield* Clock.currentTimeMillis) + timeoutMs;
+      let revision = cache.revisions.get(uri) ?? 0;
+      if (cache.settledRevisions.get(uri) === revision) return;
+      while ((yield* Clock.currentTimeMillis) < deadline) {
+        yield* Effect.sleep(settleMs);
+        const current = cache.revisions.get(uri) ?? 0;
+        if (current === revision) {
+          cache.settledRevisions.set(uri, current);
+          return;
+        }
+        revision = current;
       }
-      revision = current;
-    }
-    this.settledRevisions.set(uri, this.revisions.get(uri) ?? 0);
+      cache.settledRevisions.set(uri, cache.revisions.get(uri) ?? 0);
+    });
+  }
+
+  waitForSettled(
+    uri: string,
+    settleMs = DIAG_SETTLE_MS,
+    timeoutMs = DIAG_WAIT_TIMEOUT_MS,
+  ): Promise<void> {
+    return Effect.runPromise(this.waitForSettledEffect(uri, settleMs, timeoutMs));
   }
 
   get(uri: string): DiagnosticItem[] { return this.cache.get(uri) ?? []; }
@@ -73,21 +104,31 @@ export class DiagnosticsCache {
     this.settledRevisions.clear();
   }
 
+  private addWaiter(uri: string, waiter: Waiter): boolean {
+    if (this.cache.has(uri)) return false;
+    const pending = this.waiters.get(uri) ?? new Set<Waiter>();
+    pending.add(waiter);
+    this.waiters.set(uri, pending);
+    this.waiterCount++;
+    return true;
+  }
+
   private settleWaiters(uri: string): void {
     const pending = this.waiters.get(uri);
     if (!pending) return;
     this.waiters.delete(uri);
-    for (const waiter of pending) {
-      clearTimeout(waiter.timer);
-      Effect.runSync(Deferred.succeed(waiter.deferred, undefined));
-    }
+    this.waiterCount -= pending.size;
+    Effect.runSync(
+      Effect.forEach(pending, (waiter) => Deferred.succeed(waiter, undefined), {
+        discard: true,
+      }),
+    );
   }
 
   private removeWaiter(uri: string, waiter: Waiter): void {
     const pending = this.waiters.get(uri);
-    if (!pending) return;
-    const next = pending.filter((item) => item !== waiter);
-    if (next.length) this.waiters.set(uri, next);
-    else this.waiters.delete(uri);
+    if (!pending || !pending.delete(waiter)) return;
+    this.waiterCount--;
+    if (pending.size === 0) this.waiters.delete(uri);
   }
 }
