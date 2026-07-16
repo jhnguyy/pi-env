@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
 import {
   AnalyzerName,
   FindingKind,
@@ -99,6 +99,48 @@ export class AnalyzeProtocolError extends Data.TaggedError("AnalyzeProtocolError
   readonly kind: AnalyzeProtocolErrorKind;
   readonly message: string;
 }> {}
+
+const AnalyzeWorkerLocationSchema = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Number,
+  column: Schema.Number,
+  endLine: Schema.optionalKey(Schema.Number),
+  endColumn: Schema.optionalKey(Schema.Number),
+});
+
+const AnalyzeWorkerFindingSchema = Schema.Struct({
+  id: Schema.optionalKey(Schema.String),
+  analyzer: Schema.String,
+  kind: Schema.String,
+  severity: Schema.String,
+  message: Schema.String,
+  location: AnalyzeWorkerLocationSchema,
+  related: Schema.optionalKey(Schema.Array(AnalyzeWorkerLocationSchema)),
+});
+
+const AnalyzeWorkerFailureSchema = Schema.Struct({
+  analyzer: Schema.String,
+  message: Schema.String,
+});
+
+export const AnalyzeWorkerResultPayloadSchema = Schema.Struct({
+  version: Schema.Number,
+  summary: Schema.Struct({
+    info: Schema.Number,
+    warning: Schema.Number,
+    error: Schema.Number,
+    failures: Schema.Number,
+  }),
+  findings: Schema.Array(AnalyzeWorkerFindingSchema),
+  analyzerFailures: Schema.Array(AnalyzeWorkerFailureSchema),
+  benchmarks: Schema.Array(Schema.Unknown),
+  profile: Schema.optionalKey(Schema.Unknown),
+});
+
+type AnalyzeWorkerResultPayload = (typeof AnalyzeWorkerResultPayloadSchema)["Type"];
+type AnalyzeWorkerLocation = (typeof AnalyzeWorkerLocationSchema)["Type"];
+type AnalyzeWorkerFinding = (typeof AnalyzeWorkerFindingSchema)["Type"];
+type AnalyzeWorkerFailure = (typeof AnalyzeWorkerFailureSchema)["Type"];
 
 const protocolFailure = (
   kind: AnalyzeProtocolErrorKind,
@@ -271,16 +313,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isPositiveInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 1;
+function isPositiveInteger(value: number | undefined): value is number {
+  return Number.isInteger(value) && value !== undefined && value >= 1;
 }
 
-function validOptionalPositiveInteger(value: unknown): boolean {
+function validOptionalPositiveInteger(value: number | undefined): boolean {
   return value === undefined || isPositiveInteger(value);
 }
 
-function parseLocation(value: unknown): Location | undefined {
-  if (!isRecord(value)) return undefined;
+function parseLocation(value: AnalyzeWorkerLocation): Location | undefined {
   if (!isBoundedString(value.path, ANALYZE_LIMITS.pathLength)) return undefined;
   if (!isBoundedWorkspaceRelativePath(value.path)) return undefined;
   if (!isPositiveInteger(value.line) || !isPositiveInteger(value.column)) return undefined;
@@ -290,16 +331,16 @@ function parseLocation(value: unknown): Location | undefined {
     path: value.path,
     line: value.line,
     column: value.column,
-    ...(value.endLine === undefined ? {} : { endLine: value.endLine as number }),
-    ...(value.endColumn === undefined ? {} : { endColumn: value.endColumn as number }),
+    ...(value.endLine === undefined ? {} : { endLine: value.endLine }),
+    ...(value.endColumn === undefined ? {} : { endColumn: value.endColumn }),
   };
 }
 
-function parseRelatedLocations(value: unknown): Location[] | undefined {
+function parseRelatedLocations(
+  value: readonly AnalyzeWorkerLocation[] | undefined,
+): Location[] | undefined {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > ANALYZE_LIMITS.relatedLocations) {
-    return undefined;
-  }
+  if (value.length > ANALYZE_LIMITS.relatedLocations) return undefined;
   const related: Location[] = [];
   for (const item of value) {
     const parsed = parseLocation(item);
@@ -309,7 +350,7 @@ function parseRelatedLocations(value: unknown): Location[] | undefined {
   return related;
 }
 
-function validFindingHeader(finding: Record<string, unknown>): boolean {
+function validFindingHeader(finding: AnalyzeWorkerFinding): boolean {
   return (
     Object.values(AnalyzerName).includes(finding.analyzer as AnalyzerName) &&
     Object.values(FindingKind).includes(finding.kind as FindingKind) &&
@@ -319,17 +360,17 @@ function validFindingHeader(finding: Record<string, unknown>): boolean {
   );
 }
 
-function parseFinding(value: unknown): Finding | undefined {
-  if (!isRecord(value) || !validFindingHeader(value)) return undefined;
+function parseFinding(value: AnalyzeWorkerFinding): Finding | undefined {
+  if (!validFindingHeader(value)) return undefined;
   const location = parseLocation(value.location);
   const related = parseRelatedLocations(value.related);
   if (!location || related === undefined) return undefined;
   return {
-    id: typeof value.id === "string" ? value.id : "",
+    id: value.id ?? "",
     analyzer: value.analyzer as AnalyzerName,
     kind: value.kind as FindingKind,
     severity: value.severity as Severity,
-    message: value.message as string,
+    message: value.message,
     location,
     ...(value.related === undefined ? {} : { related }),
   };
@@ -345,8 +386,7 @@ const allowedFailureAnalyzers = new Set<AnalyzerFailure["analyzer"]>([
   "supervisor",
 ]);
 
-function parseFailure(value: unknown): AnalyzerFailure | undefined {
-  if (!isRecord(value)) return undefined;
+function parseFailure(value: AnalyzeWorkerFailure): AnalyzerFailure | undefined {
   if (!allowedFailureAnalyzers.has(value.analyzer as AnalyzerFailure["analyzer"])) {
     return undefined;
   }
@@ -357,13 +397,13 @@ function parseFailure(value: unknown): AnalyzerFailure | undefined {
   };
 }
 
-function parseBoundedArray<A>(
-  value: unknown,
+function parseBoundedArray<Input, Output>(
+  value: readonly Input[],
   max: number,
-  parse: (item: unknown) => A | undefined,
-): A[] | undefined {
-  if (!Array.isArray(value) || value.length > max) return undefined;
-  const output: A[] = [];
+  parse: (item: Input) => Output | undefined,
+): Output[] | undefined {
+  if (value.length > max) return undefined;
+  const output: Output[] = [];
   for (const item of value) {
     const parsed = parse(item);
     if (parsed === undefined) return undefined;
@@ -372,21 +412,18 @@ function parseBoundedArray<A>(
   return output;
 }
 
-function parseSummary(value: unknown): AnalysisResult["summary"] | undefined {
-  if (!isRecord(value)) return undefined;
+function parseSummary(
+  value: AnalyzeWorkerResultPayload["summary"],
+): AnalysisResult["summary"] | undefined {
   const counts = [value.info, value.warning, value.error, value.failures];
-  if (
-    counts.some(
-      (count) => !Number.isInteger(count) || (count as number) < 0 || (count as number) > 1_000_000,
-    )
-  ) {
+  if (counts.some((count) => !Number.isInteger(count) || count < 0 || count > 1_000_000)) {
     return undefined;
   }
   return {
-    info: value.info as number,
-    warning: value.warning as number,
-    error: value.error as number,
-    failures: value.failures as number,
+    info: value.info,
+    warning: value.warning,
+    error: value.error,
+    failures: value.failures,
   };
 }
 
@@ -414,37 +451,44 @@ function summariesMatch(
   );
 }
 
-function validResultEnvelope(result: Record<string, unknown>): boolean {
-  return (
-    result.version === 1 &&
-    Array.isArray(result.benchmarks) &&
-    result.benchmarks.length === 0 &&
-    result.profile === undefined
-  );
+function validResultEnvelope(result: AnalyzeWorkerResultPayload): boolean {
+  return result.version === 1 && result.benchmarks.length === 0 && result.profile === undefined;
 }
 
-function parseAnalysisResult(value: unknown): AnalysisResult | undefined {
-  if (!isRecord(value) || !validResultEnvelope(value)) return undefined;
-  const summary = parseSummary(value.summary);
-  const findings = parseBoundedArray(value.findings, ANALYZE_LIMITS.findings, parseFinding);
-  const analyzerFailures = parseBoundedArray(
-    value.analyzerFailures,
-    ANALYZE_LIMITS.failures,
-    parseFailure,
-  );
-  if (!summary || !findings || !analyzerFailures) return undefined;
-  const trustedSummary = trustedSummaryFor(findings, analyzerFailures);
-  if (!summariesMatch(summary, trustedSummary)) return undefined;
-  const trusted: AnalysisResult = {
-    version: 1,
-    summary: trustedSummary,
-    findings,
-    analyzerFailures,
-    benchmarks: [],
-  };
-  return Buffer.byteLength(JSON.stringify(trusted), "utf8") <= ANALYZE_LIMITS.resultBytes
-    ? trusted
-    : undefined;
+const invalidAnalysisResult = (): Effect.Effect<never, AnalyzeProtocolError> =>
+  protocolFailure(AnalyzeProtocolErrorKind.Malformed, "Analyze worker result is invalid");
+
+function parseAnalysisResult(value: unknown): Effect.Effect<AnalysisResult, AnalyzeProtocolError> {
+  return Effect.gen(function* () {
+    const result = yield* Schema.decodeUnknownEffect(AnalyzeWorkerResultPayloadSchema)(value).pipe(
+      Effect.catch(invalidAnalysisResult),
+    );
+    const summary = parseSummary(result.summary);
+    const findings = parseBoundedArray(result.findings, ANALYZE_LIMITS.findings, parseFinding);
+    const analyzerFailures = parseBoundedArray(
+      result.analyzerFailures,
+      ANALYZE_LIMITS.failures,
+      parseFailure,
+    );
+    if (!validResultEnvelope(result) || !summary || !findings || !analyzerFailures) {
+      return yield* invalidAnalysisResult();
+    }
+    const trustedSummary = trustedSummaryFor(findings, analyzerFailures);
+    if (!summariesMatch(summary, trustedSummary)) {
+      return yield* invalidAnalysisResult();
+    }
+    const trusted: AnalysisResult = {
+      version: 1,
+      summary: trustedSummary,
+      findings,
+      analyzerFailures,
+      benchmarks: [],
+    };
+    if (Buffer.byteLength(JSON.stringify(trusted), "utf8") > ANALYZE_LIMITS.resultBytes) {
+      return yield* invalidAnalysisResult();
+    }
+    return trusted;
+  });
 }
 
 const allowedWorkerDiagnosticTypes = new Set<AnalyzeDiagnosticEventType>([
@@ -497,13 +541,7 @@ export function parseAnalyzeWorkerEvent(
         return { version: 1, type: AnalyzeWorkerMessageType.Diagnostic, runId, event };
       }
       case AnalyzeWorkerMessageType.Result: {
-        const result = parseAnalysisResult(value.result);
-        if (!result) {
-          return yield* protocolFailure(
-            AnalyzeProtocolErrorKind.Malformed,
-            "Analyze worker result is invalid",
-          );
-        }
+        const result = yield* parseAnalysisResult(value.result);
         return { version: 1, type: AnalyzeWorkerMessageType.Result, runId, result };
       }
       case AnalyzeWorkerMessageType.Complete:
