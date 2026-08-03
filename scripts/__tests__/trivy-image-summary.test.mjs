@@ -31,20 +31,18 @@ function runSummary(result) {
 }
 
 describe("built-image Trivy policy", () => {
-  it("fails for an unfixed critical vulnerability", () => {
+  it("keeps an unfixed critical vulnerability informational", () => {
     const result = runSummary({
       Target: "test-image",
       Vulnerabilities: [vulnerability({ severity: "CRITICAL" })],
     });
 
-    expect(result.status).toBe(1);
+    expect(result.status).toBe(0);
     expect(result.stdout).toContain("Critical: 1");
     expect(result.stdout).toContain("High: 0");
-    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 0");
-    expect(result.stdout).toContain("Policy findings: 1");
-    expect(result.stdout).toContain(
-      "VULN CRITICAL CVE-TEST-CRITICAL critical-package 1.0.0 -> unfixed (test-image)",
-    );
+    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 1");
+    expect(result.stdout).toContain("Policy findings: 0");
+    expect(result.stdout).not.toContain("Policy findings (first 50):");
   });
 
   it("keeps an unfixed high vulnerability informational", () => {
@@ -60,21 +58,21 @@ describe("built-image Trivy policy", () => {
     expect(result.stdout).not.toContain("Policy findings (first 50):");
   });
 
-  it("fails for a fixable high vulnerability", () => {
+  it.each(["CRITICAL", "HIGH"])("fails for a fixable %s vulnerability", (severity) => {
     const result = runSummary({
       Target: "test-image",
-      Vulnerabilities: [vulnerability({ severity: "HIGH", fixedVersion: "1.2.3" })],
+      Vulnerabilities: [vulnerability({ severity, fixedVersion: "1.2.3" })],
     });
 
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 0");
     expect(result.stdout).toContain("Policy findings: 1");
     expect(result.stdout).toContain(
-      "VULN HIGH CVE-TEST-HIGH high-package 1.0.0 -> 1.2.3 (test-image)",
+      `VULN ${severity} CVE-TEST-${severity} ${severity.toLowerCase()}-package 1.0.0 -> 1.2.3 (test-image)`,
     );
   });
 
-  it("counts only unfixed high vulnerabilities as informational in mixed results", () => {
+  it("counts unfixed high and critical vulnerabilities as informational in mixed results", () => {
     const result = runSummary({
       Target: "test-image",
       Vulnerabilities: [
@@ -87,8 +85,8 @@ describe("built-image Trivy policy", () => {
     expect(result.status).toBe(1);
     expect(result.stdout).toContain("Critical: 1");
     expect(result.stdout).toContain("High: 2");
-    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 1");
-    expect(result.stdout).toContain("Policy findings: 2");
+    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 2");
+    expect(result.stdout).toContain("Policy findings: 1");
   });
 
   it("preserves high-severity secret and misconfiguration enforcement", () => {
