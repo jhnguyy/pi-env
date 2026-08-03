@@ -33,6 +33,8 @@ export interface DaemonRequest {
   character?: number;
   /** Search query for workspace symbols (action=symbols without path). */
   query?: string;
+  /** New symbol name (action=rename). */
+  newName?: string;
 }
 
 export interface DaemonResponse {
@@ -50,6 +52,7 @@ export type LspResult =
   | DefinitionResult
   | ImplementationResult
   | ReferencesResult
+  | RenameResult
   | IncomingCallsResult
   | OutgoingCallsResult
   | SymbolsResult
@@ -179,6 +182,24 @@ export interface ReferencesResult {
   total: number;
   items: ReferenceItem[];
   truncated: boolean;
+}
+
+export interface RenameFileResult {
+  /** Relative path from project root */
+  relativePath: string;
+  /** Absolute path */
+  absolutePath: string;
+  editCount: number;
+}
+
+export interface RenameResult {
+  action: "rename";
+  path: string;
+  line: number;
+  character: number;
+  newName: string;
+  totalEdits: number;
+  files: RenameFileResult[];
 }
 
 export interface SymbolItem {

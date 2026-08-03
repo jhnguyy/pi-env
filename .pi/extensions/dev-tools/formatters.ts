@@ -12,6 +12,7 @@ import type {
   DefinitionResult,
   ImplementationResult,
   ReferencesResult,
+  RenameResult,
   IncomingCallsResult,
   OutgoingCallsResult,
   SymbolsResult,
@@ -220,6 +221,18 @@ export function formatReferences(r: ReferencesResult): string {
     lines.push(`... ${r.total - r.items.length} more`);
   }
 
+  return lines.join("\n");
+}
+
+// ─── Rename ─────────────────────────────────────────────────────────────────
+
+export function formatRename(r: RenameResult): string {
+  const lines = [
+    `renamed to ${r.newName}: ${r.totalEdits} edit${r.totalEdits !== 1 ? "s" : ""} across ${r.files.length} file${r.files.length !== 1 ? "s" : ""}`,
+  ];
+  for (const file of r.files) {
+    lines.push(`${file.relativePath}: ${file.editCount} edit${file.editCount !== 1 ? "s" : ""}`);
+  }
   return lines.join("\n");
 }
 

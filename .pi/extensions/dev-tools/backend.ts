@@ -195,6 +195,11 @@ export class LspBackend {
     return this.docManager.openUris;
   }
 
+  getDocumentSnapshot(absolutePath: string): { version: number; content: string } | undefined {
+    const document = this.docManager.getDoc(pathToUri(absolutePath));
+    return document ? { version: document.version, content: document.content } : undefined;
+  }
+
   get projectRoots(): string[] {
     return this.docManager.projectRoots;
   }

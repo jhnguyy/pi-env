@@ -93,12 +93,14 @@ const STANDARD_CAPABILITIES = {
     definition: {},
     implementation: {},
     references: {},
+    rename: { prepareSupport: false },
     callHierarchy: { dynamicRegistration: false },
     documentSymbol: { hierarchicalDocumentSymbolSupport: false },
     publishDiagnostics: { relatedInformation: false },
   },
   workspace: {
     workspaceFolders: true,
+    workspaceEdit: { documentChanges: true },
     symbol: {},
   },
 };
@@ -145,11 +147,13 @@ const BASH_CAPABILITIES = {
     hover: { contentFormat: ["plaintext"] },
     definition: {},
     references: {},
+    rename: { prepareSupport: false },
     documentSymbol: { hierarchicalDocumentSymbolSupport: false },
     publishDiagnostics: { relatedInformation: false },
   },
   workspace: {
     workspaceFolders: true,
+    workspaceEdit: { documentChanges: true },
   },
 };
 
@@ -158,11 +162,13 @@ const NIX_CAPABILITIES = {
     hover: { contentFormat: ["plaintext"] },
     definition: {},
     references: {},
+    rename: { prepareSupport: false },
     documentSymbol: { hierarchicalDocumentSymbolSupport: false },
     publishDiagnostics: { relatedInformation: false },
   },
   workspace: {
     workspaceFolders: true,
+    workspaceEdit: { documentChanges: true },
     symbol: {},
   },
 };

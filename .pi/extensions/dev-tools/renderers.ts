@@ -53,7 +53,7 @@ export function renderDevToolsResult(
  * Render a dev-tools tool call for human TUI display.
  */
 export function renderDevToolsCall(
-  args: { action: string; path?: string | string[]; line?: number; character?: number; query?: string },
+  args: { action: string; path?: string | string[]; line?: number; character?: number; query?: string; newName?: string },
   theme: RenderTheme,
 ): Text {
   let text = theme.fg("toolTitle", theme.bold("dev-tools"));
@@ -76,6 +76,9 @@ export function renderDevToolsCall(
 
   if (args.query) {
     text += " " + theme.fg("muted", `"${args.query}"`);
+  }
+  if (args.newName) {
+    text += " " + theme.fg("muted", `→ ${args.newName}`);
   }
 
   return new Text(text, 0, 0);

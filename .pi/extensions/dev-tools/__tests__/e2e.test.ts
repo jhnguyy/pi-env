@@ -10,6 +10,7 @@
  * and verify the full pipeline from request to response.
  */
 
+import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type LspE2EFixture, createLspE2EFixture, sleep } from "./e2e-fixture";
 
@@ -121,6 +122,26 @@ describeE2E("LSP E2E", () => {
     expect(result.action).toBe("symbols");
     // May or may not find results depending on workspace indexing state
     expect(typeof result.total).toBe("number");
+  });
+
+  // ─── Rename ────────────────────────────────────────────────────────────
+
+  it("renames a TypeScript symbol across files", async () => {
+    const result = await fixture.callDaemon({
+      action: "rename",
+      path: fixture.typesFile,
+      line: 7,
+      character: 17,
+      newName: "welcome",
+    });
+
+    expect(result.action).toBe("rename");
+    expect(result.totalEdits).toBeGreaterThanOrEqual(3);
+    expect(result.files).toHaveLength(2);
+    await expect(readFile(fixture.typesFile, "utf8")).resolves.toContain("export function welcome");
+    const mainContent = await readFile(fixture.mainFile, "utf8");
+    expect(mainContent).toContain("import { welcome }");
+    expect(mainContent).toContain("welcome(bob)");
   });
 
   // ─── Multi-file: file watcher triggers re-sync ─────────────────────────

@@ -1,8 +1,8 @@
 /**
  * dev-tools extension — registers language-server-backed code intelligence.
  *
- * Use the interactive tool for diagnostics, hover, definitions, references,
- * call hierarchy, and symbols. Diagnostics are useful before commit or review.
+ * Use the interactive tool for diagnostics, navigation, symbol rename, call
+ * hierarchy, and symbols. Diagnostics are useful before commit or review.
  */
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -19,7 +19,12 @@ import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-to
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
-import { createDevToolsParameterSchema, DEV_TOOLS_TOOL_DESCRIPTIONS } from "./action-contract";
+import {
+  createDevToolsParameterSchema,
+  DEV_TOOLS_READ_ACTIONS,
+  DEV_TOOLS_TOOL_DESCRIPTIONS,
+  DEV_TOOLS_WRITE_ACTIONS,
+} from "./action-contract";
 import { registerCleanupCommand } from "./cleanup";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
@@ -33,14 +38,22 @@ export default function (pi: ExtensionAPI) {
 
   const description =
     "TypeScript and Bash language intelligence — diagnostics, hover, go-to-definition, " +
-    "go-to-implementation, find-references, incoming/outgoing call hierarchy, " +
-    "document/workspace symbols. Communicates with a shared daemon that " +
+    "go-to-implementation, find-references, symbol rename, incoming/outgoing call hierarchy, " +
+    "document/workspace symbols. Rename applies language-server workspace edits to disk. " +
+    "Communicates with a shared daemon that " +
     "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = createDevToolsParameterSchema(
     StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+  );
+
+  const readAgentParameters = createDevToolsParameterSchema(
+    StringEnum(DEV_TOOLS_READ_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+  );
+  const writeAgentParameters = createDevToolsParameterSchema(
+    StringEnum(DEV_TOOLS_WRITE_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
   );
 
   type DevToolsToolParameters = typeof toolParameters;
@@ -56,15 +69,25 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on(PiEvent.SessionStart, () => {
-    // Register dev-tools as an AgentTool so subagents can use it
-    const agentTool: AgentTool<DevToolsToolParameters, LspResult | null> = {
+    const readAgentTool: AgentTool<typeof readAgentParameters, LspResult | null> = {
       name: "dev-tools",
       label: "Dev Tools",
-      description: description,
-      parameters: toolParameters,
+      description:
+        "Language-server-backed diagnostics and code intelligence for supported coding languages.",
+      parameters: readAgentParameters,
       execute: executeDevTools,
     };
-    registerAgentTools(pi, { tool: agentTool, capabilities: [ToolCapability.Read] });
+    const writeAgentTool: AgentTool<typeof writeAgentParameters, LspResult | null> = {
+      name: "dev-tools-edit",
+      label: "Dev Tools Edit",
+      description: "Language-server-backed code edits. Renames symbols across supported files.",
+      parameters: writeAgentParameters,
+      execute: executeDevTools,
+    };
+    registerAgentTools(pi, [
+      { tool: readAgentTool, capabilities: [ToolCapability.Read] },
+      { tool: writeAgentTool, capabilities: [ToolCapability.Write] },
+    ]);
   });
 
   pi.registerTool({
@@ -73,11 +96,11 @@ export default function (pi: ExtensionAPI) {
     description: description,
     promptSnippet:
       "Language-server-backed code intelligence — diagnostics, hover, definitions, " +
-      "implementations, references, call hierarchy, and symbols for supported coding languages.",
+      "implementations, references, symbol rename, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
       "Use dev-tools symbols to orient in files and search workspace symbols for supported coding languages.",
       "Use dev-tools definition to locate declarations, implementation to find concrete implementations, and hover to inspect types and documentation.",
-      "Use dev-tools references to review all usages before renaming a symbol.",
+      "Use dev-tools rename to rename symbols across supported files. Use edit for non-symbol text changes.",
       "Use dev-tools incoming-calls before changing a callable signature and outgoing-calls to map dependencies before refactoring.",
       "Use dev-tools diagnostics to validate changed code before commit or review.",
       "Use rg only for text or pattern searches in strings, comments, config values, generated files, and unsupported file types.",

@@ -11,6 +11,7 @@ describeIfEnabled("dev-tools", "request builder", () => {
     DevToolsAction.References,
     DevToolsAction.IncomingCalls,
     DevToolsAction.OutgoingCalls,
+    DevToolsAction.Rename,
   ] as const;
 
   function failureMessage(params: Parameters<typeof buildClientRequestResult>[0]): string | undefined {
@@ -63,21 +64,84 @@ describeIfEnabled("dev-tools", "request builder", () => {
     });
   });
 
+  it("builds a rename request with the required new name", () => {
+    expect(
+      buildClientRequest({
+        action: DevToolsAction.Rename,
+        path: "/repo/a.ts",
+        line: 3,
+        character: 14,
+        newName: "updatedName",
+      }),
+    ).toEqual({
+      action: "rename",
+      path: "/repo/a.ts",
+      line: 3,
+      character: 14,
+      newName: "updatedName",
+    });
+  });
+
   it("rejects missing paths before daemon work", () => {
     expect(failureMessage({ action: DevToolsAction.Diagnostics })).toBe("diagnostics requires a path.");
 
     for (const action of positionActions) {
-      const params = { action, line: 1, character: 1 };
+      const params = {
+        action,
+        line: 1,
+        character: 1,
+        ...(action === DevToolsAction.Rename ? { newName: "updatedName" } : {}),
+      };
       expect(failureMessage(params)).toBe(`${action} requires a path.`);
       expect(() => buildClientRequest(params)).toThrow(`${action} requires a path.`);
     }
   });
 
+  it("rejects relative paths before daemon work", () => {
+    expect(failureMessage({
+      action: DevToolsAction.Rename,
+      path: "src/a.ts",
+      line: 1,
+      character: 1,
+      newName: "updatedName",
+    })).toBe("rename requires absolute paths.");
+  });
+
   it("rejects incomplete positions before daemon work", () => {
     for (const action of positionActions) {
-      expect(failureMessage({ action, path: "/repo/a.ts", character: 1 })).toBe(`${action} requires line and character values.`);
-      expect(failureMessage({ action, path: "/repo/a.ts", line: 1 })).toBe(`${action} requires line and character values.`);
+      const extra = action === DevToolsAction.Rename ? { newName: "updatedName" } : {};
+      expect(failureMessage({ action, path: "/repo/a.ts", character: 1, ...extra })).toBe(`${action} requires line and character values.`);
+      expect(failureMessage({ action, path: "/repo/a.ts", line: 1, ...extra })).toBe(`${action} requires line and character values.`);
     }
+  });
+
+  it("rejects non-integer or out-of-range positions", () => {
+    const base = {
+      action: DevToolsAction.Rename,
+      path: "/repo/a.ts",
+      newName: "updatedName",
+    } as const;
+
+    expect(failureMessage({ ...base, line: 1.5, character: 1 })).toBe(
+      "rename requires positive integer line and character values.",
+    );
+    expect(failureMessage({ ...base, line: 1, character: 0 })).toBe(
+      "rename requires positive integer line and character values.",
+    );
+  });
+
+  it("rejects a missing or empty rename target name", () => {
+    const params = {
+      action: DevToolsAction.Rename,
+      path: "/repo/a.ts",
+      line: 1,
+      character: 1,
+    } as const;
+
+    expect(failureMessage(params)).toBe("rename requires a non-empty newName.");
+    expect(failureMessage({ ...params, newName: "   " })).toBe(
+      "rename requires a non-empty newName.",
+    );
   });
 
   it("requires a path or query for symbols", () => {
