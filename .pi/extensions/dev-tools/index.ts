@@ -77,7 +77,7 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
       "Use diagnostics to validate changed code before commit or review.",
-      "Use text search for strings, comments, config values, generated files, and unsupported file types.",
+      "Use rg for strings, comments, config values, generated files, and unsupported file types.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {
