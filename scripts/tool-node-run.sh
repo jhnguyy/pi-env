@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
 # Run native-tool JavaScript launchers with a host Node executable.
-# Nub may invoke its downloaded Node through a dynamic loader; launchers such as
-# Oxlint/Oxfmt spawn process.execPath and therefore need a directly executable
-# host Node. Both tools support ^20.19.0 or >=22.12.0 independently of pi-env's
-# Node 24 application-runtime policy.
+# Nub can use a dynamic loader to run its downloaded Node. Oxlint and Oxfmt
+# start child processes through process.execPath, so they need a directly
+# executable host Node. Both tools support ^20.19.0 or >=22.12.0 independently
+# of the pi-env Node 24 application runtime policy.
 set -eu
 
 if [ "$#" -lt 1 ]; then
@@ -37,7 +37,7 @@ else
     fi
   done
   if [ -z "$node_bin" ]; then
-    echo "No directly executable Node satisfying ^20.19.0 or >=22.12.0 was found; set PI_ENV_TOOL_NODE." >&2
+    echo "No directly executable Node satisfies ^20.19.0 or >=22.12.0. Set PI_ENV_TOOL_NODE." >&2
     exit 1
   fi
 fi

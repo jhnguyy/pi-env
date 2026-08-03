@@ -17,7 +17,7 @@ request → scoped problem → success contract → delivery path → landed out
 - Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
 - Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
-- Treat ownership as complete accounting of responsibility; delegation and explicit boundaries are valid outcomes.
+- Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
 
 ## Transformation
 
@@ -81,7 +81,7 @@ Identify necessary communication and later observation by affected party and pur
 
 ## Output Shape
 
-Adapt this shape to local planning conventions; omit sections that cannot affect action or judgment.
+Adapt this shape to local planning conventions. Omit sections that cannot affect action or judgment.
 
 ```md
 ## Problem boundary

@@ -37,7 +37,7 @@ Description must be specific and actionable: "Extracts text from PDFs and fills 
 skill_build({ path: "/path/to/skill-dir" })
 ```
 
-Runs validate → evaluate. Validation errors are requirements; evaluation findings are advisory. Apply only findings that improve the user's actual scope.
+Runs validate → evaluate. Validation errors are requirements. Evaluation findings are advisory. Apply only findings that improve the user's actual scope.
 
 Pass `diff` to focus evaluation on what changed:
 
@@ -47,7 +47,7 @@ skill_build({ path: "...", diff: "<unified diff>" })
 
 **Context engineering principles:**
 
-- **Brevity and delegation are defaults.** Include only decisions the skill must own; delegate the rest to authoritative files, tools, or references.
+- **Brevity and delegation are defaults.** Include only decisions the skill must own. Delegate the rest to authoritative files, tools, or references.
 - **Retrieve changing facts.** Do not copy versions, inventories, commands, or policy that can drift.
 - **Evaluation is advisory.** Reject findings that add speculative scope, duplicate a source of truth, or reduce concision.
 

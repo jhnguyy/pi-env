@@ -44,17 +44,17 @@ function nubInstall(args) {
 
 function installWithRetry(args) {
   if (nubInstall(args)) return;
-  console.log('  —  nub install failed; removing node_modules and retrying once.');
+  console.log('  —  Nub install failed. Setup will remove node_modules and retry once.');
   rmSync(join(repo, 'node_modules'), { recursive: true, force: true });
-  if (!nubInstall(args)) fail('  ✗  nub install failed after retry');
+  if (!nubInstall(args)) fail('  ✗  Nub install failed after the retry.');
 }
 
 function installDependencies() {
   section('Dependencies');
-  console.log('  —  installing repo dependencies with nub');
+  console.log('  —  Setup will install repository dependencies with Nub.');
   switch (selectInstallStrategy()) {
     case InstallStrategy.PlainNodeBootstrap:
-      console.log('  —  nub runtime augmentation cannot execute Node here; using plain Node for setup scripts.');
+      console.log('  —  Nub cannot run Node in this environment. Setup will use plain Node for setup scripts.');
       installWithRetry(['--ignore-scripts']);
       runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
       runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
@@ -166,7 +166,7 @@ function installPiCli(policy) {
   if (!policy.path.updateShellProfiles) {
     skip('shell profile PATH edits (managed externally)');
   } else if (!process.env.PATH.split(':').includes(piBinDir)) {
-    console.log(`  —  ${piBinDir} is not in PATH yet; updating shell profiles.`);
+    console.log(`  —  ${piBinDir} is not in PATH yet. Updating shell profiles.`);
     ensurePathInShellProfiles(piBinDir);
   }
 }

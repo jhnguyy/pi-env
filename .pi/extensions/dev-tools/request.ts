@@ -28,25 +28,22 @@ function normalizePathsForAction(params: DevToolsParams): Result.Result<string[]
   const contract = getActionContract(params.action);
 
   if (contract.pathMode === DevToolsPathMode.Single && paths.length > 1) {
-    return Result.fail(requestBuildError(`${params.action} requires a single path — ${paths.length} were provided`));
+    return Result.fail(requestBuildError(`${params.action} requires one path. ${paths.length} paths were provided.`));
   }
   if (contract.requiresPath && paths.length === 0) {
-    return Result.fail(requestBuildError(`${params.action} requires a path`));
+    return Result.fail(requestBuildError(`${params.action} requires a path.`));
   }
   if (contract.requiresPathOrQuery && paths.length === 0 && !params.query?.trim()) {
-    return Result.fail(requestBuildError(`${params.action} requires a path or query`));
+    return Result.fail(requestBuildError(`${params.action} requires a path or query.`));
   }
   if (contract.needsPosition && (params.line === undefined || params.character === undefined)) {
-    return Result.fail(requestBuildError(`${params.action} requires line and character`));
+    return Result.fail(requestBuildError(`${params.action} requires line and character values.`));
   }
 
   return Result.succeed(contract.pathMode === DevToolsPathMode.None ? [] : paths);
 }
 
-/**
- * Shared request builder — normalises tool params → daemon wire format.
- * Pure function, no closure dependencies.
- */
+/** Build a daemon request from tool parameters. This pure function has no closure dependencies. */
 export function buildClientRequestResult(params: DevToolsParams): Result.Result<ClientRequest, RequestBuildError> {
   const pathsResult = normalizePathsForAction(params);
   if (Result.isFailure(pathsResult)) return Result.fail(pathsResult.failure);

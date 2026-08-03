@@ -25,7 +25,7 @@ export function ok(message) {
 }
 
 export function skip(message) {
-  console.log(`  —  ${message} (exists locally, skipping)`);
+  console.log(`  —  ${message} already exists locally. Skip.`);
 }
 
 export function fail(message, exitCode = 1) {
@@ -47,7 +47,7 @@ export function run(command, args, options = {}) {
 export function runChecked(command, args, options = {}) {
   const result = run(command, args, options);
   if (result.status !== 0) {
-    fail(`${command} ${args.join(' ')} exited with ${result.status}`, result.status ?? 1);
+    fail(`${command} ${args.join(' ')} exited with ${result.status}.`, result.status ?? 1);
   }
   return result;
 }

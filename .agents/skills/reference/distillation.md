@@ -24,12 +24,12 @@ description: Compress verbose design docs, worklogs, and notes into dense, curre
 
 ## Process
 
-1. **Read the source** — retrieve and read the actual doc; never distill from memory
+1. **Read the source** — retrieve and read the actual document. Never distill from memory.
 2. **Identify the audience** — agent-facing (skill/doc) vs human-facing (note/worklog)
 3. **Audit each section** — label it: planning, historical, current-state, or lessons
 4. **Distill** — keep durable content, drop transient content, correct stale claims
 5. **Verify facts** — cross-check claims against current file/code state before writing
-6. **Write once** — produce the final artifact; don't preserve a "before" alongside the "after"
+6. **Write once** — produce the final artifact. Do not preserve a "before" version with the "after" version.
 
 ---
 

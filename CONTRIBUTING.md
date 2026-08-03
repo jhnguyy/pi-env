@@ -11,7 +11,7 @@ refactor/<name>   behavior-preserving structural change
 chore/<name>      config, docs, cleanup
 ```
 
-- `main` is stable; repository changes go through pull requests.
+- `main` is stable. Repository changes go through pull requests.
 - Every pull request uses a dedicated branch and worktree, even solo.
 - PRs are squash-merged into `main`.
 - Delete branches after merge.
@@ -38,7 +38,7 @@ First-pass rule for prose/comments:
 
 ## Runtime requirements
 
-Use Nub with the Node.js version required by `package.json#engines.node`. Setup validates the resolved runtime against `package.json`. Node remains the runtime for pi; Nub owns dependency install and script orchestration.
+Use Nub with the Node.js version required by `package.json#engines.node`. Setup validates the resolved runtime against `package.json`. Node remains the runtime for pi. Nub owns dependency install and script orchestration.
 
 Before assuming a toolchain problem is a code problem, verify whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
 
@@ -52,7 +52,7 @@ Source-owned contracts:
 - lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
 - scripts: [`package.json#scripts`](package.json)
 
-Arguments to `nub run` are forwarded directly; do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness. Run the safe verification portfolio before integration when the full workspace contract is required.
+Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness. Run the safe verification portfolio before integration when the full workspace contract is required.
 
 ## Testing and review
 
@@ -64,7 +64,7 @@ Canonical verification phases live in [`scripts/verification-phases.mjs`](script
 
 ## Worktree isolation
 
-**Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there — concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
+**Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there. Concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
 
 ```bash
 # Start work — always from a worktree

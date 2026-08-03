@@ -36,19 +36,19 @@ Promoting a generated catching test means independently re-deriving the hardenin
 - `nub run verify` runs the standard blocking portfolio.
 - `nub run verify:safe` runs the memory-conscious blocking portfolio under the repository-wide heavyweight lock.
 - `nub run verify:phase <phase-id>` runs one standard phase for CI or focused diagnosis.
-- `nub run test:changed main` is early feedback only; it is not merge authority.
+- `nub run test:changed main` is early feedback only. It is not merge authority.
 - `nub run test:e2e` remains explicit for hosted or environment-dependent behavior.
 
-The safe and standard portfolios must preserve blocking setup, type, packaging, policy, and runtime checks. Analyze stays outside aggregate verification until strict containment exists; CI may run only the documented bounded Analyze canary.
+The safe and standard portfolios must preserve blocking setup, type, packaging, policy, and runtime checks. Analyze stays outside aggregate verification until strict containment exists. CI may run only the documented bounded Analyze canary.
 
 ## Test intent in reviews
 
 For risk-triggered work, the pull request records:
 
-- test class and protected capability, regression, or safety invariant;
-- independent design origin;
-- red/green or negative-control evidence;
-- integration/e2e runtime impact;
-- omitted coverage and why existing tests are sufficient.
+- Test class and protected capability, regression, or safety invariant
+- Independent design origin
+- Red/green or negative-control evidence
+- Integration or end-to-end runtime impact
+- Omitted coverage and the reason that existing tests are sufficient
 
 CI can reject committed catching tests and enforce executable phases. Independence is review provenance and must not be inferred from file contents.

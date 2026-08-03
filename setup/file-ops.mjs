@@ -19,7 +19,7 @@ export function linked(message) {
   console.log(`  →  ${message}`);
 }
 export function relink(message) {
-  console.log(`  ↺  ${message} (relinked)`);
+  console.log(`  ↺  ${message}. Symbolic link updated.`);
 }
 
 export function pathExistsOrIsSymlink(path) {

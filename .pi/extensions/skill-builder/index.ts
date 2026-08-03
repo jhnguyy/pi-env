@@ -20,7 +20,7 @@ import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-to
 
 const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 const REFERENCE_SKILL_TOOL_DESCRIPTION =
-  "Load a named reference skill only when the user explicitly asks to reference that skill (for example: 'reference the teach skill to help me learn X'). Call without a name only when the user asks what reference skills are available.";
+  "Load a named reference skill only when the user explicitly asks for that skill. For example, the user can ask you to reference the teach skill to help with a topic. Call without a name only when the user asks which reference skills are available.";
 
 interface ReferenceSkillEntry {
   readonly name: string;
@@ -186,18 +186,18 @@ const REFERENCE_SKILL_PARAMETERS = Type.Object({
 const SKILL_BUILD_PARAMETERS = Type.Object({
   name: Type.Optional(
     Type.String({
-      description: "New skill name. Lowercase a-z, 0-9, hyphens only. Triggers create workflow.",
+      description: "New skill name. Use lowercase letters, digits, and hyphens only. Starts the create workflow.",
     }),
   ),
   description: Type.Optional(
     Type.String({
-      description: "What the skill does and when to use it. Be specific. Max 1024 chars.",
+      description: "Describe what the skill does and when to use it. Keep it specific. Use no more than 1024 characters.",
     }),
   ),
   template: Type.Optional(
     StringEnum(["basic", "with-scripts", "with-index"] as const, {
       description:
-        'Use "basic" for concise skills; use "with-index" only when supporting references are necessary.',
+        'Use "basic" for concise skills. Use "with-index" only when supporting references are necessary.',
     }),
   ),
   targetDir: Type.Optional(
@@ -207,12 +207,12 @@ const SKILL_BUILD_PARAMETERS = Type.Object({
   ),
   path: Type.Optional(
     Type.String({
-      description: "Path to existing skill directory. Triggers review workflow.",
+      description: "Path to an existing skill directory. Starts the review workflow.",
     }),
   ),
   diff: Type.Optional(
     Type.String({
-      description: "Unified diff of changes to SKILL.md. Focuses evaluation on what changed.",
+      description: "Unified diff of SKILL.md changes. Focus the evaluation on this changed text.",
     }),
   ),
 });

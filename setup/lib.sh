@@ -5,8 +5,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node-runtime.sh"
 
 ok()     { echo "  ✓  $1"; }
 linked() { echo "  →  $1"; }
-skip()   { echo "  —  $1 (exists locally, skipping)"; }
-relink() { echo "  ↺  $1 (relinked)"; }
+skip()   { echo "  —  $1 already exists locally. Skip."; }
+relink() { echo "  ↺  $1. Symbolic link updated."; }
 
 section() {
   local title="$1" underline=""

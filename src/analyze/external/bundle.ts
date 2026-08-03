@@ -19,7 +19,7 @@ const BUNDLE_OUTPUT_LIMIT_BYTES = 32 * 1024 * 1024;
 interface PackageSideEffectsResult { sideEffects?: boolean | readonly string[]; source: "package" | "root" | "missing" }
 interface PackageManifest { workspaces?: readonly string[]; pi?: { extensions?: readonly string[] } }
 
-/** Missing or malformed optional JSON deliberately behaves like an absent configuration. */
+/** Missing or malformed optional JSON behaves like an absent configuration. */
 function readJsonOrEffect<A>(path: string, fallback: A): Effect.Effect<A> {
   return Effect.tryPromise(() => readFile(path, "utf8").then((text) => JSON.parse(text) as A)).pipe(
     Effect.catch(() => Effect.succeed(fallback)),
@@ -123,7 +123,7 @@ function workerMetafileEffect(cwd: string, entryPoint: string, externals: readon
         Effect.mapError((cause) => cause instanceof AnalyzerRunError ? cause : new AnalyzerRunError({ analyzer: AnalyzerName.Bundle, message: [cause.message, cause.stderr?.trim()].filter(Boolean).join("\n") })),
       );
     },
-    // Cleanup is best-effort, matching the previous force-remove behavior.
+    // The cleanup operation is best-effort. It matches the previous force-remove behavior.
     (outputDirectory) => Effect.tryPromise(() => rm(outputDirectory, { recursive: true, force: true })).pipe(Effect.catch(() => Effect.void)),
   );
 }
