@@ -6,11 +6,11 @@ Use the repo docs as the navigation path:
 2. Use `CONTRIBUTING.md` for branch/worktree workflow, runtime requirements, and development process.
 3. Follow `docs/` links for area-specific conventions.
 
-Before adding prose or comments:
+For prose and comments:
 
-1. Make names, types, decomposition, and tests explain behavior first.
-2. Comment only constraints, alternatives, domain meaning, compatibility history, or safety rationale.
-3. Document only external/operator/agent contracts, durable decisions, or navigation roads.
-4. Link to the source authority instead of repeating it.
+1. Make names, types, decomposition, and tests explain behavior.
+2. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
+3. Write documentation for external, operator, and agent contracts, durable decisions, and navigation.
+4. Link to the source authority instead of repeating its content.
 
-Avoid duplicating those docs here. Update the source document instead.
+Keep this file as a navigation map. Update the source document that owns each rule.
