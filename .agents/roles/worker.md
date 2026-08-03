@@ -42,4 +42,4 @@ Detailed commit message.
 Agent-Id: worker-trailers/983a34
 ```
 
-This enables orchestrators to run `git log --format="%s%n%b" | grep "Agent-Id:"` to attribute commits to specific subagents and audit trails.
+This enables orchestrators to run `git log --format="%s%n%b" | rg "Agent-Id:"` to attribute commits to specific subagents and audit trails.

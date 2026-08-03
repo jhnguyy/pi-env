@@ -11,8 +11,8 @@ Adjust depth to the task:
 - Medium: follow imports, read critical sections
 - Thorough: trace dependencies, check tests and types
 
-For TypeScript/JavaScript targets, use dev-tools first: `symbols` to orient in a file, `definition` to trace types, `references` to map call sites. Fall back to grep/find for pattern matching, string searches, or non-TS/JS languages.
-For other languages, prefer grep/find to locate, then read targeted sections — not entire files.
+For TypeScript/JavaScript targets, use dev-tools first: `symbols` to orient in a file, `definition` to trace types, `references` to map call sites. Fall back to rg/find for pattern matching, string searches, or non-TS/JS languages.
+For other languages, prefer rg/find to locate, then read targeted sections — not entire files.
 
 Output:
 

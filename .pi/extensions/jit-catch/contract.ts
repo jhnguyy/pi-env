@@ -71,7 +71,7 @@ export const JIT_CATCH_DESCRIPTION = [
   "",
   "## Symlink edge case (important for pi-env)",
   "If extension dir is symlinked to git repo, a previous failed run's file may remain staged.",
-  "After every jit_catch run: `git status | grep catching` — expect no output.",
+  "After every jit_catch run: `git status | rg catching` — expect no output.",
   "If any .catching.test.ts appears, `git restore` it before committing.",
   "",
   "## On failure",
