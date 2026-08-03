@@ -3,6 +3,7 @@
  */
 
 import { agentLoop } from "@earendil-works/pi-agent-core";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type {
   AgentContext,
   AgentEvent,
@@ -226,7 +227,7 @@ function runSubagentWorkflow(
           const signal = options.signal
             ? AbortSignal.any([options.signal, effectSignal])
             : effectSignal;
-          const stream = agentLoop(prompts, agentContext, config, signal);
+          const stream = agentLoop(prompts, agentContext, config, signal, streamSimple);
           for await (const event of stream) {
             const ev = event as AgentEvent;
             const appended = accumulator.acceptEvent(ev);
