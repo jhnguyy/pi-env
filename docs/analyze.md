@@ -1,8 +1,8 @@
 # Analyze
 
-> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests are diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates`. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. `duplicates` compares only the selected diff/path corpus; use explicit path `.` for the bounded whole-source corpus.
+> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates`. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. `duplicates` compares only the selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
 >
-> All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits, not containment.
+> All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits. They are not containment.
 
 Safe examples:
 
@@ -23,7 +23,7 @@ nub run analyze -- --checks duplicates .
 
 Process groups guarantee descendant cleanup but are not aggregate memory/PID containment. Node old-space limits do not cover every native/external allocation. Safe syntax budgets are portable workload bounds for a stable local worktree, not a filesystem security sandbox against concurrent mutation. Strict requests therefore remain unavailable until a real cgroup/container/job adapter enforces aggregate limits.
 
-Async-risk findings about sequential awaits are review signals, not automatic defects: benchmark runs, analyzer stages, and bundle entries may intentionally remain sequential where concurrency would distort measurements or increase peak memory.
+Async-risk findings about sequential awaits are review signals, not automatic defects. Benchmark runs, analyzer stages, and bundle entries may intentionally remain sequential when concurrency would distort measurements or increase peak memory.
 
 ## User-facing configuration
 
@@ -34,9 +34,9 @@ PI_ENV_ANALYZE_OTEL_ENABLED=true
 PI_ENV_ANALYZE_OTEL_ENDPOINT=http://collector:4318
 ```
 
-The endpoint is never emitted as telemetry.
+Analyze never emits the endpoint as telemetry.
 
-The supervisor writes a bounded NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze` (or `~/.local/state/pi-env/analyze`; override with `PI_ENV_ANALYZE_JOURNAL_DIR`). Set `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it.
+The supervisor writes a bounded NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze` or `~/.local/state/pi-env/analyze`. Override that path with `PI_ENV_ANALYZE_JOURNAL_DIR`. Set `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it.
 
 ## Source navigation
 

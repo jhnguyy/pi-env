@@ -1,4 +1,4 @@
-/** LSP handlers stay separate from socket lifecycle so protocol behavior is directly testable. */
+/** Keep LSP handlers separate from the socket lifecycle so tests can call the protocol behavior directly. */
 
 import { existsSync } from "node:fs";
 import {

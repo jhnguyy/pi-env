@@ -13,4 +13,4 @@ Source `helpers.sh` instead of redefining common glue:
 - `with_temp_dir` — temporary workspace allocation.
 - `make_executable` — small fake command creation.
 
-Keep behavior-heavy setup code in `setup/*.mjs` or `setup/*.sh`; tests should assemble fixtures and assert outcomes rather than reimplementing setup logic.
+Keep behavior-heavy setup code in `setup/*.mjs` or `setup/*.sh`. Tests should assemble fixtures and assert outcomes rather than reimplementing setup logic.

@@ -1,6 +1,6 @@
 # Communication Pattern Guide
 
-Smells, not bans.
+Use these patterns to find text that conflicts with the house style. Preserve a pattern only when it carries necessary meaning.
 
 | Pattern | Issue | Move |
 |---|---|---|

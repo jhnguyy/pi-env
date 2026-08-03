@@ -13,4 +13,4 @@ Before adding prose or comments:
 3. Document only external/operator/agent contracts, durable decisions, or navigation roads.
 4. Link to the source authority instead of repeating it.
 
-Avoid duplicating those docs here; update the source doc instead.
+Avoid duplicating those docs here. Update the source document instead.

@@ -8,6 +8,7 @@ import {
   fileEffect,
   linkPathEffect,
   linked,
+  managedBlockEffect,
 } from "./file-ops.mjs";
 
 export function configurePiEffect(ctx) {
@@ -47,11 +48,12 @@ export function configurePiEffect(ctx) {
       ctx.appendMarker,
       "~/.pi/agent/APPEND_SYSTEM.md",
     );
-    yield* bootstrapFileEffect(
-      join(ctx.repo, "AGENTS.md"),
+    yield* managedBlockEffect(
+      join(ctx.setupDir, "templates/AGENTS.md"),
       join(ctx.piAgentDir, "AGENTS.md"),
-      "~/.pi/agent/AGENTS.md (exists — not overwritten)",
-      "~/.pi/agent/AGENTS.md (bootstrapped from repo — customize for your environment)",
+      "<!-- pi-env:agent-guidelines:start -->",
+      "<!-- pi-env:agent-guidelines:end -->",
+      "~/.pi/agent/AGENTS.md",
     );
   });
 }
