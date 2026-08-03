@@ -40,7 +40,7 @@ const toProgramError = (cause: unknown): ProgramError => cause instanceof Progra
   ? cause
   : new ProgramError({ message: cause instanceof Error ? cause.message : String(cause) });
 
-/** Parses the project's tsconfig at the typed filesystem/compiler boundary. */
+/** Parses the project tsconfig at the filesystem and compiler boundary. */
 const parseTsconfigEffect = (cwd: string): Effect.Effect<ParsedConfig, ProgramError> => Effect.try({
   try: () => {
     const configPath = ts.findConfigFile(cwd, existsSync, "tsconfig.json");
@@ -156,7 +156,7 @@ export const createProjectEffect = (cwd: string): Effect.Effect<TypeProject, Pro
     catch: toProgramError,
   }));
 
-/** Loads only the project capability required by the selected analyzers. */
+/** Loads only the project data that the selected analyzers require. */
 export const createAnalysisProjectEffect = (
   cwd: string,
   scope: Scope,

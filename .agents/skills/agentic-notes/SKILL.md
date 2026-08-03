@@ -5,7 +5,7 @@ description: Creates, updates, reviews, and transforms notes for agentic workflo
 
 # Agentic Notes
 
-Portable note practice for pi environments. This skill defines what makes a useful agent-facing note; the current workspace defines where notes live and what may be touched. The **local adapter** is the workspace-specific note policy, tool contract, or convention source that supplies those storage and boundary rules.
+Portable note practice for pi environments. This skill defines what makes a useful agent-facing note. The current workspace defines where notes live and what may be touched. The **local adapter** is the workspace-specific note policy, tool contract, or convention source that supplies those storage and boundary rules.
 
 ## First: Find the Local Adapter
 

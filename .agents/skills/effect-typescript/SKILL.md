@@ -19,4 +19,4 @@ description: Use for TypeScript work where Effect is in use or proposed for use.
 - Use Effect for IO, interruption, scoped resources, concurrency policy, or dependency substitution.
 - Keep deterministic transforms plain TypeScript.
 - Add services or layers only for meaningful substitution or lifecycle ownership.
-- Preserve public adapters unless the task intentionally changes them; run the Effect program at the existing boundary.
+- Preserve public adapters unless the task intentionally changes them. Run the Effect program at the existing boundary.

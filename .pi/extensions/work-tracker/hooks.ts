@@ -99,7 +99,7 @@ export function registerHooks(
     batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: isReplacementSession }), ctx);
 
     if (isReplacementSession && open > 0) {
-      ctx.ui.notify(`🗑️ Session switched — cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
+      ctx.ui.notify(`Session switched. Cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
     }
   });
 

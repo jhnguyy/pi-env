@@ -32,11 +32,11 @@ function nodeProcessOptions(cwd: string, maxMemoryMb: number, timeoutMs: number)
   return { cwd, timeoutMs, stdoutLimitBytes: OUTPUT_LIMIT_BYTES, stderrLimitBytes: OUTPUT_LIMIT_BYTES, env: nodeAnalyzerEnvironment(maxMemoryMb) };
 }
 
-/** Oxlint's launcher starts native workers; do not apply a synthetic Node heap cap. */
+/** Oxlint's launcher starts native workers. Do not apply a synthetic Node heap cap. */
 function nativeProcessOptions(cwd: string, timeoutMs: number): StreamProcessOptions {
-  // tool-node-run.sh selects a directly executable host Node for launchers that
-  // spawn process.execPath. Nub may run its downloaded Node through a dynamic
-  // loader, which is not itself a valid Node executable for Oxlint's children.
+  // tool-node-run.sh selects a host Node for launchers that start child processes
+  // through process.execPath. Nub can use a dynamic loader to run its downloaded
+  // Node. Oxlint child processes cannot use that Node path directly.
   return {
     cwd,
     timeoutMs,

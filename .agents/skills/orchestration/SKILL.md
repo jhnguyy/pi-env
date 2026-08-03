@@ -7,7 +7,7 @@ description: Subagent spawning, scoping, and context gathering. Use when decompo
 
 ## Mental Model
 
-**Goal:** Route context to scoped workers, wait for completion signals, synthesize results. Workers report back. Workers can coordinate directly when the scope is clear — route through the orchestrator when its output determines what gets spawned next, or when you need to filter before forwarding.
+**Goal:** Route context to scoped workers, wait for completion signals, and synthesize results. Workers report back. Workers can coordinate directly when the scope is clear. Route through the orchestrator when its output determines what gets spawned next, or when you need to filter before forwarding.
 
 `gather context → dispatch workers (parallel or coordinating) → wait → synthesize → cleanup → commit`
 
@@ -62,13 +62,13 @@ orch cleanup {}
 // Run receipt in /tmp/orch-runs/ for retrospectives.
 ```
 
-**Cleanup is required.** `orch cleanup` is the final step of every orchestration — not optional, not conditional. If the session ends before cleanup, the shutdown hook logs a warning visible in the TUI and `orch status` shows the uncleaned run; clean up in the next session.
+**Cleanup is required.** `orch cleanup` is the final step of every orchestration. Always run it. If the session ends before cleanup, the shutdown hook logs a warning in the TUI. `orch status` also shows the uncleaned run. Clean up in the next session.
 
 ---
 
 ## Scoping Workers
 
-**Least privilege** — give each worker only the tools, skills, and context its task requires. Instruct workers to report findings and changes only, no reasoning or summaries.
+**Least privilege** — give each worker only the tools, skills, and context its task requires. Instruct workers to report findings and changes only. Do not ask for reasoning or summaries.
 
 | Flag | Effect |
 |---|---|
@@ -82,7 +82,7 @@ orch cleanup {}
 
 **Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona. For complex tasks, write a brief (`write { path: '$ORCH_DIR/brief-a.md' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context.
 
-**Model selection** — pass full `provider/model-id`, not alias. The **`subagent` tool description** (regenerated each `session_start`) is the live source of truth for available models and their tags; its underlying SSOT is `~/.pi/agent/settings.json` → `modelAnnotations`. Route by tag intent:
+**Model selection** — pass the full `provider/model-id`, not an alias. The **`subagent` tool description** is the live source for available models and their tags. Pi regenerates it during each `session_start`. Its underlying source is `~/.pi/agent/settings.json` → `modelAnnotations`. Route by tag intent:
 
 | Intent | Tag query | Typical pick |
 |---|---|---|
@@ -96,13 +96,13 @@ orch cleanup {}
 
 **Env vars:** `orch spawn` auto-injects `PI_BUS_SESSION`, `PI_AGENT_ID`, and `ORCH_DIR`. If spawning via `tmux` directly (outside an `orch` run), you must set `PI_BUS_SESSION` and `PI_AGENT_ID` manually or `bus publish` will silently fail.
 
-**Subagent cwd:** `subagent` / `subagent_start` accept optional `cwd` for intentional cross-worktree execution. Pass an absolute existing directory; it is resolved to a canonical realpath and used for agent discovery, built-in tools, execution metadata, and the child session cwd. Keep task packets using absolute paths, and keep integration/shutdown ownership in the parent session.
+**Subagent cwd:** `subagent` and `subagent_start` accept an optional `cwd` for intentional cross-worktree execution. Pass an existing absolute directory. The tool resolves it to a canonical real path and uses it for agent discovery, built-in tools, execution metadata, and the child session working directory. Use absolute paths in task packets. Keep integration and shutdown ownership in the parent session.
 
 ---
 
 ## Dispatch
 
-Spawn all independent workers before waiting on any. Sequential dispatch only when a worker's output is required to form the next worker's prompt.
+Spawn all independent workers before waiting on any. Use sequential dispatch only when a worker's output is required to form the next worker's prompt.
 
 ```
 orch spawn worker-a
@@ -124,13 +124,13 @@ msgs_b = bus read { channel: "scouts:b" }
 // if msgs_b is empty → bus wait again on ["scouts:b"]
 ```
 
-Workers also publish from inside their prompt: `"When done, publish to channel 'scouts:a' with a summary."` — this carries the structured result; the exit shim is the crash-safe fallback.
+Workers also publish from inside their prompt: `"When done, publish to channel 'scouts:a' with a summary."` This message carries the structured result. The exit shim is the crash-safe fallback.
 
 ---
 
 ## Data Flow
 
-**Files carry data. Bus carries signals.** Workers write results to `$ORCH_DIR/<label>.json` and publish completion to their bus channel. Read files for content; wait on bus for timing. Synthesize; never relay verbatim.
+**Files carry data. Bus carries signals.** Workers write results to `$ORCH_DIR/<label>.json` and publish completion to their bus channel. Read files for content. Wait on bus for timing. Synthesize. Do not relay verbatim.
 
 ---
 
@@ -142,7 +142,7 @@ When `bus wait` times out:
 1. `tmux read { paneId: "..." }` — see what's on screen
 2. Common causes: permission gate (approve with `tmux send`), silent crash, wrong `PI_BUS_SESSION`
 3. Use `--no-extensions` in worker command to prevent permission gates entirely
-4. Fix and re-spawn the failed worker only; don't re-run the whole pipeline
+4. Fix and re-spawn only the failed worker. Do not run the full pipeline again.
 
 **Note:** Labels are unique within a run — to re-spawn a crashed worker with the same label, use a suffix (e.g., `scout-a-retry`).
 
@@ -174,7 +174,7 @@ pi --no-session --tools read,bash,dev-tools --no-skills --model anthropic/claude
    No summaries. Structured output only. Write to /tmp/scout-context.json."
 ```
 
-Extract: stack → skills to load; commands → pass verbatim to workers; paths → `@file` args; conventions → `--append-system-prompt`.
+Extract the stack to select skills. Pass commands verbatim to workers. Convert paths to `@file` arguments. Pass conventions through `--append-system-prompt`.
 
 ---
 
@@ -182,7 +182,7 @@ Extract: stack → skills to load; commands → pass verbatim to workers; paths 
 
 - **Before retrying:** adjust prompt, scoping, or file args — identical retries produce identical failures.
 - **Broken tests:** spawn a focused fix worker with test output + relevant files, not a full re-run.
-- **Stalled pane:** `tmux read` to diagnose; `--no-extensions` to prevent permission gates.
+- **Stalled pane:** use `tmux read` to diagnose the problem. Use `--no-extensions` to prevent permission gates.
 - **Crashed worker:** re-spawn with a new label suffix (e.g., `scout-a-retry`). Labels must be unique within a run.
 
 ---
@@ -193,7 +193,7 @@ For design decisions requiring genuine back-and-forth. Spawn agents on a shared 
 
 What makes it work: agents reason with evidence, stay on one topic until resolved, state disagreement directly. If two exchanges don't produce movement, bring both positions to the human — persistent disagreement is usually about values, not facts.
 
-**Model selection:** same-tier ↔ same-tier (`claude-sonnet-4-6` ↔ itself, or `gpt-5.5` ↔ itself) for known solution space; mix `heavy` ↔ same-family non-heavy for genuine uncertainty (e.g. `claude-opus-4-7` ↔ `claude-sonnet-4-6`). Tag definitions live in `~/.pi/agent/settings.json`.
+**Model selection:** use the same tier on both sides for a known solution space. Examples include `claude-sonnet-4-6` ↔ itself and `gpt-5.5` ↔ itself. For genuine uncertainty, mix `heavy` with a same-family non-heavy model. An example is `claude-opus-4-7` ↔ `claude-sonnet-4-6`. Tag definitions live in `~/.pi/agent/settings.json`.
 
 ---
 

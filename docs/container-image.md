@@ -2,7 +2,7 @@
 
 ## Image contract
 
-Purpose: CI/toolchain artifact for pi-env; possible base for later homelab-agent composition.
+Purpose: CI and toolchain artifact for pi-env. It can become a base for later homelab-agent composition.
 
 State: built from [`Dockerfile`](../Dockerfile) and published by [`.github/workflows/image.yml`](../.github/workflows/image.yml).
 

@@ -13,7 +13,7 @@ The one-liner is the entire value of an index entry. A good one-liner lets an ag
 
 | ❌ Noise | ✅ Signal |
 |---|---|
-| "Manages git operations" | "git op wrappers — commit, push, fetch, revert; 5s timeout" |
+| "Manages git operations" | "git operation wrappers for commit, push, fetch, and revert, with a 5-second timeout" |
 | "Handles formatting" | "TypeScript formatter via LSP, workspace-aware, auto-runs on save" |
 | "Overview of the migration" | "REST→GraphQL: 47 endpoints, v1 deprecated 2024-11-15, rollback 48h" |
 

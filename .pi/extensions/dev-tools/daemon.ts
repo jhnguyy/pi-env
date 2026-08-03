@@ -59,7 +59,7 @@ function lspIdleTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const configured = Number(env[DevToolsEnvironmentName.LspIdleTimeoutMs]);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_IDLE_TIMEOUT_MS;
 }
-/** Max bytes to buffer per connection before disconnecting. Prevents OOM from malformed clients. */
+/** Limit each connection buffer to prevent malformed clients from causing out-of-memory errors. */
 const MAX_BUFFER_BYTES = 1024 * 1024; // 1MB
 
 function telemetryAction(action: string): string {

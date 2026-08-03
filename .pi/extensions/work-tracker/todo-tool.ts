@@ -29,8 +29,8 @@ type TodoExecution = {
 
 type TodoActionHandler = (execution: TodoExecution) => TodoResult;
 
-const TODO_ACTION_DESCRIPTION = "add: create task, done: complete by id, rm: remove by id, list: show all, clear: reset";
-const TODO_TEXT_DESCRIPTION = "Task text(s) for add; task id(s) for done/rm. ALWAYS pass as a JSON array — even for a single item. Examples: add [\"my task\"], done [\"1\"], rm [\"2\"]. Ignored for list and clear.";
+const TODO_ACTION_DESCRIPTION = "Use add to create a task. Use done to complete a task by id. Use rm to remove a task by id. Use list to show all tasks. Use clear to reset the list.";
+const TODO_TEXT_DESCRIPTION = "For add, use task text. For done and rm, use task ids. Always pass a JSON array, even for one item. Examples: add [\"my task\"], done [\"1\"], rm [\"2\"]. Ignore text for list and clear.";
 
 export const TODO_PARAMETERS = Type.Object({
   action: Type.Union(

@@ -64,25 +64,25 @@ describeIfEnabled("dev-tools", "request builder", () => {
   });
 
   it("rejects missing paths before daemon work", () => {
-    expect(failureMessage({ action: DevToolsAction.Diagnostics })).toBe("diagnostics requires a path");
+    expect(failureMessage({ action: DevToolsAction.Diagnostics })).toBe("diagnostics requires a path.");
 
     for (const action of positionActions) {
       const params = { action, line: 1, character: 1 };
-      expect(failureMessage(params)).toBe(`${action} requires a path`);
-      expect(() => buildClientRequest(params)).toThrow(`${action} requires a path`);
+      expect(failureMessage(params)).toBe(`${action} requires a path.`);
+      expect(() => buildClientRequest(params)).toThrow(`${action} requires a path.`);
     }
   });
 
   it("rejects incomplete positions before daemon work", () => {
     for (const action of positionActions) {
-      expect(failureMessage({ action, path: "/repo/a.ts", character: 1 })).toBe(`${action} requires line and character`);
-      expect(failureMessage({ action, path: "/repo/a.ts", line: 1 })).toBe(`${action} requires line and character`);
+      expect(failureMessage({ action, path: "/repo/a.ts", character: 1 })).toBe(`${action} requires line and character values.`);
+      expect(failureMessage({ action, path: "/repo/a.ts", line: 1 })).toBe(`${action} requires line and character values.`);
     }
   });
 
   it("requires a path or query for symbols", () => {
-    expect(failureMessage({ action: DevToolsAction.Symbols })).toBe("symbols requires a path or query");
-    expect(failureMessage({ action: DevToolsAction.Symbols, query: "   " })).toBe("symbols requires a path or query");
+    expect(failureMessage({ action: DevToolsAction.Symbols })).toBe("symbols requires a path or query.");
+    expect(failureMessage({ action: DevToolsAction.Symbols, query: "   " })).toBe("symbols requires a path or query.");
   });
 
   it("rejects multi-path requests for single-path actions", () => {
@@ -94,17 +94,17 @@ describeIfEnabled("dev-tools", "request builder", () => {
     expect(Result.isFailure(result)).toBe(true);
     expect(Result.isFailure(result) ? result.failure : null).toEqual({
       _tag: "RequestBuildError",
-      message: "references requires a single path — 2 were provided",
+      message: "references requires one path. 2 paths were provided.",
     });
     expect(() => buildClientRequest({
       action: DevToolsAction.References,
       path: ["/repo/a.ts", "/repo/b.ts"],
-    })).toThrow("references requires a single path — 2 were provided");
+    })).toThrow("references requires one path. 2 paths were provided.");
 
     expect(() => buildClientRequest({
       action: DevToolsAction.Symbols,
       path: ["/repo/a.ts", "/repo/b.ts"],
-    })).toThrow("symbols requires a single path — 2 were provided");
+    })).toThrow("symbols requires one path. 2 paths were provided.");
   });
 
   it("ignores path data for status", () => {

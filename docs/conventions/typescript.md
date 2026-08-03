@@ -68,7 +68,7 @@ if (!path) return skipped("missing path");
 if (isDirty(path)) return skipped("worktree has uncommitted changes");
 ```
 
-Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing `switch (true)` when naming the classification first would be clearer; derive a small const-object state, then switch on that state.
+Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing `switch (true)` when naming the classification first would be clearer. Derive a small const-object state, then switch on that state.
 
 ## Effect-style tagged data
 
