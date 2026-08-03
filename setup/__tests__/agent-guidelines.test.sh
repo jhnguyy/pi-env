@@ -52,6 +52,9 @@ test_agent_guidelines_are_created_from_the_global_template() {
   assert_file_count "$agents_file" "$START_MARKER" 1
   assert_file_count "$agents_file" "$END_MARKER" 1
   assert_managed_content "$agents_file"
+  assert_file_contains "$agents_file" 'Before changing a repository:'
+  assert_file_contains "$agents_file" 'Leave self-descriptive code uncommented.'
+  assert_file_contains "$agents_file" 'Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.'
   if grep -qF 'Use the repo docs as the navigation path' "$agents_file"; then
     fail 'global AGENTS.md must not contain pi-env project instructions'
   fi

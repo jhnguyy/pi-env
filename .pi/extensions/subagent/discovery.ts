@@ -32,10 +32,10 @@ const DESCRIPTION_INTRO = [
   "",
   "Two modes:",
   '  1. Agent file: subagent({ name: "recon", agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
-  '     `name` is required and creates a persistent `sub-<name>` session beside the parent.',
-  '     If the agent file omits model, you MUST pass model explicitly.',
+  "     `name` is required and creates a persistent `sub-<name>` session beside the parent.",
+  "     If the agent file omits model, you MUST pass model explicitly.",
   '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
-  '  max_turns is optional; omit it to run without a turn-count limit. Use subagent_start for non-blocking jobs and subagent_job to inspect them.',
+  "  max_turns is optional; omit it to run without a turn-count limit. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
   "",
 ] as const;
 
@@ -45,10 +45,41 @@ export const STATIC_DESCRIPTION = [
   "Extension tools are available when registered.",
 ].join("\n");
 
-function selectModels(enabledModelIds: string[], availableModels: AvailableModel[]): AvailableModel[] {
+function selectModels(
+  enabledModelIds: string[],
+  availableModels: AvailableModel[],
+): AvailableModel[] {
   if (enabledModelIds.length === 0) return availableModels;
   const enabled = new Set(enabledModelIds);
   return availableModels.filter((model) => enabled.has(`${model.provider}/${model.id}`));
+}
+
+const MODEL_TAG_GUIDANCE = {
+  preferred: "Cost-effective gathering, summarization, and mechanical edits",
+  fast: "Latency-sensitive read-only scouting",
+  codex: "Code-focused reasoning and implementation",
+  heavy: "Judgment, adversarial review, and subtle reasoning",
+  local: "Local execution when remote providers are unnecessary",
+  free: "No-cost iteration",
+} as const;
+
+function appendModelTagGuidance(
+  lines: string[],
+  models: AvailableModel[],
+  annotations?: Record<string, string[]>,
+): boolean {
+  const availableTags = new Set(
+    models.flatMap((model) => annotations?.[`${model.provider}/${model.id}`] ?? []),
+  );
+  const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => availableTags.has(tag));
+  if (guidance.length === 0) return false;
+
+  lines.push(
+    "",
+    "Model tag guidance:",
+    ...guidance.map(([tag, intent]) => `  - [${tag}] ${intent}.`),
+  );
+  return true;
 }
 
 function appendModels(
@@ -68,11 +99,12 @@ function appendModels(
     const tagSuffix = tags && tags.length > 0 ? ` [${tags.join(", ")}]` : "";
     lines.push(`  ${modelKey} — ${model.name}${tagSuffix}`);
   }
+  const hasTagGuidance = appendModelTagGuidance(lines, models, annotations);
   lines.push(
     "",
-    "Model selection: choose based on task complexity and cost.",
-    "  - Models tagged [preferred] are cost-effective — use for gathering, summarization, and mechanical edits.",
-    "  - Reserve heavier models for tasks requiring judgment, adversarial thinking, or subtle reasoning.",
+    hasTagGuidance
+      ? "Model selection: match task intent to the available tags and cost."
+      : "Model selection: choose based on task complexity and cost.",
     "  - Always pass model explicitly — there is no default.",
   );
 }

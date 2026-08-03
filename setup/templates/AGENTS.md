@@ -19,3 +19,19 @@ Apply this style to assistant responses, correspondence, documentation, code com
 - Do not use semicolons. Use separate sentences or a list.
 
 Keep exact quotations, identifiers, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to human-readable text inside code, including comments, diagnostics, and log messages.
+
+## Repository workflow
+
+Before changing a repository:
+
+1. Read its `README.md` for purpose, setup, and navigation when the file exists.
+2. Read its `CONTRIBUTING.md` for development workflow and validation requirements when the file exists.
+3. Follow repository instructions and links that apply to the changed area.
+
+## Code comments and documentation
+
+Make code self-descriptive through names, types, decomposition, and tests. Leave self-descriptive code uncommented.
+
+Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
+
+Write documentation for external, operator, and agent contracts, durable decisions, and navigation. Link to source authorities instead of repeating their content.

@@ -75,9 +75,12 @@ export default function (pi: ExtensionAPI) {
       "Language-server-backed code intelligence — diagnostics, hover, definitions, " +
       "implementations, references, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
-      "For supported coding languages, prefer dev-tools for symbols, definitions, references, hovers, call hierarchy, and diagnostics.",
-      "Use diagnostics to validate changed code before commit or review.",
-      "Use text search for strings, comments, config values, generated files, and unsupported file types.",
+      "Use dev-tools symbols to orient in files and search workspace symbols for supported coding languages.",
+      "Use dev-tools definition to locate declarations, implementation to find concrete implementations, and hover to inspect types and documentation.",
+      "Use dev-tools references to review all usages before renaming a symbol.",
+      "Use dev-tools incoming-calls before changing a callable signature and outgoing-calls to map dependencies before refactoring.",
+      "Use dev-tools diagnostics to validate changed code before commit or review.",
+      "Use rg only for text or pattern searches in strings, comments, config values, generated files, and unsupported file types.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {

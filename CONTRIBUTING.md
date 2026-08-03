@@ -27,14 +27,15 @@ Keep documentation targeted:
 - `CONTRIBUTING.md`: branch, PR, worktree, reviewer, and test policy.
 - `AGENTS.md`: coding-agent workflow.
 
-Cross-link when useful. Keep navigation docs as thin link chains. Do not duplicate guidance already owned by code, config, or scripts. Comments should record constraints, alternatives, or domain meaning rather than narrate control flow.
+Cross-link when useful. Keep navigation docs as thin link chains. Link to guidance owned by code, config, or scripts. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
 
-First-pass rule for prose/comments:
+First-pass rule for prose and comments:
 
-1. Before adding prose, make names, types, decomposition, and tests explain behavior.
-2. Use comments only for constraints, alternatives, domain meaning, compatibility history, or safety rationale.
-3. Use docs only for an external/operator/agent contract, a durable decision, or a navigation road.
-4. Link to the source authority instead of repeating it.
+1. Make names, types, decomposition, and tests explain behavior.
+2. Leave self-descriptive code uncommented.
+3. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
+4. Write documentation for an external, operator, or agent contract, a durable decision, or navigation.
+5. Link to the source authority instead of repeating its content.
 
 ## Runtime requirements
 
