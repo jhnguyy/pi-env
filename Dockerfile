@@ -44,8 +44,8 @@ RUN nub install --frozen-lockfile
 # Local equivalent: nub run build
 RUN nub run build
 
-# Local equivalent: nub run verify
-RUN nub run verify
+# BuildKit does not run the image entrypoint, so Tini must reap detached test descendants here.
+RUN tini -s -- nub run verify
 
 USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
