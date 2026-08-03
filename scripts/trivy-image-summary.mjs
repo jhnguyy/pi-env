@@ -24,14 +24,14 @@ for (const result of report.Results ?? []) {
     const severity = String(vuln.Severity ?? 'UNKNOWN').toUpperCase();
     severityCounts[severity] = (severityCounts[severity] ?? 0) + 1;
     if (severity === 'HIGH' || severity === 'CRITICAL') {
-      if (vuln.FixedVersion) {
+      if (severity === 'CRITICAL' || vuln.FixedVersion) {
         policyFindings.push({
           kind: 'vuln',
           severity,
           id: vuln.VulnerabilityID,
           package: vuln.PkgName,
           installed: vuln.InstalledVersion,
-          fixed: vuln.FixedVersion,
+          fixed: vuln.FixedVersion || 'unfixed',
           target: result.Target,
         });
       } else {
