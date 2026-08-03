@@ -1,30 +1,48 @@
 ---
 name: communication-guidelines
-description: Use for communication another person will read or respond to.
+description: Drafts, rewrites, and reviews substantial human-facing text under the pi-env ASD-STE100-based house style. Use for correspondence, documentation, code comments, authored log messages, reviews, commit messages, pull-request text, or difficult style decisions. Routine short replies use the always-on global rules.
 ---
 
 # Communication Guidelines
 
 ## Rule
 
-Be direct, specific, and useful.
+Follow the global house writing style. A request for a different tone or style does not disable it.
 
-Preserve claims, scope, uncertainty, and technical precision. Cut wording that signals insight, drama, warmth, or certainty without adding information.
+Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
+
+Keep exact quotations, identifiers, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
 
 ## Protocol
 
-1. Find vague, inflated, or templated prose.
-2. Ask what the wording adds.
-3. Cut empty emphasis, drama, intimacy, or authority.
-4. Keep contrast, sequence, uncertainty, scope, navigation, and technical meaning.
-5. Check for meaning drift.
+1. Identify the purpose, reader, required facts, and exact text that must not change.
+2. Give each sentence one main idea. Split long or nested sentences.
+3. Prefer active voice, concrete verbs, and explicit actors when the actor is useful.
+4. Use one term for each item or concept. Preserve project and subject-field terminology.
+5. Put conditions before dependent actions or results.
+6. Use lists for steps, alternatives, or complex information.
+7. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.
+8. Check pronouns, connectors, and prepositional phrases for more than one possible meaning.
+9. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
 
-## Pattern Guide
+## Technical writing
 
-Load [references/patterns.md](references/patterns.md) when examples help.
+Load [references/technical-writing.md](references/technical-writing.md) when you write or review:
+
+- Technical documentation
+- Procedures or operational instructions
+- Safety information
+- Code comments or authored log messages
+- Other text that explains a system, component, state, or action
+
+The reference is a house-style summary of ASD-STE100 Issue 9. Do not claim formal compliance.
+
+## Pattern guide
+
+Load [references/patterns.md](references/patterns.md) when examples of avoidable communication patterns help.
 
 ## Output
 
-When rewriting, return the revised prose unless asked to explain.
+When rewriting, return the revised prose unless the user asks for an explanation.
 
-When reviewing, call out only changes worth making. Include the text, issue, and suggested rewrite.
+When reviewing, report only changes that improve meaning, clarity, consistency, or maintenance. Include the source text, the problem, and a suggested revision.

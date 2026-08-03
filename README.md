@@ -25,7 +25,7 @@ Nub is the canonical JavaScript toolchain. Nix remains available for host/runtim
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`; it uses existing host tools.
 
-Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides.
+Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env house-writing block in `~/.pi/agent/AGENTS.md` and preserves content outside that managed block.
 
 ## Documentation
 

@@ -2,4 +2,4 @@
 
 Dotfiles repo registered as a pi package. Extensions and skills are loaded directly from this repo by pi's package manager.
 
-Root `AGENTS.md` is bootstrapped to `~/.pi/agent/AGENTS.md` on first setup — keep it principles-only, no project content. Put setup/runtime intent in `README.md` and workflow/package rules in `CONTRIBUTING.md`.
+Setup maintains the global house-writing block in `~/.pi/agent/AGENTS.md` from `setup/templates/AGENTS.md`. It preserves content outside the managed markers. Keep root `AGENTS.md` specific to this project. Put setup/runtime intent in `README.md` and workflow/package rules in `CONTRIBUTING.md`.
