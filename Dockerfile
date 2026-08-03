@@ -10,7 +10,7 @@
 # The image is a reusable CI/toolchain artifact with prebuilt extension bundles. It
 # is not the only supported build path and does not run setup.sh or hydrate any
 # machine-local identity/state.
-FROM ghcr.io/nubjs/nub:0.2.10-slim@sha256:b2a979e5ace8dd31d0f352aff1b3a2967ef7100f4d398ab61a77122e3fbd7425 AS pi-env
+FROM ghcr.io/nubjs/nub:0.2.10-alpine@sha256:f3efdc86d557acfcdd18e25e1b4fb3dd1c6433e1a56cdb277b791df438e738aa AS pi-env
 
 LABEL org.opencontainers.image.title="pi-env" \
   org.opencontainers.image.description="pi-env CI/toolchain image artifact with locked Nub dependencies and prebuilt extension bundles"
@@ -22,13 +22,11 @@ ENV PI_ENV_HOME=/opt/pi-env \
   NPM_CONFIG_UPDATE_NOTIFIER=false
 
 USER root
-RUN apt-get update \
-  && apt-get upgrade -y \
-  && apt-get install -y --no-install-recommends \
+RUN apk upgrade --no-cache \
+  && apk add --no-cache \
+    bash \
     ca-certificates \
-    git \
-    openssh-client \
-  && rm -rf /var/lib/apt/lists/*
+    git
 
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && node --version \
@@ -46,8 +44,8 @@ RUN nub install --frozen-lockfile
 # Local equivalent: nub run build
 RUN nub run build
 
-# Local equivalent: nub run verify
-RUN nub run verify
+# BuildKit does not run the image entrypoint, so Tini must reap detached test descendants here.
+RUN tini -s -- nub run verify
 
 USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \

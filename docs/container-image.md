@@ -14,6 +14,8 @@ nub run verify:install
 
 The workflow does not sign or deploy.
 
+The artifact includes Git for HTTPS workflows but not an SSH client. Downstream agent images that require SSH transport or SSH signing must add a client and own its security update policy.
+
 ## State and secrets
 
 Image-owned:
