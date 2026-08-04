@@ -364,11 +364,27 @@ export async function handleRename(req: DaemonRequest, deps: HandlerDeps): Promi
   if (!lspRes?.result) return errorResponse(req.id, "No rename edits returned at this position");
 
   try {
+    const allowedRoots = [...new Set([ctx.projectRoot, ...ctx.backend.projectRoots])];
+    const authorizedBackends = new Map<string, LspBackend>();
     const applied = await applyWorkspaceEdit(lspRes.result, {
-      getDocumentSnapshot: (absolutePath) => ctx.backend.getDocumentSnapshot(absolutePath),
+      allowedRoots,
+      authorizeTarget: (requestedPath, realPath) => {
+        const requestedBackend = deps.getBackend(requestedPath);
+        const realBackend = deps.getBackend(realPath);
+        if (requestedBackend !== realBackend) {
+          throw new Error(`${requestedPath} resolves to a different backend owner.`);
+        }
+        authorizedBackends.set(requestedPath, requestedBackend);
+        return {
+          getDocumentSnapshot: (absolutePath) =>
+            requestedBackend.getDocumentSnapshot(absolutePath),
+        };
+      },
     });
     for (const file of applied.files) deps.fileCache.invalidate(file.absolutePath);
-    await Promise.all(applied.files.map((file) => ctx.backend.ensureFile(file.absolutePath)));
+    await Promise.all(
+      applied.files.map((file) => authorizedBackends.get(file.absolutePath)!.ensureFile(file.absolutePath)),
+    );
     return okResponse(req.id, {
       action: "rename",
       path: req.path,

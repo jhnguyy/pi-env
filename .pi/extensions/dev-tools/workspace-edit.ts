@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Data, Effect } from "effect";
 
@@ -30,7 +30,18 @@ export interface WorkspaceDocumentSnapshot {
   content: string;
 }
 
+export interface WorkspaceEditTargetAuthorization {
+  getDocumentSnapshot?: (absolutePath: string) => WorkspaceDocumentSnapshot | undefined;
+}
+
 export interface ApplyWorkspaceEditOptions {
+  /** Explicit write scope. Every target must be contained by one of these roots lexically and after symlink resolution. */
+  allowedRoots: string[];
+  /** Authorizes a requested edit target and its real write path before any staging or mutation. */
+  authorizeTarget?: (
+    requestedPath: string,
+    realPath: string,
+  ) => WorkspaceEditTargetAuthorization | undefined;
   getDocumentSnapshot?: (absolutePath: string) => WorkspaceDocumentSnapshot | undefined;
 }
 
@@ -245,8 +256,12 @@ function applyTextEdits(content: string, file: WorkspaceFileEdits): string {
   );
 }
 
-interface PreparedWorkspaceFileEdit extends WorkspaceFileEdits {
+interface AuthorizedWorkspaceFileEdit extends WorkspaceFileEdits {
   writePath: string;
+  authorization?: WorkspaceEditTargetAuthorization;
+}
+
+interface PreparedWorkspaceFileEdit extends AuthorizedWorkspaceFileEdit {
   content: string;
   updatedContent: string;
 }
@@ -281,6 +296,41 @@ async function stageWorkspaceFile(
     throw cause;
   }
   return { ...update, stagedPath, backupPath };
+}
+
+function pathContains(root: string, target: string): boolean {
+  const child = relative(root, target);
+  return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
+}
+
+async function authorizeWorkspaceTargets(
+  files: WorkspaceFileEdits[],
+  options: ApplyWorkspaceEditOptions,
+): Promise<AuthorizedWorkspaceFileEdit[]> {
+  if (options.allowedRoots.length === 0) {
+    throw workspaceEditError("Workspace edit requires an explicit write scope.");
+  }
+  if (options.allowedRoots.some((root) => !isAbsolute(root))) {
+    throw workspaceEditError("Workspace edit allowed roots must be absolute paths.");
+  }
+
+  const lexicalRoots = options.allowedRoots.map((root) => resolve(root));
+  const realRoots = await Promise.all(lexicalRoots.map((root) => realpath(root)));
+
+  return Promise.all(files.map(async (file) => {
+    const lexicalTarget = resolve(file.absolutePath);
+    if (!lexicalRoots.some((root) => pathContains(root, lexicalTarget))) {
+      throw workspaceEditError(`${file.absolutePath} is outside the allowed workspace roots.`);
+    }
+
+    const writePath = await realpath(file.absolutePath);
+    if (!realRoots.some((root) => pathContains(root, writePath))) {
+      throw workspaceEditError(`${file.absolutePath} resolves outside the allowed workspace roots.`);
+    }
+
+    const authorization = options.authorizeTarget?.(file.absolutePath, writePath);
+    return { ...file, writePath, authorization };
+  }));
 }
 
 async function replaceWorkspaceFiles(updates: PreparedWorkspaceFileEdit[]): Promise<void> {
@@ -328,17 +378,19 @@ async function replaceWorkspaceFiles(updates: PreparedWorkspaceFileEdit[]): Prom
 
 export function applyWorkspaceEditEffect(
   value: unknown,
-  options: ApplyWorkspaceEditOptions = {},
+  options: ApplyWorkspaceEditOptions,
 ): Effect.Effect<AppliedWorkspaceEdit, WorkspaceEditApplyError> {
   return Effect.tryPromise({
     try: async () => {
       const files = parseWorkspaceEdit(value);
+      const authorizedFiles = await authorizeWorkspaceTargets(files, options);
       const sourceFiles = await Promise.all(
-        files.map(async (file) => {
-          const writePath = await realpath(file.absolutePath);
-          const content = await readFile(writePath, "utf8");
+        authorizedFiles.map(async (file) => {
+          const content = await readFile(file.writePath, "utf8");
           if (file.expectedVersion !== undefined && file.expectedVersion !== null) {
-            const snapshot = options.getDocumentSnapshot?.(file.absolutePath);
+            const snapshot =
+              file.authorization?.getDocumentSnapshot?.(file.absolutePath) ??
+              options.getDocumentSnapshot?.(file.absolutePath);
             if (!snapshot || snapshot.version !== file.expectedVersion) {
               throw workspaceEditError(
                 `${file.absolutePath} document version does not match the workspace edit.`,
@@ -350,7 +402,7 @@ export function applyWorkspaceEditEffect(
               );
             }
           }
-          return { ...file, writePath, content };
+          return { ...file, content };
         }),
       );
       if (new Set(sourceFiles.map((file) => file.writePath)).size !== sourceFiles.length) {
@@ -380,7 +432,7 @@ export function applyWorkspaceEditEffect(
 
 export function applyWorkspaceEdit(
   value: unknown,
-  options: ApplyWorkspaceEditOptions = {},
+  options: ApplyWorkspaceEditOptions,
 ): Promise<AppliedWorkspaceEdit> {
   return Effect.runPromise(applyWorkspaceEditEffect(value, options));
 }
