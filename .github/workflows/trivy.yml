@@ -47,6 +47,7 @@ jobs:
           test -f lock.yaml
 
           trivy fs \
+            --quiet \
             --scanners vuln \
             --file-patterns pnpm:lock.yaml \
             --include-dev-deps \
@@ -58,44 +59,37 @@ jobs:
             --output /tmp/trivy-dependency-inventory.json \
             .
 
-          if grep -q '"Target": *"lock.yaml"' /tmp/trivy-dependency-inventory.json; then
-            echo "Trivy dependency target: lock.yaml"
-          else
-            echo "Trivy did not report lock.yaml as a dependency target" >&2
-            cat /tmp/trivy-dependency-inventory.json
-            exit 2
-          fi
-          package_count="$(grep -c '"Identifier"' /tmp/trivy-dependency-inventory.json || true)"
-          all_dependency_vulnerabilities="$(grep -c '"VulnerabilityID"' /tmp/trivy-dependency-inventory.json || true)"
-          echo "Trivy dependency packages detected: $package_count"
-          echo "Trivy dependency vulnerabilities detected at all severities/statuses: $all_dependency_vulnerabilities"
-          if [ "$package_count" -lt 10 ]; then
-            echo "Trivy detected too few dependency packages; dependency scan may be ineffective" >&2
-            cat /tmp/trivy-dependency-inventory.json
+          if ! grep -q '"Target": *"lock.yaml"' /tmp/trivy-dependency-inventory.json; then
+            echo "Trivy did not report lock.yaml as a dependency target. Verify the lock format and pnpm file pattern." >&2
             exit 2
           fi
 
+          package_count="$(grep -c '"Identifier"' /tmp/trivy-dependency-inventory.json || true)"
+          if [ "$package_count" -lt 10 ]; then
+            echo "Trivy detected only $package_count dependency packages. Verify the lockfile scanner configuration." >&2
+            exit 2
+          fi
+          echo "Trivy dependency inventory: lock.yaml ($package_count packages)."
+
+          rm -f /tmp/trivy-policy-results.txt
           set +e
           trivy fs \
+            --quiet \
             --scanners vuln,secret,misconfig \
             --file-patterns pnpm:lock.yaml \
             --skip-dirs node_modules \
             --skip-dirs .git \
             --severity HIGH,CRITICAL \
             --include-dev-deps \
+            --ignore-unfixed \
             --ignorefile .trivyignore.yaml \
             --exit-code 1 \
             --skip-version-check \
-            --format json \
-            --output /tmp/trivy-policy-results.json \
+            --format template \
+            --template "@scripts/trivy-actionable.tpl" \
+            --output /tmp/trivy-policy-results.txt \
             .
           trivy_status="$?"
           set -e
-          policy_vulnerabilities="$(grep -c '"VulnerabilityID"' /tmp/trivy-policy-results.json || true)"
-          policy_rule_findings="$(grep -c '"RuleID"' /tmp/trivy-policy-results.json || true)"
-          echo "Trivy HIGH/CRITICAL vulnerability findings: $policy_vulnerabilities"
-          echo "Trivy HIGH/CRITICAL secret/misconfig findings: $policy_rule_findings"
-          if [ "$trivy_status" -ne 0 ]; then
-            cat /tmp/trivy-policy-results.json
-            exit "$trivy_status"
-          fi
+
+          sh scripts/trivy-filesystem-summary.sh /tmp/trivy-policy-results.txt "$trivy_status"

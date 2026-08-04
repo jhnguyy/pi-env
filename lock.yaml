@@ -9,6 +9,7 @@ overrides:
   minimatch: 10.2.3
   postcss: 8.5.25
   protobufjs: 8.6.6
+  undici: 8.9.0
 
 patchedDependencies:
   '@effect/vitest@4.0.0-beta.97':
@@ -2216,12 +2217,8 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
-  undici@8.5.0:
-    resolution: {integrity: sha512-xamtWoB1EshgjpmlXd7GGm2VfdDtw1+rD8uhry8pSNW3If6S8E0m2T2+orSKeZXEn/aPJMviCpDBA65WJt8zhg==}
-    engines: {node: '>=22.19.0'}
-
-  undici@8.7.0:
-    resolution: {integrity: sha512-N7iQtfyLhIMOFgQubvmLV26svHpO0bqKnAiWotTQCVKCmWrcGbBotPuW1x+xwYZ2VHdSTVUfPQQnlEt1/LouTQ==}
+  undici@8.9.0:
+    resolution: {integrity: sha512-aWZpUj7XoGonMClx4gdDRfgBjqeA+F473aDmROQQbM9n6PRfK/u1q/a0X4wMTgcHfT8H6fpbt98PFuDUwFg2YA==}
     engines: {node: '>=22.19.0'}
 
   uuid@14.0.1:
@@ -2666,7 +2663,7 @@ snapshots:
       proper-lockfile: 4.1.2
       semver: 7.8.0
       typebox: 1.3.7
-      undici: 8.5.0
+      undici: 8.9.0
       yaml: 2.9.0
     optionalDependencies:
       '@mariozechner/clipboard': 0.3.9
@@ -2712,7 +2709,7 @@ snapshots:
       effect: 4.0.0-beta.97
       ioredis: 5.11.1
       mime: 4.1.0
-      undici: 8.7.0
+      undici: 8.9.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -4286,9 +4283,7 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  undici@8.5.0: {}
-
-  undici@8.7.0: {}
+  undici@8.9.0: {}
 
   uuid@14.0.1: {}
 

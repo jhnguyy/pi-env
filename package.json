@@ -105,7 +105,8 @@
     "brace-expansion": "5.0.9",
     "minimatch": "10.2.3",
     "postcss": "8.5.25",
-    "protobufjs": "8.6.6"
+    "protobufjs": "8.6.6",
+    "undici": "8.9.0"
   },
   "packageManager": "nub@0.2.10",
   "devEngines": {

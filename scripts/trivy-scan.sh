@@ -10,15 +10,19 @@ mkdir -p "$CACHE_DIR"
 
 trivy_args=(
   fs
+  --quiet
   --scanners "${TRIVY_SCANNERS:-vuln,secret,misconfig}"
   --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:lock.yaml}"
   --skip-dirs node_modules
   --skip-dirs .git
   --severity "${TRIVY_SEVERITY:-HIGH,CRITICAL}"
   --include-dev-deps
+  --ignore-unfixed
   --ignorefile .trivyignore.yaml
   --exit-code "${TRIVY_EXIT_CODE:-1}"
   --skip-version-check
+  --format template
+  --template @scripts/trivy-actionable.tpl
 )
 
 run_local() {
