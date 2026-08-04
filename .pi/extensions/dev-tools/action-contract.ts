@@ -1,5 +1,6 @@
 import type { TSchema } from "typebox";
 import { Type } from "typebox";
+import type { ToolCapability } from "../_shared/agent-tools";
 
 export const DevToolsAction = {
   Diagnostics: "diagnostics",
@@ -7,6 +8,7 @@ export const DevToolsAction = {
   Definition: "definition",
   Implementation: "implementation",
   References: "references",
+  Rename: "rename",
   IncomingCalls: "incoming-calls",
   OutgoingCalls: "outgoing-calls",
   Symbols: "symbols",
@@ -26,9 +28,17 @@ export interface DevToolsActionContract {
   readonly requiresPath: boolean;
   readonly needsPosition: boolean;
   readonly requiresPathOrQuery: boolean;
+  readonly requiresNewName: boolean;
+  readonly capability: ToolCapability;
 }
 
+const READ_ACTION_CONTRACT = {
+  requiresNewName: false,
+  capability: "read",
+} as const;
+
 const POSITION_ACTION_CONTRACT = {
+  ...READ_ACTION_CONTRACT,
   pathMode: DevToolsPathMode.Single,
   requiresPath: true,
   needsPosition: true,
@@ -36,29 +46,41 @@ const POSITION_ACTION_CONTRACT = {
 } as const;
 
 export const DEV_TOOLS_ACTION_CONTRACTS = {
-  [DevToolsAction.Diagnostics]: { pathMode: DevToolsPathMode.Many, requiresPath: true, needsPosition: false, requiresPathOrQuery: false },
+  [DevToolsAction.Diagnostics]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.Many, requiresPath: true, needsPosition: false, requiresPathOrQuery: false },
   [DevToolsAction.Hover]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.Definition]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.Implementation]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.References]: POSITION_ACTION_CONTRACT,
+  [DevToolsAction.Rename]: {
+    ...POSITION_ACTION_CONTRACT,
+    requiresNewName: true,
+    capability: "write",
+  },
   [DevToolsAction.IncomingCalls]: POSITION_ACTION_CONTRACT,
   [DevToolsAction.OutgoingCalls]: POSITION_ACTION_CONTRACT,
-  [DevToolsAction.Symbols]: { pathMode: DevToolsPathMode.Single, requiresPath: false, needsPosition: false, requiresPathOrQuery: true },
-  [DevToolsAction.Status]: { pathMode: DevToolsPathMode.None, requiresPath: false, needsPosition: false, requiresPathOrQuery: false },
+  [DevToolsAction.Symbols]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.Single, requiresPath: false, needsPosition: false, requiresPathOrQuery: true },
+  [DevToolsAction.Status]: { ...READ_ACTION_CONTRACT, pathMode: DevToolsPathMode.None, requiresPath: false, needsPosition: false, requiresPathOrQuery: false },
 } as const satisfies Record<DevToolsAction, DevToolsActionContract>;
 
 export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
+export const DEV_TOOLS_READ_ACTIONS = DEV_TOOLS_ACTIONS.filter(
+  (action) => DEV_TOOLS_ACTION_CONTRACTS[action].capability === "read",
+);
+export const DEV_TOOLS_WRITE_ACTIONS = DEV_TOOLS_ACTIONS.filter(
+  (action) => DEV_TOOLS_ACTION_CONTRACTS[action].capability === "write",
+);
 
 export const DEV_TOOLS_TOOL_DESCRIPTIONS = {
   action: "Action to perform",
   path:
-    "Absolute path to the file. Required for diagnostics, hover, definition, references, and document symbols. " +
+    "Absolute path to the file. Required for diagnostics, hover, definition, implementation, references, rename, call hierarchy, and document symbols. " +
     "For diagnostics, pass an array to check all files in one call.",
   line:
-    "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
+    "Line number in the file, 1-indexed. Required for hover, definition, implementation, references, rename, and call hierarchy.",
   character:
-    "Column number on the line, 1-indexed. Required for hover, definition, implementation, references, and call hierarchy.",
+    "Column number on the line, 1-indexed. Required for hover, definition, implementation, references, rename, and call hierarchy.",
   query: "Search query for workspace symbols (action=symbols without path).",
+  newName: "New symbol name. Required for rename.",
 } as const;
 
 export function getActionContract(action: DevToolsAction): DevToolsActionContract {
@@ -71,16 +93,20 @@ export function createDevToolsParameterSchema<const TAction extends TSchema>(act
     path: Type.Optional(Type.Union([Type.String(), Type.Array(Type.String())], {
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.path,
     })),
-    line: Type.Optional(Type.Number({
+    line: Type.Optional(Type.Integer({
       minimum: 1,
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.line,
     })),
-    character: Type.Optional(Type.Number({
+    character: Type.Optional(Type.Integer({
       minimum: 1,
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.character,
     })),
     query: Type.Optional(Type.String({
       description: DEV_TOOLS_TOOL_DESCRIPTIONS.query,
+    })),
+    newName: Type.Optional(Type.String({
+      minLength: 1,
+      description: DEV_TOOLS_TOOL_DESCRIPTIONS.newName,
     })),
   });
 }

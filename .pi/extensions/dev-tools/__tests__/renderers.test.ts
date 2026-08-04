@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
-import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, SymbolsResult, StatusResult } from "../protocol";
+import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, RenameResult, SymbolsResult, StatusResult } from "../protocol";
 import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
 
 // ─── Mock theme ──────────────────────────────────────────────────────────────
@@ -34,6 +34,22 @@ describeIfEnabled("dev-tools", "Renderers", () => {
     it("shows query for workspace symbols", () => {
       const t = text(renderDevToolsCall({ action: "symbols", query: "User" }, mockTheme));
       expect(t).toContain('"User"');
+    });
+
+    it("shows the rename target", () => {
+      const t = text(
+        renderDevToolsCall(
+          {
+            action: "rename",
+            path: "/project/src/foo.ts",
+            line: 5,
+            character: 10,
+            newName: "updatedName",
+          },
+          mockTheme,
+        ),
+      );
+      expect(t).toContain("→ updatedName");
     });
   });
 
@@ -154,6 +170,25 @@ describeIfEnabled("dev-tools", "Renderers", () => {
       };
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("5 reference(s)");
+    });
+
+    it("renders rename with edit and file counts", () => {
+      const r: RenameResult = {
+        action: "rename",
+        path: "/a.ts",
+        line: 1,
+        character: 1,
+        newName: "updatedName",
+        totalEdits: 3,
+        files: [
+          { relativePath: "a.ts", absolutePath: "/a.ts", editCount: 1 },
+          { relativePath: "b.ts", absolutePath: "/b.ts", editCount: 2 },
+        ],
+      };
+      const t = text(
+        renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme),
+      );
+      expect(t).toContain("3 edits in 2 files");
     });
 
     it("renders symbols with count and filename", () => {

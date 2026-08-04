@@ -1,6 +1,7 @@
 /** Keep LSP handlers separate from the socket lifecycle so tests can call the protocol behavior directly. */
 
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import {
   uriToPath, toZeroBased, relativePath, symbolKindLabel,
 } from "./utils";
@@ -11,10 +12,11 @@ import type {
   DiagnosticsResult, HoverResult,
   DefinitionLocation, DefinitionResult, ImplementationResult,
   CallHierarchyItem, IncomingCallsResult, OutgoingCallsResult,
-  ReferenceItem, ReferencesResult,
+  ReferenceItem, ReferencesResult, RenameResult,
   SymbolItem, SymbolsResult, StatusResult,
 } from "./protocol";
 import type { LspBackend } from "./backend";
+import { applyWorkspaceEdit } from "./workspace-edit";
 
 export interface HandlerDeps {
   getBackend: (filePath: string) => LspBackend;
@@ -35,6 +37,15 @@ interface RequestContext {
 async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: string): Promise<RequestContext> {
   if (!req.path || req.line == null || req.character == null) {
     throw new Error(`path, line, and character required for ${action}`);
+  }
+  if (!isAbsolute(req.path)) throw new Error(`absolute path required for ${action}`);
+  if (
+    !Number.isInteger(req.line) ||
+    req.line < 1 ||
+    !Number.isInteger(req.character) ||
+    req.character < 1
+  ) {
+    throw new Error(`positive integer line and character values required for ${action}`);
   }
   const backend = deps.getBackend(req.path);
   const uri = await backend.ensureFile(req.path);
@@ -334,6 +345,62 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
     action: "references", path: req.path, line: req.line, character: req.character,
     total: all.length, items, truncated: all.length > MAX,
   } as ReferencesResult);
+}
+
+export async function handleRename(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+  if (!req.newName?.trim()) return errorResponse(req.id, "newName required for rename");
+  let ctx: RequestContext;
+  try {
+    ctx = await prepareRequest(req, deps, "rename");
+  } catch (e) {
+    return errorResponse(req.id, (e as Error).message);
+  }
+
+  const lspRes = await ctx.backend.lspRequest("textDocument/rename", {
+    textDocument: { uri: ctx.uri },
+    position: ctx.pos,
+    newName: req.newName,
+  });
+  if (!lspRes?.result) return errorResponse(req.id, "No rename edits returned at this position");
+
+  try {
+    const allowedRoots = [...new Set([ctx.projectRoot, ...ctx.backend.projectRoots])];
+    const authorizedBackends = new Map<string, LspBackend>();
+    const applied = await applyWorkspaceEdit(lspRes.result, {
+      allowedRoots,
+      authorizeTarget: (requestedPath, realPath) => {
+        const requestedBackend = deps.getBackend(requestedPath);
+        const realBackend = deps.getBackend(realPath);
+        if (requestedBackend !== realBackend) {
+          throw new Error(`${requestedPath} resolves to a different backend owner.`);
+        }
+        authorizedBackends.set(requestedPath, requestedBackend);
+        return {
+          getDocumentSnapshot: (absolutePath) =>
+            requestedBackend.getDocumentSnapshot(absolutePath),
+        };
+      },
+    });
+    for (const file of applied.files) deps.fileCache.invalidate(file.absolutePath);
+    await Promise.all(
+      applied.files.map((file) => authorizedBackends.get(file.absolutePath)!.ensureFile(file.absolutePath)),
+    );
+    return okResponse(req.id, {
+      action: "rename",
+      path: req.path,
+      line: req.line,
+      character: req.character,
+      newName: req.newName,
+      totalEdits: applied.totalEdits,
+      files: applied.files.map((file) => ({
+        relativePath: relativePath(ctx.projectRoot, file.absolutePath),
+        absolutePath: file.absolutePath,
+        editCount: file.editCount,
+      })),
+    } as RenameResult);
+  } catch (e) {
+    return errorResponse(req.id, e instanceof Error ? e.message : String(e));
+  }
 }
 
 export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {

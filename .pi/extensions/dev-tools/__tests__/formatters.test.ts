@@ -9,6 +9,7 @@ import {
   formatDefinition,
   formatImplementation,
   formatReferences,
+  formatRename,
   formatIncomingCalls,
   formatOutgoingCalls,
   formatSymbols,
@@ -16,7 +17,7 @@ import {
 } from "../formatters";
 import type {
   DiagnosticsResult, HoverResult, DefinitionResult, ImplementationResult,
-  ReferencesResult, IncomingCallsResult, OutgoingCallsResult,
+  ReferencesResult, RenameResult, IncomingCallsResult, OutgoingCallsResult,
   SymbolsResult, StatusResult,
 } from "../protocol";
 
@@ -317,6 +318,32 @@ describeIfEnabled("dev-tools", "Formatters", () => {
       };
       expect(formatReferences(r)).toContain("1 reference");
       expect(formatReferences(r)).not.toContain("1 references");
+    });
+  });
+
+  // ─── formatRename ──────────────────────────────────────────────────────────
+
+  describe("formatRename", () => {
+    it("reports total and per-file edit counts", () => {
+      const result: RenameResult = {
+        action: "rename",
+        path: "/repo/src/a.ts",
+        line: 1,
+        character: 1,
+        newName: "accountName",
+        totalEdits: 3,
+        files: [
+          { relativePath: "src/a.ts", absolutePath: "/repo/src/a.ts", editCount: 1 },
+          { relativePath: "src/b.ts", absolutePath: "/repo/src/b.ts", editCount: 2 },
+        ],
+      };
+
+      expect(formatRename(result)).toBe(
+        "renamed to accountName: 3 edits across 2 files\n" +
+          "src/a.ts: 1 edit\n" +
+          "src/b.ts: 2 edits",
+      );
+      expect(formatResult(result)).toBe(formatRename(result));
     });
   });
 

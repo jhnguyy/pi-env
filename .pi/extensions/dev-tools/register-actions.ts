@@ -12,12 +12,12 @@
 import { registerAction } from "./action-registry";
 import {
   handleDiagnostics, handleHover, handleDefinition, handleImplementation,
-  handleReferences, handleIncomingCalls, handleOutgoingCalls,
+  handleReferences, handleRename, handleIncomingCalls, handleOutgoingCalls,
   handleSymbols, handleStatus,
 } from "./handlers";
 import {
   formatDiagnostics, formatHover, formatDefinition, formatImplementation,
-  formatReferences, formatIncomingCalls, formatOutgoingCalls,
+  formatReferences, formatRename, formatIncomingCalls, formatOutgoingCalls,
   formatSymbols, formatStatus,
 } from "./formatters";
 import { keyText } from "@earendil-works/pi-coding-agent";
@@ -25,7 +25,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { DevToolsAction } from "./action-contract";
 import type { RenderTheme } from "./renderers";
 import type {
-  DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, SymbolsResult, StatusResult,
+  DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, RenameResult, SymbolsResult, StatusResult,
 } from "./protocol";
 
 // ─── Shared renderer helpers ──────────────────────────────────────────────────
@@ -130,6 +130,19 @@ registerAction(DevToolsAction.References, {
   renderer: (r, _opts, theme) => new Text(theme.fg("success", `✓ ${r.total} reference(s)`), 0, 0),
 });
 
+registerAction(DevToolsAction.Rename, {
+  handler: handleRename,
+  formatter: formatRename,
+  renderer: (r: RenameResult, _opts, theme) =>
+    new Text(
+      theme.fg(
+        "success",
+        `✓ ${r.totalEdits} edit${r.totalEdits !== 1 ? "s" : ""} in ${r.files.length} file${r.files.length !== 1 ? "s" : ""}`,
+      ),
+      0,
+      0,
+    ),
+});
 registerAction(DevToolsAction.IncomingCalls, {
   handler: handleIncomingCalls,
   formatter: formatIncomingCalls,

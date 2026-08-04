@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { Result } from "effect";
 import type { DaemonRequest } from "./protocol";
 import { DevToolsAction, DevToolsPathMode, getActionContract } from "./action-contract";
@@ -9,6 +10,7 @@ export interface DevToolsParams {
   line?: number;
   character?: number;
   query?: string;
+  newName?: string;
 }
 
 type ClientRequest = Omit<DaemonRequest, "id">;
@@ -22,6 +24,10 @@ function requestBuildError(message: string): RequestBuildError {
   return { _tag: "RequestBuildError", message };
 }
 
+function isPositiveInteger(value: number | undefined): value is number {
+  return value !== undefined && Number.isInteger(value) && value > 0;
+}
+
 function normalizePathsForAction(params: DevToolsParams): Result.Result<string[], RequestBuildError> {
   const rawPath = params.path;
   const paths = rawPath === undefined ? [] : Array.isArray(rawPath) ? rawPath : [rawPath];
@@ -33,11 +39,25 @@ function normalizePathsForAction(params: DevToolsParams): Result.Result<string[]
   if (contract.requiresPath && paths.length === 0) {
     return Result.fail(requestBuildError(`${params.action} requires a path.`));
   }
+  if (paths.some((path) => !isAbsolute(path))) {
+    return Result.fail(requestBuildError(`${params.action} requires absolute paths.`));
+  }
   if (contract.requiresPathOrQuery && paths.length === 0 && !params.query?.trim()) {
     return Result.fail(requestBuildError(`${params.action} requires a path or query.`));
   }
   if (contract.needsPosition && (params.line === undefined || params.character === undefined)) {
     return Result.fail(requestBuildError(`${params.action} requires line and character values.`));
+  }
+  if (
+    contract.needsPosition &&
+    (!isPositiveInteger(params.line) || !isPositiveInteger(params.character))
+  ) {
+    return Result.fail(
+      requestBuildError(`${params.action} requires positive integer line and character values.`),
+    );
+  }
+  if (contract.requiresNewName && !params.newName?.trim()) {
+    return Result.fail(requestBuildError(`${params.action} requires a non-empty newName.`));
   }
 
   return Result.succeed(contract.pathMode === DevToolsPathMode.None ? [] : paths);
@@ -63,6 +83,14 @@ export function buildClientRequestResult(params: DevToolsParams): Result.Result<
     case DevToolsAction.IncomingCalls:
     case DevToolsAction.OutgoingCalls:
       return Result.succeed({ action: params.action, path: paths[0], line: params.line, character: params.character });
+    case DevToolsAction.Rename:
+      return Result.succeed({
+        action: params.action,
+        path: paths[0],
+        line: params.line,
+        character: params.character,
+        newName: params.newName,
+      });
   }
 }
 
