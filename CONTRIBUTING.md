@@ -61,7 +61,7 @@ Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test cla
 
 Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request. Reviewers should verify that the chosen tests match the risk and that source-owned scripts/config remain the authority.
 
-Canonical verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Safe verification lives in [`scripts/safe-verification-plan.mjs`](scripts/safe-verification-plan.mjs).
+Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs).
 
 ## Worktree isolation
 

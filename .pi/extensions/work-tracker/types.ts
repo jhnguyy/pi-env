@@ -1,20 +1,14 @@
 export interface WorkTrackerConfig {
-  /** Repo paths to guard against direct pushes to protected branches */
+  /** Repositories included in worktree, dirty-state, and handoff cleanup checks. */
   guardedRepos: string[];
-  /** Branch names that cannot be pushed to directly */
+  /** Base branches whose merged topic branches can trigger handoff cleanup. */
   protectedBranches: string[];
-}
-
-export interface BranchGuardResult {
-  shouldBlock: boolean;
-  reason?: string;
-  targetBranch?: string;
 }
 
 export interface TodoItem {
   id: number;
   text: string;
   done: boolean;
-  addedAt: string;      // ISO timestamp
+  addedAt: string;
   completedAt?: string;
 }

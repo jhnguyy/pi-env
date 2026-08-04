@@ -6,8 +6,42 @@ import {
 } from "../managed-settings-core.mjs";
 
 describe("managed settings core", () => {
-  it("parses comments and trailing commas", () => {
-    expect(parseJsonRelaxedText('{ // keep\n "theme": "x", /* drop */ }')).toEqual({ theme: "x" });
+  it.each([
+    ["empty input", "  \n", {}],
+    ["strict JSON", '{"theme":"x","enabled":true}', { theme: "x", enabled: true }],
+    [
+      "comments and an object trailing comma",
+      '{ // keep\n "theme": "x", /* drop */ }',
+      { theme: "x" },
+    ],
+    ["an array trailing comma", '{"extensions":["a",]}', { extensions: ["a"] }],
+    [
+      "comment markers inside strings",
+      '{"note":"// not a comment /* still text */"}',
+      { note: "// not a comment /* still text */" },
+    ],
+  ])("parses %s", (_name, input, expected) => {
+    expect(parseJsonRelaxedText(input)).toEqual(expected);
+  });
+
+  it("preserves __proto__ as an own JSON data property", () => {
+    const result = parseJsonRelaxedText('{"__proto__":{"polluted":true},"ok":1}');
+
+    expect(Object.hasOwn(result, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect(result.polluted).toBeUndefined();
+    expect(result.ok).toBe(1);
+  });
+
+  it.each([
+    "// comment only",
+    '{"theme":}',
+    '{"a":[1,,2]}',
+    '{"a":1,,}',
+    '{"a":"unterminated}',
+    '{"a": /* unterminated comment }',
+  ])("rejects malformed input: %s", (input) => {
+    expect(() => parseJsonRelaxedText(input)).toThrow(SyntaxError);
   });
 
   it("merges managed settings without comment keys through the aggregate transform", () => {
