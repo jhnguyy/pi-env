@@ -9,6 +9,8 @@ The workflow is intentionally small:
 
 The durable policy is to avoid running Trivy on pull request branches, avoid third-party scanner actions, pin executable container references by digest, and keep checkout separate from scanner action lifecycle hooks. The workflow checks out into a writable temp path inside the job container instead of relying on the default GitHub workspace path.
 
+The policy scan blocks fixable HIGH/CRITICAL vulnerabilities and HIGH/CRITICAL secret or misconfiguration findings. The job log shows at most 50 one-line findings. The workflow does not print raw Trivy JSON reports.
+
 Local testing:
 
 ```bash
