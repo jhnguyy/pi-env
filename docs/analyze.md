@@ -15,9 +15,8 @@ nub run analyze -- --checks duplicates .
 `check:quality` is intentionally absent from normal and safe verification plans until strict containment exists. Use source-owned verification scripts instead:
 
 - [`package.json#scripts`](../package.json)
-- [`scripts/verification-plan.mjs`](../scripts/verification-plan.mjs)
-- [`scripts/safe-verification-plan.mjs`](../scripts/safe-verification-plan.mjs)
 - [`scripts/verification-phases.mjs`](../scripts/verification-phases.mjs)
+- [`scripts/verification-runner.mjs`](../scripts/verification-runner.mjs)
 
 ## Containment rationale
 
@@ -42,7 +41,7 @@ The supervisor writes a bounded NDJSON journal under `$XDG_STATE_HOME/pi-env/ana
 
 - CLI entrypoint: [`scripts/analyze.ts`](../scripts/analyze.ts)
 - Public boundary: [`src/analyze/public.ts`](../src/analyze/public.ts)
-- Policy and containment decisions: [`src/analyze/policy.ts`](../src/analyze/policy.ts), [`src/analyze/containment.ts`](../src/analyze/containment.ts)
+- Policy and containment decisions: [`src/analyze/policy.ts`](../src/analyze/policy.ts)
 - Supervisor and protocol: [`src/analyze/supervisor.ts`](../src/analyze/supervisor.ts), [`src/analyze/protocol.ts`](../src/analyze/protocol.ts)
 - Diagnostics, journal, telemetry: [`src/analyze/diagnostics.ts`](../src/analyze/diagnostics.ts), [`src/analyze/journal.ts`](../src/analyze/journal.ts), [`src/analyze/otel.ts`](../src/analyze/otel.ts)
 - Analyze extension: [`.pi/extensions/analyze`](../.pi/extensions/analyze)

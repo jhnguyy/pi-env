@@ -23,9 +23,19 @@ describe("verification phase registry", () => {
     ).toBe(true);
   });
 
-  it("reuses shared phase objects across standard and safe portfolios", () => {
-    const sharedIds = ["typecheck", "pattern-check", "build"];
-    for (const id of sharedIds) {
+  it("keeps the safe portfolio sequential and reuses shared phases", () => {
+    expect(
+      SAFE_VERIFICATION_PHASES.map((phase) => [phase.id, phase.command, ...phase.args]),
+    ).toEqual([
+      ["format-check", "nub", "run", "format:check"],
+      ["typecheck", "nub", "run", "typecheck"],
+      ["type-aware-lint", "nub", "run", "lint:type"],
+      ["pattern-check", "nub", "run", "check:patterns"],
+      ["unit-tests", "nub", "run", "test:safe"],
+      ["build", "nub", "run", "build"],
+    ]);
+
+    for (const id of ["typecheck", "pattern-check", "build"]) {
       expect(SAFE_VERIFICATION_PHASES.find((phase) => phase.id === id)).toBe(
         STANDARD_VERIFICATION_PHASES.find((phase) => phase.id === id),
       );

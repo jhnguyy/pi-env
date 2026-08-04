@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 import { withHeavyweightLock } from "./heavyweight-lock.mjs";
-import {
-  SAFE_VERIFICATION_PHASES,
-  formatSafePhase,
-  runSafeVerificationPlan,
-} from "./safe-verification-plan.mjs";
+import { SAFE_VERIFICATION_PHASES } from "./verification-phases.mjs";
+import { listPlan, runPlan } from "./verification-runner.mjs";
 
 if (process.argv.includes("--list")) {
-  console.log(SAFE_VERIFICATION_PHASES.map(formatSafePhase).join("\n"));
+  console.log(listPlan(SAFE_VERIFICATION_PHASES).join("\n"));
   process.exit(0);
 }
 
@@ -17,7 +14,7 @@ const exitCode = await withHeavyweightLock(
     const inheritedToken = process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
     process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = lease.token;
     try {
-      return runSafeVerificationPlan();
+      return runPlan(SAFE_VERIFICATION_PHASES, { name: "verify:safe" });
     } finally {
       if (inheritedToken === undefined) delete process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
       else process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = inheritedToken;

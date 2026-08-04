@@ -1,12 +1,25 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "scripts/*.mjs",
-    "scripts/__tests__/lock-holder.mjs",
     "scripts/analyze.ts",
-    "setup/*.mjs",
+    "scripts/analyze-bundle-worker.ts",
+    "scripts/build-extensions.mjs",
+    "scripts/check-node-version.mjs",
+    "scripts/check-patterns.js",
+    "scripts/clean-extension-artifacts.mjs",
+    "scripts/trivy-image-summary.mjs",
+    "scripts/verify-install.mjs",
+    "scripts/verify.mjs",
+    "scripts/verify-phase.mjs",
+    "scripts/verify-safe.mjs",
+    "scripts/__tests__/lock-holder.mjs",
+    "setup/apply-managed-settings.mjs",
+    "setup/configure.mjs",
+    "setup/runtime.mjs",
     "vitest.config.ts",
-    ".pi/extensions/*/index.ts"
+    ".pi/extensions/*/index.ts",
+    ".pi/extensions/dev-tools/daemon.ts",
+    ".pi/extensions/ptc/subprocess-preamble.ts"
   ],
   "project": [
     "scripts/**/*.mjs",
@@ -19,13 +32,11 @@
   ],
   "ignore": [
     ".pi/extensions/**/dist/**",
+    ".pi/extensions/analyze/cli-main.ts",
+    ".pi/extensions/analyze/worker-main.ts",
     ".pi/extensions/playwright-client/**"
   ],
-  "ignoreBinaries": [
-    "scripts/node-run.sh",
-    "scripts/tool-node-run.sh",
-    "which"
-  ],
+  "ignoreBinaries": ["scripts/node-run.sh", "scripts/tool-node-run.sh", "which"],
   "ignoreDependencies": [
     "@earendil-works/pi-agent-core",
     "@earendil-works/pi-ai",
