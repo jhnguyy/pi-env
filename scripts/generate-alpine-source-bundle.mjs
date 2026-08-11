@@ -24,12 +24,13 @@ import {
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = dirname(dirname(scriptPath));
 const defaultAportsRepository = "https://gitlab.alpinelinux.org/alpine/aports.git";
+const defaultDistfilesMirror = "https://distfiles.alpinelinux.org/distfiles/v3.24";
 const aportsSections = ["main", "community", "testing"];
 
-function run(command, args, { cwd, quiet = false, allowFailure = false } = {}) {
+function run(command, args, { cwd, quiet = false, allowFailure = false, env = {} } = {}) {
   const result = spawnSync(command, args, {
     cwd,
-    env: process.env,
+    env: { ...process.env, ...env },
     encoding: "utf8",
     stdio: quiet ? "pipe" : "inherit",
   });
@@ -39,6 +40,17 @@ function run(command, args, { cwd, quiet = false, allowFailure = false } = {}) {
     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status}${detail}`);
   }
   return result;
+}
+
+function runWithRetries(command, args, options, attempts = 3) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = run(command, args, { ...options, allowFailure: true });
+    if (result.status === 0) return;
+    if (attempt < attempts) {
+      console.error(`${command} failed. Retrying source fetch (${attempt + 1}/${attempts}).`);
+    }
+  }
+  throw new Error(`${command} ${args.join(" ")} failed after ${attempts} attempts`);
 }
 
 function safeName(value) {
@@ -91,6 +103,7 @@ export async function generateAlpineSourceBundle({
   policyPath = join(defaultRepoRoot, "compliance", "alpine-policy.json"),
   outputPath = join(defaultRepoRoot, "THIRD_PARTY_SOURCES", "alpine"),
   aportsRepository = defaultAportsRepository,
+  distfilesMirror = defaultDistfilesMirror,
 } = {}) {
   const packages = parseApkInstalled(apkDbPath);
   if (packages.length === 0) throw new Error(`No installed Alpine packages found in ${apkDbPath}`);
@@ -151,17 +164,21 @@ export async function generateAlpineSourceBundle({
       const sourcePackageOutput = join(workPath, `${unitName}-output`);
       mkdirSync(sourceDestination, { recursive: true });
       mkdirSync(sourcePackageOutput, { recursive: true });
-      run("abuild", [
-        "-F",
-        "-d",
-        "-C",
-        join(unitPath, recipePath),
-        "-P",
-        sourcePackageOutput,
-        "-s",
-        sourceDestination,
-        "srcpkg",
-      ]);
+      runWithRetries(
+        "abuild",
+        [
+          "-F",
+          "-d",
+          "-C",
+          join(unitPath, recipePath),
+          "-P",
+          sourcePackageOutput,
+          "-s",
+          sourceDestination,
+          "srcpkg",
+        ],
+        { env: { DISTFILES_MIRROR: distfilesMirror } },
+      );
 
       const generatedArchive = sourceArchive(sourcePackageOutput);
       const archiveName = `${unitName}.src.tar.gz`;
@@ -215,6 +232,7 @@ function parseArgs(args) {
     else if (arg === "--policy") options.policyPath = resolve(value());
     else if (arg === "--output") options.outputPath = resolve(value());
     else if (arg === "--aports-repository") options.aportsRepository = value();
+    else if (arg === "--distfiles-mirror") options.distfilesMirror = value();
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return options;
