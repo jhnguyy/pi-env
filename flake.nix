@@ -43,6 +43,14 @@
         paths = toolchainPackages pkgs;
         meta = {
           description = "Baseline command-line tools for setting up and developing pi-env";
+          license = with pkgs.lib.licenses; [
+            asl20
+            gpl2Only
+            gpl3Plus
+            isc
+            mit
+            unlicense
+          ];
           platforms = systems;
         };
       };

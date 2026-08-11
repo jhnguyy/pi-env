@@ -2,6 +2,7 @@
   "name": "@pi-env/jit-catch",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "pi": {
     "extensions": [
       "./dist/index.js"

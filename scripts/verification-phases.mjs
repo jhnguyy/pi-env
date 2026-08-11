@@ -11,6 +11,7 @@ export const VerificationCapability = Object.freeze({
   TypeSafety: "type-safety",
   ExtensionIntegrity: "extension-integrity",
   InstallIntegrity: "install-integrity",
+  LicenseCompliance: "license-compliance",
   RuntimeBehavior: "runtime-behavior",
 });
 
@@ -41,6 +42,14 @@ export const VerificationPhase = Object.freeze({
     ["run", "check:patterns"],
     VerificationClass.Static,
     VerificationCapability.SourcePolicy,
+  ),
+  LicenseCompliance: phase(
+    "license-compliance",
+    "license compliance",
+    "nub",
+    ["run", "licenses:check"],
+    VerificationClass.Packaging,
+    VerificationCapability.LicenseCompliance,
   ),
   SetupTests: phase(
     "setup-tests",
@@ -104,6 +113,7 @@ export const STANDARD_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.SetupTests,
   VerificationPhase.Typecheck,
   VerificationPhase.PatternCheck,
+  VerificationPhase.LicenseCompliance,
   VerificationPhase.Build,
   VerificationPhase.InstallReadiness,
   VerificationPhase.UnitTests,
@@ -114,6 +124,7 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.Typecheck,
   VerificationPhase.TypeAwareLint,
   VerificationPhase.PatternCheck,
+  VerificationPhase.LicenseCompliance,
   VerificationPhase.SafeUnitTests,
   VerificationPhase.Build,
 ]);
