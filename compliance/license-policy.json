@@ -77,7 +77,8 @@
     {
       "repository": "https://github.com/parcel-bundler/lightningcss",
       "versions": ["1.32.0"],
-      "reference": "https://github.com/parcel-bundler/lightningcss/tree/v{version}"
+      "revision": "7f8a861bdee476fe90c89a8badeb3fd33a99c51a",
+      "reference": "https://github.com/parcel-bundler/lightningcss/tree/{revision}"
     }
   ]
 }

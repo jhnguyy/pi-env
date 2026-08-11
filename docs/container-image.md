@@ -14,8 +14,9 @@ nub run verify:install
 
 The workflow does not sign or deploy.
 
-The image stores generated dependency notices, license texts, and source references in `/opt/pi-env/THIRD_PARTY_LICENSES`.
-See [licensing](licensing.md) for the artifact contract.
+The image stores generated dependency notices and license texts in `/opt/pi-env/THIRD_PARTY_LICENSES`.
+It stores Alpine corresponding-source archives in `/opt/pi-env/THIRD_PARTY_SOURCES`.
+See [licensing](licensing.md) for the artifact contract and package review policy.
 
 The artifact includes Git for HTTPS workflows but not an SSH client. Downstream agent images that require SSH transport or SSH signing must add a client and own its security update policy.
 

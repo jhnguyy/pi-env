@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   mkdtempSync,
   mkdirSync,
@@ -12,7 +13,11 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   generateLicenseBundle,
+  loadAlpinePolicy,
   parseApkInstalled,
+  planAlpineSources,
+  validateAlpinePackages,
+  validateAlpineSourceManifest,
 } from "../generate-license-bundle.mjs";
 
 const temporaryDirectories = [];
@@ -301,17 +306,68 @@ describe("license bundle generation", () => {
     const policyPath = writePolicy(repoRoot, [], [{
       repository: "https://example.test/source-required",
       versions: ["1.0.0"],
-      reference: "https://example.test/source-required/tree/v{version}",
+      revision: "0123456789abcdef0123456789abcdef01234567",
+      reference: "https://example.test/source-required/tree/{revision}",
     }]);
 
     generate(repoRoot, policyPath);
 
     expect(readFileSync(join(repoRoot, "licenses", "SOURCE_CODE.md"), "utf8"))
-      .toContain("https://example.test/source-required/tree/v1.0.0");
+      .toContain(
+        "https://example.test/source-required/tree/0123456789abcdef0123456789abcdef01234567",
+      );
+  });
+
+  it("rejects a mutable source reference", () => {
+    const repoRoot = temporaryDirectory();
+    addPackage(repoRoot, {
+      name: "source-required",
+      license: "MPL-2.0",
+      repository: "https://example.test/source-required",
+    });
+    const policyPath = writePolicy(repoRoot, [], [{
+      repository: "https://example.test/source-required",
+      versions: ["1.0.0"],
+      reference: "https://example.test/source-required/tree/v{version}",
+    }]);
+
+    expect(() => generate(repoRoot, policyPath)).toThrow(
+      "source-required@1.0.0: exact source reference is required for MPL-2.0",
+    );
   });
 });
 
 describe("Alpine package metadata", () => {
+  const buildCommit = "0123456789abcdef0123456789abcdef01234567";
+
+  function apkPackage({
+    name = "busybox",
+    version = "1.37.0-r31",
+    license = "GPL-2.0-only",
+    origin = "busybox",
+  } = {}) {
+    return {
+      name,
+      version,
+      license,
+      origin,
+      buildCommit,
+      buildRecipe: `https://gitlab.alpinelinux.org/alpine/aports/-/commit/${buildCommit}`,
+      homepage: "https://example.test",
+    };
+  }
+
+  function alpinePolicy(packages = [{
+    name: "busybox",
+    origin: "busybox",
+    licenseExpressions: ["GPL-2.0-only"],
+  }]) {
+    return {
+      sourceRequiredLicenseIds: ["GPL-2.0-only", "MPL-2.0"],
+      packages,
+    };
+  }
+
   it("preserves exact license and source fields from the installed package database", () => {
     const directory = temporaryDirectory();
     const database = join(directory, "installed");
@@ -334,5 +390,102 @@ describe("Alpine package metadata", () => {
       buildRecipe: "https://gitlab.alpinelinux.org/alpine/aports/-/commit/c3ef5d10",
       homepage: "https://busybox.net/",
     }]);
+  });
+
+  it("does not permit policy to omit a copyleft source requirement", () => {
+    const directory = temporaryDirectory();
+    const policyPath = join(directory, "alpine-policy.json");
+    write(policyPath, `${JSON.stringify({
+      sourceRequiredLicenseIds: [],
+      packages: [{
+        name: "busybox",
+        origin: "busybox",
+        licenseExpressions: ["GPL-2.0-only"],
+      }],
+    })}\n`);
+
+    expect(() => loadAlpinePolicy(policyPath)).toThrow(
+      "Invalid Alpine license policy: GPL-2.0-only must require corresponding source",
+    );
+  });
+
+  it("permits Alpine version changes without changing reviewed package terms", () => {
+    const pkg = apkPackage({ version: "9.9.9-r9" });
+
+    expect(validateAlpinePackages([pkg], alpinePolicy())).toEqual([]);
+  });
+
+  it("rejects an unreviewed Alpine package set", () => {
+    const pkg = apkPackage({ name: "new-package" });
+
+    expect(validateAlpinePackages([pkg], alpinePolicy())).toEqual([
+      "new-package@1.37.0-r31: Alpine package is not approved",
+      "busybox: approved Alpine package is not installed",
+    ]);
+  });
+
+  it("rejects changed Alpine origins and license expressions", () => {
+    const pkg = apkPackage({ origin: "other-origin", license: "Proprietary" });
+
+    expect(validateAlpinePackages([pkg], alpinePolicy())).toEqual([
+      "busybox@1.37.0-r31: Alpine origin changed from busybox to other-origin",
+      "busybox@1.37.0-r31: Alpine license expression is not approved: Proprietary",
+    ]);
+  });
+
+  it("groups source-required subpackages by origin and build commit", () => {
+    const packages = [
+      apkPackage(),
+      apkPackage({ name: "busybox-data", license: "MIT" }),
+    ];
+    const policy = alpinePolicy([
+      { name: "busybox", origin: "busybox", licenseExpressions: ["GPL-2.0-only"] },
+      { name: "busybox-data", origin: "busybox", licenseExpressions: ["MIT"] },
+    ]);
+
+    expect(planAlpineSources(packages, policy)).toEqual([{
+      origin: "busybox",
+      buildCommit,
+      packages: [
+        { name: "busybox", version: "1.37.0-r31", license: "GPL-2.0-only" },
+        { name: "busybox-data", version: "1.37.0-r31", license: "MIT" },
+      ],
+    }]);
+  });
+
+  it("validates exact corresponding-source archive coverage", () => {
+    const directory = temporaryDirectory();
+    const archive = join(directory, "archives", "busybox.src.tar.gz");
+    write(archive, "complete source\n");
+    const sha256 = createHash("sha256").update("complete source\n").digest("hex");
+    const pkg = apkPackage();
+    const manifestPath = join(directory, "manifest.json");
+    write(manifestPath, `${JSON.stringify({
+      schemaVersion: 1,
+      sources: [{
+        origin: "busybox",
+        buildCommit,
+        recipePath: "main/busybox",
+        archive: "archives/busybox.src.tar.gz",
+        sha256,
+        packages: [{ name: pkg.name, version: pkg.version, license: pkg.license }],
+      }],
+    })}\n`);
+
+    expect(validateAlpineSourceManifest([pkg], alpinePolicy(), manifestPath).errors).toEqual([]);
+
+    write(archive, "changed source\n");
+    expect(validateAlpineSourceManifest([pkg], alpinePolicy(), manifestPath).errors).toEqual([
+      "busybox: Alpine corresponding-source archive checksum does not match",
+      `busybox@${buildCommit}: corresponding source is missing`,
+    ]);
+  });
+
+  it("rejects a missing source manifest for source-required packages", () => {
+    const pkg = apkPackage();
+
+    expect(validateAlpineSourceManifest([pkg], alpinePolicy()).errors).toEqual([
+      "Alpine corresponding-source manifest is missing",
+    ]);
   });
 });

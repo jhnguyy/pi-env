@@ -38,6 +38,16 @@ WORKDIR ${PI_ENV_HOME}
 COPY --chown=node:node . .
 RUN chown -R node:node ${PI_ENV_HOME}
 
+# Embed exact corresponding source for source-required Alpine packages.
+RUN cp /lib/apk/db/installed /tmp/pi-env-apk-installed \
+  && apk add --no-cache --virtual .pi-env-source-tools abuild \
+  && scripts/node-run.sh scripts/generate-alpine-source-bundle.mjs \
+    --apk-db /tmp/pi-env-apk-installed \
+    --output ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/alpine \
+  && apk del .pi-env-source-tools \
+  && rm -f /tmp/pi-env-apk-installed \
+  && rm -rf /var/cache/distfiles
+
 USER node
 
 # Local equivalent: nub install --frozen-lockfile
@@ -47,6 +57,7 @@ RUN nub install --frozen-lockfile
 RUN nub run licenses:generate \
   --package-root /usr/local/lib/node_modules \
   --apk-db /lib/apk/db/installed \
+  --alpine-source-manifest ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/alpine/manifest.json \
   --system-license node-LICENSE.txt=/usr/local/LICENSE
 
 # Local equivalent: nub run build

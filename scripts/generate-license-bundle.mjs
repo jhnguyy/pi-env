@@ -12,8 +12,9 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -22,6 +23,8 @@ const LEGAL_FILE_PATTERN = /^(?:(?:licen[cs]e|copying|notice)(?:$|[._ -])|third[
 const LICENSE_FILE_PATTERN = /^(?:licen[cs]e|copying)(?:$|[._ -])/i;
 const NOTICE_FILE_PATTERN = /^(?:notice(?:$|[._ -])|third[-_ ]?party)/i;
 const SPDX_OPERATOR = new Set(["AND", "OR", "WITH"]);
+const SOURCE_REQUIRED_LICENSE_PREFIXES = ["AGPL-", "GPL-", "LGPL-"];
+const ALPINE_APORTS_SECTIONS = ["main", "community", "testing"];
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -81,7 +84,7 @@ function licenseExpression(pkg) {
   return "";
 }
 
-function licenseIdentifiers(expression) {
+export function licenseIdentifiers(expression) {
   return expression
     .replaceAll(/[()]/g, " ")
     .split(/\s+/)
@@ -202,7 +205,7 @@ function loadPackages(packageRoots) {
   );
 }
 
-function loadPolicy(policyPath) {
+export function loadPolicy(policyPath) {
   const policy = readJson(policyPath);
   if (
     !Array.isArray(policy.allowedLicenseIds) ||
@@ -215,6 +218,109 @@ function loadPolicy(policyPath) {
     overrides: Array.isArray(policy.overrides) ? policy.overrides : [],
     sourceRepositories: Array.isArray(policy.sourceRepositories) ? policy.sourceRepositories : [],
   };
+}
+
+export function loadAlpinePolicy(policyPath) {
+  const policy = readJson(policyPath);
+  if (!Array.isArray(policy.packages) || !Array.isArray(policy.sourceRequiredLicenseIds)) {
+    throw new Error(`Invalid Alpine license policy: ${policyPath}`);
+  }
+  for (const entry of policy.packages) {
+    for (const expression of entry.licenseExpressions ?? []) {
+      for (const identifier of licenseIdentifiers(expression)) {
+        const sourceRequired =
+          identifier === "MPL-2.0" ||
+          SOURCE_REQUIRED_LICENSE_PREFIXES.some((prefix) => identifier.startsWith(prefix));
+        if (sourceRequired && !policy.sourceRequiredLicenseIds.includes(identifier)) {
+          throw new Error(
+            `Invalid Alpine license policy: ${identifier} must require corresponding source`,
+          );
+        }
+      }
+    }
+  }
+  return policy;
+}
+
+export function validateAlpinePackages(packages, policy) {
+  const errors = [];
+  const approved = new Map();
+  for (const entry of policy.packages) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.name !== "string" ||
+      typeof entry.origin !== "string" ||
+      !Array.isArray(entry.licenseExpressions) ||
+      entry.licenseExpressions.length === 0
+    ) {
+      errors.push("Alpine policy contains an invalid package entry");
+      continue;
+    }
+    if (approved.has(entry.name)) {
+      errors.push(`Alpine policy contains a duplicate package: ${entry.name}`);
+      continue;
+    }
+    approved.set(entry.name, entry);
+  }
+
+  const installedNames = new Set();
+  for (const pkg of packages) {
+    installedNames.add(pkg.name);
+    const entry = approved.get(pkg.name);
+    if (!entry) {
+      errors.push(`${pkg.name}@${pkg.version}: Alpine package is not approved`);
+      continue;
+    }
+    if (pkg.origin !== entry.origin) {
+      errors.push(
+        `${pkg.name}@${pkg.version}: Alpine origin changed from ${entry.origin} to ${pkg.origin}`,
+      );
+    }
+    if (!entry.licenseExpressions.includes(pkg.license)) {
+      errors.push(
+        `${pkg.name}@${pkg.version}: Alpine license expression is not approved: ${pkg.license}`,
+      );
+    }
+  }
+
+  for (const name of approved.keys()) {
+    if (!installedNames.has(name)) errors.push(`${name}: approved Alpine package is not installed`);
+  }
+  return errors;
+}
+
+export function alpinePackageRequiresSource(pkg, policy) {
+  return licenseIdentifiers(pkg.license).some((identifier) =>
+    policy.sourceRequiredLicenseIds.includes(identifier),
+  );
+}
+
+export function planAlpineSources(packages, policy) {
+  const grouped = new Map();
+  for (const pkg of packages) {
+    const key = `${pkg.origin}\n${pkg.buildCommit}`;
+    const group = grouped.get(key) ?? {
+      origin: pkg.origin,
+      buildCommit: pkg.buildCommit,
+      packages: [],
+    };
+    group.packages.push({
+      name: pkg.name,
+      version: pkg.version,
+      license: pkg.license,
+    });
+    grouped.set(key, group);
+  }
+
+  return [...grouped.values()]
+    .filter((group) => group.packages.some((pkg) => alpinePackageRequiresSource(pkg, policy)))
+    .map((group) => ({
+      ...group,
+      packages: group.packages.sort((left, right) => left.name.localeCompare(right.name)),
+    }))
+    .sort((left, right) =>
+      `${left.origin}@${left.buildCommit}`.localeCompare(`${right.origin}@${right.buildCommit}`),
+    );
 }
 
 function validateLicense(pkg, policy, errors) {
@@ -306,7 +412,9 @@ function matchingSourceRepository(pkg, policy) {
       Array.isArray(candidate.versions) &&
       candidate.versions.includes(pkg.version) &&
       typeof candidate.reference === "string" &&
-      candidate.reference.trim() !== "",
+      candidate.reference.includes("{revision}") &&
+      typeof candidate.revision === "string" &&
+      /^[0-9a-f]{40}$/i.test(candidate.revision),
   );
 }
 
@@ -322,7 +430,9 @@ function validateSourceRequirement(pkg, policy, errors) {
 function sourceCodeReference(pkg, policy) {
   const source = matchingSourceRepository(pkg, policy);
   if (!source) throw new Error(`${packageKey(pkg)}: exact source reference is missing`);
-  return source.reference.replaceAll("{version}", pkg.version);
+  return source.reference
+    .replaceAll("{version}", pkg.version)
+    .replaceAll("{revision}", source.revision);
 }
 
 function copyLegalFile(file, targetDirectory, targetName) {
@@ -429,7 +539,134 @@ export function parseApkInstalled(path) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function writeApkManifest(outputPath, apkPackages) {
+function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function safeManifestArchivePath(manifestPath, archive) {
+  if (typeof archive !== "string" || archive === "" || isAbsolute(archive)) return null;
+  const base = dirname(manifestPath);
+  const archivePath = resolve(base, archive);
+  const fromBase = relative(base, archivePath);
+  if (fromBase === ".." || fromBase.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+    return null;
+  return archivePath;
+}
+
+export function validateAlpineSourceManifest(packages, policy, manifestPath) {
+  const required = planAlpineSources(packages, policy);
+  if (required.length === 0) return { errors: [], sources: [] };
+  if (!manifestPath || !existsSync(manifestPath)) {
+    return { errors: ["Alpine corresponding-source manifest is missing"], sources: [] };
+  }
+
+  const manifest = readJson(manifestPath);
+  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.sources)) {
+    return { errors: [`Invalid Alpine source manifest: ${manifestPath}`], sources: [] };
+  }
+
+  const errors = [];
+  const sources = [];
+  const seen = new Set();
+  const requiredByKey = new Map(
+    required.map((group) => [`${group.origin}\n${group.buildCommit}`, group]),
+  );
+  if (manifest.sources.length !== required.length) {
+    errors.push(
+      `Alpine source manifest has ${manifest.sources.length} source units, expected ${required.length}`,
+    );
+  }
+  for (const source of manifest.sources) {
+    const key = `${source.origin}\n${source.buildCommit}`;
+    if (seen.has(key)) {
+      errors.push(`Alpine source manifest contains a duplicate source unit: ${source.origin}`);
+      continue;
+    }
+    seen.add(key);
+    const requiredGroup = requiredByKey.get(key);
+    if (!requiredGroup) {
+      errors.push(`${source.origin}@${source.buildCommit}: source unit is not expected`);
+      continue;
+    }
+    const validRecipePaths = ALPINE_APORTS_SECTIONS.map((section) => `${section}/${source.origin}`);
+    if (!validRecipePaths.includes(source.recipePath)) {
+      errors.push(`${source.origin}@${source.buildCommit}: aports recipe path is invalid`);
+      continue;
+    }
+    const archivePath = safeManifestArchivePath(manifestPath, source.archive);
+    if (!archivePath || !existsSync(archivePath)) {
+      errors.push(`${source.origin}: Alpine corresponding-source archive is missing`);
+      continue;
+    }
+    const actualSha256 = sha256File(archivePath);
+    if (source.sha256 !== actualSha256) {
+      errors.push(`${source.origin}: Alpine corresponding-source archive checksum does not match`);
+      continue;
+    }
+    sources.push(source);
+  }
+
+  for (const group of required) {
+    if (!/^[0-9a-f]{40}$/i.test(group.buildCommit)) {
+      errors.push(
+        `${group.origin}: exact Alpine build commit is required for corresponding source`,
+      );
+      continue;
+    }
+    const source = sources.find(
+      (candidate) =>
+        candidate.origin === group.origin && candidate.buildCommit === group.buildCommit,
+    );
+    if (!source) {
+      errors.push(`${group.origin}@${group.buildCommit}: corresponding source is missing`);
+      continue;
+    }
+    if (!Array.isArray(source.packages)) {
+      errors.push(`${group.origin}@${group.buildCommit}: source package list is missing`);
+      continue;
+    }
+    if (source.packages.length !== group.packages.length) {
+      errors.push(`${group.origin}@${group.buildCommit}: source package list does not match`);
+    }
+    for (const pkg of group.packages) {
+      const covered = source.packages.some(
+        (candidate) =>
+          candidate.name === pkg.name &&
+          candidate.version === pkg.version &&
+          candidate.license === pkg.license,
+      );
+      if (!covered) {
+        errors.push(`${pkg.name}@${pkg.version}: corresponding-source coverage is missing`);
+      }
+    }
+  }
+  return { errors, sources };
+}
+
+function renderAlpineSourceCode(sources) {
+  const lines = [
+    "# Alpine corresponding source",
+    "",
+    "The image contains complete corresponding-source archives for source-required Alpine packages.",
+    "Each archive comes from the exact Alpine build commit and contains the APKBUILD, local patches, and fetched upstream source files.",
+    "",
+  ];
+  for (const source of sources) {
+    lines.push(
+      `## ${source.origin}`,
+      "",
+      `- Build commit: ${source.buildCommit}`,
+      `- Aports path: ${source.recipePath}`,
+      `- Archive: /opt/pi-env/THIRD_PARTY_SOURCES/alpine/${source.archive}`,
+      `- SHA-256: ${source.sha256}`,
+      `- Packages: ${source.packages.map((pkg) => `${pkg.name}@${pkg.version}`).join(", ")}`,
+      "",
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function writeApkManifest(outputPath, apkPackages, alpineSources) {
   if (apkPackages.length === 0) return;
   writeJson(join(outputPath, "alpine-packages.json"), apkPackages);
   const lines = [
@@ -437,7 +674,7 @@ function writeApkManifest(outputPath, apkPackages) {
     "",
     "The image contains the following Alpine packages.",
     "The installed package database supplies each exact version, license expression, source origin, and build commit.",
-    "Use the Alpine build commit and upstream home page to obtain the corresponding source and build recipe.",
+    "Source-required packages are covered by archives in /opt/pi-env/THIRD_PARTY_SOURCES/alpine.",
     "",
     "| Package | Version | License | Origin | Build recipe | Upstream |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -450,6 +687,9 @@ function writeApkManifest(outputPath, apkPackages) {
     "",
   ];
   writeFileSync(join(outputPath, "ALPINE_PACKAGES.md"), `${lines.join("\n")}\n`);
+  if (alpineSources.length > 0) {
+    writeFileSync(join(outputPath, "ALPINE_SOURCE_CODE.md"), renderAlpineSourceCode(alpineSources));
+  }
 }
 
 function validateRepositoryLicense(repoRoot) {
@@ -484,17 +724,26 @@ export function generateLicenseBundle({
   packageRoots = [],
   outputPath = join(repoRoot, "THIRD_PARTY_LICENSES"),
   policyPath = join(repoRoot, "compliance", "license-policy.json"),
+  alpinePolicyPath = join(repoRoot, "compliance", "alpine-policy.json"),
   apkDbPath,
+  alpineSourceManifestPath,
   systemLicenses = [],
   validateRepository = false,
 } = {}) {
   const policy = loadPolicy(policyPath);
+  const apkPackages = apkDbPath ? parseApkInstalled(apkDbPath) : [];
+  const alpinePolicy =
+    apkPackages.length > 0 || existsSync(alpinePolicyPath)
+      ? loadAlpinePolicy(alpinePolicyPath)
+      : null;
   const discoveredRoots = [
     ...discoverNubPackages(nodeModulesPath),
     ...packageRoots.flatMap((path) => discoverStandardPackages(path)),
   ];
   const packages = loadPackages(discoveredRoots);
   const errors = validateRepository ? validateRepositoryLicense(repoRoot) : [];
+  if (apkPackages.length > 0 && alpinePolicy)
+    errors.push(...validateAlpinePackages(apkPackages, alpinePolicy));
   for (const pkg of packages) {
     validateLicense(pkg, policy, errors);
     validateSourceRequirement(pkg, policy, errors);
@@ -508,6 +757,12 @@ export function generateLicenseBundle({
       errors.push(`${packageKey(pkg)}: no license text or reviewed override is available`);
     else resolved.push({ pkg, source });
   }
+
+  const alpineSourceValidation =
+    apkPackages.length > 0 && alpinePolicy
+      ? validateAlpineSourceManifest(apkPackages, alpinePolicy, alpineSourceManifestPath)
+      : { errors: [], sources: [] };
+  errors.push(...alpineSourceValidation.errors);
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
@@ -550,8 +805,7 @@ export function generateLicenseBundle({
     });
   }
 
-  const apkPackages = apkDbPath ? parseApkInstalled(apkDbPath) : [];
-  writeApkManifest(outputPath, apkPackages);
+  writeApkManifest(outputPath, apkPackages, alpineSourceValidation.sources);
 
   if (systemLicenses.length > 0) {
     const systemPath = join(outputPath, "system");
@@ -565,6 +819,7 @@ export function generateLicenseBundle({
     schemaVersion: 1,
     javascriptPackages: records,
     alpinePackages: apkPackages,
+    alpineSources: alpineSourceValidation.sources,
     systemLicenses: systemLicenses.map((entry) => entry.name).sort(),
   };
   writeJson(join(outputPath, "manifest.json"), manifest);
@@ -596,7 +851,10 @@ function parseArgs(args) {
     else if (arg === "--package-root") options.packageRoots.push(resolve(value()));
     else if (arg === "--output") options.outputPath = resolve(value());
     else if (arg === "--policy") options.policyPath = resolve(value());
+    else if (arg === "--alpine-policy") options.alpinePolicyPath = resolve(value());
     else if (arg === "--apk-db") options.apkDbPath = resolve(value());
+    else if (arg === "--alpine-source-manifest")
+      options.alpineSourceManifestPath = resolve(value());
     else if (arg === "--system-license") {
       const specification = value();
       const separator = specification.indexOf("=");
@@ -609,6 +867,7 @@ function parseArgs(args) {
   }
   options.nodeModulesPath ??= join(options.repoRoot, "node_modules");
   options.policyPath ??= join(options.repoRoot, "compliance", "license-policy.json");
+  options.alpinePolicyPath ??= join(options.repoRoot, "compliance", "alpine-policy.json");
   options.outputPath ??= join(options.repoRoot, "THIRD_PARTY_LICENSES");
   return options;
 }

@@ -52,7 +52,15 @@ jobs:
           docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES.md
           docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/SOURCE_CODE.md
           docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/ALPINE_PACKAGES.md
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/ALPINE_SOURCE_CODE.md
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_SOURCES/alpine/manifest.json
+          docker run --rm pi-env:ci sh -c 'find /opt/pi-env/THIRD_PARTY_SOURCES/alpine/archives -name "*.src.tar.gz" -type f -size +0c | grep -q .'
           docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/system/node-LICENSE.txt
+          docker run --rm pi-env:ci nub run licenses:generate --check \
+            --package-root /usr/local/lib/node_modules \
+            --apk-db /lib/apk/db/installed \
+            --alpine-source-manifest /opt/pi-env/THIRD_PARTY_SOURCES/alpine/manifest.json \
+            --system-license node-LICENSE.txt=/usr/local/LICENSE
           docker run --rm pi-env:ci nub run verify:install
 
       - name: Scan built image with Trivy
