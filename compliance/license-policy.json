@@ -1,0 +1,83 @@
+{
+  "allowedLicenseIds": [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0"
+  ],
+  "prohibitedLicensePrefixes": [
+    "AGPL-",
+    "GPL-",
+    "SSPL-"
+  ],
+  "sourceRequiredLicenseIds": [
+    "MPL-2.0"
+  ],
+  "overrides": [
+    {
+      "repository": "https://github.com/aws/aws-sdk-js-v3",
+      "license": "Apache-2.0",
+      "versions": ["3.972.55", "3.997.27"],
+      "file": "compliance/Apache-2.0.txt"
+    },
+    {
+      "repository": "https://github.com/earendil-works/pi",
+      "license": "MIT",
+      "versions": ["0.83.0"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/badlogic/clipboard",
+      "license": "MIT",
+      "versions": ["0.3.9"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/oxc-project/oxc-resolver",
+      "license": "MIT",
+      "versions": ["11.21.3"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/bash-lsp/bash-language-server",
+      "license": "MIT",
+      "versions": ["5.6.0"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/tootallnate/node-data-uri-to-buffer",
+      "license": "MIT",
+      "versions": ["4.0.1"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/silverlyra/kubernetes-types",
+      "license": "Apache-2.0",
+      "versions": ["1.30.0"],
+      "file": "compliance/Apache-2.0.txt"
+    },
+    {
+      "repository": "https://github.com/shtylman/node-stackback",
+      "license": "MIT",
+      "versions": ["0.0.2"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/sebmaster/tr46.js",
+      "license": "MIT",
+      "versions": ["0.0.3"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    }
+  ],
+  "sourceRepositories": [
+    {
+      "repository": "https://github.com/parcel-bundler/lightningcss",
+      "versions": ["1.32.0"],
+      "reference": "https://github.com/parcel-bundler/lightningcss/tree/v{version}"
+    }
+  ]
+}

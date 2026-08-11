@@ -48,6 +48,11 @@ jobs:
           docker run --rm pi-env:ci node --version
           docker run --rm pi-env:ci nub --version
           docker run --rm pi-env:ci test -d /opt/pi-env/.pi/extensions/dev-tools/dist
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/manifest.json
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES.md
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/SOURCE_CODE.md
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/ALPINE_PACKAGES.md
+          docker run --rm pi-env:ci test -f /opt/pi-env/THIRD_PARTY_LICENSES/system/node-LICENSE.txt
           docker run --rm pi-env:ci nub run verify:install
 
       - name: Scan built image with Trivy

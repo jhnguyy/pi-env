@@ -13,7 +13,9 @@
 FROM ghcr.io/nubjs/nub:0.2.10-alpine@sha256:f3efdc86d557acfcdd18e25e1b4fb3dd1c6433e1a56cdb277b791df438e738aa AS pi-env
 
 LABEL org.opencontainers.image.title="pi-env" \
-  org.opencontainers.image.description="pi-env CI/toolchain image artifact with locked Nub dependencies and prebuilt extension bundles"
+  org.opencontainers.image.description="pi-env CI/toolchain image artifact with locked Nub dependencies and prebuilt extension bundles" \
+  org.opencontainers.image.source="https://github.com/jhnguyy/pi-env" \
+  org.opencontainers.image.licenses="MIT"
 
 ENV PI_ENV_HOME=/opt/pi-env \
   PI_ENV_CONTAINER=1 \
@@ -40,6 +42,12 @@ USER node
 
 # Local equivalent: nub install --frozen-lockfile
 RUN nub install --frozen-lockfile
+
+# Preserve package notices and source references in the final artifact.
+RUN nub run licenses:generate \
+  --package-root /usr/local/lib/node_modules \
+  --apk-db /lib/apk/db/installed \
+  --system-license node-LICENSE.txt=/usr/local/LICENSE
 
 # Local equivalent: nub run build
 RUN nub run build

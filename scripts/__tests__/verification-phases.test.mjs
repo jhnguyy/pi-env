@@ -12,6 +12,7 @@ describe("verification phase registry", () => {
       "setup-tests",
       "typecheck",
       "pattern-check",
+      "license-compliance",
       "build",
       "install-readiness",
       "unit-tests",
@@ -31,11 +32,12 @@ describe("verification phase registry", () => {
       ["typecheck", "nub", "run", "typecheck"],
       ["type-aware-lint", "nub", "run", "lint:type"],
       ["pattern-check", "nub", "run", "check:patterns"],
+      ["license-compliance", "nub", "run", "licenses:check"],
       ["unit-tests", "nub", "run", "test:safe"],
       ["build", "nub", "run", "build"],
     ]);
 
-    for (const id of ["typecheck", "pattern-check", "build"]) {
+    for (const id of ["typecheck", "pattern-check", "license-compliance", "build"]) {
       expect(SAFE_VERIFICATION_PHASES.find((phase) => phase.id === id)).toBe(
         STANDARD_VERIFICATION_PHASES.find((phase) => phase.id === id),
       );

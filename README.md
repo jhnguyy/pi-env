@@ -31,6 +31,15 @@ Portable fallback setup intentionally uses whatever tools are already on `PATH`.
 
 Repository conventions and area-specific documentation live under `docs/`.
 
+- [Container image](docs/container-image.md)
+- [License compliance](docs/licensing.md)
+- [Nix integration](docs/nix.md)
+
+## License
+
+pi-env is available under the [MIT License](LICENSE).
+See [third-party notices](THIRD_PARTY_NOTICES.md) for incorporated material.
+
 ## Theme snippets
 
 Slack custom theme strings:
