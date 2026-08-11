@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import webContextExtension, { WebFetchFailureKind, WebFetchMode, buildContextPlan, fetchWebText, fetchWebTextEffect, parseWebUrl, selectAdapter, type WebFetch } from "../index";
+import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
@@ -43,7 +43,7 @@ function webFetchToolResult() {
   };
 }
 
-describe("web context", () => {
+describe("web fetch", () => {
   it("keeps fetched output compact until the user expands it", () => {
     const tool = registeredWebFetchTool();
     const { body, result } = webFetchToolResult();
@@ -68,25 +68,6 @@ describe("web context", () => {
     expect(expanded).toContain(body);
     expect(expanded).toContain("URL: https://example.com/");
     expect(expanded).not.toContain("ctrl+o");
-  });
-
-  it("selects the GitHub adapter", () => {
-    const adapter = selectAdapter(new URL("https://github.com/example/project/issues/1"));
-    expect(adapter?.id).toBe("github");
-  });
-
-  it("builds a site-specific GitHub plan", () => {
-    const plan = buildContextPlan("https://github.com/example/project/pull/1", "review PR context");
-    expect(plan).toContain("Adapter: github (GitHub repository/content)");
-    expect(plan).toContain("Purpose: review PR context");
-    expect(plan).toContain("gh issue/pr view --json");
-  });
-
-  it("falls back to a generic browser-last plan", () => {
-    const plan = buildContextPlan("https://example.com/page");
-    expect(plan).toContain("Adapter: generic");
-    expect(plan).toContain("Prefer official APIs");
-    expect(plan).toContain("Use the browser only when the user explicitly asks");
   });
 
   it("rejects non-web protocols", () => {

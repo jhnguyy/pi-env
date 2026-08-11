@@ -20,7 +20,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   skills: ["reference_skill", "skill_build"],
   "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],
-  web: ["web_context", "web_fetch"],
+  web: ["web_fetch"],
 };
 
 export const GROUP_HINTS: Record<string, RegExp[]> = {

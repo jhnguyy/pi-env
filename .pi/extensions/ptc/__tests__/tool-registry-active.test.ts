@@ -108,7 +108,6 @@ describe("ToolRegistry active filtering", () => {
     const harness = createHarness(["search_tools"]);
     harness.tools.push(
       { name: "web_fetch", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") as ToolInfo["sourceInfo"] },
-      { name: "web_context", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") as ToolInfo["sourceInfo"] },
     );
 
     const ptcApi = harness.createApi();
@@ -124,8 +123,7 @@ describe("ToolRegistry active filtering", () => {
     const result = await registry.dispatch("search_tools", { query: "web" }, process.cwd(), undefined);
     expect(result).toContain("loaded:");
     expect(result).toContain("web_fetch");
-    expect(result).toContain("web_context");
-    expect(harness.active).toEqual(expect.arrayContaining(["search_tools", "web_fetch", "web_context"]));
+    expect(harness.active).toEqual(expect.arrayContaining(["search_tools", "web_fetch"]));
     expect(harness.appended).toEqual([
       { type: "tool-manager:state", data: expect.objectContaining({ reason: "search" }) },
     ]);
