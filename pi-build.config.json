@@ -7,6 +7,7 @@
     "@earendil-works/pi-agent-core",
     "typebox",
     "@sinclair/typebox",
+    "@linear/sdk",
     "@effect/opentelemetry",
     "@opentelemetry/api",
     "@opentelemetry/exporter-trace-otlp-http",
