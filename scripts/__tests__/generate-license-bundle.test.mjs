@@ -11,14 +11,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { generateLicenseBundle } from "../generate-license-bundle.mjs";
 import {
-  generateLicenseBundle,
   loadAlpinePolicy,
   parseApkInstalled,
   planAlpineSources,
   validateAlpinePackages,
   validateAlpineSourceManifest,
-} from "../generate-license-bundle.mjs";
+} from "../license-compliance-core.mjs";
 
 const temporaryDirectories = [];
 

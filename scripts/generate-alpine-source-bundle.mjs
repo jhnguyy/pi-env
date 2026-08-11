@@ -19,7 +19,7 @@ import {
   parseApkInstalled,
   planAlpineSources,
   validateAlpinePackages,
-} from "./generate-license-bundle.mjs";
+} from "./license-compliance-core.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = dirname(dirname(scriptPath));
