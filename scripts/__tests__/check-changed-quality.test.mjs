@@ -33,6 +33,20 @@ describe("changed-code quality wrapper", () => {
     expect(run(cwd).stdout).toContain("no git metadata");
   });
 
+  it("skips a packaged git snapshot without a base ref", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "quality-no-base-"));
+    execFileSync("git", ["init", "-b", "feature"], { cwd });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd });
+    await writeFile(join(cwd, "file.ts"), "export const one = 1;\n");
+    execFileSync("git", ["add", "."], { cwd });
+    execFileSync("git", ["commit", "-m", "snapshot"], { cwd });
+
+    const result = run(cwd);
+    expect(result).toMatchObject({ status: 0 });
+    expect(result.stdout).toContain("no base ref");
+  });
+
   it("uses an available base ref", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "quality-git-"));
     execFileSync("git", ["init", "-b", "main"], { cwd });

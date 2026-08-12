@@ -28,6 +28,14 @@ if (githubBase && git("rev-parse", "--verify", `origin/${githubBase}`).status !=
 const candidates = [githubBase ? `origin/${githubBase}` : undefined, "origin/main", "main"].filter(
   Boolean,
 );
+if (
+  !githubBase &&
+  !process.env.GITHUB_ACTIONS &&
+  candidates.every((ref) => git("rev-parse", "--verify", ref).status !== 0)
+) {
+  console.log("changed-code-quality: skipped because the packaged build has no base ref");
+  process.exit(0);
+}
 const baseRef = candidates.find((ref) => git("rev-parse", "--verify", ref).status === 0);
 if (!baseRef) {
   console.error("changed-code-quality: cannot find the pull request base ref");
