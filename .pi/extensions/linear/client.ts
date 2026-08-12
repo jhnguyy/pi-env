@@ -416,13 +416,7 @@ export class LinearGateway {
     ctx: LinearSelectionContext,
     signal?: AbortSignal,
   ): Promise<IssueSummary> {
-    return this.#withApi(
-      ctx,
-      "write",
-      signal,
-      (api) => api.createIssue(prepared.input),
-      prepared.expectedConnectionId,
-    );
+    return this.#executePrepared(prepared, ctx, signal, (api, input) => api.createIssue(input));
   }
 
   async prepareUpdateIssue(
@@ -465,13 +459,7 @@ export class LinearGateway {
     ctx: LinearSelectionContext,
     signal?: AbortSignal,
   ): Promise<IssueSummary> {
-    return this.#withApi(
-      ctx,
-      "write",
-      signal,
-      (api) => api.updateIssue(prepared.input),
-      prepared.expectedConnectionId,
-    );
+    return this.#executePrepared(prepared, ctx, signal, (api, input) => api.updateIssue(input));
   }
 
   prepareCreateComment(
@@ -514,11 +502,20 @@ export class LinearGateway {
     ctx: LinearSelectionContext,
     signal?: AbortSignal,
   ): Promise<CommentSummary> {
+    return this.#executePrepared(prepared, ctx, signal, (api, input) => api.createComment(input));
+  }
+
+  #executePrepared<TInput, TResult>(
+    prepared: PreparedLinearWrite<TInput>,
+    ctx: LinearSelectionContext,
+    signal: AbortSignal | undefined,
+    execute: (api: LinearApi, input: TInput) => Promise<TResult>,
+  ): Promise<TResult> {
     return this.#withApi(
       ctx,
       "write",
       signal,
-      (api) => api.createComment(prepared.input),
+      (api) => execute(api, prepared.input),
       prepared.expectedConnectionId,
     );
   }

@@ -334,6 +334,23 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
     requiredScope: "read" | "write",
     signal?: AbortSignal,
   ): Promise<AccessGrant> {
+    return this.#accessGrant(ctx, requiredScope, false, signal);
+  }
+
+  refreshAfterAuthenticationError(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<AccessGrant> {
+    return this.#accessGrant(ctx, requiredScope, true, signal);
+  }
+
+  #accessGrant(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    forceRefresh: boolean,
+    signal?: AbortSignal,
+  ): Promise<AccessGrant> {
     return this.#exclusive(signal, async (operation) => {
       const [config, grants] = await Promise.all([
         this.configRepository.read(),
@@ -343,31 +360,11 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
       let grant = grants.grants[connection.id];
       if (!grant) throw authRequired(connection.id);
       this.#requireScope(grant, requiredScope);
-      if (grant.expiresAt <= this.#now() + REFRESH_WINDOW_MS) {
+      if (forceRefresh || grant.expiresAt <= this.#now() + REFRESH_WINDOW_MS) {
         grant = await this.#refreshGrant(grant, operation);
       }
       operation.assertCurrent();
       return { accessToken: grant.accessToken, connection };
-    });
-  }
-
-  refreshAfterAuthenticationError(
-    ctx: LinearSelectionContext,
-    requiredScope: "read" | "write",
-    signal?: AbortSignal,
-  ): Promise<AccessGrant> {
-    return this.#exclusive(signal, async (operation) => {
-      const [config, grants] = await Promise.all([
-        this.configRepository.read(),
-        this.grantRepository.read(),
-      ]);
-      const connection = await selectConnection(ctx, config, grants);
-      const grant = grants.grants[connection.id];
-      if (!grant) throw authRequired(connection.id);
-      this.#requireScope(grant, requiredScope);
-      const refreshed = await this.#refreshGrant(grant, operation);
-      operation.assertCurrent();
-      return { accessToken: refreshed.accessToken, connection };
     });
   }
 
