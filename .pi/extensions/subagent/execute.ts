@@ -125,7 +125,6 @@ export interface RunSubagentOptions {
   supervisor?: SubagentRunSupervisor;
   workspaceAccess?: WorkspaceAccessValue;
   onAdmitted?: () => void;
-  admitted?: boolean;
 }
 
 export interface ResolvedSubagentRun {
@@ -296,11 +295,6 @@ function runControlledResolvedSubagentWorkflow(
   AgentToolResult<SubagentDetails>,
   SubagentExecutionError | SubagentAdmissionError
 > {
-  if (options.admitted) {
-    return Effect.sync(() => options.onAdmitted?.()).pipe(
-      Effect.andThen(runResolvedSubagentWorkflow(run, ctx, options, diagnostics)),
-    );
-  }
   const supervisor = resolveSupervisor(ctx, options);
   const workspaceAccess = options.workspaceAccess ?? run.workspaceAccess ?? WorkspaceAccess.Read;
   return Effect.acquireUseRelease(
