@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { registerCommands } from "./commands";
 import { loadConfig } from "./context";
 import { registerHooks } from "./hooks";
@@ -32,14 +32,15 @@ export default function (pi: ExtensionAPI) {
 
   registerHooks(pi, config, store);
 
-  pi.on(PiEvent.SessionStart, () => {
-    const todoAgentTool: AgentTool<any, any> = {
-      name: "todo",
-      label: "Todo",
-      description: "Manage your session task list. Actions: add, done, rm, list, clear.",
-      parameters: TODO_PARAMETERS,
-      execute: async (_id, params) => executeTodo(store, params as TodoParams),
-    };
-    registerAgentTools(pi, { tool: todoAgentTool, capabilities: [ToolCapability.Write] });
+  const todoAgentTool: AgentTool<any, any> = {
+    name: "todo",
+    label: "Todo",
+    description: "Manage your session task list. Actions: add, done, rm, list, clear.",
+    parameters: TODO_PARAMETERS,
+    execute: async (_id, params) => executeTodo(store, params as TodoParams),
+  };
+  registerAgentToolsOnSessionStart(pi, {
+    tool: todoAgentTool,
+    capabilities: [ToolCapability.Write],
   });
 }

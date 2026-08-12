@@ -11,7 +11,7 @@ import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
 import { BLOCKED_TOOLS } from "./types";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 
 export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
@@ -76,30 +76,28 @@ export default function ptcExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.on(PiEvent.SessionStart, (_event, ctx) => {
-    const sessionCwd = ctx.cwd;
-    const ptcAgentTool: AgentTool<any, any> = {
-      name: "ptc",
-      label: "Programmatic Tool Calling",
-      description: DESCRIPTION,
-      parameters: Type.Object({
-        code: Type.String({ description: PARAM_DESCRIPTION }),
-      }),
-      execute: async (_toolCallId, params, signal, onUpdate) => {
-        try {
-          const { code } = params as { code: string };
-          const output = await executor.execute(code, sessionCwd, signal, onUpdate);
-          return { content: [txt(output || "(no output)")], details: {} };
-        } catch (e: unknown) {
-          throw new Error(formatError(e, "ptc"));
-        }
-      },
-    };
-    registerAgentTools(pi, {
-      tool: ptcAgentTool,
-      capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
-    });
+  const createPtcAgentTool = (cwd: string): AgentTool<any, any> => ({
+    name: "ptc",
+    label: "Programmatic Tool Calling",
+    description: DESCRIPTION,
+    parameters: Type.Object({
+      code: Type.String({ description: PARAM_DESCRIPTION }),
+    }),
+    execute: async (_toolCallId, params, signal, onUpdate) => {
+      try {
+        const { code } = params as { code: string };
+        const output = await executor.execute(code, cwd, signal, onUpdate);
+        return { content: [txt(output || "(no output)")], details: {} };
+      } catch (e: unknown) {
+        throw new Error(formatError(e, "ptc"));
+      }
+    },
   });
+  registerAgentToolsOnSessionStart(pi, (_generation, ctx) => ({
+    tool: createPtcAgentTool(ctx.cwd),
+    createTool: ({ cwd }) => createPtcAgentTool(cwd),
+    capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
+  }));
 }
 
 const DESCRIPTION = [

@@ -3,7 +3,7 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
   DEFAULT_SESSION_DIR,
   assertUnderSessionDir,
@@ -128,24 +128,22 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on(PiEvent.SessionStart, () => {
-    const listTool: AgentTool<any, any> = {
-      name: "list_sessions",
-      label: "List Sessions",
-      description: "List pi sessions as compact navigation digests. Safe, read-only, no raw tool output.",
-      parameters: LIST_SCHEMA,
-      execute: async (_id, params, signal) => executeListSessions(params as ListSessionsParams, signal),
-    };
-
-    const readTool: AgentTool<any, any> = {
-      name: "read_session",
-      label: "Read Session",
-      description: "Read one pi session as sparse metadata, user prompts, tool errors, labels, branch summaries, and compactions.",
-      parameters: READ_SCHEMA,
-      execute: async (_id, params, signal) => executeReadSession(params as ReadSessionParams, signal),
-    };
-
-    registerAgentTools(pi, { tool: listTool, capabilities: [ToolCapability.Read] });
-    registerAgentTools(pi, { tool: readTool, capabilities: [ToolCapability.Read] });
-  });
+  const listTool: AgentTool<any, any> = {
+    name: "list_sessions",
+    label: "List Sessions",
+    description: "List pi sessions as compact navigation digests. Safe, read-only, no raw tool output.",
+    parameters: LIST_SCHEMA,
+    execute: async (_id, params, signal) => executeListSessions(params as ListSessionsParams, signal),
+  };
+  const readTool: AgentTool<any, any> = {
+    name: "read_session",
+    label: "Read Session",
+    description: "Read one pi session as sparse metadata, user prompts, tool errors, labels, branch summaries, and compactions.",
+    parameters: READ_SCHEMA,
+    execute: async (_id, params, signal) => executeReadSession(params as ReadSessionParams, signal),
+  };
+  registerAgentToolsOnSessionStart(pi, [
+    { tool: listTool, capabilities: [ToolCapability.Read] },
+    { tool: readTool, capabilities: [ToolCapability.Read] },
+  ]);
 }

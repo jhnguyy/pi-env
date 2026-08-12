@@ -16,7 +16,7 @@ import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect } from "effect";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 
 const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 const REFERENCE_SKILL_TOOL_DESCRIPTION =
@@ -586,35 +586,36 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.on(PiEvent.SessionStart, () => {
-    const referenceSkillAgentTool: AgentTool<any, any> = {
-      name: "reference_skill",
-      label: "Reference Skill",
-      description: REFERENCE_SKILL_TOOL_DESCRIPTION,
-      parameters: REFERENCE_SKILL_PARAMETERS,
-      execute: async (_toolCallId, params) => executeReferenceSkill(params as ReferenceSkillParams),
-    };
-
-    const skillBuildAgentTool: AgentTool<any, any> = {
-      name: "skill_build",
-      label: "Skill Build",
-      description:
-        "Create or review a pi skill. Create mode scaffolds and validates; review mode validates and runs advisory evaluation.",
-      parameters: SKILL_BUILD_PARAMETERS,
-      execute: async (_toolCallId, params, signal) =>
-        runSkillBuild(pi, params as SkillBuildParams, {
-          cwd: process.cwd(),
-          signal,
-          modelConfig: modelConfigFromContext(null),
-        }),
-    };
-
-    registerAgentTools(pi, [
-      { tool: referenceSkillAgentTool, capabilities: [ToolCapability.Read] },
-      {
-        tool: skillBuildAgentTool,
-        capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
-      },
-    ]);
+  const referenceSkillAgentTool: AgentTool<any, any> = {
+    name: "reference_skill",
+    label: "Reference Skill",
+    description: REFERENCE_SKILL_TOOL_DESCRIPTION,
+    parameters: REFERENCE_SKILL_PARAMETERS,
+    execute: async (_toolCallId, params) => executeReferenceSkill(params as ReferenceSkillParams),
+  };
+  const createSkillBuildAgentTool = (
+    cwd: string,
+    model: unknown,
+  ): AgentTool<any, any> => ({
+    name: "skill_build",
+    label: "Skill Build",
+    description:
+      "Create or review a pi skill. Create mode scaffolds and validates; review mode validates and runs advisory evaluation.",
+    parameters: SKILL_BUILD_PARAMETERS,
+    execute: async (_toolCallId, params, signal) =>
+      runSkillBuild(pi, params as SkillBuildParams, {
+        cwd,
+        signal,
+        modelConfig: modelConfigFromContext(model),
+      }),
   });
+  registerAgentToolsOnSessionStart(pi, [
+    { tool: referenceSkillAgentTool, capabilities: [ToolCapability.Read] },
+    {
+      tool: createSkillBuildAgentTool(process.cwd(), null),
+      createTool: ({ cwd, parentContext }) =>
+        createSkillBuildAgentTool(cwd, parentContext?.model),
+      capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
+    },
+  ]);
 }

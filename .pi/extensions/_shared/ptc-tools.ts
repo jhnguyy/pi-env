@@ -3,6 +3,7 @@ import { createRememberedRegistrationChannel } from "./remembered-registration-c
 
 export const PtcToolEvent = {
   Register: "ptc-tools:register",
+  Unregister: "ptc-tools:unregister",
 } as const;
 export type PtcToolEvent = typeof PtcToolEvent[keyof typeof PtcToolEvent];
 
@@ -12,8 +13,8 @@ export interface PtcToolRegistration {
 
 export interface PtcToolEvents {
   events: {
-    emit(event: typeof PtcToolEvent.Register, data: PtcToolRegistration): void;
-    on?(event: typeof PtcToolEvent.Register, handler: (data: unknown) => void): void;
+    emit(event: PtcToolEvent, data: PtcToolRegistration): void;
+    on?(event: PtcToolEvent, handler: (data: unknown) => void): void;
   };
 }
 
@@ -23,9 +24,10 @@ export interface PtcToolRegistrar extends PtcToolEvents {
 
 type PtcToolHandler = (registration: PtcToolRegistration) => void;
 
-const ptcToolChannel = createRememberedRegistrationChannel<PtcToolRegistration, typeof PtcToolEvent.Register>({
+const ptcToolChannel = createRememberedRegistrationChannel<PtcToolRegistration, PtcToolEvent>({
   storeKey: "__piEnvPtcToolRegistry",
-  event: PtcToolEvent.Register,
+  registerEvent: PtcToolEvent.Register,
+  unregisterEvent: PtcToolEvent.Unregister,
   isDuplicate: (previous, next) => previous?.tool === next.tool,
 });
 

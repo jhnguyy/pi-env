@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
@@ -21,6 +22,7 @@ afterEach(() => {
 function sessionContext(cwd: string) {
   return {
     cwd,
+    sessionManager: SessionManager.inMemory(cwd),
     modelRegistry: {
       getAvailable: () => [],
     },
@@ -64,6 +66,72 @@ describe("subagent extension session lifecycle", () => {
     const list = await jobTool.execute("list", { action: "list" }, undefined, undefined, ctx);
     expect(list.content[0]?.text).toBe("No subagent jobs.");
     if (oldManager) await originalShutdown.call(oldManager);
+  });
+
+  it("settles jobs before parent tree navigation", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
+    temporaryDirectories.push(directory);
+    const harness = createHarness();
+    const startSession = harness.handlers.get("session_start")!;
+    const beforeTree = harness.handlers.get("session_before_tree")!;
+    const shutdownSession = harness.handlers.get("session_shutdown")!;
+    const ctx = sessionContext(directory);
+    await startSession({ type: "session_start" }, ctx);
+    const settle = vi.spyOn(SubagentJobManager.prototype, "settle");
+
+    await beforeTree({ type: "session_before_tree" }, ctx);
+    expect(settle).toHaveBeenCalledOnce();
+    await shutdownSession({ type: "session_shutdown" }, ctx);
+  });
+
+  it("restores receipts and marks unfinished jobs interrupted without retry", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
+    temporaryDirectories.push(directory);
+    const harness = createHarness();
+    const startSession = harness.handlers.get("session_start")!;
+    const shutdownSession = harness.handlers.get("session_shutdown")!;
+    const jobTool = harness.tools.get("subagent_job");
+    const ctx = sessionContext(directory);
+    ctx.sessionManager.appendCustomEntry("subagent-job", {
+      jobId: "invalid-job",
+      name: "invalid",
+      task: "ignore",
+      status: "invented-status",
+      cwd: directory,
+      createdAt: new Date(0).toISOString(),
+    });
+    ctx.sessionManager.appendCustomEntry("subagent-job", {
+      jobId: "unfinished-job",
+      name: "unfinished",
+      task: "do not retry",
+      status: "running",
+      cwd: directory,
+      createdAt: new Date(0).toISOString(),
+    });
+
+    await startSession({ type: "session_start" }, ctx);
+    const status = await jobTool.execute(
+      "status",
+      { action: "status", job_id: "unfinished-job" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(status.details).toMatchObject({
+      jobId: "unfinished-job",
+      status: "interrupted",
+      restored: true,
+    });
+    await expect(
+      jobTool.execute(
+        "invalid-status",
+        { action: "status", job_id: "invalid-job" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow("Unknown subagent job");
+    await shutdownSession({ type: "session_shutdown" }, ctx);
   });
 
   it("rejects async starts during/after shutdown and creates jobs only after session_start", async () => {

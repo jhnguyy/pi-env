@@ -32,10 +32,11 @@ const DESCRIPTION_INTRO = [
   "",
   "Two modes:",
   '  1. Agent file: subagent({ name: "recon", agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
-  "     `name` is required and creates a persistent `sub-<name>` session beside the parent.",
+  "     User and installed package agents are the default. Project agents require agent_scope and project trust.",
+  "     `name` is required and creates a persistent `sub-<name>` transcript beside the parent.",
   "     If the agent file omits model, you MUST pass model explicitly.",
   '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
-  "  max_turns is optional; omit it to run without a turn-count limit. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
+  "  max_turns is optional; omit it to use only session token, cost, and time budgets. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
   "",
 ] as const;
 

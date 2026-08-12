@@ -10,36 +10,12 @@ import {
   getSubagentSessionName,
   hasReachedTurnLimit,
 } from "../execute";
-import { formatJobToolContent, SubagentJobManager } from "../jobs";
+import { SubagentJobManager } from "../jobs";
 import { SubagentUsageLedger, zeroUsage } from "../usage";
 
 class TestProviderUnavailable extends Data.TaggedError("TestProviderUnavailable")<{ readonly message: string }> {}
 
 describe("persistent subagent sessions", () => {
-  it("keeps full child output in the model-visible job result", () => {
-    const fullOutput = `result\n${"context".repeat(200)}`;
-    const rendered = formatJobToolContent({
-      id: "job-1",
-      name: "audit",
-      status: "completed",
-      result: {
-        content: [{ type: "text", text: fullOutput }],
-        details: {
-          task: "audit task",
-          toolNames: [],
-          modelOverride: undefined,
-          finalOutput: fullOutput,
-          toolCallCount: 0,
-          usage: zeroUsage(),
-          isError: false,
-          turnLimitExceeded: false,
-        },
-      },
-    } as any);
-
-    expect(rendered).toContain(fullOutput);
-  });
-
   it("names child sessions with a sub- prefix", () => {
     expect(getSubagentSessionName("Recon: Auth Flow")).toBe("sub-recon-auth-flow");
   });
@@ -206,8 +182,8 @@ describe("persistent subagent sessions", () => {
     await expect.poll(() => running.status).toBe("running");
     await Promise.all([jobs.shutdown(), jobs.shutdown()]);
     const late = jobs.start({ name: "late", task: "x" }, {} as any);
-    expect(late.status).toBe("cancelled");
-    expect(running.status).toBe("cancelled");
+    expect(late.status).toBe("rejected");
+    expect(running.status).toBe("interrupted");
   });
 
   it("does not double count async usage when cancellation races with progress", async () => {

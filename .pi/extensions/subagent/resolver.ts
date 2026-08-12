@@ -1,10 +1,11 @@
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { discoverAgents } from "./agents";
+import { discoverAgents, type AgentScope, type AgentSource } from "./agents";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import { WorkspaceAccess, type WorkspaceAccess as WorkspaceAccessValue } from "./control";
 import { BUILT_IN_TOOL_CONTRACTS } from "../_shared/built-in-tools";
 import {
   ResolutionErrorReason,
@@ -23,6 +24,12 @@ export interface SubagentParams {
   max_turns?: number;
   /** Optional absolute working directory for child discovery, tools, and execution. */
   cwd?: string;
+  /** Project agents require both explicit project scope and a trusted project. */
+  agent_scope?: AgentScope;
+  /** Select an exact origin when agents from more than one source have the same name. */
+  agent_source?: AgentSource;
+  /** Write/execute tools serialize by canonical workspace unless isolation is required. */
+  workspace_policy?: "read-only" | "serialize-write" | "isolated-write";
 }
 
 export interface ToolDef {
@@ -79,6 +86,7 @@ export interface AgentResolution {
 export interface ToolResolution {
   tools: AgentTool<any, any>[];
   toolNames: string[];
+  workspaceAccess: WorkspaceAccessValue;
 }
 
 export interface ModelResolution {
@@ -93,13 +101,20 @@ export interface SubagentExecutionPlan {
   model: unknown;
   systemPrompt: string;
   effectiveCwd: string;
+  workspaceAccess: WorkspaceAccessValue;
 }
 
 export function resolveEffectiveCwd(
   params: SubagentParams,
   ctxCwd: string,
 ): ResolutionResult<string> {
-  if (!params.cwd) return resolutionOk(ctxCwd);
+  if (!params.cwd) {
+    try {
+      return resolutionOk(realpathSync(ctxCwd));
+    } catch {
+      return resolutionOk(ctxCwd);
+    }
+  }
   if (!isAbsolute(params.cwd)) {
     return resolutionError({
       reason: ResolutionErrorReason.InvalidCwd,
@@ -136,8 +151,14 @@ export function resolveAgentConfig(
 ): ResolutionResult<AgentResolution> {
   if (!params.agent) return resolutionOk({});
 
-  const discovery = discoverAgents(cwd, "both");
-  const agentConfig = discovery.agents.find((a) => a.name === params.agent);
+  const scope = params.agent_scope ?? (params.agent_source === "project" ? "project" : "user");
+  const discovery = discoverAgents(cwd, scope);
+  const candidates = params.agent_source ? discovery.candidates : discovery.agents;
+  const agentConfig = candidates.find(
+    (candidate) =>
+      candidate.name === params.agent &&
+      (params.agent_source === undefined || candidate.source === params.agent_source),
+  );
   if (!agentConfig) {
     const available = discovery.agents.map((a) => a.name).join(", ") || "none";
     return resolutionError({
@@ -205,8 +226,21 @@ function collectToolNames(
   return names;
 }
 
-function materializeTool(entry: ToolCatalogEntry, cwd: string): AgentTool<any, any> {
-  return entry._tag === "built-in" ? entry.definition.factory(cwd) : entry.registration.tool;
+function materializeTool(
+  entry: ToolCatalogEntry,
+  cwd: string,
+  parentContext: ExtensionContext,
+): AgentTool<any, any> {
+  if (entry._tag === "built-in") return entry.definition.factory(cwd);
+  return entry.registration.createTool?.({
+    cwd,
+    sessionGeneration: entry.registration.sessionGeneration ?? "legacy",
+    parentContext,
+  }) ?? { ...entry.registration.tool };
+}
+
+function entryCapabilities(entry: ToolCatalogEntry): readonly ToolCapability[] {
+  return entry._tag === "built-in" ? entry.definition.capabilities : entry.registration.capabilities;
 }
 
 function materializeToolResolution(
@@ -215,15 +249,18 @@ function materializeToolResolution(
   catalog: ToolCatalog,
   cwd: string,
   modelOverride: string | undefined,
+  parentContext: ExtensionContext,
 ): ResolutionResult<ToolResolution> {
   const explicitNameSet = new Set(explicitNames);
   const tools: AgentTool<any, any>[] = [];
+  const capabilities = new Set<ToolCapability>();
   const unknownExplicitNames: string[] = [];
 
   for (const name of names) {
     const entry = catalog.byName.get(name);
     if (entry) {
-      tools.push(materializeTool(entry, cwd));
+      tools.push(materializeTool(entry, cwd, parentContext));
+      for (const capability of entryCapabilities(entry)) capabilities.add(capability);
     } else if (explicitNameSet.has(name)) {
       unknownExplicitNames.push(name);
     }
@@ -237,7 +274,11 @@ function materializeToolResolution(
       modelOverride,
     });
   }
-  return resolutionOk({ tools, toolNames: [...names] });
+  const workspaceAccess =
+    capabilities.has(ToolCapability.Write) || capabilities.has(ToolCapability.Execute)
+      ? WorkspaceAccess.Write
+      : WorkspaceAccess.Read;
+  return resolutionOk({ tools, toolNames: [...names], workspaceAccess });
 }
 
 export function resolveTools(
@@ -245,6 +286,7 @@ export function resolveTools(
   agentConfig: AgentConfig | undefined,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   cwd: string,
+  parentContext?: ExtensionContext,
 ): ResolutionResult<ToolResolution> {
   // Two mechanisms, unioned when both present:
   //   capabilities: include all tools whose capability tags are a subset of the requested set.
@@ -263,7 +305,14 @@ export function resolveTools(
 
   const names = collectToolNames(explicitNames, requestedCapabilities, registeredExtTools);
   const catalog = buildToolCatalog(registeredExtTools);
-  return materializeToolResolution(names, explicitNames, catalog, cwd, params.model);
+  return materializeToolResolution(
+    names,
+    explicitNames,
+    catalog,
+    cwd,
+    params.model,
+    parentContext ?? ({ cwd } as ExtensionContext),
+  );
 }
 
 export function resolveModel(
@@ -310,11 +359,81 @@ export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentC
   );
 }
 
+function gitWorkspaceRoot(cwd: string): { root: string; linked: boolean } | undefined {
+  let current = cwd;
+  while (true) {
+    try {
+      const gitEntry = statSync(join(current, ".git"));
+      return { root: current, linked: gitEntry.isFile() };
+    } catch {}
+    const parent = join(current, "..");
+    let canonicalParent = parent;
+    try {
+      canonicalParent = realpathSync(parent);
+    } catch {}
+    if (canonicalParent === current) return undefined;
+    current = canonicalParent;
+  }
+}
+
+function workspacePolicyError(
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  tools: ToolResolution,
+  effectiveCwd: string,
+  agentConfig: AgentConfig | undefined,
+): ResolutionError | undefined {
+  const policy = params.workspace_policy ?? agentConfig?.workspacePolicy ?? "serialize-write";
+  if (tools.workspaceAccess === WorkspaceAccess.Read) return undefined;
+  if (policy === "read-only") {
+    return {
+      reason: ResolutionErrorReason.UnsafeWorkspace,
+      message: "Write or execute tools are not allowed by the read-only workspace policy.",
+      toolNames: tools.toolNames,
+      modelOverride: params.model,
+    };
+  }
+  if (policy !== "isolated-write") return undefined;
+  let parentCwd = ctx.cwd;
+  try {
+    parentCwd = realpathSync(ctx.cwd);
+  } catch {}
+  const childWorkspace = gitWorkspaceRoot(effectiveCwd);
+  const parentWorkspace = gitWorkspaceRoot(parentCwd);
+  if (
+    !childWorkspace?.linked ||
+    childWorkspace.root === parentWorkspace?.root
+  ) {
+    return {
+      reason: ResolutionErrorReason.UnsafeWorkspace,
+      message: "The isolated-write policy requires a linked Git worktree separate from the parent cwd.",
+      toolNames: tools.toolNames,
+      modelOverride: params.model,
+    };
+  }
+  return undefined;
+}
+
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
 ): ResolutionResult<SubagentExecutionPlan> {
+  if (
+    params.agent &&
+    (params.agent_scope === "project" ||
+      params.agent_scope === "both" ||
+      params.agent_source === "project") &&
+    ctx.isProjectTrusted?.() !== true
+  ) {
+    return resolutionError({
+      reason: ResolutionErrorReason.UntrustedProjectAgent,
+      message: "Project agents require an explicit project scope and a trusted project.",
+      toolNames: [],
+      modelOverride: params.model,
+    });
+  }
+
   const effectiveCwd = resolveEffectiveCwd(params, ctx.cwd);
   if (!isResolutionOk(effectiveCwd)) return effectiveCwd;
 
@@ -326,8 +445,17 @@ export function resolveSubagentExecutionPlan(
     agent.value.agentConfig,
     registeredExtTools,
     effectiveCwd.value,
+    ctx,
   );
   if (!isResolutionOk(tools)) return tools;
+  const unsafeWorkspace = workspacePolicyError(
+    params,
+    ctx,
+    tools.value,
+    effectiveCwd.value,
+    agent.value.agentConfig,
+  );
+  if (unsafeWorkspace) return resolutionError(unsafeWorkspace);
 
   const model = resolveModel(
     params.model ?? agent.value.agentConfig?.model,
@@ -343,5 +471,6 @@ export function resolveSubagentExecutionPlan(
     model: model.value.model,
     systemPrompt: resolveSystemPrompt(params, agent.value.agentConfig),
     effectiveCwd: effectiveCwd.value,
+    workspaceAccess: tools.value.workspaceAccess,
   });
 }

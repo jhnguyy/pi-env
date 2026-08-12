@@ -12,6 +12,7 @@ import {
   resolveTools,
   type AgentConfig,
 } from "../resolver";
+import { WorkspaceAccess } from "../control";
 import { ToolCapability } from "../types";
 
 const modelRegistry = {
@@ -63,6 +64,37 @@ describe("subagent resolver", () => {
     if (result._tag !== ResolutionResultTag.Ok) return;
     expect(result.value.toolNames).toEqual(["read", "notes"]);
     expect(result.value.tools).toHaveLength(2);
+    expect(result.value.workspaceAccess).toBe(WorkspaceAccess.Read);
+  });
+
+  it("creates extension tools for the child cwd and active session generation", () => {
+    const calls: any[] = [];
+    const registration = {
+      tool: readExtTool,
+      capabilities: [ToolCapability.Read],
+      sessionGeneration: "generation-1",
+      createTool: (factoryContext: any) => {
+        calls.push(factoryContext);
+        return { ...readExtTool, name: "factory-notes" };
+      },
+    };
+    const ctx = { cwd: "/tmp", modelRegistry } as any;
+    const result = resolveSubagentExecutionPlan(
+      {
+        task: "x",
+        tools: ["notes"],
+        model: "anthropic/claude-haiku-4-5",
+      },
+      ctx,
+      new Map([["notes", registration]]),
+    );
+
+    expect(result._tag).toBe(ResolutionResultTag.Ok);
+    if (result._tag !== ResolutionResultTag.Ok) return;
+    expect(result.value.tools[0]?.name).toBe("factory-notes");
+    expect(calls).toEqual([
+      { cwd: "/tmp", sessionGeneration: "generation-1", parentContext: ctx },
+    ]);
   });
 
   it("resolves tools by capability subset", () => {
@@ -131,6 +163,60 @@ describe("subagent resolver", () => {
       expect(implicit).toEqual({ _tag: ResolutionResultTag.Ok, value: "/missing/default" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces read-only and isolated-write workspace policies", () => {
+    const parent = mkdtempSync(join(tmpdir(), "pi-subagent-parent-"));
+    const isolated = mkdtempSync(join(tmpdir(), "pi-subagent-linked-worktree-"));
+    try {
+      writeFileSync(join(isolated, ".git"), "gitdir: /tmp/common/worktrees/child\n");
+      const ctx = { cwd: parent, modelRegistry } as any;
+      const readOnly = resolveSubagentExecutionPlan(
+        {
+          task: "x",
+          tools: ["bash"],
+          model: "anthropic/claude-haiku-4-5",
+          workspace_policy: "read-only",
+        },
+        ctx,
+        new Map(),
+      );
+      expect(readOnly._tag).toBe(ResolutionResultTag.Error);
+      if (readOnly._tag === ResolutionResultTag.Error) {
+        expect(readOnly.error.reason).toBe(ResolutionErrorReason.UnsafeWorkspace);
+      }
+
+      const sameWorkspace = resolveSubagentExecutionPlan(
+        {
+          task: "x",
+          tools: ["write"],
+          model: "anthropic/claude-haiku-4-5",
+          workspace_policy: "isolated-write",
+        },
+        ctx,
+        new Map(),
+      );
+      expect(sameWorkspace._tag).toBe(ResolutionResultTag.Error);
+
+      const separateWorktree = resolveSubagentExecutionPlan(
+        {
+          task: "x",
+          tools: ["write"],
+          model: "anthropic/claude-haiku-4-5",
+          cwd: isolated,
+          workspace_policy: "isolated-write",
+        },
+        ctx,
+        new Map(),
+      );
+      expect(separateWorktree._tag).toBe(ResolutionResultTag.Ok);
+      if (separateWorktree._tag === ResolutionResultTag.Ok) {
+        expect(separateWorktree.value.workspaceAccess).toBe(WorkspaceAccess.Write);
+      }
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+      rmSync(isolated, { recursive: true, force: true });
     }
   });
 

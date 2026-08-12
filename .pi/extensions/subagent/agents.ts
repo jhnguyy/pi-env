@@ -6,9 +6,15 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir, parseFrontmatter, SettingsManager } from "@earendil-works/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  getAgentDir,
+  parseFrontmatter,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
 
 export type AgentScope = "user" | "project" | "both";
+export type AgentSource = "user" | "package" | "project";
 
 export interface AgentConfig {
 	name: string;
@@ -17,70 +23,68 @@ export interface AgentConfig {
 	capabilities?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	workspacePolicy?: "read-only" | "serialize-write" | "isolated-write";
+	source: AgentSource;
 	filePath: string;
 }
 
 export interface AgentDiscoveryResult {
 	agents: AgentConfig[];
+	candidates: AgentConfig[];
 	projectAgentsDir: string | null;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
-	const agents: AgentConfig[] = [];
+function commaList(value: string | undefined): string[] | undefined {
+	const values = value
+		?.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean);
+	return values && values.length > 0 ? values : undefined;
+}
 
-	if (!fs.existsSync(dir)) {
-		return agents;
+function workspacePolicy(value: string | undefined): AgentConfig["workspacePolicy"] {
+	if (value === "read-only" || value === "serialize-write" || value === "isolated-write") {
+		return value;
 	}
+	return undefined;
+}
 
+function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | undefined {
+	let content: string;
+	try {
+		content = fs.readFileSync(filePath, "utf-8");
+	} catch {
+		return undefined;
+	}
+	const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+	if (!frontmatter.name || !frontmatter.description) return undefined;
+	return {
+		name: frontmatter.name,
+		description: frontmatter.description,
+		tools: commaList(frontmatter.tools),
+		capabilities: commaList(frontmatter.capabilities),
+		model: frontmatter.model,
+		systemPrompt: body,
+		workspacePolicy: workspacePolicy(frontmatter.workspace),
+		source,
+		filePath,
+	};
+}
+
+function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
+	if (!fs.existsSync(dir)) return [];
 	let entries: fs.Dirent[];
 	try {
 		entries = fs.readdirSync(dir, { withFileTypes: true });
 	} catch {
-		return agents;
+		return [];
 	}
-
-	for (const entry of entries) {
-		if (!entry.name.endsWith(".md")) continue;
-		if (!entry.isFile() && !entry.isSymbolicLink()) continue;
-
-		const filePath = path.join(dir, entry.name);
-		let content: string;
-		try {
-			content = fs.readFileSync(filePath, "utf-8");
-		} catch {
-			continue;
-		}
-
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-
-		if (!frontmatter.name || !frontmatter.description) {
-			continue;
-		}
-
-		const tools = frontmatter.tools
-			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
-
-		const capabilities = frontmatter.capabilities
-			?.split(",")
-			.map((c: string) => c.trim())
-			.filter(Boolean);
-
-		agents.push({
-			name: frontmatter.name,
-			description: frontmatter.description,
-			tools: tools && tools.length > 0 ? tools : undefined,
-			capabilities: capabilities && capabilities.length > 0 ? capabilities : undefined,
-			model: frontmatter.model,
-			systemPrompt: body,
-			source,
-			filePath,
-		});
-	}
-
-	return agents;
+	return entries.flatMap((entry) => {
+		if (!entry.name.endsWith(".md")) return [];
+		if (!entry.isFile() && !entry.isSymbolicLink()) return [];
+		const agent = loadAgentFile(path.join(dir, entry.name), source);
+		return agent ? [agent] : [];
+	});
 }
 
 function isDirectory(p: string): boolean {
@@ -105,8 +109,8 @@ function loadAgentsFromPackages(cwd: string): AgentConfig[] {
 		for (const pkg of packages) {
 			const source = typeof pkg === "string" ? pkg : pkg.source;
 			if (!source || !fs.existsSync(source)) continue;
-			const agentsDir = path.join(source, ".pi", "agents");
-			agents.push(...loadAgentsFromDir(agentsDir, "project"));
+			const agentsDir = path.join(source, CONFIG_DIR_NAME, "agents");
+			agents.push(...loadAgentsFromDir(agentsDir, "package"));
 		}
 	} catch {
 		// settings.json unavailable or malformed — skip package scanning
@@ -117,7 +121,7 @@ function loadAgentsFromPackages(cwd: string): AgentConfig[] {
 function findNearestProjectAgentsDir(cwd: string): string | null {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".pi", "agents");
+		const candidate = path.join(currentDir, CONFIG_DIR_NAME, "agents");
 		if (isDirectory(candidate)) return candidate;
 
 		const parentDir = path.dirname(currentDir);
@@ -131,25 +135,19 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
-	// Package agents: loaded from .pi/agents/ in each registered package (settings.json `packages`).
-	// Priority: user > cwd-project > packages — later entries win, so packages go in first.
-	const packageAgents = scope === "user" ? [] : loadAgentsFromPackages(cwd);
+	const packageAgents = scope === "project" ? [] : loadAgentsFromPackages(cwd);
+	const projectAgents =
+		scope === "user" || !projectAgentsDir
+			? []
+			: loadAgentsFromDir(projectAgentsDir, "project");
 
 	const agentMap = new Map<string, AgentConfig>();
+	for (const agent of packageAgents) agentMap.set(agent.name, agent);
+	for (const agent of userAgents) agentMap.set(agent.name, agent);
+	for (const agent of projectAgents) agentMap.set(agent.name, agent);
+	const candidates = [...projectAgents, ...userAgents, ...packageAgents];
 
-	if (scope === "both") {
-		for (const agent of packageAgents) agentMap.set(agent.name, agent);
-		for (const agent of userAgents) agentMap.set(agent.name, agent);
-		for (const agent of projectAgents) agentMap.set(agent.name, agent);
-	} else if (scope === "user") {
-		for (const agent of userAgents) agentMap.set(agent.name, agent);
-	} else {
-		for (const agent of packageAgents) agentMap.set(agent.name, agent);
-		for (const agent of projectAgents) agentMap.set(agent.name, agent);
-	}
-
-	return { agents: Array.from(agentMap.values()), projectAgentsDir };
+	return { agents: Array.from(agentMap.values()), candidates, projectAgentsDir };
 }
 
 export function formatAgentList(agents: AgentConfig[], maxItems: number): { text: string; remaining: number } {

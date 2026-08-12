@@ -1,8 +1,8 @@
-import { keyHint, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
 import { createJitCatchContract } from "./contract";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { toAgentTool, toPiTool } from "../_shared/tool-contract";
 
 export default function (pi: ExtensionAPI) {
@@ -40,10 +40,10 @@ export default function (pi: ExtensionAPI) {
     },
   }));
 
-  pi.on(PiEvent.SessionStart, (_event, ctx: ExtensionContext) => {
-    registerAgentTools(pi, {
-      tool: toAgentTool(contract, () => ctx),
-      capabilities: [ToolCapability.Write, ToolCapability.Execute],
-    });
-  });
+  registerAgentToolsOnSessionStart(pi, (_generation, ctx) => ({
+    tool: toAgentTool(contract, () => ctx),
+    createTool: ({ cwd, parentContext }) =>
+      toAgentTool(contract, () => parentContext ?? { cwd }),
+    capabilities: [ToolCapability.Write, ToolCapability.Execute],
+  }));
 }

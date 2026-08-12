@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const runtimeState = vi.hoisted(() => ({
   blocked: false,
@@ -58,11 +59,19 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     return new SubagentSessionRuntime(pi as any, new Map());
   }
 
+  function sessionContext() {
+    return {
+      cwd: "/tmp",
+      sessionManager: SessionManager.inMemory("/tmp"),
+    } as any;
+  }
+
   it("disposes replaced telemetry exactly once and ignores repeated shutdown", async () => {
     const runtime = makeRuntime();
+    const ctx = sessionContext();
 
-    await runtime.startSession();
-    await runtime.startSession();
+    await runtime.startSession(ctx);
+    await runtime.startSession(ctx);
     await runtime.shutdownSession();
     await runtime.shutdownSession();
 
@@ -80,7 +89,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     });
     runtimeState.onBlockedStart = startupBlocked;
 
-    const startup = runtime.startSession();
+    const startup = runtime.startSession(sessionContext());
     await blocked;
     let shutdownSettled = false;
     const shutdown = runtime.shutdownSession().then(() => {
