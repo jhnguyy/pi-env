@@ -15,6 +15,7 @@ function run(cwd, env = {}) {
       PATH: `${cwd}:${process.env.PATH}`,
       GITHUB_BASE_REF: "",
       GITHUB_HEAD_REF: "",
+      GITHUB_ACTIONS: "",
       ...env,
     },
   });
