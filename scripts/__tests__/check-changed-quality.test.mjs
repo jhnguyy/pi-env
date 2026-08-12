@@ -10,7 +10,13 @@ function run(cwd, env = {}) {
   return spawnSync(process.env.PI_ENV_NODE_BIN ?? process.execPath, [script], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, PATH: `${cwd}:${process.env.PATH}`, ...env },
+    env: {
+      ...process.env,
+      PATH: `${cwd}:${process.env.PATH}`,
+      GITHUB_BASE_REF: "",
+      GITHUB_HEAD_REF: "",
+      ...env,
+    },
   });
 }
 
