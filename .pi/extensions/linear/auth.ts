@@ -329,21 +329,17 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
     return connection;
   }
 
-  accessToken(
+  accessToken = (
     ctx: LinearSelectionContext,
     requiredScope: "read" | "write",
     signal?: AbortSignal,
-  ): Promise<AccessGrant> {
-    return this.#accessGrant(ctx, requiredScope, false, signal);
-  }
+  ) => this.#accessGrant(ctx, requiredScope, false, signal);
 
-  refreshAfterAuthenticationError(
+  refreshAfterAuthenticationError = (
     ctx: LinearSelectionContext,
     requiredScope: "read" | "write",
     signal?: AbortSignal,
-  ): Promise<AccessGrant> {
-    return this.#accessGrant(ctx, requiredScope, true, signal);
-  }
+  ) => this.#accessGrant(ctx, requiredScope, true, signal);
 
   #accessGrant(
     ctx: LinearSelectionContext,
