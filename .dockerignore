@@ -8,6 +8,8 @@
 .github/workflows/*.log
 node_modules
 coverage
+THIRD_PARTY_LICENSES
+THIRD_PARTY_SOURCES
 *.tsbuildinfo
 
 # Extension bundles are rebuilt inside the image from source.

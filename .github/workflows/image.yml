@@ -41,14 +41,8 @@ jobs:
           push: false
           tags: pi-env:ci
 
-      - name: Smoke test image toolchain and prebuilt outputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm pi-env:ci node --version
-          docker run --rm pi-env:ci nub --version
-          docker run --rm pi-env:ci test -d /opt/pi-env/.pi/extensions/dev-tools/dist
-          docker run --rm pi-env:ci nub run verify:install
+      - name: Verify image artifact contract
+        run: docker run --rm pi-env:ci nub run verify:image-artifact
 
       - name: Scan built image with Trivy
         shell: bash

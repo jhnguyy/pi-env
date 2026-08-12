@@ -2,6 +2,7 @@
   "name": "@pi-env/introspection",
   "type": "module",
   "private": true,
+  "license": "MIT",
   "pi": {
     "extensions": [
       "./dist/index.js"

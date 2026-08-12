@@ -33,7 +33,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   skills: ["reference_skill", "skill_build"],
   "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],
-  web: ["web_context", "web_fetch"],
+  web: ["web_fetch"],
   "linear-read": LINEAR_READ_TOOLS,
   "linear-write": LINEAR_WRITE_TOOLS,
   linear: [...LINEAR_READ_TOOLS, ...LINEAR_WRITE_TOOLS],

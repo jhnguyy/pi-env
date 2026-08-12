@@ -22,6 +22,7 @@ const common = {
   platform: "node",
   target: esbuildNodeTarget(),
   sourcemap: false,
+  legalComments: "eof",
   external: config.externals ?? [],
   logLevel: "silent",
   banner: {
