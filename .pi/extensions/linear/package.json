@@ -1,0 +1,23 @@
+{
+  "name": "@pi-env/linear",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@linear/sdk": "89.0.0",
+    "effect": "4.0.0-beta.97"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

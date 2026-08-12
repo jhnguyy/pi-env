@@ -16,6 +16,7 @@
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
     ".pi/extensions/jit-catch",
+    ".pi/extensions/linear",
     ".pi/extensions/pi-update",
     ".pi/extensions/ptc",
     ".pi/extensions/security",
@@ -30,6 +31,7 @@
       ".pi/extensions/dev-tools",
       ".pi/extensions/introspection",
       ".pi/extensions/jit-catch",
+      ".pi/extensions/linear",
       ".pi/extensions/pi-update",
       ".pi/extensions/ptc",
       ".pi/extensions/security",
@@ -56,8 +58,8 @@
     "test:e2e": "E2E=1 scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads --maxWorkers=1",
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
     "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
-    "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 scripts/check-patterns.js scripts/generate-alpine-source-bundle.mjs scripts/generate-license-bundle.mjs scripts/license-compliance-core.mjs scripts/heavyweight-lock.mjs scripts/verification-phases.mjs scripts/verification-runner.mjs scripts/verify-image-artifact.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
-    "format:check": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 --check scripts/check-patterns.js scripts/generate-alpine-source-bundle.mjs scripts/generate-license-bundle.mjs scripts/license-compliance-core.mjs scripts/heavyweight-lock.mjs scripts/verification-phases.mjs scripts/verification-runner.mjs scripts/verify-image-artifact.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
+    "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 scripts/check-patterns.js scripts/check-changed-quality.mjs scripts/generate-alpine-source-bundle.mjs scripts/generate-license-bundle.mjs scripts/license-compliance-core.mjs scripts/heavyweight-lock.mjs scripts/verification-phases.mjs scripts/verification-runner.mjs scripts/verify-image-artifact.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
+    "format:check": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 --check scripts/check-patterns.js scripts/check-changed-quality.mjs scripts/generate-alpine-source-bundle.mjs scripts/generate-license-bundle.mjs scripts/license-compliance-core.mjs scripts/heavyweight-lock.mjs scripts/verification-phases.mjs scripts/verification-runner.mjs scripts/verify-image-artifact.mjs scripts/verify-phase.mjs scripts/verify-safe.mjs .oxlintrc.json .oxfmtrc.json",
     "analyze": "scripts/node-run.sh .pi/extensions/analyze/dist/cli.js",
     "sensors": "nub run analyze -- --diff --checks complexity,async-risk",
     "check:duplicates": "nub run analyze -- --checks duplicates . --fail-on error",
@@ -79,7 +81,8 @@
     "licenses:generate": "scripts/node-run.sh scripts/generate-license-bundle.mjs",
     "licenses:alpine-sources": "scripts/node-run.sh scripts/generate-alpine-source-bundle.mjs",
     "licenses:check": "scripts/node-run.sh scripts/generate-license-bundle.mjs --check",
-    "security:trivy": "bash scripts/trivy-scan.sh"
+    "security:trivy": "bash scripts/trivy-scan.sh",
+    "quality:changed": "scripts/node-run.sh scripts/check-changed-quality.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
