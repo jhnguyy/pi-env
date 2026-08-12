@@ -6,6 +6,7 @@ import {
   type Issue,
   type IssueSearchResult,
 } from "@linear/sdk";
+import { LinearResourceType } from "./api";
 import type {
   CommentSummary,
   CreateCommentApiInput,
@@ -25,6 +26,68 @@ import type {
 import { LinearErrorCode, LinearExtensionError, linearError } from "./domain";
 
 type IssueLike = Issue | IssueSearchResult;
+
+type StringFilter = { containsIgnoreCase: string };
+
+type ResourceQueryFilter = {
+  id: { eq: string };
+  text: StringFilter;
+};
+
+function resourceFilter(input: ResourcePageInput): ResourceQueryFilter | undefined {
+  const query = input.query?.trim();
+  return query ? { id: { eq: query }, text: { containsIgnoreCase: query } } : undefined;
+}
+
+function teamConstraint(teamId: string | undefined) {
+  return teamId ? { team: { id: { eq: teamId } } } : {};
+}
+
+export function sdkResourceVariables(input: ResourcePageInput): Record<string, unknown> {
+  const common = { first: input.limit, after: input.cursor };
+  const filter = resourceFilter(input);
+  switch (input.type) {
+    case LinearResourceType.Teams:
+      return {
+        ...common,
+        ...(filter
+          ? { filter: { or: [{ id: filter.id }, { key: filter.text }, { name: filter.text }] } }
+          : {}),
+      };
+    case LinearResourceType.Users:
+      return {
+        ...common,
+        ...(filter
+          ? {
+              filter: {
+                or: [
+                  { id: filter.id },
+                  { email: filter.text },
+                  { name: filter.text },
+                  { displayName: filter.text },
+                ],
+              },
+            }
+          : {}),
+      };
+    case LinearResourceType.States:
+    case LinearResourceType.Labels:
+      return {
+        ...common,
+        ...((filter || input.teamId) && {
+          filter: {
+            ...teamConstraint(input.teamId),
+            ...(filter ? { or: [{ id: filter.id }, { name: filter.text }] } : {}),
+          },
+        }),
+      };
+    case LinearResourceType.Projects:
+      return {
+        ...common,
+        ...(filter ? { filter: { or: [{ id: filter.id }, { name: filter.text }] } } : {}),
+      };
+  }
+}
 
 async function summarizeIssue(issue: IssueLike, includeDescription = false): Promise<IssueSummary> {
   const [state, assignee] = await Promise.all([issue.state, issue.assignee]);
@@ -77,52 +140,49 @@ export function sdkCursorPage<T>(
   };
 }
 
+const SDK_ERROR_CODES: Partial<Record<LinearErrorType, LinearErrorCode>> = {
+  [LinearErrorType.AuthenticationError]: LinearErrorCode.AuthRequired,
+  [LinearErrorType.Ratelimited]: LinearErrorCode.RateLimited,
+  [LinearErrorType.NetworkError]: LinearErrorCode.NetworkUnavailable,
+  [LinearErrorType.Forbidden]: LinearErrorCode.Forbidden,
+  [LinearErrorType.InvalidInput]: LinearErrorCode.Validation,
+  [LinearErrorType.UserError]: LinearErrorCode.Validation,
+};
+
+const SDK_ERROR_MESSAGES: Partial<Record<LinearErrorCode, string>> = {
+  [LinearErrorCode.AuthRequired]: "Linear rejected the access token.",
+  [LinearErrorCode.RateLimited]: "Linear rate-limited the request.",
+  [LinearErrorCode.NetworkUnavailable]: "Cannot reach the Linear API.",
+  [LinearErrorCode.Forbidden]: "Linear denied this operation.",
+  [LinearErrorCode.NotFound]: "Linear resource not found.",
+};
+
 function mapSdkError(error: unknown): never {
   if (error instanceof LinearExtensionError) throw error;
-  if (!(error instanceof LinearError))
+  if (!(error instanceof LinearError)) {
     throw linearError(
       LinearErrorCode.Api,
       error instanceof Error ? error.message : "Linear API failed.",
       { cause: error },
     );
-  const details = error.status ? { status: error.status } : undefined;
-  if (error.status === 401) {
-    throw linearError(LinearErrorCode.AuthRequired, "Linear rejected the access token.", {
-      retryable: true,
-    });
   }
-  switch (error.type) {
-    case LinearErrorType.AuthenticationError:
-      throw linearError(LinearErrorCode.AuthRequired, "Linear rejected the access token.", {
-        retryable: true,
-      });
-    case LinearErrorType.Ratelimited:
-      throw linearError(LinearErrorCode.RateLimited, "Linear rate-limited the request.", {
-        retryable: true,
-        details,
-      });
-    case LinearErrorType.NetworkError:
-      throw linearError(LinearErrorCode.NetworkUnavailable, "Cannot reach the Linear API.", {
-        retryable: true,
-        details,
-      });
-    case LinearErrorType.Forbidden:
-      throw linearError(LinearErrorCode.Forbidden, "Linear denied this operation.", { details });
-    case LinearErrorType.InvalidInput:
-    case LinearErrorType.UserError:
-      throw linearError(
-        LinearErrorCode.Validation,
-        error.message || "Linear rejected the request.",
-        { details },
-      );
-    default:
-      if (error.status === 404)
-        throw linearError(LinearErrorCode.NotFound, "Linear resource not found.", { details });
-      throw linearError(LinearErrorCode.Api, error.message || "Linear API failed.", {
-        retryable: Boolean(error.status && error.status >= 500),
-        details,
-      });
-  }
+  const code =
+    error.status === 401
+      ? LinearErrorCode.AuthRequired
+      : error.status === 404
+        ? LinearErrorCode.NotFound
+        : error.type === undefined
+          ? LinearErrorCode.Api
+          : (SDK_ERROR_CODES[error.type] ?? LinearErrorCode.Api);
+  const retryable =
+    code === LinearErrorCode.AuthRequired ||
+    code === LinearErrorCode.RateLimited ||
+    code === LinearErrorCode.NetworkUnavailable ||
+    Boolean(error.status && error.status >= 500);
+  throw linearError(code, SDK_ERROR_MESSAGES[code] ?? error.message ?? "Linear API failed.", {
+    retryable,
+    ...(error.status ? { details: { status: error.status } } : {}),
+  });
 }
 
 export class LinearSdkApi implements LinearApi {
@@ -199,9 +259,9 @@ export class LinearSdkApi implements LinearApi {
 
   resources(input: ResourcePageInput): Promise<CursorPage<LinearResourceSummary>> {
     return this.#guard(async () => {
-      const variables = { first: input.limit, after: input.cursor };
+      const variables = sdkResourceVariables(input);
       switch (input.type) {
-        case "teams": {
+        case LinearResourceType.Teams: {
           const result = await this.#client.teams(variables);
           return sdkCursorPage(
             result.nodes.map((item) => ({
@@ -215,7 +275,7 @@ export class LinearSdkApi implements LinearApi {
             input.cursor,
           );
         }
-        case "users": {
+        case LinearResourceType.Users: {
           const result = await this.#client.users(variables);
           return sdkCursorPage(
             result.nodes.map((item) => ({
@@ -229,7 +289,7 @@ export class LinearSdkApi implements LinearApi {
             input.cursor,
           );
         }
-        case "states": {
+        case LinearResourceType.States: {
           const result = await this.#client.workflowStates(variables);
           return sdkCursorPage(
             result.nodes.map((item) => ({
@@ -243,7 +303,7 @@ export class LinearSdkApi implements LinearApi {
             input.cursor,
           );
         }
-        case "projects": {
+        case LinearResourceType.Projects: {
           const result = await this.#client.projects(variables);
           return sdkCursorPage(
             result.nodes.map((item) => ({ type: input.type, id: item.id, name: item.name })),
@@ -252,7 +312,7 @@ export class LinearSdkApi implements LinearApi {
             input.cursor,
           );
         }
-        case "labels": {
+        case LinearResourceType.Labels: {
           const result = await this.#client.issueLabels(variables);
           return sdkCursorPage(
             result.nodes.map((item) => ({

@@ -54,6 +54,17 @@ describeIfEnabled("linear", "Linear architecture contracts", () => {
     expect(commentCreate).toContain("The identifier in UUID v4 format");
   });
 
+  it("has one Effect-to-Promise runtime boundary", async () => {
+    const directory = join(process.cwd(), ".pi", "extensions", "linear");
+    const files = (await readdir(directory)).filter((name) => name.endsWith(".ts"));
+    const callers: string[] = [];
+    for (const file of files) {
+      const source = await readFile(join(directory, file), "utf8");
+      if (source.includes("Effect.runPromise")) callers.push(file);
+    }
+    expect(callers).toEqual(["effect-runtime.ts"]);
+  });
+
   it("pins the generated SDK and declares all external runtime contracts", async () => {
     const pkg = JSON.parse(
       await readFile(join(process.cwd(), ".pi", "extensions", "linear", "package.json"), "utf8"),

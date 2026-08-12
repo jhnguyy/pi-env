@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Schema } from "effect";
-import { LinearErrorCode, LinearExtensionError, linearError } from "./domain";
+import { Effect, Schema, Semaphore } from "effect";
+import { LinearErrorCode, LinearExtensionError, asLinearError, linearError } from "./domain";
+import { runLinear, type LinearEffect } from "./effect-runtime";
 
 export interface LinearAppConfig {
   clientId: string;
@@ -120,11 +120,20 @@ class AtomicJsonStore<T extends object> {
   }
 
   update(mutator: (current: T) => T | Promise<T>): Promise<T> {
-    return withPathLock(this.path, async () => {
-      const next = await mutator(await this.read());
-      await this.#write(next);
-      return next;
-    });
+    const store = this;
+    return runLinear(
+      withPathLockEffect(
+        this.path,
+        Effect.gen(function* () {
+          const next = yield* Effect.tryPromise({
+            try: async () => mutator(await store.read()),
+            catch: asLinearError,
+          });
+          yield* Effect.tryPromise({ try: () => store.#write(next), catch: asLinearError });
+          return next;
+        }),
+      ),
+    );
   }
 
   async #write(value: T): Promise<void> {
@@ -271,50 +280,72 @@ export class LinearGrantRepository implements LinearGrantStore {
   }
 }
 
-type LockRegistry = Map<string, Promise<void>>;
+type LockRegistry = Map<string, Semaphore.Semaphore>;
 
 function pathLockRegistry(): LockRegistry {
   const globals = globalThis as typeof globalThis & { __piEnvLinearPathLocks?: LockRegistry };
   return (globals.__piEnvLinearPathLocks ??= new Map());
 }
 
-async function withPathLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+function pathSemaphore(path: string): Semaphore.Semaphore {
   const registry = pathLockRegistry();
-  const previous = registry.get(path) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  registry.set(path, current);
-  await previous;
-  try {
-    return await withProcessLock(path, operation);
-  } finally {
-    release();
-    if (registry.get(path) === current) registry.delete(path);
-  }
+  const existing = registry.get(path);
+  if (existing) return existing;
+  const created = Semaphore.makeUnsafe(1);
+  registry.set(path, created);
+  return created;
 }
 
-async function withProcessLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+function withPathLockEffect<T>(path: string, operation: LinearEffect<T>): LinearEffect<T> {
+  return pathSemaphore(path).withPermit(withProcessLockEffect(path, operation));
+}
+
+function withProcessLockEffect<T>(path: string, operation: LinearEffect<T>): LinearEffect<T> {
+  return Effect.acquireUseRelease(
+    acquireProcessLockEffect(path),
+    () => operation,
+    ({ lockPath, owner }) =>
+      Effect.promise(() => releaseOwnedLock(lockPath, owner)).pipe(
+        Effect.catchCause(() => Effect.void),
+      ),
+  );
+}
+
+function acquireProcessLockEffect(path: string): LinearEffect<{ lockPath: string; owner: string }> {
   const lockPath = `${path}.lock`;
   const owner = `${process.pid}:${randomUUID()}`;
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const deadline = Date.now() + 10_000;
-  while (true) {
-    try {
-      const handle = await open(lockPath, "wx", 0o600);
-      try {
-        await handle.writeFile(`${owner}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      break;
-    } catch (cause) {
-      if (!isExistingFileError(cause)) throw cause;
+  return Effect.gen(function* () {
+    yield* Effect.tryPromise({
+      try: () => mkdir(dirname(path), { recursive: true, mode: 0o700 }),
+      catch: asLinearError,
+    });
+    while (true) {
+      const acquired = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            const handle = await open(lockPath, "wx", 0o600);
+            try {
+              await handle.writeFile(`${owner}\n`, "utf8");
+              await handle.sync();
+            } finally {
+              await handle.close();
+            }
+            return true;
+          } catch (cause) {
+            if (isExistingFileError(cause)) return false;
+            throw cause;
+          }
+        },
+        catch: asLinearError,
+      });
+      if (acquired) return { lockPath, owner };
       if (Date.now() >= deadline) {
-        const stale = await isStaleLock(lockPath);
-        throw linearError(
+        const stale = yield* Effect.tryPromise({
+          try: () => isStaleLock(lockPath),
+          catch: asLinearError,
+        });
+        return yield* linearError(
           LinearErrorCode.Storage,
           stale ? `Stale Linear storage lock: ${lockPath}.` : `Timed out waiting for ${lockPath}.`,
           {
@@ -325,14 +356,9 @@ async function withProcessLock<T>(path: string, operation: () => Promise<T>): Pr
           },
         );
       }
-      await delay(25);
+      yield* Effect.sleep(25);
     }
-  }
-  try {
-    return await operation();
-  } finally {
-    await releaseOwnedLock(lockPath, owner);
-  }
+  });
 }
 
 async function isStaleLock(lockPath: string): Promise<boolean> {

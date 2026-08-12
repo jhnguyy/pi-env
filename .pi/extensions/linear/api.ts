@@ -26,7 +26,15 @@ export interface CommentSummary {
   url: string;
 }
 
-export type LinearResourceType = "teams" | "users" | "states" | "projects" | "labels";
+export const LinearResourceType = {
+  Teams: "teams",
+  Users: "users",
+  States: "states",
+  Projects: "projects",
+  Labels: "labels",
+} as const;
+
+export type LinearResourceType = (typeof LinearResourceType)[keyof typeof LinearResourceType];
 
 export interface LinearResourceSummary {
   type: LinearResourceType;
@@ -60,6 +68,8 @@ export interface ResourcePageInput {
   type: LinearResourceType;
   limit: number;
   cursor?: string;
+  query?: string;
+  teamId?: string;
 }
 
 export interface CreateIssueApiInput {

@@ -1,6 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Effect, Semaphore } from "effect";
 import type { LinearIdentity } from "./api";
-import { LinearErrorCode, LinearExtensionError, linearError } from "./domain";
+import { LinearErrorCode, LinearExtensionError, asLinearError, linearError } from "./domain";
+import { runLinear, type LinearEffect } from "./effect-runtime";
 import {
   buildAuthorizationUrl,
   buildOAuthAppSetupUrl,
@@ -159,10 +161,10 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
   readonly #startCallback: typeof startLoopbackCallback;
   readonly #defaultCallbackPort?: number;
   readonly #callbackTimeoutMs: number;
-  readonly #lifecycleController = new AbortController();
+  readonly #mutex = Semaphore.makeUnsafe(1);
   #activeController?: AbortController;
-  #tail: Promise<void> = Promise.resolve();
   #generation = 0;
+  #stopped = false;
 
   constructor(options: AuthCoordinatorOptions) {
     this.configRepository = options.configRepository ?? new LinearConfigRepository();
@@ -414,9 +416,10 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
 
   shutdown(): void {
     this.#generation += 1;
-    const reason = linearError(LinearErrorCode.OAuthCancelled, "Pi session stopped.");
-    this.#activeController?.abort(reason);
-    this.#lifecycleController.abort(reason);
+    this.#stopped = true;
+    this.#activeController?.abort(
+      linearError(LinearErrorCode.OAuthCancelled, "Pi session stopped."),
+    );
   }
 
   async #selectOrCreateApp(
@@ -425,58 +428,79 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
     signal: AbortSignal,
   ): Promise<LinearAppConfig> {
     const config = await this.configRepository.read();
-    let clientId = options.clientId?.trim() || process.env.LINEAR_OAUTH_CLIENT_ID?.trim();
-    let existing = clientId ? config.apps[clientId] : undefined;
-    if (!clientId) {
-      const apps = Object.values(config.apps);
-      if (apps.length === 1) {
-        existing = apps[0];
-        clientId = existing?.clientId;
-      } else if (apps.length > 1) {
-        const selected = await ctx.ui.select(
-          "Select a Linear OAuth app",
-          apps.map((app) => `${app.clientId} (${callbackUri(app.callbackPort)})`),
-          { signal },
-        );
-        if (!selected)
-          throw linearError(
-            LinearErrorCode.OAuthCancelled,
-            "Linear OAuth app selection was cancelled.",
-          );
-        clientId = selected.split(" ", 1)[0];
-        existing = clientId ? config.apps[clientId] : undefined;
-      }
-    }
+    const selected = await this.#selectConfiguredApp(ctx, options.clientId, config, signal);
     const port =
       options.callbackPort ??
-      existing?.callbackPort ??
+      selected?.callbackPort ??
       this.#defaultCallbackPort ??
       parseCallbackPort(process.env.LINEAR_OAUTH_PORT) ??
       DEFAULT_CALLBACK_PORT;
-    if (!clientId) {
-      const setupUrl = buildOAuthAppSetupUrl(callbackUri(port));
-      if (options.mode === "manual") {
-        ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "info");
-      } else if (!(await this.#openExternal(setupUrl, signal))) {
-        ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "warning");
-      }
-      clientId = (
-        await ctx.ui.input(
-          "Linear OAuth app",
-          "Complete the app owner and homepage fields, save it, then paste its client ID",
-          { signal },
-        )
-      )?.trim();
-      if (!clientId)
-        throw linearError(LinearErrorCode.OAuthCancelled, "Linear OAuth app setup was cancelled.");
-    }
+    const clientId = selected?.clientId ?? (await this.#createApp(ctx, options.mode, port, signal));
     const app: LinearAppConfig = {
       clientId,
       callbackPort: port,
-      createdAt: existing?.createdAt ?? new Date(this.#now()).toISOString(),
+      createdAt: selected?.createdAt ?? new Date(this.#now()).toISOString(),
     };
     await this.configRepository.saveApp(app);
     return app;
+  }
+
+  async #selectConfiguredApp(
+    ctx: LinearAuthContext,
+    requestedClientId: string | undefined,
+    config: Awaited<ReturnType<LinearConfigStore["read"]>>,
+    signal: AbortSignal,
+  ): Promise<LinearAppConfig | undefined> {
+    const clientId = requestedClientId?.trim() || process.env.LINEAR_OAUTH_CLIENT_ID?.trim();
+    if (clientId) {
+      return (
+        config.apps[clientId] ?? {
+          clientId,
+          callbackPort:
+            this.#defaultCallbackPort ??
+            parseCallbackPort(process.env.LINEAR_OAUTH_PORT) ??
+            DEFAULT_CALLBACK_PORT,
+          createdAt: "",
+        }
+      );
+    }
+    const apps = Object.values(config.apps);
+    if (apps.length < 2) return apps[0];
+    const selected = await ctx.ui.select(
+      "Select a Linear OAuth app",
+      apps.map((app) => `${app.clientId} (${callbackUri(app.callbackPort)})`),
+      { signal },
+    );
+    if (!selected) {
+      throw linearError(
+        LinearErrorCode.OAuthCancelled,
+        "Linear OAuth app selection was cancelled.",
+      );
+    }
+    return config.apps[selected.split(" ", 1)[0]!];
+  }
+
+  async #createApp(
+    ctx: LinearAuthContext,
+    mode: LoginMode,
+    port: number,
+    signal: AbortSignal,
+  ): Promise<string> {
+    const setupUrl = buildOAuthAppSetupUrl(callbackUri(port));
+    if (mode === "manual") {
+      ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "info");
+    } else if (!(await this.#openExternal(setupUrl, signal))) {
+      ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "warning");
+    }
+    const clientId = (
+      await ctx.ui.input(
+        "Linear OAuth app",
+        "Complete the app owner and homepage fields, save it, then paste its client ID",
+        { signal },
+      )
+    )?.trim();
+    if (clientId) return clientId;
+    throw linearError(LinearErrorCode.OAuthCancelled, "Linear OAuth app setup was cancelled.");
   }
 
   async #refreshGrant(grant: LinearGrant, operation: AuthOperation): Promise<LinearGrant> {
@@ -517,48 +541,57 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
     );
   }
 
-  async #exclusive<T>(
+  #exclusive<T>(
     externalSignal: AbortSignal | undefined,
     operation: (operation: AuthOperation) => Promise<T>,
   ): Promise<T> {
     const requestedGeneration = this.#generation;
-    const previous = this.#tail;
-    let release!: () => void;
-    this.#tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    await previous;
-    let controller: AbortController | undefined;
-    try {
-      this.#lifecycleController.signal.throwIfAborted();
-      controller = new AbortController();
-      this.#activeController = controller;
-      const signal = externalSignal
-        ? AbortSignal.any([externalSignal, controller.signal, this.#lifecycleController.signal])
-        : AbortSignal.any([controller.signal, this.#lifecycleController.signal]);
-      signal.throwIfAborted();
-      if (requestedGeneration !== this.#generation) {
-        throw linearError(
+    return runLinear(
+      this.#mutex.withPermit(this.#exclusiveEffect(requestedGeneration, operation)),
+      externalSignal,
+    );
+  }
+
+  #exclusiveEffect<T>(
+    requestedGeneration: number,
+    operation: (operation: AuthOperation) => Promise<T>,
+  ): LinearEffect<T> {
+    const coordinator = this;
+    return Effect.gen(function* () {
+      if (coordinator.#stopped) {
+        return yield* linearError(LinearErrorCode.OAuthCancelled, "Pi session stopped.");
+      }
+      if (requestedGeneration !== coordinator.#generation) {
+        return yield* linearError(
           LinearErrorCode.Conflict,
           "A newer Linear auth operation superseded this request.",
         );
       }
-      return await operation({
-        signal,
-        assertCurrent: () => {
-          signal.throwIfAborted();
-          if (requestedGeneration !== this.#generation) {
-            throw linearError(
-              LinearErrorCode.Conflict,
-              "A newer Linear auth operation superseded this result.",
-            );
-          }
-        },
-      });
-    } finally {
-      if (controller && this.#activeController === controller) this.#activeController = undefined;
-      release();
-    }
+      const controller = new AbortController();
+      coordinator.#activeController = controller;
+      const assertCurrent = () => {
+        controller.signal.throwIfAborted();
+        if (requestedGeneration !== coordinator.#generation) {
+          throw linearError(
+            LinearErrorCode.Conflict,
+            "A newer Linear auth operation superseded this result.",
+          );
+        }
+      };
+      return yield* Effect.tryPromise({
+        try: (signal) =>
+          operation({ signal: AbortSignal.any([signal, controller.signal]), assertCurrent }),
+        catch: asLinearError,
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (coordinator.#activeController === controller) {
+              coordinator.#activeController = undefined;
+            }
+          }),
+        ),
+      );
+    });
   }
 }
 

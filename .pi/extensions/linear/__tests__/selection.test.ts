@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { configuredConnectionSelector, selectConnection } from "../selection";
+import { LinearErrorCode } from "../domain";
+import {
+  configuredConnectionSelector,
+  resolveConnectionReference,
+  selectConnection,
+} from "../selection";
 import type {
   LinearConfigDocument,
   LinearConnectionConfig,
@@ -61,6 +66,56 @@ describeIfEnabled("linear", "Linear connection selection", () => {
     await expect(
       configuredConnectionSelector({ cwd: project, isProjectTrusted: () => false }),
     ).resolves.toBe("global");
+  });
+
+  it("rejects unknown and ambiguous aliases", () => {
+    const first = connection("first-id", "shared", "first@example.com");
+    const second = connection("second-id", "shared", "second@example.com");
+    const config: LinearConfigDocument = {
+      version: 1,
+      apps: {},
+      connections: { [first.id]: first, [second.id]: second },
+    };
+
+    expect(() => resolveConnectionReference("missing", config)).toThrow();
+    expect(() => resolveConnectionReference("shared", config)).toThrow();
+    try {
+      resolveConnectionReference("shared", config);
+    } catch (error) {
+      expect(error).toMatchObject({ code: LinearErrorCode.ConnectionAmbiguous });
+    }
+  });
+
+  it("rejects zero or multiple authenticated connections without a selection", async () => {
+    const first = connection("first-id", "first", "first@example.com");
+    const second = connection("second-id", "second", "second@example.com");
+    const config: LinearConfigDocument = {
+      version: 1,
+      apps: {},
+      connections: { [first.id]: first, [second.id]: second },
+    };
+    const context = { cwd: root, isProjectTrusted: () => true };
+
+    await expect(
+      selectConnection(context, config, { version: 1, grants: {} }),
+    ).rejects.toMatchObject({
+      code: LinearErrorCode.AuthRequired,
+    });
+    const grant = (connectionId: string) => ({
+      connectionId,
+      clientId: "client",
+      accessToken: "a",
+      refreshToken: "r",
+      expiresAt: 1,
+      tokenType: "Bearer",
+      scope: "read",
+    });
+    await expect(
+      selectConnection(context, config, {
+        version: 1,
+        grants: { [first.id]: grant(first.id), [second.id]: grant(second.id) },
+      }),
+    ).rejects.toMatchObject({ code: LinearErrorCode.ConnectionAmbiguous });
   });
 
   it("resolves explicit project selection by workspace and user alias", async () => {

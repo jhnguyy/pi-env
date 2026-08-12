@@ -88,6 +88,47 @@ async function confirmWrite(
   }
 }
 
+async function executePreparedWrite<
+  TPrepared extends { preview: Record<string, unknown> },
+  TResult,
+>(
+  ctx: ExtensionContext,
+  signal: AbortSignal | undefined,
+  title: string,
+  prepare: () => Promise<TPrepared>,
+  execute: (prepared: TPrepared) => Promise<TResult>,
+  details: (result: TResult) => unknown = (result) => result,
+) {
+  const prepared = await prepare();
+  await confirmWrite(ctx, title, prepared.preview, signal);
+  const result = await execute(prepared);
+  return toolResult(resultText(result), details(result));
+}
+
+function executeCreation<
+  TParams extends { idempotencyKey?: string },
+  TPrepared extends { preview: Record<string, unknown> },
+  TResult extends object,
+>(
+  toolCallId: string,
+  params: TParams,
+  ctx: ExtensionContext,
+  signal: AbortSignal | undefined,
+  title: string,
+  prepare: (operationKey: string) => Promise<TPrepared>,
+  execute: (prepared: TPrepared) => Promise<TResult>,
+) {
+  const operationKey = params.idempotencyKey ?? toolCallId;
+  return executePreparedWrite(
+    ctx,
+    signal,
+    title,
+    () => prepare(operationKey),
+    execute,
+    (result) => ({ ...result, idempotencyKey: operationKey }),
+  );
+}
+
 export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
   return [
     defineTool({
@@ -239,17 +280,17 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         ),
       }),
       async execute(toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(async () => {
-          const operationKey = params.idempotencyKey ?? toolCallId;
-          const prepared = await gateway.prepareCreateIssue(
-            { ...params, operationKey },
+        return executeTool(() =>
+          executeCreation(
+            toolCallId,
+            params,
             ctx,
             signal,
-          );
-          await confirmWrite(ctx, "Create Linear issue?", prepared.preview, signal);
-          const issue = await gateway.executeCreateIssue(prepared, ctx, signal);
-          return toolResult(resultText(issue), { ...issue, idempotencyKey: operationKey });
-        });
+            "Create Linear issue?",
+            (operationKey) => gateway.prepareCreateIssue({ ...params, operationKey }, ctx, signal),
+            (prepared) => gateway.executeCreateIssue(prepared, ctx, signal),
+          ),
+        );
       },
     }),
     defineTool({
@@ -273,12 +314,15 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         clearLabels: Type.Optional(Type.Boolean()),
       }),
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(async () => {
-          const prepared = await gateway.prepareUpdateIssue(params, ctx, signal);
-          await confirmWrite(ctx, "Update Linear issue?", prepared.preview, signal);
-          const issue = await gateway.executeUpdateIssue(prepared, ctx, signal);
-          return toolResult(resultText(issue), issue);
-        });
+        return executeTool(() =>
+          executePreparedWrite(
+            ctx,
+            signal,
+            "Update Linear issue?",
+            () => gateway.prepareUpdateIssue(params, ctx, signal),
+            (prepared) => gateway.executeUpdateIssue(prepared, ctx, signal),
+          ),
+        );
       },
     }),
     defineTool({
@@ -294,17 +338,18 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         ),
       }),
       async execute(toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(async () => {
-          const operationKey = params.idempotencyKey ?? toolCallId;
-          const prepared = await gateway.prepareCreateComment(
-            { ...params, operationKey },
+        return executeTool(() =>
+          executeCreation(
+            toolCallId,
+            params,
             ctx,
             signal,
-          );
-          await confirmWrite(ctx, "Create Linear comment?", prepared.preview, signal);
-          const comment = await gateway.executeCreateComment(prepared, ctx, signal);
-          return toolResult(resultText(comment), { ...comment, idempotencyKey: operationKey });
-        });
+            "Create Linear comment?",
+            (operationKey) =>
+              gateway.prepareCreateComment({ ...params, operationKey }, ctx, signal),
+            (prepared) => gateway.executeCreateComment(prepared, ctx, signal),
+          ),
+        );
       },
     }),
   ];

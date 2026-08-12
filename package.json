@@ -81,7 +81,8 @@
     "licenses:generate": "scripts/node-run.sh scripts/generate-license-bundle.mjs",
     "licenses:alpine-sources": "scripts/node-run.sh scripts/generate-alpine-source-bundle.mjs",
     "licenses:check": "scripts/node-run.sh scripts/generate-license-bundle.mjs --check",
-    "security:trivy": "bash scripts/trivy-scan.sh"
+    "security:trivy": "bash scripts/trivy-scan.sh",
+    "quality:changed": "nub run analyze -- --diff --checks complexity,duplicates --fail-on warning && nub run analyze -- --diff --checks async-risk --fail-on error"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

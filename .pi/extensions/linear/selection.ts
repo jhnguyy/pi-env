@@ -2,6 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect, Schema } from "effect";
 import { loadSettingsSnapshotEffect, isObject } from "../_shared/settings";
 import { LinearErrorCode, linearError } from "./domain";
+import { runLinear } from "./effect-runtime";
 import type { LinearConfigDocument, LinearConnectionConfig, LinearGrantsDocument } from "./storage";
 
 const LinearSettingsSchema = Schema.Struct({
@@ -14,7 +15,15 @@ export async function configuredConnectionSelector(
   ctx: LinearSelectionContext,
 ): Promise<string | undefined> {
   try {
-    const snapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
+    const snapshot = await runLinear(
+      loadSettingsSnapshotEffect(ctx.cwd).pipe(
+        Effect.mapError((cause) =>
+          linearError(LinearErrorCode.Validation, "The linear settings block is invalid.", {
+            cause,
+          }),
+        ),
+      ),
+    );
     const globalBlock = isObject(snapshot.global.linear) ? snapshot.global.linear : {};
     const projectBlock =
       ctx.isProjectTrusted() && isObject(snapshot.project.linear) ? snapshot.project.linear : {};

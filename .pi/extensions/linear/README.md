@@ -80,3 +80,11 @@ Pi marks a tool result as failed only when the tool throws. The extension theref
 ## SDK boundary
 
 Only `sdk-adapter.ts` imports `@linear/sdk`. The extension pins SDK version `89.0.0` because its generated model and mutation contracts can change between SDK releases. Adapter contract tests must pass before the pin changes.
+
+## Effect boundary
+
+The extension keeps deterministic parsing, formatting, validation, and DTO mapping as plain TypeScript. Operational serialization and interruptible storage waits use Effect. `effect-runtime.ts` is the only Effect-to-Promise boundary. Pi-facing APIs remain Promise-based.
+
+Resource queries use Linear server filters and server cursors. One write operation shares each multi-reference catalog, such as labels, instead of scanning the same catalog for each field.
+
+The blocking verification portfolio runs changed-code complexity and duplication checks at warning severity. It also reports async-risk findings and fails if the analyzer emits an error.

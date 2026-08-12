@@ -141,55 +141,57 @@ describeIfEnabled("linear", "Linear gateway", () => {
     expect(fakeAuth.accessToken).toHaveBeenCalledWith(ctx, "read", undefined);
   });
 
-  it("searches resource pages until it finds human-name matches", async () => {
+  it("passes resource queries to the adapter instead of scanning local pages", async () => {
     const fakeApi = api();
-    fakeApi.resources
-      .mockResolvedValueOnce({
-        nodes: [{ type: "teams", id: "team-other", name: "Other" }],
-        hasMore: true,
-        endCursor: "page-2",
-      })
-      .mockResolvedValueOnce({
-        nodes: [{ type: "teams", id: "team-platform", name: "Platform" }],
-        hasMore: false,
-      });
+    fakeApi.resources.mockResolvedValue({
+      nodes: [{ type: "teams", id: "team-platform", name: "Platform" }],
+      hasMore: false,
+    });
     const gateway = new LinearGateway(auth(), () => fakeApi);
 
     await expect(
       gateway.listResources({ type: "teams", query: "Platform", limit: 10 }, ctx),
-    ).resolves.toMatchObject({
-      nodes: [{ id: "team-platform" }],
-      hasMore: false,
+    ).resolves.toMatchObject({ nodes: [{ id: "team-platform" }], hasMore: false });
+    expect(fakeApi.resources).toHaveBeenCalledOnce();
+    expect(fakeApi.resources).toHaveBeenCalledWith({
+      type: "teams",
+      query: "Platform",
+      limit: 10,
+      cursor: undefined,
     });
-    expect(fakeApi.resources).toHaveBeenCalledTimes(2);
   });
 
-  it("paginates filtered resources without skipping matches from one API page", async () => {
+  it("continues filtered resource pagination with the server cursor", async () => {
     const fakeApi = api();
-    fakeApi.resources.mockResolvedValue({
-      nodes: [
-        { type: "teams", id: "team-1", name: "Platform One" },
-        { type: "teams", id: "team-2", name: "Platform Two" },
-        { type: "teams", id: "team-3", name: "Platform Three" },
-      ],
-      hasMore: false,
-    });
+    fakeApi.resources
+      .mockResolvedValueOnce({
+        nodes: [
+          { type: "teams", id: "team-1", name: "Platform One" },
+          { type: "teams", id: "team-2", name: "Platform Two" },
+        ],
+        hasMore: true,
+        endCursor: "server-page-2",
+      })
+      .mockResolvedValueOnce({
+        nodes: [{ type: "teams", id: "team-3", name: "Platform Three" }],
+        hasMore: false,
+      });
     const gateway = new LinearGateway(auth(), () => fakeApi);
 
     const first = await gateway.listResources({ type: "teams", query: "Platform", limit: 2 }, ctx);
     const second = await gateway.listResources(
-      {
-        type: "teams",
-        query: "Platform",
-        limit: 2,
-        cursor: first.endCursor,
-      },
+      { type: "teams", query: "Platform", limit: 2, cursor: first.endCursor },
       ctx,
     );
 
     expect(first.nodes.map((item) => item.id)).toEqual(["team-1", "team-2"]);
     expect(second.nodes.map((item) => item.id)).toEqual(["team-3"]);
-    expect(second.hasMore).toBe(false);
+    expect(fakeApi.resources).toHaveBeenNthCalledWith(2, {
+      type: "teams",
+      query: "Platform",
+      limit: 2,
+      cursor: "server-page-2",
+    });
   });
 
   it("rejects resource pagination that does not advance", async () => {
@@ -221,6 +223,44 @@ describeIfEnabled("linear", "Linear gateway", () => {
       details: { type: "teams" },
     });
     expect(fakeApi.createIssue).not.toHaveBeenCalled();
+  });
+
+  it("loads one shared label catalog when a write resolves multiple labels", async () => {
+    const fakeApi = api();
+    fakeApi.resources.mockImplementation(async ({ type, query }: ResourcePageInput) => {
+      if (type === "teams") {
+        return {
+          nodes: [{ type, id: "team-platform", name: "Platform", key: "PLAT" }],
+          hasMore: false,
+        };
+      }
+      if (type === "labels" && query === undefined) {
+        return {
+          nodes: [
+            { type, id: "label-security", name: "Security", teamId: "team-platform" },
+            { type, id: "label-api", name: "API", teamId: "team-platform" },
+          ],
+          hasMore: false,
+        };
+      }
+      return { nodes: [], hasMore: false };
+    });
+    const gateway = new LinearGateway(auth(), () => fakeApi);
+
+    const prepared = await gateway.prepareCreateIssue(
+      {
+        operationKey: "intent",
+        team: "Platform",
+        title: "Issue",
+        labels: ["Security", "API"],
+      },
+      ctx,
+    );
+
+    expect(prepared.input.labelIds).toEqual(["label-security", "label-api"]);
+    expect(fakeApi.resources.mock.calls.filter(([input]) => input.type === "labels")).toHaveLength(
+      1,
+    );
   });
 
   it("uses stable mutation IDs for identical retries and different IDs for changed payloads", async () => {
