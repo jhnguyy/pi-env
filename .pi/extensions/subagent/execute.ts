@@ -11,6 +11,7 @@ import type {
   AgentMessage,
   AgentToolResult,
   AgentToolUpdateCallback,
+  AgentTool,
 } from "@earendil-works/pi-agent-core";
 import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -115,6 +116,18 @@ export interface RunSubagentOptions {
   executionMode?: SubagentUsageMode;
 }
 
+export interface ResolvedSubagentRun {
+  name: string;
+  task: string;
+  tools: AgentTool<any, any>[];
+  toolNames: string[];
+  model: unknown;
+  modelOverride?: string;
+  systemPrompt: string;
+  cwd: string;
+  maxTurns?: number;
+}
+
 class SubagentAgentLoopFailure extends Data.TaggedError("SubagentAgentLoopFailure")<{
   readonly cause: unknown;
 }> {}
@@ -126,46 +139,23 @@ function executionError(phase: SubagentExecutionPhase): SubagentExecutionError {
   });
 }
 
-function runSubagentWorkflow(
-  params: SubagentParams,
+function runResolvedSubagentWorkflow(
+  run: ResolvedSubagentRun,
   ctx: ExtensionContext,
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions,
   diagnostics: ToolingDiagnostics,
 ): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
   const mode = options.executionMode ?? SubagentUsageMode.Sync;
   const workflow = Effect.gen(function* () {
-    const plan = yield* diagnostics.span(
-      SubagentSpanName.Resolve,
-      { operation: SubagentOperation.Resolve, mode },
-      Effect.try({
-        try: () => resolveSubagentExecutionPlan(params, ctx, registeredExtTools),
-        catch: () => executionError(SubagentExecutionPhase.Session),
-      }),
-    );
-    if (!isResolutionOk(plan)) {
-      yield* diagnostics.annotate({ outcome: "failure", error_kind: "resolution" });
-      const resolutionResult: AgentToolResult<SubagentDetails> = {
-        content: [{ type: "text", text: plan.error.message }],
-        details: buildErrorDetails(
-          params,
-          plan.error.toolNames,
-          plan.error.modelOverride ?? params.model,
-          plan.error.reason,
-        ),
-      };
-      return resolutionResult;
-    }
-
     const {
       tools: resolvedTools,
       toolNames,
       model: resolvedModel,
       systemPrompt,
-      effectiveCwd,
-    } = plan.value;
-    const name = params.name ?? "unnamed";
-    const maxTurns = params.max_turns;
+      cwd: effectiveCwd,
+    } = run;
+    const name = run.name;
+    const maxTurns = run.maxTurns;
     const childSession = yield* diagnostics.span(
       SubagentSpanName.Session,
       { operation: SubagentOperation.Session, mode },
@@ -185,10 +175,9 @@ function runSubagentWorkflow(
     const accumulator = new SubagentRunAccumulator(
       {
         name,
-        task: params.task,
-        agent: params.agent,
+        task: run.task,
         toolNames,
-        modelOverride: params.model,
+        modelOverride: run.modelOverride,
         maxTurns,
         sessionFile: childSession.file,
         sessionId: childSession.id,
@@ -208,7 +197,7 @@ function runSubagentWorkflow(
     const prompts: AgentMessage[] = [
       {
         role: "user",
-        content: [{ type: "text", text: params.task }],
+        content: [{ type: "text", text: run.task }],
         timestamp: Date.now(),
       } as any,
     ];
@@ -263,17 +252,68 @@ function runSubagentWorkflow(
       diagnostics.annotate({ outcome: "failure", error_kind: error.phase }),
     ),
   );
-  return diagnostics.span(SubagentSpanName.Run, { operation: SubagentOperation.Run, mode }, workflow);
+  return diagnostics.span(
+    SubagentSpanName.Run,
+    { operation: SubagentOperation.Run, mode },
+    workflow,
+  );
 }
 
-export function runSubagentEffect(
+function runSubagentWorkflow(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  options: RunSubagentOptions = {},
+  options: RunSubagentOptions,
+  diagnostics: ToolingDiagnostics,
 ): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
-  const workflowWith = (runtime: ToolingTelemetryRuntime) =>
-    runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics);
+  const mode = options.executionMode ?? SubagentUsageMode.Sync;
+  return Effect.gen(function* () {
+    const plan = yield* diagnostics.span(
+      SubagentSpanName.Resolve,
+      { operation: SubagentOperation.Resolve, mode },
+      Effect.try({
+        try: () => resolveSubagentExecutionPlan(params, ctx, registeredExtTools),
+        catch: () => executionError(SubagentExecutionPhase.Session),
+      }),
+    );
+    if (!isResolutionOk(plan)) {
+      yield* diagnostics.annotate({ outcome: "failure", error_kind: "resolution" });
+      const resolutionResult: AgentToolResult<SubagentDetails> = {
+        content: [{ type: "text", text: plan.error.message }],
+        details: buildErrorDetails(
+          params,
+          plan.error.toolNames,
+          plan.error.modelOverride ?? params.model,
+          plan.error.reason,
+        ),
+      };
+      return resolutionResult;
+    }
+    return yield* runResolvedSubagentWorkflow(
+      {
+        name: params.name ?? "unnamed",
+        task: params.task,
+        tools: plan.value.tools,
+        toolNames: plan.value.toolNames,
+        model: plan.value.model,
+        modelOverride: params.model,
+        systemPrompt: plan.value.systemPrompt,
+        cwd: plan.value.effectiveCwd,
+        maxTurns: params.max_turns,
+      },
+      ctx,
+      options,
+      diagnostics,
+    );
+  });
+}
+
+function withSubagentTelemetry(
+  options: RunSubagentOptions,
+  workflowWith: (
+    runtime: ToolingTelemetryRuntime,
+  ) => Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError>,
+): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
   if (options.telemetryRuntime) {
     return options.telemetryRuntime.provide(workflowWith(options.telemetryRuntime));
   }
@@ -289,6 +329,27 @@ export function runSubagentEffect(
     Effect.catchTag("ToolingOtelConfigError", () =>
       Effect.fail(executionError(SubagentExecutionPhase.Session)),
     ),
+  );
+}
+
+export function runSubagentEffect(
+  params: SubagentParams,
+  ctx: ExtensionContext,
+  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+  options: RunSubagentOptions = {},
+): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+  return withSubagentTelemetry(options, (runtime) =>
+    runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics),
+  );
+}
+
+export function runResolvedSubagentEffect(
+  run: ResolvedSubagentRun,
+  ctx: ExtensionContext,
+  options: RunSubagentOptions = {},
+): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+  return withSubagentTelemetry(options, (runtime) =>
+    runResolvedSubagentWorkflow(run, ctx, options, runtime.diagnostics),
   );
 }
 
