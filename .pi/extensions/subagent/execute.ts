@@ -25,6 +25,14 @@ import {
 } from "../../../src/telemetry/tooling";
 import { slugify } from "../_shared/slug";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import { loadSubagentRuntimeConfig, resolveSubagentRuntimeConfig } from "./config";
+import {
+  getOrCreateSubagentRunSupervisor,
+  SubagentAdmissionError,
+  WorkspaceAccess,
+  type SubagentRunSupervisor,
+  type WorkspaceAccess as WorkspaceAccessValue,
+} from "./control";
 import { SubagentExecutionError, SubagentExecutionPhase } from "./errors";
 import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
 import type { SubagentDetails } from "./types";
@@ -114,6 +122,9 @@ export interface RunSubagentOptions {
   telemetryExporter?: SpanExporter;
   telemetryRuntime?: ToolingTelemetryRuntime;
   executionMode?: SubagentUsageMode;
+  supervisor?: SubagentRunSupervisor;
+  workspaceAccess?: WorkspaceAccessValue;
+  onAdmitted?: () => void;
 }
 
 export interface ResolvedSubagentRun {
@@ -126,6 +137,7 @@ export interface ResolvedSubagentRun {
   systemPrompt: string;
   cwd: string;
   maxTurns?: number;
+  workspaceAccess?: WorkspaceAccessValue;
 }
 
 class SubagentAgentLoopFailure extends Data.TaggedError("SubagentAgentLoopFailure")<{
@@ -259,13 +271,72 @@ function runResolvedSubagentWorkflow(
   );
 }
 
+function resolveSupervisor(
+  ctx: ExtensionContext,
+  options: RunSubagentOptions,
+): SubagentRunSupervisor {
+  if (options.supervisor) return options.supervisor;
+  const sessionId = ctx.sessionManager.getSessionId();
+  let config;
+  try {
+    config = loadSubagentRuntimeConfig(ctx.cwd);
+  } catch {
+    config = resolveSubagentRuntimeConfig({});
+  }
+  return getOrCreateSubagentRunSupervisor(sessionId, config);
+}
+
+function runControlledResolvedSubagentWorkflow(
+  run: ResolvedSubagentRun,
+  ctx: ExtensionContext,
+  options: RunSubagentOptions,
+  diagnostics: ToolingDiagnostics,
+): Effect.Effect<
+  AgentToolResult<SubagentDetails>,
+  SubagentExecutionError | SubagentAdmissionError
+> {
+  const supervisor = resolveSupervisor(ctx, options);
+  const workspaceAccess = options.workspaceAccess ?? run.workspaceAccess ?? WorkspaceAccess.Read;
+  return Effect.acquireUseRelease(
+    supervisor.acquireEffect({
+      runId: options.runId,
+      cwd: run.cwd,
+      workspaceAccess,
+      signal: options.signal,
+    }),
+    (lease) =>
+      Effect.sync(() => options.onAdmitted?.()).pipe(
+        Effect.andThen(
+          runResolvedSubagentWorkflow(
+            run,
+            ctx,
+            {
+              ...options,
+              signal: lease.signal,
+              onUsage: (details) => {
+                lease.updateUsage(details.usage);
+                options.onUsage?.(details);
+              },
+            },
+            diagnostics,
+          ),
+        ),
+        Effect.tap((result) => Effect.sync(() => lease.updateUsage(result.details.usage))),
+      ),
+    (lease) => Effect.sync(() => lease.release()),
+  );
+}
+
 function runSubagentWorkflow(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions,
   diagnostics: ToolingDiagnostics,
-): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+): Effect.Effect<
+  AgentToolResult<SubagentDetails>,
+  SubagentExecutionError | SubagentAdmissionError
+> {
   const mode = options.executionMode ?? SubagentUsageMode.Sync;
   return Effect.gen(function* () {
     const plan = yield* diagnostics.span(
@@ -289,7 +360,7 @@ function runSubagentWorkflow(
       };
       return resolutionResult;
     }
-    return yield* runResolvedSubagentWorkflow(
+    return yield* runControlledResolvedSubagentWorkflow(
       {
         name: params.name ?? "unnamed",
         task: params.task,
@@ -300,6 +371,7 @@ function runSubagentWorkflow(
         systemPrompt: plan.value.systemPrompt,
         cwd: plan.value.effectiveCwd,
         maxTurns: params.max_turns,
+        workspaceAccess: plan.value.workspaceAccess,
       },
       ctx,
       options,
@@ -312,8 +384,14 @@ function withSubagentTelemetry(
   options: RunSubagentOptions,
   workflowWith: (
     runtime: ToolingTelemetryRuntime,
-  ) => Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError>,
-): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+  ) => Effect.Effect<
+    AgentToolResult<SubagentDetails>,
+    SubagentExecutionError | SubagentAdmissionError
+  >,
+): Effect.Effect<
+  AgentToolResult<SubagentDetails>,
+  SubagentExecutionError | SubagentAdmissionError
+> {
   if (options.telemetryRuntime) {
     return options.telemetryRuntime.provide(workflowWith(options.telemetryRuntime));
   }
@@ -337,7 +415,10 @@ export function runSubagentEffect(
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions = {},
-): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+): Effect.Effect<
+  AgentToolResult<SubagentDetails>,
+  SubagentExecutionError | SubagentAdmissionError
+> {
   return withSubagentTelemetry(options, (runtime) =>
     runSubagentWorkflow(params, ctx, registeredExtTools, options, runtime.diagnostics),
   );
@@ -347,9 +428,12 @@ export function runResolvedSubagentEffect(
   run: ResolvedSubagentRun,
   ctx: ExtensionContext,
   options: RunSubagentOptions = {},
-): Effect.Effect<AgentToolResult<SubagentDetails>, SubagentExecutionError> {
+): Effect.Effect<
+  AgentToolResult<SubagentDetails>,
+  SubagentExecutionError | SubagentAdmissionError
+> {
   return withSubagentTelemetry(options, (runtime) =>
-    runResolvedSubagentWorkflow(run, ctx, options, runtime.diagnostics),
+    runControlledResolvedSubagentWorkflow(run, ctx, options, runtime.diagnostics),
   );
 }
 

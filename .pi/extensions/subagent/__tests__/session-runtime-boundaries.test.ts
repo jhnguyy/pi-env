@@ -24,10 +24,14 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
         if (state.mode === "blockUntilAbort") {
           state.onBlockedStart?.();
           await new Promise<void>((_resolve, reject) => {
-            signal.addEventListener("abort", () => {
-              state.abortCount += 1;
-              reject(new Error("cancelled"));
-            }, { once: true });
+            signal.addEventListener(
+              "abort",
+              () => {
+                state.abortCount += 1;
+                reject(new Error("cancelled"));
+              },
+              { once: true },
+            );
           });
           return;
         }
@@ -107,7 +111,9 @@ describe("SubagentSessionRuntime public boundaries", () => {
       ctx,
     );
     expect(syncBeforeStart.details.isError).toBe(false);
-    expect(syncBeforeStart.content[0]?.type === "text" ? syncBeforeStart.content[0].text : "").toContain("done-");
+    expect(
+      syncBeforeStart.content[0]?.type === "text" ? syncBeforeStart.content[0].text : "",
+    ).toContain("done-");
 
     await startSession({ type: "session_start" }, ctx);
 
@@ -129,7 +135,13 @@ describe("SubagentSessionRuntime public boundaries", () => {
     );
     expect(waitedA.details.status).toBe("completed");
 
-    const usageAfterA = await jobTool.execute("usage-a", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterA = await jobTool.execute(
+      "usage-a",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterA.content[0]?.text).not.toBe("No subagent usage recorded.");
 
     state.mode = "blockUntilAbort";
@@ -167,28 +179,47 @@ describe("SubagentSessionRuntime public boundaries", () => {
     });
     await replaceSession;
 
-    const oldList = await jobTool.execute("list-old", { action: "list" }, undefined, undefined, ctx);
-    expect(oldList.content[0]?.text).toBe("No subagent jobs.");
-    expect(state.abortCount).toBeGreaterThanOrEqual(1);
-
-    const oldStatus = await jobTool.execute(
-      "status-old",
-      { action: "status", job_id: asyncB.details.jobId },
+    const oldList = await jobTool.execute(
+      "list-old",
+      { action: "list" },
       undefined,
       undefined,
       ctx,
-    ).catch((error: unknown) => error);
+    );
+    expect(oldList.content[0]?.text).toBe("No subagent jobs.");
+    expect(state.abortCount).toBeGreaterThanOrEqual(1);
+
+    const oldStatus = await jobTool
+      .execute(
+        "status-old",
+        { action: "status", job_id: asyncB.details.jobId },
+        undefined,
+        undefined,
+        ctx,
+      )
+      .catch((error: unknown) => error);
     expect(oldStatus).toBeInstanceOf(Error);
     expect((oldStatus as Error).message).toContain(`Unknown subagent job: ${asyncB.details.jobId}`);
 
-    const usageAfterReplace = await jobTool.execute("usage-reset", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterReplace = await jobTool.execute(
+      "usage-reset",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterReplace.content[0]?.text).toBe("No subagent usage recorded.");
 
     state.mode = "complete";
     state.onBlockedStart = undefined;
     const asyncC = await startTool.execute(
       "async-c",
-      { name: "async-c", task: "fresh session", tools: ["read"], model: "test-provider/test-model" },
+      {
+        name: "async-c",
+        task: "fresh session",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -203,7 +234,13 @@ describe("SubagentSessionRuntime public boundaries", () => {
     expect(waitedC.details.status).toBe("completed");
 
     await shutdownSession({ type: "session_shutdown" }, ctx);
-    const usageAfterShutdown = await jobTool.execute("usage-shutdown", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterShutdown = await jobTool.execute(
+      "usage-shutdown",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterShutdown.content[0]?.text).toBe("No subagent usage recorded.");
   });
 });

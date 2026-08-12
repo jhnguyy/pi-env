@@ -12,6 +12,7 @@ import {
   resolveTools,
   type AgentConfig,
 } from "../resolver";
+import { WorkspaceAccess } from "../control";
 import { ToolCapability } from "../types";
 
 const modelRegistry = {
@@ -63,6 +64,35 @@ describe("subagent resolver", () => {
     if (result._tag !== ResolutionResultTag.Ok) return;
     expect(result.value.toolNames).toEqual(["read", "notes"]);
     expect(result.value.tools).toHaveLength(2);
+    expect(result.value.workspaceAccess).toBe(WorkspaceAccess.Read);
+  });
+
+  it("creates extension tools for the child cwd and active session generation", () => {
+    const calls: any[] = [];
+    const registration = {
+      tool: readExtTool,
+      capabilities: [ToolCapability.Read],
+      sessionGeneration: "generation-1",
+      createTool: (factoryContext: any) => {
+        calls.push(factoryContext);
+        return { ...readExtTool, name: "factory-notes" };
+      },
+    };
+    const ctx = { cwd: "/tmp", modelRegistry } as any;
+    const result = resolveSubagentExecutionPlan(
+      {
+        task: "x",
+        tools: ["notes"],
+        model: "anthropic/claude-haiku-4-5",
+      },
+      ctx,
+      new Map([["notes", registration]]),
+    );
+
+    expect(result._tag).toBe(ResolutionResultTag.Ok);
+    if (result._tag !== ResolutionResultTag.Ok) return;
+    expect(result.value.tools[0]?.name).toBe("factory-notes");
+    expect(calls).toEqual([{ cwd: "/tmp", sessionGeneration: "generation-1", parentContext: ctx }]);
   });
 
   it("resolves tools by capability subset", () => {
@@ -95,7 +125,9 @@ describe("subagent resolver", () => {
   });
 
   it("resolves provider/id and bare model names", () => {
-    expect(resolveModel("anthropic/claude-haiku-4-5", modelRegistry, ["read"])._tag).toBe(ResolutionResultTag.Ok);
+    expect(resolveModel("anthropic/claude-haiku-4-5", modelRegistry, ["read"])._tag).toBe(
+      ResolutionResultTag.Ok,
+    );
     expect(resolveModel("gpt-5.4-mini", modelRegistry, ["read"])._tag).toBe(ResolutionResultTag.Ok);
   });
 
@@ -108,10 +140,12 @@ describe("subagent resolver", () => {
   });
 
   it("prefers explicit system prompt over agent prompt", () => {
-    expect(resolveSystemPrompt(
-      { task: "x", system_prompt: "explicit" },
-      agentConfig({ systemPrompt: "agent" }),
-    )).toBe("explicit");
+    expect(
+      resolveSystemPrompt(
+        { task: "x", system_prompt: "explicit" },
+        agentConfig({ systemPrompt: "agent" }),
+      ),
+    ).toBe("explicit");
   });
 
   it("validates and canonicalizes only explicit cwd", () => {
@@ -122,7 +156,8 @@ describe("subagent resolver", () => {
       if (ok._tag === ResolutionResultTag.Ok) expect(ok.value).toBe(dir);
       const relative = resolveEffectiveCwd({ task: "x", cwd: "relative" }, dir);
       expect(relative._tag).toBe(ResolutionResultTag.Error);
-      if (relative._tag === ResolutionResultTag.Error) expect(relative.error.reason).toBe(ResolutionErrorReason.InvalidCwd);
+      if (relative._tag === ResolutionResultTag.Error)
+        expect(relative.error.reason).toBe(ResolutionErrorReason.InvalidCwd);
       const file = join(dir, "file");
       writeFileSync(file, "x");
       const notDir = resolveEffectiveCwd({ task: "x", cwd: file }, dir);

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
@@ -21,6 +22,7 @@ afterEach(() => {
 function sessionContext(cwd: string) {
   return {
     cwd,
+    sessionManager: SessionManager.inMemory(cwd),
     modelRegistry: {
       getAvailable: () => [],
     },
@@ -40,13 +42,17 @@ describe("subagent extension session lifecycle", () => {
     await startSession({ type: "session_start" }, ctx);
 
     let release!: () => void;
-    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     let oldManager: SubagentJobManager | undefined;
     const originalShutdown = SubagentJobManager.prototype.shutdown;
-    vi.spyOn(SubagentJobManager.prototype, "shutdown").mockImplementationOnce(function (this: SubagentJobManager) {
-      oldManager = this;
-      return blocked;
-    });
+    vi.spyOn(SubagentJobManager.prototype, "shutdown").mockImplementationOnce(
+      function (this: SubagentJobManager) {
+        oldManager = this;
+        return blocked;
+      },
+    );
 
     const staleStart = startSession({ type: "session_start" }, ctx);
     await Promise.resolve();
@@ -59,7 +65,13 @@ describe("subagent extension session lifecycle", () => {
     release();
     await Promise.all([staleStart, shutdown]);
 
-    const result = await startTool.execute("after", { name: "after", task: "x" }, undefined, undefined, ctx);
+    const result = await startTool.execute(
+      "after",
+      { name: "after", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(result.details).toMatchObject({ status: "inactive", name: "after", task: "x" });
     const list = await jobTool.execute("list", { action: "list" }, undefined, undefined, ctx);
     expect(list.content[0]?.text).toBe("No subagent jobs.");
@@ -76,20 +88,44 @@ describe("subagent extension session lifecycle", () => {
     const jobTool = harness.tools.get("subagent_job");
     const ctx = sessionContext(directory);
 
-    const beforeStart = await startTool.execute("before", { name: "before", task: "x" }, undefined, undefined, ctx);
+    const beforeStart = await startTool.execute(
+      "before",
+      { name: "before", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(beforeStart.details).toMatchObject({ status: "inactive", name: "before", task: "x" });
 
     await startSession({ type: "session_start" }, ctx);
     const shutdown = shutdownSession({ type: "session_shutdown" }, ctx);
-    const duringShutdown = await startTool.execute("during", { name: "during", task: "x" }, undefined, undefined, ctx);
+    const duringShutdown = await startTool.execute(
+      "during",
+      { name: "during", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(duringShutdown.details).toMatchObject({ status: "shutting-down" });
     await shutdown;
 
-    const afterShutdown = await startTool.execute("after", { name: "after", task: "x" }, undefined, undefined, ctx);
+    const afterShutdown = await startTool.execute(
+      "after",
+      { name: "after", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(afterShutdown.details).toMatchObject({ status: "inactive" });
 
     await startSession({ type: "session_start" }, ctx);
-    const active = await startTool.execute("active", { name: "active", task: "x" }, undefined, undefined, ctx);
+    const active = await startTool.execute(
+      "active",
+      { name: "active", task: "x" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(active.details.jobId).toEqual(expect.any(String));
     const status = await jobTool.execute(
       "status",

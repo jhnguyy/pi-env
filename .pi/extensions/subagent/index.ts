@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type, type Static } from "typebox";
 
 import { discoverAgents } from "./agents";
-import { formatJobToolContent, type SubagentJob } from "./jobs";
+import { formatJobMetadata, formatJobResult, type SubagentJob } from "./jobs";
 import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import {
@@ -14,11 +14,7 @@ import {
   renderSubagentResult,
   renderSubagentStartResult,
 } from "./render";
-import {
-  SubagentJobStatus,
-  SubagentJobToolStatus,
-  type SubagentJobRenderDetails,
-} from "./types";
+import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
 import { SubagentSessionRuntime } from "./session-runtime";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
@@ -64,6 +60,12 @@ const SUBAGENT_PARAMETERS = Type.Object({
         "Optional absolute working directory for this subagent. Resolved with realpath and must be an existing directory.",
     }),
   ),
+  agent_scope: Type.Optional(
+    StringEnum(["user", "project"] as const, {
+      description:
+        "Agent definition scope. Defaults to user and installed package agents. Project agents require explicit scope and project trust.",
+    }),
+  ),
 });
 
 const SubagentJobAction = {
@@ -72,6 +74,7 @@ const SubagentJobAction = {
   Cancel: "cancel",
   List: "list",
   Usage: "usage",
+  Result: "result",
 } as const;
 type SubagentJobAction = (typeof SubagentJobAction)[keyof typeof SubagentJobAction];
 
@@ -79,7 +82,8 @@ const SUBAGENT_JOB_PARAMETERS = Type.Object({
   action: StringEnum(
     Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]],
     {
-      description: "Inspect, wait for, cancel, list, or summarize asynchronous subagent jobs.",
+      description:
+        "Inspect, wait for, cancel, list, retrieve a bounded result, or summarize asynchronous subagent jobs.",
     },
   ),
   job_id: Type.Optional(Type.String({ description: "Job ID (required except for list/usage)." })),
@@ -89,24 +93,33 @@ type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
 type SubagentJobParams = Static<typeof SUBAGENT_JOB_PARAMETERS>;
 
 function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
-  const details = job.latestDetails ?? job.result?.details;
+  const details = job.latestDetails;
   return {
     jobId: job.id,
     status: job.status,
     name: job.name,
-    task: job.params.task,
+    task: job.task,
     toolCallCount: details?.toolCallCount,
     usage: details?.usage,
     model: details?.model,
     sessionName: details?.sessionName,
+    resultTruncated: job.resultTruncated,
   };
 }
 
 export default function (pi: ExtensionAPI) {
   const registeredExtTools = new Map<string, ExtToolRegistration>();
-  listenForAgentTools(pi, (registration) => {
-    registeredExtTools.set(registration.tool.name, registration);
-  });
+  const stopListeningForAgentTools = listenForAgentTools(
+    pi,
+    (registration) => {
+      registeredExtTools.set(registration.tool.name, registration);
+    },
+    (registration) => {
+      if (registeredExtTools.get(registration.tool.name) === registration) {
+        registeredExtTools.delete(registration.tool.name);
+      }
+    },
+  );
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
 
@@ -128,7 +141,7 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (signal?.aborted) throw new Error("Subagent start aborted.");
-    return runtime.startJob(params as SubagentParams, ctx);
+    return runtime.startJob(params as SubagentParams, ctx, signal);
   };
   const executeSubagentJob = async (
     _id: string,
@@ -143,13 +156,13 @@ export default function (pi: ExtensionAPI) {
     }
     if (params.action === SubagentJobAction.List) {
       const activeJobs = runtime.listJobs();
-      const output = activeJobs.map(formatJobToolContent).join("\n") || "No subagent jobs.";
+      const output = activeJobs.map(formatJobMetadata).join("\n") || "No subagent jobs.";
       return {
         content: [{ type: "text", text: output }],
         details: { status: SubagentJobToolStatus.List, count: activeJobs.length },
       };
     }
-    if (!params.job_id) throw new Error("job_id is required for status, wait, and cancel.");
+    if (!params.job_id) throw new Error("job_id is required for status, wait, result, and cancel.");
     if (params.action === SubagentJobAction.Wait) {
       const waited = await runtime.waitJob(params.job_id, signal);
       if (waited.interrupted) {
@@ -167,8 +180,16 @@ export default function (pi: ExtensionAPI) {
       }
       if (!waited.job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
-        content: [{ type: "text", text: formatJobToolContent(waited.job) }],
+        content: [{ type: "text", text: formatJobMetadata(waited.job) }],
         details: getJobRenderDetails(waited.job),
+      };
+    }
+    if (params.action === SubagentJobAction.Result) {
+      const job = runtime.getJob(params.job_id);
+      if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
+      return {
+        content: [{ type: "text", text: formatJobResult(job) }],
+        details: getJobRenderDetails(job),
       };
     }
     const job =
@@ -177,7 +198,7 @@ export default function (pi: ExtensionAPI) {
         : runtime.getJob(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return {
-      content: [{ type: "text", text: formatJobToolContent(job) }],
+      content: [{ type: "text", text: formatJobMetadata(job) }],
       details: getJobRenderDetails(job),
     };
   };
@@ -187,7 +208,7 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_start",
     label: "Start Subagent",
     description:
-      "Start a named persistent subagent without waiting. Use subagent_job to inspect, wait for, or cancel it. Jobs stop when the parent session shuts down.",
+      "Start a session-scoped subagent job without waiting. The live job handle is volatile. The linked child transcript persists. Use subagent_job to inspect, wait, retrieve a bounded result, or cancel the job.",
     parameters: SUBAGENT_PARAMETERS,
     execute: executeAsyncSubagent,
     renderCall: renderSubagentCall,
@@ -197,27 +218,32 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_job",
     label: "Subagent Job",
     description:
-      "Inspect, wait for, cancel, list, or summarize in-process asynchronous subagent jobs.",
+      "Inspect, wait for, cancel, list, retrieve bounded results, or summarize session-scoped asynchronous subagent jobs.",
     parameters: SUBAGENT_JOB_PARAMETERS,
     execute: executeSubagentJob,
     renderCall: renderSubagentJobCall,
     renderResult: renderSubagentJobResult,
   });
-  pi.on("session_shutdown", async () => runtime.shutdownSession());
+  pi.on(PiEvent.SessionBeforeTree, async () => {
+    await runtime.settleJobsBeforeTreeNavigation();
+  });
+  pi.on("session_shutdown", async () => {
+    stopListeningForAgentTools();
+    await runtime.shutdownSession();
+  });
 
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {
-    if (!(await runtime.startSession())) return;
+    if (!(await runtime.startSession(ctx))) return;
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
     const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
     const modelAnnotations = settings?.modelAnnotations ?? {};
-
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{
       provider: string;
       id: string;
       name: string;
     }>;
 
-    const { agents } = discoverAgents(ctx.cwd, "both");
+    const { agents } = discoverAgents(ctx.cwd, "user");
 
     const extToolNames = [...registeredExtTools.keys()];
     const extToolCaps = new Map(

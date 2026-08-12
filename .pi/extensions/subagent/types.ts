@@ -3,9 +3,12 @@ export { formatCapabilities, ToolCapability } from "../_shared/agent-tools";
 export const SubagentJobStatus = {
   Queued: "queued",
   Running: "running",
+  Cancelling: "cancelling",
   Completed: "completed",
   Failed: "failed",
   Cancelled: "cancelled",
+  Interrupted: "interrupted",
+  Rejected: "rejected",
 } as const;
 export type SubagentJobStatus = (typeof SubagentJobStatus)[keyof typeof SubagentJobStatus];
 
@@ -14,8 +17,7 @@ export const SubagentSessionState = {
   Active: "active",
   ShuttingDown: "shutting-down",
 } as const;
-export type SubagentSessionState =
-  (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
+export type SubagentSessionState = (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
 
 export const SubagentJobToolStatus = {
   Usage: "usage",
@@ -31,6 +33,7 @@ export const ResolutionErrorReason = {
   NoModel: "no_model",
   ModelNotFound: "model_not_found",
   InvalidCwd: "invalid_cwd",
+  UntrustedProjectAgent: "untrusted_project_agent",
 } as const;
 export type ResolutionErrorReason =
   (typeof ResolutionErrorReason)[keyof typeof ResolutionErrorReason];
@@ -54,6 +57,7 @@ export interface SubagentJobRenderDetails {
   model?: string;
   sessionName?: string;
   count?: number;
+  resultTruncated?: boolean;
 }
 
 export type SubagentJobRenderStatus =

@@ -15,7 +15,7 @@ import { formatResult } from "./formatters";
 import { registerDevToolsLifecycle } from "./lifecycle";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { LspResult } from "./protocol";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
@@ -68,27 +68,25 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  pi.on(PiEvent.SessionStart, () => {
-    const readAgentTool: AgentTool<typeof readAgentParameters, LspResult | null> = {
-      name: "dev-tools",
-      label: "Dev Tools",
-      description:
-        "Language-server-backed diagnostics and code intelligence for supported coding languages.",
-      parameters: readAgentParameters,
-      execute: executeDevTools,
-    };
-    const writeAgentTool: AgentTool<typeof writeAgentParameters, LspResult | null> = {
-      name: "dev-tools-edit",
-      label: "Dev Tools Edit",
-      description: "Language-server-backed code edits. Renames symbols across supported files.",
-      parameters: writeAgentParameters,
-      execute: executeDevTools,
-    };
-    registerAgentTools(pi, [
-      { tool: readAgentTool, capabilities: [ToolCapability.Read] },
-      { tool: writeAgentTool, capabilities: [ToolCapability.Write] },
-    ]);
-  });
+  const readAgentTool: AgentTool<typeof readAgentParameters, LspResult | null> = {
+    name: "dev-tools",
+    label: "Dev Tools",
+    description:
+      "Language-server-backed diagnostics and code intelligence for supported coding languages.",
+    parameters: readAgentParameters,
+    execute: executeDevTools,
+  };
+  const writeAgentTool: AgentTool<typeof writeAgentParameters, LspResult | null> = {
+    name: "dev-tools-edit",
+    label: "Dev Tools Edit",
+    description: "Language-server-backed code edits. Renames symbols across supported files.",
+    parameters: writeAgentParameters,
+    execute: executeDevTools,
+  };
+  registerAgentToolsOnSessionStart(pi, [
+    { tool: readAgentTool, capabilities: [ToolCapability.Read] },
+    { tool: writeAgentTool, capabilities: [ToolCapability.Write] },
+  ]);
 
   pi.registerTool({
     name: "dev-tools",

@@ -9,7 +9,7 @@ import { txt } from "../_shared/result";
 import { BROWSER_ACTIONS, executeBrowserAction, formatActionSummary, formatTargets, translateBrowserError, type BrowserAction, type BrowserArgs } from "./actions";
 import { BrowserClient } from "./browser";
 import { loadBrowserClientConfig } from "./config";
-import { PiEvent, registerAgentTools, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 
 const browserActionSchema = StringEnum(BROWSER_ACTIONS, { description: "Browser action to perform" });
 
@@ -84,8 +84,9 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
   };
 
   pi.registerTool(browserTool);
-  pi.on(PiEvent.SessionStart, () => {
-    registerAgentTools(pi, { tool: browserTool as AgentTool<any, any>, capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute] });
+  registerAgentToolsOnSessionStart(pi, {
+    tool: browserTool as AgentTool<any, any>,
+    capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
   });
 
   pi.registerCommand("browser-targets", {

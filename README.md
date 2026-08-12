@@ -35,6 +35,7 @@ Repository conventions and area-specific documentation live under `docs/`.
 - [GitHub pull request review workflow](docs/pr-review.md)
 - [License compliance](docs/licensing.md)
 - [Nix integration](docs/nix.md)
+- [Subagents](docs/subagents.md)
 
 ## License
 

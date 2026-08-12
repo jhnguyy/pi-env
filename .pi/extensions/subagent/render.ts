@@ -210,7 +210,10 @@ const JobStatusPresentation: Partial<
 > = {
   [SubagentJobStatus.Completed]: { color: "success", icon: "✓" },
   [SubagentJobStatus.Failed]: { color: "error", icon: "✗" },
+  [SubagentJobStatus.Rejected]: { color: "error", icon: "✗" },
+  [SubagentJobStatus.Cancelling]: { color: "warning", icon: "…" },
   [SubagentJobStatus.Cancelled]: { color: "warning", icon: "⚠" },
+  [SubagentJobStatus.Interrupted]: { color: "warning", icon: "⚠" },
 };
 
 function jobStatusIcon(status: SubagentJobRenderDetails["status"], theme: any): string {

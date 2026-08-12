@@ -18,6 +18,7 @@ import {
   type ResolvedSubagentRun,
   type RunSubagentOptions,
 } from "../subagent/execute";
+import { WorkspaceAccess } from "../subagent/control";
 import {
   Disclosure,
   REVIEW_COMMANDS,
@@ -205,6 +206,7 @@ async function startReview(
         modelOverride: modelString(model),
         systemPrompt: SYSTEM_PROMPT,
         cwd: snapshot.worktree,
+        workspaceAccess: WorkspaceAccess.Read,
       },
       ctx,
       { signal },
