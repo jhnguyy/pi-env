@@ -158,6 +158,11 @@ export interface LinearConfigStore {
   read(): Promise<LinearConfigDocument>;
   saveApp(app: LinearAppConfig): Promise<LinearConfigDocument>;
   saveConnection(connection: LinearConnectionConfig): Promise<LinearConfigDocument>;
+  restoreConnection(
+    connectionId: string,
+    connection: LinearConnectionConfig | undefined,
+    defaultConnection: string | undefined,
+  ): Promise<LinearConfigDocument>;
   removeConnection(connectionId: string): Promise<LinearConfigDocument>;
   setDefaultConnection(connectionId: string): Promise<LinearConfigDocument>;
 }
@@ -193,6 +198,21 @@ export class LinearConfigRepository implements LinearConfigStore {
       connections: { ...current.connections, [connection.id]: connection },
       ...(current.defaultConnection ? {} : { defaultConnection: connection.id }),
     }));
+  }
+
+  restoreConnection(
+    connectionId: string,
+    connection: LinearConnectionConfig | undefined,
+    defaultConnection: string | undefined,
+  ): Promise<LinearConfigDocument> {
+    return this.#store.update((current) => {
+      const connections = { ...current.connections };
+      if (connection) connections[connectionId] = connection;
+      else delete connections[connectionId];
+      if (defaultConnection) return { ...current, connections, defaultConnection };
+      const { defaultConnection: _removed, ...withoutDefault } = current;
+      return { ...withoutDefault, connections };
+    });
   }
 
   removeConnection(connectionId: string): Promise<LinearConfigDocument> {

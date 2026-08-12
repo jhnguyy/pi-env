@@ -285,8 +285,11 @@ export class LinearAuthCoordinator implements LinearAuthAccess {
         } catch (error) {
           if (previousGrant) await this.grantRepository.put(previousGrant);
           else await this.grantRepository.remove(connectionId);
-          if (existing) await this.configRepository.saveConnection(existing);
-          else await this.configRepository.removeConnection(connectionId);
+          await this.configRepository.restoreConnection(
+            connectionId,
+            existing,
+            configBefore.defaultConnection,
+          );
           throw error;
         }
       } finally {

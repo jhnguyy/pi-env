@@ -47,6 +47,18 @@ class MemoryConfigStore implements LinearConfigStore {
     return this.read();
   }
 
+  async restoreConnection(
+    connectionId: string,
+    connection: LinearConnectionConfig | undefined,
+    defaultConnection: string | undefined,
+  ) {
+    if (connection) this.document.connections[connectionId] = structuredClone(connection);
+    else delete this.document.connections[connectionId];
+    if (defaultConnection) this.document.defaultConnection = defaultConnection;
+    else delete this.document.defaultConnection;
+    return this.read();
+  }
+
   async removeConnection(connectionId: string) {
     delete this.document.connections[connectionId];
     if (this.document.defaultConnection === connectionId) delete this.document.defaultConnection;
@@ -340,6 +352,39 @@ describeIfEnabled("linear", "Linear auth architecture", () => {
     ).resolves.toMatchObject({ id: connectionId });
     expect(openExternal).not.toHaveBeenCalled();
     expect(grants.document.grants[connectionId]?.accessToken).toBe("access-new");
+  });
+
+  it("restores the prior default connection when grant persistence fails", async () => {
+    const prior = connection({ id: "org-1:viewer-old", name: "Prior" });
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [prior.id]: prior },
+      defaultConnection: prior.id,
+    });
+    const grants = new MemoryGrantStore();
+    grants.put = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal: vi.fn(async () => true),
+      startCallback: vi.fn(
+        async (): Promise<LoopbackCallback> => ({
+          redirectUri: callbackUri(43_921),
+          code: Promise.resolve("authorization-code"),
+          close: vi.fn(async () => undefined),
+        }),
+      ),
+      fetcher: vi.fn(async () => tokenResponse()) as unknown as typeof fetch,
+    });
+
+    await expect(auth.login(context(root), { mode: "local", write: false })).rejects.toThrow(
+      "disk full",
+    );
+    expect(config.document.defaultConnection).toBe(prior.id);
+    expect(config.document.connections).toEqual({ [prior.id]: prior });
   });
 
   it("rolls back connection metadata when grant persistence fails", async () => {
