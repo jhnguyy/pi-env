@@ -249,7 +249,17 @@ export async function startLoopbackCallback(
     server.off("error", onServerError);
     await closeServer(server);
   };
-  return { redirectUri, code: codePromise.finally(close), close };
+  const code = codePromise.then(
+    async (value) => {
+      await close();
+      return value;
+    },
+    async (cause: unknown) => {
+      await close();
+      throw cause;
+    },
+  );
+  return { redirectUri, code, close };
 }
 
 async function responseJson(response: Response): Promise<unknown> {
