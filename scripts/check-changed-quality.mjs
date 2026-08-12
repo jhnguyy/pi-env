@@ -12,11 +12,22 @@ if (!existsSync(".git") && git("rev-parse", "--git-dir").status !== 0) {
   process.exit(0);
 }
 
-const candidates = [
-  process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : undefined,
-  "origin/main",
-  "main",
-].filter(Boolean);
+const githubBase = process.env.GITHUB_BASE_REF;
+if (githubBase && git("rev-parse", "--verify", `origin/${githubBase}`).status !== 0) {
+  const fetched = git(
+    "fetch",
+    "--no-tags",
+    "origin",
+    `refs/heads/${githubBase}:refs/remotes/origin/${githubBase}`,
+  );
+  if (fetched.status !== 0) {
+    console.error(`changed-code-quality: cannot fetch pull request base ${githubBase}`);
+    process.exit(1);
+  }
+}
+const candidates = [githubBase ? `origin/${githubBase}` : undefined, "origin/main", "main"].filter(
+  Boolean,
+);
 const baseRef = candidates.find((ref) => git("rev-parse", "--verify", ref).status === 0);
 if (!baseRef) {
   console.error("changed-code-quality: cannot find the pull request base ref");
