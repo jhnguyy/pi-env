@@ -1,0 +1,11 @@
+{
+  "name": "@pi-env/pr-review",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

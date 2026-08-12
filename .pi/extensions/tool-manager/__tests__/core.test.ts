@@ -11,7 +11,7 @@ import {
   triggerGroups,
 } from "../core";
 
-const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "jit_catch", "web_fetch", "notes", "linear_viewer", "linear_list_resources", "linear_list_issues", "linear_search_issues", "linear_get_issue", "linear_create_issue", "linear_update_issue", "linear_create_comment"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
+const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "jit_catch", "pr_review_start", "web_fetch", "notes", "linear_viewer", "linear_list_resources", "linear_list_issues", "linear_search_issues", "linear_get_issue", "linear_create_issue", "linear_update_issue", "linear_create_comment"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
 
 describe("tool manager core", () => {
   it("uses the core profile after all tools are known and rejects an invalid configured default", () => {
@@ -50,6 +50,9 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "create a skill for this" }, true)).toContain("skills");
     expect(triggerGroups({ text: "use catching for JIT phrasing" }, true)).toContain("catching-tests");
     expect(triggerGroups({ text: "read previous session conversation" }, true)).toContain("sessions");
+    expect(triggerGroups({ text: "Review this PR https://github.com/acme/widgets/pull/123" }, true)).toContain("pr-review");
+    expect(triggerGroups({ text: "Review this pull request" }, true)).toContain("pr-review");
+    expect(triggerGroups({ text: "review this TypeScript file" }, true)).not.toContain("pr-review");
     expect(triggerGroups({ text: "fetch https://example.com" }, true)).toContain("web");
     expect(triggerGroups({ text: "run extension tests" }, true)).not.toContain("catching-tests");
     expect(triggerGroups({ text: "fetch https://example.com", source: "extension" }, true)).toEqual([]);
