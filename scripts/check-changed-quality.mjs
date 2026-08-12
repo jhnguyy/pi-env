@@ -35,6 +35,22 @@ if (!baseRef) {
 }
 const mergeBase = git("merge-base", baseRef, "HEAD");
 if (mergeBase.status !== 0 || !output(mergeBase)) {
+  const deepened = git(
+    "fetch",
+    "--no-tags",
+    "--deepen=100",
+    "origin",
+    process.env.GITHUB_BASE_REF ?? "main",
+  );
+  if (deepened.status === 0) {
+    const retry = git("merge-base", baseRef, "HEAD");
+    if (retry.status === 0 && output(retry)) {
+      mergeBase.stdout = retry.stdout;
+      mergeBase.status = retry.status;
+    }
+  }
+}
+if (mergeBase.status !== 0 || !output(mergeBase)) {
   console.error(`changed-code-quality: cannot compute merge base for ${baseRef}`);
   process.exit(1);
 }
