@@ -1,22 +1,17 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
-import { WorkspaceAccess } from "../control";
-import { runResolvedSubagentEffect } from "../execute";
 import { createSubagentHarness as createHarness } from "./harness";
 
 const state = vi.hoisted(() => ({
-  mode: "complete" as "complete" | "blockUntilAbort" | "blockUntilRelease",
+  mode: "complete" as "complete" | "blockUntilAbort",
   startCount: 0,
   abortCount: 0,
   onBlockedStart: undefined as (() => void) | undefined,
-  outputText: undefined as string | undefined,
-  releases: [] as Array<() => void>,
 }));
 
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
@@ -29,24 +24,22 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
         if (state.mode === "blockUntilAbort") {
           state.onBlockedStart?.();
           await new Promise<void>((_resolve, reject) => {
-            signal.addEventListener("abort", () => {
-              state.abortCount += 1;
-              reject(new Error("cancelled"));
-            }, { once: true });
+            signal.addEventListener(
+              "abort",
+              () => {
+                state.abortCount += 1;
+                reject(new Error("cancelled"));
+              },
+              { once: true },
+            );
           });
-          return;
-        }
-        if (state.mode === "blockUntilRelease") {
-          await new Promise<void>((resolve) => state.releases.push(resolve));
           return;
         }
         yield {
           type: "message_end",
           message: {
             role: "assistant",
-            content: [
-              { type: "text", text: state.outputText ?? `done-${state.startCount}` },
-            ],
+            content: [{ type: "text", text: `done-${state.startCount}` }],
             timestamp: Date.now(),
             model: "test-model",
             stopReason: "stop",
@@ -76,8 +69,6 @@ beforeEach(() => {
   state.startCount = 0;
   state.abortCount = 0;
   state.onBlockedStart = undefined;
-  state.outputText = undefined;
-  state.releases = [];
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -101,91 +92,6 @@ function createContext(cwd: string) {
 }
 
 describe("SubagentSessionRuntime public boundaries", () => {
-  it("shares one supervisor across blocking, asynchronous, and direct child runs", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-shared-supervisor-"));
-    tempDirs.push(cwd);
-    const settingsDir = join(cwd, ".pi");
-    mkdirSync(settingsDir);
-    writeFileSync(
-      join(settingsDir, "settings.json"),
-      JSON.stringify({ subagent: { maxConcurrentRuns: 1, maxPendingRuns: 4 } }),
-    );
-    const { tools, handlers } = createHarness();
-    const ctx = createContext(cwd);
-    await handlers.get("session_start")!({ type: "session_start" }, ctx);
-    state.mode = "blockUntilRelease";
-
-    const blocking = tools.get("subagent").execute(
-      "blocking",
-      {
-        name: "blocking",
-        task: "block",
-        tools: ["read"],
-        model: "test-provider/test-model",
-      },
-      undefined,
-      undefined,
-      ctx,
-    );
-    await expect.poll(() => state.startCount).toBe(1);
-
-    const asyncJob = await tools.get("subagent_start").execute(
-      "async",
-      {
-        name: "async",
-        task: "queue",
-        tools: ["read"],
-        model: "test-provider/test-model",
-      },
-      undefined,
-      undefined,
-      ctx,
-    );
-    await expect.poll(() => tools.get("subagent_job").execute(
-      "async-status",
-      { action: "status", job_id: asyncJob.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    ).then((value: any) => value.details.status)).toBe("running");
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    const direct = Effect.runPromise(
-      runResolvedSubagentEffect(
-        {
-          name: "direct",
-          task: "queue direct",
-          tools: [],
-          toolNames: [],
-          model: { provider: "test-provider", id: "test-model" },
-          systemPrompt: "Test.",
-          cwd,
-          workspaceAccess: WorkspaceAccess.Read,
-        },
-        ctx,
-        { runId: "direct" },
-      ),
-    );
-    await Promise.resolve();
-    expect(state.startCount).toBe(1);
-
-    state.releases.shift()?.();
-    await blocking;
-    await expect.poll(() => state.startCount).toBe(2);
-    state.releases.shift()?.();
-    await tools.get("subagent_job").execute(
-      "wait-async",
-      { action: "wait", job_id: asyncJob.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    await expect.poll(() => state.startCount).toBe(3);
-    state.releases.shift()?.();
-    await direct;
-    await handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
-  });
-
   it("keeps sync subagent compatible before session_start and resets async jobs/usage across replacement and shutdown", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-session-runtime-"));
     tempDirs.push(cwd);
@@ -205,7 +111,9 @@ describe("SubagentSessionRuntime public boundaries", () => {
       ctx,
     );
     expect(syncBeforeStart.details.isError).toBe(false);
-    expect(syncBeforeStart.content[0]?.type === "text" ? syncBeforeStart.content[0].text : "").toContain("done-");
+    expect(
+      syncBeforeStart.content[0]?.type === "text" ? syncBeforeStart.content[0].text : "",
+    ).toContain("done-");
 
     await startSession({ type: "session_start" }, ctx);
 
@@ -226,31 +134,14 @@ describe("SubagentSessionRuntime public boundaries", () => {
       ctx,
     );
     expect(waitedA.details.status).toBe("completed");
-    expect(waitedA.content[0]?.type === "text" ? waitedA.content[0].text : "").not.toContain(
-      "done-",
-    );
-    const statusA = await jobTool.execute(
-      "status-a",
-      { action: "status", job_id: asyncA.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(statusA.content[0]?.type === "text" ? statusA.content[0].text : "").not.toContain(
-      "done-",
-    );
-    const resultA = await jobTool.execute(
-      "result-a",
-      { action: "result", job_id: asyncA.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(resultA.content[0]?.type === "text" ? resultA.content[0].text : "").toContain(
-      "done-",
-    );
 
-    const usageAfterA = await jobTool.execute("usage-a", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterA = await jobTool.execute(
+      "usage-a",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterA.content[0]?.text).not.toBe("No subagent usage recorded.");
 
     state.mode = "blockUntilAbort";
@@ -288,28 +179,47 @@ describe("SubagentSessionRuntime public boundaries", () => {
     });
     await replaceSession;
 
-    const oldList = await jobTool.execute("list-old", { action: "list" }, undefined, undefined, ctx);
-    expect(oldList.content[0]?.text).toBe("No subagent jobs.");
-    expect(state.abortCount).toBeGreaterThanOrEqual(1);
-
-    const oldStatus = await jobTool.execute(
-      "status-old",
-      { action: "status", job_id: asyncB.details.jobId },
+    const oldList = await jobTool.execute(
+      "list-old",
+      { action: "list" },
       undefined,
       undefined,
       ctx,
-    ).catch((error: unknown) => error);
+    );
+    expect(oldList.content[0]?.text).toBe("No subagent jobs.");
+    expect(state.abortCount).toBeGreaterThanOrEqual(1);
+
+    const oldStatus = await jobTool
+      .execute(
+        "status-old",
+        { action: "status", job_id: asyncB.details.jobId },
+        undefined,
+        undefined,
+        ctx,
+      )
+      .catch((error: unknown) => error);
     expect(oldStatus).toBeInstanceOf(Error);
     expect((oldStatus as Error).message).toContain(`Unknown subagent job: ${asyncB.details.jobId}`);
 
-    const usageAfterReplace = await jobTool.execute("usage-reset", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterReplace = await jobTool.execute(
+      "usage-reset",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterReplace.content[0]?.text).toBe("No subagent usage recorded.");
 
     state.mode = "complete";
     state.onBlockedStart = undefined;
     const asyncC = await startTool.execute(
       "async-c",
-      { name: "async-c", task: "fresh session", tools: ["read"], model: "test-provider/test-model" },
+      {
+        name: "async-c",
+        task: "fresh session",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -323,48 +233,14 @@ describe("SubagentSessionRuntime public boundaries", () => {
     );
     expect(waitedC.details.status).toBe("completed");
 
-    state.outputText = "large-result-marker" + "x".repeat(100_000);
-    const asyncLarge = await startTool.execute(
-      "async-large",
-      {
-        name: "async-large",
-        task: "large result",
-        tools: ["read"],
-        model: "test-provider/test-model",
-      },
-      undefined,
-      undefined,
-      ctx,
-    );
-    await jobTool.execute(
-      "wait-large",
-      { action: "wait", job_id: asyncLarge.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    const listLarge = await jobTool.execute(
-      "list-large",
-      { action: "list" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(listLarge.content[0]?.text).not.toContain("large-result-marker");
-    const resultLarge = await jobTool.execute(
-      "result-large",
-      { action: "result", job_id: asyncLarge.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    const resultLargeText = resultLarge.content[0]?.text ?? "";
-    expect(resultLargeText).toContain("large-result-marker");
-    expect(resultLargeText).toContain("Output truncated");
-    expect(Buffer.byteLength(resultLargeText, "utf8")).toBeLessThan(52_000);
-
     await shutdownSession({ type: "session_shutdown" }, ctx);
-    const usageAfterShutdown = await jobTool.execute("usage-shutdown", { action: "usage" }, undefined, undefined, ctx);
+    const usageAfterShutdown = await jobTool.execute(
+      "usage-shutdown",
+      { action: "usage" },
+      undefined,
+      undefined,
+      ctx,
+    );
     expect(usageAfterShutdown.content[0]?.text).toBe("No subagent usage recorded.");
   });
 });

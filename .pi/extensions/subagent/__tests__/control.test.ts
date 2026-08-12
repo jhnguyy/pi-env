@@ -4,19 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "../config";
-import {
-  SubagentAdmissionError,
-  SubagentRunKind,
-  SubagentRunOutcome,
-  SubagentRunSupervisor,
-  WorkspaceAccess,
-} from "../control";
-import { zeroUsage } from "../usage";
+import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
   return {
     ...DEFAULT_SUBAGENT_LIMITS,
-    allowedModels: ["test/model"],
     maxConcurrentRuns: 2,
     maxPendingRuns: 2,
     cancellationGraceMs: 10,
@@ -25,33 +17,31 @@ function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntime
 }
 
 function request(
-  kind: (typeof SubagentRunKind)[keyof typeof SubagentRunKind],
   cwd: string,
-  workspaceAccess: (typeof WorkspaceAccess)[keyof typeof WorkspaceAccess],
+  workspaceAccess: (typeof WorkspaceAccess)[keyof typeof WorkspaceAccess] = WorkspaceAccess.Read,
 ) {
-  return { kind, cwd, workspaceAccess, model: "test/model" };
+  return { cwd, workspaceAccess };
 }
 
 describe("shared subagent run supervisor", () => {
-  it("shares concurrency across sync, async, and direct runs", async () => {
-    const supervisor = new SubagentRunSupervisor("session", config());
-    const sync = await supervisor.acquire(request(SubagentRunKind.Sync, "/one", WorkspaceAccess.Read));
-    const asyncRun = await supervisor.acquire(request(SubagentRunKind.Async, "/two", WorkspaceAccess.Read));
-    let directStarted = false;
-    const direct = supervisor
-      .acquire(request(SubagentRunKind.Direct, "/three", WorkspaceAccess.Read))
-      .then((lease) => {
-        directStarted = true;
-        return lease;
-      });
-    await Promise.resolve();
-    expect(directStarted).toBe(false);
+  it("bounds shared admission and removes an aborted pending run", async () => {
+    const supervisor = new SubagentRunSupervisor(
+      "session",
+      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
+    );
+    const active = await supervisor.acquire(request("/active"));
+    const controller = new AbortController();
+    const pending = supervisor.acquire({ ...request("/pending"), signal: controller.signal });
+    await expect(supervisor.acquire(request("/full"))).rejects.toMatchObject({
+      reason: "capacity",
+    });
 
-    sync.release(SubagentRunOutcome.Completed);
-    const directLease = await direct;
-    expect(directStarted).toBe(true);
-    asyncRun.release(SubagentRunOutcome.Completed);
-    directLease.release(SubagentRunOutcome.Completed);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ reason: "aborted" });
+    active.release();
+
+    const replacement = await supervisor.acquire(request("/replacement"));
+    replacement.release();
     await supervisor.shutdown();
   });
 
@@ -61,98 +51,37 @@ describe("shared subagent run supervisor", () => {
     mkdirSync(join(workspace, ".git"));
     mkdirSync(child, { recursive: true });
     const supervisor = new SubagentRunSupervisor("session", config());
-    const firstWrite = await supervisor.acquire(
-      request(SubagentRunKind.Async, workspace, WorkspaceAccess.Write),
-    );
+
+    const firstWrite = await supervisor.acquire(request(workspace, WorkspaceAccess.Write));
     let secondWriteStarted = false;
-    const secondWrite = supervisor
-      .acquire(request(SubagentRunKind.Sync, child, WorkspaceAccess.Write))
-      .then((lease) => {
-        secondWriteStarted = true;
-        return lease;
-      });
-    const sharedRead = await supervisor.acquire(
-      request(SubagentRunKind.Direct, child, WorkspaceAccess.Read),
-    );
+    const secondWrite = supervisor.acquire(request(child, WorkspaceAccess.Write)).then((lease) => {
+      secondWriteStarted = true;
+      return lease;
+    });
+    const sharedRead = await supervisor.acquire(request(child));
     expect(secondWriteStarted).toBe(false);
 
-    sharedRead.release(SubagentRunOutcome.Completed);
-    firstWrite.release(SubagentRunOutcome.Completed);
+    sharedRead.release();
+    firstWrite.release();
     const secondWriteLease = await secondWrite;
     expect(secondWriteStarted).toBe(true);
-    secondWriteLease.release(SubagentRunOutcome.Completed);
+    secondWriteLease.release();
     await supervisor.shutdown();
     rmSync(workspace, { recursive: true, force: true });
   });
 
-  it("removes an aborted pending admission without starting it later", async () => {
-    const supervisor = new SubagentRunSupervisor(
-      "session",
-      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
-    );
-    const active = await supervisor.acquire(
-      request(SubagentRunKind.Sync, "/active", WorkspaceAccess.Read),
-    );
-    const controller = new AbortController();
-    const pending = supervisor.acquire({
-      ...request(SubagentRunKind.Async, "/pending", WorkspaceAccess.Read),
-      signal: controller.signal,
-    });
-    controller.abort();
-    await expect(pending).rejects.toMatchObject({ reason: "aborted" });
-
-    active.release(SubagentRunOutcome.Completed);
-    const replacement = await supervisor.acquire(
-      request(SubagentRunKind.Direct, "/replacement", WorkspaceAccess.Read),
-    );
-    replacement.release(SubagentRunOutcome.Completed);
-    await supervisor.shutdown();
-  });
-
-  it("aborts a run at its wall-time budget", async () => {
+  it("aborts a run at its wall-time limit", async () => {
     vi.useFakeTimers();
     try {
       const supervisor = new SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
-      const lease = await supervisor.acquire(
-        request(SubagentRunKind.Sync, "/timed", WorkspaceAccess.Read),
-      );
+      const lease = await supervisor.acquire(request("/timed"));
       expect(lease.signal.aborted).toBe(false);
-
       await vi.advanceTimersByTimeAsync(20);
       expect(lease.signal.aborted).toBe(true);
-      lease.release(SubagentRunOutcome.Interrupted);
+      lease.release();
       await supervisor.shutdown();
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("enforces model, capacity, token, and cost budgets", async () => {
-    const supervisor = new SubagentRunSupervisor(
-      "session",
-      config({ maxConcurrentRuns: 1, maxPendingRuns: 1, maxSessionTokens: 5, maxSessionCostUsd: 1 }),
-    );
-    await expect(
-      supervisor.acquire({
-        ...request(SubagentRunKind.Sync, "/one", WorkspaceAccess.Read),
-        model: "other/model",
-      }),
-    ).rejects.toMatchObject({ reason: "model" });
-
-    const active = await supervisor.acquire(request(SubagentRunKind.Sync, "/one", WorkspaceAccess.Read));
-    const pending = supervisor
-      .acquire(request(SubagentRunKind.Async, "/two", WorkspaceAccess.Read))
-      .catch((error: unknown) => error);
-    await expect(
-      supervisor.acquire(request(SubagentRunKind.Direct, "/three", WorkspaceAccess.Read)),
-    ).rejects.toMatchObject({ reason: "capacity" });
-
-    active.updateUsage({ ...zeroUsage(), input: 5, cost: 1 });
-    active.release(SubagentRunOutcome.Completed);
-    expect(await pending).toMatchObject({ reason: "budget" });
-    await expect(
-      supervisor.acquire(request(SubagentRunKind.Sync, "/four", WorkspaceAccess.Read)),
-    ).rejects.toBeInstanceOf(SubagentAdmissionError);
-    await supervisor.shutdown();
   });
 });

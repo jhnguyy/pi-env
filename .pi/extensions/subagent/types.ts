@@ -17,8 +17,7 @@ export const SubagentSessionState = {
   Active: "active",
   ShuttingDown: "shutting-down",
 } as const;
-export type SubagentSessionState =
-  (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
+export type SubagentSessionState = (typeof SubagentSessionState)[keyof typeof SubagentSessionState];
 
 export const SubagentJobToolStatus = {
   Usage: "usage",
@@ -35,7 +34,6 @@ export const ResolutionErrorReason = {
   ModelNotFound: "model_not_found",
   InvalidCwd: "invalid_cwd",
   UntrustedProjectAgent: "untrusted_project_agent",
-  UnsafeWorkspace: "unsafe_workspace",
 } as const;
 export type ResolutionErrorReason =
   (typeof ResolutionErrorReason)[keyof typeof ResolutionErrorReason];
@@ -60,7 +58,6 @@ export interface SubagentJobRenderDetails {
   sessionName?: string;
   count?: number;
   resultTruncated?: boolean;
-  restored?: boolean;
 }
 
 export type SubagentJobRenderStatus =

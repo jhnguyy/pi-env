@@ -36,7 +36,7 @@ const DESCRIPTION_INTRO = [
   "     `name` is required and creates a persistent `sub-<name>` transcript beside the parent.",
   "     If the agent file omits model, you MUST pass model explicitly.",
   '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
-  "  max_turns is optional; omit it to use only session token, cost, and time budgets. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
+  "  max_turns is optional; omit it to use the session time limit only. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
   "",
 ] as const;
 

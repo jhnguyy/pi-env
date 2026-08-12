@@ -92,9 +92,7 @@ describe("subagent resolver", () => {
     expect(result._tag).toBe(ResolutionResultTag.Ok);
     if (result._tag !== ResolutionResultTag.Ok) return;
     expect(result.value.tools[0]?.name).toBe("factory-notes");
-    expect(calls).toEqual([
-      { cwd: "/tmp", sessionGeneration: "generation-1", parentContext: ctx },
-    ]);
+    expect(calls).toEqual([{ cwd: "/tmp", sessionGeneration: "generation-1", parentContext: ctx }]);
   });
 
   it("resolves tools by capability subset", () => {
@@ -127,7 +125,9 @@ describe("subagent resolver", () => {
   });
 
   it("resolves provider/id and bare model names", () => {
-    expect(resolveModel("anthropic/claude-haiku-4-5", modelRegistry, ["read"])._tag).toBe(ResolutionResultTag.Ok);
+    expect(resolveModel("anthropic/claude-haiku-4-5", modelRegistry, ["read"])._tag).toBe(
+      ResolutionResultTag.Ok,
+    );
     expect(resolveModel("gpt-5.4-mini", modelRegistry, ["read"])._tag).toBe(ResolutionResultTag.Ok);
   });
 
@@ -140,10 +140,12 @@ describe("subagent resolver", () => {
   });
 
   it("prefers explicit system prompt over agent prompt", () => {
-    expect(resolveSystemPrompt(
-      { task: "x", system_prompt: "explicit" },
-      agentConfig({ systemPrompt: "agent" }),
-    )).toBe("explicit");
+    expect(
+      resolveSystemPrompt(
+        { task: "x", system_prompt: "explicit" },
+        agentConfig({ systemPrompt: "agent" }),
+      ),
+    ).toBe("explicit");
   });
 
   it("validates and canonicalizes only explicit cwd", () => {
@@ -154,7 +156,8 @@ describe("subagent resolver", () => {
       if (ok._tag === ResolutionResultTag.Ok) expect(ok.value).toBe(dir);
       const relative = resolveEffectiveCwd({ task: "x", cwd: "relative" }, dir);
       expect(relative._tag).toBe(ResolutionResultTag.Error);
-      if (relative._tag === ResolutionResultTag.Error) expect(relative.error.reason).toBe(ResolutionErrorReason.InvalidCwd);
+      if (relative._tag === ResolutionResultTag.Error)
+        expect(relative.error.reason).toBe(ResolutionErrorReason.InvalidCwd);
       const file = join(dir, "file");
       writeFileSync(file, "x");
       const notDir = resolveEffectiveCwd({ task: "x", cwd: file }, dir);
@@ -163,60 +166,6 @@ describe("subagent resolver", () => {
       expect(implicit).toEqual({ _tag: ResolutionResultTag.Ok, value: "/missing/default" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("enforces read-only and isolated-write workspace policies", () => {
-    const parent = mkdtempSync(join(tmpdir(), "pi-subagent-parent-"));
-    const isolated = mkdtempSync(join(tmpdir(), "pi-subagent-linked-worktree-"));
-    try {
-      writeFileSync(join(isolated, ".git"), "gitdir: /tmp/common/worktrees/child\n");
-      const ctx = { cwd: parent, modelRegistry } as any;
-      const readOnly = resolveSubagentExecutionPlan(
-        {
-          task: "x",
-          tools: ["bash"],
-          model: "anthropic/claude-haiku-4-5",
-          workspace_policy: "read-only",
-        },
-        ctx,
-        new Map(),
-      );
-      expect(readOnly._tag).toBe(ResolutionResultTag.Error);
-      if (readOnly._tag === ResolutionResultTag.Error) {
-        expect(readOnly.error.reason).toBe(ResolutionErrorReason.UnsafeWorkspace);
-      }
-
-      const sameWorkspace = resolveSubagentExecutionPlan(
-        {
-          task: "x",
-          tools: ["write"],
-          model: "anthropic/claude-haiku-4-5",
-          workspace_policy: "isolated-write",
-        },
-        ctx,
-        new Map(),
-      );
-      expect(sameWorkspace._tag).toBe(ResolutionResultTag.Error);
-
-      const separateWorktree = resolveSubagentExecutionPlan(
-        {
-          task: "x",
-          tools: ["write"],
-          model: "anthropic/claude-haiku-4-5",
-          cwd: isolated,
-          workspace_policy: "isolated-write",
-        },
-        ctx,
-        new Map(),
-      );
-      expect(separateWorktree._tag).toBe(ResolutionResultTag.Ok);
-      if (separateWorktree._tag === ResolutionResultTag.Ok) {
-        expect(separateWorktree.value.workspaceAccess).toBe(WorkspaceAccess.Write);
-      }
-    } finally {
-      rmSync(parent, { recursive: true, force: true });
-      rmSync(isolated, { recursive: true, force: true });
     }
   });
 

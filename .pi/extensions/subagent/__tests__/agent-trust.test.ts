@@ -84,62 +84,25 @@ describe("subagent agent source and trust policy", () => {
     expect(trusted._tag).toBe(ResolutionResultTag.Ok);
   });
 
-  it("keeps installed package and project origins distinct", () => {
+  it("keeps default and project scopes distinct", () => {
     const cwd = root();
     const packageRoot = root();
     writeAgent(join(packageRoot, ".pi", "agents"), "package-agent");
-    writeAgent(join(packageRoot, ".pi", "agents"), "duplicate-agent");
     writeAgent(join(cwd, ".pi", "agents"), "project-agent");
-    writeAgent(join(cwd, ".pi", "agents"), "duplicate-agent");
     mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".pi", "settings.json"),
-      JSON.stringify({ packages: [packageRoot] }),
-    );
+    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: [packageRoot] }));
 
     const defaultAgents = discoverAgents(cwd, "user");
-    expect(defaultAgents.agents.find((agent) => agent.name === "package-agent")?.source).toBe(
-      "package",
+    expect(defaultAgents.agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "package-agent", source: "package" }),
+      ]),
     );
     expect(defaultAgents.agents.some((agent) => agent.name === "project-agent")).toBe(false);
 
     const projectAgents = discoverAgents(cwd, "project");
-    expect(projectAgents.agents).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ name: "project-agent", source: "project" }),
-        expect.objectContaining({ name: "duplicate-agent", source: "project" }),
-      ]),
-    );
-
-    const packageDuplicate = resolveSubagentExecutionPlan(
-      {
-        name: "package-duplicate",
-        agent: "duplicate-agent",
-        agent_scope: "both",
-        agent_source: "package",
-        task: "task",
-      },
-      context(cwd, true),
-      new Map(),
-    );
-    expect(packageDuplicate._tag).toBe(ResolutionResultTag.Ok);
-    if (packageDuplicate._tag === ResolutionResultTag.Ok) {
-      expect(packageDuplicate.value.agentConfig?.source).toBe("package");
-    }
-
-    const projectDuplicate = resolveSubagentExecutionPlan(
-      {
-        name: "project-duplicate",
-        agent: "duplicate-agent",
-        agent_source: "project",
-        task: "task",
-      },
-      context(cwd, true),
-      new Map(),
-    );
-    expect(projectDuplicate._tag).toBe(ResolutionResultTag.Ok);
-    if (projectDuplicate._tag === ResolutionResultTag.Ok) {
-      expect(projectDuplicate.value.agentConfig?.source).toBe("project");
-    }
+    expect(projectAgents.agents).toEqual([
+      expect.objectContaining({ name: "project-agent", source: "project" }),
+    ]);
   });
 });

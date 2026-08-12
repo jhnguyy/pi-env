@@ -1,9 +1,9 @@
 import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { discoverAgents, type AgentScope, type AgentSource } from "./agents";
+import { discoverAgents, type AgentScope } from "./agents";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { WorkspaceAccess, type WorkspaceAccess as WorkspaceAccessValue } from "./control";
 import { BUILT_IN_TOOL_CONTRACTS } from "../_shared/built-in-tools";
@@ -26,10 +26,6 @@ export interface SubagentParams {
   cwd?: string;
   /** Project agents require both explicit project scope and a trusted project. */
   agent_scope?: AgentScope;
-  /** Select an exact origin when agents from more than one source have the same name. */
-  agent_source?: AgentSource;
-  /** Write/execute tools serialize by canonical workspace unless isolation is required. */
-  workspace_policy?: "read-only" | "serialize-write" | "isolated-write";
 }
 
 export interface ToolDef {
@@ -151,14 +147,8 @@ export function resolveAgentConfig(
 ): ResolutionResult<AgentResolution> {
   if (!params.agent) return resolutionOk({});
 
-  const scope = params.agent_scope ?? (params.agent_source === "project" ? "project" : "user");
-  const discovery = discoverAgents(cwd, scope);
-  const candidates = params.agent_source ? discovery.candidates : discovery.agents;
-  const agentConfig = candidates.find(
-    (candidate) =>
-      candidate.name === params.agent &&
-      (params.agent_source === undefined || candidate.source === params.agent_source),
-  );
+  const discovery = discoverAgents(cwd, params.agent_scope ?? "user");
+  const agentConfig = discovery.agents.find((candidate) => candidate.name === params.agent);
   if (!agentConfig) {
     const available = discovery.agents.map((a) => a.name).join(", ") || "none";
     return resolutionError({
@@ -232,15 +222,19 @@ function materializeTool(
   parentContext: ExtensionContext,
 ): AgentTool<any, any> {
   if (entry._tag === "built-in") return entry.definition.factory(cwd);
-  return entry.registration.createTool?.({
-    cwd,
-    sessionGeneration: entry.registration.sessionGeneration ?? "legacy",
-    parentContext,
-  }) ?? { ...entry.registration.tool };
+  return (
+    entry.registration.createTool?.({
+      cwd,
+      sessionGeneration: entry.registration.sessionGeneration ?? "legacy",
+      parentContext,
+    }) ?? { ...entry.registration.tool }
+  );
 }
 
 function entryCapabilities(entry: ToolCatalogEntry): readonly ToolCapability[] {
-  return entry._tag === "built-in" ? entry.definition.capabilities : entry.registration.capabilities;
+  return entry._tag === "built-in"
+    ? entry.definition.capabilities
+    : entry.registration.capabilities;
 }
 
 function materializeToolResolution(
@@ -359,73 +353,12 @@ export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentC
   );
 }
 
-function gitWorkspaceRoot(cwd: string): { root: string; linked: boolean } | undefined {
-  let current = cwd;
-  while (true) {
-    try {
-      const gitEntry = statSync(join(current, ".git"));
-      return { root: current, linked: gitEntry.isFile() };
-    } catch {}
-    const parent = join(current, "..");
-    let canonicalParent = parent;
-    try {
-      canonicalParent = realpathSync(parent);
-    } catch {}
-    if (canonicalParent === current) return undefined;
-    current = canonicalParent;
-  }
-}
-
-function workspacePolicyError(
-  params: SubagentParams,
-  ctx: ExtensionContext,
-  tools: ToolResolution,
-  effectiveCwd: string,
-  agentConfig: AgentConfig | undefined,
-): ResolutionError | undefined {
-  const policy = params.workspace_policy ?? agentConfig?.workspacePolicy ?? "serialize-write";
-  if (tools.workspaceAccess === WorkspaceAccess.Read) return undefined;
-  if (policy === "read-only") {
-    return {
-      reason: ResolutionErrorReason.UnsafeWorkspace,
-      message: "Write or execute tools are not allowed by the read-only workspace policy.",
-      toolNames: tools.toolNames,
-      modelOverride: params.model,
-    };
-  }
-  if (policy !== "isolated-write") return undefined;
-  let parentCwd = ctx.cwd;
-  try {
-    parentCwd = realpathSync(ctx.cwd);
-  } catch {}
-  const childWorkspace = gitWorkspaceRoot(effectiveCwd);
-  const parentWorkspace = gitWorkspaceRoot(parentCwd);
-  if (
-    !childWorkspace?.linked ||
-    childWorkspace.root === parentWorkspace?.root
-  ) {
-    return {
-      reason: ResolutionErrorReason.UnsafeWorkspace,
-      message: "The isolated-write policy requires a linked Git worktree separate from the parent cwd.",
-      toolNames: tools.toolNames,
-      modelOverride: params.model,
-    };
-  }
-  return undefined;
-}
-
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
 ): ResolutionResult<SubagentExecutionPlan> {
-  if (
-    params.agent &&
-    (params.agent_scope === "project" ||
-      params.agent_scope === "both" ||
-      params.agent_source === "project") &&
-    ctx.isProjectTrusted?.() !== true
-  ) {
+  if (params.agent && params.agent_scope === "project" && ctx.isProjectTrusted?.() !== true) {
     return resolutionError({
       reason: ResolutionErrorReason.UntrustedProjectAgent,
       message: "Project agents require an explicit project scope and a trusted project.",
@@ -448,14 +381,6 @@ export function resolveSubagentExecutionPlan(
     ctx,
   );
   if (!isResolutionOk(tools)) return tools;
-  const unsafeWorkspace = workspacePolicyError(
-    params,
-    ctx,
-    tools.value,
-    effectiveCwd.value,
-    agent.value.agentConfig,
-  );
-  if (unsafeWorkspace) return resolutionError(unsafeWorkspace);
 
   const model = resolveModel(
     params.model ?? agent.value.agentConfig?.model,

@@ -6,7 +6,6 @@ import { Type, type Static } from "typebox";
 import { discoverAgents } from "./agents";
 import { formatJobMetadata, formatJobResult, type SubagentJob } from "./jobs";
 import type { SubagentParams } from "./resolver";
-import { loadSubagentRuntimeConfig } from "./config";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import {
   renderSubagentCall,
@@ -15,11 +14,7 @@ import {
   renderSubagentResult,
   renderSubagentStartResult,
 } from "./render";
-import {
-  SubagentJobStatus,
-  SubagentJobToolStatus,
-  type SubagentJobRenderDetails,
-} from "./types";
+import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
 import { SubagentSessionRuntime } from "./session-runtime";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
@@ -66,21 +61,9 @@ const SUBAGENT_PARAMETERS = Type.Object({
     }),
   ),
   agent_scope: Type.Optional(
-    StringEnum(["user", "project", "both"] as const, {
+    StringEnum(["user", "project"] as const, {
       description:
         "Agent definition scope. Defaults to user and installed package agents. Project agents require explicit scope and project trust.",
-    }),
-  ),
-  agent_source: Type.Optional(
-    StringEnum(["user", "package", "project"] as const, {
-      description:
-        "Exact agent origin. Use this when agents from more than one source have the same name. Project origin requires project trust.",
-    }),
-  ),
-  workspace_policy: Type.Optional(
-    StringEnum(["read-only", "serialize-write", "isolated-write"] as const, {
-      description:
-        "Workspace policy. Write/execute tools serialize by canonical cwd by default. isolated-write requires a separate linked Git worktree.",
     }),
   ),
 });
@@ -99,7 +82,8 @@ const SUBAGENT_JOB_PARAMETERS = Type.Object({
   action: StringEnum(
     Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]],
     {
-      description: "Inspect, wait for, cancel, list, retrieve a bounded result, or summarize asynchronous subagent jobs.",
+      description:
+        "Inspect, wait for, cancel, list, retrieve a bounded result, or summarize asynchronous subagent jobs.",
     },
   ),
   job_id: Type.Optional(Type.String({ description: "Job ID (required except for list/usage)." })),
@@ -120,7 +104,6 @@ function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
     model: details?.model,
     sessionName: details?.sessionName,
     resultTruncated: job.resultTruncated,
-    restored: job.restored,
   };
 }
 
@@ -254,13 +237,6 @@ export default function (pi: ExtensionAPI) {
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
     const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
     const modelAnnotations = settings?.modelAnnotations ?? {};
-    let describedModelIds = enabledModelIds;
-    try {
-      describedModelIds = [
-        ...(loadSubagentRuntimeConfig(ctx.cwd, enabledModelIds).allowedModels ?? enabledModelIds),
-      ];
-    } catch {}
-
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{
       provider: string;
       id: string;
@@ -274,7 +250,7 @@ export default function (pi: ExtensionAPI) {
       [...registeredExtTools].map(([name, registration]) => [name, registration.capabilities]),
     );
     const description = buildDynamicDescription(
-      describedModelIds,
+      enabledModelIds,
       availableModels,
       agents,
       extToolNames,

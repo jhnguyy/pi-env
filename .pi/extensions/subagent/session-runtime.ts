@@ -7,24 +7,19 @@ import {
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
-import { readOptionalAgentSettings } from "../_shared/agent-settings";
-import { loadSubagentRuntimeConfig, resolveSubagentRuntimeConfig, type SubagentRuntimeConfig } from "./config";
+import {
+  loadSubagentRuntimeConfig,
+  resolveSubagentRuntimeConfig,
+  type SubagentRuntimeConfig,
+} from "./config";
 import {
   disposeSubagentRunSupervisor,
   getOrCreateSubagentRunSupervisor,
   SubagentAdmissionError,
   type SubagentRunSupervisor,
 } from "./control";
-import {
-  buildErrorDetails,
-  runSubagentEffect,
-  SUBAGENT_TELEMETRY_SERVICE_NAME,
-} from "./execute";
-import {
-  SubagentJobManager,
-  type SubagentJob,
-  type SubagentJobReceipt,
-} from "./jobs";
+import { buildErrorDetails, runSubagentEffect, SUBAGENT_TELEMETRY_SERVICE_NAME } from "./execute";
+import { SubagentJobManager, type SubagentJob } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
 import {
   SubagentJobStatus,
@@ -34,64 +29,6 @@ import {
   type SubagentSessionState as SubagentSessionStateValue,
 } from "./types";
 import { formatUsageCompact, SubagentUsageLedger } from "./usage";
-
-function restoredUsage(value: unknown): SubagentDetails["usage"] | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  const keys = ["input", "output", "cacheRead", "cacheWrite", "cost", "turns"] as const;
-  if (
-    !keys.every(
-      (key) =>
-        typeof candidate[key] === "number" &&
-        Number.isFinite(candidate[key]) &&
-        (candidate[key] as number) >= 0,
-    )
-  ) {
-    return undefined;
-  }
-  return candidate as unknown as SubagentDetails["usage"];
-}
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function receiptFromEntry(entry: any, cwd: string): SubagentJobReceipt | undefined {
-  if (entry.type !== "custom" || entry.customType !== "subagent-job") return undefined;
-  const value = entry.data as Partial<SubagentJobReceipt> | undefined;
-  const status = value?.status;
-  if (
-    !value ||
-    typeof value.jobId !== "string" ||
-    typeof status !== "string" ||
-    !Object.values(SubagentJobStatus).includes(status)
-  ) {
-    return undefined;
-  }
-  return {
-    jobId: value.jobId,
-    name: optionalString(value.name) ?? "unnamed",
-    task: optionalString(value.task) ?? "(task unavailable)",
-    status,
-    cwd: optionalString(value.cwd) ?? cwd,
-    sessionFile: optionalString(value.sessionFile),
-    usage: restoredUsage(value.usage),
-    errorMessage: optionalString(value.errorMessage),
-    resultText: optionalString(value.resultText),
-    resultTruncated: value.resultTruncated === true,
-    createdAt: optionalString(value.createdAt) ?? entry.timestamp,
-    finishedAt: optionalString(value.finishedAt),
-  };
-}
-
-function restoredReceipts(ctx: ExtensionContext): SubagentJobReceipt[] {
-  const latest = new Map<string, SubagentJobReceipt>();
-  for (const entry of ctx.sessionManager.getBranch()) {
-    const receipt = receiptFromEntry(entry, ctx.cwd);
-    if (receipt) latest.set(receipt.jobId, receipt);
-  }
-  return [...latest.values()];
-}
 
 export class SubagentSessionRuntime {
   private readonly ledger = new SubagentUsageLedger();
@@ -161,13 +98,11 @@ export class SubagentSessionRuntime {
         return false;
       }
 
-      const settings = readOptionalAgentSettings(undefined, ctx.cwd);
-      const enabledModels = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
       let config: SubagentRuntimeConfig;
       try {
-        config = loadSubagentRuntimeConfig(ctx.cwd, enabledModels);
+        config = loadSubagentRuntimeConfig(ctx.cwd);
       } catch {
-        config = resolveSubagentRuntimeConfig({}, enabledModels);
+        config = resolveSubagentRuntimeConfig({});
       }
       const sessionId = ctx.sessionManager.getSessionId();
       const supervisor = getOrCreateSubagentRunSupervisor(sessionId, config);
@@ -183,7 +118,7 @@ export class SubagentSessionRuntime {
         this.ledger,
         nextRuntime,
         config,
-        restoredReceipts(ctx),
+        supervisor,
       );
       this.sessionState = SubagentSessionState.Active;
       return true;

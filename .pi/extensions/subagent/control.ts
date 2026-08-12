@@ -3,16 +3,9 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Data, Effect } from "effect";
 
-import type { UsageStats } from "./types";
 import type { SubagentRuntimeConfig } from "./config";
+import type { UsageStats } from "./types";
 import { zeroUsage } from "./usage";
-
-export const SubagentRunKind = {
-  Sync: "sync",
-  Async: "async",
-  Direct: "direct",
-} as const;
-export type SubagentRunKind = (typeof SubagentRunKind)[keyof typeof SubagentRunKind];
 
 export const WorkspaceAccess = {
   Read: "read",
@@ -20,23 +13,13 @@ export const WorkspaceAccess = {
 } as const;
 export type WorkspaceAccess = (typeof WorkspaceAccess)[keyof typeof WorkspaceAccess];
 
-export const SubagentRunOutcome = {
-  Completed: "completed",
-  Failed: "failed",
-  Cancelled: "cancelled",
-  Interrupted: "interrupted",
-} as const;
-export type SubagentRunOutcome = (typeof SubagentRunOutcome)[keyof typeof SubagentRunOutcome];
-
 export class SubagentAdmissionError extends Data.TaggedError("SubagentAdmissionError")<{
-  readonly reason: "closed" | "capacity" | "model" | "budget" | "aborted";
+  readonly reason: "closed" | "capacity" | "aborted";
   readonly message: string;
 }> {}
 
 export interface SubagentAdmissionRequest {
   readonly runId?: string;
-  readonly kind: SubagentRunKind;
-  readonly model: string;
   readonly cwd: string;
   readonly workspaceAccess: WorkspaceAccess;
   readonly signal?: AbortSignal;
@@ -46,7 +29,7 @@ export interface SubagentRunLease {
   readonly runId: string;
   readonly signal: AbortSignal;
   updateUsage(usage: UsageStats): void;
-  release(outcome: SubagentRunOutcome, usage?: UsageStats): void;
+  release(usage?: UsageStats): void;
 }
 
 interface PendingAdmission {
@@ -60,7 +43,6 @@ interface PendingAdmission {
 interface ActiveRun {
   readonly request: SubagentAdmissionRequest;
   readonly controller: AbortController;
-  readonly signal: AbortSignal;
   readonly done: Promise<void>;
   readonly finish: () => void;
   usage: UsageStats;
@@ -82,10 +64,6 @@ function registry(): SupervisorRegistry {
 
 function cloneUsage(usage: UsageStats): UsageStats {
   return { ...usage };
-}
-
-function usageTokens(usage: UsageStats): number {
-  return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
 function canonicalWorkspaceKey(cwd: string): string {
@@ -118,7 +96,10 @@ export class SubagentRunSupervisor {
   private readonly totalUsage = zeroUsage();
   private closed = false;
 
-  constructor(readonly sessionId: string, readonly config: SubagentRuntimeConfig) {}
+  constructor(
+    readonly sessionId: string,
+    readonly config: SubagentRuntimeConfig,
+  ) {}
 
   acquireEffect(
     request: SubagentAdmissionRequest,
@@ -143,7 +124,12 @@ export class SubagentRunSupervisor {
       const onAbort = () => {
         const index = this.pending.indexOf(pending);
         if (index >= 0) this.pending.splice(index, 1);
-        reject(new SubagentAdmissionError({ reason: "aborted", message: "Subagent admission aborted." }));
+        reject(
+          new SubagentAdmissionError({
+            reason: "aborted",
+            message: "Subagent admission aborted.",
+          }),
+        );
       };
       if (request.signal) {
         request.signal.addEventListener("abort", onAbort, { once: true });
@@ -165,7 +151,10 @@ export class SubagentRunSupervisor {
   async shutdown(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    const error = new SubagentAdmissionError({ reason: "closed", message: "Parent subagent session is shutting down." });
+    const error = new SubagentAdmissionError({
+      reason: "closed",
+      message: "Parent subagent session is shutting down.",
+    });
     for (const pending of this.pending.splice(0)) {
       pending.cleanupAbort?.();
       pending.reject(error);
@@ -179,50 +168,37 @@ export class SubagentRunSupervisor {
     for (const [runId] of activeRuns) this.release(runId);
   }
 
-  private budgetExhausted(): boolean {
-    return (
-      usageTokens(this.totalUsage) >= this.config.maxSessionTokens ||
-      this.totalUsage.cost >= this.config.maxSessionCostUsd
-    );
-  }
-
-  private rejectPendingForBudget(): void {
-    if (!this.budgetExhausted()) return;
-    const error = new SubagentAdmissionError({
-      reason: "budget",
-      message: "Subagent session budget is exhausted.",
-    });
-    for (const pending of this.pending.splice(0)) {
-      pending.cleanupAbort?.();
-      pending.reject(error);
-    }
-  }
-
   private rejection(request: SubagentAdmissionRequest): SubagentAdmissionError | undefined {
     if (this.closed) {
-      return new SubagentAdmissionError({ reason: "closed", message: "Parent subagent session is not active." });
-    }
-    if (request.signal?.aborted) {
-      return new SubagentAdmissionError({ reason: "aborted", message: "Subagent admission aborted." });
-    }
-    if (this.config.allowedModels && !this.config.allowedModels.includes(request.model)) {
       return new SubagentAdmissionError({
-        reason: "model",
-        message: `Subagent model is not allowed in this session: ${request.model}`,
+        reason: "closed",
+        message: "Parent subagent session is not active.",
       });
     }
-    if (this.budgetExhausted()) {
-      return new SubagentAdmissionError({ reason: "budget", message: "Subagent session budget is exhausted." });
+    if (request.signal?.aborted) {
+      return new SubagentAdmissionError({
+        reason: "aborted",
+        message: "Subagent admission aborted.",
+      });
     }
-    if (this.active.size + this.pending.length >= this.config.maxPendingRuns + this.config.maxConcurrentRuns) {
-      return new SubagentAdmissionError({ reason: "capacity", message: "Subagent run capacity is full." });
+    if (
+      this.active.size + this.pending.length >=
+      this.config.maxPendingRuns + this.config.maxConcurrentRuns
+    ) {
+      return new SubagentAdmissionError({
+        reason: "capacity",
+        message: "Subagent run capacity is full.",
+      });
     }
     return undefined;
   }
 
   private canStart(pending: PendingAdmission): boolean {
     if (this.active.size >= this.config.maxConcurrentRuns) return false;
-    return pending.request.workspaceAccess !== WorkspaceAccess.Write || !this.activeWorkspaceWriters.has(pending.request.cwd);
+    return (
+      pending.request.workspaceAccess !== WorkspaceAccess.Write ||
+      !this.activeWorkspaceWriters.has(pending.request.cwd)
+    );
   }
 
   private drain(): void {
@@ -233,7 +209,12 @@ export class SubagentRunSupervisor {
       const [pending] = this.pending.splice(index, 1);
       pending.cleanupAbort?.();
       if (pending.request.signal?.aborted) {
-        pending.reject(new SubagentAdmissionError({ reason: "aborted", message: "Subagent admission aborted." }));
+        pending.reject(
+          new SubagentAdmissionError({
+            reason: "aborted",
+            message: "Subagent admission aborted.",
+          }),
+        );
         continue;
       }
       pending.resolve(this.start(pending.runId, pending.request));
@@ -242,7 +223,9 @@ export class SubagentRunSupervisor {
 
   private start(runId: string, request: SubagentAdmissionRequest): SubagentRunLease {
     const controller = new AbortController();
-    const signal = request.signal ? AbortSignal.any([request.signal, controller.signal]) : controller.signal;
+    const signal = request.signal
+      ? AbortSignal.any([request.signal, controller.signal])
+      : controller.signal;
     let finish!: () => void;
     const done = new Promise<void>((resolve) => {
       finish = resolve;
@@ -250,7 +233,6 @@ export class SubagentRunSupervisor {
     const active: ActiveRun = {
       request,
       controller,
-      signal,
       done,
       finish,
       usage: zeroUsage(),
@@ -261,13 +243,15 @@ export class SubagentRunSupervisor {
       this.config.maxRunMs,
     );
     this.active.set(runId, active);
-    if (request.workspaceAccess === WorkspaceAccess.Write) this.activeWorkspaceWriters.add(request.cwd);
+    if (request.workspaceAccess === WorkspaceAccess.Write) {
+      this.activeWorkspaceWriters.add(request.cwd);
+    }
 
     return {
       runId,
       signal,
       updateUsage: (usage) => this.updateUsage(runId, usage),
-      release: (_outcome, usage) => this.release(runId, usage),
+      release: (usage) => this.release(runId, usage),
     };
   }
 
@@ -276,10 +260,6 @@ export class SubagentRunSupervisor {
     if (!active || active.released) return;
     addUsageDelta(this.totalUsage, active.usage, usage);
     active.usage = cloneUsage(usage);
-    if (this.budgetExhausted()) {
-      active.controller.abort(new Error("Subagent session budget exceeded."));
-      this.rejectPendingForBudget();
-    }
   }
 
   private release(runId: string, usage?: UsageStats): void {
