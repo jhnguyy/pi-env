@@ -122,7 +122,7 @@ function summarizeComment(comment: Comment): CommentSummary {
 }
 
 export function sdkCursorPage<T>(
-  nodes: T[],
+  nodes: readonly T[],
   pageInfo: { hasNextPage: boolean; endCursor?: string | null },
   totalCount?: number,
   inputCursor?: string,
@@ -133,7 +133,7 @@ export function sdkCursorPage<T>(
     });
   }
   return {
-    nodes,
+    nodes: [...nodes],
     hasMore: pageInfo.hasNextPage,
     ...(pageInfo.endCursor ? { endCursor: pageInfo.endCursor } : {}),
     ...(totalCount === undefined ? {} : { totalCount }),
@@ -183,6 +183,14 @@ function mapSdkError(error: unknown): never {
     retryable,
     ...(error.status ? { details: { status: error.status } } : {}),
   });
+}
+
+function resourcePage<T>(
+  input: ResourcePageInput,
+  result: { nodes: readonly T[]; pageInfo: { hasNextPage: boolean; endCursor?: string | null } },
+  summarize: (item: T) => LinearResourceSummary,
+): CursorPage<LinearResourceSummary> {
+  return sdkCursorPage(result.nodes.map(summarize), result.pageInfo, undefined, input.cursor);
 }
 
 export class LinearSdkApi implements LinearApi {
@@ -261,71 +269,40 @@ export class LinearSdkApi implements LinearApi {
     return this.#guard(async () => {
       const variables = sdkResourceVariables(input);
       switch (input.type) {
-        case LinearResourceType.Teams: {
-          const result = await this.#client.teams(variables);
-          return sdkCursorPage(
-            result.nodes.map((item) => ({
-              type: input.type,
-              id: item.id,
-              name: item.name,
-              key: item.key,
-            })),
-            result.pageInfo,
-            undefined,
-            input.cursor,
-          );
-        }
-        case LinearResourceType.Users: {
-          const result = await this.#client.users(variables);
-          return sdkCursorPage(
-            result.nodes.map((item) => ({
-              type: input.type,
-              id: item.id,
-              name: item.name,
-              email: item.email,
-            })),
-            result.pageInfo,
-            undefined,
-            input.cursor,
-          );
-        }
-        case LinearResourceType.States: {
-          const result = await this.#client.workflowStates(variables);
-          return sdkCursorPage(
-            result.nodes.map((item) => ({
-              type: input.type,
-              id: item.id,
-              name: item.name,
-              ...(item.teamId ? { teamId: item.teamId } : {}),
-            })),
-            result.pageInfo,
-            undefined,
-            input.cursor,
-          );
-        }
-        case LinearResourceType.Projects: {
-          const result = await this.#client.projects(variables);
-          return sdkCursorPage(
-            result.nodes.map((item) => ({ type: input.type, id: item.id, name: item.name })),
-            result.pageInfo,
-            undefined,
-            input.cursor,
-          );
-        }
-        case LinearResourceType.Labels: {
-          const result = await this.#client.issueLabels(variables);
-          return sdkCursorPage(
-            result.nodes.map((item) => ({
-              type: input.type,
-              id: item.id,
-              name: item.name,
-              ...(item.teamId ? { teamId: item.teamId } : {}),
-            })),
-            result.pageInfo,
-            undefined,
-            input.cursor,
-          );
-        }
+        case LinearResourceType.Teams:
+          return resourcePage(input, await this.#client.teams(variables), (item) => ({
+            type: input.type,
+            id: item.id,
+            name: item.name,
+            key: item.key,
+          }));
+        case LinearResourceType.Users:
+          return resourcePage(input, await this.#client.users(variables), (item) => ({
+            type: input.type,
+            id: item.id,
+            name: item.name,
+            email: item.email,
+          }));
+        case LinearResourceType.States:
+          return resourcePage(input, await this.#client.workflowStates(variables), (item) => ({
+            type: input.type,
+            id: item.id,
+            name: item.name,
+            ...(item.teamId ? { teamId: item.teamId } : {}),
+          }));
+        case LinearResourceType.Projects:
+          return resourcePage(input, await this.#client.projects(variables), (item) => ({
+            type: input.type,
+            id: item.id,
+            name: item.name,
+          }));
+        case LinearResourceType.Labels:
+          return resourcePage(input, await this.#client.issueLabels(variables), (item) => ({
+            type: input.type,
+            id: item.id,
+            name: item.name,
+            ...(item.teamId ? { teamId: item.teamId } : {}),
+          }));
       }
     });
   }
