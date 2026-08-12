@@ -5,6 +5,7 @@ const lazyFiles = [
   ".pi/extensions/analyze/index.ts",
   ".pi/extensions/web-context/index.ts",
   ".pi/extensions/introspection/index.ts",
+  ".pi/extensions/linear/tools.ts",
 ];
 
 describe("lazy tool metadata", () => {

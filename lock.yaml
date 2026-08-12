@@ -108,9 +108,21 @@ importers:
 
   .pi/extensions/linear:
     dependencies:
+      '@earendil-works/pi-ai':
+        specifier: '*'
+        version: 0.83.0
+      '@earendil-works/pi-coding-agent':
+        specifier: '*'
+        version: 0.83.0
       '@linear/sdk':
-        specifier: ^89.0.0
+        specifier: 89.0.0
         version: 89.0.0(graphql@17.0.2)
+      effect:
+        specifier: 4.0.0-beta.97
+        version: 4.0.0-beta.97
+      typebox:
+        specifier: '*'
+        version: 1.3.3
 
   .pi/extensions/pi-update: {}
 

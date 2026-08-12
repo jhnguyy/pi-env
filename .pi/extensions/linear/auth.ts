@@ -1,178 +1,121 @@
-import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Data, Schema } from "effect";
+import type { LinearIdentity } from "./api";
+import { LinearErrorCode, LinearExtensionError, linearError } from "./domain";
 import {
   buildAuthorizationUrl,
   buildOAuthAppSetupUrl,
+  callbackUri,
   createPkceChallenge,
   exchangeAuthorizationCode,
+  parseManualCallback,
   refreshOAuthToken,
   revokeOAuthToken,
   startLoopbackCallback,
   type LoopbackCallback,
-  type OAuthTokenResponse,
 } from "./oauth";
+import {
+  configuredConnectionSelector,
+  resolveConnectionReference,
+  selectConnection,
+  type LinearSelectionContext,
+} from "./selection";
+import {
+  LinearConfigRepository,
+  LinearGrantRepository,
+  type LinearAppConfig,
+  type LinearConnectionConfig,
+  type LinearConfigStore,
+  type LinearGrant,
+  type LinearGrantStore,
+} from "./storage";
 
-const CredentialsSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  clientId: Schema.String,
-  accessToken: Schema.String,
-  refreshToken: Schema.String,
-  expiresAt: Schema.Number,
-  tokenType: Schema.String,
-  scope: Schema.String,
-});
+export type LinearAuthContext = Pick<
+  ExtensionContext,
+  "cwd" | "hasUI" | "isProjectTrusted" | "mode" | "ui"
+>;
+export type LoginMode = "local" | "manual";
 
-export interface LinearCredentials {
-  version: 1;
-  clientId: string;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-  tokenType: string;
-  scope: string;
+export interface LoginOptions {
+  mode: LoginMode;
+  write: boolean;
+  clientId?: string;
+  callbackPort?: number;
+  name?: string;
 }
 
-export class LinearAuthError extends Data.TaggedError("LinearAuthError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
-export class LinearAuthRequiredError extends Data.TaggedError("LinearAuthRequiredError")<{
-  readonly message: string;
-}> {}
-
-export interface CredentialStore {
-  read(): Promise<LinearCredentials | null>;
-  write(credentials: LinearCredentials): Promise<void>;
-  remove(): Promise<void>;
-}
-
-export class FileCredentialStore implements CredentialStore {
-  constructor(readonly path = join(getAgentDir(), "linear", "credentials.json")) {}
-
-  async read(): Promise<LinearCredentials | null> {
-    let content: string;
-    try {
-      const metadata = await lstat(this.path);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) {
-        throw new LinearAuthError({
-          message: `Linear credentials at ${this.path} must be a regular file.`,
-        });
-      }
-      if (process.getuid && metadata.uid !== process.getuid()) {
-        throw new LinearAuthError({
-          message: `Linear credentials at ${this.path} must be owned by the current user.`,
-        });
-      }
-      if ((metadata.mode & 0o077) !== 0) await chmod(this.path, 0o600);
-      content = await readFile(this.path, "utf8");
-    } catch (cause) {
-      if (isMissingFileError(cause)) return null;
-      if (cause instanceof LinearAuthError) throw cause;
-      throw new LinearAuthError({
-        message: `Cannot read Linear credentials from ${this.path}.`,
-        cause,
-      });
-    }
-
-    try {
-      return Schema.decodeUnknownSync(CredentialsSchema)(JSON.parse(content)) as LinearCredentials;
-    } catch {
-      throw new LinearAuthError({
-        message: `Linear credentials at ${this.path} are invalid. Run /linear-auth logout, then /linear-auth login.`,
-      });
-    }
-  }
-
-  async write(credentials: LinearCredentials): Promise<void> {
-    const directory = dirname(this.path);
-    const temporaryDirectory = join(directory, `.write-${process.pid}-${randomUUID()}`);
-    const temporaryPath = join(temporaryDirectory, "credentials.json");
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await chmod(directory, 0o700);
-
-    try {
-      await mkdir(temporaryDirectory, { mode: 0o700 });
-      const handle = await open(temporaryPath, "wx", 0o600);
-      try {
-        await handle.writeFile(`${JSON.stringify(credentials, null, 2)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporaryPath, this.path);
-      await chmod(this.path, 0o600);
-      await rm(temporaryDirectory, { recursive: true, force: true });
-      await syncDirectory(directory);
-    } catch (cause) {
-      await rm(temporaryDirectory, { recursive: true, force: true });
-      throw new LinearAuthError({
-        message: `Cannot save Linear credentials to ${this.path}.`,
-        cause,
-      });
-    }
-  }
-
-  async remove(): Promise<void> {
-    try {
-      await rm(this.path, { force: true });
-    } catch (cause) {
-      throw new LinearAuthError({
-        message: `Cannot remove Linear credentials from ${this.path}.`,
-        cause,
-      });
-    }
-  }
-}
-
-function isMissingFileError(cause: unknown): cause is NodeJS.ErrnoException {
-  return cause instanceof Error && "code" in cause && cause.code === "ENOENT";
-}
-
-async function syncDirectory(path: string): Promise<void> {
-  if (process.platform === "win32") return;
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-
-export type LinearAuthContext = Pick<ExtensionContext, "hasUI" | "mode" | "ui">;
-
-export interface AuthManagerOptions {
-  store?: CredentialStore;
+export interface AuthCoordinatorOptions {
+  configRepository?: LinearConfigStore;
+  grantRepository?: LinearGrantStore;
+  identifyAccessToken: (accessToken: string, signal?: AbortSignal) => Promise<LinearIdentity>;
   now?: () => number;
   fetcher?: typeof fetch;
-  callbackPort?: number;
-  callbackTimeoutMs?: number;
-  clientId?: string;
   openExternal?: (url: string, signal?: AbortSignal) => Promise<boolean>;
   startCallback?: typeof startLoopbackCallback;
+  defaultCallbackPort?: number;
+  callbackTimeoutMs?: number;
 }
 
-export interface LogoutResult {
-  hadCredentials: boolean;
-  revoked: boolean;
+export interface AccessGrant {
+  accessToken: string;
+  connection: LinearConnectionConfig;
+}
+
+export interface LinearAuthAccess {
+  accessToken(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<AccessGrant>;
+  refreshAfterAuthenticationError(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<AccessGrant>;
+}
+
+export interface ConnectionStatus {
+  connection: LinearConnectionConfig;
+  authenticated: boolean;
+  expiresAt?: number;
+  scopes: readonly string[];
+  selected: boolean;
 }
 
 const DEFAULT_CALLBACK_PORT = 43_921;
 const DEFAULT_CALLBACK_TIMEOUT_MS = 5 * 60_000;
 const REFRESH_WINDOW_MS = 60_000;
-const OAUTH_SCOPES = ["read", "write"] as const;
 
-function credentialsFromToken(
+function parseCallbackPort(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw linearError(
+      LinearErrorCode.Validation,
+      "LINEAR_OAUTH_PORT must be an integer from 1 through 65535.",
+    );
+  }
+  return port;
+}
+
+function parseScopes(scope: string): string[] {
+  return [
+    ...new Set(
+      scope
+        .split(/[\s,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function grantFromToken(
+  connectionId: string,
   clientId: string,
-  token: OAuthTokenResponse,
+  token: Awaited<ReturnType<typeof exchangeAuthorizationCode>>,
   now: number,
-): LinearCredentials {
+): LinearGrant {
   return {
-    version: 1,
+    connectionId,
     clientId,
     accessToken: token.accessToken,
     refreshToken: token.refreshToken,
@@ -180,18 +123,6 @@ function credentialsFromToken(
     tokenType: token.tokenType,
     scope: token.scope,
   };
-}
-
-function callbackPortFromEnvironment(): number {
-  const value = process.env.LINEAR_OAUTH_PORT;
-  if (!value) return DEFAULT_CALLBACK_PORT;
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new LinearAuthError({
-      message: "LINEAR_OAUTH_PORT must be an integer from 1 through 65535.",
-    });
-  }
-  return port;
 }
 
 export function externalOpenCommand(
@@ -211,249 +142,435 @@ export function createExternalOpener(
   return async (url, signal) => {
     const { command, args } = externalOpenCommand(process.platform, url);
     try {
-      const result = await pi.exec(command, args, { signal, timeout: 10_000 });
-      return result.code === 0;
+      return (await pi.exec(command, args, { signal, timeout: 10_000 })).code === 0;
     } catch {
       return false;
     }
   };
 }
 
-export class LinearAuthManager {
-  readonly store: CredentialStore;
+export class LinearAuthCoordinator implements LinearAuthAccess {
+  readonly configRepository: LinearConfigStore;
+  readonly grantRepository: LinearGrantStore;
+  readonly #identifyAccessToken: AuthCoordinatorOptions["identifyAccessToken"];
   readonly #now: () => number;
   readonly #fetcher: typeof fetch;
-  readonly #callbackPort: number;
-  readonly #callbackTimeoutMs: number;
-  readonly #configuredClientId?: string;
   readonly #openExternal: (url: string, signal?: AbortSignal) => Promise<boolean>;
   readonly #startCallback: typeof startLoopbackCallback;
-  #loginPromise?: Promise<LinearCredentials>;
-  #refreshPromise?: Promise<LinearCredentials>;
-  #activeLoginController?: AbortController;
+  readonly #defaultCallbackPort?: number;
+  readonly #callbackTimeoutMs: number;
   readonly #lifecycleController = new AbortController();
+  #activeController?: AbortController;
+  #tail: Promise<void> = Promise.resolve();
+  #generation = 0;
 
-  constructor(options: AuthManagerOptions = {}) {
-    this.store = options.store ?? new FileCredentialStore();
+  constructor(options: AuthCoordinatorOptions) {
+    this.configRepository = options.configRepository ?? new LinearConfigRepository();
+    this.grantRepository = options.grantRepository ?? new LinearGrantRepository();
+    this.#identifyAccessToken = options.identifyAccessToken;
     this.#now = options.now ?? Date.now;
     this.#fetcher = options.fetcher ?? fetch;
-    this.#callbackPort = options.callbackPort ?? callbackPortFromEnvironment();
-    this.#callbackTimeoutMs = options.callbackTimeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
-    this.#configuredClientId = options.clientId ?? process.env.LINEAR_OAUTH_CLIENT_ID;
     this.#openExternal = options.openExternal ?? (async () => false);
     this.#startCallback = options.startCallback ?? startLoopbackCallback;
+    this.#defaultCallbackPort = options.defaultCallbackPort;
+    this.#callbackTimeoutMs = options.callbackTimeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
   }
 
-  async status(): Promise<string> {
-    const credentials = await this.store.read();
-    if (!credentials) return "Linear is not authenticated. Run /linear-auth login.";
-    if (credentials.expiresAt <= this.#now()) {
-      return "Linear access has expired. The next Linear request will refresh it.";
-    }
-    return `Linear is authenticated until ${new Date(credentials.expiresAt).toISOString()} with scope: ${credentials.scope}.`;
-  }
-
-  async login(
+  login(
     ctx: LinearAuthContext,
+    options: LoginOptions,
     signal?: AbortSignal,
-    force = false,
-  ): Promise<LinearCredentials> {
-    if (!ctx.hasUI) throw authRequired();
-    if (!force) {
-      const existing = await this.store.read();
-      if (existing && existing.expiresAt > this.#now() + REFRESH_WINDOW_MS) return existing;
-      if (existing) {
+  ): Promise<LinearConnectionConfig> {
+    if (!ctx.hasUI) {
+      return Promise.reject(
+        linearError(
+          LinearErrorCode.SetupRequired,
+          "Linear login requires TUI or RPC interaction.",
+          {
+            recovery: "Run /linear-auth login from TUI or an RPC client that handles UI prompts.",
+          },
+        ),
+      );
+    }
+    return this.#exclusive(signal, async (operation) => {
+      const app = await this.#selectOrCreateApp(ctx, options, operation.signal);
+      const redirectUri = callbackUri(app.callbackPort);
+      const pkce = createPkceChallenge();
+      const requestedScopes = options.write ? ["read", "write"] : ["read"];
+      let callback: LoopbackCallback | undefined;
+      try {
+        let code: string;
+        if (options.mode === "local") {
+          callback = await this.#startCallback({
+            port: app.callbackPort,
+            state: pkce.state,
+            timeoutMs: this.#callbackTimeoutMs,
+            signal: operation.signal,
+          });
+        }
+        const authorizationUrl = buildAuthorizationUrl({
+          clientId: app.clientId,
+          redirectUri,
+          scope: requestedScopes,
+          pkce,
+        });
+        if (options.mode === "manual") {
+          ctx.ui.notify(`Open this URL to authorize Linear:\n${authorizationUrl}`, "info");
+        } else if (!(await this.#openExternal(authorizationUrl, operation.signal))) {
+          ctx.ui.notify(`Open this URL to authorize Linear:\n${authorizationUrl}`, "warning");
+        }
+        if (options.mode === "manual") {
+          const pasted = await ctx.ui.input(
+            "Linear OAuth callback",
+            "After the redirect fails, paste the complete browser URL",
+            { signal: operation.signal },
+          );
+          if (!pasted)
+            throw linearError(
+              LinearErrorCode.OAuthCancelled,
+              "Linear authorization was cancelled.",
+            );
+          code = parseManualCallback(pasted, redirectUri, pkce.state);
+        } else {
+          code = await callback!.code;
+        }
+        const token = await exchangeAuthorizationCode({
+          code,
+          clientId: app.clientId,
+          redirectUri,
+          verifier: pkce.verifier,
+          signal: operation.signal,
+          fetcher: this.#fetcher,
+        });
+        const grantedScopes = parseScopes(token.scope);
+        for (const scope of requestedScopes) {
+          if (!grantedScopes.includes(scope)) {
+            throw linearError(
+              LinearErrorCode.InsufficientScope,
+              `Linear did not grant the ${scope} scope.`,
+            );
+          }
+        }
+        const identity = await this.#identifyAccessToken(token.accessToken, operation.signal);
+        const connectionId = `${identity.organization.id}:${identity.viewer.id}`;
+        const [configBefore, grantsBefore] = await Promise.all([
+          this.configRepository.read(),
+          this.grantRepository.read(),
+        ]);
+        const existing = configBefore.connections[connectionId];
+        const previousGrant = grantsBefore.grants[connectionId];
+        const timestamp = new Date(this.#now()).toISOString();
+        const connection: LinearConnectionConfig = {
+          id: connectionId,
+          name:
+            options.name?.trim() ||
+            existing?.name ||
+            `${identity.organization.urlKey}/${identity.viewer.email}`,
+          appClientId: app.clientId,
+          organization: identity.organization,
+          viewer: identity.viewer,
+          grantedScopes,
+          createdAt: existing?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+        operation.assertCurrent();
+        await this.configRepository.saveConnection(connection);
         try {
-          return await this.#refresh(existing, signal);
-        } catch {
-          // Continue with a new authorization when the stored grant cannot refresh.
+          operation.assertCurrent();
+          await this.grantRepository.put(
+            grantFromToken(connectionId, app.clientId, token, this.#now()),
+          );
+          operation.assertCurrent();
+          return connection;
+        } catch (error) {
+          if (previousGrant) await this.grantRepository.put(previousGrant);
+          else await this.grantRepository.remove(connectionId);
+          if (existing) await this.configRepository.saveConnection(existing);
+          else await this.configRepository.removeConnection(connectionId);
+          throw error;
+        }
+      } finally {
+        await callback?.close();
+      }
+    });
+  }
+
+  async status(ctx: LinearSelectionContext): Promise<ConnectionStatus[]> {
+    const [config, grants] = await Promise.all([
+      this.configRepository.read(),
+      this.grantRepository.read(),
+    ]);
+    const configuredSelector = await configuredConnectionSelector(ctx);
+    const selectedReference = configuredSelector ?? config.defaultConnection;
+    const selected = selectedReference
+      ? resolveConnectionReference(selectedReference, config).id
+      : undefined;
+    return Object.values(config.connections).map((connection) => {
+      const grant = grants.grants[connection.id];
+      return {
+        connection,
+        authenticated: Boolean(grant),
+        ...(grant ? { expiresAt: grant.expiresAt } : {}),
+        scopes: grant ? parseScopes(grant.scope) : connection.grantedScopes,
+        selected: connection.id === selected,
+      };
+    });
+  }
+
+  async use(reference: string): Promise<LinearConnectionConfig> {
+    const config = await this.configRepository.read();
+    const connection = resolveConnectionReference(reference, config);
+    await this.configRepository.setDefaultConnection(connection.id);
+    return connection;
+  }
+
+  accessToken(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<AccessGrant> {
+    return this.#exclusive(signal, async (operation) => {
+      const [config, grants] = await Promise.all([
+        this.configRepository.read(),
+        this.grantRepository.read(),
+      ]);
+      const connection = await selectConnection(ctx, config, grants);
+      let grant = grants.grants[connection.id];
+      if (!grant) throw authRequired(connection.id);
+      this.#requireScope(grant, requiredScope);
+      if (grant.expiresAt <= this.#now() + REFRESH_WINDOW_MS) {
+        grant = await this.#refreshGrant(grant, operation);
+      }
+      operation.assertCurrent();
+      return { accessToken: grant.accessToken, connection };
+    });
+  }
+
+  refreshAfterAuthenticationError(
+    ctx: LinearSelectionContext,
+    requiredScope: "read" | "write",
+    signal?: AbortSignal,
+  ): Promise<AccessGrant> {
+    return this.#exclusive(signal, async (operation) => {
+      const [config, grants] = await Promise.all([
+        this.configRepository.read(),
+        this.grantRepository.read(),
+      ]);
+      const connection = await selectConnection(ctx, config, grants);
+      const grant = grants.grants[connection.id];
+      if (!grant) throw authRequired(connection.id);
+      this.#requireScope(grant, requiredScope);
+      const refreshed = await this.#refreshGrant(grant, operation);
+      operation.assertCurrent();
+      return { accessToken: refreshed.accessToken, connection };
+    });
+  }
+
+  async logout(
+    ctx: LinearSelectionContext,
+    options: { reference?: string; all?: boolean } = {},
+    signal?: AbortSignal,
+  ): Promise<{ removed: string[]; revoked: string[] }> {
+    this.#generation += 1;
+    this.#activeController?.abort(
+      linearError(
+        LinearErrorCode.OAuthCancelled,
+        "Linear logout cancelled the active auth operation.",
+      ),
+    );
+    return this.#exclusive(signal, async () => {
+      const [config, grants] = await Promise.all([
+        this.configRepository.read(),
+        this.grantRepository.read(),
+      ]);
+      const grantIds = Object.keys(grants.grants);
+      const targets = options.all
+        ? grantIds
+        : !options.reference && grantIds.length === 0
+          ? []
+          : [(await selectConnection(ctx, config, grants, options.reference)).id];
+      const revoked: string[] = [];
+      for (const connectionId of targets) {
+        const grant = grants.grants[connectionId];
+        if (!grant) continue;
+        if (
+          await revokeOAuthToken({
+            token: grant.refreshToken || grant.accessToken,
+            signal,
+            fetcher: this.#fetcher,
+          })
+        ) {
+          revoked.push(connectionId);
         }
       }
-    }
-
-    if (!this.#loginPromise) {
-      this.#loginPromise = this.#loginOnce(ctx, signal).finally(() => {
-        this.#loginPromise = undefined;
-        this.#activeLoginController = undefined;
-      });
-    }
-    return this.#loginPromise;
-  }
-
-  async accessToken(ctx: LinearAuthContext, signal?: AbortSignal): Promise<string> {
-    let credentials = await this.store.read();
-    if (!credentials) credentials = await this.login(ctx, signal);
-    if (credentials.expiresAt <= this.#now() + REFRESH_WINDOW_MS) {
-      try {
-        credentials = await this.#refresh(credentials, signal);
-      } catch (cause) {
-        if (signal?.aborted) throw signal.reason;
-        if (!ctx.hasUI)
-          throw new LinearAuthRequiredError({
-            message: `Linear authentication expired. Run /linear-auth login in TUI or RPC mode. ${errorMessage(cause)}`,
-          });
-        credentials = await this.login(ctx, signal, true);
-      }
-    }
-    return credentials.accessToken;
-  }
-
-  async refreshAfterAuthenticationError(
-    ctx: LinearAuthContext,
-    signal?: AbortSignal,
-  ): Promise<string> {
-    const credentials = await this.store.read();
-    if (!credentials) return (await this.login(ctx, signal)).accessToken;
-    try {
-      return (await this.#refresh(credentials, signal)).accessToken;
-    } catch (cause) {
-      if (signal?.aborted) throw signal.reason;
-      if (!ctx.hasUI)
-        throw new LinearAuthRequiredError({
-          message: `Linear authentication failed. Run /linear-auth login in TUI or RPC mode. ${errorMessage(cause)}`,
-        });
-      return (await this.login(ctx, signal, true)).accessToken;
-    }
-  }
-
-  async logout(signal?: AbortSignal): Promise<LogoutResult> {
-    let credentials: LinearCredentials | null;
-    try {
-      credentials = await this.store.read();
-    } catch {
-      await this.store.remove();
-      return { hadCredentials: true, revoked: false };
-    }
-    if (!credentials) return { hadCredentials: false, revoked: false };
-
-    let revoked = false;
-    try {
-      revoked = await revokeOAuthToken({
-        token: credentials.refreshToken || credentials.accessToken,
-        signal,
-        fetcher: this.#fetcher,
-      });
-    } finally {
-      await this.store.remove();
-    }
-    return { hadCredentials: true, revoked };
+      if (options.all) await this.grantRepository.clear();
+      else for (const connectionId of targets) await this.grantRepository.remove(connectionId);
+      return { removed: targets, revoked };
+    });
   }
 
   shutdown(): void {
-    const reason = new Error("Pi session stopped.");
-    this.#activeLoginController?.abort(reason);
+    this.#generation += 1;
+    const reason = linearError(LinearErrorCode.OAuthCancelled, "Pi session stopped.");
+    this.#activeController?.abort(reason);
     this.#lifecycleController.abort(reason);
   }
 
-  async #loginOnce(ctx: LinearAuthContext, signal?: AbortSignal): Promise<LinearCredentials> {
-    const controller = new AbortController();
-    this.#activeLoginController = controller;
-    const combinedSignal = signal
-      ? AbortSignal.any([signal, controller.signal, this.#lifecycleController.signal])
-      : AbortSignal.any([controller.signal, this.#lifecycleController.signal]);
-    const pkce = createPkceChallenge();
-    let callback: LoopbackCallback | undefined;
-
-    try {
-      callback = await this.#startCallback({
-        port: this.#callbackPort,
-        state: pkce.state,
-        timeoutMs: this.#callbackTimeoutMs,
-        signal: combinedSignal,
-      });
-
-      let clientId = this.#configuredClientId ?? (await this.store.read())?.clientId;
-      if (!clientId) {
-        const setupUrl = buildOAuthAppSetupUrl(callback.redirectUri);
-        const opened = await this.#openExternal(setupUrl, combinedSignal);
-        if (!opened)
-          ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "warning");
-        clientId = (
-          await ctx.ui.input(
-            "Linear OAuth setup",
-            "Create and save the app, then paste its client ID",
-            { signal: combinedSignal },
-          )
-        )?.trim();
-        if (!clientId) throw new LinearAuthError({ message: "Linear OAuth setup was cancelled." });
+  async #selectOrCreateApp(
+    ctx: LinearAuthContext,
+    options: LoginOptions,
+    signal: AbortSignal,
+  ): Promise<LinearAppConfig> {
+    const config = await this.configRepository.read();
+    let clientId = options.clientId?.trim() || process.env.LINEAR_OAUTH_CLIENT_ID?.trim();
+    let existing = clientId ? config.apps[clientId] : undefined;
+    if (!clientId) {
+      const apps = Object.values(config.apps);
+      if (apps.length === 1) {
+        existing = apps[0];
+        clientId = existing?.clientId;
+      } else if (apps.length > 1) {
+        const selected = await ctx.ui.select(
+          "Select a Linear OAuth app",
+          apps.map((app) => `${app.clientId} (${callbackUri(app.callbackPort)})`),
+          { signal },
+        );
+        if (!selected)
+          throw linearError(
+            LinearErrorCode.OAuthCancelled,
+            "Linear OAuth app selection was cancelled.",
+          );
+        clientId = selected.split(" ", 1)[0];
+        existing = clientId ? config.apps[clientId] : undefined;
       }
+    }
+    const port =
+      options.callbackPort ??
+      existing?.callbackPort ??
+      this.#defaultCallbackPort ??
+      parseCallbackPort(process.env.LINEAR_OAUTH_PORT) ??
+      DEFAULT_CALLBACK_PORT;
+    if (!clientId) {
+      const setupUrl = buildOAuthAppSetupUrl(callbackUri(port));
+      if (options.mode === "manual") {
+        ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "info");
+      } else if (!(await this.#openExternal(setupUrl, signal))) {
+        ctx.ui.notify(`Open this URL to create the OAuth app:\n${setupUrl}`, "warning");
+      }
+      clientId = (
+        await ctx.ui.input(
+          "Linear OAuth app",
+          "Complete the app owner and homepage fields, save it, then paste its client ID",
+          { signal },
+        )
+      )?.trim();
+      if (!clientId)
+        throw linearError(LinearErrorCode.OAuthCancelled, "Linear OAuth app setup was cancelled.");
+    }
+    const app: LinearAppConfig = {
+      clientId,
+      callbackPort: port,
+      createdAt: existing?.createdAt ?? new Date(this.#now()).toISOString(),
+    };
+    await this.configRepository.saveApp(app);
+    return app;
+  }
 
-      const authorizationUrl = buildAuthorizationUrl({
-        clientId,
-        redirectUri: callback.redirectUri,
-        scope: OAUTH_SCOPES,
-        pkce,
-      });
-      const opened = await this.#openExternal(authorizationUrl, combinedSignal);
-      if (!opened)
-        ctx.ui.notify(`Open this URL to authorize Linear:\n${authorizationUrl}`, "warning");
-
-      const code = await callback.code;
-      const token = await exchangeAuthorizationCode({
-        code,
-        clientId,
-        redirectUri: callback.redirectUri,
-        verifier: pkce.verifier,
-        signal: combinedSignal,
+  async #refreshGrant(grant: LinearGrant, operation: AuthOperation): Promise<LinearGrant> {
+    try {
+      const token = await refreshOAuthToken({
+        refreshToken: grant.refreshToken,
+        clientId: grant.clientId,
+        signal: operation.signal,
         fetcher: this.#fetcher,
       });
-      const credentials = credentialsFromToken(clientId, token, this.#now());
-      await this.store.write(credentials);
-      return credentials;
-    } catch (cause) {
-      if (cause instanceof LinearAuthError || cause instanceof LinearAuthRequiredError) throw cause;
-      throw new LinearAuthError({ message: errorMessage(cause), cause });
-    } finally {
-      await callback?.close();
+      const refreshed = grantFromToken(grant.connectionId, grant.clientId, token, this.#now());
+      operation.assertCurrent();
+      await this.grantRepository.put(refreshed);
+      operation.assertCurrent();
+      return refreshed;
+    } catch (error) {
+      if (
+        error instanceof LinearExtensionError &&
+        error.code === LinearErrorCode.OAuthInvalidGrant
+      ) {
+        operation.assertCurrent();
+        await this.grantRepository.remove(grant.connectionId);
+        throw authRequired(grant.connectionId);
+      }
+      throw error;
     }
   }
 
-  async #refresh(credentials: LinearCredentials, signal?: AbortSignal): Promise<LinearCredentials> {
-    if (!this.#refreshPromise) {
-      this.#refreshPromise = (async () => {
-        const token = await refreshOAuthToken({
-          refreshToken: credentials.refreshToken,
-          clientId: credentials.clientId,
-          signal: this.#lifecycleController.signal,
-          fetcher: this.#fetcher,
-        });
-        const refreshed = credentialsFromToken(credentials.clientId, token, this.#now());
-        await this.store.write(refreshed);
-        return refreshed;
-      })().finally(() => {
-        this.#refreshPromise = undefined;
-      });
-    }
-    return waitForShared(this.#refreshPromise, signal);
-  }
-}
-
-function waitForShared<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
-  if (!signal) return promise;
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
+  #requireScope(grant: LinearGrant, requiredScope: "read" | "write"): void {
+    if (parseScopes(grant.scope).includes(requiredScope)) return;
+    throw linearError(
+      LinearErrorCode.InsufficientScope,
+      `The selected Linear connection lacks ${requiredScope} access.`,
+      {
+        recovery: "Run /linear-auth login --write to grant write access.",
+        details: { connectionId: grant.connectionId, requiredScope },
       },
     );
-  });
+  }
+
+  async #exclusive<T>(
+    externalSignal: AbortSignal | undefined,
+    operation: (operation: AuthOperation) => Promise<T>,
+  ): Promise<T> {
+    const requestedGeneration = this.#generation;
+    const previous = this.#tail;
+    let release!: () => void;
+    this.#tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    let controller: AbortController | undefined;
+    try {
+      this.#lifecycleController.signal.throwIfAborted();
+      controller = new AbortController();
+      this.#activeController = controller;
+      const signal = externalSignal
+        ? AbortSignal.any([externalSignal, controller.signal, this.#lifecycleController.signal])
+        : AbortSignal.any([controller.signal, this.#lifecycleController.signal]);
+      signal.throwIfAborted();
+      if (requestedGeneration !== this.#generation) {
+        throw linearError(
+          LinearErrorCode.Conflict,
+          "A newer Linear auth operation superseded this request.",
+        );
+      }
+      return await operation({
+        signal,
+        assertCurrent: () => {
+          signal.throwIfAborted();
+          if (requestedGeneration !== this.#generation) {
+            throw linearError(
+              LinearErrorCode.Conflict,
+              "A newer Linear auth operation superseded this result.",
+            );
+          }
+        },
+      });
+    } finally {
+      if (controller && this.#activeController === controller) this.#activeController = undefined;
+      release();
+    }
+  }
 }
 
-function authRequired(): LinearAuthRequiredError {
-  return new LinearAuthRequiredError({
-    message: "Linear is not authenticated. Run /linear-auth login in TUI or RPC mode.",
-  });
+interface AuthOperation {
+  signal: AbortSignal;
+  assertCurrent(): void;
 }
 
-function errorMessage(cause: unknown): string {
-  if (cause instanceof Error && cause.message) return cause.message;
-  return "Linear authentication failed.";
+function authRequired(connectionId: string) {
+  return linearError(
+    LinearErrorCode.AuthRequired,
+    "The selected Linear connection is not authenticated.",
+    {
+      recovery: "Run /linear-auth login.",
+      details: { connectionId },
+    },
+  );
 }

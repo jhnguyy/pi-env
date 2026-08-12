@@ -1,287 +1,678 @@
-import { chmod, mkdtemp, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import {
-  externalOpenCommand,
-  FileCredentialStore,
-  LinearAuthManager,
-  LinearAuthRequiredError,
-  type CredentialStore,
-  type LinearAuthContext,
-  type LinearCredentials,
-} from "../auth";
+import { LinearAuthCoordinator, externalOpenCommand, type LinearAuthContext } from "../auth";
+import { LinearErrorCode, LinearExtensionError } from "../domain";
 import {
   buildAuthorizationUrl,
+  callbackUri,
   createPkceChallenge,
+  parseManualCallback,
   startLoopbackCallback,
   type LoopbackCallback,
 } from "../oauth";
+import {
+  LinearConfigRepository,
+  LinearGrantRepository,
+  type LinearAppConfig,
+  type LinearConfigDocument,
+  type LinearConfigStore,
+  type LinearConnectionConfig,
+  type LinearGrant,
+  type LinearGrantsDocument,
+  type LinearGrantStore,
+} from "../storage";
 
-class MemoryCredentialStore implements CredentialStore {
-  credentials: LinearCredentials | null;
-  writes: LinearCredentials[] = [];
-  removals = 0;
+class MemoryConfigStore implements LinearConfigStore {
+  document: LinearConfigDocument;
 
-  constructor(credentials: LinearCredentials | null = null) {
-    this.credentials = credentials;
+  constructor(document: LinearConfigDocument = { version: 1, apps: {}, connections: {} }) {
+    this.document = structuredClone(document);
   }
 
-  async read(): Promise<LinearCredentials | null> {
-    return this.credentials;
+  async read() {
+    return structuredClone(this.document);
   }
 
-  async write(credentials: LinearCredentials): Promise<void> {
-    this.credentials = credentials;
-    this.writes.push(credentials);
+  async saveApp(app: LinearAppConfig) {
+    this.document.apps[app.clientId] = structuredClone(app);
+    return this.read();
   }
 
-  async remove(): Promise<void> {
-    this.credentials = null;
-    this.removals += 1;
+  async saveConnection(connection: LinearConnectionConfig) {
+    this.document.connections[connection.id] = structuredClone(connection);
+    this.document.defaultConnection ??= connection.id;
+    return this.read();
+  }
+
+  async removeConnection(connectionId: string) {
+    delete this.document.connections[connectionId];
+    if (this.document.defaultConnection === connectionId) delete this.document.defaultConnection;
+    return this.read();
+  }
+
+  async setDefaultConnection(connectionId: string) {
+    this.document.defaultConnection = connectionId;
+    return this.read();
   }
 }
 
-function credentials(overrides: Partial<LinearCredentials> = {}): LinearCredentials {
+class MemoryGrantStore implements LinearGrantStore {
+  document: LinearGrantsDocument;
+  writes: LinearGrant[] = [];
+
+  constructor(document: LinearGrantsDocument = { version: 1, grants: {} }) {
+    this.document = structuredClone(document);
+  }
+
+  async read() {
+    return structuredClone(this.document);
+  }
+
+  async put(grant: LinearGrant) {
+    this.document.grants[grant.connectionId] = structuredClone(grant);
+    this.writes.push(structuredClone(grant));
+    return this.read();
+  }
+
+  async remove(connectionId: string) {
+    delete this.document.grants[connectionId];
+    return this.read();
+  }
+
+  async clear() {
+    this.document = { version: 1, grants: {} };
+    return this.read();
+  }
+}
+
+const identity = {
+  organization: { id: "org-1", name: "Example", urlKey: "example" },
+  viewer: { id: "user-1", name: "Agent User", displayName: "agent", email: "agent@example.com" },
+};
+const connectionId = "org-1:user-1";
+
+function connection(overrides: Partial<LinearConnectionConfig> = {}): LinearConnectionConfig {
   return {
-    version: 1,
-    clientId: "client-id",
-    accessToken: "old-access",
-    refreshToken: "old-refresh",
-    expiresAt: 2_000,
-    tokenType: "Bearer",
-    scope: "read write",
+    id: connectionId,
+    name: "example/agent@example.com",
+    appClientId: "client-1",
+    organization: identity.organization,
+    viewer: identity.viewer,
+    grantedScopes: ["read"],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }
 
-function context(hasUI: boolean, input = vi.fn()): LinearAuthContext {
+function grant(overrides: Partial<LinearGrant> = {}): LinearGrant {
   return {
-    hasUI,
-    mode: hasUI ? "tui" : "print",
-    ui: { input, notify: vi.fn() } as unknown as LinearAuthContext["ui"],
+    connectionId,
+    clientId: "client-1",
+    accessToken: "access-old",
+    refreshToken: "refresh-old",
+    expiresAt: 100_000,
+    tokenType: "Bearer",
+    scope: "read",
+    ...overrides,
   };
 }
 
-function tokenResponse(accessToken = "new-access", refreshToken = "new-refresh"): Response {
+function app(overrides: Partial<LinearAppConfig> = {}): LinearAppConfig {
+  return {
+    clientId: "client-1",
+    callbackPort: 43_921,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function context(root: string, input = vi.fn(), select = vi.fn()): LinearAuthContext {
+  return {
+    cwd: root,
+    hasUI: true,
+    mode: "tui",
+    isProjectTrusted: () => true,
+    ui: { input, select, notify: vi.fn() } as unknown as LinearAuthContext["ui"],
+  };
+}
+
+function tokenResponse(
+  accessToken = "access-new",
+  refreshToken = "refresh-new",
+  scope = "read",
+): Response {
   return new Response(
     JSON.stringify({
       access_token: accessToken,
       refresh_token: refreshToken,
       expires_in: 86_399,
       token_type: "Bearer",
-      scope: "read write",
+      scope,
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }
 
-const managers: LinearAuthManager[] = [];
-afterEach(() => {
-  for (const manager of managers.splice(0)) manager.shutdown();
+let originalAgentDir: string | undefined;
+let root: string;
+const coordinators: LinearAuthCoordinator[] = [];
+
+beforeEach(async () => {
+  originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+  root = await mkdtemp(join(tmpdir(), "linear-auth-architecture-test-"));
+  process.env.PI_CODING_AGENT_DIR = root;
 });
 
-describeIfEnabled("linear", "Linear OAuth", () => {
-  it("passes Windows OAuth URLs to an opener without a command shell", () => {
-    const url = "https://linear.app/oauth/authorize?client_id=id&scope=read%2Cwrite&state=state";
+afterEach(() => {
+  for (const coordinator of coordinators.splice(0)) coordinator.shutdown();
+  if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+});
 
+function coordinator(
+  options: Partial<ConstructorParameters<typeof LinearAuthCoordinator>[0]> = {},
+) {
+  const instance = new LinearAuthCoordinator({
+    identifyAccessToken: async () => identity,
+    configRepository: new MemoryConfigStore(),
+    grantRepository: new MemoryGrantStore(),
+    ...options,
+  });
+  coordinators.push(instance);
+  return instance;
+}
+
+describeIfEnabled("linear", "Linear auth architecture", () => {
+  it("builds S256 PKCE without a client secret and validates manual callbacks", () => {
+    const pkce = createPkceChallenge();
+    const redirectUri = callbackUri(43_921);
+    const authorization = new URL(
+      buildAuthorizationUrl({
+        clientId: "client-1",
+        redirectUri,
+        scope: ["read"],
+        pkce,
+      }),
+    );
+
+    expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(authorization.searchParams.get("state")).toBe(pkce.state);
+    expect(authorization.searchParams.has("client_secret")).toBe(false);
+    expect(
+      parseManualCallback(
+        `${redirectUri}?code=accepted&state=${pkce.state}`,
+        redirectUri,
+        pkce.state,
+      ),
+    ).toBe("accepted");
+    expect(() =>
+      parseManualCallback(`${redirectUri}?code=wrong&state=other`, redirectUri, pkce.state),
+    ).toThrow();
+  });
+
+  it("uses a shell-free Windows browser opener", () => {
+    const url = "https://linear.app/oauth/authorize?scope=read&state=state";
     expect(externalOpenCommand("win32", url)).toEqual({
       command: "rundll32.exe",
       args: ["url.dll,FileProtocolHandler", url],
     });
   });
 
-  it("builds an authorization request with state and S256 PKCE but no client secret", () => {
-    const pkce = createPkceChallenge();
-    const url = new URL(
-      buildAuthorizationUrl({
-        clientId: "client-id",
-        redirectUri: "http://127.0.0.1:43921/oauth/callback",
-        scope: ["read", "write"],
-        pkce,
-      }),
-    );
-
-    expect(url.searchParams.get("state")).toBe(pkce.state);
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.searchParams.get("code_challenge")).toBe(pkce.challenge);
-    expect(url.searchParams.has("client_secret")).toBe(false);
-    expect(pkce.verifier).not.toBe(pkce.challenge);
-  });
-
-  it("rejects a wrong callback state, accepts one matching callback, and closes the listener", async () => {
+  it("accepts one matching loopback callback, rejects wrong state, and closes", async () => {
     const callback = await startLoopbackCallback({ port: 0, state: "expected", timeoutMs: 2_000 });
-    const wrong = await fetch(`${callback.redirectUri}?code=wrong&state=other`);
-    expect(wrong.status).toBe(400);
-
-    const accepted = await fetch(`${callback.redirectUri}?code=accepted&state=expected`);
-    expect(accepted.status).toBe(200);
+    expect((await fetch(`${callback.redirectUri}?code=wrong&state=other`)).status).toBe(400);
+    expect((await fetch(`${callback.redirectUri}?code=accepted&state=expected`)).status).toBe(200);
     await expect(callback.code).resolves.toBe("accepted");
     await expect(fetch(`${callback.redirectUri}?code=replay&state=expected`)).rejects.toThrow();
   });
 
-  it("times out and closes the callback listener", async () => {
-    const callback = await startLoopbackCallback({ port: 0, state: "expected", timeoutMs: 10 });
-    await expect(callback.code).rejects.toThrow("timed out");
-    await expect(fetch(`${callback.redirectUri}?code=late&state=expected`)).rejects.toThrow();
-  });
-
-  it("stores rotating credentials atomically with owner-only permissions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "linear-credentials-test-"));
-    const path = join(root, "private", "credentials.json");
-    const store = new FileCredentialStore(path);
-
-    await store.write(credentials());
-    await store.write(
-      credentials({ accessToken: "rotated-access", refreshToken: "rotated-refresh" }),
-    );
-
-    expect(await store.read()).toMatchObject({
-      accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
-    });
-    expect(await readdir(dirname(path))).toEqual(["credentials.json"]);
-
-    if (process.platform !== "win32") {
-      expect((await stat(dirname(path))).mode & 0o777).toBe(0o700);
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
-      await chmod(path, 0o644);
-      await store.read();
-      expect((await stat(path)).mode & 0o777).toBe(0o600);
-    }
-  });
-
-  it("removes a malformed credential file during logout", async () => {
-    const root = await mkdtemp(join(tmpdir(), "linear-logout-test-"));
-    const path = join(root, "private", "credentials.json");
-    const store = new FileCredentialStore(path);
-    await store.write(credentials());
-    await writeFile(path, "not valid JSON", { mode: 0o600 });
-    const manager = new LinearAuthManager({ store });
-    managers.push(manager);
-
-    await expect(manager.logout()).resolves.toEqual({ hadCredentials: true, revoked: false });
-    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("fails directly in headless mode without starting login", async () => {
+  it("does not start login from an API access request", async () => {
     const openExternal = vi.fn(async (_url: string) => true);
-    const manager = new LinearAuthManager({ store: new MemoryCredentialStore(), openExternal });
-    managers.push(manager);
+    const auth = coordinator({ openExternal });
 
-    await expect(manager.accessToken(context(false))).rejects.toEqual(
-      expect.objectContaining<Partial<LinearAuthRequiredError>>({
-        message: expect.stringContaining("/linear-auth login"),
-      }),
-    );
+    await expect(auth.accessToken(context(root), "read")).rejects.toMatchObject({
+      code: LinearErrorCode.AuthRequired,
+    });
     expect(openExternal).not.toHaveBeenCalled();
   });
 
-  it("starts setup and OAuth lazily, then completes the original access request", async () => {
-    const store = new MemoryCredentialStore();
-    const input = vi.fn(async () => "created-client-id");
+  it("completes explicit local login and keeps app config separate from grants", async () => {
+    const config = new MemoryConfigStore();
+    const grants = new MemoryGrantStore();
     const openExternal = vi.fn(async (_url: string) => true);
     const close = vi.fn(async () => undefined);
     const startCallback = vi.fn(
       async (): Promise<LoopbackCallback> => ({
-        redirectUri: "http://127.0.0.1:43921/oauth/callback",
+        redirectUri: callbackUri(43_921),
         code: Promise.resolve("authorization-code"),
         close,
       }),
     );
-    const requests: URLSearchParams[] = [];
-    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      requests.push(init?.body as URLSearchParams);
-      return tokenResponse();
-    }) as unknown as typeof fetch;
-    const manager = new LinearAuthManager({
-      store,
-      now: () => 1_000,
+    const input = vi.fn(async () => "client-1");
+    const fetcher = vi.fn(async () => tokenResponse()) as unknown as typeof fetch;
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
       openExternal,
       startCallback,
       fetcher,
+      now: () => 1_000,
     });
-    managers.push(manager);
 
-    await expect(manager.accessToken(context(true, input))).resolves.toBe("new-access");
+    await expect(
+      auth.login(context(root, input), { mode: "local", write: false }),
+    ).resolves.toMatchObject({ id: connectionId });
 
-    expect(input).toHaveBeenCalledTimes(1);
+    expect(config.document.apps["client-1"]).toMatchObject({ callbackPort: 43_921 });
+    expect(JSON.stringify(config.document)).not.toContain("access-new");
+    expect(grants.document.grants[connectionId]).toMatchObject({
+      accessToken: "access-new",
+      refreshToken: "refresh-new",
+    });
     expect(openExternal).toHaveBeenCalledTimes(2);
-    const authorizationUrl = new URL(openExternal.mock.calls[1]![0]);
-    expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(authorizationUrl.searchParams.has("client_secret")).toBe(false);
-    expect(requests[0]?.get("grant_type")).toBe("authorization_code");
-    expect(requests[0]?.has("client_secret")).toBe(false);
-    expect(store.credentials).toMatchObject({
-      clientId: "created-client-id",
-      accessToken: "new-access",
-      refreshToken: "new-refresh",
-    });
     expect(close).toHaveBeenCalled();
   });
 
-  it("refreshes an expired token before use and persists both rotated tokens", async () => {
-    const store = new MemoryCredentialStore(credentials({ expiresAt: 1_000 }));
-    const requests: URLSearchParams[] = [];
-    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      requests.push(init?.body as URLSearchParams);
-      return tokenResponse("rotated-access", "rotated-refresh");
-    }) as unknown as typeof fetch;
-    const manager = new LinearAuthManager({ store, now: () => 2_000, fetcher });
-    managers.push(manager);
+  it("stores write scope only after explicit write elevation", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: {},
+    });
+    const grants = new MemoryGrantStore();
+    const openExternal = vi.fn(async (_url: string) => true);
+    const startCallback = vi.fn(
+      async (): Promise<LoopbackCallback> => ({
+        redirectUri: callbackUri(43_921),
+        code: Promise.resolve("authorization-code"),
+        close: vi.fn(async () => undefined),
+      }),
+    );
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal,
+      startCallback,
+      fetcher: vi.fn(async () =>
+        tokenResponse("write-access", "write-refresh", "read write"),
+      ) as unknown as typeof fetch,
+      now: () => 1_000,
+    });
 
-    await expect(manager.accessToken(context(false))).resolves.toBe("rotated-access");
-    expect(requests[0]?.get("grant_type")).toBe("refresh_token");
-    expect(requests[0]?.get("refresh_token")).toBe("old-refresh");
-    expect(store.writes.at(-1)).toMatchObject({
-      accessToken: "rotated-access",
-      refreshToken: "rotated-refresh",
+    await auth.login(context(root), { mode: "local", write: true });
+
+    const authorization = new URL(openExternal.mock.calls[0]![0]);
+    expect(authorization.searchParams.get("scope")).toBe("read,write");
+    expect(grants.document.grants[connectionId]?.scope).toBe("read write");
+  });
+
+  it("completes explicit manual login from a pasted callback URL", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: {},
+    });
+    const grants = new MemoryGrantStore();
+    const openExternal = vi.fn(async (_url: string) => true);
+    let manualContext!: LinearAuthContext;
+    const input = vi.fn(async () => {
+      const notification = (manualContext.ui.notify as ReturnType<typeof vi.fn>).mock.calls.at(
+        -1,
+      )![0] as string;
+      const authorization = new URL(notification.split("\n").at(-1)!);
+      return `${callbackUri(43_921)}?code=manual-code&state=${authorization.searchParams.get("state")}`;
+    });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal,
+      fetcher: vi.fn(async () => tokenResponse()) as unknown as typeof fetch,
+      now: () => 1_000,
+    });
+
+    manualContext = context(root, input);
+    await expect(
+      auth.login(manualContext, { mode: "manual", write: false }),
+    ).resolves.toMatchObject({ id: connectionId });
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(grants.document.grants[connectionId]?.accessToken).toBe("access-new");
+  });
+
+  it("rolls back connection metadata when grant persistence fails", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: {},
+    });
+    const grants = new MemoryGrantStore();
+    grants.put = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal: vi.fn(async (_url: string) => true),
+      startCallback: vi.fn(
+        async (): Promise<LoopbackCallback> => ({
+          redirectUri: callbackUri(43_921),
+          code: Promise.resolve("authorization-code"),
+          close: vi.fn(async () => undefined),
+        }),
+      ),
+      fetcher: vi.fn(async () => tokenResponse()) as unknown as typeof fetch,
+    });
+
+    await expect(auth.login(context(root), { mode: "local", write: false })).rejects.toThrow(
+      "disk full",
+    );
+    expect(config.document.connections).toEqual({});
+    expect(grants.document.grants).toEqual({});
+  });
+
+  it("keeps multiple authenticated connections ambiguous until explicitly selected", async () => {
+    const second = connection({
+      id: "org-2:user-2",
+      name: "other/user@example.com",
+      organization: { id: "org-2", name: "Other", urlKey: "other" },
+      viewer: { id: "user-2", name: "Other User", displayName: "other", email: "user@example.com" },
+    });
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection(), [second.id]: second },
+    });
+    const grants = new MemoryGrantStore({
+      version: 1,
+      grants: { [connectionId]: grant(), [second.id]: grant({ connectionId: second.id }) },
+    });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      now: () => 1_000,
+    });
+
+    await expect(auth.accessToken(context(root), "read")).rejects.toMatchObject({
+      code: LinearErrorCode.ConnectionAmbiguous,
+    });
+    await auth.use(second.id);
+    await expect(auth.accessToken(context(root), "read")).resolves.toMatchObject({
+      connection: { id: second.id },
     });
   });
 
-  it("does not cancel a shared token rotation when one caller stops waiting", async () => {
-    const store = new MemoryCredentialStore(credentials({ expiresAt: 1_000 }));
+  it("requires explicit write elevation while preserving read access", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({ version: 1, grants: { [connectionId]: grant() } });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      now: () => 1_000,
+    });
+
+    await expect(auth.accessToken(context(root), "read")).resolves.toMatchObject({
+      accessToken: "access-old",
+    });
+    await expect(auth.accessToken(context(root), "write")).rejects.toMatchObject({
+      code: LinearErrorCode.InsufficientScope,
+    });
+  });
+
+  it("makes logout cancel delayed login before it can persist a connection or grant", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: {},
+    });
+    const grants = new MemoryGrantStore();
+    let finishExchange!: (response: Response) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/oauth/token")) {
+        markStarted();
+        return new Promise<Response>((resolve) => {
+          finishExchange = resolve;
+        });
+      }
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal: vi.fn(async (_url: string) => true),
+      startCallback: vi.fn(
+        async (): Promise<LoopbackCallback> => ({
+          redirectUri: callbackUri(43_921),
+          code: Promise.resolve("authorization-code"),
+          close: vi.fn(async () => undefined),
+        }),
+      ),
+      fetcher,
+    });
+
+    const login = auth.login(context(root), { mode: "local", write: false });
+    await started;
+    const logout = auth.logout(context(root));
+    finishExchange(tokenResponse());
+
+    await expect(login).rejects.toBeInstanceOf(LinearExtensionError);
+    await expect(logout).resolves.toEqual({ removed: [], revoked: [] });
+    expect(config.document.connections).toEqual({});
+    expect(grants.document.grants).toEqual({});
+  });
+
+  it("makes logout win over a delayed refresh and prevents credential resurrection", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({
+      version: 1,
+      grants: { [connectionId]: grant({ expiresAt: 0 }) },
+    });
     let finishRefresh!: (response: Response) => void;
-    let markRefreshStarted!: () => void;
-    const refreshStarted = new Promise<void>((resolve) => {
-      markRefreshStarted = resolve;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
     });
-    let fetchSignal: AbortSignal | undefined;
-    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      fetchSignal = init?.signal ?? undefined;
-      markRefreshStarted();
-      return new Promise<Response>((resolve) => {
-        finishRefresh = resolve;
-      });
+    const fetcher = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith("/oauth/token")) {
+        markStarted();
+        return new Promise<Response>((resolve) => {
+          finishRefresh = resolve;
+        });
+      }
+      return new Response(null, { status: 200 });
     }) as unknown as typeof fetch;
-    const manager = new LinearAuthManager({ store, now: () => 2_000, fetcher });
-    managers.push(manager);
-    const controller = new AbortController();
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      fetcher,
+      now: () => 1_000,
+    });
 
-    const cancelledRequest = manager.accessToken(context(false), controller.signal);
-    await refreshStarted;
-    const continuingRequest = manager.accessToken(context(false));
-    controller.abort(new Error("cancel this caller"));
+    const access = auth.accessToken(context(root), "read");
+    await started;
+    const queuedAccess = auth.accessToken(context(root), "read");
+    const logout = auth.logout(context(root));
+    finishRefresh(tokenResponse("rotated-access", "rotated-refresh"));
 
-    await expect(cancelledRequest).rejects.toThrow("cancel this caller");
-    expect(fetchSignal?.aborted).toBe(false);
-    finishRefresh(tokenResponse("shared-access", "shared-refresh"));
-    await expect(continuingRequest).resolves.toBe("shared-access");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(access).rejects.toBeInstanceOf(LinearExtensionError);
+    await expect(queuedAccess).rejects.toBeInstanceOf(LinearExtensionError);
+    await expect(logout).resolves.toMatchObject({ removed: [connectionId] });
+    expect(grants.document.grants).toEqual({});
+    expect(grants.writes).toHaveLength(0);
   });
 
-  it("removes local credentials even when remote revocation fails", async () => {
-    const store = new MemoryCredentialStore(credentials());
+  it("does not return a valid token after logout starts during a delayed store read", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({ version: 1, grants: { [connectionId]: grant() } });
+    const originalRead = grants.read.bind(grants);
+    let finishRead!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let delayed = true;
+    grants.read = async () => {
+      if (delayed) {
+        delayed = false;
+        markStarted();
+        await new Promise<void>((resolve) => {
+          finishRead = resolve;
+        });
+      }
+      return originalRead();
+    };
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      fetcher: vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch,
+      now: () => 1_000,
+    });
+
+    const access = auth.accessToken(context(root), "read");
+    await started;
+    const logout = auth.logout(context(root));
+    finishRead();
+
+    await expect(access).rejects.toBeInstanceOf(LinearExtensionError);
+    await logout;
+    expect(grants.document.grants).toEqual({});
+  });
+
+  it("keeps the prior rotating grant when refreshed grant persistence fails", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({
+      version: 1,
+      grants: { [connectionId]: grant({ expiresAt: 0 }) },
+    });
+    grants.put = vi.fn(async () => {
+      throw new Error("disk full");
+    });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      fetcher: vi.fn(async () =>
+        tokenResponse("rotated-access", "rotated-refresh"),
+      ) as unknown as typeof fetch,
+      now: () => 1_000,
+    });
+
+    await expect(auth.accessToken(context(root), "read")).rejects.toThrow("disk full");
+    expect(grants.document.grants[connectionId]).toMatchObject({
+      accessToken: "access-old",
+      refreshToken: "refresh-old",
+    });
+  });
+
+  it("does not convert a transient refresh failure into interactive login", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({
+      version: 1,
+      grants: { [connectionId]: grant({ expiresAt: 0 }) },
+    });
+    const openExternal = vi.fn(async (_url: string) => true);
     const fetcher = vi.fn(async () => {
       throw new Error("offline");
     }) as unknown as typeof fetch;
-    const manager = new LinearAuthManager({ store, fetcher });
-    managers.push(manager);
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      openExternal,
+      fetcher,
+      now: () => 1_000,
+    });
 
-    await expect(manager.logout()).resolves.toEqual({ hadCredentials: true, revoked: false });
-    expect(store.credentials).toBeNull();
-    expect(store.removals).toBe(1);
-    await expect(manager.logout()).resolves.toEqual({ hadCredentials: false, revoked: false });
+    await expect(auth.accessToken(context(root), "read")).rejects.toMatchObject({
+      code: LinearErrorCode.NetworkUnavailable,
+    });
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(grants.document.grants[connectionId]).toBeDefined();
+  });
+
+  it("preserves app and connection config when logout removes the rotating grant", async () => {
+    const config = new MemoryConfigStore({
+      version: 1,
+      apps: { "client-1": app() },
+      connections: { [connectionId]: connection() },
+      defaultConnection: connectionId,
+    });
+    const grants = new MemoryGrantStore({ version: 1, grants: { [connectionId]: grant() } });
+    const auth = coordinator({
+      configRepository: config,
+      grantRepository: grants,
+      fetcher: vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch,
+    });
+
+    await auth.logout(context(root));
+    expect(config.document.apps["client-1"]).toBeDefined();
+    expect(config.document.connections[connectionId]).toBeDefined();
+    expect(grants.document.grants).toEqual({});
+  });
+
+  it("stores config and grants in separate owner-only atomic files", async () => {
+    const configPath = join(root, "linear", "config.json");
+    const grantPath = join(root, "linear", "credentials.json");
+    const configRepository = new LinearConfigRepository(configPath);
+    const grantRepository = new LinearGrantRepository(grantPath);
+
+    const secondConfigRepository = new LinearConfigRepository(configPath);
+    await Promise.all([
+      configRepository.saveApp(app()),
+      secondConfigRepository.saveApp(app({ clientId: "client-2" })),
+    ]);
+    await configRepository.saveConnection(connection());
+    await grantRepository.put(grant());
+    await grantRepository.put(
+      grant({ accessToken: "rotated-access", refreshToken: "rotated-refresh" }),
+    );
+
+    expect(Object.keys((await configRepository.read()).apps).sort()).toEqual([
+      "client-1",
+      "client-2",
+    ]);
+    expect(await readFile(configPath, "utf8")).not.toMatch(
+      /access-old|refresh-old|rotated-access|rotated-refresh/,
+    );
+    expect((await grantRepository.read()).grants[connectionId]).toMatchObject({
+      accessToken: "rotated-access",
+    });
+    expect(await readdir(join(root, "linear"))).toEqual(["config.json", "credentials.json"]);
+    if (process.platform !== "win32") {
+      expect((await stat(join(root, "linear"))).mode & 0o777).toBe(0o700);
+      expect((await stat(grantPath)).mode & 0o777).toBe(0o600);
+      await chmod(grantPath, 0o644);
+      await grantRepository.read();
+      expect((await stat(grantPath)).mode & 0o777).toBe(0o600);
+    }
   });
 });

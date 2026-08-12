@@ -14,6 +14,19 @@ export type ToolManagerSettings = typeof ToolManagerSettingsSchema.Type;
 export const SEARCH_TOOL_NAME = "search_tools";
 export const CUSTOM_TYPE = "tool-manager:state";
 
+const LINEAR_READ_TOOLS = [
+  "linear_viewer",
+  "linear_list_resources",
+  "linear_list_issues",
+  "linear_search_issues",
+  "linear_get_issue",
+];
+const LINEAR_WRITE_TOOLS = [
+  "linear_create_issue",
+  "linear_update_issue",
+  "linear_create_comment",
+];
+
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   analysis: ["analyze"],
   delegation: ["subagent", "subagent_start", "subagent_job"],
@@ -21,6 +34,9 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],
   web: ["web_context", "web_fetch"],
+  "linear-read": LINEAR_READ_TOOLS,
+  "linear-write": LINEAR_WRITE_TOOLS,
+  linear: [...LINEAR_READ_TOOLS, ...LINEAR_WRITE_TOOLS],
 };
 
 export const GROUP_HINTS: Record<string, RegExp[]> = {
@@ -30,7 +46,11 @@ export const GROUP_HINTS: Record<string, RegExp[]> = {
   "catching-tests": [/\bcatching\b/, /\bjit[- ]?catch\b/],
   sessions: [/\bsessions?\b/, /\bconversation history\b/],
   web: [/\bweb\b/, /\bhttps?:\/\//, /\burl\b/, /\bwebsite\b/],
+  "linear-read": [/\blinear\b/],
+  linear: [/\blinear\b/],
 };
+
+export const DEFAULT_MANUAL_ONLY = new Set(LINEAR_WRITE_TOOLS);
 
 export const CORE_PROFILE = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME];
 export const DEFAULT_PROFILES: Record<string, string[]> = {
@@ -63,7 +83,7 @@ export function resolveConfig(settings: ToolManagerSettings = {}): ResolvedConfi
     profiles,
     groups: mutableRecord({ ...DEFAULT_GROUPS, ...(settings.groups ?? {}) }),
     alwaysActive: unique([SEARCH_TOOL_NAME, ...(settings.alwaysActive ?? [])]),
-    manualOnly: new Set(settings.manualOnly ?? []),
+    manualOnly: new Set([...DEFAULT_MANUAL_ONLY, ...(settings.manualOnly ?? [])]),
     autoActivate: settings.autoActivate ?? true,
   };
 }
@@ -161,6 +181,7 @@ export function triggerGroups(input: { text: string; source?: string }, autoActi
   if (/\b(catching|jit[- ]?catch)\b/.test(t)) groups.push("catching-tests");
   if (/\b(prior|previous|past) (session|conversation)\b|\bsession history\b/.test(t)) groups.push("sessions");
   if (/https?:\/\/\S+|\b(web fetch|fetch (the )?(website|url|page)|website context)\b/.test(t)) groups.push("web");
+  if (/\blinear\b/.test(t)) groups.push("linear-read");
   return unique(groups);
 }
 

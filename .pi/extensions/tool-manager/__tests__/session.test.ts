@@ -6,7 +6,7 @@ function extensionHarness() {
   const handlers = new Map<string, Function>();
   const entries: unknown[] = [];
   let active = ["read", "analyze", SEARCH_TOOL_NAME];
-  const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", "analyze", "notes"].map((name) => ({ name, description: name, parameters: {}, sourceInfo: { source: "test" } as any }));
+  const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", "analyze", "notes", "linear_viewer", "linear_list_resources", "linear_list_issues", "linear_search_issues", "linear_get_issue", "linear_create_issue", "linear_update_issue", "linear_create_comment"].map((name) => ({ name, description: name, parameters: {}, sourceInfo: { source: "test" } as any }));
   return {
     pi: {
       registerTool(tool: any) { tools.push({ ...tool, sourceInfo: { source: "extension" } }); },
@@ -45,6 +45,16 @@ describe("tool manager branch restore", () => {
     h.handlers.get("input")?.({ text: "fix this TypeScript file", source: "user" });
     expect(h.active).toEqual(["read", "ghost", "analyze", SEARCH_TOOL_NAME]);
     expect(h.entries).toEqual([]);
+  });
+
+  it("auto-activates Linear read tools without write tools", () => {
+    const h = extensionHarness();
+    toolManager(h.pi);
+
+    h.handlers.get("input")?.({ text: "find the Linear issue for this work", source: "user" });
+
+    expect(h.active).toContain("linear_search_issues");
+    expect(h.active).not.toContain("linear_create_issue");
   });
 
   it("search_tools adds matches without removing active tools and persists the addition", async () => {

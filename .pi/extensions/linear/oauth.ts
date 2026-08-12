@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { createServer, type Server } from "node:http";
-import { Data, Schema } from "effect";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { Schema } from "effect";
+import { LinearErrorCode, linearError } from "./domain";
 
 export const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 export const LINEAR_TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -14,7 +15,6 @@ const OAuthTokenResponseSchema = Schema.Struct({
   token_type: Schema.String,
   scope: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
 });
-
 const OAuthErrorResponseSchema = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
   error_description: Schema.optionalKey(Schema.String),
@@ -34,11 +34,6 @@ export interface PkceChallenge {
   state: string;
 }
 
-export class OAuthFlowError extends Data.TaggedError("OAuthFlowError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
-
 export interface LoopbackCallback {
   readonly redirectUri: string;
   readonly code: Promise<string>;
@@ -52,17 +47,17 @@ export interface LoopbackCallbackOptions {
   signal?: AbortSignal;
 }
 
-function base64Url(value: Buffer): string {
-  return value.toString("base64url");
-}
-
 export function createPkceChallenge(): PkceChallenge {
-  const verifier = base64Url(randomBytes(32));
+  const verifier = randomBytes(32).toString("base64url");
   return {
     verifier,
-    challenge: base64Url(createHash("sha256").update(verifier).digest()),
-    state: base64Url(randomBytes(32)),
+    challenge: createHash("sha256").update(verifier).digest().toString("base64url"),
+    state: randomBytes(32).toString("base64url"),
   };
+}
+
+export function callbackUri(port: number): string {
+  return `http://127.0.0.1:${port}${OAUTH_CALLBACK_PATH}`;
 }
 
 export function buildAuthorizationUrl(input: {
@@ -83,20 +78,12 @@ export function buildAuthorizationUrl(input: {
 }
 
 export function buildOAuthAppSetupUrl(redirectUri: string): string {
-  const manifest = {
-    schemaVersion: "1.0.0",
-    distribution: "private",
-    display: { description: "Connect a local Pi agent to workspace issues." },
-    developer: { name: "Pi user" },
-    oauth: {
-      client_name: "Pi Issue Client",
-      client_uri: "https://linear.app/developers/sdk",
-      redirect_uris: [redirectUri],
-      grant_types: ["authorization_code"],
-    },
-  };
   const url = new URL("https://linear.app/settings/api/applications/new");
-  url.searchParams.set("manifest", JSON.stringify(manifest));
+  url.searchParams.set("distribution", "private");
+  url.searchParams.set("display.description", "Connect a local Pi workbench to workspace issues.");
+  url.searchParams.set("oauth.client_name", "Pi Workbench");
+  url.searchParams.set("oauth.redirect_uris", redirectUri);
+  url.searchParams.set("oauth.grant_types", "authorization_code");
   return url.toString();
 }
 
@@ -104,12 +91,7 @@ function callbackPage(title: string, message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><h1>${title}</h1><p>${message}</p></body></html>`;
 }
 
-function respond(
-  response: import("node:http").ServerResponse,
-  status: number,
-  title: string,
-  message: string,
-): void {
+function respond(response: ServerResponse, status: number, title: string, message: string): void {
   const body = callbackPage(title, message);
   response.writeHead(status, {
     "content-type": "text/html; charset=utf-8",
@@ -127,84 +109,111 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
+function parseCallbackUrl(
+  value: string,
+  expectedRedirectUri: string,
+  expectedState: string,
+): string {
+  let callback: URL;
+  let expected: URL;
+  try {
+    callback = new URL(value.trim());
+    expected = new URL(expectedRedirectUri);
+  } catch {
+    throw linearError(
+      LinearErrorCode.OAuthInvalidCallback,
+      "The pasted OAuth callback URL is invalid.",
+      {
+        recovery: "Paste the complete URL from the browser address bar.",
+      },
+    );
+  }
+  if (callback.origin !== expected.origin || callback.pathname !== expected.pathname) {
+    throw linearError(
+      LinearErrorCode.OAuthInvalidCallback,
+      "The OAuth callback URL does not match the configured redirect URI.",
+    );
+  }
+  if (callback.searchParams.get("state") !== expectedState) {
+    throw linearError(
+      LinearErrorCode.OAuthInvalidCallback,
+      "The OAuth callback state does not match.",
+    );
+  }
+  const denied = callback.searchParams.get("error");
+  if (denied)
+    throw linearError(LinearErrorCode.OAuthDenied, `Linear denied authorization: ${denied}.`);
+  const code = callback.searchParams.get("code");
+  if (!code)
+    throw linearError(
+      LinearErrorCode.OAuthInvalidCallback,
+      "The OAuth callback has no authorization code.",
+    );
+  return code;
+}
+
+export function parseManualCallback(
+  value: string,
+  expectedRedirectUri: string,
+  expectedState: string,
+): string {
+  return parseCallbackUrl(value, expectedRedirectUri, expectedState);
+}
+
 export async function startLoopbackCallback(
   options: LoopbackCallbackOptions,
 ): Promise<LoopbackCallback> {
   options.signal?.throwIfAborted();
-
   let settleCode!: (code: string) => void;
   let settleError!: (error: unknown) => void;
   let settled = false;
   let timer: NodeJS.Timeout | undefined;
   let abortHandler: (() => void) | undefined;
-
   const code = new Promise<string>((resolve, reject) => {
     settleCode = resolve;
     settleError = reject;
   });
 
+  let redirectUri = callbackUri(options.port);
   const server = createServer((request, response) => {
-    const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+    const requestUrl = new URL(request.url ?? "/", redirectUri);
     if (request.method !== "GET" || requestUrl.pathname !== OAUTH_CALLBACK_PATH) {
       respond(response, 404, "Not found", "This callback path is not valid.");
       return;
     }
-
-    if (requestUrl.searchParams.get("state") !== options.state) {
-      respond(
-        response,
-        400,
-        "Authorization rejected",
-        "The OAuth state did not match. Return to Pi and try again.",
-      );
-      return;
-    }
-
-    const oauthError = requestUrl.searchParams.get("error");
-    if (oauthError) {
-      if (!settled) {
-        settled = true;
-        settleError(new OAuthFlowError({ message: `Linear denied authorization: ${oauthError}` }));
+    try {
+      const authorizationCode = parseCallbackUrl(requestUrl.toString(), redirectUri, options.state);
+      if (settled) {
+        respond(response, 409, "Authorization already received", "Return to Pi to continue.");
+        return;
       }
-      respond(
-        response,
-        400,
-        "Authorization rejected",
-        "Linear did not authorize the connection. Return to Pi for details.",
-      );
-      return;
+      settled = true;
+      respond(response, 200, "Authorization complete", "You can close this page and return to Pi.");
+      settleCode(authorizationCode);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "The OAuth callback is invalid.";
+      respond(response, 400, "Authorization rejected", message);
+      if (
+        cause instanceof Error &&
+        "code" in cause &&
+        cause.code === LinearErrorCode.OAuthDenied &&
+        !settled
+      ) {
+        settled = true;
+        settleError(cause);
+      }
     }
-
-    const authorizationCode = requestUrl.searchParams.get("code");
-    if (!authorizationCode) {
-      respond(
-        response,
-        400,
-        "Authorization rejected",
-        "The callback did not include an authorization code.",
-      );
-      return;
-    }
-
-    if (settled) {
-      respond(response, 409, "Authorization already received", "Return to Pi to continue.");
-      return;
-    }
-
-    settled = true;
-    respond(response, 200, "Authorization complete", "You can close this page and return to Pi.");
-    settleCode(authorizationCode);
   });
-
-  const onServerError = (cause: unknown): void => {
-    if (settled) return;
-    settled = true;
-    settleError(new OAuthFlowError({ message: "The OAuth callback server failed.", cause }));
-  };
 
   await new Promise<void>((resolve, reject) => {
     const onStartupError = (cause: unknown) =>
-      reject(new OAuthFlowError({ message: `Cannot listen on 127.0.0.1:${options.port}.`, cause }));
+      reject(
+        linearError(LinearErrorCode.Conflict, `Cannot listen on 127.0.0.1:${options.port}.`, {
+          recovery:
+            "Retry with /linear-auth login --manual, or configure another registered callback port.",
+          cause,
+        }),
+      );
     server.once("error", onStartupError);
     server.listen(options.port, "127.0.0.1", () => {
       server.off("error", onStartupError);
@@ -212,18 +221,37 @@ export async function startLoopbackCallback(
     });
   });
 
-  server.on("error", onServerError);
-
   const address = server.address();
   if (!address || typeof address === "string") {
     await closeServer(server);
-    throw new OAuthFlowError({ message: "The OAuth callback server has no TCP address." });
+    throw linearError(
+      LinearErrorCode.NetworkUnavailable,
+      "The OAuth callback server has no TCP address.",
+    );
   }
+  redirectUri = callbackUri(address.port);
+
+  const onServerError = (cause: unknown): void => {
+    if (settled) return;
+    settled = true;
+    settleError(
+      linearError(LinearErrorCode.NetworkUnavailable, "The OAuth callback server failed.", {
+        retryable: true,
+        cause,
+      }),
+    );
+  };
+  server.on("error", onServerError);
 
   timer = setTimeout(() => {
     if (settled) return;
     settled = true;
-    settleError(new OAuthFlowError({ message: "Linear authorization timed out." }));
+    settleError(
+      linearError(LinearErrorCode.OAuthTimeout, "Linear authorization timed out.", {
+        retryable: true,
+        recovery: "Run /linear-auth login again.",
+      }),
+    );
   }, options.timeoutMs);
   timer.unref();
 
@@ -232,10 +260,7 @@ export async function startLoopbackCallback(
       if (settled) return;
       settled = true;
       settleError(
-        new OAuthFlowError({
-          message: "Linear authorization was cancelled.",
-          cause: options.signal?.reason,
-        }),
+        linearError(LinearErrorCode.OAuthCancelled, "Linear authorization was cancelled."),
       );
     };
     options.signal.addEventListener("abort", abortHandler, { once: true });
@@ -244,9 +269,9 @@ export async function startLoopbackCallback(
   const close = async (): Promise<void> => {
     if (timer) clearTimeout(timer);
     if (abortHandler) options.signal?.removeEventListener("abort", abortHandler);
+    server.off("error", onServerError);
     await closeServer(server);
   };
-
   const codeWithCleanup = code.then(
     async (value) => {
       await close();
@@ -257,34 +282,17 @@ export async function startLoopbackCallback(
       throw error;
     },
   );
-
-  return {
-    redirectUri: `http://127.0.0.1:${address.port}${OAUTH_CALLBACK_PATH}`,
-    code: codeWithCleanup,
-    close,
-  };
+  return { redirectUri, code: codeWithCleanup, close };
 }
 
-async function decodeResponse(response: Response): Promise<unknown> {
+async function decodeJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
-  } catch (cause) {
-    throw new OAuthFlowError({
-      message: `Linear OAuth returned HTTP ${response.status} with an invalid JSON body.`,
-      cause,
-    });
-  }
-}
-
-function oauthErrorMessage(status: number, body: unknown): string {
-  try {
-    const decoded = Schema.decodeUnknownSync(OAuthErrorResponseSchema)(body);
-    const detail = decoded.error_description ?? decoded.error;
-    return detail
-      ? `Linear OAuth failed with HTTP ${status}: ${detail}`
-      : `Linear OAuth failed with HTTP ${status}.`;
   } catch {
-    return `Linear OAuth failed with HTTP ${status}.`;
+    throw linearError(
+      LinearErrorCode.Api,
+      `Linear OAuth returned invalid JSON with HTTP ${response.status}.`,
+    );
   }
 }
 
@@ -302,13 +310,44 @@ async function requestTokens(
       signal,
     });
   } catch (cause) {
-    throw new OAuthFlowError({ message: "Cannot reach the Linear OAuth token endpoint.", cause });
+    throw linearError(
+      LinearErrorCode.NetworkUnavailable,
+      "Cannot reach the Linear OAuth token endpoint.",
+      {
+        retryable: true,
+        cause,
+      },
+    );
   }
-
-  const payload = await decodeResponse(response);
-  if (!response.ok)
-    throw new OAuthFlowError({ message: oauthErrorMessage(response.status, payload) });
-
+  const payload = await decodeJson(response);
+  if (!response.ok) {
+    let oauthCode: string | undefined;
+    let description: string | undefined;
+    try {
+      const decoded = Schema.decodeUnknownSync(OAuthErrorResponseSchema)(payload);
+      oauthCode = decoded.error;
+      description = decoded.error_description;
+    } catch {
+      // The stable HTTP classification remains usable without provider error fields.
+    }
+    if (oauthCode === "invalid_grant") {
+      throw linearError(
+        LinearErrorCode.OAuthInvalidGrant,
+        description ?? "The Linear OAuth grant is invalid.",
+        {
+          recovery: "Run /linear-auth login again.",
+        },
+      );
+    }
+    throw linearError(
+      LinearErrorCode.Api,
+      description ?? `Linear OAuth failed with HTTP ${response.status}.`,
+      {
+        retryable: response.status >= 500,
+        details: { status: response.status, ...(oauthCode ? { oauthCode } : {}) },
+      },
+    );
+  }
   try {
     const decoded = Schema.decodeUnknownSync(OAuthTokenResponseSchema)(payload);
     return {
@@ -319,7 +358,7 @@ async function requestTokens(
       scope: typeof decoded.scope === "string" ? decoded.scope : [...decoded.scope].join(" "),
     };
   } catch {
-    throw new OAuthFlowError({ message: "Linear OAuth returned an invalid token response." });
+    throw linearError(LinearErrorCode.Api, "Linear OAuth returned an invalid token response.");
   }
 }
 
