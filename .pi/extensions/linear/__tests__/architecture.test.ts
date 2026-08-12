@@ -26,6 +26,34 @@ describeIfEnabled("linear", "Linear architecture contracts", () => {
     }
   });
 
+  it("uses SDK create IDs as retry-safe entity IDs", async () => {
+    const sdkTypes = await readFile(
+      join(
+        process.cwd(),
+        ".pi",
+        "extensions",
+        "linear",
+        "node_modules",
+        "@linear",
+        "sdk",
+        "dist",
+        "index-DHA7xCPn.d.mts",
+      ),
+      "utf8",
+    );
+    const issueCreate = sdkTypes.slice(
+      sdkTypes.indexOf("type IssueCreateInput ="),
+      sdkTypes.indexOf("type IssueCreatePayload ="),
+    );
+    const commentCreate = sdkTypes.slice(
+      sdkTypes.indexOf("type CommentCreateInput ="),
+      sdkTypes.indexOf("type CommentCreatePayload ="),
+    );
+
+    expect(issueCreate).toContain("The identifier in UUID v4 format");
+    expect(commentCreate).toContain("The identifier in UUID v4 format");
+  });
+
   it("pins the generated SDK and declares all external runtime contracts", async () => {
     const pkg = JSON.parse(
       await readFile(join(process.cwd(), ".pi", "extensions", "linear", "package.json"), "utf8"),
