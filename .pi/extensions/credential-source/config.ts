@@ -17,7 +17,6 @@ const OnePasswordEntrySchema = Schema.Struct({
   consumers: Schema.Array(Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]*$/))).check(
     Schema.isNonEmpty(),
   ),
-  account: Schema.String.check(Schema.isNonEmpty(), Schema.isTrimmed()),
   reference: Schema.String.check(
     Schema.isPattern(/^op:\/\/[^/\s]+\/[^/\s]+\/(?:[^/\s]+\/)?[^/\s]+$/),
   ),

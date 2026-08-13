@@ -32,7 +32,6 @@ describe("credential source settings", () => {
               "linear.apiKey": {
                 provider: "1password",
                 consumers: ["linear"],
-                account: "Work",
                 reference: "op://Private/Linear/credential",
               },
               "forgejo.apiToken": {
@@ -63,7 +62,6 @@ describe("credential source settings", () => {
                   "linear.apiKey": {
                     provider: "1password",
                     consumers: ["linear"],
-                    account: "Work",
                     reference: "op://Private/Linear/credential",
                   },
                 },
@@ -107,7 +105,6 @@ describe("credential source settings", () => {
       {
         provider: "1password",
         consumers: ["linear"],
-        account: "Work",
         reference: "op://Private/Linear/credential",
         command: "op",
       },

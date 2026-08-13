@@ -15,24 +15,28 @@ const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
 const itemId = "12345678-1234-1234-1234-123456789abc";
 
 describe("credential providers", () => {
-  it("uses the 1Password desktop SDK with a fixed secret reference", async () => {
-    const resolve = vi.fn(async () => SENTINEL);
-    const createClient = vi.fn(async () => ({ secrets: { resolve } }));
-    const provider = createOnePasswordProvider(createClient);
+  it("uses a constrained 1Password CLI read with a fixed secret reference", async () => {
+    const runner = vi.fn((_command, _args, _options) =>
+      Effect.succeed({ stdout: SENTINEL, stderr: "" }),
+    ) as unknown as CredentialProcessRunner;
+    const provider = createOnePasswordProvider(runner, () => "/trusted/op");
     const wrapped = await Effect.runPromise(
       provider.resolve(
         {
           provider: "1password",
           consumers: ["linear"],
-          account: "Work",
           reference: "op://Private/Linear/credential",
         },
         "linear.apiKey",
       ),
     );
 
-    expect(createClient).toHaveBeenCalledWith("Work");
-    expect(resolve).toHaveBeenCalledWith("op://Private/Linear/credential");
+    const [command, args, options] = (runner as any).mock.calls[0];
+    expect(command).toBe("/trusted/op");
+    expect(args).toEqual(["read", "--no-newline", "op://Private/Linear/credential"]);
+    expect(options.env).not.toHaveProperty("PI_ENV_NODE_BIN");
+    expect(options.stdoutLimitBytes).toBe(CREDENTIAL_STDOUT_LIMIT_BYTES);
+    expect(options.stderrLimitBytes).toBe(CREDENTIAL_STDERR_LIMIT_BYTES);
     expect(Redacted.value(wrapped)).toBe(SENTINEL);
   });
 

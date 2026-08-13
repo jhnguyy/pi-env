@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Cause, Effect, Redacted } from "effect";
+import { Effect, Redacted } from "effect";
 import {
   ProcessFailure,
   resolveNodeCommand,
@@ -29,14 +29,6 @@ export interface CredentialProvider {
     name: CredentialName,
   ): Effect.Effect<Redacted.Redacted<string>, ReturnType<typeof credentialError>>;
 }
-
-export interface OnePasswordClient {
-  readonly secrets: {
-    resolve(reference: string): Promise<string>;
-  };
-}
-
-export type OnePasswordClientFactory = (account: string) => Promise<OnePasswordClient>;
 
 export type CredentialExecutableResolver = (
   name: string,
@@ -102,27 +94,10 @@ function validateCredential(
   return Effect.succeed(Redacted.make(normalized, { label: name }));
 }
 
-async function defaultOnePasswordClient(account: string): Promise<OnePasswordClient> {
-  const sdk = await import("@1password/sdk");
-  return sdk.createClient({
-    auth: new sdk.DesktopAuth(account),
-    integrationName: "Pi Credential Source",
-    integrationVersion: "1.0.0",
-  });
-}
-
 export function createOnePasswordProvider(
-  createClient: OnePasswordClientFactory = defaultOnePasswordClient,
+  runner: CredentialProcessRunner = streamProcess,
+  resolveExecutable: CredentialExecutableResolver = () => CredentialExecutable.OnePassword,
 ): CredentialProvider {
-  const clients = new Map<string, Promise<OnePasswordClient>>();
-  const clientFor = (account: string) => {
-    const existing = clients.get(account);
-    if (existing) return existing;
-    const created = createClient(account);
-    clients.set(account, created);
-    void created.catch(() => clients.delete(account));
-    return created;
-  };
   return {
     id: "1password",
     resolve(entry, name) {
@@ -136,20 +111,35 @@ export function createOnePasswordProvider(
         );
       }
       return Effect.tryPromise({
-        try: async () => (await clientFor(entry.account)).secrets.resolve(entry.reference),
-        catch: (error) => sanitizeProviderError(error, "1password"),
-      }).pipe(
-        Effect.timeout(DEFAULT_CREDENTIAL_TIMEOUT_MS),
-        Effect.catchIf(Cause.isTimeoutError, () =>
-          Effect.fail(
-            credentialError(
-              CredentialErrorCode.Timeout,
-              "The 1Password credential request timed out.",
-              { provider: "1password", name, retryable: true },
-            ),
+        try: async () => resolveExecutable(CredentialExecutable.OnePassword),
+        catch: () =>
+          credentialError(
+            CredentialErrorCode.ProviderUnavailable,
+            "The 1Password credential provider is not available.",
+            { provider: "1password", name },
           ),
-        ),
-        Effect.flatMap((value) => validateCredential(value, "1password", name)),
+      }).pipe(
+        Effect.flatMap((executable) => {
+          if (!executable) {
+            return Effect.fail(
+              credentialError(
+                CredentialErrorCode.ProviderUnavailable,
+                "The 1Password credential provider is not available.",
+                {
+                  provider: "1password",
+                  name,
+                  recovery: "Install and configure the op CLI.",
+                },
+              ),
+            );
+          }
+          return runner(executable, ["read", "--no-newline", entry.reference], {
+            ...PROVIDER_PROCESS_OPTIONS,
+          }).pipe(
+            Effect.mapError((error) => providerFailure(error, "1password")),
+            Effect.flatMap((output) => validateCredential(output.stdout, "1password", name)),
+          );
+        }),
       );
     },
   };

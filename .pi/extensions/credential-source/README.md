@@ -8,7 +8,7 @@ Consumers use fixed logical names such as `linear.apiKey`. Each entry also names
 
 Add `credentialSource` to `~/.pi/agent/settings.json`.
 
-### 1Password desktop app
+### 1Password CLI
 
 ```json
 {
@@ -17,7 +17,6 @@ Add `credentialSource` to `~/.pi/agent/settings.json`.
       "linear.apiKey": {
         "provider": "1password",
         "consumers": ["linear"],
-        "account": "Work",
         "reference": "op://Private/Linear/credential"
       }
     }
@@ -25,7 +24,7 @@ Add `credentialSource` to `~/.pi/agent/settings.json`.
 }
 ```
 
-The extension uses the 1Password JavaScript SDK and its desktop-app authorization flow. Enable **Integrate with other apps** in the 1Password developer settings. The extension does not use `OP_SERVICE_ACCOUNT_TOKEN` or pass credentials through command arguments or environment variables.
+Install and configure the `op` CLI with desktop-app integration. The extension runs only `op read --no-newline` with the fixed global secret reference. It does not use a shell, `op run`, `OP_SERVICE_ACCOUNT_TOKEN`, or a model-facing 1Password tool.
 
 ### Bitwarden CLI
 

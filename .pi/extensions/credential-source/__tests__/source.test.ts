@@ -8,7 +8,6 @@ const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
 const entry = {
   provider: "1password" as const,
   consumers: ["linear"],
-  account: "Work",
   reference: "op://Private/Linear/credential",
 };
 

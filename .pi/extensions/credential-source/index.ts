@@ -31,7 +31,7 @@ export default function credentialSourceExtension(pi: ExtensionAPI) {
     const source = new CredentialSourceRuntime(
       settings.entries,
       providerMap([
-        createOnePasswordProvider(),
+        createOnePasswordProvider(undefined, (name) => findNodeBinaryLite(name, import.meta.url)),
         createBitwardenProvider(
           bitwardenSession,
           join(import.meta.dirname, "bitwarden-runner.js"),
