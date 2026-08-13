@@ -1,17 +1,9 @@
 import { Data } from "effect";
+import { CredentialSourceError } from "../_shared/credential-source";
 
 export const LinearErrorCode = {
   AuthRequired: "auth_required",
-  SetupRequired: "setup_required",
-  ConnectionAmbiguous: "connection_ambiguous",
-  ConnectionNotFound: "connection_not_found",
-  InsufficientScope: "insufficient_scope",
-  WriteConfirmationRequired: "write_confirmation_required",
-  OAuthCancelled: "oauth_cancelled",
-  OAuthTimeout: "oauth_timeout",
-  OAuthInvalidCallback: "oauth_invalid_callback",
-  OAuthInvalidGrant: "oauth_invalid_grant",
-  OAuthDenied: "oauth_denied",
+  CredentialConfirmationRequired: "credential_confirmation_required",
   NetworkUnavailable: "network_unavailable",
   RateLimited: "rate_limited",
   Forbidden: "forbidden",
@@ -19,7 +11,6 @@ export const LinearErrorCode = {
   Validation: "validation_error",
   AmbiguousReference: "ambiguous_reference",
   Conflict: "conflict",
-  Storage: "storage_error",
   Api: "linear_api_error",
 } as const;
 export type LinearErrorCode = (typeof LinearErrorCode)[keyof typeof LinearErrorCode];
@@ -49,6 +40,17 @@ export function linearError(
 
 export function asLinearError(error: unknown): LinearExtensionError {
   if (error instanceof LinearExtensionError) return error;
+  if (error instanceof CredentialSourceError) {
+    return linearError(LinearErrorCode.AuthRequired, error.message, {
+      retryable: error.retryable,
+      recovery: error.recovery,
+      details: {
+        credentialCode: error.code,
+        ...(error.name ? { credentialName: error.name } : {}),
+        ...(error.provider ? { provider: error.provider } : {}),
+      },
+    });
+  }
   return linearError(
     LinearErrorCode.Api,
     error instanceof Error ? error.message : "Linear failed.",

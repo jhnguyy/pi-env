@@ -27,6 +27,13 @@
         "outfile": "dist/cli.js"
       }
     ],
+    "credential-source": [
+      {
+        "entry": "bitwarden-runner.ts",
+        "outfile": "dist/bitwarden-runner.js",
+        "banner": false
+      }
+    ],
     "dev-tools": [
       {
         "entry": "daemon.ts",
