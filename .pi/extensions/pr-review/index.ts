@@ -877,7 +877,7 @@ async function openWalkthroughOnce(
         }),
         keybindings,
         theme,
-        rows: tui.terminal.rows,
+        getRows: () => Math.max(3, tui.terminal.rows - 4),
         requestRender: () => tui.requestRender(),
         onIntent: (intent: WalkthroughIntent) => done(intent),
       }),

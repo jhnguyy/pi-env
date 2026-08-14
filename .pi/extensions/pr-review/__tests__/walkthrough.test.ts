@@ -160,6 +160,7 @@ describe("pr-review walkthrough", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     expect(text(component, width)).toContain(width < 40 ? "Resize to 40+" : "PR review");
+    if (width < 40) expect(text(component, width)).toContain("/review findings");
   });
 
   it("bounds the viewport rows", () => {

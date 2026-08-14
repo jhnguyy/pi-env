@@ -339,6 +339,7 @@ export interface WalkthroughComponentOptions {
   readonly viewModel: WalkthroughViewModel;
   readonly keybindings: Pick<KeybindingsManager, "matches">;
   readonly rows?: number;
+  readonly getRows?: () => number;
   readonly onIntent?: (intent: WalkthroughIntent) => void;
   readonly requestRender?: () => void;
   readonly theme?: {
@@ -365,7 +366,7 @@ export class PrReviewWalkthroughComponent implements Component {
 
   render(width: number): string[] {
     if (this.cachedWidth === width && this.cachedRows) return this.cachedRows;
-    const maxRows = Math.max(3, this.options.rows ?? 18);
+    const maxRows = this.rows();
     const safeWidth = Math.max(1, width);
     const lines =
       safeWidth < 40
@@ -388,6 +389,10 @@ export class PrReviewWalkthroughComponent implements Component {
 
   private page(): WalkthroughPage {
     return this.options.viewModel.pages[this.selected] ?? this.options.viewModel.pages[0]!;
+  }
+
+  private rows(): number {
+    return Math.max(3, this.options.getRows?.() ?? this.options.rows ?? 18);
   }
 
   private currentFindingId(): string | undefined {
@@ -481,7 +486,8 @@ export class PrReviewWalkthroughComponent implements Component {
           width,
           "",
         ),
-        truncateToWidth("Resize to 40+ columns, or press Esc to close.", width, ""),
+        truncateToWidth("Resize to 40+ columns.", width, ""),
+        truncateToWidth("Use /review findings, or press Esc to close.", width, ""),
       ],
       rows,
     );

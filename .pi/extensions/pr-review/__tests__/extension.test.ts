@@ -270,6 +270,7 @@ describe("pr-review extension surface", () => {
               },
               resolve,
             );
+            expect(component.render(80)).toHaveLength(16);
             component.handleInput("\x1b[C");
             component.handleInput("\x1b[D");
             component.handleInput("escape");
