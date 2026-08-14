@@ -3,7 +3,6 @@ import {
   Key,
   matchesKey,
   truncateToWidth,
-  visibleWidth,
   wrapTextWithAnsi,
   type Component,
 } from "@earendil-works/pi-tui";
@@ -23,7 +22,7 @@ export type WalkthroughNotice = DeepReadonly<{
 }>;
 
 export type WalkthroughActionResult = DeepReadonly<{
-  action: "select" | "edit" | "preface" | "rerun" | "post" | "inspect" | "cleanup";
+  action: "select" | "edit" | "preface" | "rerun" | "post" | "inspect" | "cleanup" | "help";
   ok: boolean;
   notice: WalkthroughNotice;
 }>;
@@ -160,7 +159,9 @@ export function deriveWalkthroughViewModel(
       `Verdict: ${state.result?.verdict ?? "No submitted review result yet."}`,
       `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
       `Changed files: ${meta.changedFiles.length}`,
-      complete ? "State: complete" : "State: incomplete; posting is blocked until plan and result exist.",
+      complete
+        ? "State: complete"
+        : "State: incomplete; posting is blocked until plan and result exist.",
     ],
   });
 
@@ -181,7 +182,9 @@ export function deriveWalkthroughViewModel(
         `Attention: ${planFile?.attention ?? "unplanned"}`,
         `Role: ${planFile?.role ?? "changed file without plan entry"}`,
         pathFindings.length ? "Findings:" : "Findings: none",
-        ...pathFindings.map(({ finding, index }) => `- ${findingSummary(finding, index, selectedIds)}`),
+        ...pathFindings.map(
+          ({ finding, index }) => `- ${findingSummary(finding, index, selectedIds)}`,
+        ),
       ],
     });
     for (const { finding, index, id } of pathFindings) {
@@ -190,7 +193,12 @@ export function deriveWalkthroughViewModel(
         kind: "finding",
         title: `${id} ${path}`,
         findingId: id,
-        lines: findingDetailLines(finding, index, options.diffContextByFindingId?.get(id), selectedIds),
+        lines: findingDetailLines(
+          finding,
+          index,
+          options.diffContextByFindingId?.get(id),
+          selectedIds,
+        ),
       });
     }
   };
@@ -209,7 +217,8 @@ export function deriveWalkthroughViewModel(
       title: "Post-body findings",
       lines: unanchored.flatMap(({ finding, index }) => [
         findingSummary(finding, index, selectedIds),
-        `Post-body explanation: ${finding.problem}`,
+        "Post-body reason: no valid line is available in the pinned diff.",
+        `Problem: ${finding.problem}`,
         `Consequence: ${finding.consequence}`,
         `Suggested fix: ${finding.suggestedFix}`,
       ]),
@@ -218,7 +227,9 @@ export function deriveWalkthroughViewModel(
 
   const invalidAnchors = findings.filter((f) => f.anchorValid === false).length;
   const selected = findings.filter((finding, index) => selectedIds.has(findingId(finding, index)));
-  const selectedAnchored = selected.filter((finding) => finding.anchorValid === true && finding.file).length;
+  const selectedAnchored = selected.filter(
+    (finding) => finding.anchorValid === true && finding.file,
+  ).length;
   const selectedPostBody = selected.length - selectedAnchored;
   pages.push({
     id: "finalize",
@@ -237,7 +248,9 @@ export function deriveWalkthroughViewModel(
         : "Unanchored reason: none.",
       `Invalid anchors: ${invalidAnchors}`,
       `Posts: ${state.posts.length}`,
-      complete ? "Posting: available after explicit event choice and confirmation" : "Posting: blocked until plan and result exist",
+      complete
+        ? "Posting: available after explicit event choice and confirmation"
+        : "Posting: blocked until plan and result exist",
       state.child
         ? `Child session: ${state.child.sessionName ?? state.child.sessionFile ?? "available"}${state.child.isError ? " (error)" : ""}`
         : "Child session: missing",
@@ -342,7 +355,8 @@ export class PrReviewWalkthroughComponent implements Component {
 
   private handleEnter(): void {
     const page = this.page();
-    if (page.kind === "finding") return this.emit({ kind: "toggleSelection", findingId: page.findingId });
+    if (page.kind === "finding")
+      return this.emit({ kind: "toggleSelection", findingId: page.findingId });
     if (page.kind === "finalize") return this.emit({ kind: "post" });
     this.movePage(1);
   }
@@ -437,11 +451,8 @@ export class PrReviewWalkthroughComponent implements Component {
   }
 
   private boundRows(lines: string[], rows: number): string[] {
-    const bounded = lines.slice(this.scroll, this.scroll + rows);
+    const bounded = lines.slice(0, rows);
     while (bounded.length < Math.min(rows, 3)) bounded.push("");
-    for (const line of bounded) {
-      if (visibleWidth(line) > 10_000) break;
-    }
     return bounded;
   }
 }

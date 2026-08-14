@@ -208,7 +208,12 @@ describe("pr-review extension surface", () => {
     let customCalls = 0;
     await pi.command("walkthrough", {
       mode: "json",
-      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+      ui: {
+        notify: (m: string) => notes.push(m),
+        custom: async () => {
+          customCalls += 1;
+        },
+      },
     } as any);
     expect(notes.at(-1)).toContain("TUI mode");
     expect(customCalls).toBe(0);
@@ -234,7 +239,12 @@ describe("pr-review extension surface", () => {
     let customCalls = 0;
     await pi.command("walkthrough", {
       mode: "tui",
-      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+      ui: {
+        notify: (m: string) => notes.push(m),
+        custom: async () => {
+          customCalls += 1;
+        },
+      },
     } as any);
     expect(notes.at(-1)).toContain("No active PR review");
     expect(customCalls).toBe(0);
@@ -254,7 +264,10 @@ describe("pr-review extension surface", () => {
             const component = factory(
               { requestRender() {}, terminal: { rows: 20 } },
               {},
-              { matches: (data: string, id: string) => data === "escape" && id === "tui.select.cancel" },
+              {
+                matches: (data: string, id: string) =>
+                  data === "escape" && id === "tui.select.cancel",
+              },
               resolve,
             );
             component.handleInput("\x1b[C");
@@ -277,7 +290,12 @@ describe("pr-review extension surface", () => {
       ui: {
         notify() {},
         custom: async (factory: any) => {
-          const component = factory({ requestRender() {}, terminal: { rows: 20 } }, {}, { matches: () => false }, () => {});
+          const component = factory(
+            { requestRender() {}, terminal: { rows: 20 } },
+            {},
+            { matches: () => false },
+            () => {},
+          );
           seenSelected.push((component as any).options.viewModel.counts.selectedFindings);
           return intents.shift();
         },
@@ -317,8 +335,10 @@ describe("pr-review extension surface", () => {
     pi.exec = async (cmd: string, args: string[]) => {
       calls.push({ cmd, args });
       if (cmd === "gh" && args[0] === "pr") return { code: 0, stdout: "h\n", stderr: "" };
-      if (cmd === "gh" && args[0] === "api" && args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
-      if (cmd === "gh" && args[0] === "api" && args[1] === "-X") return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+      if (cmd === "gh" && args[0] === "api" && args.includes("--method"))
+        return { code: 0, stdout: "[]", stderr: "" };
+      if (cmd === "gh" && args[0] === "api" && args[1] === "-X")
+        return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
       return { code: 1, stdout: "", stderr: "bad" };
     };
     const intents = [{ kind: "post" }, { kind: "cancel" }];
@@ -346,7 +366,12 @@ describe("pr-review extension surface", () => {
     let customCalls = 0;
     await pi.command("walkthrough", {
       mode: "tui",
-      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+      ui: {
+        notify: (m: string) => notes.push(m),
+        custom: async () => {
+          customCalls += 1;
+        },
+      },
     } as any);
     expect(notes.at(-1)).toContain("hash_mismatch");
     expect(customCalls).toBe(0);
@@ -361,7 +386,12 @@ describe("pr-review extension surface", () => {
     delete incomplete.result;
     restore({ sessionManager: { getBranch: () => [custom(incomplete)] } } as any);
     const pi = extensionPi();
-    const intents = [{ kind: "post" }, { kind: "inspectChild" }, { kind: "cleanup" }, { kind: "cancel" }];
+    const intents = [
+      { kind: "post" },
+      { kind: "inspectChild" },
+      { kind: "cleanup" },
+      { kind: "cancel" },
+    ];
     await pi.command("walkthrough", {
       mode: "tui",
       ui: {
@@ -369,12 +399,22 @@ describe("pr-review extension surface", () => {
         confirm: async () => true,
         select: async () => "COMMENT",
         custom: async (factory: any) => {
-          const component = factory({ requestRender() {}, terminal: { rows: 20 } }, {}, { matches: () => false }, () => {});
-          expect((component as any).options.viewModel.pages.map((p: any) => p.id)).toEqual(["overview", "finalize"]);
+          const component = factory(
+            { requestRender() {}, terminal: { rows: 20 } },
+            {},
+            { matches: () => false },
+            () => {},
+          );
+          expect((component as any).options.viewModel.pages.map((p: any) => p.id)).toEqual([
+            "overview",
+            "finalize",
+          ]);
           return intents.shift();
         },
       },
-      switchSession: async () => { throw new Error("should not switch"); },
+      switchSession: async () => {
+        throw new Error("should not switch");
+      },
     } as any);
     expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
   });
@@ -389,7 +429,10 @@ describe("pr-review extension surface", () => {
     await pi.command("walkthrough", {
       mode: "tui",
       ui: { notify() {}, custom: async () => ({ kind: "inspectChild" }) },
-      switchSession: async (path: string) => { switched = path; return { cancelled: false }; },
+      switchSession: async (path: string) => {
+        switched = path;
+        return { cancelled: false };
+      },
     } as any);
     expect(switched).toBe("/tmp/child.jsonl");
   });
@@ -406,8 +449,8 @@ describe("pr-review extension surface", () => {
       calls.push({ cmd, args, cwd: opts.cwd });
       return { code: 0, stdout: "", stderr: "" };
     };
-    await pi.command("cleanup", { ui: { notify() {}, confirm: async () => true } } as any);
-    await pi.command("cleanup", { ui: { notify() {}, confirm: async () => true } } as any);
+    await pi.command("cleanup", { ui: { notify() {} } } as any);
+    await pi.command("cleanup", { ui: { notify() {} } } as any);
     expect(calls.filter((c) => c.args[0] === "worktree" && c.args[1] === "remove")).toHaveLength(1);
     expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
     expect(pi.appended.at(-1)?.[1].state.snapshot.cache.repoDir).toContain(root);

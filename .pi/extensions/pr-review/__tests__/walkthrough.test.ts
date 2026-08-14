@@ -148,7 +148,7 @@ describe("pr-review walkthrough", () => {
     const lines = vm.pages.find((p) => p.kind === "unanchored")?.lines.join("\n") ?? "";
     expect(lines.indexOf("F2")).toBeLessThan(lines.indexOf("F3"));
     expect(lines).toContain("F4");
-    expect(lines).toContain("Post-body explanation");
+    expect(lines).toContain("Post-body reason: no valid line is available in the pinned diff.");
   });
 
   it.each([39, 40, 60, 80, 120])("renders width-safe at %i columns", (width) => {
@@ -169,6 +169,25 @@ describe("pr-review walkthrough", () => {
       rows: 5,
     });
     expect(component.render(80)).toHaveLength(5);
+  });
+
+  it("keeps the header and action footer visible while wrapped content scrolls", () => {
+    const longFinding = {
+      ...baseFindings()[0]!,
+      problem: "A long problem description ".repeat(30),
+    };
+    const component = new PrReviewWalkthroughComponent({
+      viewModel: deriveWalkthroughViewModel(state([longFinding])),
+      keybindings: kb(),
+      rows: 12,
+    });
+    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[C");
+    component.render(40);
+    component.handleInput("pageDown");
+    const lines = component.render(40);
+    expect(lines[0]).toContain("PR review");
+    expect(lines.at(-1)).toContain("section");
   });
 
   it("invalidates theme-sensitive render cache", () => {
@@ -198,7 +217,8 @@ describe("pr-review walkthrough", () => {
     component.render(80);
     for (const key of ["down", "up", "pageDown", "pageUp", "\x1b[C", "\x1b[C"])
       component.handleInput(key);
-    for (const key of [" ", "e", "f", "r", "p", "i", "c", "?", "escape"]) component.handleInput(key);
+    for (const key of [" ", "e", "f", "r", "p", "i", "c", "?", "escape"])
+      component.handleInput(key);
     expect(intents.map((i) => i.kind)).toEqual([
       "toggleSelection",
       "edit",
