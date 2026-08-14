@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,17 +19,15 @@ function state(): ReviewState {
   const artifact = mkdtempSync(join(tmpdir(), "pi-pr-review-art-"));
   temps.push(artifact);
   const diffPath = join(artifact, "diff.patch");
-  writeFileSync(
-    diffPath,
-    "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,2 @@\n same\n+needle\n",
-  );
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,2 @@\n same\n+needle\n";
+  writeFileSync(diffPath, diff);
   return {
     snapshot: {
       id: "r",
       artifactDir: artifact,
       worktree: root,
       diffPath,
-      diffHash: "h",
+      diffHash: createHash("sha256").update(diff).digest("hex"),
       createdAt: "now",
       metadata: {
         owner: "o",
@@ -100,10 +99,15 @@ describe("pr-review run-scoped tools", () => {
         )) as any
       ).content[0].text,
     ).toContain("diff --git");
-    writeFileSync(
-      s.snapshot.diffPath,
-      "diff --git a/dir b/part/a.ts b/dir b/part/a.ts\n--- a/dir b/part/a.ts\n+++ b/dir b/part/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
-    );
+    const ambiguousDiff = "diff --git a/dir b/part/a.ts b/dir b/part/a.ts\n--- a/dir b/part/a.ts\n+++ b/dir b/part/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    writeFileSync(s.snapshot.diffPath, ambiguousDiff);
+    s = {
+      ...s,
+      snapshot: {
+        ...s.snapshot,
+        diffHash: createHash("sha256").update(ambiguousDiff).digest("hex"),
+      },
+    };
     const ambiguousTools = Object.fromEntries(
       makeReviewTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
     );
@@ -293,11 +297,13 @@ describe("pr-review run-scoped tools", () => {
   it("validates anchors in diff sections after the first 128 KB", async () => {
     let s = state();
     const late = `diff --git a/src/late.ts b/src/late.ts\n--- a/src/late.ts\n+++ b/src/late.ts\n@@ -1,1 +1,2 @@\n old\n+late\n`;
-    writeFileSync(s.snapshot.diffPath, `${"x".repeat(140_000)}\n${late}`);
+    const diff = `${"x".repeat(140_000)}\n${late}`;
+    writeFileSync(s.snapshot.diffPath, diff);
     s = {
       ...s,
       snapshot: {
         ...s.snapshot,
+        diffHash: createHash("sha256").update(diff).digest("hex"),
         metadata: { ...s.snapshot.metadata, changedFiles: [{ path: "src/late.ts" }] },
       },
     };
@@ -358,6 +364,62 @@ describe("pr-review run-scoped tools", () => {
       undefined as any,
     );
     expect(s.result?.findings[0]?.anchorValid).toBe(true);
+  });
+
+  it("fails closed when diff.patch mutates after snapshot", async () => {
+    let s = state();
+    const tools = Object.fromEntries(
+      makeReviewTools({
+        get state() {
+          return s;
+        },
+        set state(v) {
+          s = v;
+        },
+        save: (v) => {
+          s = v;
+        },
+      }).map((t) => [t.name, t]),
+    );
+    writeFileSync(s.snapshot.diffPath, "diff --git a/changed.ts b/changed.ts\n");
+    await expect(
+      tools.review_diff.execute("1", { path: "src/a.ts" } as any, undefined as any, undefined as any),
+    ).rejects.toThrow(/hash_mismatch/);
+    await tools.submit_review_plan.execute(
+      "1",
+      {
+        goal: "g",
+        goalAssessment: "a",
+        risk: "r",
+        riskReasons: [],
+        cohorts: [{ label: "source", purpose: "Review source", paths: ["src/a.ts"] }],
+        files: [{ path: "src/a.ts", attention: "normal", role: "r" }],
+      } as any,
+      undefined as any,
+      undefined as any,
+    );
+    await expect(
+      tools.submit_review.execute(
+        "1",
+        {
+          verdict: "v",
+          findings: [
+            {
+              severity: "serious",
+              impact: "low",
+              problem: "p",
+              consequence: "c",
+              suggestedFix: "f",
+              file: "src/a.ts",
+              side: "RIGHT",
+              line: 2,
+            },
+          ],
+        } as any,
+        undefined as any,
+        undefined as any,
+      ),
+    ).rejects.toThrow(/hash_mismatch/);
   });
 
   it("checks cancellation in tool execution", async () => {

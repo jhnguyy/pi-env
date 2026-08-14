@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
@@ -10,6 +10,7 @@ import {
   validateFindingAnchors,
   validatePlan,
 } from "./core";
+import { loadPinnedDiff } from "./diff-context";
 import {
   ChangedFilesParamSchema,
   DiffParamSchema,
@@ -91,13 +92,13 @@ export function boundedChangedFileContext(state: ReviewState): string {
 
 function makeToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
   const root = store.state.snapshot.worktree;
-  const diffPath = store.state.snapshot.diffPath;
-  let diffText: string | undefined;
-  let diffChunkMap: Map<string, string[]> | undefined;
-  const fullDiff = () => (diffText ??= readFileSync(diffPath, "utf8"));
+  const fullDiff = () => {
+    const loaded = loadPinnedDiff(store.state.snapshot);
+    if (!loaded.ok) throw new Error(`Pinned diff unavailable: ${loaded.error.kind}.`);
+    return loaded.value.text;
+  };
   const indexedDiff = () => {
-    if (diffChunkMap) return diffChunkMap;
-    diffChunkMap = new Map();
+    const diffChunkMap = new Map<string, string[]>();
     for (const chunk of diffChunks(fullDiff())) {
       if (!chunk.path) continue;
       const list = diffChunkMap.get(chunk.path) ?? [];

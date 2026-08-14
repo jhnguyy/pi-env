@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  BorderedLoader,
   getAgentDir,
   type ExtensionAPI,
   type ExtensionCommandContext,
@@ -36,6 +37,7 @@ import {
   type ReviewEvent as ReviewEventValue,
   type ReviewState,
 } from "./core";
+import type { ReviewActionOutcome } from "./schema";
 import { boundedChangedFileContext, makeReviewTools } from "./runtime";
 import {
   currentRemoteHead,
@@ -43,6 +45,15 @@ import {
   prepareSnapshot,
   resolvePrUrl,
 } from "./snapshot";
+import { extractFindingContext, loadPinnedDiff } from "./diff-context";
+import {
+  PrReviewWalkthroughComponent,
+  deriveWalkthroughViewModel,
+  type WalkthroughActionResult,
+  type WalkthroughDiffContext,
+  type WalkthroughIntent,
+  type WalkthroughNotice,
+} from "./walkthrough";
 
 export const START_PARAMS = Type.Object(
   {
@@ -93,12 +104,31 @@ function remember(state: ReviewState): void {
   latestReviewId = state.snapshot.id;
 }
 function saveState(pi: ExtensionAPI, state: ReviewState): void {
-  remember(state);
   persistJson(statePath(state.snapshot.id), state);
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  if (state.cleaned) {
+    states.delete(state.snapshot.id);
+    if (latestReviewId === state.snapshot.id) latestReviewId = undefined;
+  } else {
+    remember(state);
+  }
 }
 function latestState(): ReviewState | undefined {
   return latestReviewId ? states.get(latestReviewId) : undefined;
+}
+function immutableClone<T>(value: T): Readonly<T> {
+  const cloned = structuredClone(value);
+  const freeze = (v: any): any => {
+    if (!v || typeof v !== "object" || Object.isFrozen(v)) return v;
+    Object.freeze(v);
+    for (const child of Object.values(v)) freeze(child);
+    return v;
+  };
+  return freeze(cloned);
+}
+export function getLatestReviewState(): Readonly<ReviewState> | undefined {
+  const s = latestState();
+  return s ? immutableClone(s) : undefined;
 }
 export function restore(ctx: ExtensionContext): void {
   states.clear();
@@ -273,6 +303,26 @@ function renderFindings(): string {
       .join("\n") || "No findings."
   );
 }
+export function setFindingSelectionAction(
+  pi: ExtensionAPI,
+  findingId: string,
+  selected: boolean,
+): ReviewActionOutcome {
+  const s = latestState();
+  if (!s?.result) return { status: "no-findings", message: "No findings to select." };
+  if (!s.result.findings.some((f) => f.id === findingId))
+    return { status: "not-found", message: "Finding not found.", findingId };
+  const ids = new Set(s.selectedFindingIds);
+  if (selected) ids.add(findingId);
+  else ids.delete(findingId);
+  s.selectedFindingIds = s.result.findings.map((f) => f.id!).filter((id) => id && ids.has(id));
+  saveState(pi, s);
+  return {
+    status: "updated",
+    message: `Selected ${s.selectedFindingIds.length} findings.`,
+    reviewId: s.snapshot.id,
+  };
+}
 function selectFindings(pi: ExtensionAPI, arg: string): string {
   const s = latestState();
   if (!s?.result) return "No findings to select.";
@@ -410,6 +460,7 @@ async function postingPreflight(
   );
   if (remote !== s.snapshot.metadata.headOid)
     return "Review is stale: remote PR head changed. Rerun before posting.";
+  if (!s.plan || !s.result) return "Posting blocked until plan and result exist.";
   const selected = selectedFindings(s);
   if (!selected.length && !(s.preface ?? "").trim() && event !== ReviewEvent.Approve)
     return "No postable selected findings or preface.";
@@ -435,69 +486,193 @@ async function handlePostFailure(
   stderr: string,
   stdout: string,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ReviewActionOutcome> {
   attempt.status = "uncertain";
   saveState(pi, s);
   const reconciled = await reconcileAttempt(pi, ctx, s, attempt, signal);
   return reconciled
-    ? `Posted review reconciled after uncertain result (${reconciled}).`
-    : `Posting uncertain or failed: ${stderr || stdout}`;
+    ? {
+        status: "reconciled",
+        message: `Posted review reconciled after uncertain result (${reconciled}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: reconciled,
+      }
+    : {
+        status: "uncertain",
+        message: `Posting uncertain or failed: ${stderr || stdout}`,
+        reviewId: s.snapshot.id,
+      };
 }
 
 function prefacePreview(s: ReviewState): string {
   const preface = (s.preface ?? "").trim();
   return preface ? bound(preface, 500) : "(none)";
 }
-async function postReviewCritical(
+
+function alreadyPostedOutcome(s: ReviewState, contentHash: string): ReviewActionOutcome | undefined {
+  const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
+  return posted
+    ? {
+        status: "already-posted",
+        message: `Review already posted (${posted.reviewId ?? posted.id}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: posted.reviewId,
+      }
+    : undefined;
+}
+
+function priorReviewOutcome(s: ReviewState, prior: string | undefined): ReviewActionOutcome | undefined {
+  return prior
+    ? {
+        status: "already-posted",
+        message: `Existing review found for marker; not posting duplicate (${prior}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: prior,
+      }
+    : undefined;
+}
+
+function uncertainAttemptOutcome(
+  s: ReviewState,
+  attempt: PostAttempt | undefined,
+): ReviewActionOutcome | undefined {
+  return attempt?.status === "uncertain"
+    ? {
+        status: "uncertain",
+        message:
+          "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
+        reviewId: s.snapshot.id,
+      }
+    : undefined;
+}
+
+async function readyPostState(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<{ ok: true; state: ReviewState } | { ok: false; outcome: ReviewActionOutcome }> {
   const s = latestState();
-  if (!s) return "No active PR review.";
+  if (!s) return { ok: false, outcome: { status: "no-active", message: "No active PR review." } };
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
-  if (blocked) return blocked;
-  const contentHash = contentHashFor(s, event);
-  let attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
-  const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
-  if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-  const prior = attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined;
-  if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
-  if (attempt?.status === "uncertain")
-    return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
-  const selected = selectedFindings(s);
-  if (
-    !(await confirm(
-      ctx,
-      "Post PR review?",
-      `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
-    ))
-  )
-    return "Posting cancelled.";
-  if (!attempt) {
-    attempt = newAttempt(s, event, contentHash);
-    saveState(pi, s);
-  }
+  return blocked
+    ? {
+        ok: false,
+        outcome: {
+          status: blocked.startsWith("Review is stale") ? "stale" : "blocked",
+          message: blocked,
+          reviewId: s.snapshot.id,
+        },
+      }
+    : { ok: true, state: s };
+}
+
+async function confirmPostReview(
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  event: ReviewEventValue,
+): Promise<boolean> {
+  return confirm(
+    ctx,
+    "Post PR review?",
+    `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selectedFindings(s).length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
+  );
+}
+
+async function secondHeadCheck(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome | undefined> {
+  const remoteAfterConfirm = await currentRemoteHead(
+    pi.exec.bind(pi),
+    ctx.cwd,
+    s.snapshot.metadata.url,
+    signal,
+  );
+  return remoteAfterConfirm !== s.snapshot.metadata.headOid
+    ? {
+        status: "stale",
+        message: "Review is stale: remote PR head changed. Rerun before posting.",
+        reviewId: s.snapshot.id,
+      }
+    : undefined;
+}
+
+function persistedAttempt(
+  pi: ExtensionAPI,
+  s: ReviewState,
+  event: ReviewEventValue,
+  contentHash: string,
+  attempt: PostAttempt | undefined,
+): PostAttempt {
+  if (attempt) return attempt;
+  const created = newAttempt(s, event, contentHash);
+  saveState(pi, s);
+  return created;
+}
+
+async function submitAndRecordPost(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  event: ReviewEventValue,
+  attempt: PostAttempt,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
   const r = await submitPost(pi, ctx, s, event, attempt, signal);
-  if (r.code === -1) return r.stderr;
+  if (r.code === -1) return { status: "blocked", message: r.stderr, reviewId: s.snapshot.id };
   if (r.code !== 0) return handlePostFailure(pi, ctx, s, attempt, r.stderr, r.stdout, signal);
   attempt.status = "posted";
   try {
     attempt.reviewId = String(JSON.parse(r.stdout || "{}").id);
   } catch {}
   saveState(pi, s);
-  return "Review posted.";
+  return {
+    status: "posted",
+    message: "Review posted.",
+    reviewId: s.snapshot.id,
+    remoteReviewId: attempt.reviewId,
+  };
 }
 
-export async function postReview(
+async function postReviewCritical(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ReviewActionOutcome> {
+  const ready = await readyPostState(pi, ctx, event, signal);
+  if (!ready.ok) return ready.outcome;
+  const s = ready.state;
+  const contentHash = contentHashFor(s, event);
+  const posted = alreadyPostedOutcome(s, contentHash);
+  if (posted) return posted;
+  const attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
+  const prior = priorReviewOutcome(
+    s,
+    attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined,
+  );
+  if (prior) return prior;
+  const uncertain = uncertainAttemptOutcome(s, attempt);
+  if (uncertain) return uncertain;
+  if (!(await confirmPostReview(ctx, s, event)))
+    return { status: "cancelled", message: "Posting cancelled." };
+  const stale = await secondHeadCheck(pi, ctx, s, signal);
+  if (stale) return stale;
+  const persisted = persistedAttempt(pi, s, event, contentHash, attempt);
+  return submitAndRecordPost(pi, ctx, s, event, persisted, signal);
+}
+
+export async function postReviewAction(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  event: ReviewEventValue,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
   const keyState = latestState();
-  if (!keyState) return "No active PR review.";
+  if (!keyState) return { status: "no-active", message: "No active PR review." };
   const key = `${keyState.snapshot.id}:${contentHashFor(keyState, event)}`;
   return Effect.runPromise(
     PartitionedSemaphore.withPermits(
@@ -507,6 +682,15 @@ export async function postReview(
     )(Effect.tryPromise((effectSignal) => postReviewCritical(pi, ctx, event, effectSignal))),
     { signal },
   );
+}
+
+export async function postReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  event: ReviewEventValue,
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await postReviewAction(pi, ctx, event, signal)).message;
 }
 async function editWithUi(
   ctx: ExtensionCommandContext,
@@ -533,6 +717,18 @@ function applyFindingTemplate(f: Finding, text: string): void {
   f.consequence = consequence;
   f.suggestedFix = fix;
 }
+export function applyFindingTemplateEditAction(
+  pi: ExtensionAPI,
+  id: string,
+  text: string,
+): ReviewActionOutcome {
+  const s = latestState();
+  const f = s?.result?.findings.find((x) => x.id === id);
+  if (!s || !f) return { status: "not-found", message: "Finding not found.", findingId: id };
+  applyFindingTemplate(f, text);
+  saveState(pi, s);
+  return { status: "updated", message: `Finding ${id} updated.`, reviewId: s.snapshot.id };
+}
 async function editFinding(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
@@ -543,9 +739,14 @@ async function editFinding(
   if (!s || !f) return "Finding not found.";
   const edited = await editWithUi(ctx, `Edit finding ${id}`, findingTemplate(f));
   if (edited === undefined) return "Edit cancelled.";
-  applyFindingTemplate(f, edited);
+  return applyFindingTemplateEditAction(pi, id, edited).message;
+}
+export function updatePrefaceAction(pi: ExtensionAPI, preface: string): ReviewActionOutcome {
+  const s = latestState();
+  if (!s) return { status: "no-active", message: "No active PR review." };
+  s.preface = preface;
   saveState(pi, s);
-  return `Finding ${id} updated.`;
+  return { status: "updated", message: "Preface updated.", reviewId: s.snapshot.id };
 }
 async function editPreface(
   pi: ExtensionAPI,
@@ -558,16 +759,28 @@ async function editPreface(
     ? inline
     : await editWithUi(ctx, "Edit PR review preface", s.preface ?? "");
   if (edited === undefined) return "Preface edit cancelled.";
-  s.preface = edited;
-  saveState(pi, s);
-  return "Preface updated.";
+  return updatePrefaceAction(pi, edited).message;
 }
 function assertManagedPath(root: string, absolute: string): void {
   assertContainedResolved(root, absolute);
 }
-async function cleanup(pi: ExtensionAPI): Promise<string> {
+export async function rerunReviewAction(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
   const s = latestState();
-  if (!s || s.cleaned) return "Review cleanup complete.";
+  if (!s) return { status: "no-active", message: "No active PR review." };
+  const result = await startReview(pi, { url: s.snapshot.metadata.url }, signal, ctx as any);
+  return {
+    status: "started",
+    message: result.content[0]?.text ?? "Rerun started.",
+    reviewId: result.details?.reviewId,
+  };
+}
+export async function cleanupReviewAction(pi: ExtensionAPI): Promise<ReviewActionOutcome> {
+  const s = latestState();
+  if (!s || s.cleaned) return { status: "cleaned", message: "Review cleanup complete." };
   const root = join(getAgentDir(), "pr-review");
   const repoDir = s.snapshot.cache?.repoDir;
   const wt = s.snapshot.cache?.worktree ?? s.snapshot.worktree;
@@ -583,11 +796,307 @@ async function cleanup(pi: ExtensionAPI): Promise<string> {
     if (prune.code !== 0) throw new Error("git worktree prune failed.");
   }
   s.cleaned = true;
-  persistJson(statePath(s.snapshot.id), s);
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(s));
-  states.delete(s.snapshot.id);
-  if (latestReviewId === s.snapshot.id) latestReviewId = undefined;
-  return "Review cleanup complete.";
+  saveState(pi, s);
+  return { status: "cleaned", message: "Review cleanup complete." };
+}
+
+async function cleanupReviewWithConfirm(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+): Promise<ReviewActionOutcome> {
+  if (
+    !(await confirm(
+      ctx,
+      "Cleanup PR review artifacts?",
+      "Remove managed PR review worktree artifacts?",
+    ))
+  )
+    return { status: "cancelled", message: "Cleanup cancelled." };
+  return cleanupReviewAction(pi);
+}
+
+function outcomeNotice(
+  action: WalkthroughActionResult["action"],
+  outcome: ReviewActionOutcome,
+): WalkthroughActionResult {
+  const ok = ["updated", "posted", "already-posted", "reconciled", "started", "cleaned"].includes(
+    outcome.status,
+  );
+  const kind: WalkthroughNotice["kind"] = ok
+    ? "success"
+    : outcome.status === "cancelled"
+      ? "info"
+      : outcome.status === "uncertain"
+        ? "warning"
+        : "error";
+  return { action, ok, notice: { kind, message: bound(outcome.message, 500) } };
+}
+
+function buildDiffContext(
+  s: ReviewState,
+): { ok: true; contexts: Map<string, WalkthroughDiffContext> } | { ok: false; message: string } {
+  if (!s.plan || !s.result) return { ok: true, contexts: new Map() };
+  const loaded = loadPinnedDiff(s.snapshot);
+  if (!loaded.ok) return { ok: false, message: `Pinned diff unavailable: ${loaded.error.kind}.` };
+  const contexts = new Map<string, WalkthroughDiffContext>();
+  for (const [index, finding] of (s.result?.findings ?? []).entries()) {
+    const id = finding.id ?? `F${index + 1}`;
+    if (finding.anchorValid !== true || !finding.file) continue;
+    if (!finding.side || !finding.line)
+      return { ok: false, message: `Pinned diff anchor is malformed for ${id}.` };
+    const context = extractFindingContext(loaded.value, {
+      file: finding.file,
+      side: finding.side,
+      line: finding.line,
+    });
+    if (!context.ok)
+      return { ok: false, message: `Pinned diff anchor failed for ${id}: ${context.error.kind}.` };
+    contexts.set(id, { lines: context.value.split("\n") });
+  }
+  return { ok: true, contexts };
+}
+
+function latestCompleteOrSafeState(): ReviewState | undefined {
+  return latestState();
+}
+
+async function openWalkthroughOnce(
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  actionResult?: WalkthroughActionResult,
+): Promise<WalkthroughIntent> {
+  const diff = buildDiffContext(state);
+  if (!diff.ok) throw new Error(diff.message);
+  return (await (ctx.ui as any).custom(
+    (tui: any, theme: any, keybindings: any, done: any) =>
+      new PrReviewWalkthroughComponent({
+        viewModel: deriveWalkthroughViewModel(state, {
+          diffContextByFindingId: diff.contexts,
+          actionResult,
+          notice: actionResult?.notice,
+        }),
+        keybindings,
+        theme,
+        getRows: () => Math.max(3, tui.terminal.rows - 4),
+        requestRender: () => tui.requestRender(),
+        onIntent: (intent: WalkthroughIntent) => done(intent),
+      }),
+  )) as WalkthroughIntent;
+}
+
+async function runWithLoader<T>(
+  ctx: ExtensionCommandContext,
+  message: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T | undefined> {
+  if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function")
+    return run(new AbortController().signal);
+  const settled = (await (ctx.ui as any).custom((tui: any, theme: any, _kb: any, done: any) => {
+    const loader = new BorderedLoader(tui, theme, message);
+    loader.onAbort = () => done({ ok: false, cancelled: true });
+    run(loader.signal).then(
+      (value) => done({ ok: true, value }),
+      (error) =>
+        done(loader.signal.aborted ? { ok: false, cancelled: true } : { ok: false, error }),
+    );
+    return loader;
+  })) as { ok: true; value: T } | { ok: false; cancelled?: boolean; error?: unknown };
+  if (settled.ok) return settled.value;
+  if (settled.cancelled) return undefined;
+  throw settled.error instanceof Error ? settled.error : new Error(String(settled.error));
+}
+
+async function reviewEventDialog(
+  ctx: ExtensionCommandContext,
+): Promise<ReviewEventValue | undefined> {
+  const choice = await ctx.ui.select("Post review event", [
+    "COMMENT",
+    "APPROVE",
+    "REQUEST_CHANGES",
+  ]);
+  if (!choice) return undefined;
+  return choice === "APPROVE"
+    ? ReviewEvent.Approve
+    : choice === "REQUEST_CHANGES"
+      ? ReviewEvent.RequestChanges
+      : ReviewEvent.Comment;
+}
+
+type WalkthroughLoopState = {
+  actionResult?: WalkthroughActionResult;
+  postExhausted: boolean;
+};
+
+type WalkthroughHandlerResult = { done?: string; actionResult?: WalkthroughActionResult };
+type WalkthroughHandler = (
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  intent: WalkthroughIntent,
+  loop: WalkthroughLoopState,
+) => Promise<WalkthroughHandlerResult> | WalkthroughHandlerResult;
+
+function walkthroughNotice(
+  action: WalkthroughActionResult["action"],
+  kind: WalkthroughNotice["kind"],
+  message: string,
+  ok = false,
+): WalkthroughActionResult {
+  return { action, ok, notice: { kind, message } };
+}
+
+const handleToggleSelection: WalkthroughHandler = (pi, _ctx, state, intent) => {
+  if (intent.kind !== "toggleSelection") return {};
+  return {
+    actionResult: outcomeNotice(
+      "select",
+      setFindingSelectionAction(
+        pi,
+        intent.findingId,
+        !state.selectedFindingIds.includes(intent.findingId),
+      ),
+    ),
+  };
+};
+
+const handleWalkthroughEdit: WalkthroughHandler = async (pi, ctx, state, intent) => {
+  if (intent.kind !== "edit") return {};
+  if (!intent.findingId)
+    return { actionResult: walkthroughNotice("edit", "warning", "Open a finding page before editing.") };
+  const f = state.result?.findings.find((x) => x.id === intent.findingId);
+  const edited = f ? await editWithUi(ctx, `Edit finding ${intent.findingId}`, findingTemplate(f)) : undefined;
+  return {
+    actionResult:
+      edited === undefined
+        ? walkthroughNotice("edit", "info", "Edit cancelled.")
+        : outcomeNotice("edit", applyFindingTemplateEditAction(pi, intent.findingId, edited)),
+  };
+};
+
+const handleWalkthroughPreface: WalkthroughHandler = async (pi, ctx, state, intent) => {
+  if (intent.kind !== "editPreface") return {};
+  const edited = await editWithUi(ctx, "Edit PR review preface", state.preface ?? "");
+  return {
+    actionResult:
+      edited === undefined
+        ? walkthroughNotice("preface", "info", "Preface edit cancelled.")
+        : outcomeNotice("preface", updatePrefaceAction(pi, edited)),
+  };
+};
+
+const handleWalkthroughRerun: WalkthroughHandler = async (pi, ctx, _state, intent) => {
+  if (intent.kind !== "rerun") return {};
+  const result = await runWithLoader(ctx, "Rerunning PR review…", (signal) =>
+    rerunReviewAction(pi, ctx, signal),
+  );
+  return {
+    actionResult: result
+      ? outcomeNotice("rerun", result)
+      : walkthroughNotice("rerun", "info", "Rerun cancelled."),
+  };
+};
+
+async function handleReadyPost(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  loop: WalkthroughLoopState,
+): Promise<WalkthroughActionResult> {
+  const event = await reviewEventDialog(ctx);
+  if (!event) return walkthroughNotice("post", "info", "Post event selection cancelled.");
+  const outcome = await postReviewAction(pi, ctx, event);
+  if (["posted", "already-posted", "reconciled", "uncertain"].includes(outcome.status))
+    loop.postExhausted = true;
+  return outcomeNotice("post", outcome);
+}
+
+const handleWalkthroughPost: WalkthroughHandler = async (pi, ctx, state, intent, loop) => {
+  if (intent.kind !== "post") return {};
+  if (loop.postExhausted)
+    return {
+      actionResult: walkthroughNotice(
+        "post",
+        "info",
+        "Posting is not offered again in this walkthrough. Reopen after reconciling state.",
+      ),
+    };
+  if (!state.plan || !state.result)
+    return {
+      actionResult: walkthroughNotice(
+        "post",
+        "error",
+        "Posting blocked until plan and result exist.",
+      ),
+    };
+  return { actionResult: await handleReadyPost(pi, ctx, loop) };
+};
+
+const handleWalkthroughCleanup: WalkthroughHandler = async (pi, ctx, _state, intent) =>
+  intent.kind === "cleanup"
+    ? { actionResult: outcomeNotice("cleanup", await cleanupReviewWithConfirm(pi, ctx)) }
+    : {};
+
+const handleWalkthroughInspect: WalkthroughHandler = async (_pi, ctx, state, intent) => {
+  if (intent.kind !== "inspectChild") return {};
+  if (!state.child?.sessionFile)
+    return {
+      actionResult: walkthroughNotice("inspect", "warning", "Child session metadata is missing."),
+    };
+  const switched = await ctx.switchSession(state.child.sessionFile);
+  return switched?.cancelled
+    ? {
+        actionResult: walkthroughNotice("inspect", "info", "Child session switch cancelled."),
+      }
+    : { done: "Switched to review child session." };
+};
+
+const handleWalkthroughHelp: WalkthroughHandler = (_pi, _ctx, _state, intent) =>
+  intent.kind === "help"
+    ? {
+        actionResult: walkthroughNotice(
+          "help",
+          "info",
+          "Use ←/→ for sections, ↑↓/Page keys to scroll, Space to select, e/f edit, r rerun, p post, i inspect, c cleanup, Esc close.",
+          true,
+        ),
+      }
+    : {};
+
+const walkthroughHandlers: Partial<Record<WalkthroughIntent["kind"], WalkthroughHandler>> = {
+  toggleSelection: handleToggleSelection,
+  edit: handleWalkthroughEdit,
+  editPreface: handleWalkthroughPreface,
+  rerun: handleWalkthroughRerun,
+  post: handleWalkthroughPost,
+  cleanup: handleWalkthroughCleanup,
+  inspectChild: handleWalkthroughInspect,
+  help: handleWalkthroughHelp,
+};
+
+async function dispatchWalkthroughIntent(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  intent: WalkthroughIntent,
+  loop: WalkthroughLoopState,
+): Promise<string | undefined> {
+  if (intent.kind === "cancel") return "PR review walkthrough closed.";
+  const result = await walkthroughHandlers[intent.kind]?.(pi, ctx, state, intent, loop);
+  if (result?.actionResult !== undefined) loop.actionResult = result.actionResult;
+  return result?.done;
+}
+
+async function walkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<string> {
+  if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function")
+    return "PR review walkthrough is available only in TUI mode.";
+  if (!latestState()) return "No active PR review.";
+  const loop: WalkthroughLoopState = { postExhausted: false };
+  for (;;) {
+    const state = latestCompleteOrSafeState();
+    if (!state) return loop.actionResult?.notice.message ?? "No active PR review.";
+    const intent = await openWalkthroughOnce(ctx, state, loop.actionResult);
+    const done = await dispatchWalkthroughIntent(pi, ctx, state, intent, loop);
+    if (done) return done;
+  }
 }
 
 const handlers: Partial<
@@ -604,16 +1113,10 @@ const handlers: Partial<
   select: (pi, rest) => selectFindings(pi, rest.join(" ")),
   edit: (pi, rest, ctx) => editFinding(pi, ctx, rest[0] ?? ""),
   preface: (pi, rest, ctx) => editPreface(pi, ctx, rest.join(" ")),
-  rerun: async (pi, _rest, ctx) => {
-    const s = latestState();
-    if (!s) return "No active PR review.";
-    return (
-      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx as any)).content[0]
-        ?.text ?? "Rerun started."
-    );
-  },
+  rerun: async (pi, _rest, ctx) => (await rerunReviewAction(pi, ctx)).message,
   post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
-  cleanup: (pi) => cleanup(pi),
+  cleanup: async (pi) => (await cleanupReviewAction(pi)).message,
+  walkthrough: (pi, _rest, ctx) => walkthrough(pi, ctx),
 };
 async function command(
   pi: ExtensionAPI,
@@ -647,7 +1150,7 @@ export default function prReviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage PR reviews. Usage: /review start [url]|status|findings|select|edit|preface|rerun|post|cleanup",
+      "Manage PR reviews. Usage: /review start [url]|status|findings|select|edit|preface|rerun|post|cleanup|walkthrough",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => restore(ctx));
