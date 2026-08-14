@@ -4,9 +4,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import prReviewExtension, {
+  applyFindingTemplateEditAction,
   clearInMemoryStateForTests,
+  getLatestReviewState,
   restore,
+  setFindingSelectionAction,
   setPrReviewSubagentRunnerForTests,
+  updatePrefaceAction,
 } from "../index";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
 
@@ -144,6 +148,48 @@ describe("pr-review extension surface", () => {
     } as any);
     await pi.command("status", { ui: { notify: (m: string) => notes.push(m) } } as any);
     expect(notes.at(-1)).toContain("Selected: 0");
+  });
+
+  it("exposes immutable latest active state", () => {
+    tempRoot();
+    const state = sampleState("r", ["F1"]);
+    restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+    const latest = getLatestReviewState() as ReviewState;
+    expect(latest.snapshot.id).toBe("r");
+    expect(() => ((latest as any).selectedFindingIds = [])).toThrow();
+    expect(() => ((latest.result!.findings[0] as any).problem = "changed")).toThrow();
+    expect(getLatestReviewState()!.result!.findings[0]!.problem).toBe("p");
+  });
+
+  it("persists one-finding selection through the shared action", () => {
+    tempRoot();
+    const state = sampleState("r", []);
+    restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+    const pi = extensionPi();
+    expect(setFindingSelectionAction(pi, "F1", true)).toMatchObject({ status: "updated" });
+    expect(pi.appended.at(-1)?.[1].state.selectedFindingIds).toEqual(["F1"]);
+    expect(setFindingSelectionAction(pi, "F1", false)).toMatchObject({ status: "updated" });
+    expect(pi.appended.at(-1)?.[1].state.selectedFindingIds).toEqual([]);
+  });
+
+  it("applies shared finding-template and preface edits", () => {
+    tempRoot();
+    const state = sampleState("r", []);
+    restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+    const pi = extensionPi();
+    expect(
+      applyFindingTemplateEditAction(
+        pi,
+        "F1",
+        "Problem: new p\nConsequence: new c\nSuggested fix: new f",
+      ),
+    ).toMatchObject({ status: "updated" });
+    expect(updatePrefaceAction(pi, "Ready for review.")).toMatchObject({ status: "updated" });
+    expect(pi.appended.at(-1)?.[1].state.result.findings[0].problem).toBe("new p");
+    expect(pi.appended.at(-1)?.[1].state.preface).toBe("Ready for review.");
+    expect(() => applyFindingTemplateEditAction(pi, "F1", "Problem: incomplete")).toThrow(
+      /malformed/,
+    );
   });
 
   it("cleanup uses a temporary managed root and appends durable cleanup state", async () => {

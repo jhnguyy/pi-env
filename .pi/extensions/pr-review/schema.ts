@@ -187,6 +187,21 @@ export interface ReviewState {
   cleaned?: boolean;
 }
 
+export type ReviewActionOutcome =
+  | { status: "no-active"; message: string }
+  | { status: "no-findings"; message: string }
+  | { status: "not-found"; message: string; findingId?: string }
+  | { status: "updated"; message: string; reviewId: string }
+  | { status: "cancelled"; message: string }
+  | { status: "stale"; message: string; reviewId: string }
+  | { status: "blocked"; message: string; reviewId?: string }
+  | { status: "already-posted"; message: string; reviewId: string; remoteReviewId?: string }
+  | { status: "posted"; message: string; reviewId: string; remoteReviewId?: string }
+  | { status: "uncertain"; message: string; reviewId: string }
+  | { status: "reconciled"; message: string; reviewId: string; remoteReviewId: string }
+  | { status: "started"; message: string; reviewId?: string }
+  | { status: "cleaned"; message: string };
+
 function coherentAnchor(f: FindingInput): boolean {
   const hasFile = f.file !== undefined;
   const hasSide = f.side !== undefined;

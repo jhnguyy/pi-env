@@ -36,6 +36,7 @@ import {
   type ReviewEvent as ReviewEventValue,
   type ReviewState,
 } from "./core";
+import type { ReviewActionOutcome } from "./schema";
 import { boundedChangedFileContext, makeReviewTools } from "./runtime";
 import {
   currentRemoteHead,
@@ -93,12 +94,31 @@ function remember(state: ReviewState): void {
   latestReviewId = state.snapshot.id;
 }
 function saveState(pi: ExtensionAPI, state: ReviewState): void {
-  remember(state);
   persistJson(statePath(state.snapshot.id), state);
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  if (state.cleaned) {
+    states.delete(state.snapshot.id);
+    if (latestReviewId === state.snapshot.id) latestReviewId = undefined;
+  } else {
+    remember(state);
+  }
 }
 function latestState(): ReviewState | undefined {
   return latestReviewId ? states.get(latestReviewId) : undefined;
+}
+function immutableClone<T>(value: T): Readonly<T> {
+  const cloned = structuredClone(value);
+  const freeze = (v: any): any => {
+    if (!v || typeof v !== "object" || Object.isFrozen(v)) return v;
+    Object.freeze(v);
+    for (const child of Object.values(v)) freeze(child);
+    return v;
+  };
+  return freeze(cloned);
+}
+export function getLatestReviewState(): Readonly<ReviewState> | undefined {
+  const s = latestState();
+  return s ? immutableClone(s) : undefined;
 }
 export function restore(ctx: ExtensionContext): void {
   states.clear();
@@ -273,6 +293,28 @@ function renderFindings(): string {
       .join("\n") || "No findings."
   );
 }
+export function setFindingSelectionAction(
+  pi: ExtensionAPI,
+  findingId: string,
+  selected: boolean,
+): ReviewActionOutcome {
+  const s = latestState();
+  if (!s?.result) return { status: "no-findings", message: "No findings to select." };
+  if (!s.result.findings.some((f) => f.id === findingId))
+    return { status: "not-found", message: "Finding not found.", findingId };
+  const ids = new Set(s.selectedFindingIds);
+  if (selected) ids.add(findingId);
+  else ids.delete(findingId);
+  s.selectedFindingIds = s.result.findings
+    .map((f) => f.id!)
+    .filter((id) => id && ids.has(id));
+  saveState(pi, s);
+  return {
+    status: "updated",
+    message: `Selected ${s.selectedFindingIds.length} findings.`,
+    reviewId: s.snapshot.id,
+  };
+}
 function selectFindings(pi: ExtensionAPI, arg: string): string {
   const s = latestState();
   if (!s?.result) return "No findings to select.";
@@ -435,13 +477,22 @@ async function handlePostFailure(
   stderr: string,
   stdout: string,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ReviewActionOutcome> {
   attempt.status = "uncertain";
   saveState(pi, s);
   const reconciled = await reconcileAttempt(pi, ctx, s, attempt, signal);
   return reconciled
-    ? `Posted review reconciled after uncertain result (${reconciled}).`
-    : `Posting uncertain or failed: ${stderr || stdout}`;
+    ? {
+        status: "reconciled",
+        message: `Posted review reconciled after uncertain result (${reconciled}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: reconciled,
+      }
+    : {
+        status: "uncertain",
+        message: `Posting uncertain or failed: ${stderr || stdout}`,
+        reviewId: s.snapshot.id,
+      };
 }
 
 function prefacePreview(s: ReviewState): string {
@@ -453,19 +504,40 @@ async function postReviewCritical(
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ReviewActionOutcome> {
   const s = latestState();
-  if (!s) return "No active PR review.";
+  if (!s) return { status: "no-active", message: "No active PR review." };
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
-  if (blocked) return blocked;
+  if (blocked)
+    return {
+      status: blocked.startsWith("Review is stale") ? "stale" : "blocked",
+      message: blocked,
+      reviewId: s.snapshot.id,
+    };
   const contentHash = contentHashFor(s, event);
   let attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
   const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
-  if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
+  if (posted)
+    return {
+      status: "already-posted",
+      message: `Review already posted (${posted.reviewId ?? posted.id}).`,
+      reviewId: s.snapshot.id,
+      remoteReviewId: posted.reviewId,
+    };
   const prior = attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined;
-  if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
+  if (prior)
+    return {
+      status: "already-posted",
+      message: `Existing review found for marker; not posting duplicate (${prior}).`,
+      reviewId: s.snapshot.id,
+      remoteReviewId: prior,
+    };
   if (attempt?.status === "uncertain")
-    return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
+    return {
+      status: "uncertain",
+      message: "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
+      reviewId: s.snapshot.id,
+    };
   const selected = selectedFindings(s);
   if (
     !(await confirm(
@@ -474,30 +546,35 @@ async function postReviewCritical(
       `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
     ))
   )
-    return "Posting cancelled.";
+    return { status: "cancelled", message: "Posting cancelled." };
   if (!attempt) {
     attempt = newAttempt(s, event, contentHash);
     saveState(pi, s);
   }
   const r = await submitPost(pi, ctx, s, event, attempt, signal);
-  if (r.code === -1) return r.stderr;
+  if (r.code === -1) return { status: "blocked", message: r.stderr, reviewId: s.snapshot.id };
   if (r.code !== 0) return handlePostFailure(pi, ctx, s, attempt, r.stderr, r.stdout, signal);
   attempt.status = "posted";
   try {
     attempt.reviewId = String(JSON.parse(r.stdout || "{}").id);
   } catch {}
   saveState(pi, s);
-  return "Review posted.";
+  return {
+    status: "posted",
+    message: "Review posted.",
+    reviewId: s.snapshot.id,
+    remoteReviewId: attempt.reviewId,
+  };
 }
 
-export async function postReview(
+export async function postReviewAction(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ReviewActionOutcome> {
   const keyState = latestState();
-  if (!keyState) return "No active PR review.";
+  if (!keyState) return { status: "no-active", message: "No active PR review." };
   const key = `${keyState.snapshot.id}:${contentHashFor(keyState, event)}`;
   return Effect.runPromise(
     PartitionedSemaphore.withPermits(
@@ -507,6 +584,15 @@ export async function postReview(
     )(Effect.tryPromise((effectSignal) => postReviewCritical(pi, ctx, event, effectSignal))),
     { signal },
   );
+}
+
+export async function postReview(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  event: ReviewEventValue,
+  signal?: AbortSignal,
+): Promise<string> {
+  return (await postReviewAction(pi, ctx, event, signal)).message;
 }
 async function editWithUi(
   ctx: ExtensionCommandContext,
@@ -533,6 +619,18 @@ function applyFindingTemplate(f: Finding, text: string): void {
   f.consequence = consequence;
   f.suggestedFix = fix;
 }
+export function applyFindingTemplateEditAction(
+  pi: ExtensionAPI,
+  id: string,
+  text: string,
+): ReviewActionOutcome {
+  const s = latestState();
+  const f = s?.result?.findings.find((x) => x.id === id);
+  if (!s || !f) return { status: "not-found", message: "Finding not found.", findingId: id };
+  applyFindingTemplate(f, text);
+  saveState(pi, s);
+  return { status: "updated", message: `Finding ${id} updated.`, reviewId: s.snapshot.id };
+}
 async function editFinding(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
@@ -543,9 +641,14 @@ async function editFinding(
   if (!s || !f) return "Finding not found.";
   const edited = await editWithUi(ctx, `Edit finding ${id}`, findingTemplate(f));
   if (edited === undefined) return "Edit cancelled.";
-  applyFindingTemplate(f, edited);
+  return applyFindingTemplateEditAction(pi, id, edited).message;
+}
+export function updatePrefaceAction(pi: ExtensionAPI, preface: string): ReviewActionOutcome {
+  const s = latestState();
+  if (!s) return { status: "no-active", message: "No active PR review." };
+  s.preface = preface;
   saveState(pi, s);
-  return `Finding ${id} updated.`;
+  return { status: "updated", message: "Preface updated.", reviewId: s.snapshot.id };
 }
 async function editPreface(
   pi: ExtensionAPI,
@@ -558,16 +661,28 @@ async function editPreface(
     ? inline
     : await editWithUi(ctx, "Edit PR review preface", s.preface ?? "");
   if (edited === undefined) return "Preface edit cancelled.";
-  s.preface = edited;
-  saveState(pi, s);
-  return "Preface updated.";
+  return updatePrefaceAction(pi, edited).message;
 }
 function assertManagedPath(root: string, absolute: string): void {
   assertContainedResolved(root, absolute);
 }
-async function cleanup(pi: ExtensionAPI): Promise<string> {
+export async function rerunReviewAction(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
   const s = latestState();
-  if (!s || s.cleaned) return "Review cleanup complete.";
+  if (!s) return { status: "no-active", message: "No active PR review." };
+  const result = await startReview(pi, { url: s.snapshot.metadata.url }, signal, ctx as any);
+  return {
+    status: "started",
+    message: result.content[0]?.text ?? "Rerun started.",
+    reviewId: result.details?.reviewId,
+  };
+}
+export async function cleanupReviewAction(pi: ExtensionAPI): Promise<ReviewActionOutcome> {
+  const s = latestState();
+  if (!s || s.cleaned) return { status: "cleaned", message: "Review cleanup complete." };
   const root = join(getAgentDir(), "pr-review");
   const repoDir = s.snapshot.cache?.repoDir;
   const wt = s.snapshot.cache?.worktree ?? s.snapshot.worktree;
@@ -583,11 +698,8 @@ async function cleanup(pi: ExtensionAPI): Promise<string> {
     if (prune.code !== 0) throw new Error("git worktree prune failed.");
   }
   s.cleaned = true;
-  persistJson(statePath(s.snapshot.id), s);
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(s));
-  states.delete(s.snapshot.id);
-  if (latestReviewId === s.snapshot.id) latestReviewId = undefined;
-  return "Review cleanup complete.";
+  saveState(pi, s);
+  return { status: "cleaned", message: "Review cleanup complete." };
 }
 
 const handlers: Partial<
@@ -604,16 +716,9 @@ const handlers: Partial<
   select: (pi, rest) => selectFindings(pi, rest.join(" ")),
   edit: (pi, rest, ctx) => editFinding(pi, ctx, rest[0] ?? ""),
   preface: (pi, rest, ctx) => editPreface(pi, ctx, rest.join(" ")),
-  rerun: async (pi, _rest, ctx) => {
-    const s = latestState();
-    if (!s) return "No active PR review.";
-    return (
-      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx as any)).content[0]
-        ?.text ?? "Rerun started."
-    );
-  },
+  rerun: async (pi, _rest, ctx) => (await rerunReviewAction(pi, ctx)).message,
   post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
-  cleanup: (pi) => cleanup(pi),
+  cleanup: async (pi) => (await cleanupReviewAction(pi)).message,
 };
 async function command(
   pi: ExtensionAPI,

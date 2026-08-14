@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { REVIEW_ENTRY_TYPE, ReviewEvent, type ReviewState } from "../core";
-import { clearInMemoryStateForTests, postReview, restore } from "../index";
+import { clearInMemoryStateForTests, postReview, postReviewAction, restore } from "../index";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
@@ -90,6 +90,85 @@ function custom(s: ReviewState) {
 }
 
 describe("pr-review posting", () => {
+  it("returns structured cancelled and stale post statuses without appending state", async () => {
+    restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
+    const appended: any[] = [];
+    let remoteHead = "head";
+    const pi = {
+      appendEntry(_type: string, data: any) {
+        appended.push(data);
+      },
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: `${remoteHead}\n`, stderr: "" };
+        return { code: 1, stdout: "", stderr: "unexpected" };
+      },
+    };
+    const cancelled = await postReviewAction(
+      pi as any,
+      { cwd: "/tmp", ui: { confirm: async () => false } } as any,
+      ReviewEvent.Comment,
+    );
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.message).toBe("Posting cancelled.");
+    expect(appended).toHaveLength(0);
+
+    remoteHead = "new-head";
+    const stale = await postReviewAction(
+      pi as any,
+      { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+      ReviewEvent.Comment,
+    );
+    expect(stale.status).toBe("stale");
+    expect(stale.message).toContain("Review is stale");
+    expect(appended).toHaveLength(0);
+  });
+
+  it("returns structured posted, already-posted, and uncertain statuses", async () => {
+    restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry(_type: string, data: any) {
+        restore({ sessionManager: { getBranch: () => [custom(data.state)] } } as any);
+      },
+      exec: async (cmd: string, args: string[]) => {
+        if (cmd === "gh" && args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (cmd === "gh" && args[0] === "api" && args.includes("--method"))
+          return { code: 0, stdout: "[]", stderr: "" };
+        if (cmd === "gh" && args[0] === "api" && args[1] === "-X") {
+          posts += 1;
+          return { code: 0, stdout: JSON.stringify({ id: "remote1" }), stderr: "" };
+        }
+        return { code: 1, stdout: "", stderr: "bad" };
+      },
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    expect(await postReviewAction(pi as any, ctx as any, ReviewEvent.Comment)).toMatchObject({
+      status: "posted",
+      remoteReviewId: "remote1",
+    });
+    expect(await postReviewAction(pi as any, ctx as any, ReviewEvent.Comment)).toMatchObject({
+      status: "already-posted",
+      remoteReviewId: "remote1",
+    });
+    expect(posts).toBe(1);
+
+    clearInMemoryStateForTests();
+    restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
+    const failingPi = {
+      appendEntry(_type: string, data: any) {
+        restore({ sessionManager: { getBranch: () => [custom(data.state)] } } as any);
+      },
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+        return { code: 1, stdout: "", stderr: "lost" };
+      },
+    };
+    expect(await postReviewAction(failingPi as any, ctx as any, ReviewEvent.Comment)).toMatchObject({
+      status: "uncertain",
+    });
+  });
+
   it("uses GET pagination, persists pending before POST, and reuses uncertain attempt on retry", async () => {
     const s = state();
     restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
