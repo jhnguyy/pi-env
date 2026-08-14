@@ -160,11 +160,7 @@ const SDK_ERROR_MESSAGES: Partial<Record<LinearErrorCode, string>> = {
 function mapSdkError(error: unknown): never {
   if (error instanceof LinearExtensionError) throw error;
   if (!(error instanceof LinearError)) {
-    throw linearError(
-      LinearErrorCode.Api,
-      error instanceof Error ? error.message : "Linear API failed.",
-      { cause: error },
-    );
+    throw linearError(LinearErrorCode.Api, "Linear API failed.", { cause: error });
   }
   const code =
     error.status === 401

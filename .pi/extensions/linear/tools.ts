@@ -59,73 +59,26 @@ async function executeTool<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-async function confirmWrite(
+async function confirmCredentialUse(
   ctx: ExtensionContext,
   title: string,
-  preview: Record<string, unknown>,
+  message: string,
   signal?: AbortSignal,
 ): Promise<void> {
   if (!ctx.hasUI) {
     throw linearError(
-      LinearErrorCode.WriteConfirmationRequired,
-      "Linear writes require interactive confirmation.",
+      LinearErrorCode.CredentialConfirmationRequired,
+      "Linear credential use requires interactive confirmation.",
       {
-        recovery: "Run the write from TUI or an RPC client that handles confirmation prompts.",
-        details: { preview },
+        recovery: "Run the operation from TUI or an RPC client that handles confirmation prompts.",
       },
     );
   }
-  const confirmed = await ctx.ui.confirm(title, resultText(preview), { signal });
-  if (!confirmed) {
-    throw linearError(
-      LinearErrorCode.WriteConfirmationRequired,
-      "The Linear write was not confirmed.",
-      {
-        retryable: true,
-        details: { preview },
-      },
-    );
-  }
-}
-
-async function executePreparedWrite<
-  TPrepared extends { preview: Record<string, unknown> },
-  TResult,
->(
-  ctx: ExtensionContext,
-  signal: AbortSignal | undefined,
-  title: string,
-  prepare: () => Promise<TPrepared>,
-  execute: (prepared: TPrepared) => Promise<TResult>,
-  details: (result: TResult) => unknown = (result) => result,
-) {
-  const prepared = await prepare();
-  await confirmWrite(ctx, title, prepared.preview, signal);
-  const result = await execute(prepared);
-  return toolResult(resultText(result), details(result));
-}
-
-function executeCreation<
-  TParams extends { idempotencyKey?: string },
-  TPrepared extends { preview: Record<string, unknown> },
-  TResult extends object,
->(
-  toolCallId: string,
-  params: TParams,
-  ctx: ExtensionContext,
-  signal: AbortSignal | undefined,
-  title: string,
-  prepare: (operationKey: string) => Promise<TPrepared>,
-  execute: (prepared: TPrepared) => Promise<TResult>,
-) {
-  const operationKey = params.idempotencyKey ?? toolCallId;
-  return executePreparedWrite(
-    ctx,
-    signal,
-    title,
-    () => prepare(operationKey),
-    execute,
-    (result) => ({ ...result, idempotencyKey: operationKey }),
+  if (await ctx.ui.confirm(title, message, { signal })) return;
+  throw linearError(
+    LinearErrorCode.CredentialConfirmationRequired,
+    "Linear credential use was not confirmed.",
+    { retryable: true },
   );
 }
 
@@ -134,12 +87,17 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
     defineTool({
       name: "linear_viewer",
       label: "Linear Viewer",
-      description:
-        "Get the selected authenticated Linear user and workspace. Returns auth_required without starting login.",
+      description: "Get the Linear user and workspace for the configured API key.",
       parameters: Type.Object({}),
       async execute(_id, _params, signal, _onUpdate, ctx) {
         return executeTool(async () => {
-          const viewer = await gateway.viewer(ctx, signal);
+          await confirmCredentialUse(
+            ctx,
+            "Access Linear workspace?",
+            "Use the configured Linear credential to identify the current workspace and user.",
+            signal,
+          );
+          const viewer = await gateway.viewer(signal);
           return toolResult(resultText(viewer), viewer);
         });
       },
@@ -159,16 +117,16 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       }),
       async execute(_id, params, signal, _onUpdate, ctx) {
         return executeTool(async () => {
+          await confirmCredentialUse(
+            ctx,
+            "List Linear resources?",
+            `Use the configured Linear credential to list ${params.type}.`,
+            signal,
+          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const resources = boundedPage(
             await gateway.listResources(
-              {
-                type: params.type,
-                query: params.query,
-                limit,
-                cursor: params.cursor,
-              },
-              ctx,
+              { type: params.type, query: params.query, limit, cursor: params.cursor },
               signal,
             ),
             limit,
@@ -191,6 +149,12 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       }),
       async execute(_id, params, signal, _onUpdate, ctx) {
         return executeTool(async () => {
+          await confirmCredentialUse(
+            ctx,
+            "List Linear issues?",
+            "Use the configured Linear credential to list issues.",
+            signal,
+          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const issues = boundedPage(
             await gateway.listIssues(
@@ -201,7 +165,6 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
                 assignee: params.assignee,
                 includeArchived: params.includeArchived,
               },
-              ctx,
               signal,
             ),
             limit,
@@ -225,6 +188,12 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       }),
       async execute(_id, params, signal, _onUpdate, ctx) {
         return executeTool(async () => {
+          await confirmCredentialUse(
+            ctx,
+            "Search Linear issues?",
+            "Use the configured Linear credential to search issues.",
+            signal,
+          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const issues = boundedPage(
             await gateway.searchIssues(
@@ -236,7 +205,6 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
                 assignee: params.assignee,
                 includeArchived: params.includeArchived,
               },
-              ctx,
               signal,
             ),
             limit,
@@ -255,101 +223,15 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       }),
       async execute(_id, params, signal, _onUpdate, ctx) {
         return executeTool(async () => {
-          const issue = await gateway.issue(params.issueId, ctx, signal);
+          await confirmCredentialUse(
+            ctx,
+            "Read Linear issue?",
+            `Use the configured Linear credential to read ${params.issueId}.`,
+            signal,
+          );
+          const issue = await gateway.issue(params.issueId, signal);
           return toolResult(resultText(issue), issue);
         });
-      },
-    }),
-    defineTool({
-      name: "linear_create_issue",
-      label: "Create Linear Issue",
-      description:
-        "Preview and confirm creation of one Linear issue. Requires manually enabled write tools and a write-scoped connection. Human resource names are resolved without silent ambiguity.",
-      parameters: Type.Object({
-        team: Type.String({ description: "Team name, key, or UUID." }),
-        title: Type.String({ minLength: 1 }),
-        description: Type.Optional(Type.String()),
-        assignee: Type.Optional(Type.String({ description: "Assignee name, email, or UUID." })),
-        state: Type.Optional(Type.String({ description: "Workflow state name or UUID." })),
-        project: Type.Optional(Type.String({ description: "Project name or UUID." })),
-        priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 4 })),
-        dueDate: Type.Optional(Type.String({ description: "YYYY-MM-DD." })),
-        labels: Type.Optional(Type.Array(Type.String({ description: "Label name or UUID." }))),
-        idempotencyKey: Type.Optional(
-          Type.String({ description: "Reuse this key when retrying the same intended creation." }),
-        ),
-      }),
-      async execute(toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(() =>
-          executeCreation(
-            toolCallId,
-            params,
-            ctx,
-            signal,
-            "Create Linear issue?",
-            (operationKey) => gateway.prepareCreateIssue({ ...params, operationKey }, ctx, signal),
-            (prepared) => gateway.executeCreateIssue(prepared, ctx, signal),
-          ),
-        );
-      },
-    }),
-    defineTool({
-      name: "linear_update_issue",
-      label: "Update Linear Issue",
-      description:
-        "Preview and confirm an issue update. Requires manually enabled write tools and a write-scoped connection. Human resource names are resolved without silent ambiguity.",
-      parameters: Type.Object({
-        issueId: Type.String({ description: "Issue UUID or identifier such as ENG-123." }),
-        title: Type.Optional(Type.String({ minLength: 1 })),
-        description: Type.Optional(Type.String()),
-        assignee: Type.Optional(Type.String()),
-        clearAssignee: Type.Optional(Type.Boolean()),
-        state: Type.Optional(Type.String()),
-        project: Type.Optional(Type.String()),
-        clearProject: Type.Optional(Type.Boolean()),
-        priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 4 })),
-        dueDate: Type.Optional(Type.String({ description: "YYYY-MM-DD." })),
-        clearDueDate: Type.Optional(Type.Boolean()),
-        labels: Type.Optional(Type.Array(Type.String())),
-        clearLabels: Type.Optional(Type.Boolean()),
-      }),
-      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(() =>
-          executePreparedWrite(
-            ctx,
-            signal,
-            "Update Linear issue?",
-            () => gateway.prepareUpdateIssue(params, ctx, signal),
-            (prepared) => gateway.executeUpdateIssue(prepared, ctx, signal),
-          ),
-        );
-      },
-    }),
-    defineTool({
-      name: "linear_create_comment",
-      label: "Create Linear Comment",
-      description:
-        "Preview and confirm one Linear issue comment. Requires manually enabled write tools and a write-scoped connection. Retries can reuse an idempotency key.",
-      parameters: Type.Object({
-        issueId: Type.String({ description: "Issue UUID or identifier such as ENG-123." }),
-        body: Type.String({ minLength: 1, description: "Markdown comment body." }),
-        idempotencyKey: Type.Optional(
-          Type.String({ description: "Reuse this key when retrying the same intended comment." }),
-        ),
-      }),
-      async execute(toolCallId, params, signal, _onUpdate, ctx) {
-        return executeTool(() =>
-          executeCreation(
-            toolCallId,
-            params,
-            ctx,
-            signal,
-            "Create Linear comment?",
-            (operationKey) =>
-              gateway.prepareCreateComment({ ...params, operationKey }, ctx, signal),
-            (prepared) => gateway.executeCreateComment(prepared, ctx, signal),
-          ),
-        );
       },
     }),
   ];

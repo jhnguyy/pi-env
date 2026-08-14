@@ -12,6 +12,7 @@
   },
   "workspaces": [
     ".pi/extensions/analyze",
+    ".pi/extensions/credential-source",
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
@@ -28,6 +29,7 @@
   "pi": {
     "extensions": [
       ".pi/extensions/analyze",
+      ".pi/extensions/credential-source",
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
       ".pi/extensions/introspection",
@@ -114,7 +116,7 @@
   "overrides": {
     "brace-expansion": "5.0.9",
     "minimatch": "10.2.3",
-    "nanoid": "3.3.17",
+    "nanoid": "3.3.18",
     "postcss": "8.5.25",
     "protobufjs": "8.6.6",
     "undici": "8.9.0"

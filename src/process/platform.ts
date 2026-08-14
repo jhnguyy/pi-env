@@ -33,7 +33,7 @@ export interface ProcessOptions {
   readonly killGraceMs?: number;
 }
 export interface StreamProcessOptions extends ProcessOptions {
-  readonly stdin?: string;
+  readonly stdin?: string | Uint8Array;
   readonly stdoutLimitBytes?: number;
   readonly stderrLimitBytes?: number;
 }
