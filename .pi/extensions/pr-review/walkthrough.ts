@@ -6,7 +6,7 @@ import {
   wrapTextWithAnsi,
   type Component,
 } from "@earendil-works/pi-tui";
-import type { Finding, ReviewState } from "./core";
+import type { Finding, PlanFile, ReviewState } from "./core";
 
 type DeepReadonly<T> = T extends (...args: any[]) => any
   ? T
@@ -127,23 +127,35 @@ function findingDetailLines(
   return lines;
 }
 
-export function deriveWalkthroughViewModel(
-  state: ReviewState,
-  options: WalkthroughOptions = {},
-): WalkthroughViewModel {
-  const meta = state.snapshot.metadata;
-  const findings = state.result?.findings ?? [];
-  const selectedIds = new Set(state.selectedFindingIds);
-  const complete = Boolean(state.plan && state.result);
-  const anchored = findings
-    .map((finding, index) => ({ finding, index, id: findingId(finding, index) }))
-    .filter(({ finding }) => finding.anchorValid === true && finding.file);
-  const unanchored = findings
-    .map((finding, index) => ({ finding, index, id: findingId(finding, index) }))
-    .filter(({ finding }) => finding.anchorValid !== true || !finding.file);
-  const pages: WalkthroughPage[] = [];
+type FindingEntry = { finding: Finding; index: number; id: string };
 
-  pages.push({
+type FindingGroups = {
+  findings: readonly Finding[];
+  anchored: FindingEntry[];
+  unanchored: FindingEntry[];
+  selectedIds: ReadonlySet<string>;
+  invalidAnchors: number;
+};
+
+function findingEntries(findings: readonly Finding[]): FindingEntry[] {
+  return findings.map((finding, index) => ({ finding, index, id: findingId(finding, index) }));
+}
+
+function groupFindings(state: ReviewState): FindingGroups {
+  const findings = state.result?.findings ?? [];
+  const entries = findingEntries(findings);
+  return {
+    findings,
+    anchored: entries.filter(({ finding }) => finding.anchorValid === true && finding.file),
+    unanchored: entries.filter(({ finding }) => finding.anchorValid !== true || !finding.file),
+    selectedIds: new Set(state.selectedFindingIds),
+    invalidAnchors: findings.filter((f) => f.anchorValid === false).length,
+  };
+}
+
+function overviewPage(state: ReviewState, complete: boolean): WalkthroughPage {
+  const meta = state.snapshot.metadata;
+  return {
     id: "overview",
     kind: "overview",
     title: "Review overview",
@@ -163,90 +175,122 @@ export function deriveWalkthroughViewModel(
         ? "State: complete"
         : "State: incomplete; posting is blocked until plan and result exist.",
     ],
-  });
+  };
+}
 
+function filePage(
+  path: string,
+  cohortLabel: string,
+  pathFindings: FindingEntry[],
+  planFile: PlanFile | undefined,
+  selectedIds: ReadonlySet<string>,
+): WalkthroughPage {
+  return {
+    id: `file:${path}`,
+    kind: "file",
+    title: path,
+    path,
+    lines: [
+      `Cohort: ${cohortLabel}`,
+      `Attention: ${planFile?.attention ?? "unplanned"}`,
+      `Role: ${planFile?.role ?? "changed file without plan entry"}`,
+      pathFindings.length ? "Findings:" : "Findings: none",
+      ...pathFindings.map(({ finding, index }) => `- ${findingSummary(finding, index, selectedIds)}`),
+    ],
+  };
+}
+
+function findingPage(
+  path: string,
+  entry: FindingEntry,
+  options: WalkthroughOptions,
+  selectedIds: ReadonlySet<string>,
+): WalkthroughPage {
+  return {
+    id: `finding:${entry.id}`,
+    kind: "finding",
+    title: `${entry.id} ${path}`,
+    findingId: entry.id,
+    lines: findingDetailLines(
+      entry.finding,
+      entry.index,
+      options.diffContextByFindingId?.get(entry.id),
+      selectedIds,
+    ),
+  };
+}
+
+function appendFilePages(
+  pages: WalkthroughPage[],
+  state: ReviewState,
+  groups: FindingGroups,
+  options: WalkthroughOptions,
+): void {
   const planFileByPath = new Map((state.plan?.files ?? []).map((file) => [file.path, file]));
   const emitted = new Set<string>();
-  const appendFilePage = (path: string, cohortLabel: string): void => {
+  const append = (path: string, cohortLabel: string): void => {
     if (emitted.has(path)) return;
     emitted.add(path);
-    const planFile = planFileByPath.get(path);
-    const pathFindings = anchored.filter(({ finding }) => finding.file === path);
-    pages.push({
-      id: `file:${path}`,
-      kind: "file",
-      title: path,
-      path,
-      lines: [
-        `Cohort: ${cohortLabel}`,
-        `Attention: ${planFile?.attention ?? "unplanned"}`,
-        `Role: ${planFile?.role ?? "changed file without plan entry"}`,
-        pathFindings.length ? "Findings:" : "Findings: none",
-        ...pathFindings.map(
-          ({ finding, index }) => `- ${findingSummary(finding, index, selectedIds)}`,
-        ),
-      ],
-    });
-    for (const { finding, index, id } of pathFindings) {
-      pages.push({
-        id: `finding:${id}`,
-        kind: "finding",
-        title: `${id} ${path}`,
-        findingId: id,
-        lines: findingDetailLines(
-          finding,
-          index,
-          options.diffContextByFindingId?.get(id),
-          selectedIds,
-        ),
-      });
-    }
+    const pathFindings = groups.anchored.filter(({ finding }) => finding.file === path);
+    pages.push(filePage(path, cohortLabel, pathFindings, planFileByPath.get(path), groups.selectedIds));
+    pages.push(...pathFindings.map((entry) => findingPage(path, entry, options, groups.selectedIds)));
   };
-
-  if (complete) {
-    for (const cohort of state.plan?.cohorts ?? []) {
-      for (const path of cohort.paths) appendFilePage(path, cohort.label);
-    }
-    for (const file of meta.changedFiles) appendFilePage(file.path, "changed files");
+  for (const cohort of state.plan?.cohorts ?? []) {
+    for (const path of cohort.paths) append(path, cohort.label);
   }
+  for (const file of state.snapshot.metadata.changedFiles) append(file.path, "changed files");
+}
 
-  if (complete && unanchored.length) {
-    pages.push({
-      id: "unanchored",
-      kind: "unanchored",
-      title: "Post-body findings",
-      lines: unanchored.flatMap(({ finding, index }) => [
-        findingSummary(finding, index, selectedIds),
-        "Post-body reason: no valid line is available in the pinned diff.",
-        `Problem: ${finding.problem}`,
-        `Consequence: ${finding.consequence}`,
-        `Suggested fix: ${finding.suggestedFix}`,
-      ]),
-    });
-  }
+function unanchoredPage(entries: FindingEntry[], selectedIds: ReadonlySet<string>): WalkthroughPage {
+  return {
+    id: "unanchored",
+    kind: "unanchored",
+    title: "Post-body findings",
+    lines: entries.flatMap(({ finding, index }) => [
+      findingSummary(finding, index, selectedIds),
+      "Post-body reason: no valid line is available in the pinned diff.",
+      `Problem: ${finding.problem}`,
+      `Consequence: ${finding.consequence}`,
+      `Suggested fix: ${finding.suggestedFix}`,
+    ]),
+  };
+}
 
-  const invalidAnchors = findings.filter((f) => f.anchorValid === false).length;
-  const selected = findings.filter((finding, index) => selectedIds.has(findingId(finding, index)));
+function selectedFindingStats(groups: FindingGroups): { selected: Finding[]; selectedAnchored: number } {
+  const selected = groups.findings.filter((finding, index) =>
+    groups.selectedIds.has(findingId(finding, index)),
+  );
   const selectedAnchored = selected.filter(
     (finding) => finding.anchorValid === true && finding.file,
   ).length;
+  return { selected, selectedAnchored };
+}
+
+function finalizePage(
+  state: ReviewState,
+  groups: FindingGroups,
+  complete: boolean,
+  actionResult: WalkthroughActionResult | undefined,
+): WalkthroughPage {
+  const { selected, selectedAnchored } = selectedFindingStats(groups);
   const selectedPostBody = selected.length - selectedAnchored;
-  pages.push({
+  const meta = state.snapshot.metadata;
+  return {
     id: "finalize",
     kind: "finalize",
     title: "Finalize review",
     lines: [
       `Reviewed head: ${meta.headOid}`,
       `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
-      `Selected anchored findings: ${selectedAnchored}/${anchored.length}`,
-      `Selected post-body findings: ${selectedPostBody}/${unanchored.length}`,
-      `Selected findings: ${selected.length}/${findings.length}`,
-      `Anchored findings: ${anchored.length}`,
-      `Post-body findings: ${unanchored.length}`,
-      unanchored.length
+      `Selected anchored findings: ${selectedAnchored}/${groups.anchored.length}`,
+      `Selected post-body findings: ${selectedPostBody}/${groups.unanchored.length}`,
+      `Selected findings: ${selected.length}/${groups.findings.length}`,
+      `Anchored findings: ${groups.anchored.length}`,
+      `Post-body findings: ${groups.unanchored.length}`,
+      groups.unanchored.length
         ? "Unanchored reason: invalid, missing, or file-only anchors are posted in the review body."
         : "Unanchored reason: none.",
-      `Invalid anchors: ${invalidAnchors}`,
+      `Invalid anchors: ${groups.invalidAnchors}`,
       `Posts: ${state.posts.length}`,
       complete
         ? "Posting: available after explicit event choice and confirmation"
@@ -254,12 +298,24 @@ export function deriveWalkthroughViewModel(
       state.child
         ? `Child session: ${state.child.sessionName ?? state.child.sessionFile ?? "available"}${state.child.isError ? " (error)" : ""}`
         : "Child session: missing",
-      options.actionResult
-        ? `Last action: ${options.actionResult.action} ${options.actionResult.ok ? "ok" : "failed"} — ${options.actionResult.notice.message}`
+      actionResult
+        ? `Last action: ${actionResult.action} ${actionResult.ok ? "ok" : "failed"} — ${actionResult.notice.message}`
         : "Last action: none",
     ],
-  });
+  };
+}
 
+export function deriveWalkthroughViewModel(
+  state: ReviewState,
+  options: WalkthroughOptions = {},
+): WalkthroughViewModel {
+  const meta = state.snapshot.metadata;
+  const complete = Boolean(state.plan && state.result);
+  const groups = groupFindings(state);
+  const pages: WalkthroughPage[] = [overviewPage(state, complete)];
+  if (complete) appendFilePages(pages, state, groups, options);
+  if (complete && groups.unanchored.length) pages.push(unanchoredPage(groups.unanchored, groups.selectedIds));
+  pages.push(finalizePage(state, groups, complete, options.actionResult));
   return Object.freeze({
     reviewId: state.snapshot.id,
     title: `PR review ${meta.owner}/${meta.repo}#${meta.number}`,
@@ -269,10 +325,10 @@ export function deriveWalkthroughViewModel(
     pages,
     counts: {
       changedFiles: meta.changedFiles.length,
-      anchoredFindings: anchored.length,
-      unanchoredFindings: unanchored.length,
-      selectedFindings: selectedCount(findings, selectedIds),
-      invalidAnchors,
+      anchoredFindings: groups.anchored.length,
+      unanchoredFindings: groups.unanchored.length,
+      selectedFindings: selectedCount(groups.findings, groups.selectedIds),
+      invalidAnchors: groups.invalidAnchors,
     },
     notice: options.notice,
     actionResult: options.actionResult,
@@ -303,27 +359,8 @@ export class PrReviewWalkthroughComponent implements Component {
   constructor(private readonly options: WalkthroughComponentOptions) {}
 
   handleInput(data: string): void {
-    const kb = this.options.keybindings;
-    if (matchesKey(data, Key.left)) return this.movePage(-1);
-    if (matchesKey(data, Key.right)) return this.movePage(1);
-    if (kb.matches(data, "tui.select.up")) return this.scrollBy(-1);
-    if (kb.matches(data, "tui.select.down")) return this.scrollBy(1);
-    if (kb.matches(data, "tui.select.pageUp")) return this.scrollBy(-this.lastBodyRows);
-    if (kb.matches(data, "tui.select.pageDown")) return this.scrollBy(this.lastBodyRows);
-    if (kb.matches(data, "tui.select.confirm")) return this.handleEnter();
-    if (kb.matches(data, "tui.select.cancel")) return this.emit({ kind: "cancel" });
-
-    const page = this.page();
-    const findingId = page.kind === "finding" ? page.findingId : undefined;
-    if (matchesKey(data, Key.space) && findingId)
-      return this.emit({ kind: "toggleSelection", findingId });
-    if (data === "e") return this.emit({ kind: "edit", findingId });
-    if (data === "f") return this.emit({ kind: "editPreface" });
-    if (data === "r") return this.emit({ kind: "rerun" });
-    if (data === "p") return this.emit({ kind: "post" });
-    if (data === "i") return this.emit({ kind: "inspectChild" });
-    if (data === "c") return this.emit({ kind: "cleanup" });
-    if (data === "?") return this.emit({ kind: "help" });
+    const handler = this.inputHandlers(this.currentFindingId()).find(({ matches }) => matches(data));
+    handler?.run();
   }
 
   render(width: number): string[] {
@@ -351,6 +388,42 @@ export class PrReviewWalkthroughComponent implements Component {
 
   private page(): WalkthroughPage {
     return this.options.viewModel.pages[this.selected] ?? this.options.viewModel.pages[0]!;
+  }
+
+  private currentFindingId(): string | undefined {
+    const page = this.page();
+    return page.kind === "finding" ? page.findingId : undefined;
+  }
+
+  private inputHandlers(findingId: string | undefined): Array<{ matches: (data: string) => boolean; run: () => void }> {
+    const kb = this.options.keybindings;
+    return [
+      { matches: (data) => matchesKey(data, Key.left), run: () => this.movePage(-1) },
+      { matches: (data) => matchesKey(data, Key.right), run: () => this.movePage(1) },
+      { matches: (data) => kb.matches(data, "tui.select.up"), run: () => this.scrollBy(-1) },
+      { matches: (data) => kb.matches(data, "tui.select.down"), run: () => this.scrollBy(1) },
+      {
+        matches: (data) => kb.matches(data, "tui.select.pageUp"),
+        run: () => this.scrollBy(-this.lastBodyRows),
+      },
+      {
+        matches: (data) => kb.matches(data, "tui.select.pageDown"),
+        run: () => this.scrollBy(this.lastBodyRows),
+      },
+      { matches: (data) => kb.matches(data, "tui.select.confirm"), run: () => this.handleEnter() },
+      { matches: (data) => kb.matches(data, "tui.select.cancel"), run: () => this.emit({ kind: "cancel" }) },
+      {
+        matches: (data) => matchesKey(data, Key.space) && Boolean(findingId),
+        run: () => this.emit({ kind: "toggleSelection", findingId: findingId! }),
+      },
+      { matches: (data) => data === "e", run: () => this.emit({ kind: "edit", findingId }) },
+      { matches: (data) => data === "f", run: () => this.emit({ kind: "editPreface" }) },
+      { matches: (data) => data === "r", run: () => this.emit({ kind: "rerun" }) },
+      { matches: (data) => data === "p", run: () => this.emit({ kind: "post" }) },
+      { matches: (data) => data === "i", run: () => this.emit({ kind: "inspectChild" }) },
+      { matches: (data) => data === "c", run: () => this.emit({ kind: "cleanup" }) },
+      { matches: (data) => data === "?", run: () => this.emit({ kind: "help" }) },
+    ];
   }
 
   private handleEnter(): void {

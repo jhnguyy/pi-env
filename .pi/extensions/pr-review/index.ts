@@ -508,71 +508,119 @@ function prefacePreview(s: ReviewState): string {
   const preface = (s.preface ?? "").trim();
   return preface ? bound(preface, 500) : "(none)";
 }
-async function postReviewCritical(
+
+function alreadyPostedOutcome(s: ReviewState, contentHash: string): ReviewActionOutcome | undefined {
+  const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
+  return posted
+    ? {
+        status: "already-posted",
+        message: `Review already posted (${posted.reviewId ?? posted.id}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: posted.reviewId,
+      }
+    : undefined;
+}
+
+function priorReviewOutcome(s: ReviewState, prior: string | undefined): ReviewActionOutcome | undefined {
+  return prior
+    ? {
+        status: "already-posted",
+        message: `Existing review found for marker; not posting duplicate (${prior}).`,
+        reviewId: s.snapshot.id,
+        remoteReviewId: prior,
+      }
+    : undefined;
+}
+
+function uncertainAttemptOutcome(
+  s: ReviewState,
+  attempt: PostAttempt | undefined,
+): ReviewActionOutcome | undefined {
+  return attempt?.status === "uncertain"
+    ? {
+        status: "uncertain",
+        message:
+          "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
+        reviewId: s.snapshot.id,
+      }
+    : undefined;
+}
+
+async function readyPostState(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
-): Promise<ReviewActionOutcome> {
+): Promise<{ ok: true; state: ReviewState } | { ok: false; outcome: ReviewActionOutcome }> {
   const s = latestState();
-  if (!s) return { status: "no-active", message: "No active PR review." };
+  if (!s) return { ok: false, outcome: { status: "no-active", message: "No active PR review." } };
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
-  if (blocked)
-    return {
-      status: blocked.startsWith("Review is stale") ? "stale" : "blocked",
-      message: blocked,
-      reviewId: s.snapshot.id,
-    };
-  const contentHash = contentHashFor(s, event);
-  let attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
-  const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
-  if (posted)
-    return {
-      status: "already-posted",
-      message: `Review already posted (${posted.reviewId ?? posted.id}).`,
-      reviewId: s.snapshot.id,
-      remoteReviewId: posted.reviewId,
-    };
-  const prior = attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined;
-  if (prior)
-    return {
-      status: "already-posted",
-      message: `Existing review found for marker; not posting duplicate (${prior}).`,
-      reviewId: s.snapshot.id,
-      remoteReviewId: prior,
-    };
-  if (attempt?.status === "uncertain")
-    return {
-      status: "uncertain",
-      message:
-        "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
-      reviewId: s.snapshot.id,
-    };
-  const selected = selectedFindings(s);
-  if (
-    !(await confirm(
-      ctx,
-      "Post PR review?",
-      `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
-    ))
-  )
-    return { status: "cancelled", message: "Posting cancelled." };
+  return blocked
+    ? {
+        ok: false,
+        outcome: {
+          status: blocked.startsWith("Review is stale") ? "stale" : "blocked",
+          message: blocked,
+          reviewId: s.snapshot.id,
+        },
+      }
+    : { ok: true, state: s };
+}
+
+async function confirmPostReview(
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  event: ReviewEventValue,
+): Promise<boolean> {
+  return confirm(
+    ctx,
+    "Post PR review?",
+    `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selectedFindings(s).length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
+  );
+}
+
+async function secondHeadCheck(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome | undefined> {
   const remoteAfterConfirm = await currentRemoteHead(
     pi.exec.bind(pi),
     ctx.cwd,
     s.snapshot.metadata.url,
     signal,
   );
-  if (remoteAfterConfirm !== s.snapshot.metadata.headOid)
-    return {
-      status: "stale",
-      message: "Review is stale: remote PR head changed. Rerun before posting.",
-      reviewId: s.snapshot.id,
-    };
-  if (!attempt) {
-    attempt = newAttempt(s, event, contentHash);
-    saveState(pi, s);
-  }
+  return remoteAfterConfirm !== s.snapshot.metadata.headOid
+    ? {
+        status: "stale",
+        message: "Review is stale: remote PR head changed. Rerun before posting.",
+        reviewId: s.snapshot.id,
+      }
+    : undefined;
+}
+
+function persistedAttempt(
+  pi: ExtensionAPI,
+  s: ReviewState,
+  event: ReviewEventValue,
+  contentHash: string,
+  attempt: PostAttempt | undefined,
+): PostAttempt {
+  if (attempt) return attempt;
+  const created = newAttempt(s, event, contentHash);
+  saveState(pi, s);
+  return created;
+}
+
+async function submitAndRecordPost(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  s: ReviewState,
+  event: ReviewEventValue,
+  attempt: PostAttempt,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
   const r = await submitPost(pi, ctx, s, event, attempt, signal);
   if (r.code === -1) return { status: "blocked", message: r.stderr, reviewId: s.snapshot.id };
   if (r.code !== 0) return handlePostFailure(pi, ctx, s, attempt, r.stderr, r.stdout, signal);
@@ -587,6 +635,34 @@ async function postReviewCritical(
     reviewId: s.snapshot.id,
     remoteReviewId: attempt.reviewId,
   };
+}
+
+async function postReviewCritical(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  event: ReviewEventValue,
+  signal?: AbortSignal,
+): Promise<ReviewActionOutcome> {
+  const ready = await readyPostState(pi, ctx, event, signal);
+  if (!ready.ok) return ready.outcome;
+  const s = ready.state;
+  const contentHash = contentHashFor(s, event);
+  const posted = alreadyPostedOutcome(s, contentHash);
+  if (posted) return posted;
+  const attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
+  const prior = priorReviewOutcome(
+    s,
+    attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined,
+  );
+  if (prior) return prior;
+  const uncertain = uncertainAttemptOutcome(s, attempt);
+  if (uncertain) return uncertain;
+  if (!(await confirmPostReview(ctx, s, event)))
+    return { status: "cancelled", message: "Posting cancelled." };
+  const stale = await secondHeadCheck(pi, ctx, s, signal);
+  if (stale) return stale;
+  const persisted = persistedAttempt(pi, s, event, contentHash, attempt);
+  return submitAndRecordPost(pi, ctx, s, event, persisted, signal);
 }
 
 export async function postReviewAction(
@@ -846,123 +922,180 @@ async function reviewEventDialog(
       : ReviewEvent.Comment;
 }
 
+type WalkthroughLoopState = {
+  actionResult?: WalkthroughActionResult;
+  postExhausted: boolean;
+};
+
+type WalkthroughHandlerResult = { done?: string; actionResult?: WalkthroughActionResult };
+type WalkthroughHandler = (
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  intent: WalkthroughIntent,
+  loop: WalkthroughLoopState,
+) => Promise<WalkthroughHandlerResult> | WalkthroughHandlerResult;
+
+function walkthroughNotice(
+  action: WalkthroughActionResult["action"],
+  kind: WalkthroughNotice["kind"],
+  message: string,
+  ok = false,
+): WalkthroughActionResult {
+  return { action, ok, notice: { kind, message } };
+}
+
+const handleToggleSelection: WalkthroughHandler = (pi, _ctx, state, intent) => {
+  if (intent.kind !== "toggleSelection") return {};
+  return {
+    actionResult: outcomeNotice(
+      "select",
+      setFindingSelectionAction(
+        pi,
+        intent.findingId,
+        !state.selectedFindingIds.includes(intent.findingId),
+      ),
+    ),
+  };
+};
+
+const handleWalkthroughEdit: WalkthroughHandler = async (pi, ctx, state, intent) => {
+  if (intent.kind !== "edit") return {};
+  if (!intent.findingId)
+    return { actionResult: walkthroughNotice("edit", "warning", "Open a finding page before editing.") };
+  const f = state.result?.findings.find((x) => x.id === intent.findingId);
+  const edited = f ? await editWithUi(ctx, `Edit finding ${intent.findingId}`, findingTemplate(f)) : undefined;
+  return {
+    actionResult:
+      edited === undefined
+        ? walkthroughNotice("edit", "info", "Edit cancelled.")
+        : outcomeNotice("edit", applyFindingTemplateEditAction(pi, intent.findingId, edited)),
+  };
+};
+
+const handleWalkthroughPreface: WalkthroughHandler = async (pi, ctx, state, intent) => {
+  if (intent.kind !== "editPreface") return {};
+  const edited = await editWithUi(ctx, "Edit PR review preface", state.preface ?? "");
+  return {
+    actionResult:
+      edited === undefined
+        ? walkthroughNotice("preface", "info", "Preface edit cancelled.")
+        : outcomeNotice("preface", updatePrefaceAction(pi, edited)),
+  };
+};
+
+const handleWalkthroughRerun: WalkthroughHandler = async (pi, ctx, _state, intent) => {
+  if (intent.kind !== "rerun") return {};
+  const result = await runWithLoader(ctx, "Rerunning PR review…", (signal) =>
+    rerunReviewAction(pi, ctx, signal),
+  );
+  return {
+    actionResult: result
+      ? outcomeNotice("rerun", result)
+      : walkthroughNotice("rerun", "info", "Rerun cancelled."),
+  };
+};
+
+async function handleReadyPost(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  loop: WalkthroughLoopState,
+): Promise<WalkthroughActionResult> {
+  const event = await reviewEventDialog(ctx);
+  if (!event) return walkthroughNotice("post", "info", "Post event selection cancelled.");
+  const outcome = await postReviewAction(pi, ctx, event);
+  if (["posted", "already-posted", "reconciled", "uncertain"].includes(outcome.status))
+    loop.postExhausted = true;
+  return outcomeNotice("post", outcome);
+}
+
+const handleWalkthroughPost: WalkthroughHandler = async (pi, ctx, state, intent, loop) => {
+  if (intent.kind !== "post") return {};
+  if (loop.postExhausted)
+    return {
+      actionResult: walkthroughNotice(
+        "post",
+        "info",
+        "Posting is not offered again in this walkthrough. Reopen after reconciling state.",
+      ),
+    };
+  if (!state.plan || !state.result)
+    return {
+      actionResult: walkthroughNotice(
+        "post",
+        "error",
+        "Posting blocked until plan and result exist.",
+      ),
+    };
+  return { actionResult: await handleReadyPost(pi, ctx, loop) };
+};
+
+const handleWalkthroughCleanup: WalkthroughHandler = async (pi, ctx, _state, intent) =>
+  intent.kind === "cleanup"
+    ? { actionResult: outcomeNotice("cleanup", await cleanupReviewWithConfirm(pi, ctx)) }
+    : {};
+
+const handleWalkthroughInspect: WalkthroughHandler = async (_pi, ctx, state, intent) => {
+  if (intent.kind !== "inspectChild") return {};
+  if (!state.child?.sessionFile)
+    return {
+      actionResult: walkthroughNotice("inspect", "warning", "Child session metadata is missing."),
+    };
+  const switched = await ctx.switchSession(state.child.sessionFile);
+  return switched?.cancelled
+    ? {
+        actionResult: walkthroughNotice("inspect", "info", "Child session switch cancelled."),
+      }
+    : { done: "Switched to review child session." };
+};
+
+const handleWalkthroughHelp: WalkthroughHandler = (_pi, _ctx, _state, intent) =>
+  intent.kind === "help"
+    ? {
+        actionResult: walkthroughNotice(
+          "help",
+          "info",
+          "Use ←/→ for sections, ↑↓/Page keys to scroll, Space to select, e/f edit, r rerun, p post, i inspect, c cleanup, Esc close.",
+          true,
+        ),
+      }
+    : {};
+
+const walkthroughHandlers: Partial<Record<WalkthroughIntent["kind"], WalkthroughHandler>> = {
+  toggleSelection: handleToggleSelection,
+  edit: handleWalkthroughEdit,
+  editPreface: handleWalkthroughPreface,
+  rerun: handleWalkthroughRerun,
+  post: handleWalkthroughPost,
+  cleanup: handleWalkthroughCleanup,
+  inspectChild: handleWalkthroughInspect,
+  help: handleWalkthroughHelp,
+};
+
+async function dispatchWalkthroughIntent(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  intent: WalkthroughIntent,
+  loop: WalkthroughLoopState,
+): Promise<string | undefined> {
+  if (intent.kind === "cancel") return "PR review walkthrough closed.";
+  const result = await walkthroughHandlers[intent.kind]?.(pi, ctx, state, intent, loop);
+  if (result?.actionResult !== undefined) loop.actionResult = result.actionResult;
+  return result?.done;
+}
+
 async function walkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<string> {
   if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function")
     return "PR review walkthrough is available only in TUI mode.";
   if (!latestState()) return "No active PR review.";
-  let actionResult: WalkthroughActionResult | undefined;
-  let postExhausted = false;
+  const loop: WalkthroughLoopState = { postExhausted: false };
   for (;;) {
     const state = latestCompleteOrSafeState();
-    if (!state) return actionResult?.notice.message ?? "No active PR review.";
-    const intent = await openWalkthroughOnce(ctx, state, actionResult);
-    if (intent.kind === "cancel") return "PR review walkthrough closed.";
-    if (intent.kind === "toggleSelection")
-      actionResult = outcomeNotice(
-        "select",
-        setFindingSelectionAction(
-          pi,
-          intent.findingId,
-          !state.selectedFindingIds.includes(intent.findingId),
-        ),
-      );
-    else if (intent.kind === "edit") {
-      if (!intent.findingId)
-        actionResult = {
-          action: "edit",
-          ok: false,
-          notice: { kind: "warning", message: "Open a finding page before editing." },
-        };
-      else {
-        const f = state.result?.findings.find((x) => x.id === intent.findingId);
-        const edited = f
-          ? await editWithUi(ctx, `Edit finding ${intent.findingId}`, findingTemplate(f))
-          : undefined;
-        actionResult =
-          edited === undefined
-            ? { action: "edit", ok: false, notice: { kind: "info", message: "Edit cancelled." } }
-            : outcomeNotice("edit", applyFindingTemplateEditAction(pi, intent.findingId, edited));
-      }
-    } else if (intent.kind === "editPreface") {
-      const edited = await editWithUi(ctx, "Edit PR review preface", state.preface ?? "");
-      actionResult =
-        edited === undefined
-          ? {
-              action: "preface",
-              ok: false,
-              notice: { kind: "info", message: "Preface edit cancelled." },
-            }
-          : outcomeNotice("preface", updatePrefaceAction(pi, edited));
-    } else if (intent.kind === "rerun") {
-      const result = await runWithLoader(ctx, "Rerunning PR review…", (signal) =>
-        rerunReviewAction(pi, ctx, signal),
-      );
-      actionResult = result
-        ? outcomeNotice("rerun", result)
-        : { action: "rerun", ok: false, notice: { kind: "info", message: "Rerun cancelled." } };
-    } else if (intent.kind === "post") {
-      if (postExhausted)
-        actionResult = {
-          action: "post",
-          ok: false,
-          notice: {
-            kind: "info",
-            message:
-              "Posting is not offered again in this walkthrough. Reopen after reconciling state.",
-          },
-        };
-      else if (!state.plan || !state.result)
-        actionResult = {
-          action: "post",
-          ok: false,
-          notice: { kind: "error", message: "Posting blocked until plan and result exist." },
-        };
-      else {
-        const event = await reviewEventDialog(ctx);
-        if (!event)
-          actionResult = {
-            action: "post",
-            ok: false,
-            notice: { kind: "info", message: "Post event selection cancelled." },
-          };
-        else {
-          const outcome = await postReviewAction(pi, ctx, event);
-          if (["posted", "already-posted", "reconciled", "uncertain"].includes(outcome.status))
-            postExhausted = true;
-          actionResult = outcomeNotice("post", outcome);
-        }
-      }
-    } else if (intent.kind === "cleanup") {
-      actionResult = outcomeNotice("cleanup", await cleanupReviewWithConfirm(pi, ctx));
-    } else if (intent.kind === "inspectChild") {
-      if (state.child?.sessionFile) {
-        const switched = await ctx.switchSession(state.child.sessionFile);
-        actionResult = switched?.cancelled
-          ? {
-              action: "inspect",
-              ok: false,
-              notice: { kind: "info", message: "Child session switch cancelled." },
-            }
-          : undefined;
-        if (!switched?.cancelled) return "Switched to review child session.";
-      } else {
-        actionResult = {
-          action: "inspect",
-          ok: false,
-          notice: { kind: "warning", message: "Child session metadata is missing." },
-        };
-      }
-    } else if (intent.kind === "help") {
-      actionResult = {
-        action: "help",
-        ok: true,
-        notice: {
-          kind: "info",
-          message:
-            "Use ←/→ for sections, ↑↓/Page keys to scroll, Space to select, e/f edit, r rerun, p post, i inspect, c cleanup, Esc close.",
-        },
-      };
-    }
+    if (!state) return loop.actionResult?.notice.message ?? "No active PR review.";
+    const intent = await openWalkthroughOnce(ctx, state, loop.actionResult);
+    const done = await dispatchWalkthroughIntent(pi, ctx, state, intent, loop);
+    if (done) return done;
   }
 }
 
