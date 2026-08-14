@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  BorderedLoader,
   getAgentDir,
   type ExtensionAPI,
   type ExtensionCommandContext,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { CancellableLoader } from "@earendil-works/pi-tui";
 import { Effect, PartitionedSemaphore } from "effect";
 import { Schema } from "effect";
 import { Type, type Static } from "typebox";
@@ -558,6 +558,18 @@ async function postReviewCritical(
     ))
   )
     return { status: "cancelled", message: "Posting cancelled." };
+  const remoteAfterConfirm = await currentRemoteHead(
+    pi.exec.bind(pi),
+    ctx.cwd,
+    s.snapshot.metadata.url,
+    signal,
+  );
+  if (remoteAfterConfirm !== s.snapshot.metadata.headOid)
+    return {
+      status: "stale",
+      message: "Review is stale: remote PR head changed. Rerun before posting.",
+      reviewId: s.snapshot.id,
+    };
   if (!attempt) {
     attempt = newAttempt(s, event, contentHash);
     saveState(pi, s);
@@ -713,6 +725,15 @@ export async function cleanupReviewAction(pi: ExtensionAPI): Promise<ReviewActio
   return { status: "cleaned", message: "Review cleanup complete." };
 }
 
+async function cleanupReviewWithConfirm(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+): Promise<ReviewActionOutcome> {
+  if (!(await confirm(ctx, "Cleanup PR review artifacts?", "Remove managed PR review worktree artifacts?")))
+    return { status: "cancelled", message: "Cleanup cancelled." };
+  return cleanupReviewAction(pi);
+}
+
 function outcomeNotice(action: WalkthroughActionResult["action"], outcome: ReviewActionOutcome): WalkthroughActionResult {
   const ok = ["updated", "posted", "already-posted", "reconciled", "started", "cleaned"].includes(outcome.status);
   const kind: WalkthroughNotice["kind"] = ok ? "success" : outcome.status === "cancelled" ? "info" : outcome.status === "uncertain" ? "warning" : "error";
@@ -720,6 +741,7 @@ function outcomeNotice(action: WalkthroughActionResult["action"], outcome: Revie
 }
 
 function buildDiffContext(s: ReviewState): { ok: true; contexts: Map<string, WalkthroughDiffContext> } | { ok: false; message: string } {
+  if (!s.plan || !s.result) return { ok: true, contexts: new Map() };
   const loaded = loadPinnedDiff(s.snapshot);
   if (!loaded.ok) return { ok: false, message: `Pinned diff unavailable: ${loaded.error.kind}.` };
   const contexts = new Map<string, WalkthroughDiffContext>();
@@ -754,6 +776,7 @@ async function openWalkthroughOnce(
       }),
       keybindings,
       theme,
+      rows: tui.terminal.rows,
       requestRender: () => tui.requestRender(),
       onIntent: (intent: WalkthroughIntent) => done(intent),
     }),
@@ -766,15 +789,18 @@ async function runWithLoader<T>(
   run: (signal: AbortSignal) => Promise<T>,
 ): Promise<T | undefined> {
   if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function") return run(new AbortController().signal);
-  return (await (ctx.ui as any).custom((tui: any, theme: any, _kb: any, done: any) => {
-    const loader = new CancellableLoader(tui, (s: string) => theme.fg("accent", s), (s: string) => theme.fg("muted", s), message);
-    loader.onAbort = () => done(undefined);
-    run(loader.signal).then(done, (error) => {
-      if (loader.signal.aborted) done(undefined);
-      else throw error;
-    });
+  const settled = (await (ctx.ui as any).custom((tui: any, theme: any, _kb: any, done: any) => {
+    const loader = new BorderedLoader(tui, theme, message);
+    loader.onAbort = () => done({ ok: false, cancelled: true });
+    run(loader.signal).then(
+      (value) => done({ ok: true, value }),
+      (error) => done(loader.signal.aborted ? { ok: false, cancelled: true } : { ok: false, error }),
+    );
     return loader;
-  })) as T | undefined;
+  })) as { ok: true; value: T } | { ok: false; cancelled?: boolean; error?: unknown };
+  if (settled.ok) return settled.value;
+  if (settled.cancelled) return undefined;
+  throw settled.error instanceof Error ? settled.error : new Error(String(settled.error));
 }
 
 async function reviewEventDialog(ctx: ExtensionCommandContext): Promise<ReviewEventValue | undefined> {
@@ -787,6 +813,7 @@ async function walkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext): Prom
   if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function") return "PR review walkthrough is available only in TUI mode.";
   if (!latestState()) return "No active PR review.";
   let actionResult: WalkthroughActionResult | undefined;
+  let postExhausted = false;
   for (;;) {
     const state = latestCompleteOrSafeState();
     if (!state) return actionResult?.notice.message ?? "No active PR review.";
@@ -807,20 +834,29 @@ async function walkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext): Prom
       const result = await runWithLoader(ctx, "Rerunning PR review…", (signal) => rerunReviewAction(pi, ctx, signal));
       actionResult = result ? outcomeNotice("rerun", result) : { action: "rerun", ok: false, notice: { kind: "info", message: "Rerun cancelled." } };
     } else if (intent.kind === "post") {
-      if (!state.plan || !state.result) actionResult = { action: "post", ok: false, notice: { kind: "error", message: "Posting blocked until plan and result exist." } };
+      if (postExhausted) actionResult = { action: "post", ok: false, notice: { kind: "info", message: "Posting is not offered again in this walkthrough. Reopen after reconciling state." } };
+      else if (!state.plan || !state.result) actionResult = { action: "post", ok: false, notice: { kind: "error", message: "Posting blocked until plan and result exist." } };
       else {
         const event = await reviewEventDialog(ctx);
-        actionResult = event ? outcomeNotice("post", await postReviewAction(pi, ctx, event)) : { action: "post", ok: false, notice: { kind: "info", message: "Post event selection cancelled." } };
+        if (!event) actionResult = { action: "post", ok: false, notice: { kind: "info", message: "Post event selection cancelled." } };
+        else {
+          const outcome = await postReviewAction(pi, ctx, event);
+          if (["posted", "already-posted", "reconciled", "uncertain"].includes(outcome.status)) postExhausted = true;
+          actionResult = outcomeNotice("post", outcome);
+        }
       }
     } else if (intent.kind === "cleanup") {
-      const choice = await ctx.ui.select("Cleanup PR review artifacts?", ["Cancel", "Cleanup"]);
-      actionResult = choice === "Cleanup" ? outcomeNotice("cleanup", await cleanupReviewAction(pi)) : { action: "cleanup", ok: false, notice: { kind: "info", message: "Cleanup cancelled." } };
+      actionResult = outcomeNotice("cleanup", await cleanupReviewWithConfirm(pi, ctx));
     } else if (intent.kind === "inspectChild") {
       if (state.child?.sessionFile) {
-        await ctx.switchSession(state.child.sessionFile);
-        return "Switched to review child session.";
+        const switched = await ctx.switchSession(state.child.sessionFile);
+        actionResult = switched?.cancelled
+          ? { action: "inspect", ok: false, notice: { kind: "info", message: "Child session switch cancelled." } }
+          : undefined;
+        if (!switched?.cancelled) return "Switched to review child session.";
+      } else {
+        actionResult = { action: "inspect", ok: false, notice: { kind: "warning", message: "Child session metadata is missing." } };
       }
-      actionResult = { action: "inspect", ok: false, notice: { kind: "warning", message: "Child session metadata is missing." } };
     } else if (intent.kind === "help") {
       actionResult = { action: "inspect", ok: true, notice: { kind: "info", message: "Use ←/→ for sections, ↑↓/Page keys to scroll, Space to select, e/f edit, r rerun, p post, i inspect, c cleanup, Esc close." } };
     }
@@ -843,7 +879,7 @@ const handlers: Partial<
   preface: (pi, rest, ctx) => editPreface(pi, ctx, rest.join(" ")),
   rerun: async (pi, _rest, ctx) => (await rerunReviewAction(pi, ctx)).message,
   post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
-  cleanup: async (pi) => (await cleanupReviewAction(pi)).message,
+  cleanup: async (pi, _rest, ctx) => (await cleanupReviewWithConfirm(pi, ctx)).message,
   walkthrough: (pi, _rest, ctx) => walkthrough(pi, ctx),
 };
 async function command(

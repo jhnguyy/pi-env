@@ -240,6 +240,32 @@ describe("pr-review extension surface", () => {
     expect(customCalls).toBe(0);
   });
 
+  it("walkthrough production component does not close on navigation but closes on durable key", async () => {
+    tempRoot();
+    restore({ sessionManager: { getBranch: () => [custom(sampleState("r", []))] } } as any);
+    const pi = extensionPi();
+    const notes: string[] = [];
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: {
+        notify: (m: string) => notes.push(m),
+        custom: async (factory: any) =>
+          await new Promise((resolve) => {
+            const component = factory(
+              { requestRender() {}, terminal: { rows: 20 } },
+              {},
+              { matches: (data: string, id: string) => data === "escape" && id === "tui.select.cancel" },
+              resolve,
+            );
+            component.handleInput("\x1b[C");
+            component.handleInput("\x1b[D");
+            component.handleInput("escape");
+          }),
+      },
+    } as any);
+    expect(notes.at(-1)).toContain("closed");
+  });
+
   it("walkthrough persists selection after component closes and reopens from latest state", async () => {
     tempRoot();
     restore({ sessionManager: { getBranch: () => [custom(sampleState("r", []))] } } as any);
@@ -251,7 +277,7 @@ describe("pr-review extension surface", () => {
       ui: {
         notify() {},
         custom: async (factory: any) => {
-          const component = factory({ requestRender() {} }, {}, { matches: () => false }, () => {});
+          const component = factory({ requestRender() {}, terminal: { rows: 20 } }, {}, { matches: () => false }, () => {});
           seenSelected.push((component as any).options.viewModel.counts.selectedFindings);
           return intents.shift();
         },
@@ -340,9 +366,10 @@ describe("pr-review extension surface", () => {
       mode: "tui",
       ui: {
         notify() {},
-        select: async (_title: string, options: string[]) => options.includes("Cleanup") ? "Cleanup" : "COMMENT",
+        confirm: async () => true,
+        select: async () => "COMMENT",
         custom: async (factory: any) => {
-          const component = factory({ requestRender() {} }, {}, { matches: () => false }, () => {});
+          const component = factory({ requestRender() {}, terminal: { rows: 20 } }, {}, { matches: () => false }, () => {});
           expect((component as any).options.viewModel.pages.map((p: any) => p.id)).toEqual(["overview", "finalize"]);
           return intents.shift();
         },
@@ -379,8 +406,8 @@ describe("pr-review extension surface", () => {
       calls.push({ cmd, args, cwd: opts.cwd });
       return { code: 0, stdout: "", stderr: "" };
     };
-    await pi.command("cleanup", { ui: { notify() {} } } as any);
-    await pi.command("cleanup", { ui: { notify() {} } } as any);
+    await pi.command("cleanup", { ui: { notify() {}, confirm: async () => true } } as any);
+    await pi.command("cleanup", { ui: { notify() {}, confirm: async () => true } } as any);
     expect(calls.filter((c) => c.args[0] === "worktree" && c.args[1] === "remove")).toHaveLength(1);
     expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
     expect(pi.appended.at(-1)?.[1].state.snapshot.cache.repoDir).toContain(root);

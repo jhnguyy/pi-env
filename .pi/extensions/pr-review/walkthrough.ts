@@ -29,9 +29,6 @@ export type WalkthroughActionResult = DeepReadonly<{
 }>;
 
 export type WalkthroughIntent =
-  | { kind: "navigate"; direction: "left" | "right" }
-  | { kind: "scroll"; direction: "up" | "down" | "pageUp" | "pageDown" }
-  | { kind: "confirm"; pageId: string }
   | { kind: "cancel" }
   | { kind: "toggleSelection"; findingId: string }
   | { kind: "edit"; findingId?: string }
@@ -159,7 +156,7 @@ export function deriveWalkthroughViewModel(
       `Goal: ${state.plan?.goal ?? "No accepted review plan yet."}`,
       `Goal assessment: ${state.plan?.goalAssessment ?? "No accepted review plan yet."}`,
       `Risk: ${state.plan?.risk ?? "unknown"}`,
-      `Risk reasons: ${state.plan?.riskReasons?.join("; ") || "none"}`,
+      `Risk reasons: ${state.plan?.riskReasons?.join(", ") || "none"}`,
       `Verdict: ${state.result?.verdict ?? "No submitted review result yet."}`,
       `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
       `Changed files: ${meta.changedFiles.length}`,
@@ -205,7 +202,7 @@ export function deriveWalkthroughViewModel(
     for (const file of meta.changedFiles) appendFilePage(file.path, "changed files");
   }
 
-  if (unanchored.length) {
+  if (complete && unanchored.length) {
     pages.push({
       id: "unanchored",
       kind: "unanchored",
@@ -220,17 +217,26 @@ export function deriveWalkthroughViewModel(
   }
 
   const invalidAnchors = findings.filter((f) => f.anchorValid === false).length;
+  const selected = findings.filter((finding, index) => selectedIds.has(findingId(finding, index)));
+  const selectedAnchored = selected.filter((finding) => finding.anchorValid === true && finding.file).length;
+  const selectedPostBody = selected.length - selectedAnchored;
   pages.push({
     id: "finalize",
     kind: "finalize",
     title: "Finalize review",
     lines: [
-      `Selected findings: ${selectedCount(findings, selectedIds)}/${findings.length}`,
+      `Reviewed head: ${meta.headOid}`,
+      `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
+      `Selected anchored findings: ${selectedAnchored}/${anchored.length}`,
+      `Selected post-body findings: ${selectedPostBody}/${unanchored.length}`,
+      `Selected findings: ${selected.length}/${findings.length}`,
       `Anchored findings: ${anchored.length}`,
       `Post-body findings: ${unanchored.length}`,
+      unanchored.length
+        ? "Unanchored reason: invalid, missing, or file-only anchors are posted in the review body."
+        : "Unanchored reason: none.",
       `Invalid anchors: ${invalidAnchors}`,
       `Posts: ${state.posts.length}`,
-      `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
       complete ? "Posting: available after explicit event choice and confirmation" : "Posting: blocked until plan and result exist",
       state.child
         ? `Child session: ${state.child.sessionName ?? state.child.sessionFile ?? "available"}${state.child.isError ? " (error)" : ""}`
@@ -277,20 +283,21 @@ export class PrReviewWalkthroughComponent implements Component {
   private scroll = 0;
   private cachedWidth: number | undefined;
   private cachedRows: string[] | undefined;
+  private lastBodyRows = 1;
+  private lastBodyRowCount = 0;
   private themeGeneration = 0;
 
   constructor(private readonly options: WalkthroughComponentOptions) {}
 
   handleInput(data: string): void {
     const kb = this.options.keybindings;
-    if (matchesKey(data, Key.left)) return this.movePage(-1, "left");
-    if (matchesKey(data, Key.right)) return this.movePage(1, "right");
-    if (kb.matches(data, "tui.select.up")) return this.scrollBy(-1, "up");
-    if (kb.matches(data, "tui.select.down")) return this.scrollBy(1, "down");
-    if (kb.matches(data, "tui.select.pageUp")) return this.scrollBy(-5, "pageUp");
-    if (kb.matches(data, "tui.select.pageDown")) return this.scrollBy(5, "pageDown");
-    if (kb.matches(data, "tui.select.confirm"))
-      return this.emit({ kind: "confirm", pageId: this.page().id });
+    if (matchesKey(data, Key.left)) return this.movePage(-1);
+    if (matchesKey(data, Key.right)) return this.movePage(1);
+    if (kb.matches(data, "tui.select.up")) return this.scrollBy(-1);
+    if (kb.matches(data, "tui.select.down")) return this.scrollBy(1);
+    if (kb.matches(data, "tui.select.pageUp")) return this.scrollBy(-this.lastBodyRows);
+    if (kb.matches(data, "tui.select.pageDown")) return this.scrollBy(this.lastBodyRows);
+    if (kb.matches(data, "tui.select.confirm")) return this.handleEnter();
     if (kb.matches(data, "tui.select.cancel")) return this.emit({ kind: "cancel" });
 
     const page = this.page();
@@ -333,7 +340,14 @@ export class PrReviewWalkthroughComponent implements Component {
     return this.options.viewModel.pages[this.selected] ?? this.options.viewModel.pages[0]!;
   }
 
-  private movePage(delta: number, direction: "left" | "right"): void {
+  private handleEnter(): void {
+    const page = this.page();
+    if (page.kind === "finding") return this.emit({ kind: "toggleSelection", findingId: page.findingId });
+    if (page.kind === "finalize") return this.emit({ kind: "post" });
+    this.movePage(1);
+  }
+
+  private movePage(delta: number): void {
     const last = Math.max(0, this.options.viewModel.pages.length - 1);
     const next = Math.max(0, Math.min(last, this.selected + delta));
     if (next !== this.selected) {
@@ -342,19 +356,21 @@ export class PrReviewWalkthroughComponent implements Component {
       this.invalidate();
       this.options.requestRender?.();
     }
-    this.emit({ kind: "navigate", direction });
   }
 
-  private scrollBy(delta: number, direction: "up" | "down" | "pageUp" | "pageDown"): void {
-    const pageLineCount = this.page().lines.length + 6;
-    const maxScroll = Math.max(0, pageLineCount - Math.max(3, this.options.rows ?? 18));
+  private scrollBy(delta: number): void {
+    const maxScroll = this.maxScroll();
     const next = Math.max(0, Math.min(maxScroll, this.scroll + delta));
     if (next !== this.scroll) {
       this.scroll = next;
       this.invalidate();
       this.options.requestRender?.();
     }
-    this.emit({ kind: "scroll", direction });
+  }
+
+  private maxScroll(): number {
+    if (this.cachedWidth !== undefined) this.render(this.cachedWidth);
+    return Math.max(0, this.lastBodyRowCount - this.lastBodyRows);
   }
 
   private emit(intent: WalkthroughIntent): void {
@@ -367,6 +383,9 @@ export class PrReviewWalkthroughComponent implements Component {
 
   private renderFallback(width: number, rows: number): string[] {
     const page = this.page();
+    this.lastBodyRows = Math.max(1, rows - 3);
+    this.lastBodyRowCount = 0;
+    this.scroll = 0;
     return this.boundRows(
       [
         this.style("accent", truncateToWidth("PR review", width, "")),
@@ -375,7 +394,7 @@ export class PrReviewWalkthroughComponent implements Component {
           width,
           "",
         ),
-        truncateToWidth("Width too narrow; use 40+ columns.", width, ""),
+        truncateToWidth("Resize to 40+ columns, or press Esc to close.", width, ""),
       ],
       rows,
     );
@@ -389,23 +408,32 @@ export class PrReviewWalkthroughComponent implements Component {
       this.options.theme?.bold?.(this.options.viewModel.title) ?? this.options.viewModel.title,
     );
     const nav = `${this.selected + 1}/${this.options.viewModel.pages.length} ${page.kind}: ${page.title}`;
-    const raw = [
+    const headerRows = [
       header,
       this.style("muted", nav),
       ...(this.options.viewModel.notice
         ? [this.style(this.options.viewModel.notice.kind, this.options.viewModel.notice.message)]
         : []),
       "",
-      ...page.lines.flatMap((line) =>
-        wrapTextWithAnsi(line, bodyWidth).map((wrapped) => ` ${wrapped}`),
-      ),
+    ];
+    const footerRows = [
       "",
       this.style(
         "dim",
-        "←/→ section • ↑↓/Pg scroll • Esc close • Space select • e edit • f preface • r rerun • p post • i child • c cleanup • ? help",
+        "←/→ section • ↑↓/Pg scroll • Enter select/next/post • Esc close • Space select • e edit • f preface • r rerun • p post • i child • c cleanup • ? help",
       ),
     ];
-    return this.boundRows(raw, rows);
+    const body = page.lines.flatMap((line) =>
+      wrapTextWithAnsi(line, bodyWidth).map((wrapped) => ` ${wrapped}`),
+    );
+    const bodyRows = Math.max(1, rows - headerRows.length - footerRows.length);
+    this.lastBodyRows = bodyRows;
+    this.lastBodyRowCount = body.length;
+    const maxScroll = Math.max(0, body.length - bodyRows);
+    if (this.scroll > maxScroll) this.scroll = maxScroll;
+    const visibleBody = body.slice(this.scroll, this.scroll + bodyRows);
+    while (visibleBody.length < bodyRows) visibleBody.push("");
+    return this.boundRows([...headerRows, ...visibleBody, ...footerRows], rows);
   }
 
   private boundRows(lines: string[], rows: number): string[] {

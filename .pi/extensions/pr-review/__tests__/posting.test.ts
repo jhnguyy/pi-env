@@ -294,6 +294,34 @@ describe("pr-review posting", () => {
     expect(confirms[0].length).toBeLessThan(700);
   });
 
+  it("rechecks remote head after confirmation before creating an attempt or posting", async () => {
+    restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
+    const appended: any[] = [];
+    const postCalls: any[] = [];
+    let headChecks = 0;
+    const pi = {
+      appendEntry(_type: string, data: any) {
+        appended.push(data);
+      },
+      exec: async (cmd: string, args: string[]) => {
+        if (cmd === "gh" && args[0] === "pr") {
+          headChecks += 1;
+          return { code: 0, stdout: `${headChecks === 1 ? "head" : "new-head"}\n`, stderr: "" };
+        }
+        if (cmd === "gh" && args[0] === "api") postCalls.push(args);
+        return { code: 0, stdout: "[]", stderr: "" };
+      },
+    };
+    const result = await postReviewAction(
+      pi as any,
+      { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+      ReviewEvent.Comment,
+    );
+    expect(result).toMatchObject({ status: "stale" });
+    expect(appended).toHaveLength(0);
+    expect(postCalls).toHaveLength(0);
+  });
+
   it("rejects unknown post events through the command", async () => {
     restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
     const notes: string[] = [];

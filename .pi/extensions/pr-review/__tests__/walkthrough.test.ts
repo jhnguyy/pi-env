@@ -159,7 +159,7 @@ describe("pr-review walkthrough", () => {
     const lines = component.render(width);
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-    expect(text(component, width)).toContain(width < 40 ? "Width too narrow" : "PR review");
+    expect(text(component, width)).toContain(width < 40 ? "Resize to 40+" : "PR review");
   });
 
   it("bounds the viewport rows", () => {
@@ -188,27 +188,18 @@ describe("pr-review walkthrough", () => {
     expect(component.themeInvalidationCount()).toBe(1);
   });
 
-  it("maps standard and local keys to durable intents only", () => {
+  it("keeps navigation and scrolling local and emits durable intents only", () => {
     const intents: WalkthroughIntent[] = [];
     const component = new PrReviewWalkthroughComponent({
       viewModel: deriveWalkthroughViewModel(state()),
       keybindings: kb(),
       onIntent: (intent) => intents.push(intent),
     });
-    for (const key of ["down", "up", "pageDown", "pageUp", "enter", "escape"])
+    component.render(80);
+    for (const key of ["down", "up", "pageDown", "pageUp", "\x1b[C", "\x1b[C"])
       component.handleInput(key);
-    component.handleInput("\x1b[C");
-    component.handleInput("\x1b[C");
-    for (const key of [" ", "e", "f", "r", "p", "i", "c", "?"]) component.handleInput(key);
+    for (const key of [" ", "e", "f", "r", "p", "i", "c", "?", "escape"]) component.handleInput(key);
     expect(intents.map((i) => i.kind)).toEqual([
-      "scroll",
-      "scroll",
-      "scroll",
-      "scroll",
-      "confirm",
-      "cancel",
-      "navigate",
-      "navigate",
       "toggleSelection",
       "edit",
       "editPreface",
@@ -217,6 +208,22 @@ describe("pr-review walkthrough", () => {
       "inspectChild",
       "cleanup",
       "help",
+      "cancel",
     ]);
+  });
+
+  it("makes Enter toggle on findings and request post on finalize", () => {
+    const intents: WalkthroughIntent[] = [];
+    const component = new PrReviewWalkthroughComponent({
+      viewModel: deriveWalkthroughViewModel(state()),
+      keybindings: kb(),
+      onIntent: (intent) => intents.push(intent),
+    });
+    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[C");
+    component.handleInput("enter");
+    for (let i = 0; i < 4; i += 1) component.handleInput("\x1b[C");
+    component.handleInput("enter");
+    expect(intents).toMatchObject([{ kind: "toggleSelection", findingId: "F1" }, { kind: "post" }]);
   });
 });
