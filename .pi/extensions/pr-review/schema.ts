@@ -22,6 +22,7 @@ export const REVIEW_COMMANDS = [
   "rerun",
   "post",
   "cleanup",
+  "walkthrough",
 ] as const;
 export const ReviewEvent = {
   Comment: "COMMENT",

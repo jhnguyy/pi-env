@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -40,13 +41,16 @@ function custom(state: ReviewState) {
 }
 function sampleState(id: string, selected: string[]): ReviewState {
   const root = mocked.agentDir || tempRoot();
+  const diff = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,2 @@\n same\n+new\n";
+  mkdirSync(`${root}/pr-review/artifacts/${id}`, { recursive: true });
+  writeFileSync(`${root}/pr-review/artifacts/${id}/diff.patch`, diff);
   return {
     snapshot: {
       id,
       artifactDir: `${root}/pr-review/artifacts/${id}`,
       worktree: `${root}/pr-review/worktrees/${id}`,
       diffPath: `${root}/pr-review/artifacts/${id}/diff.patch`,
-      diffHash: "h",
+      diffHash: createHash("sha256").update(diff).digest("hex"),
       createdAt: "now",
       cache: {
         repoDir: `${root}/pr-review/repos/o/r`,
@@ -82,7 +86,11 @@ function sampleState(id: string, selected: string[]): ReviewState {
           problem: "p",
           consequence: "c",
           suggestedFix: "f",
-          selected: true,
+          selected: false,
+          file: "a.ts",
+          side: "RIGHT",
+          line: 2,
+          anchorValid: true,
         },
       ],
     },
@@ -190,6 +198,173 @@ describe("pr-review extension surface", () => {
     expect(() => applyFindingTemplateEditAction(pi, "F1", "Problem: incomplete")).toThrow(
       /malformed/,
     );
+  });
+
+  it("opens walkthrough only in TUI and falls back in other modes", async () => {
+    tempRoot();
+    restore({ sessionManager: { getBranch: () => [custom(sampleState("r", ["F1"]))] } } as any);
+    const pi = extensionPi();
+    const notes: string[] = [];
+    let customCalls = 0;
+    await pi.command("walkthrough", {
+      mode: "json",
+      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+    } as any);
+    expect(notes.at(-1)).toContain("TUI mode");
+    expect(customCalls).toBe(0);
+
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: {
+        notify: (m: string) => notes.push(m),
+        custom: async (_factory: any) => {
+          customCalls += 1;
+          return { kind: "cancel" };
+        },
+      },
+    } as any);
+    expect(customCalls).toBe(1);
+    expect(notes.at(-1)).toContain("closed");
+  });
+
+  it("walkthrough reports no active review without opening custom UI", async () => {
+    tempRoot();
+    const pi = extensionPi();
+    const notes: string[] = [];
+    let customCalls = 0;
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+    } as any);
+    expect(notes.at(-1)).toContain("No active PR review");
+    expect(customCalls).toBe(0);
+  });
+
+  it("walkthrough persists selection after component closes and reopens from latest state", async () => {
+    tempRoot();
+    restore({ sessionManager: { getBranch: () => [custom(sampleState("r", []))] } } as any);
+    const pi = extensionPi();
+    const seenSelected: number[] = [];
+    const intents = [{ kind: "toggleSelection", findingId: "F1" }, { kind: "cancel" }];
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: {
+        notify() {},
+        custom: async (factory: any) => {
+          const component = factory({ requestRender() {} }, {}, { matches: () => false }, () => {});
+          seenSelected.push((component as any).options.viewModel.counts.selectedFindings);
+          return intents.shift();
+        },
+      },
+    } as any);
+    expect(seenSelected).toEqual([0, 1]);
+    expect(pi.appended.at(-1)?.[1].state.selectedFindingIds).toEqual(["F1"]);
+  });
+
+  it("walkthrough treats cancelled edit, cleanup, and post event selection as notices without mutations", async () => {
+    tempRoot();
+    restore({ sessionManager: { getBranch: () => [custom(sampleState("r", ["F1"]))] } } as any);
+    const pi = extensionPi();
+    const intents = [
+      { kind: "edit", findingId: "F1" },
+      { kind: "cleanup" },
+      { kind: "post" },
+      { kind: "cancel" },
+    ];
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: {
+        notify() {},
+        editor: async () => undefined,
+        select: async () => undefined,
+        custom: async () => intents.shift(),
+      },
+    } as any);
+    expect(pi.appended).toHaveLength(0);
+  });
+
+  it("walkthrough uses explicit event selection for posting", async () => {
+    tempRoot();
+    restore({ sessionManager: { getBranch: () => [custom(sampleState("r", ["F1"]))] } } as any);
+    const pi = extensionPi();
+    const calls: any[] = [];
+    pi.exec = async (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      if (cmd === "gh" && args[0] === "pr") return { code: 0, stdout: "h\n", stderr: "" };
+      if (cmd === "gh" && args[0] === "api" && args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+      if (cmd === "gh" && args[0] === "api" && args[1] === "-X") return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+      return { code: 1, stdout: "", stderr: "bad" };
+    };
+    const intents = [{ kind: "post" }, { kind: "cancel" }];
+    await pi.command("walkthrough", {
+      mode: "tui",
+      cwd: "/tmp",
+      ui: {
+        notify() {},
+        confirm: async () => true,
+        select: async () => "REQUEST_CHANGES",
+        custom: async () => intents.shift(),
+      },
+    } as any);
+    const payloadPath = calls.find((c) => c.cmd === "gh" && c.args[1] === "-X")?.args.at(-1);
+    expect(JSON.parse(readFileSync(payloadPath, "utf8")).event).toBe("REQUEST_CHANGES");
+  });
+
+  it("walkthrough fails closed when pinned diff hash is invalid", async () => {
+    tempRoot();
+    const s = sampleState("r", ["F1"]);
+    s.snapshot.diffHash = "bad";
+    restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
+    const pi = extensionPi();
+    const notes: string[] = [];
+    let customCalls = 0;
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: { notify: (m: string) => notes.push(m), custom: async () => { customCalls += 1; } },
+    } as any);
+    expect(notes.at(-1)).toContain("hash_mismatch");
+    expect(customCalls).toBe(0);
+  });
+
+  it("walkthrough blocks incomplete posting, supports cleanup, and switches only with child metadata", async () => {
+    tempRoot();
+    const incomplete = sampleState("r", []);
+    mkdirSync(incomplete.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(incomplete.snapshot.cache!.worktree, { recursive: true });
+    delete incomplete.plan;
+    delete incomplete.result;
+    restore({ sessionManager: { getBranch: () => [custom(incomplete)] } } as any);
+    const pi = extensionPi();
+    const intents = [{ kind: "post" }, { kind: "inspectChild" }, { kind: "cleanup" }, { kind: "cancel" }];
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: {
+        notify() {},
+        select: async (_title: string, options: string[]) => options.includes("Cleanup") ? "Cleanup" : "COMMENT",
+        custom: async (factory: any) => {
+          const component = factory({ requestRender() {} }, {}, { matches: () => false }, () => {});
+          expect((component as any).options.viewModel.pages.map((p: any) => p.id)).toEqual(["overview", "finalize"]);
+          return intents.shift();
+        },
+      },
+      switchSession: async () => { throw new Error("should not switch"); },
+    } as any);
+    expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
+  });
+
+  it("walkthrough switches to child session when metadata exists", async () => {
+    tempRoot();
+    const s = sampleState("r", []);
+    s.child = { sessionFile: "/tmp/child.jsonl", sessionName: "child" };
+    restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
+    const pi = extensionPi();
+    let switched = "";
+    await pi.command("walkthrough", {
+      mode: "tui",
+      ui: { notify() {}, custom: async () => ({ kind: "inspectChild" }) },
+      switchSession: async (path: string) => { switched = path; return { cancelled: false }; },
+    } as any);
+    expect(switched).toBe("/tmp/child.jsonl");
   });
 
   it("cleanup uses a temporary managed root and appends durable cleanup state", async () => {

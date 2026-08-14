@@ -23,21 +23,23 @@ export type WalkthroughNotice = DeepReadonly<{
 }>;
 
 export type WalkthroughActionResult = DeepReadonly<{
-  action: "select" | "edit" | "rerun" | "post" | "inspect" | "copy";
+  action: "select" | "edit" | "preface" | "rerun" | "post" | "inspect" | "cleanup";
   ok: boolean;
   notice: WalkthroughNotice;
 }>;
 
 export type WalkthroughIntent =
-  | { kind: "navigate"; direction: "up" | "down" | "pageUp" | "pageDown" }
+  | { kind: "navigate"; direction: "left" | "right" }
+  | { kind: "scroll"; direction: "up" | "down" | "pageUp" | "pageDown" }
   | { kind: "confirm"; pageId: string }
   | { kind: "cancel" }
   | { kind: "toggleSelection"; findingId: string }
   | { kind: "edit"; findingId?: string }
+  | { kind: "editPreface" }
   | { kind: "rerun" }
   | { kind: "post" }
   | { kind: "inspectChild" }
-  | { kind: "copy" }
+  | { kind: "cleanup" }
   | { kind: "help" };
 
 export type WalkthroughPageKind = "overview" | "file" | "finding" | "unanchored" | "finalize";
@@ -89,16 +91,16 @@ function findingAnchor(finding: Finding): string | undefined {
   return finding.line ? `${finding.file}:${finding.line}` : finding.file;
 }
 
-function findingSummary(finding: Finding, index: number): string {
+function findingSummary(finding: Finding, index: number, selectedIds: ReadonlySet<string>): string {
   const id = findingId(finding, index);
   const anchor = findingAnchor(finding) ?? "post-body note";
-  const mark = finding.selected ? "selected" : "not selected";
-  const valid = finding.anchorValid === false ? ", invalid anchor" : "";
+  const mark = selectedIds.has(id) ? "selected" : "not selected";
+  const valid = finding.anchorValid !== true ? ", unanchored/post-body" : "";
   return `${id} ${finding.severity}/${finding.impact} ${anchor} (${mark}${valid}) — ${finding.problem}`;
 }
 
-function selectedCount(findings: readonly Finding[]): number {
-  return findings.filter((f) => f.selected).length;
+function selectedCount(findings: readonly Finding[], selectedIds: ReadonlySet<string>): number {
+  return findings.filter((f, index) => selectedIds.has(findingId(f, index))).length;
 }
 
 function pushBlock(lines: string[], label: string, value: string | undefined): void {
@@ -110,8 +112,9 @@ function findingDetailLines(
   finding: Finding,
   index: number,
   context: WalkthroughDiffContext | undefined,
+  selectedIds: ReadonlySet<string>,
 ): string[] {
-  const lines = [findingSummary(finding, index)];
+  const lines = [findingSummary(finding, index, selectedIds)];
   pushBlock(lines, "Problem", finding.problem);
   pushBlock(lines, "Consequence", finding.consequence);
   pushBlock(lines, "Suggested fix", finding.suggestedFix);
@@ -134,12 +137,14 @@ export function deriveWalkthroughViewModel(
 ): WalkthroughViewModel {
   const meta = state.snapshot.metadata;
   const findings = state.result?.findings ?? [];
+  const selectedIds = new Set(state.selectedFindingIds);
+  const complete = Boolean(state.plan && state.result);
   const anchored = findings
     .map((finding, index) => ({ finding, index, id: findingId(finding, index) }))
-    .filter(({ finding }) => finding.file);
+    .filter(({ finding }) => finding.anchorValid === true && finding.file);
   const unanchored = findings
-    .map((finding, index) => ({ finding, index }))
-    .filter(({ finding }) => !finding.file);
+    .map((finding, index) => ({ finding, index, id: findingId(finding, index) }))
+    .filter(({ finding }) => finding.anchorValid !== true || !finding.file);
   const pages: WalkthroughPage[] = [];
 
   pages.push({
@@ -149,11 +154,16 @@ export function deriveWalkthroughViewModel(
     lines: [
       `PR: ${meta.owner}/${meta.repo}#${meta.number}`,
       `URL: ${meta.url}`,
-      `Head: ${meta.headOid}`,
+      `Reviewed head: ${meta.headOid}`,
       `Title: ${meta.title ?? "(untitled)"}`,
       `Goal: ${state.plan?.goal ?? "No accepted review plan yet."}`,
+      `Goal assessment: ${state.plan?.goalAssessment ?? "No accepted review plan yet."}`,
+      `Risk: ${state.plan?.risk ?? "unknown"}`,
+      `Risk reasons: ${state.plan?.riskReasons?.join("; ") || "none"}`,
       `Verdict: ${state.result?.verdict ?? "No submitted review result yet."}`,
+      `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
       `Changed files: ${meta.changedFiles.length}`,
+      complete ? "State: complete" : "State: incomplete; posting is blocked until plan and result exist.",
     ],
   });
 
@@ -174,7 +184,7 @@ export function deriveWalkthroughViewModel(
         `Attention: ${planFile?.attention ?? "unplanned"}`,
         `Role: ${planFile?.role ?? "changed file without plan entry"}`,
         pathFindings.length ? "Findings:" : "Findings: none",
-        ...pathFindings.map(({ finding, index }) => `- ${findingSummary(finding, index)}`),
+        ...pathFindings.map(({ finding, index }) => `- ${findingSummary(finding, index, selectedIds)}`),
       ],
     });
     for (const { finding, index, id } of pathFindings) {
@@ -183,15 +193,17 @@ export function deriveWalkthroughViewModel(
         kind: "finding",
         title: `${id} ${path}`,
         findingId: id,
-        lines: findingDetailLines(finding, index, options.diffContextByFindingId?.get(id)),
+        lines: findingDetailLines(finding, index, options.diffContextByFindingId?.get(id), selectedIds),
       });
     }
   };
 
-  for (const cohort of state.plan?.cohorts ?? []) {
-    for (const path of cohort.paths) appendFilePage(path, cohort.label);
+  if (complete) {
+    for (const cohort of state.plan?.cohorts ?? []) {
+      for (const path of cohort.paths) appendFilePage(path, cohort.label);
+    }
+    for (const file of meta.changedFiles) appendFilePage(file.path, "changed files");
   }
-  for (const file of meta.changedFiles) appendFilePage(file.path, "changed files");
 
   if (unanchored.length) {
     pages.push({
@@ -199,7 +211,7 @@ export function deriveWalkthroughViewModel(
       kind: "unanchored",
       title: "Post-body findings",
       lines: unanchored.flatMap(({ finding, index }) => [
-        findingSummary(finding, index),
+        findingSummary(finding, index, selectedIds),
         `Post-body explanation: ${finding.problem}`,
         `Consequence: ${finding.consequence}`,
         `Suggested fix: ${finding.suggestedFix}`,
@@ -213,11 +225,13 @@ export function deriveWalkthroughViewModel(
     kind: "finalize",
     title: "Finalize review",
     lines: [
-      `Selected findings: ${selectedCount(findings)}/${findings.length}`,
+      `Selected findings: ${selectedCount(findings, selectedIds)}/${findings.length}`,
       `Anchored findings: ${anchored.length}`,
       `Post-body findings: ${unanchored.length}`,
       `Invalid anchors: ${invalidAnchors}`,
       `Posts: ${state.posts.length}`,
+      `Preface: ${state.preface?.trim() ? state.preface.trim() : "(none)"}`,
+      complete ? "Posting: available after explicit event choice and confirmation" : "Posting: blocked until plan and result exist",
       state.child
         ? `Child session: ${state.child.sessionName ?? state.child.sessionFile ?? "available"}${state.child.isError ? " (error)" : ""}`
         : "Child session: missing",
@@ -238,7 +252,7 @@ export function deriveWalkthroughViewModel(
       changedFiles: meta.changedFiles.length,
       anchoredFindings: anchored.length,
       unanchoredFindings: unanchored.length,
-      selectedFindings: selectedCount(findings),
+      selectedFindings: selectedCount(findings, selectedIds),
       invalidAnchors,
     },
     notice: options.notice,
@@ -269,10 +283,12 @@ export class PrReviewWalkthroughComponent implements Component {
 
   handleInput(data: string): void {
     const kb = this.options.keybindings;
-    if (kb.matches(data, "tui.select.up")) return this.move(-1, "up");
-    if (kb.matches(data, "tui.select.down")) return this.move(1, "down");
-    if (kb.matches(data, "tui.select.pageUp")) return this.move(-5, "pageUp");
-    if (kb.matches(data, "tui.select.pageDown")) return this.move(5, "pageDown");
+    if (matchesKey(data, Key.left)) return this.movePage(-1, "left");
+    if (matchesKey(data, Key.right)) return this.movePage(1, "right");
+    if (kb.matches(data, "tui.select.up")) return this.scrollBy(-1, "up");
+    if (kb.matches(data, "tui.select.down")) return this.scrollBy(1, "down");
+    if (kb.matches(data, "tui.select.pageUp")) return this.scrollBy(-5, "pageUp");
+    if (kb.matches(data, "tui.select.pageDown")) return this.scrollBy(5, "pageDown");
     if (kb.matches(data, "tui.select.confirm"))
       return this.emit({ kind: "confirm", pageId: this.page().id });
     if (kb.matches(data, "tui.select.cancel")) return this.emit({ kind: "cancel" });
@@ -282,10 +298,11 @@ export class PrReviewWalkthroughComponent implements Component {
     if (matchesKey(data, Key.space) && findingId)
       return this.emit({ kind: "toggleSelection", findingId });
     if (data === "e") return this.emit({ kind: "edit", findingId });
+    if (data === "f") return this.emit({ kind: "editPreface" });
     if (data === "r") return this.emit({ kind: "rerun" });
     if (data === "p") return this.emit({ kind: "post" });
     if (data === "i") return this.emit({ kind: "inspectChild" });
-    if (data === "c") return this.emit({ kind: "copy" });
+    if (data === "c") return this.emit({ kind: "cleanup" });
     if (data === "?") return this.emit({ kind: "help" });
   }
 
@@ -316,7 +333,7 @@ export class PrReviewWalkthroughComponent implements Component {
     return this.options.viewModel.pages[this.selected] ?? this.options.viewModel.pages[0]!;
   }
 
-  private move(delta: number, direction: "up" | "down" | "pageUp" | "pageDown"): void {
+  private movePage(delta: number, direction: "left" | "right"): void {
     const last = Math.max(0, this.options.viewModel.pages.length - 1);
     const next = Math.max(0, Math.min(last, this.selected + delta));
     if (next !== this.selected) {
@@ -326,6 +343,18 @@ export class PrReviewWalkthroughComponent implements Component {
       this.options.requestRender?.();
     }
     this.emit({ kind: "navigate", direction });
+  }
+
+  private scrollBy(delta: number, direction: "up" | "down" | "pageUp" | "pageDown"): void {
+    const pageLineCount = this.page().lines.length + 6;
+    const maxScroll = Math.max(0, pageLineCount - Math.max(3, this.options.rows ?? 18));
+    const next = Math.max(0, Math.min(maxScroll, this.scroll + delta));
+    if (next !== this.scroll) {
+      this.scroll = next;
+      this.invalidate();
+      this.options.requestRender?.();
+    }
+    this.emit({ kind: "scroll", direction });
   }
 
   private emit(intent: WalkthroughIntent): void {
@@ -373,7 +402,7 @@ export class PrReviewWalkthroughComponent implements Component {
       "",
       this.style(
         "dim",
-        "↑↓/Pg navigate • Enter confirm • Esc cancel • Space select • e edit • r rerun • p post • i child • c copy • ? help",
+        "←/→ section • ↑↓/Pg scroll • Esc close • Space select • e edit • f preface • r rerun • p post • i child • c cleanup • ? help",
       ),
     ];
     return this.boundRows(raw, rows);

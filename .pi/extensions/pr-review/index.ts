@@ -7,6 +7,7 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { CancellableLoader } from "@earendil-works/pi-tui";
 import { Effect, PartitionedSemaphore } from "effect";
 import { Schema } from "effect";
 import { Type, type Static } from "typebox";
@@ -44,6 +45,15 @@ import {
   prepareSnapshot,
   resolvePrUrl,
 } from "./snapshot";
+import { extractFindingContext, loadPinnedDiff } from "./diff-context";
+import {
+  PrReviewWalkthroughComponent,
+  deriveWalkthroughViewModel,
+  type WalkthroughActionResult,
+  type WalkthroughDiffContext,
+  type WalkthroughIntent,
+  type WalkthroughNotice,
+} from "./walkthrough";
 
 export const START_PARAMS = Type.Object(
   {
@@ -452,6 +462,7 @@ async function postingPreflight(
   );
   if (remote !== s.snapshot.metadata.headOid)
     return "Review is stale: remote PR head changed. Rerun before posting.";
+  if (!s.plan || !s.result) return "Posting blocked until plan and result exist.";
   const selected = selectedFindings(s);
   if (!selected.length && !(s.preface ?? "").trim() && event !== ReviewEvent.Approve)
     return "No postable selected findings or preface.";
@@ -702,6 +713,120 @@ export async function cleanupReviewAction(pi: ExtensionAPI): Promise<ReviewActio
   return { status: "cleaned", message: "Review cleanup complete." };
 }
 
+function outcomeNotice(action: WalkthroughActionResult["action"], outcome: ReviewActionOutcome): WalkthroughActionResult {
+  const ok = ["updated", "posted", "already-posted", "reconciled", "started", "cleaned"].includes(outcome.status);
+  const kind: WalkthroughNotice["kind"] = ok ? "success" : outcome.status === "cancelled" ? "info" : outcome.status === "uncertain" ? "warning" : "error";
+  return { action, ok, notice: { kind, message: bound(outcome.message, 500) } };
+}
+
+function buildDiffContext(s: ReviewState): { ok: true; contexts: Map<string, WalkthroughDiffContext> } | { ok: false; message: string } {
+  const loaded = loadPinnedDiff(s.snapshot);
+  if (!loaded.ok) return { ok: false, message: `Pinned diff unavailable: ${loaded.error.kind}.` };
+  const contexts = new Map<string, WalkthroughDiffContext>();
+  for (const [index, finding] of (s.result?.findings ?? []).entries()) {
+    const id = finding.id ?? `F${index + 1}`;
+    if (finding.anchorValid !== true || !finding.file) continue;
+    if (!finding.side || !finding.line) return { ok: false, message: `Pinned diff anchor is malformed for ${id}.` };
+    const context = extractFindingContext(loaded.value, { file: finding.file, side: finding.side, line: finding.line });
+    if (!context.ok) return { ok: false, message: `Pinned diff anchor failed for ${id}: ${context.error.kind}.` };
+    contexts.set(id, { lines: context.value.split("\n") });
+  }
+  return { ok: true, contexts };
+}
+
+function latestCompleteOrSafeState(): ReviewState | undefined {
+  return latestState();
+}
+
+async function openWalkthroughOnce(
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  actionResult?: WalkthroughActionResult,
+): Promise<WalkthroughIntent> {
+  const diff = buildDiffContext(state);
+  if (!diff.ok) throw new Error(diff.message);
+  return (await (ctx.ui as any).custom((tui: any, theme: any, keybindings: any, done: any) =>
+    new PrReviewWalkthroughComponent({
+      viewModel: deriveWalkthroughViewModel(state, {
+        diffContextByFindingId: diff.contexts,
+        actionResult,
+        notice: actionResult?.notice,
+      }),
+      keybindings,
+      theme,
+      requestRender: () => tui.requestRender(),
+      onIntent: (intent: WalkthroughIntent) => done(intent),
+    }),
+  )) as WalkthroughIntent;
+}
+
+async function runWithLoader<T>(
+  ctx: ExtensionCommandContext,
+  message: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T | undefined> {
+  if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function") return run(new AbortController().signal);
+  return (await (ctx.ui as any).custom((tui: any, theme: any, _kb: any, done: any) => {
+    const loader = new CancellableLoader(tui, (s: string) => theme.fg("accent", s), (s: string) => theme.fg("muted", s), message);
+    loader.onAbort = () => done(undefined);
+    run(loader.signal).then(done, (error) => {
+      if (loader.signal.aborted) done(undefined);
+      else throw error;
+    });
+    return loader;
+  })) as T | undefined;
+}
+
+async function reviewEventDialog(ctx: ExtensionCommandContext): Promise<ReviewEventValue | undefined> {
+  const choice = await ctx.ui.select("Post review event", ["COMMENT", "APPROVE", "REQUEST_CHANGES"]);
+  if (!choice) return undefined;
+  return choice === "APPROVE" ? ReviewEvent.Approve : choice === "REQUEST_CHANGES" ? ReviewEvent.RequestChanges : ReviewEvent.Comment;
+}
+
+async function walkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<string> {
+  if ((ctx as any).mode !== "tui" || typeof (ctx.ui as any).custom !== "function") return "PR review walkthrough is available only in TUI mode.";
+  if (!latestState()) return "No active PR review.";
+  let actionResult: WalkthroughActionResult | undefined;
+  for (;;) {
+    const state = latestCompleteOrSafeState();
+    if (!state) return actionResult?.notice.message ?? "No active PR review.";
+    const intent = await openWalkthroughOnce(ctx, state, actionResult);
+    if (intent.kind === "cancel") return "PR review walkthrough closed.";
+    if (intent.kind === "toggleSelection") actionResult = outcomeNotice("select", setFindingSelectionAction(pi, intent.findingId, !state.selectedFindingIds.includes(intent.findingId)));
+    else if (intent.kind === "edit") {
+      if (!intent.findingId) actionResult = { action: "edit", ok: false, notice: { kind: "warning", message: "Open a finding page before editing." } };
+      else {
+        const f = state.result?.findings.find((x) => x.id === intent.findingId);
+        const edited = f ? await editWithUi(ctx, `Edit finding ${intent.findingId}`, findingTemplate(f)) : undefined;
+        actionResult = edited === undefined ? { action: "edit", ok: false, notice: { kind: "info", message: "Edit cancelled." } } : outcomeNotice("edit", applyFindingTemplateEditAction(pi, intent.findingId, edited));
+      }
+    } else if (intent.kind === "editPreface") {
+      const edited = await editWithUi(ctx, "Edit PR review preface", state.preface ?? "");
+      actionResult = edited === undefined ? { action: "preface", ok: false, notice: { kind: "info", message: "Preface edit cancelled." } } : outcomeNotice("preface", updatePrefaceAction(pi, edited));
+    } else if (intent.kind === "rerun") {
+      const result = await runWithLoader(ctx, "Rerunning PR review…", (signal) => rerunReviewAction(pi, ctx, signal));
+      actionResult = result ? outcomeNotice("rerun", result) : { action: "rerun", ok: false, notice: { kind: "info", message: "Rerun cancelled." } };
+    } else if (intent.kind === "post") {
+      if (!state.plan || !state.result) actionResult = { action: "post", ok: false, notice: { kind: "error", message: "Posting blocked until plan and result exist." } };
+      else {
+        const event = await reviewEventDialog(ctx);
+        actionResult = event ? outcomeNotice("post", await postReviewAction(pi, ctx, event)) : { action: "post", ok: false, notice: { kind: "info", message: "Post event selection cancelled." } };
+      }
+    } else if (intent.kind === "cleanup") {
+      const choice = await ctx.ui.select("Cleanup PR review artifacts?", ["Cancel", "Cleanup"]);
+      actionResult = choice === "Cleanup" ? outcomeNotice("cleanup", await cleanupReviewAction(pi)) : { action: "cleanup", ok: false, notice: { kind: "info", message: "Cleanup cancelled." } };
+    } else if (intent.kind === "inspectChild") {
+      if (state.child?.sessionFile) {
+        await ctx.switchSession(state.child.sessionFile);
+        return "Switched to review child session.";
+      }
+      actionResult = { action: "inspect", ok: false, notice: { kind: "warning", message: "Child session metadata is missing." } };
+    } else if (intent.kind === "help") {
+      actionResult = { action: "inspect", ok: true, notice: { kind: "info", message: "Use ←/→ for sections, ↑↓/Page keys to scroll, Space to select, e/f edit, r rerun, p post, i inspect, c cleanup, Esc close." } };
+    }
+  }
+}
+
 const handlers: Partial<
   Record<
     string,
@@ -719,6 +844,7 @@ const handlers: Partial<
   rerun: async (pi, _rest, ctx) => (await rerunReviewAction(pi, ctx)).message,
   post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
   cleanup: async (pi) => (await cleanupReviewAction(pi)).message,
+  walkthrough: (pi, _rest, ctx) => walkthrough(pi, ctx),
 };
 async function command(
   pi: ExtensionAPI,
@@ -752,7 +878,7 @@ export default function prReviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage PR reviews. Usage: /review start [url]|status|findings|select|edit|preface|rerun|post|cleanup",
+      "Manage PR reviews. Usage: /review start [url]|status|findings|select|edit|preface|rerun|post|cleanup|walkthrough",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => restore(ctx));

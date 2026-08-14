@@ -14,7 +14,7 @@ If the prompt has no URL, the extension can resolve the pull request for the cur
 
 The main pi agent delegates the review. The main agent does not inspect or synthesize the change itself. Each run uses a new child agent session with no parent conversation context.
 
-The extension also provides explicit commands or tool actions for status, finding selection, editing, reruns, posting, and cleanup. Finding edits and preface edits use standard pi editor interactions when inline text is not supplied. A guided walkthrough TUI is a later feature.
+The extension also provides explicit commands or tool actions for status, finding selection, editing, reruns, posting, cleanup, and a TUI walkthrough. Finding edits and preface edits use standard pi editor interactions when inline text is not supplied. `/review walkthrough` is available only in TUI mode; other modes receive a concise fallback and no custom component is opened.
 
 ## Review lifecycle
 
@@ -153,6 +153,12 @@ The initial explicit surface is:
 
 The exact parser can evolve without changing the lifecycle or safety contracts in this note.
 
-## Deferred UI
+## Walkthrough TUI
 
-A guided review walkthrough is intentionally deferred. The later UI will consume the same pinned snapshot, plan, findings, decisions, and posting state. The extension must not couple the core workflow to a specific layout.
+`/review walkthrough` opens a focused, non-overlay TUI over the latest active review. Each opening reads the persisted pinned diff once, verifies its SHA-256, and derives bounded context for every declared valid finding anchor. If the diff artifact is unreadable, the hash mismatches, or any valid anchor cannot be extracted, the walkthrough fails closed and does not open. The walkthrough never refreshes context from live Git.
+
+The component is pure view/navigation. Left and Right move between sections; Up, Down, and Page keys scroll the current section. Component keys close with durable intents only: selection, finding edit, preface edit, rerun, post, child inspection, cleanup, help, or close. The command handler then runs the existing shared action or standard Pi dialog and reopens from `getLatestReviewState()`. Selection is stored only in `selectedFindingIds`; component navigation appends no review state.
+
+Posting from the walkthrough requires an explicit event choice: `COMMENT`, `APPROVE`, or `REQUEST_CHANGES`. The existing final post confirmation, stale-head check, idempotence marker, and uncertain-result guard remain authoritative. A complete plan and result are required before posting. Zero findings is valid and can approve; empty comment and request-changes posts remain blocked by the core posting rules.
+
+If the child run is incomplete or failed, the walkthrough opens only an overview/finalize-safe view. It still allows rerun, child inspection when exact session metadata exists, and cleanup. It does not guess missing child metadata. Cleanup uses a walkthrough-local confirmation before invoking the shared cleanup action.

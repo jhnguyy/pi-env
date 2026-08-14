@@ -119,6 +119,8 @@ describe("pr-review walkthrough", () => {
       "unanchored",
       "finalize",
     ]);
+    expect(vm.pages[0]?.lines.join("\n")).toContain("Goal assessment: clear");
+    expect(vm.pages[0]?.lines.join("\n")).toContain("Reviewed head: head1234567890");
     expect(vm.pages.find((p) => p.id === "file:c.ts")?.lines.join("\n")).toContain(
       "Findings: none",
     );
@@ -140,10 +142,12 @@ describe("pr-review walkthrough", () => {
     ]);
   });
 
-  it("keeps unanchored findings in result order with post-body explanation", () => {
-    const vm = deriveWalkthroughViewModel(state());
+  it("keeps unanchored and invalid anchored findings in result order with post-body explanation", () => {
+    const findings = [...baseFindings(), { ...baseFindings()[0]!, id: "F4", anchorValid: false }];
+    const vm = deriveWalkthroughViewModel(state(findings));
     const lines = vm.pages.find((p) => p.kind === "unanchored")?.lines.join("\n") ?? "";
     expect(lines.indexOf("F2")).toBeLessThan(lines.indexOf("F3"));
+    expect(lines).toContain("F4");
     expect(lines).toContain("Post-body explanation");
   });
 
@@ -184,7 +188,7 @@ describe("pr-review walkthrough", () => {
     expect(component.themeInvalidationCount()).toBe(1);
   });
 
-  it("maps standard and local keys to intents only", () => {
+  it("maps standard and local keys to durable intents only", () => {
     const intents: WalkthroughIntent[] = [];
     const component = new PrReviewWalkthroughComponent({
       viewModel: deriveWalkthroughViewModel(state()),
@@ -193,24 +197,25 @@ describe("pr-review walkthrough", () => {
     });
     for (const key of ["down", "up", "pageDown", "pageUp", "enter", "escape"])
       component.handleInput(key);
-    component.handleInput("down");
-    component.handleInput("down");
-    for (const key of [" ", "e", "r", "p", "i", "c", "?"]) component.handleInput(key);
+    component.handleInput("\x1b[C");
+    component.handleInput("\x1b[C");
+    for (const key of [" ", "e", "f", "r", "p", "i", "c", "?"]) component.handleInput(key);
     expect(intents.map((i) => i.kind)).toEqual([
-      "navigate",
-      "navigate",
-      "navigate",
-      "navigate",
+      "scroll",
+      "scroll",
+      "scroll",
+      "scroll",
       "confirm",
       "cancel",
       "navigate",
       "navigate",
       "toggleSelection",
       "edit",
+      "editPreface",
       "rerun",
       "post",
       "inspectChild",
-      "copy",
+      "cleanup",
       "help",
     ]);
   });
