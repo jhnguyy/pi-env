@@ -101,7 +101,7 @@
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@earendil-works/pi-tui": "0.84.1",
     "@effect/language-service": "^0.86.6",
-    "@effect/vitest": "4.0.0-beta.97",
+    "@effect/vitest": "4.0.0-rc.108",
     "@types/node": "^24.0.0",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
@@ -135,19 +135,16 @@
     }
   },
   "dependencies": {
-    "@effect/opentelemetry": "4.0.0-beta.97",
-    "@effect/platform-node": "4.0.0-beta.97",
+    "@effect/opentelemetry": "4.0.0-rc.108",
+    "@effect/platform-node": "4.0.0-rc.108",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.220.0",
     "@opentelemetry/sdk-trace-node": "2.9.0",
-    "effect": "4.0.0-beta.97"
+    "effect": "4.0.0-rc.108"
   },
   "allowBuilds": {
     "@google/genai": true,
     "esbuild": true,
     "msgpackr-extract": false
-  },
-  "patchedDependencies": {
-    "@effect/vitest@4.0.0-beta.97": "patches/@effect+vitest@4.0.0-beta.97.patch"
   }
 }
