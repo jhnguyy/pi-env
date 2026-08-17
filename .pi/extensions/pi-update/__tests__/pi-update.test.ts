@@ -55,9 +55,10 @@ describe("pi-update", () => {
     expect(isPiUpdateEnabled(dir)).toBe(true);
   });
 
-  it("defaults disabled and rejects malformed persisted enabled field", () => {
+  it("loads disabled and rejects malformed persisted enabled field", () => {
     const dir = mkdtempSync(join(tmpdir(), "pi-update-test-"));
     mkdirSync(join(dir, ".pi"));
+    writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ piUpdate: { enabled: false } }));
 
     expect(isPiUpdateEnabled(dir)).toBe(false);
     writeFileSync(join(dir, ".pi", "settings.json"), JSON.stringify({ piUpdate: { enabled: "true" } }));
