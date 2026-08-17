@@ -2,7 +2,7 @@
  * ptc — Programmatic Tool Calling extension for pi-env
  */
 
-import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
@@ -12,6 +12,7 @@ import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
 import { BLOCKED_TOOLS } from "./types";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import { toolExpandHint, toolExpandKeyHint } from "../_shared/tool-render";
 
 export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
@@ -193,9 +194,9 @@ function renderPtcCollapsedFinal(text: string, ctx: PtcRenderContext, theme: Ptc
     (firstLine ? "  " + theme.fg("text", firstLine) : "");
 
   if (hiddenOutputLines > 0) {
-    collapsed += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+    collapsed += `${theme.fg("muted", `\n... (${hiddenOutputLines} more lines,`)} ${toolExpandKeyHint()}${theme.fg("muted", ")")}`;
   } else {
-    collapsed += `\n${theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
+    collapsed += `\n${toolExpandHint(theme)}`;
   }
 
   return new Text(collapsed, 0, 0);
