@@ -16,7 +16,7 @@ export const analyzeToolSchema = Type.Object({
   scope: Type.Optional(StringEnum(scopeNames, { description: "Analysis scope. Safe local mode supports diff and non-empty explicit paths; all requires strict containment." })),
   paths: Type.Optional(Type.Array(Type.String(), { description: "Workspace-relative files or directories for paths scope." })),
   ref: Type.Optional(Type.String({ description: "Diff base ref. Defaults to main." })),
-  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks must be explicit. Safe local mode permits complexity, async-risk, and scoped duplicates; other checks require strict containment." })),
+  checks: Type.Optional(Type.Array(StringEnum(analyzerNames), { description: "Checks must be explicit. Safe local mode permits complexity, async-risk, scoped duplicates, and test-duplicates; other checks require strict containment." })),
   type_threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1, description: "Structural type similarity threshold; requires strict containment." })),
   max_memory_mb: Type.Optional(Type.Integer({ minimum: 1, description: "Requested worker heap cap. Safe local mode always clamps to 512 MiB." })),
   profile: Type.Optional(Type.Boolean({ description: "Include timings and memory snapshots; requires strict containment." })),
@@ -64,7 +64,7 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
   return {
     name: "analyze",
     label: "Analyze",
-    description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity, async-risk, and/or scoped duplicates checks on diff or workspace-relative paths; semantic/external checks and all scope fail closed without strict containment.",
+    description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity, async-risk, scoped duplicates, and/or test-duplicates checks on diff or workspace-relative paths; semantic/external checks and all scope fail closed without strict containment.",
     parameters: analyzeToolSchema,
     execute: async (_toolCallId, params, signal) => {
       signal?.throwIfAborted();

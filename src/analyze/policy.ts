@@ -1,7 +1,7 @@
 import { isAbsolute } from "node:path";
 import { AnalyzerName, ScopeMode, type ScopeMode as Scope } from "./model.js";
 
-export const SAFE_CHECKS = [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates] as const;
+export const SAFE_CHECKS = [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates, AnalyzerName.TestDuplicates] as const;
 export type SafeAnalyzerName = (typeof SAFE_CHECKS)[number];
 
 export const ANALYZE_LIMITS = {
@@ -141,7 +141,7 @@ function validateScopeAndPaths(
 
 function validateChecks(checks: readonly string[] | undefined): RejectedPolicy | undefined {
   if (!checks || checks.length === 0) {
-    return invalid("checks must explicitly select complexity, async-risk, and/or duplicates");
+    return invalid("checks must explicitly select complexity, async-risk, duplicates, and/or test-duplicates");
   }
   if (new Set(checks).size !== checks.length) return invalid("checks must be unique");
   if (checks.some((check) => !SAFE_CHECKS.includes(check as SafeAnalyzerName))) {

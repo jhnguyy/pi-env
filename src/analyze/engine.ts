@@ -26,12 +26,13 @@ import {
   type MemorySnapshot,
   type ScopeMode,
 } from "./model.js";
-import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget } from "./program.js";
+import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget, type SyntaxSourceSelection } from "./program.js";
 import { ProcessService, processServiceLayer, type streamProcessEffect } from "./process.js";
 import {
   analyzerDescriptor,
   defaultAnalyzerNames,
   projectRequirement,
+  projectSourceSelection,
   runAnalyzer,
 } from "./registry.js";
 import { resolveScopeEffect, type Scope } from "./scope.js";
@@ -77,6 +78,7 @@ export interface EngineSeams {
     cwd: string,
     scope: Scope,
     requirement: ProjectRequirement,
+    sourceSelection: SyntaxSourceSelection,
   ) => ProjectFactoryResult;
   processRunner?: typeof streamProcessEffect;
   /** Additive seams; existing project and process seams remain supported. */
@@ -409,6 +411,7 @@ function loadProjectIfNeeded(
 ): Effect.Effect<{ project?: Project; state: AnalysisState }, ProgramError, AnalysisRuntime> {
   const requirement = projectRequirement(plan.checks);
   if (requirement === ProjectRequirement.None) return Effect.succeed({ state: plan.state });
+  const sourceSelection = projectSourceSelection(plan.checks);
   const first = plan.checks.find(
     (name) => analyzerDescriptor(name).project !== ProjectRequirement.None,
   )!;
@@ -434,8 +437,14 @@ function loadProjectIfNeeded(
         const created = yield* Effect.try({
           try: () =>
             seams.createAnalysisProject !== undefined
-              ? seams.createAnalysisProject(options.cwd, plan.scope, requirement)
-              : createAnalysisProjectEffect(options.cwd, plan.scope, requirement, options.sourceBudget),
+              ? seams.createAnalysisProject(options.cwd, plan.scope, requirement, sourceSelection)
+              : createAnalysisProjectEffect(
+                options.cwd,
+                plan.scope,
+                requirement,
+                options.sourceBudget,
+                sourceSelection,
+              ),
           catch: toProgramError,
         });
         return yield* Effect.isEffect(created) ? created : Effect.succeed(created);

@@ -5,21 +5,45 @@ import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect } from "../analyzers.js";
+import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
-import { createAnalysisProjectEffect, createProjectEffect, isTypeProject, ProjectRequirement } from "../program.js";
-import { analyzerDescriptor, projectRequirement } from "../registry.js";
+import { createAnalysisProjectEffect, createProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
+import { analyzerDescriptor, projectRequirement, projectSourceSelection } from "../registry.js";
 import { childHeapLimitMb, ProcessServiceLive, processServiceLayer, streamProcessEffect } from "../process.js";
 import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
+const testCloneBody = `
+  const values = [1, 2, 3, 4];
+  let total = 0;
+  for (const value of values) {
+    if (value > 2) total += value * 2;
+    else total += value;
+  }
+  expect(total).toBeGreaterThan(0);
+`;
+
+function testSyntaxProject(cwd: string, text: string) {
+  return {
+    files: [],
+    testFiles: [
+      ts.createSourceFile(
+        join(cwd, "src/case.test.ts"),
+        text,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      ),
+    ],
+  };
+}
 
 function writeProject(files: Record<string, string>): string {
   const cwd = fixtureRoot();
@@ -240,12 +264,52 @@ describe("analyze contracts", () => {
     const scope = pathScope(["src/changed.ts"]);
     expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.AsyncRisk])).toBe(ProjectRequirement.ScopedSyntax);
     expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.Duplicates])).toBe(ProjectRequirement.ScopedSyntax);
+    expect(projectRequirement([AnalyzerName.TestDuplicates])).toBe(ProjectRequirement.ScopedSyntax);
     expect(projectRequirement([AnalyzerName.Duplicates, AnalyzerName.Types])).toBe(ProjectRequirement.Types);
+    expect(projectSourceSelection([AnalyzerName.TestDuplicates])).toBe(SyntaxSourceSelection.Tests);
+    expect(projectSourceSelection([AnalyzerName.Complexity, AnalyzerName.TestDuplicates])).toBe(
+      SyntaxSourceSelection.ProductionAndTests,
+    );
     const scoped = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.ScopedSyntax)))!;
     const corpus = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.CorpusSyntax)))!;
     expect(scoped.files.map((file) => file.fileName)).toHaveLength(1);
     expect(corpus.files.map((file) => file.fileName)).toHaveLength(2);
     expect(isTypeProject(scoped)).toBe(false);
+  });
+
+  it("loads selected test sources separately from production sources", async () => {
+    const cwd = writeProject({
+      "src/app.ts": "export const app = true;",
+      "src/case.test.ts": "it('case', () => expect(true).toBe(true));",
+      "src/example.spec.ts": "test('example', () => expect(true).toBe(true));",
+      "src/__tests__/nested.ts": "it('nested', () => expect(true).toBe(true));",
+      "src/__tests__/fixture.json": "{\"fixture\": true}",
+    });
+    const scope = pathScope([
+      "src/app.ts",
+      "src/case.test.ts",
+      "src/example.spec.ts",
+      "src/__tests__/nested.ts",
+      "src/__tests__/fixture.json",
+    ]);
+
+    const production = (await Effect.runPromise(
+      createAnalysisProjectEffect(cwd, scope, ProjectRequirement.ScopedSyntax),
+    ))!;
+    const tests = (await Effect.runPromise(
+      createAnalysisProjectEffect(
+        cwd,
+        scope,
+        ProjectRequirement.ScopedSyntax,
+        undefined,
+        SyntaxSourceSelection.Tests,
+      ),
+    ))!;
+
+    expect(production.files.map((file) => file.fileName)).toHaveLength(1);
+    expect(production.testFiles).toEqual([]);
+    expect(tests.files).toEqual([]);
+    expect(tests.testFiles.map((file) => file.fileName)).toHaveLength(3);
   });
 
   it("bounds syntax project files and source bytes before parsing", async () => {
@@ -431,6 +495,97 @@ describe("ast analyzers", () => {
     expect(findings[0]?.location.line).toBe(2);
     expect(findings[0]?.related).toHaveLength(1);
     expect(findings[0]?.related?.[0]?.line).toBe(3);
+  });
+
+  it.each([
+    ["it", `it("first", () => { BODY }); it("second", () => { BODY });`],
+    ["test", `test("first", () => { BODY }); test("second", () => { BODY });`],
+    ["function", `it("first", function () { BODY }); test("second", function () { BODY });`],
+    ["it.only", `it.only("first", () => { BODY }); it.only("second", () => { BODY });`],
+    ["it.skip", `it.skip("first", () => { BODY }); it.skip("second", () => { BODY });`],
+    ["test.todo", `test.todo("first", () => { BODY }); test.todo("second", () => { BODY });`],
+    ["test.concurrent", `test.concurrent("first", () => { BODY }); test.concurrent("second", () => { BODY });`],
+    ["it.each", `it.each([1])("first", () => { BODY }); it.each([2])("second", () => { BODY });`],
+    ["test.each", `test.each([1])("first", () => { BODY }); test.each([2])("second", () => { BODY });`],
+    ["it.skip.each", `it.skip.each([1])("first", () => { BODY }); it.skip.each([2])("second", () => { BODY });`],
+    ["test.each.concurrent", `test.each([1]).concurrent("first", () => { BODY }); test.each([2]).concurrent("second", () => { BODY });`],
+  ])("detects duplicate %s callbacks", async (_name, template) => {
+    const cwd = fixtureRoot();
+    const project = testSyntaxProject(cwd, template.replaceAll("BODY", testCloneBody));
+
+    const findings = await Effect.runPromise(testDuplicatesEffect(project, cwd, allScope));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      analyzer: AnalyzerName.TestDuplicates,
+      kind: FindingKind.Duplicate,
+      severity: Severity.Warning,
+      message: "Structurally duplicate test callback",
+    });
+    expect(findings[0]?.related).toHaveLength(1);
+  });
+
+  it("uses the changed duplicate test callback as the primary location", async () => {
+    const cwd = fixtureRoot();
+    const source = `
+      it("first", () => { ${testCloneBody} });
+      test("second", () => { ${testCloneBody} });
+    `;
+    const secondLine = source.slice(0, source.indexOf('test("second"')).split("\n").length;
+    const project = testSyntaxProject(cwd, source);
+    const scope = pathScope(
+      ["src/case.test.ts"],
+      new Map([["src/case.test.ts", [{ start: secondLine, end: secondLine }]]]),
+    );
+
+    const findings = await Effect.runPromise(testDuplicatesEffect(project, cwd, scope));
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.location.line).toBe(secondLine);
+    expect(findings[0]?.related?.[0]?.line).toBeLessThan(secondLine);
+  });
+
+  it("normalizes callback identifiers and literals while keeping test audits exact", async () => {
+    const cwd = fixtureRoot();
+    const project = testSyntaxProject(cwd, `
+      it("first", () => {
+        const values = [1, 2, 3, 4]; let total = 0;
+        for (const value of values) { if (value > 2) total += value * 2; else total += value; }
+        expect(total).toBeGreaterThan(0);
+      });
+      test("second", () => {
+        const entries = [5, 6, 7, 8]; let sum = 0;
+        for (const entry of entries) { if (entry > 9) sum += entry * 3; else sum += entry; }
+        expect(sum).toBeGreaterThan(10);
+      });
+    `);
+    const effect = testDuplicatesEffect(project, cwd, allScope);
+
+    const first = await Effect.runPromise(effect);
+    const concurrent = await Effect.runPromise(Effect.all([effect, effect], { concurrency: "unbounded" }));
+    const productionDuplicates = await Effect.runPromise(duplicatesEffect(project, cwd, allScope));
+
+    expect(first).toHaveLength(1);
+    expect(productionDuplicates).toEqual([]);
+    expect(concurrent).toEqual([first, first]);
+  });
+
+  it("does not infer test subsumption from non-test functions or partial callback overlap", async () => {
+    const cwd = fixtureRoot();
+    const project = testSyntaxProject(cwd, `
+      function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
+      function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
+      beforeEach(() => { const values = [1,2,3,4]; for (const value of values) console.log(value); });
+      beforeEach(() => { const values = [1,2,3,4]; for (const value of values) console.log(value); });
+      it("prefix one", () => { ${testCloneBody} expect(true).toBe(true); });
+      it("prefix two", () => { ${testCloneBody} return undefined; });
+      it("tiny one", () => expect(true).toBe(true));
+      it("tiny two", () => expect(true).toBe(true));
+    `);
+
+    await expect(
+      Effect.runPromise(testDuplicatesEffect(project, cwd, allScope)),
+    ).resolves.toEqual([]);
   });
 
   it("keeps reusable analyzer Effects independent", async () => {

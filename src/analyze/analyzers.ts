@@ -29,6 +29,39 @@ function functions(file: ts.SourceFile): BodyFunction[] {
   return output;
 }
 
+const TEST_MODIFIERS = new Set(["concurrent", "only", "skip", "todo"]);
+function isTestCallee(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return node.text === "it" || node.text === "test";
+  if (ts.isCallExpression(node)) return isTestEachFactory(node);
+  return ts.isPropertyAccessExpression(node)
+    && TEST_MODIFIERS.has(node.name.text)
+    && isTestCallee(node.expression);
+}
+function isTestEachFactory(node: ts.Expression): boolean {
+  if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return false;
+  return node.expression.name.text === "each" && isTestCallee(node.expression.expression);
+}
+function inlineTestCallback(node: ts.CallExpression): BodyFunction | undefined {
+  if (!isTestCallee(node.expression) && !isTestEachFactory(node.expression)) return undefined;
+  for (let index = node.arguments.length - 1; index >= 0; index--) {
+    const argument = node.arguments[index]!;
+    if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) return argument;
+  }
+  return undefined;
+}
+function testCallbacks(file: ts.SourceFile): BodyFunction[] {
+  const output: BodyFunction[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const callback = inlineTestCallback(node);
+      if (callback !== undefined) output.push(callback);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return output;
+}
+
 function location(cwd: string, file: ts.SourceFile, node: ts.Node): Location {
   const start = file.getLineAndCharacterOfPosition(node.getStart(file));
   const end = file.getLineAndCharacterOfPosition(node.getEnd());
@@ -194,42 +227,53 @@ function matchingDuplicateGroup(groups: readonly DuplicateGroup[], canonical: st
   return groups.find((group) => canonicalizeWithCap(group.sample).canonical === canonical);
 }
 
-function collectDuplicateFile(file: ts.SourceFile, cwd: string, state: DuplicateCollection): void {
-  for (const fn of functions(file)) {
+function collectDuplicateFile(
+  file: ts.SourceFile,
+  candidates: readonly BodyFunction[],
+  cwd: string,
+  state: DuplicateCollection,
+): void {
+  for (const candidate of candidates) {
     if (state.candidates >= ANALYZER_CAPS.duplicateCandidates) { state.truncated = true; return; }
     state.candidates++;
-    const result = canonicalizeWithCap(fn.body);
+    const result = canonicalizeWithCap(candidate.body);
     if (result.truncated || result.canonical.length < 80 || result.nodeCount < DUPLICATE_CANONICAL_CAPS.minimumNodeCount || result.tokenCount < DUPLICATE_CANONICAL_CAPS.minimumTokenCount) continue;
     const hash = createHash("sha256").update(result.canonical).digest("hex");
     const groups = state.groups.get(hash) ?? [];
     const prior = matchingDuplicateGroup(groups, result.canonical);
     if (prior === undefined) {
-      groups.push({ sample: fn.body, locations: [location(cwd, file, fn)] });
+      groups.push({ sample: candidate.body, locations: [location(cwd, file, candidate)] });
       state.groups.set(hash, groups);
     } else {
-      prior.locations.push(location(cwd, file, fn));
+      prior.locations.push(location(cwd, file, candidate));
     }
   }
 }
 
-function duplicateFinding(group: DuplicateGroup, scope: Scope): Finding | undefined {
+function duplicateFinding(
+  group: DuplicateGroup,
+  scope: Scope,
+  analyzer: AnalyzerName,
+  message: string,
+): Finding | undefined {
   const locations = [...group.locations].sort(compareLocations);
   const primary = locations.find((candidate) => changed(scope, candidate));
   if (primary === undefined || locations.length < 2) return undefined;
   const related = locations.filter((candidate) => candidate !== primary).slice(0, 25);
   return {
     id: "",
-    analyzer: AnalyzerName.Duplicates,
+    analyzer,
     kind: FindingKind.Duplicate,
     severity: Severity.Warning,
-    message: "Structurally duplicate function",
+    message,
     location: primary,
     related,
   };
 }
 
 function truncationFinding(analyzer: AnalyzerName): Finding {
-  const duplicate = analyzer === AnalyzerName.Duplicates;
+  const duplicate = analyzer === AnalyzerName.Duplicates
+    || analyzer === AnalyzerName.TestDuplicates;
   return {
     id: "",
     analyzer,
@@ -243,12 +287,17 @@ function truncationFinding(analyzer: AnalyzerName): Finding {
   };
 }
 
-function duplicateFindings(collected: DuplicateCollection, scope: Scope): Finding[] {
+function duplicateFindings(
+  collected: DuplicateCollection,
+  scope: Scope,
+  analyzer: AnalyzerName,
+  message: string,
+): Finding[] {
   const output: Finding[] = [];
   let truncated = collected.truncated;
   for (const groups of collected.groups.values()) {
     for (const group of groups) {
-      const finding = duplicateFinding(group, scope);
+      const finding = duplicateFinding(group, scope, analyzer, message);
       if (finding === undefined) continue;
       if (output.length >= ANALYZER_CAPS.duplicateFindings) { truncated = true; break; }
       output.push(finding);
@@ -257,21 +306,53 @@ function duplicateFindings(collected: DuplicateCollection, scope: Scope): Findin
   }
   if (truncated) {
     if (output.length >= ANALYZER_CAPS.duplicateFindings) output.pop();
-    output.push(truncationFinding(AnalyzerName.Duplicates));
+    output.push(truncationFinding(analyzer));
   }
   return output;
 }
 
-export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+function duplicateAnalysisEffect(
+  analyzer: AnalyzerName,
+  files: readonly ts.SourceFile[],
+  candidates: (file: ts.SourceFile) => readonly BodyFunction[],
+  cwd: string,
+  scope: Scope,
+  message: string,
+): Effect.Effect<Finding[], AnalyzerRunError> {
   return Effect.gen(function* () {
     const state: DuplicateCollection = { groups: new Map(), candidates: 0, truncated: false };
-    for (const file of project.files) {
-      yield* Effect.try({ try: () => collectDuplicateFile(file, cwd, state), catch: (cause) => analyzerFailure(AnalyzerName.Duplicates, cause) });
+    for (const file of files) {
+      yield* Effect.try({
+        try: () => collectDuplicateFile(file, candidates(file), cwd, state),
+        catch: (cause) => analyzerFailure(analyzer, cause),
+      });
       if (state.truncated) break;
       yield* Effect.yieldNow;
     }
-    return duplicateFindings(state, scope);
+    return duplicateFindings(state, scope, analyzer, message);
   });
+}
+
+export function duplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+  return duplicateAnalysisEffect(
+    AnalyzerName.Duplicates,
+    project.files,
+    functions,
+    cwd,
+    scope,
+    "Structurally duplicate function",
+  );
+}
+
+export function testDuplicatesEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
+  return duplicateAnalysisEffect(
+    AnalyzerName.TestDuplicates,
+    project.testFiles,
+    testCallbacks,
+    cwd,
+    scope,
+    "Structurally duplicate test callback",
+  );
 }
 interface TypeShape {
   properties: readonly string[];

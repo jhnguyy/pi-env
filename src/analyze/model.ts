@@ -10,7 +10,7 @@ export const OutputMode = { Compact: "compact", Pretty: "pretty", Json: "json" }
 export type OutputMode = typeof OutputMode[keyof typeof OutputMode];
 export const FailPolicy = { Never: "never", Warning: "warning", Error: "error" } as const;
 export type FailPolicy = typeof FailPolicy[keyof typeof FailPolicy];
-export const AnalyzerName = { Complexity: "complexity", Duplicates: "duplicates", Types: "types", AsyncRisk: "async-risk", Eslint: "eslint", Dependencies: "dependencies", Knip: "knip", Bundle: "bundle" } as const;
+export const AnalyzerName = { Complexity: "complexity", Duplicates: "duplicates", TestDuplicates: "test-duplicates", Types: "types", AsyncRisk: "async-risk", Eslint: "eslint", Dependencies: "dependencies", Knip: "knip", Bundle: "bundle" } as const;
 export type AnalyzerName = typeof AnalyzerName[keyof typeof AnalyzerName];
 export interface Location { path: string; line: number; column: number; endLine?: number; endColumn?: number }
 export interface Finding { id: string; analyzer: AnalyzerName; kind: FindingKind; severity: Severity; message: string; location: Location; related?: readonly Location[]; data?: Readonly<Record<string, unknown>> }

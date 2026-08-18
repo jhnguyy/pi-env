@@ -31,7 +31,7 @@ First remove checks that do not protect a durable requirement. The incidental ch
 
 Do not infer that component dimensions are orthogonal only because the implementation separates them. Before replacing an `N × M` matrix, identify the shared contract. Test every selector or registration path. Keep pairwise or full combinations for representation differences, error translation, state, concurrency, cancellation, cleanup, resource bounds, setup modes, credentials, and other interaction risks.
 
-Use composition to improve the suite as a whole. Do not use test count, assertion count, or speed as sufficient reasons to remove coverage. `test:changed` remains early feedback and cannot establish portfolio-level composition for merge decisions.
+Use composition to improve the suite as a whole. Do not use test count, assertion count, or speed as sufficient reasons to remove coverage. Analyze `test-duplicates` findings identify review candidates only. Apply the conditions above before pruning a test. `test:changed` remains early feedback and cannot establish portfolio-level composition for merge decisions.
 
 ## Independent hardening workflow
 

@@ -1,6 +1,6 @@
 # Analyze
 
-> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates`. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. `duplicates` compares only the selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
+> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates,test-duplicates`. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
 >
 > All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits. They are not containment.
 
@@ -10,11 +10,14 @@ Safe examples:
 nub run analyze -- --diff --checks complexity,async-risk
 nub run analyze -- --checks complexity src/analyze/policy.ts
 nub run analyze -- --checks duplicates .
+nub run analyze -- --checks test-duplicates .pi/extensions
 ```
 
 ## Test portfolio audits
 
-The `duplicates` check excludes `__tests__` directories and `*.test.*` files. Exact callback duplication can identify review candidates, but it does not prove that one test subsumes another. Statement-prefix and repeated-assertion matching produce too many ambiguous results for a stable Analyze contract. Apply the [testing composition rules](conventions/testing.md) through a requirement-based review instead.
+The `duplicates` check excludes test files. The `test-duplicates` check scans selected `__tests__` directories and `*.test.*` or `*.spec.*` JavaScript and TypeScript files. It compares inline `it` and `test` callback bodies, including modifier and `each` forms.
+
+`test-duplicates` reports exact structural matches after identifier and literal normalization. It does not report shared setup, statement-prefix overlap, repeated assertion text alone, or small callbacks below the duplicate-analysis threshold. A finding identifies a review candidate. It does not prove that one test subsumes another. Apply the [testing composition rules](conventions/testing.md) before pruning a test.
 
 `check:quality` is intentionally absent from normal and safe verification plans until strict containment exists. Use source-owned verification scripts instead:
 
@@ -46,6 +49,7 @@ The supervisor writes a bounded NDJSON journal under `$XDG_STATE_HOME/pi-env/ana
 - CLI entrypoint: [`scripts/analyze.ts`](../scripts/analyze.ts)
 - Public boundary: [`src/analyze/public.ts`](../src/analyze/public.ts)
 - Policy and containment decisions: [`src/analyze/policy.ts`](../src/analyze/policy.ts)
+- Syntax projects and analyzers: [`src/analyze/program.ts`](../src/analyze/program.ts), [`src/analyze/analyzers.ts`](../src/analyze/analyzers.ts)
 - Supervisor and protocol: [`src/analyze/supervisor.ts`](../src/analyze/supervisor.ts), [`src/analyze/protocol.ts`](../src/analyze/protocol.ts)
 - Diagnostics, journal, telemetry: [`src/analyze/diagnostics.ts`](../src/analyze/diagnostics.ts), [`src/analyze/journal.ts`](../src/analyze/journal.ts), [`src/analyze/otel.ts`](../src/analyze/otel.ts)
 - Analyze extension: [`.pi/extensions/analyze`](../.pi/extensions/analyze)
