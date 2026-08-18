@@ -1,7 +1,6 @@
 import {
   defineTool,
   formatSize,
-  keyHint,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -10,6 +9,7 @@ import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
 import { registerPtcTools } from "../_shared/ptc-tools";
 import { txt } from "../_shared/result";
+import { toolExpandHint } from "../_shared/tool-render";
 import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
 import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
 
@@ -306,6 +306,29 @@ function truncateUtf8(text: string, maxBytes: number): string {
   return output;
 }
 
+const webFetchPreviewMaxLines = 12;
+const webFetchPreviewMaxCharacters = 1200;
+
+function webFetchPreview(text: string): { text: string; truncated: boolean } {
+  const lines = text.split("\n", webFetchPreviewMaxLines + 1);
+  const lineLimited = lines.slice(0, webFetchPreviewMaxLines).join("\n");
+  let characterLimited = "";
+  let characterCount = 0;
+  let characterTruncated = false;
+  for (const character of lineLimited) {
+    if (characterCount >= webFetchPreviewMaxCharacters) {
+      characterTruncated = true;
+      break;
+    }
+    characterLimited += character;
+    characterCount += 1;
+  }
+  return {
+    text: characterLimited.trimEnd(),
+    truncated: lines.length > webFetchPreviewMaxLines || characterTruncated,
+  };
+}
+
 export default function webContext(pi: ExtensionAPI) {
   let anthropicSettings: AnthropicWebToolSettings | undefined;
   let openAISettings: OpenAIWebToolSettings | undefined;
@@ -338,6 +361,10 @@ export default function webContext(pi: ExtensionAPI) {
       maxBytes: Type.Optional(Type.Number({ description: "Maximum response bytes to return after extraction, capped at 1 MB. Default 100000." })),
       mode: Type.Optional(Type.String({ description: "Output mode: text (default, token-efficient), raw (unprocessed response text), or metadata (title/headings/links)." })),
     }),
+    renderCall(args, theme) {
+      const url = args.url ? ` ${theme.fg("accent", args.url)}` : "";
+      return new Text(`${theme.fg("toolTitle", theme.bold("web_fetch"))}${url}`, 0, 0);
+    },
     async execute(_toolCallId, params, signal) {
       try {
         const mode = Object.values(WebFetchMode).includes(params.mode as WebFetchMode) ? (params.mode as WebFetchMode) : WebFetchMode.Text;
@@ -366,7 +393,7 @@ export default function webContext(pi: ExtensionAPI) {
       if (expanded) return new Text(output || "(no output)", 0, 0);
 
       const details = result.details as (WebFetchResult & { error?: string }) | undefined;
-      const expandHint = theme.fg("muted", `(${keyHint("app.tools.expand", "to expand")})`);
+      const expandHint = toolExpandHint(theme);
       if (!details) return new Text(`${theme.fg("muted", "Web fetch complete")}\n${expandHint}`, 0, 0);
       if (details.error) return new Text(`${theme.fg("error", `✗ ${details.error}`)}\n${expandHint}`, 0, 0);
 
@@ -375,7 +402,13 @@ export default function webContext(pi: ExtensionAPI) {
       const icon = details.status >= 400 ? "⚠" : "✓";
       let summary = `${theme.fg(statusColor, icon)} ${theme.fg("muted", `HTTP ${details.status} · ${details.mode} · ${contentType} · ${formatSize(details.outputBytes)}`)}`;
       if (details.truncated) summary += ` ${theme.fg("warning", "[truncated]")}`;
-      return new Text(`${summary}\n${expandHint}`, 0, 0);
+
+      const preview = webFetchPreview(details.text);
+      const lines = [summary];
+      if (preview.text) lines.push(theme.fg("toolOutput", preview.text));
+      if (preview.truncated) lines.push(theme.fg("muted", "... output preview truncated"));
+      lines.push(expandHint);
+      return new Text(lines.join("\n"), 0, 0);
     },
   });
   registerPtcTools(pi, webFetchTool);

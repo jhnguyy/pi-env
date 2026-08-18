@@ -9,6 +9,7 @@ import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolS
 
 const mockTheme = {
   fg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
 };
 
 function registeredWebFetchTool() {
@@ -24,9 +25,11 @@ function componentText(component: unknown): string {
 }
 
 function webFetchToolResult() {
-  const body = `Fetched body\n${"full output ".repeat(40)}`;
+  const hiddenTail = "end of fetched output";
+  const body = `Fetched body ${"full output ".repeat(200)}${hiddenTail}`;
   return {
     body,
+    hiddenTail,
     result: {
       content: [{ type: "text", text: `URL: https://example.com/\nStatus: 200\nContent-Type: text/html\nMode: text\nRaw-Bytes: 8192\nOutput-Bytes: 4096\nTruncated: false\n\n${body}` }],
       details: {
@@ -44,9 +47,18 @@ function webFetchToolResult() {
 }
 
 describe("web fetch", () => {
-  it("keeps fetched output compact until the user expands it", () => {
+  it("shows the requested URL in the compact call", () => {
     const tool = registeredWebFetchTool();
-    const { body, result } = webFetchToolResult();
+
+    const call = componentText(tool.renderCall({ url: "https://example.com/docs?q=pi" }, mockTheme));
+
+    expect(call).toContain("web_fetch");
+    expect(call).toContain("https://example.com/docs?q=pi");
+  });
+
+  it("shows a bounded fetched-output preview until the user expands it", () => {
+    const tool = registeredWebFetchTool();
+    const { body, hiddenTail, result } = webFetchToolResult();
     const beforeRender = structuredClone(result);
 
     const collapsed = componentText(tool.renderResult(result, { expanded: false }, mockTheme));
@@ -54,18 +66,22 @@ describe("web fetch", () => {
     expect(collapsed).toContain("HTTP 200");
     expect(collapsed).toContain("text/html");
     expect(collapsed).toContain("4.0KB");
+    expect(collapsed).toContain("Fetched body");
     expect(collapsed).toContain("ctrl+o");
+    expect(collapsed.length).toBeLessThan(1600);
+    expect(collapsed).not.toContain(hiddenTail);
     expect(collapsed).not.toContain(body);
     expect(result).toEqual(beforeRender);
   });
 
   it("reveals the full fetched output when expanded", () => {
     const tool = registeredWebFetchTool();
-    const { body, result } = webFetchToolResult();
+    const { body, hiddenTail, result } = webFetchToolResult();
 
     const expanded = componentText(tool.renderResult(result, { expanded: true }, mockTheme));
 
     expect(expanded).toContain(body);
+    expect(expanded).toContain(hiddenTail);
     expect(expanded).toContain("URL: https://example.com/");
     expect(expanded).not.toContain("ctrl+o");
   });

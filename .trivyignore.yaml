@@ -1,10 +1,40 @@
 vulnerabilities:
+  - id: CVE-2026-33818
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
   - id: CVE-2026-39821
     paths:
       - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
     expired_at: 2026-09-15
     statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
   - id: CVE-2026-46600
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+  - id: CVE-2026-56853
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+  - id: CVE-2026-56858
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+  - id: CVE-2026-56859
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+  - id: CVE-2026-56860
+    paths:
+      - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
+    expired_at: 2026-09-15
+    statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+  - id: CVE-2026-56862
     paths:
       - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
     expired_at: 2026-09-15

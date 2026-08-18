@@ -1,9 +1,10 @@
-import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 
 import { createJitCatchContract } from "./contract";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { toAgentTool, toPiTool } from "../_shared/tool-contract";
+import { toolExpandKeyHint } from "../_shared/tool-render";
 
 export default function (pi: ExtensionAPI) {
   const contract = createJitCatchContract();
@@ -34,7 +35,7 @@ export default function (pi: ExtensionAPI) {
       const color = isError ? "error" : "success";
       let rendered = theme.fg(color, prefix + text);
       if (!opts.expanded && hiddenLines > 0) {
-        rendered += `${theme.fg("muted", `\n... (${hiddenLines} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+        rendered += `${theme.fg("muted", `\n... (${hiddenLines} more lines,`)} ${toolExpandKeyHint()}${theme.fg("muted", ")")}`;
       }
       return new Text(rendered, 0, 0);
     },

@@ -6,7 +6,7 @@
  */
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import { getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 import {
@@ -15,12 +15,9 @@ import {
   type SubagentJobRenderDetails,
   type SubagentJobRenderStatus,
 } from "./types";
+import { toolExpandHint } from "../_shared/tool-render";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function expandKeyText(): string {
-  return keyText("app.tools.expand") || "ctrl+o";
-}
 
 const PROMPT_PREVIEW_LENGTH = 70;
 
@@ -177,7 +174,7 @@ function renderCollapsedSubagentResult(
   if (usage) stats.push(usage);
   if (details.sessionName) stats.push(details.sessionName);
   if (stats.length > 0) text += `\n${theme.fg("dim", stats.join(" · "))}`;
-  text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
+  text += `\n${toolExpandHint(theme)}`;
   return new Text(text, 0, 0);
 }
 
@@ -251,7 +248,7 @@ export function renderSubagentStartResult(
     (jobId ? ` ${theme.fg("dim", jobId)}` : "");
 
   if (!expanded) {
-    return new Text(`${header}\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`, 0, 0);
+    return new Text(`${header}\n${toolExpandHint(theme)}`, 0, 0);
   }
 
   const container = new Container();
@@ -303,7 +300,7 @@ export function renderSubagentJobResult(
     let text = header;
     if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
     if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
-    text += `\n${theme.fg("muted", `(${expandKeyText()} to expand)`)}`;
+    text += `\n${toolExpandHint(theme)}`;
     return new Text(text, 0, 0);
   }
 
