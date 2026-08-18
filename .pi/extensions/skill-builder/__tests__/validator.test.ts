@@ -62,28 +62,15 @@ describeIfEnabled("skill-builder", "Validator", () => {
   // ─── Name Validation ──────────────────────────────────────────
 
   describe("name validation", () => {
-    it("fails when name contains uppercase", () => {
-      const dir = createSkill("My-Skill", { name: "My-Skill" });
+    it.each([
+      { condition: "contains uppercase", name: "My-Skill" },
+      { condition: "has consecutive hyphens", name: "my--skill" },
+      { condition: "starts with a hyphen", name: "-my-skill" },
+      { condition: "ends with a hyphen", name: "my-skill-" },
+    ])("fails when name $condition", ({ name }) => {
+      const dir = createSkill(name, { name });
       const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-format")).toBe(true);
-    });
-
-    it("fails when name has consecutive hyphens", () => {
-      const dir = createSkill("my--skill", { name: "my--skill" });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-format")).toBe(true);
-    });
-
-    it("fails when name starts with hyphen", () => {
-      const dir = createSkill("-my-skill", { name: "-my-skill" });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-format")).toBe(true);
-    });
-
-    it("fails when name ends with hyphen", () => {
-      const dir = createSkill("my-skill-", { name: "my-skill-" });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-format")).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "name-format")).toBe(true);
     });
 
     it("fails when name exceeds 64 characters", () => {
