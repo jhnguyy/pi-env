@@ -54,6 +54,7 @@
     "check:node": "scripts/node-run.sh scripts/check-node-version.mjs",
     "build": "scripts/node-run.sh scripts/build-extensions.mjs",
     "clean:extensions": "scripts/node-run.sh scripts/clean-extension-artifacts.mjs",
+    "worktree:init": "bash scripts/init-worktree.sh",
     "test": "nub run test:unit",
     "test:unit": "scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads",
     "test:changed": "scripts/node-run.sh node_modules/vitest/vitest.mjs run --pool=threads --changed",

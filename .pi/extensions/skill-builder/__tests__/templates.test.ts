@@ -2,6 +2,21 @@ import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderTemplate, getTemplateTypes } from "../templates";
 
+const directoryTemplateCases = [
+  {
+    template: "with-scripts",
+    name: "web-search",
+    description: "Searches the web via Brave API.",
+    directory: "scripts",
+  },
+  {
+    template: "with-index",
+    name: "api-docs",
+    description: "API documentation for the project.",
+    directory: "references",
+  },
+] as const;
+
 describeIfEnabled("skill-builder", "Templates", () => {
   describe("getTemplateTypes", () => {
     it("returns all available template types", () => {
@@ -56,17 +71,23 @@ describeIfEnabled("skill-builder", "Templates", () => {
     });
   });
 
-  describe("with-scripts template", () => {
-    it("produces SKILL.md and a scripts directory entry", () => {
-      const result = renderTemplate({
-        name: "web-search",
-        description: "Searches the web via Brave API.",
-        template: "with-scripts",
-      });
-      expect(result.files["SKILL.md"]).toBeDefined();
-      expect(Object.keys(result.files).some((f) => f.startsWith("scripts/"))).toBe(true);
-    });
+  describe("directory templates", () => {
+    it.each(directoryTemplateCases)(
+      "$template produces SKILL.md and a $directory directory entry",
+      (templateCase) => {
+        const result = renderTemplate({
+          name: templateCase.name,
+          description: templateCase.description,
+          template: templateCase.template,
+        });
+        expect(result.files["SKILL.md"]).toBeDefined();
+        const prefix = `${templateCase.directory}/`;
+        expect(Object.keys(result.files).some((file) => file.startsWith(prefix))).toBe(true);
+      },
+    );
+  });
 
+  describe("with-scripts template", () => {
     it("SKILL.md references the scripts directory", () => {
       const result = renderTemplate({
         name: "web-search",
@@ -78,18 +99,6 @@ describeIfEnabled("skill-builder", "Templates", () => {
   });
 
   describe("with-index template (compression pattern)", () => {
-    it("produces SKILL.md and a references directory", () => {
-      const result = renderTemplate({
-        name: "api-docs",
-        description: "API documentation for the project.",
-        template: "with-index",
-      });
-      expect(result.files["SKILL.md"]).toBeDefined();
-      expect(
-        Object.keys(result.files).some((f) => f.startsWith("references/")),
-      ).toBe(true);
-    });
-
     it("SKILL.md contains a compressed index section", () => {
       const result = renderTemplate({
         name: "api-docs",

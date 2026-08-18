@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect } from "./analyzers.js";
+import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "./analyzers.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import { AnalyzerName, AnalyzerRunError, type Finding } from "./model.js";
-import { isTypeProject, ProjectRequirement, type Project } from "./program.js";
+import { isTypeProject, ProjectRequirement, SyntaxSourceSelection, type Project } from "./program.js";
 import { ProcessService } from "./process.js";
 import type { Scope } from "./scope.js";
 
@@ -56,6 +56,15 @@ const ANALYZERS: readonly AnalyzerDescriptor[] = [
     run: (context) => internalEffect(AnalyzerName.Duplicates, context.project === undefined
       ? missingProject(AnalyzerName.Duplicates, "Duplicate analyzer requires a syntax project")
       : duplicatesEffect(context.project, context.cwd, context.scope)),
+  },
+  {
+    name: AnalyzerName.TestDuplicates,
+    defaultEnabled: false,
+    minimumTotalMemoryMb: 512,
+    project: ProjectRequirement.ScopedSyntax,
+    run: (context) => internalEffect(AnalyzerName.TestDuplicates, context.project === undefined
+      ? missingProject(AnalyzerName.TestDuplicates, "Test duplicate analyzer requires a syntax project")
+      : testDuplicatesEffect(context.project, context.cwd, context.scope)),
   },
   {
     name: AnalyzerName.Types,
@@ -128,6 +137,16 @@ export function projectRequirement(checks: readonly AnalyzerName[]): ProjectRequ
     if (requirementRank[candidate] > requirementRank[requirement]) requirement = candidate;
   }
   return requirement;
+}
+
+export function projectSourceSelection(checks: readonly AnalyzerName[]): SyntaxSourceSelection {
+  const internalChecks = checks.filter(
+    (name) => analyzerDescriptor(name).project !== ProjectRequirement.None,
+  );
+  const tests = internalChecks.includes(AnalyzerName.TestDuplicates);
+  const production = internalChecks.some((name) => name !== AnalyzerName.TestDuplicates);
+  if (tests && production) return SyntaxSourceSelection.ProductionAndTests;
+  return tests ? SyntaxSourceSelection.Tests : SyntaxSourceSelection.Production;
 }
 
 export function runAnalyzer(name: AnalyzerName, context: AnalyzerContext): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {

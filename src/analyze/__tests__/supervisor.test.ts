@@ -147,6 +147,21 @@ describe("safe analyze policy", () => {
         maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
       },
     });
+    expect(
+      classifyAnalyzeRequest({
+        cwd,
+        scope: ScopeMode.Diff,
+        checks: [AnalyzerName.TestDuplicates],
+      }),
+    ).toMatchObject({ _tag: "safe" });
+    expect(
+      classifyAnalyzeRequest({
+        cwd,
+        scope: ScopeMode.Paths,
+        paths: ["src/a.test.ts"],
+        checks: [AnalyzerName.TestDuplicates],
+      }),
+    ).toMatchObject({ _tag: "safe" });
     for (const path of ["../outside.ts", "src/../../outside.ts", "src\\..\\outside.ts"]) {
       expect(
         classifyAnalyzeRequest({
@@ -331,7 +346,12 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     const result = await superviseAnalyze(
       safeRequest(cwd, {
         paths: ["src/analyze"],
-        checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates],
+        checks: [
+          AnalyzerName.Complexity,
+          AnalyzerName.AsyncRisk,
+          AnalyzerName.Duplicates,
+          AnalyzerName.TestDuplicates,
+        ],
         timeoutMs: 20_000,
       }),
       { env: disabledEnv },
@@ -355,6 +375,32 @@ describe("public analyze boundary", () => {
     expect(result.analyzerFailures).toEqual([]);
     expect(result.findings).toHaveLength(1);
     expect(result.findings[0]).toMatchObject({ analyzer: AnalyzerName.Duplicates, message: "Structurally duplicate function" });
+  }, 30_000);
+
+  it("reports scoped duplicate test callbacks through the bounded worker", async () => {
+    const cwd = fixtureRoot();
+    mkdirSync(join(cwd, "src"));
+    writeFileSync(join(cwd, "src/example.test.ts"), `
+      it("first", () => { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > 2) total += value * 2; else total += value; } expect(total).toBeGreaterThan(0); });
+      test("second", () => { const entries = [5,6,7,8]; let sum = 0; for (const entry of entries) { if (entry > 9) sum += entry * 3; else sum += entry; } expect(sum).toBeGreaterThan(10); });
+    `);
+
+    const result = await runPublicAnalyze(
+      {
+        cwd,
+        scope: ScopeMode.Paths,
+        paths: ["src/example.test.ts"],
+        checks: [AnalyzerName.TestDuplicates],
+      },
+      { env: disabledEnv },
+    );
+
+    expect(result.analyzerFailures).toEqual([]);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]).toMatchObject({
+      analyzer: AnalyzerName.TestDuplicates,
+      message: "Structurally duplicate test callback",
+    });
   }, 30_000);
 
   it("returns safe worker results and refuses heavy/all work before spawn", async () => {

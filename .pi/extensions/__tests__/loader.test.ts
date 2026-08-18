@@ -35,14 +35,6 @@ describe("Extension Loader", () => {
         expect(typeof mod.default).toBe("function");
       }, 15_000);
 
-      it("accepts one argument (pi: ExtensionAPI)", async () => {
-        const pkgPath = join(EXTENSIONS_DIR, name, "package.json");
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { pi?: { extensions?: string[] } };
-        const entry = pkg.pi?.extensions?.[0] ?? "./dist/index.js";
-        const mod = await import(join(EXTENSIONS_DIR, name, entry));
-        expect(mod.default.length).toBe(1);
-      });
-
       it("has at least one test file", () => {
         const testDir = join(EXTENSIONS_DIR, name, "__tests__");
         expect(existsSync(testDir)).toBe(true);

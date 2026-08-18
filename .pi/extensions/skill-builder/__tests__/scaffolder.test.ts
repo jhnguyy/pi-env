@@ -7,6 +7,21 @@ import { scaffoldSkill } from "../scaffolder";
 
 let tempDir: string;
 
+const extendedScaffoldCases = [
+  {
+    template: "with-scripts",
+    name: "web-search",
+    description: "Searches the web.",
+    directory: "scripts",
+  },
+  {
+    template: "with-index",
+    name: "api-docs",
+    description: "API documentation.",
+    directory: "references",
+  },
+] as const;
+
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), "skill-scaffolder-test-"));
 });
@@ -61,51 +76,27 @@ describeIfEnabled("skill-builder", "Scaffolder", () => {
     });
   });
 
-  describe("with-scripts scaffold", () => {
-    it("creates scripts directory", () => {
+  describe.each(extendedScaffoldCases)("$template scaffold", (scaffoldCase) => {
+    it("creates the template directory", () => {
       const result = scaffoldSkill({
-        name: "web-search",
-        description: "Searches the web.",
-        template: "with-scripts",
+        name: scaffoldCase.name,
+        description: scaffoldCase.description,
+        template: scaffoldCase.template,
         targetDir: tempDir,
       });
       expect(result.success).toBe(true);
-      expect(existsSync(join(result.skillDir, "scripts"))).toBe(true);
+      expect(existsSync(join(result.skillDir, scaffoldCase.directory))).toBe(true);
     });
 
-    it("creates placeholder script", () => {
+    it("creates a placeholder file", () => {
       const result = scaffoldSkill({
-        name: "web-search",
-        description: "Searches the web.",
-        template: "with-scripts",
+        name: scaffoldCase.name,
+        description: scaffoldCase.description,
+        template: scaffoldCase.template,
         targetDir: tempDir,
       });
-      const scripts = result.filesCreated.filter((f) => f.startsWith("scripts/"));
-      expect(scripts.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe("with-index scaffold", () => {
-    it("creates references directory", () => {
-      const result = scaffoldSkill({
-        name: "api-docs",
-        description: "API documentation.",
-        template: "with-index",
-        targetDir: tempDir,
-      });
-      expect(result.success).toBe(true);
-      expect(existsSync(join(result.skillDir, "references"))).toBe(true);
-    });
-
-    it("creates placeholder reference file", () => {
-      const result = scaffoldSkill({
-        name: "api-docs",
-        description: "API documentation.",
-        template: "with-index",
-        targetDir: tempDir,
-      });
-      const refs = result.filesCreated.filter((f) => f.startsWith("references/"));
-      expect(refs.length).toBeGreaterThan(0);
+      const prefix = `${scaffoldCase.directory}/`;
+      expect(result.filesCreated.some((file) => file.startsWith(prefix))).toBe(true);
     });
   });
 
