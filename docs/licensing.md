@@ -18,7 +18,7 @@ Run this check after dependency installation:
 nub run licenses:check
 ```
 
-The check uses the installed Nub virtual store. It does not infer the artifact contents only from `package.json` or `lock.yaml`.
+The check follows installed dependency links from the root package and declared workspaces into the Nub virtual store. It ignores stale virtual-store entries that no installed dependency tree can reach. It does not infer artifact contents only from `package.json` or `lock.yaml`.
 
 A dependency update must fail the check when it:
 

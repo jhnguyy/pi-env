@@ -12,6 +12,10 @@ nub run analyze -- --checks complexity src/analyze/policy.ts
 nub run analyze -- --checks duplicates .
 ```
 
+## Test portfolio audits
+
+The `duplicates` check excludes `__tests__` directories and `*.test.*` files. Exact callback duplication can identify review candidates, but it does not prove that one test subsumes another. Statement-prefix and repeated-assertion matching produce too many ambiguous results for a stable Analyze contract. Apply the [testing composition rules](conventions/testing.md) through a requirement-based review instead.
+
 `check:quality` is intentionally absent from normal and safe verification plans until strict containment exists. Use source-owned verification scripts instead:
 
 - [`package.json#scripts`](../package.json)

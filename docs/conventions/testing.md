@@ -14,6 +14,25 @@ Every committed test should have one primary intent:
 
 Delete or avoid assertions that only mirror private field layout, function arity, incidental rendering details, or lifecycle checks already enforced by build/install verification.
 
+## Composable test portfolios
+
+Keep tests isolated in execution. Do not share mutable fixtures or require an execution order. Compose evidence in the canonical verification portfolio instead.
+
+Each test must own one clear claim and remain meaningful when run alone. A test can use behavior that another test owns as part of its arrangement. Do not repeat the owning assertion unless it gives necessary diagnostic, requirement, interaction, or safety evidence.
+
+First remove checks that do not protect a durable requirement. The incidental checks listed above are examples. To remove evidence because the portfolio subsumes it, all of these conditions must apply:
+
+1. A remaining test establishes the same invariant at the same public boundary.
+2. The relevant tests run in the same canonical verification portfolio.
+3. Focused execution of each remaining test still has a clear interpretation.
+4. Continuing after an unchecked intermediate result cannot hang, leak resources, expose credentials, or cause harmful side effects.
+5. The change preserves useful failure location and requirement traceability.
+6. Negative-control or red/green evidence shows that the owning test detects the relevant defect.
+
+Do not infer that component dimensions are orthogonal only because the implementation separates them. Before replacing an `N × M` matrix, identify the shared contract. Test every selector or registration path. Keep pairwise or full combinations for representation differences, error translation, state, concurrency, cancellation, cleanup, resource bounds, setup modes, credentials, and other interaction risks.
+
+Use composition to improve the suite as a whole. Do not use test count, assertion count, or speed as sufficient reasons to remove coverage. `test:changed` remains early feedback and cannot establish portfolio-level composition for merge decisions.
+
 ## Independent hardening workflow
 
 Risk-triggered changes require requirement-derived test design that is independent of the implementation session:

@@ -3,9 +3,6 @@
  *
  * Verifies that both /review-retros and /handoff register correctly and that
  * their handlers call sendUserMessage with the expected content.
- *
- * These are smoke tests only — there is no pure logic to unit test.
- * The suite confirms the module contract is intact after the commands.ts split.
  */
 
 import { describe, expect, it } from "vitest";
@@ -34,20 +31,6 @@ function makeCommandCaptureMock(targetCommand?: string, captureMessages?: string
 
   return { mockPi, registered, messages };
 }
-
-// ─── Module contract ──────────────────────────────────────────────────────────
-
-describeIfEnabled("work-tracker", "module contract", () => {
-  it("exports a default function", async () => {
-    const mod = await import("../index");
-    expect(typeof mod.default).toBe("function");
-  });
-
-  it("default export accepts one argument (pi: ExtensionAPI)", async () => {
-    const mod = await import("../index");
-    expect(mod.default.length).toBe(1);
-  });
-});
 
 // ─── /review-retros ───────────────────────────────────────────────────────────
 

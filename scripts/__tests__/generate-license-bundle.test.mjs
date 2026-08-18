@@ -45,6 +45,7 @@ function addPackage(repoRoot, {
   repository = "https://example.test/project",
   files = { LICENSE: "license text\n" },
   virtualId = `${name.replaceAll("/", "+")}@${version}`,
+  linked = true,
 }) {
   const root = packageRoot(repoRoot, virtualId, name);
   mkdirSync(root, { recursive: true });
@@ -52,6 +53,11 @@ function addPackage(repoRoot, {
   if (license !== undefined) manifest.license = license;
   write(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   for (const [file, content] of Object.entries(files)) write(join(root, file), content);
+  if (linked) {
+    const link = join(repoRoot, "node_modules", ...name.split("/"));
+    mkdirSync(dirname(link), { recursive: true });
+    symlinkSync(root, link, "dir");
+  }
   return root;
 }
 
@@ -106,6 +112,52 @@ describe("license bundle generation", () => {
     const result = generate(repoRoot);
 
     expect(result.javascriptPackages.map((pkg) => pkg.name)).toEqual(["installed-package"]);
+  });
+
+  it("ignores stale Nub packages that are not reachable from an installed dependency tree", () => {
+    const repoRoot = temporaryDirectory();
+    addPackage(repoRoot, { name: "reachable-package" });
+    addPackage(repoRoot, { name: "stale-package", linked: false });
+
+    const result = generate(repoRoot);
+
+    expect(result.javascriptPackages.map((pkg) => pkg.name)).toEqual(["reachable-package"]);
+  });
+
+  it("discovers transitive packages in a reachable Nub dependency tree", () => {
+    const repoRoot = temporaryDirectory();
+    const virtualId = "root-package@1.0.0_transitive-package@1.0.0";
+    addPackage(repoRoot, { name: "root-package", virtualId });
+    addPackage(repoRoot, { name: "@scope/transitive-package", virtualId, linked: false });
+
+    const result = generate(repoRoot);
+
+    expect(result.javascriptPackages.map((pkg) => pkg.name)).toEqual([
+      "@scope/transitive-package",
+      "root-package",
+    ]);
+  });
+
+  it("discovers dependencies linked only from a declared workspace", () => {
+    const repoRoot = temporaryDirectory();
+    const workspaceRoot = join(repoRoot, "packages", "worker");
+    const dependencyRoot = join(repoRoot, "workspace-store", "workspace-package");
+    write(join(repoRoot, "package.json"), `${JSON.stringify({ workspaces: ["packages/worker"] })}\n`);
+    write(join(workspaceRoot, "package.json"), `${JSON.stringify({ name: "worker", private: true })}\n`);
+    write(join(dependencyRoot, "package.json"), `${JSON.stringify({
+      name: "workspace-package",
+      version: "1.0.0",
+      license: "MIT",
+      repository: "https://example.test/workspace-package",
+    })}\n`);
+    write(join(dependencyRoot, "LICENSE"), "workspace license\n");
+    mkdirSync(join(repoRoot, "node_modules", ".nub"), { recursive: true });
+    mkdirSync(join(workspaceRoot, "node_modules"), { recursive: true });
+    symlinkSync(dependencyRoot, join(workspaceRoot, "node_modules", "workspace-package"), "dir");
+
+    const result = generate(repoRoot);
+
+    expect(result.javascriptPackages.map((pkg) => pkg.name)).toEqual(["workspace-package"]);
   });
 
   it("discovers scoped and unscoped symlinks in an additional package tree", () => {

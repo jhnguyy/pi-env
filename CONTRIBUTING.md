@@ -71,6 +71,7 @@ Canonical standard and safe verification phases live in [`scripts/verification-p
 # Start work — always from a worktree
 git worktree add /tmp/pi-env-<branch> -b <branch>
 cd /tmp/pi-env-<branch>
+nub run worktree:init
 
 # Do work, commit, push, open PR ...
 
@@ -86,3 +87,5 @@ git branch -D <branch>
 ```
 
 Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
+
+Nub reuses its content-addressed package store, but each worktree needs its own dependency links and extension build artifacts. `nub run worktree:init` installs the locked dependency tree, builds extensions through `postinstall`, and verifies install readiness. Do not symlink `node_modules` or extension `dist` directories between worktrees.

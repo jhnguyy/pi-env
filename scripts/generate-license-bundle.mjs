@@ -2,6 +2,7 @@
 import {
   copyFileSync,
   existsSync,
+  globSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep as pathSeparator } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   licenseIdentifiers,
@@ -134,22 +135,13 @@ export function discoverNubPackages(nodeModulesPath) {
   if (!existsSync(virtualStorePath)) {
     throw new Error(`Nub virtual store is missing: ${virtualStorePath}`);
   }
+  return discoverStandardPackages(nodeModulesPath);
+}
 
-  const packageRoots = new Set();
-  for (const entry of readdirSync(virtualStorePath, { withFileTypes: true })) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const entryPath = join(virtualStorePath, entry.name);
-    let target;
-    try {
-      target = realpathSync(entryPath);
-    } catch {
-      continue;
-    }
-    for (const packageRoot of immediatePackageRoots(join(target, "node_modules"))) {
-      packageRoots.add(realpathSync(packageRoot));
-    }
-  }
-  return [...packageRoots];
+function containingNodeModules(packageRoot) {
+  let parent = dirname(packageRoot);
+  if (basename(parent).startsWith("@")) parent = dirname(parent);
+  return basename(parent) === "node_modules" ? parent : undefined;
 }
 
 export function discoverStandardPackages(nodeModulesPath) {
@@ -167,11 +159,37 @@ export function discoverStandardPackages(nodeModulesPath) {
     for (const packageRoot of immediatePackageRoots(realCurrent)) {
       const realPackageRoot = realpathSync(packageRoot);
       packageRoots.add(realPackageRoot);
+      const dependencyTree = containingNodeModules(realPackageRoot);
+      if (dependencyTree !== undefined) pending.push(dependencyTree);
       const nested = join(realPackageRoot, "node_modules");
       if (existsSync(nested)) pending.push(nested);
     }
   }
   return [...packageRoots];
+}
+
+function workspacePatterns(manifest) {
+  if (Array.isArray(manifest.workspaces)) return manifest.workspaces;
+  return isRecord(manifest.workspaces) && Array.isArray(manifest.workspaces.packages)
+    ? manifest.workspaces.packages
+    : [];
+}
+
+function workspaceNodeModulesPaths(repoRoot) {
+  const manifestPath = join(repoRoot, "package.json");
+  if (!existsSync(manifestPath)) return [];
+  const paths = new Set();
+  for (const pattern of workspacePatterns(readJson(manifestPath))) {
+    if (typeof pattern !== "string" || pattern.length === 0) continue;
+    for (const workspacePath of globSync(pattern, { cwd: repoRoot })) {
+      const packagePath = resolve(repoRoot, workspacePath);
+      const relativePath = relative(repoRoot, packagePath);
+      if (relativePath === ".." || relativePath.startsWith(`..${pathSeparator}`)) continue;
+      if (!existsSync(join(packagePath, "package.json"))) continue;
+      paths.add(join(packagePath, "node_modules"));
+    }
+  }
+  return [...paths];
 }
 
 function loadPackages(packageRoots) {
@@ -480,6 +498,66 @@ function validateRepositoryLicense(repoRoot) {
   return errors;
 }
 
+function validatePackages(packages, policy, errors) {
+  for (const pkg of packages) {
+    validateLicense(pkg, policy, errors);
+    validateSourceRequirement(pkg, policy, errors);
+  }
+}
+
+function resolvePackageLicenses(packages, policy, repoRoot, errors) {
+  const donors = licenseDonors(packages);
+  const resolved = [];
+  for (const pkg of packages) {
+    const source = resolveLicenseSource(pkg, donors, policy, repoRoot);
+    if (source) resolved.push({ pkg, source });
+    else errors.push(`${packageKey(pkg)}: no license text or reviewed override is available`);
+  }
+  return resolved;
+}
+
+function writePackageRecords(resolved, packageOutputPath) {
+  const records = [];
+  const missingOriginalLicenseText = [];
+  for (const { pkg, source } of resolved) {
+    const targetDirectory = join(packageOutputPath, packageDirectoryName(pkg));
+    mkdirSync(targetDirectory, { recursive: true });
+    const copiedFiles = [];
+    for (const file of source.files) {
+      const targetName =
+        source.type === "package"
+          ? file.name
+          : `LICENSE.from-${packageDirectoryName({ name: source.package ?? "override", version: "source" })}-${file.name}`;
+      copyLegalFile(file, targetDirectory, targetName);
+      copiedFiles.push(targetName);
+    }
+    for (const file of pkg.legalFiles.filter((candidate) => candidate.type === "notice")) {
+      copyLegalFile(file, targetDirectory, file.name);
+      copiedFiles.push(file.name);
+    }
+    const hasOwnLicense = pkg.legalFiles.some((file) => LICENSE_FILE_PATTERN.test(file.name));
+    if (!hasOwnLicense) missingOriginalLicenseText.push(packageKey(pkg));
+    records.push({
+      name: pkg.name,
+      version: pkg.version,
+      license: pkg.license,
+      repository: pkg.repository,
+      author: pkg.author,
+      upstreamLicenseTextMissing: !hasOwnLicense,
+      licenseSource: { type: source.type, package: source.package },
+      files: copiedFiles.sort(),
+    });
+  }
+  return { records, missingOriginalLicenseText };
+}
+
+function copySystemLicenses(outputPath, systemLicenses) {
+  if (systemLicenses.length === 0) return;
+  const systemPath = join(outputPath, "system");
+  mkdirSync(systemPath, { recursive: true });
+  for (const entry of systemLicenses) copyFileSync(entry.path, join(systemPath, entry.name));
+}
+
 export function generateLicenseBundle({
   repoRoot = defaultRepoRoot,
   nodeModulesPath = join(repoRoot, "node_modules"),
@@ -500,25 +578,15 @@ export function generateLicenseBundle({
       : null;
   const discoveredRoots = [
     ...discoverNubPackages(nodeModulesPath),
+    ...workspaceNodeModulesPaths(repoRoot).flatMap((path) => discoverStandardPackages(path)),
     ...packageRoots.flatMap((path) => discoverStandardPackages(path)),
   ];
   const packages = loadPackages(discoveredRoots);
   const errors = validateRepository ? validateRepositoryLicense(repoRoot) : [];
   if (apkPackages.length > 0 && alpinePolicy)
     errors.push(...validateAlpinePackages(apkPackages, alpinePolicy));
-  for (const pkg of packages) {
-    validateLicense(pkg, policy, errors);
-    validateSourceRequirement(pkg, policy, errors);
-  }
-
-  const donors = licenseDonors(packages);
-  const resolved = [];
-  for (const pkg of packages) {
-    const source = resolveLicenseSource(pkg, donors, policy, repoRoot);
-    if (!source)
-      errors.push(`${packageKey(pkg)}: no license text or reviewed override is available`);
-    else resolved.push({ pkg, source });
-  }
+  validatePackages(packages, policy, errors);
+  const resolved = resolvePackageLicenses(packages, policy, repoRoot, errors);
 
   const alpineSourceValidation =
     apkPackages.length > 0 && alpinePolicy
@@ -533,49 +601,11 @@ export function generateLicenseBundle({
   const packageOutputPath = join(outputPath, "packages");
   mkdirSync(packageOutputPath, { recursive: true });
 
-  const records = [];
-  const missingOriginalLicenseText = [];
-  for (const { pkg, source } of resolved) {
-    const targetDirectory = join(packageOutputPath, packageDirectoryName(pkg));
-    mkdirSync(targetDirectory, { recursive: true });
-    const copiedFiles = [];
-
-    for (const file of source.files) {
-      const targetName =
-        source.type === "package"
-          ? file.name
-          : `LICENSE.from-${packageDirectoryName({ name: source.package ?? "override", version: "source" })}-${file.name}`;
-      copyLegalFile(file, targetDirectory, targetName);
-      copiedFiles.push(targetName);
-    }
-    for (const file of pkg.legalFiles.filter((candidate) => candidate.type === "notice")) {
-      copyLegalFile(file, targetDirectory, file.name);
-      copiedFiles.push(file.name);
-    }
-
-    const hasOwnLicense = pkg.legalFiles.some((file) => LICENSE_FILE_PATTERN.test(file.name));
-    if (!hasOwnLicense) missingOriginalLicenseText.push(packageKey(pkg));
-    records.push({
-      name: pkg.name,
-      version: pkg.version,
-      license: pkg.license,
-      repository: pkg.repository,
-      author: pkg.author,
-      upstreamLicenseTextMissing: !hasOwnLicense,
-      licenseSource: { type: source.type, package: source.package },
-      files: copiedFiles.sort(),
-    });
-  }
+  const { records, missingOriginalLicenseText } = writePackageRecords(resolved, packageOutputPath);
 
   writeApkManifest(outputPath, apkPackages, alpineSourceValidation.sources);
 
-  if (systemLicenses.length > 0) {
-    const systemPath = join(outputPath, "system");
-    mkdirSync(systemPath, { recursive: true });
-    for (const entry of systemLicenses) {
-      copyFileSync(entry.path, join(systemPath, entry.name));
-    }
-  }
+  copySystemLicenses(outputPath, systemLicenses);
 
   const manifest = {
     schemaVersion: 1,
