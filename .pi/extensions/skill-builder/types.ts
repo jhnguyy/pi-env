@@ -21,8 +21,8 @@ export interface ValidationResult {
 
 /** Parsed SKILL.md frontmatter. */
 export interface SkillFrontmatter {
-  name?: string;
-  description?: string;
+  name?: unknown;
+  description?: unknown;
   license?: string;
   compatibility?: string;
   metadata?: Record<string, unknown>;

@@ -2,21 +2,27 @@
  * Skill Builder Extension
  *
  * Provides:
- * - `skill_build` tool — scaffold and validate a new skill, or run validation
- *   plus advisory evaluation for an existing skill
+ * - `skill_build` tool — scaffold, validate, or run one advisory evaluation
+ *   for a skill
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StringEnum } from "@earendil-works/pi-ai";
-import { Type } from "typebox";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync, readdirSync, existsSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
+import { Type } from "typebox";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
-import { Data, Effect } from "effect";
+import { Data, Effect, Result } from "effect";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import { WorkspaceAccess } from "../subagent/control";
+import {
+  runResolvedSubagentEffect,
+  type ResolvedSubagentRun,
+  type RunSubagentOptions,
+} from "../subagent/execute";
 
 const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
 const REFERENCE_SKILL_TOOL_DESCRIPTION =
@@ -96,10 +102,11 @@ export function getReferenceSkillIndex(): Map<string, ReferenceSkillEntry> {
   return index;
 }
 
-import { validateSkill } from "./validator";
-import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
-import type { ValidationResult } from "./types";
+import { resolveSkillDiff, type ExecFn } from "./git-diff";
+import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
+import type { EvaluationResult, ValidationResult } from "./types";
+import { validateSkill } from "./validator";
 import {
   noopToolingDiagnostics,
   withToolingTelemetryRuntime,
@@ -113,26 +120,38 @@ type SkillBuildParams = {
   template?: "basic" | "with-scripts" | "with-index";
   targetDir?: string;
   path?: string;
-  diff?: string;
+  action?: "validate" | "evaluate";
+  goal?: string;
 };
 
-type TextResult = {
+type TextResult = Omit<AgentToolResult<unknown>, "content"> & {
   content: Array<{ type: "text"; text: string }>;
-  details: unknown;
 };
 
 type SkillBuildOptions = {
   cwd: string;
   signal?: AbortSignal;
-  modelConfig: EvalModelConfig;
+  ctx?: ExtensionContext;
+  allowEvaluation?: boolean;
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;
 };
 
+type EvaluationRunner = typeof runResolvedSubagentEffect;
+let evaluationRunner: EvaluationRunner = runResolvedSubagentEffect;
+
+export function setSkillEvaluationRunnerForTests(runner: EvaluationRunner): void {
+  evaluationRunner = runner;
+}
+
+export function resetSkillEvaluationRunnerForTests(): void {
+  evaluationRunner = runResolvedSubagentEffect;
+}
+
 const SkillBuildOperation = {
   Scaffold: "scaffold",
   Validate: "validate",
-  FileCheck: "file_check",
+  Diff: "diff",
   FileRead: "file_read",
   Evaluate: "evaluate",
   Run: "skill_build",
@@ -146,6 +165,7 @@ const SkillBuildSpanName = {
   Workflow: "tooling.skill_build.workflow",
   Scaffold: "tooling.skill_build.scaffold",
   Validate: "tooling.skill_build.validate",
+  Diff: "tooling.skill_build.diff",
   Evaluate: "tooling.skill_build.evaluate",
 } as const;
 
@@ -156,7 +176,8 @@ export class SkillBuildOperationalError extends Data.TaggedError("SkillBuildOper
 
 const SkillBuildMode = {
   Create: "create",
-  Review: "review",
+  Validate: "validate",
+  Evaluate: "evaluate",
 } as const;
 
 type SkillBuildMode =
@@ -168,9 +189,13 @@ type SkillBuildMode =
       targetDir?: string;
     }
   | {
-      _tag: typeof SkillBuildMode.Review;
+      _tag: typeof SkillBuildMode.Validate;
       path: string;
-      diff?: string;
+    }
+  | {
+      _tag: typeof SkillBuildMode.Evaluate;
+      path: string;
+      goal: string;
     };
 
 type SkillBuildModeResolution =
@@ -186,12 +211,14 @@ const REFERENCE_SKILL_PARAMETERS = Type.Object({
 const SKILL_BUILD_PARAMETERS = Type.Object({
   name: Type.Optional(
     Type.String({
-      description: "New skill name. Use lowercase letters, digits, and hyphens only. Starts the create workflow.",
+      description:
+        "New skill name. Use lowercase letters, digits, and hyphens only. Starts the create workflow.",
     }),
   ),
   description: Type.Optional(
     Type.String({
-      description: "Describe what the skill does and when to use it. Keep it specific. Use no more than 1024 characters.",
+      description:
+        "Describe what the skill does and when to use it. Keep it specific. Use no more than 1024 characters.",
     }),
   ),
   template: Type.Optional(
@@ -207,18 +234,24 @@ const SKILL_BUILD_PARAMETERS = Type.Object({
   ),
   path: Type.Optional(
     Type.String({
-      description: "Path to an existing skill directory. Starts the review workflow.",
+      description: "Path to an existing skill directory. Defaults to deterministic validation.",
     }),
   ),
-  diff: Type.Optional(
+  action: Type.Optional(
+    StringEnum(["validate", "evaluate"] as const, {
+      description:
+        'Use "validate" for deterministic checks. Use "evaluate" for one advisory subagent review.',
+    }),
+  ),
+  goal: Type.Optional(
     Type.String({
-      description: "Unified diff of SKILL.md changes. Focus the evaluation on this changed text.",
+      description: "User-requested outcome that defines the scope of advisory evaluation.",
     }),
   ),
 });
 
-function textResult(text: string, details: unknown = null): TextResult {
-  return { content: [{ type: "text", text }], details };
+function textResult(text: string, details: unknown = null, usage?: Usage): TextResult {
+  return { content: [{ type: "text", text }], details, usage };
 }
 
 export function executeReferenceSkill(params: ReferenceSkillParams): TextResult {
@@ -249,48 +282,53 @@ export function executeReferenceSkill(params: ReferenceSkillParams): TextResult 
   return textResult(readFileSync(matched.filePath, "utf-8"), matched);
 }
 
-function resolveSkillBuildMode(params: SkillBuildParams): SkillBuildModeResolution {
-  const creating = Boolean(params.name);
-  const reviewing = Boolean(params.path);
+function invalidMode(message: string): SkillBuildModeResolution {
+  return { _tag: "invalid", message: `✗ ${message}` };
+}
 
-  if (!creating && !reviewing) {
-    return {
-      _tag: "invalid",
-      message: "✗ Provide name+description+template to create, or path to review.",
-    };
+function resolveCreateMode(params: SkillBuildParams): SkillBuildModeResolution {
+  if (!params.name || !params.description || !params.template) {
+    return invalidMode("Create mode requires name, description, and template.");
   }
-  if (creating && reviewing) {
-    return {
-      _tag: "invalid",
-      message: "✗ Provide either name (create) or path (review), not both.",
-    };
-  }
-  if (creating && (!params.description || !params.template)) {
-    return {
-      _tag: "invalid",
-      message: "✗ Create mode requires name, description, and template.",
-    };
-  }
-  if (creating) {
-    return {
-      _tag: "valid",
-      mode: {
-        _tag: SkillBuildMode.Create,
-        name: params.name!,
-        description: params.description!,
-        template: params.template!,
-        targetDir: params.targetDir,
-      },
-    };
+  if (params.action || params.goal) {
+    return invalidMode("Create mode does not accept action or goal.");
   }
   return {
     _tag: "valid",
     mode: {
-      _tag: SkillBuildMode.Review,
-      path: params.path!,
-      diff: params.diff,
+      _tag: SkillBuildMode.Create,
+      name: params.name,
+      description: params.description,
+      template: params.template,
+      targetDir: params.targetDir,
     },
   };
+}
+
+function resolveExistingMode(params: SkillBuildParams): SkillBuildModeResolution {
+  const action = params.action ?? SkillBuildMode.Validate;
+  if (action === SkillBuildMode.Evaluate) {
+    const goal = params.goal?.trim();
+    return goal
+      ? { _tag: "valid", mode: { _tag: SkillBuildMode.Evaluate, path: params.path!, goal } }
+      : invalidMode("Evaluate mode requires the user's goal.");
+  }
+  return params.goal
+    ? invalidMode("Goal applies only to evaluate mode.")
+    : { _tag: "valid", mode: { _tag: SkillBuildMode.Validate, path: params.path! } };
+}
+
+function resolveSkillBuildMode(params: SkillBuildParams): SkillBuildModeResolution {
+  const creating = Boolean(params.name);
+  const existing = Boolean(params.path);
+  if (creating && existing) {
+    return invalidMode("Provide either name (create) or path (validate or evaluate), not both.");
+  }
+  if (creating) return resolveCreateMode(params);
+  if (existing) return resolveExistingMode(params);
+  return invalidMode(
+    "Provide name+description+template to create, or path to validate or evaluate.",
+  );
 }
 
 function operationalFailure(
@@ -339,7 +377,11 @@ function runCreateWorkflowEffect(
     Effect.gen(function* () {
       const scaffold = yield* diagnostics.span(
         SkillBuildSpanName.Scaffold,
-        { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Create, template: mode.template },
+        {
+          operation: SkillBuildOperation.Run,
+          mode: SkillBuildMode.Create,
+          template: mode.template,
+        },
         Effect.try({
           try: () =>
             scaffoldSkill({
@@ -383,64 +425,144 @@ function runCreateWorkflowEffect(
       ];
       appendValidationSummary(lines, validation);
       lines.push("");
-      lines.push("Next: replace the scaffold placeholders, then review the skill by path.");
+      lines.push("Next: replace the scaffold placeholders, then validate the skill by path.");
       return textResult(lines.join("\n"), { skillDir: scaffold.skillDir, validation });
     }),
   );
 }
 
+const EVALUATOR_SYSTEM_PROMPT = [
+  "You are an advisory skill review subagent with no parent conversation context.",
+  "The task contains the user goal, skill content, diff, rubric, and exact JSON schema.",
+  "Return one JSON object and no other text. Do not use tools or request follow-up work.",
+].join("\n");
+
 interface EvaluationSummaryMetadata {
-  readonly verdict?: string;
+  readonly evaluation?: EvaluationResult;
   readonly findingCount: number;
   readonly errorKind?: string;
 }
 
-function appendEvaluationSummary(
-  lines: string[],
-  result: { code: number; stdout: string; stderr: string },
-  evalPrompt: string,
-  skillName: string,
-  modelConfig: EvalModelConfig,
-): EvaluationSummaryMetadata {
-  lines.push("");
-  if (result.code !== 0) {
-    lines.push(`✗ Evaluate: subagent failed (exit ${result.code}): ${result.stderr.slice(0, 200)}`);
-    return { findingCount: 0, errorKind: "process_exit" };
-  }
-
-  const evalResult = parseEvalResponse(result.stdout, skillName, modelConfig, {
-    inputTokens: Math.ceil(evalPrompt.length / 4),
-    outputTokens: Math.ceil(result.stdout.length / 4),
-  });
-  const icon =
-    evalResult.verdict === "pass" ? "✓" : evalResult.verdict === "needs-revision" ? "△" : "✗";
-  const cost =
-    evalResult.tokenEconomy.costModel === "self-hosted"
-      ? "self-hosted"
-      : `$${evalResult.tokenEconomy.estimatedCost.toFixed(6)}`;
-  lines.push(
-    `${icon} Evaluate: ${evalResult.verdict}  (${evalResult.tokenEconomy.model}, ${evalResult.tokenEconomy.inputTokens}in/${evalResult.tokenEconomy.outputTokens}out, ${cost})`,
-  );
-  for (const finding of evalResult.findings) {
-    lines.push(`  [${finding.severity.toUpperCase()}] ${finding.category}: ${finding.message}`);
-  }
-  return { verdict: evalResult.verdict, findingCount: evalResult.findings.length };
+function configuredModel(ctx: ExtensionContext): any {
+  const current = (ctx as ExtensionContext & { model?: unknown }).model;
+  if (current) return current;
+  const fallback = ctx.modelRegistry.getAvailable()[0];
+  if (!fallback) throw new Error("No usable model is available for skill evaluation.");
+  return fallback;
 }
 
-function runReviewWorkflowEffect(
+function modelString(model: any): string | undefined {
+  return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
+}
+
+export function modelConfigFromModel(model: any, actualModel?: string): EvalModelConfig {
+  return {
+    provider: model?.provider || "unknown",
+    model: actualModel || model?.id || "unknown",
+    costModel: model ? "api" : "self-hosted",
+    costPerMillionInputTokens: model?.cost?.input || 0,
+    costPerMillionOutputTokens: model?.cost?.output || 0,
+  };
+}
+
+function toolUsage(usage: {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+}): Usage {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: usage.cost,
+    },
+  };
+}
+
+function appendEvaluationSummary(
+  lines: string[],
+  result: AgentToolResult<any>,
+  skillName: string,
+  model: any,
+): EvaluationSummaryMetadata {
+  lines.push("");
+  if (result.details.isError) {
+    const reason = result.details.stopReason || "subagent failed";
+    lines.push(`Advisory evaluation unavailable for user review (${reason}).`);
+    return { findingCount: 0, errorKind: "subagent" };
+  }
+
+  const usage = result.details.usage;
+  const modelConfig = modelConfigFromModel(model, result.details.model);
+  const evaluation = parseEvalResponse(result.details.finalOutput, skillName, modelConfig, {
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheWriteTokens: usage.cacheWrite,
+    actualCost: usage.cost,
+  });
+  const cost =
+    evaluation.tokenEconomy.costModel === "self-hosted"
+      ? "self-hosted"
+      : `$${evaluation.tokenEconomy.estimatedCost.toFixed(6)}`;
+  lines.push(
+    `Advisory evaluation: ${evaluation.findings.length} finding(s) for user review (${evaluation.tokenEconomy.provider}/${evaluation.tokenEconomy.model}, ${evaluation.tokenEconomy.inputTokens}in/${evaluation.tokenEconomy.outputTokens}out, ${cost})`,
+  );
+  for (const finding of evaluation.findings) {
+    lines.push(`  [${finding.severity.toUpperCase()}] ${finding.category}: ${finding.message}`);
+  }
+  if (evaluation.findings.length > 0) {
+    lines.push("Review each finding against the user's goal. Do not rerun only to obtain a pass.");
+  }
+  return { evaluation, findingCount: evaluation.findings.length };
+}
+
+function evaluationRun(
+  skillName: string,
+  prompt: string,
+  skillDir: string,
+  model: any,
+): ResolvedSubagentRun {
+  return {
+    name: `skill-evaluation-${skillName}`,
+    task: prompt,
+    tools: [],
+    toolNames: [],
+    model,
+    modelOverride: modelString(model),
+    systemPrompt: EVALUATOR_SYSTEM_PROMPT,
+    cwd: skillDir,
+    workspaceAccess: WorkspaceAccess.Read,
+  };
+}
+
+function evaluationOptions(options: SkillBuildOptions): RunSubagentOptions {
+  return { signal: options.signal, env: options.env };
+}
+
+function runExistingSkillWorkflowEffect(
   pi: ExtensionAPI,
-  mode: Extract<SkillBuildMode, { _tag: "review" }>,
+  mode: Extract<SkillBuildMode, { _tag: "validate" | "evaluate" }>,
   options: SkillBuildOptions,
   diagnostics: ToolingDiagnostics,
 ): Effect.Effect<TextResult, SkillBuildOperationalError> {
   return diagnostics.span(
     SkillBuildSpanName.Workflow,
-    { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Review },
+    { operation: SkillBuildOperation.Run, mode: mode._tag },
     Effect.gen(function* () {
       const skillDir = resolve(options.cwd, mode.path);
       const validation = yield* diagnostics.span(
         SkillBuildSpanName.Validate,
-        { operation: SkillBuildOperation.Run, mode: SkillBuildMode.Review },
+        { operation: SkillBuildOperation.Run, mode: mode._tag },
         Effect.try({
           try: () => validateSkill(skillDir),
           catch: (cause) =>
@@ -450,69 +572,142 @@ function runReviewWorkflowEffect(
       const lines: string[] = [];
       appendValidationSummary(lines, validation);
 
-      const skillMdPath = join(skillDir, "SKILL.md");
-      const hasSkillMd = yield* Effect.try({
-        try: () => existsSync(skillMdPath),
-        catch: (cause) =>
-          operationalFailure(SkillBuildOperation.FileCheck, "Skill file check failed", cause),
-      });
-      if (!hasSkillMd) {
+      if (mode._tag === SkillBuildMode.Validate || !validation.valid) {
         yield* diagnostics.annotate({
           operation: SkillBuildOperation.Run,
-          mode: SkillBuildMode.Review,
+          mode: mode._tag,
           outcome: validation.valid ? "success" : "failure",
           ...validationCounts(validation),
         });
         return textResult(lines.join("\n"), { skillDir, validation });
       }
+      if (options.allowEvaluation === false) {
+        lines.push("");
+        lines.push("Advisory evaluation must run from the parent session.");
+        return textResult(lines.join("\n"), { skillDir, validation });
+      }
+      if (!options.ctx) {
+        lines.push("");
+        lines.push(
+          "Advisory evaluation unavailable for user review: parent session context is missing.",
+        );
+        return textResult(lines.join("\n"), { skillDir, validation });
+      }
 
+      const skillMdPath = join(skillDir, "SKILL.md");
       const skillContent = yield* Effect.try({
         try: () => readFileSync(skillMdPath, "utf-8"),
         catch: (cause) =>
           operationalFailure(SkillBuildOperation.FileRead, "Skill file read failed", cause),
       });
-      const skillName = skillContent.match(/^name:\s*(.+)$/m)?.[1]?.trim() || basename(skillDir);
-      const evalPrompt = buildEvalPrompt(skillContent, skillName, mode.diff);
-      const result = yield* diagnostics.span(
-        SkillBuildSpanName.Evaluate,
-        {
-          operation: SkillBuildOperation.Run,
-          mode: SkillBuildMode.Review,
-          provider: options.modelConfig.provider,
-          model: options.modelConfig.model,
-          cost_model: options.modelConfig.costModel,
-        },
+      const skillName = validation.name || basename(skillDir);
+      const diff = yield* diagnostics.span(
+        SkillBuildSpanName.Diff,
+        { operation: SkillBuildOperation.Diff, mode: mode._tag },
         Effect.tryPromise({
-          try: (signal) =>
-            pi.exec(
-              "pi",
-              ["-p", "--no-session", "--no-skills", "--no-extensions", "--tools", "", evalPrompt],
-              { signal, timeout: 60000 },
-            ),
+          try: (signal) => resolveSkillDiff(pi.exec.bind(pi) as ExecFn, skillDir, signal),
           catch: (cause) =>
-            operationalFailure(SkillBuildOperation.Evaluate, "Skill evaluation failed", cause),
+            operationalFailure(SkillBuildOperation.Diff, "Skill diff resolution failed", cause),
         }),
       );
-      const evaluation = appendEvaluationSummary(
-        lines,
-        result,
-        evalPrompt,
-        skillName,
-        options.modelConfig,
+      const prompt = buildEvalPrompt(skillContent, skillName, mode.goal, diff.diff);
+      const modelResult = yield* Effect.result(
+        Effect.try({
+          try: () => configuredModel(options.ctx!),
+          catch: (cause) =>
+            operationalFailure(
+              SkillBuildOperation.Evaluate,
+              "Skill evaluation model resolution failed",
+              cause,
+            ),
+        }),
       );
+      if (Result.isFailure(modelResult)) {
+        lines.push("");
+        lines.push("Advisory evaluation unavailable for user review: no model is available.");
+        yield* diagnostics.annotate({
+          operation: SkillBuildOperation.Run,
+          mode: mode._tag,
+          outcome: "success",
+          error_kind: "model",
+          ...validationCounts(validation),
+        });
+        return textResult(lines.join("\n"), {
+          skillDir,
+          validation,
+          diffSource: diff.source,
+        });
+      }
+      const model = modelResult.success;
+      const child = yield* Effect.result(
+        diagnostics.span(
+          SkillBuildSpanName.Evaluate,
+          {
+            operation: SkillBuildOperation.Run,
+            mode: mode._tag,
+            provider: model.provider,
+            model: model.id,
+            cost_model: "subagent",
+          },
+          evaluationRunner(
+            evaluationRun(skillName, prompt, skillDir, model),
+            options.ctx,
+            evaluationOptions(options),
+          ).pipe(
+            Effect.mapError((cause) =>
+              operationalFailure(SkillBuildOperation.Evaluate, "Skill evaluation failed", cause),
+            ),
+          ),
+        ),
+      );
+      if (Result.isFailure(child)) {
+        lines.push("");
+        lines.push("Advisory evaluation unavailable for user review.");
+        yield* diagnostics.annotate({
+          operation: SkillBuildOperation.Run,
+          mode: mode._tag,
+          outcome: "success",
+          error_kind: "subagent",
+          ...validationCounts(validation),
+        });
+        return textResult(lines.join("\n"), {
+          skillDir,
+          validation,
+          diffSource: diff.source,
+        });
+      }
+
+      const result = child.success;
+      const summary = appendEvaluationSummary(lines, result, skillName, model);
       yield* diagnostics.annotate({
         operation: SkillBuildOperation.Run,
-        mode: SkillBuildMode.Review,
-        outcome: result.code === 0 && validation.valid ? "success" : "failure",
-        error_kind: evaluation.errorKind,
-        verdict: evaluation.verdict,
-        finding_count: evaluation.findingCount,
-        provider: options.modelConfig.provider,
-        model: options.modelConfig.model,
-        cost_model: options.modelConfig.costModel,
+        mode: mode._tag,
+        outcome: "success",
+        error_kind: summary.errorKind,
+        verdict: summary.evaluation?.verdict,
+        finding_count: summary.findingCount,
+        provider: model.provider,
+        model: result.details.model || model.id,
+        cost_model: modelConfigFromModel(model).costModel,
         ...validationCounts(validation),
       });
-      return textResult(lines.join("\n"), { skillDir, validation });
+      return textResult(
+        lines.join("\n"),
+        {
+          skillDir,
+          validation,
+          diffSource: diff.source,
+          evaluation: summary.evaluation,
+          child: {
+            sessionFile: result.details.sessionFile,
+            sessionName: result.details.sessionName,
+            model: result.details.model,
+            usage: result.details.usage,
+            isError: result.details.isError,
+          },
+        },
+        toolUsage(result.details.usage),
+      );
     }),
   );
 }
@@ -527,7 +722,7 @@ export function executeSkillBuildEffect(
   if (resolution._tag === "invalid") return Effect.succeed(textResult(resolution.message));
   return resolution.mode._tag === SkillBuildMode.Create
     ? runCreateWorkflowEffect(resolution.mode, options, diagnostics)
-    : runReviewWorkflowEffect(pi, resolution.mode, options, diagnostics);
+    : runExistingSkillWorkflowEffect(pi, resolution.mode, options, diagnostics);
 }
 
 /** Promise compatibility boundary for Pi and AgentTool execute callbacks. */
@@ -547,16 +742,6 @@ export function runSkillBuild(
   return Effect.runPromise(program, { signal: options.signal });
 }
 
-function modelConfigFromContext(model: any): EvalModelConfig {
-  return {
-    provider: model?.provider || "unknown",
-    model: model?.id || "unknown",
-    costModel: model ? "api" : "self-hosted",
-    costPerInputToken: model?.cost?.input || 0,
-    costPerOutputToken: model?.cost?.output || 0,
-  };
-}
-
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "reference_skill",
@@ -572,16 +757,17 @@ export default function (pi: ExtensionAPI) {
     name: "skill_build",
     label: "Skill Build",
     description:
-      "Create or review a pi skill. " +
-      "Create mode (pass name + description + template): scaffold → validate. " +
-      "Review mode (pass path): validate → advisory evaluation. " +
-      "Pass diff to focus evaluation on what changed.",
+      "Create, validate, or evaluate a pi skill. " +
+      "Create mode passes name + description + template. " +
+      "A path defaults to deterministic validation. " +
+      'Pass action "evaluate" with the user goal for one advisory subagent review. ' +
+      "Evaluation uses local SKILL.md changes against Git HEAD when available.",
     parameters: SKILL_BUILD_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       return runSkillBuild(pi, params as SkillBuildParams, {
         cwd: ctx.cwd,
         signal,
-        modelConfig: modelConfigFromContext(ctx.model),
+        ctx,
       });
     },
   });
@@ -595,27 +781,27 @@ export default function (pi: ExtensionAPI) {
   };
   const createSkillBuildAgentTool = (
     cwd: string,
-    model: unknown,
+    parentContext?: ExtensionContext,
   ): AgentTool<any, any> => ({
     name: "skill_build",
     label: "Skill Build",
     description:
-      "Create or review a pi skill. Create mode scaffolds and validates; review mode validates and runs advisory evaluation.",
+      "Create or validate a pi skill. Advisory evaluation must run from the parent session.",
     parameters: SKILL_BUILD_PARAMETERS,
     execute: async (_toolCallId, params, signal) =>
       runSkillBuild(pi, params as SkillBuildParams, {
         cwd,
         signal,
-        modelConfig: modelConfigFromContext(model),
+        ctx: parentContext,
+        allowEvaluation: false,
       }),
   });
   registerAgentToolsOnSessionStart(pi, [
     { tool: referenceSkillAgentTool, capabilities: [ToolCapability.Read] },
     {
-      tool: createSkillBuildAgentTool(process.cwd(), null),
-      createTool: ({ cwd, parentContext }) =>
-        createSkillBuildAgentTool(cwd, parentContext?.model),
-      capabilities: [ToolCapability.Read, ToolCapability.Write, ToolCapability.Execute],
+      tool: createSkillBuildAgentTool(process.cwd()),
+      createTool: ({ cwd, parentContext }) => createSkillBuildAgentTool(cwd, parentContext),
+      capabilities: [ToolCapability.Read, ToolCapability.Write],
     },
   ]);
 }

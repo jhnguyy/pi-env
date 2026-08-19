@@ -33,16 +33,16 @@ const testModelConfig: EvalModelConfig = {
   provider: "anthropic",
   model: "claude-haiku-4-5-20250929",
   costModel: "api",
-  costPerInputToken: 0.0000008,
-  costPerOutputToken: 0.000004,
+  costPerMillionInputTokens: 0.8,
+  costPerMillionOutputTokens: 4,
 };
 
 const selfHostedConfig: EvalModelConfig = {
   provider: "ollama",
   model: "llama3.2",
   costModel: "self-hosted",
-  costPerInputToken: 0,
-  costPerOutputToken: 0,
+  costPerMillionInputTokens: 0,
+  costPerMillionOutputTokens: 0,
 };
 
 describeIfEnabled("skill-builder", "Evaluator", () => {
@@ -51,37 +51,38 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
   describe("buildEvalPrompt", () => {
     it("includes the skill content in the prompt", () => {
       const content = createSkillContent("my-tool", "# My Tool\n\nDoes things.");
-      const prompt = buildEvalPrompt(content, "my-tool");
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
       expect(prompt).toContain("my-tool");
       expect(prompt).toContain("Does things.");
     });
 
     it("includes evaluation rubric categories", () => {
       const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool");
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
       expect(prompt).toContain("clarity");
       expect(prompt).toContain("completeness");
       expect(prompt).toContain("context-efficiency");
     });
 
-    it("prioritizes brevity, delegation, and authoritative sources", () => {
+    it("uses the user goal and prioritizes narrowing and delegation", () => {
       const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool");
-      expect(prompt).toContain("Brevity and delegation are paramount");
-      expect(prompt).toContain("Missing detail matters only when the skill owns it");
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
+      expect(prompt).toContain("Keep the skill concise.");
+      expect(prompt).toContain("The user goal controls scope");
+      expect(prompt).toContain("Prefer narrowing, deleting, or delegating before adding");
       expect(prompt).toContain("Prefer authoritative sources over copied facts");
     });
 
     it("requests structured JSON output", () => {
       const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool");
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
       expect(prompt).toMatch(/json/i);
     });
 
     it("includes diff context when provided", () => {
       const content = createSkillContent("my-tool", "# My Tool\n\nNew content.");
       const diff = "- Old line\n+ New content.";
-      const prompt = buildEvalPrompt(content, "my-tool", diff);
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.", diff);
       expect(prompt).toContain("Old line");
       expect(prompt).toContain("diff");
     });
@@ -185,9 +186,25 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
         inputTokens: 500,
         outputTokens: 100,
       });
-      // Should keep valid findings, drop invalid
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0].category).toBe("clarity");
+    });
+
+    it("bounds advisory findings and message length", () => {
+      const response = JSON.stringify({
+        verdict: "needs-revision",
+        findings: Array.from({ length: 4 }, (_, index) => ({
+          category: "clarity",
+          severity: "warning",
+          message: `${index}:${"x".repeat(600)}`,
+        })),
+      });
+      const result = parseEvalResponse(response, "my-tool", testModelConfig, {
+        inputTokens: 500,
+        outputTokens: 100,
+      });
+      expect(result.findings).toHaveLength(3);
+      expect(result.findings.every((finding) => finding.message.length <= 500)).toBe(true);
     });
   });
 
@@ -196,7 +213,7 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
   describe("estimateCost", () => {
     it("calculates API cost from token counts", () => {
       const cost = estimateCost(testModelConfig, 1000, 200);
-      // 1000 * 0.0000008 + 200 * 0.000004 = 0.0008 + 0.0008 = 0.0016
+      // (1000 / 1M) * 0.8 + (200 / 1M) * 4 = 0.0016
       expect(cost).toBeCloseTo(0.0016, 6);
     });
 
@@ -216,14 +233,14 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
   describe("diff-aware evaluation", () => {
     it("buildEvalPrompt without diff omits diff section", () => {
       const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool");
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
       expect(prompt).not.toContain("## Changes");
     });
 
     it("buildEvalPrompt with diff includes diff-aware instructions", () => {
       const content = createSkillContent("my-tool", "# My Tool\n\nUpdated.");
       const diff = "@@ -1,3 +1,3 @@\n- old instruction\n+ Updated.";
-      const prompt = buildEvalPrompt(content, "my-tool", diff);
+      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.", diff);
       expect(prompt).toContain("Changes");
       expect(prompt).toContain("old instruction");
       // Should ask evaluator to focus on what changed

@@ -4,7 +4,7 @@
  * Design:
  * - Provider-agnostic: accepts model config, doesn't hardcode Anthropic
  * - Token-economy-aware: tracks cost per evaluation, distinguishes API vs self-hosted
- * - JiT-style: supports diff-aware evaluation (focus on what changed)
+ * - Goal- and diff-aware: evaluates the user's requested outcome and local changes
  * - Produces structured results suitable for notes tracking
  *
  * This module handles prompt construction and response parsing.
@@ -18,8 +18,8 @@ export interface EvalModelConfig {
   provider: string;
   model: string;
   costModel: "api" | "self-hosted";
-  costPerInputToken: number;
-  costPerOutputToken: number;
+  costPerMillionInputTokens: number;
+  costPerMillionOutputTokens: number;
 }
 
 export interface TokenUsage {
@@ -27,6 +27,7 @@ export interface TokenUsage {
   outputTokens: number;
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  actualCost?: number;
 }
 
 /** Shape we expect from the LLM evaluator response (validated before use). */
@@ -44,41 +45,49 @@ const VALID_CATEGORIES = new Set([
   "jit-catch",
 ]);
 const VALID_SEVERITIES = new Set(["error", "warning", "info"]);
+const MAX_FINDINGS = 3;
+const MAX_FINDING_MESSAGE_LENGTH = 500;
 
 const RUBRIC = `## Evaluation Rubric
 
-Judge only the capability promised by the description. Brevity and delegation are paramount; do not infer a tutorial, setup guide, or reference manual.
+The user goal controls scope. Treat the description as activation metadata, not a demand to add routine mechanics. Assume a competent coding agent can use standard tools and repository guidance. Prefer narrowing, deleting, or delegating before adding instructions.
 
 ### clarity
-Can an agent act without inventing requirements? Keep only non-obvious decisions, constraints, and retrieval steps.
+Can an agent achieve the user goal without inventing non-obvious requirements? Keep only decisions, constraints, and retrieval steps that the skill must own.
 
 ### completeness
-Is the stated capability minimally sufficient? Missing detail matters only when the skill owns it and cannot delegate it.
+Is the user goal minimally supported? Flag omitted detail only when the omission creates a concrete reliability, safety, or usability failure that an authoritative source cannot resolve.
 
 ### context-efficiency
-Does every instruction earn its recurring cost? Prefer authoritative sources over copied facts, and direct instructions over unnecessary indexes or references.
+Does every instruction earn its recurring cost? Prefer authoritative sources over copied facts and direct instructions over unnecessary indexes or references.
 
 ### correctness
 Are stable claims accurate and changing facts retrieved at task time? Do references resolve where used?
 
 ### jit-catch (only when diff provided)
-Do changes preserve scope, consistency, and context efficiency without leaving broken references?`;
+Do the local changes preserve scope, consistency, and context efficiency without leaving broken references?`;
 
 /**
  * Build the evaluation prompt for the LLM judge.
  *
  * @param skillContent - Full content of SKILL.md
  * @param skillName - Name of the skill being evaluated
- * @param diff - Optional unified diff for JiT-style evaluation
+ * @param goal - User-requested outcome that defines the evaluation scope
+ * @param diff - Optional local SKILL.md diff against Git HEAD
  */
 export function buildEvalPrompt(
   skillContent: string,
   skillName: string,
+  goal: string,
   diff?: string,
 ): string {
   let prompt = `You are evaluating a pi coding agent skill named "${skillName}".
 
 ${RUBRIC}
+
+## User Goal
+
+${goal}
 
 ## Skill Content
 
@@ -91,7 +100,7 @@ ${skillContent}
     prompt += `
 ## Changes (Diff)
 
-Focus your evaluation on what changed. Flag any issues introduced by the modifications.
+Focus on issues introduced by these local changes. Use the full skill only to detect contradictions or lost requirements.
 
 \`\`\`diff
 ${diff}
@@ -116,11 +125,14 @@ Respond with a JSON object (no markdown wrapping needed, but it's okay if you us
 }
 
 Rules:
-- "pass" = the stated capability is usable and concise
-- "needs-revision" = a material in-scope issue reduces reliability, safety, or usability
+- The verdict and findings are advisory. The user decides whether each finding applies.
+- "pass" = the user goal is supported and no material finding remains
+- "needs-revision" = a material goal-relative issue reduces reliability, safety, or usability
 - "fail" = errors prevent the skill from working
-- Do not request copied facts or out-of-scope detail; use "info" for genuinely optional suggestions
-- Be concise and actionable. Use "jit-catch" only when a diff is provided.`;
+- Do not request routine tool mechanics, copied facts, or out-of-scope detail
+- For each finding, state the concrete failure and the smallest corrective action
+- Return no more than three findings. Use "info" only for genuinely optional suggestions
+- Be concise. Use "jit-catch" only when a diff is provided.`;
 
   return prompt;
 }
@@ -142,11 +154,8 @@ export function parseEvalResponse(
     outputTokens: usage.outputTokens,
     cacheReadTokens: usage.cacheReadTokens,
     cacheWriteTokens: usage.cacheWriteTokens,
-    estimatedCost: estimateCost(
-      modelConfig,
-      usage.inputTokens,
-      usage.outputTokens,
-    ),
+    estimatedCost:
+      usage.actualCost ?? estimateCost(modelConfig, usage.inputTokens, usage.outputTokens),
     costModel: modelConfig.costModel,
   };
 
@@ -161,7 +170,9 @@ export function parseEvalResponse(
       if (parsed && typeof parsed === "object" && "verdict" in parsed) {
         return parsed as RawEvalResponse;
       }
-    } catch { /* not valid JSON */ }
+    } catch {
+      /* not valid JSON */
+    }
     return null;
   };
 
@@ -190,9 +201,10 @@ export function parseEvalResponse(
   // Validate verdict
   type EvalVerdict = "pass" | "fail" | "needs-revision";
   const rawVerdict = json.verdict;
-  const verdict: EvalVerdict = typeof rawVerdict === "string" && VALID_VERDICTS.has(rawVerdict)
-    ? (rawVerdict as EvalVerdict)
-    : "fail";
+  const verdict: EvalVerdict =
+    typeof rawVerdict === "string" && VALID_VERDICTS.has(rawVerdict)
+      ? (rawVerdict as EvalVerdict)
+      : "fail";
 
   // Validate and filter findings
   const findings: EvaluationFinding[] = [];
@@ -207,8 +219,9 @@ export function parseEvalResponse(
         findings.push({
           category: f.category,
           severity: f.severity,
-          message: f.message,
+          message: f.message.slice(0, MAX_FINDING_MESSAGE_LENGTH),
         });
+        if (findings.length >= MAX_FINDINGS) break;
       }
     }
   }
@@ -231,5 +244,8 @@ export function estimateCost(
   outputTokens: number,
 ): number {
   if (config.costModel === "self-hosted") return 0;
-  return inputTokens * config.costPerInputToken + outputTokens * config.costPerOutputToken;
+  return (
+    (inputTokens / 1_000_000) * config.costPerMillionInputTokens +
+    (outputTokens / 1_000_000) * config.costPerMillionOutputTokens
+  );
 }
