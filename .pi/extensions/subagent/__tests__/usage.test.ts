@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SubagentRunAccumulator, SubagentUsageLedger, zeroUsage } from "../usage";
+import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, zeroUsage } from "../usage";
 import type { SubagentDetails } from "../types";
 
 function details(name: string, input: number, output: number): SubagentDetails {
@@ -30,6 +30,23 @@ describe("subagent usage accumulation", () => {
 
     ledger.clear();
     expect(ledger.render()).toBe("No subagent usage recorded.");
+  });
+
+  it("retains every text part from only the latest assistant message", () => {
+    expect(
+      getFinalOutput([
+        { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
+        { role: "user", content: [{ type: "text", text: "follow-up" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "latest first" },
+            { type: "thinking", thinking: "not output" },
+            { type: "text", text: "latest second" },
+          ],
+        },
+      ] as any),
+    ).toBe("latest first\nlatest second");
   });
 
   it("accumulates transcript, usage, tool count, and turn-limit state", () => {

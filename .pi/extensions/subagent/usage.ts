@@ -39,9 +39,11 @@ export function getFinalOutput(messages: AgentMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as any;
     if (msg.role !== "assistant") continue;
+    const textParts: string[] = [];
     for (const part of msg.content) {
-      if (part.type === "text") return part.text as string;
+      if (part.type === "text") textParts.push(part.text as string);
     }
+    return textParts.join("\n");
   }
   return "";
 }

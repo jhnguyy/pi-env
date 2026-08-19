@@ -10,8 +10,8 @@ Use `subagent_start` to start a session-scoped job and continue parent work. The
 
 - `list` returns bounded metadata for retained jobs.
 - `status` returns metadata for one job.
-- `wait` waits for a terminal state and returns metadata.
-- `result` returns the bounded retained result.
+- `wait` waits for a terminal state. A successfully completed job returns its bounded retained final answer directly; other terminal states return status metadata.
+- `result` returns only the bounded retained final answer for a completed job. Job, usage, session, and truncation metadata remain available in tool details and the TUI.
 - `cancel` requests cancellation.
 - `usage` returns aggregate subagent usage for the parent session.
 

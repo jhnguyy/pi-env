@@ -103,6 +103,7 @@ function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
     usage: details?.usage,
     model: details?.model,
     sessionName: details?.sessionName,
+    sessionFile: details?.sessionFile,
     resultTruncated: job.resultTruncated,
   };
 }
@@ -180,7 +181,7 @@ export default function (pi: ExtensionAPI) {
       }
       if (!waited.job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
-        content: [{ type: "text", text: formatJobMetadata(waited.job) }],
+        content: [{ type: "text", text: formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
       };
     }
