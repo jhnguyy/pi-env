@@ -26,6 +26,7 @@ import {
   DEV_TOOLS_WRITE_ACTIONS,
 } from "./action-contract";
 import { registerCleanupCommand } from "./cleanup";
+import { registerCloseoutCommand } from "./closeout";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export default function (pi: ExtensionAPI) {
   const client = new LspClient();
 
   registerCleanupCommand(pi);
+  registerCloseoutCommand(pi);
 
   // ─── dev-tools tool ───────────────────────────────────────────────────────
 
