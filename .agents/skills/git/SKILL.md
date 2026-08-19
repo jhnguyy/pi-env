@@ -1,39 +1,35 @@
 ---
 name: git
-description: "Git hygiene and pull request rules for any repository: keep the base tree updated, do branch work in dedicated git worktrees, and write reviewer-friendly PR descriptions."
+description: "Manages Git changes in dedicated worktrees from branch setup through commit, pull request preparation, and post-merge cleanup."
 ---
 
-# Git Hygiene
+# Git Change Workflow
 
-Use before starting non-trivial work in any Git repository, creating or switching branches, merging work, or cleaning up a completed branch.
+Use when starting, resuming, committing, publishing, or cleaning up work in a Git repository.
 
-- Treat the base working tree as the checkout that tracks the base branch, not as a place for feature branch work. Use the project-specified base branch. Otherwise, use `main`. If `main` is not appropriate, inspect the remote default branch and ask before assuming.
-- Before starting work, ensure the base working tree is on the base branch, clean (`git status --porcelain` is empty), and synchronized by fast-forwarding from its remote when one exists.
-- The base branch should only need fast-forward sync from its remote. If it has uncommitted changes or cannot fast-forward, stop before proceeding.
-- Do not create, switch to, or edit feature branches in the base working tree.
-- Do all branch work in a dedicated worktree: one branch/session per worktree.
-- If a GitHub SSH agent refuses signing, check `gh auth status`.
-- If `gh` has an active account, use the equivalent HTTPS repository URL for the blocked fetch or push. Use an explicit refspec when the fetch must update `origin/*`. Let the configured `gh` credential helper supply authentication. Do not expose tokens.
-- Do not rewrite `origin` to use HTTPS unless the user requests that change.
-- Use `git worktree list` to find existing worktrees and avoid checking out the same branch in multiple worktrees. If the branch already has a worktree, use it. If the branch exists locally, attach the worktree to it. If it exists only remotely, fetch first and create the local branch/worktree from the remote-tracking branch instead of recreating it.
-- Use the real branch name for Git and a slash-free filesystem slug for the worktree path, e.g. `feat/example` -> `repo-feat-example`. Temporary worktree paths are acceptable when branch work is committed and pushed regularly. Do not place worktrees inside the base working tree.
-- Follow project-specific branch naming, test, merge, push, and PR conventions. If the repository uses remote PR-only merges, do not perform a local merge.
-- For new work, sync the base tree first, then create a branch worktree. For existing work, find or attach the existing branch worktree. After merge or PR completion, verify the branch is no longer needed, then remove the worktree and delete the local branch (`git worktree remove`, `git branch -d`).
-- For Git syntax details, use `git help worktree` rather than expanding this skill into a Git tutorial.
+## Prepare
 
-## Pull Requests
+- Read the repository instructions first. Follow its rules for the base branch, branch names, worktrees, validation, pushes, merges, and pull requests.
+- Determine the base branch from the repository instructions or the remote default branch. Ask if neither source identifies it.
+- Reserve the base worktree for the base branch. Do not create, switch to, or edit a feature branch there.
 
-When preparing or creating a pull request:
+## Start or Resume Work
 
-- First explore the repository for pull request conventions instead of assuming a format. Look for project-specific PR guidance and templates such as `pull_request_template`, `.github/PULL_REQUEST_TEMPLATE*`, Forgejo/Gitea/GitHub templates, contributing docs, or nearby repository-specific instructions.
-- Follow any discovered PR template or project convention. If no template exists, create a reviewer-friendly description tailored to the actual change.
-- Do not duplicate qualitative information already available in the Files Changed tab: avoid file-by-file summaries, mechanical diff narration, or listing every touched path.
-- Prefer behavioral and decision-oriented information:
-  - what behavior changes for users, operators, agents, or maintainers
-  - why the change was made
-  - important decisions and tradeoffs
-  - constraints considered
-  - validation performed
-  - risks, follow-ups, or reviewer attention areas
-- The PR description should equip a reviewer to approve or reject the change without reverse-engineering intent from the diff.
-- If the repository uses PR-only merges, do not merge locally unless explicitly instructed.
+- Before new work, confirm that the base worktree is on the base branch and clean. If the base branch has an upstream, fetch it. Stop if the branch is ahead of its upstream or has diverged. Fast-forward the branch if it is behind.
+- Create each new branch from the updated base branch in a dedicated worktree outside the base worktree.
+- Before resuming a branch, inspect `git worktree list`. If the current worktree has the branch, continue there. If another worktree has it, ask whether that worktree is free before use.
+- If the branch has no worktree, attach one to the local branch. If the branch exists only on a remote, fetch it first and create the local branch and worktree from the remote-tracking branch.
+
+## Commit and Publish
+
+- Inspect `git status` and the diff before committing. Run the repository-required validation and commit only the intended changes.
+- Resolve the push remote from the repository instructions or Git configuration. Ask if the remote is ambiguous. Set the upstream on the first push, then use that upstream. Do not force-push or change remote configuration unless the user explicitly requests it.
+- Before preparing a pull request, inspect repository contribution guidance such as `CONTRIBUTING.md` and applicable pull request template files such as `.github/pull_request_template.md`.
+- Follow the applicable instructions and template. Create or update the pull request for the actual change.
+- Explain the behavioral outcome and rationale. Record important decisions, validation, risks, and follow-up work.
+- Do not narrate the diff or list every changed file.
+- If the repository uses pull-request-only merges, do not merge locally unless the user explicitly requests it.
+
+## Clean Up
+
+- After merge, verify the merged pull request or equivalent forge status and confirm that the worktree is clean. Remove the worktree, then delete the local branch with `git branch -d`. If squash or rebase history prevents deletion, use `git branch -D` only after the user confirms that the local commits can be discarded.
