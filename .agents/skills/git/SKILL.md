@@ -24,7 +24,8 @@ Use when starting, resuming, committing, publishing, or cleaning up work in a Gi
 
 - Inspect `git status` and the diff before committing. Run the repository-required validation and commit only the intended changes.
 - Resolve the push remote from the repository instructions or Git configuration. Ask if the remote is ambiguous. Set the upstream on the first push, then use that upstream. Do not force-push or change remote configuration unless the user explicitly requests it.
-- Read and follow the repository pull request guidance and template. Create or update the pull request for the actual change.
+- Before preparing a pull request, inspect repository contribution guidance such as `CONTRIBUTING.md` and applicable pull request template files such as `.github/pull_request_template.md`.
+- Follow the applicable instructions and template. Create or update the pull request for the actual change.
 - Explain the behavioral outcome and rationale. Record important decisions, validation, risks, and follow-up work.
 - Do not narrate the diff or list every changed file.
 - If the repository uses pull-request-only merges, do not merge locally unless the user explicitly requests it.
