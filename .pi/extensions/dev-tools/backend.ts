@@ -4,7 +4,7 @@
 
 import { type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, extname, resolve as resolvePath } from "node:path";
+import { dirname, extname, join, resolve as resolvePath } from "node:path";
 
 import { Data, Deferred, Effect, Exit, Scope } from "effect";
 
@@ -13,7 +13,7 @@ import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { DiagnosticsCache } from "./diagnostics-cache";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
-import type { DiagnosticItem } from "./protocol";
+import type { DiagnosticItem, InitializationState, ProjectMode } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
 import { findNodeBinaryLite } from "../_shared/node-bin-lite";
 import {
@@ -29,6 +29,22 @@ import {
 
 export const LSP_INIT_TIMEOUT_MS = 10_000;
 export const LSP_REQUEST_TIMEOUT_MS = 5_000;
+export const LSP_SEMANTIC_REQUEST_TIMEOUT_MS = 20_000;
+
+const COLD_SEMANTIC_METHODS = new Set([
+  "textDocument/documentSymbol",
+  "workspace/symbol",
+  "textDocument/hover",
+  "textDocument/definition",
+  "textDocument/implementation",
+  "textDocument/references",
+]);
+
+export function lspRequestTimeoutMs(method: string): number {
+  return COLD_SEMANTIC_METHODS.has(method)
+    ? LSP_SEMANTIC_REQUEST_TIMEOUT_MS
+    : LSP_REQUEST_TIMEOUT_MS;
+}
 
 export async function findBinary(name: string): Promise<string | null> {
   return findNodeBinaryLite(name, import.meta.url);
@@ -53,6 +69,39 @@ type BackendResource = {
   process?: ChildProcess;
   listeners?: ListenerSet;
   stderrTail: string;
+};
+
+type SemanticRequestSummary = {
+  method: string;
+  itemCount: number;
+};
+
+type SemanticFailureSummary = {
+  method: string;
+  detail: string;
+};
+
+const MAX_STATUS_DETAIL_LENGTH = 256;
+
+function compactStatusDetail(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= MAX_STATUS_DETAIL_LENGTH
+    ? normalized
+    : `${normalized.slice(0, MAX_STATUS_DETAIL_LENGTH - 3)}...`;
+}
+
+export type BackendStatusSnapshot = {
+  name: string;
+  running: boolean;
+  initializationState: InitializationState;
+  semanticAvailable: boolean;
+  lastSemanticRequest?: SemanticRequestSummary;
+  semanticFailure?: SemanticFailureSummary;
+  stderrTail?: string;
+  startupFailure?: string;
+  projectMode: ProjectMode;
+  projectRoot?: string;
+  tsconfigPath?: string;
 };
 
 type BackendLifecycle =
@@ -119,6 +168,11 @@ export class LspBackend {
   private lifecycle: BackendLifecycle = { _tag: "idle", generation: 0 };
   private nextLspId = 1;
   private readonly pendingLsp = new Map<number, Pending>();
+  private initialWorkspaceRoot: string | null = null;
+  private semanticAvailable = false;
+  private lastSemanticRequest: SemanticRequestSummary | undefined;
+  private startupFailureDetail: string | undefined;
+  private semanticFailure: SemanticFailureSummary | undefined;
 
   readonly diagnostics = new DiagnosticsCache();
   private readonly docManager: DocumentManager;
@@ -172,9 +226,16 @@ export class LspBackend {
 
   findProjectRoot(filePath: string): string | null {
     if (this.rootMarkers.length === 0) return null;
+    const configMarkers = this.rootMarkers.filter((marker) => marker === "tsconfig.json" || marker === "jsconfig.json");
+    return this.findNearestRootMarker(filePath, configMarkers) ??
+      this.findNearestRootMarker(filePath, this.rootMarkers);
+  }
+
+  private findNearestRootMarker(filePath: string, markers: string[]): string | null {
+    if (markers.length === 0) return null;
     let dir = dirname(filePath);
     while (true) {
-      for (const marker of this.rootMarkers) {
+      for (const marker of markers) {
         if (existsSync(resolvePath(dir, marker))) return dir;
       }
       const parent = dirname(dir);
@@ -202,6 +263,68 @@ export class LspBackend {
 
   get projectRoots(): string[] {
     return this.docManager.projectRoots;
+  }
+
+  recordSemanticResult(method: string, itemCount: number): void {
+    this.semanticAvailable = true;
+    this.semanticFailure = undefined;
+    this.lastSemanticRequest = { method, itemCount };
+  }
+
+  recordSemanticFailure(method: string, detail: string): void {
+    this.semanticAvailable = false;
+    this.semanticFailure = { method, detail: compactStatusDetail(detail) };
+    this.lastSemanticRequest = { method, itemCount: 0 };
+  }
+
+  didLastSemanticRequestFail(method: string): boolean {
+    return this.semanticFailure?.method === method;
+  }
+
+  private snapshotInitializationState(): InitializationState {
+    if (this.lifecycle._tag === "running") return "initialized";
+    return this.startupFailureDetail || this.lifecycle._tag === "unavailable"
+      ? "failed"
+      : "initializing";
+  }
+
+  private snapshotProject(): {
+    projectMode: ProjectMode;
+    projectRoot?: string;
+    tsconfigPath?: string;
+  } {
+    const projectRoot = this.projectRoots[0];
+    const tsconfigPath = projectRoot ? join(projectRoot, "tsconfig.json") : undefined;
+    const projectMode: ProjectMode = tsconfigPath && existsSync(tsconfigPath)
+      ? "configured"
+      : projectRoot
+        ? "inferred"
+        : "unknown";
+    return {
+      projectMode,
+      ...(projectRoot ? { projectRoot } : {}),
+      ...(projectMode === "configured" && tsconfigPath ? { tsconfigPath } : {}),
+    };
+  }
+
+  getStatusSnapshot(): BackendStatusSnapshot {
+    const resource =
+      this.lifecycle._tag === "starting" || this.lifecycle._tag === "running" || this.lifecycle._tag === "stopping"
+        ? this.lifecycle.resource
+        : undefined;
+    const initializationState = this.snapshotInitializationState();
+    const project = this.snapshotProject();
+    return {
+      name: this.name,
+      running: this.lifecycle._tag === "running",
+      initializationState,
+      semanticAvailable: this.lifecycle._tag === "running" && this.semanticAvailable,
+      ...(this.lastSemanticRequest ? { lastSemanticRequest: this.lastSemanticRequest } : {}),
+      ...(this.semanticFailure ? { semanticFailure: this.semanticFailure } : {}),
+      ...(resource?.stderrTail ? { stderrTail: compactStatusDetail(resource.stderrTail) } : {}),
+      ...(this.startupFailureDetail ? { startupFailure: this.startupFailureDetail } : {}),
+      ...project,
+    };
   }
 
   ensureStartedEffect(): Effect.Effect<void, LspBackendError> {
@@ -371,6 +494,7 @@ export class LspBackend {
         generation,
         resource: this.lifecycle.resource,
       };
+      this.startupFailureDetail = undefined;
       return Deferred.succeed(ready, undefined).pipe(Effect.asVoid);
     });
   }
@@ -382,6 +506,8 @@ export class LspBackend {
     error: LspBackendError,
   ): Effect.Effect<void> {
     return Effect.gen({ self: this }, function* () {
+      this.semanticAvailable = false;
+      this.startupFailureDetail = compactStatusDetail(error.message);
       let ownedStopping:
         | {
             done: Deferred.Deferred<void>;
@@ -516,10 +642,13 @@ export class LspBackend {
               method: "initialize",
               params: {
                 processId: process.pid,
-                rootUri: null,
+                rootPath: this.initialWorkspaceRoot,
+                rootUri: this.initialWorkspaceRoot ? pathToUri(this.initialWorkspaceRoot) : null,
                 capabilities: this.lspCapabilities,
                 initializationOptions: this.initializationOptions,
-                workspaceFolders: null,
+                workspaceFolders: this.initialWorkspaceRoot
+                  ? [{ uri: pathToUri(this.initialWorkspaceRoot), name: this.initialWorkspaceRoot.split("/").pop() ?? this.initialWorkspaceRoot }]
+                  : null,
               },
             },
             generation,
@@ -538,40 +667,46 @@ export class LspBackend {
   }
 
   ensureFileEffect(absolutePath: string): Effect.Effect<string, LspBackendError> {
-    return this.ensureStartedEffect().pipe(
-      Effect.andThen(
-        Effect.try({
-          try: () => {
-            const { uri, notification, isNewRoot, projectRoot } =
-              this.docManager.ensure(absolutePath);
-            if (isNewRoot) this.addWorkspaceFolder(projectRoot);
-            if (notification) {
-              this.diagnostics.delete(uri);
-              this.sendLsp({
-                jsonrpc: "2.0",
-                method: `textDocument/${notification.type}`,
-                params: notification.params,
-              });
-            }
-            for (const evictedUri of this.docManager.evict(MAX_OPEN_DOCUMENTS)) {
-              this.sendLsp({
-                jsonrpc: "2.0",
-                method: "textDocument/didClose",
-                params: { textDocument: { uri: evictedUri } },
-              });
-              this.diagnostics.delete(evictedUri);
-            }
-            return uri;
-          },
-          catch: (cause) =>
-            backendErrorFromCause(
-              LspBackendErrorKind.Document,
-              `${this.name} document open failed`,
-              cause,
-            ),
-        }),
-      ),
-    );
+    return Effect.suspend(() => {
+      const projectRoot = this.docManager.getProjectRoot(absolutePath);
+      if (this.lifecycle._tag === "idle") this.initialWorkspaceRoot = projectRoot;
+      return this.ensureStartedEffect().pipe(
+        Effect.andThen(
+          Effect.try({
+            try: () => {
+              const { uri, notification, isNewRoot, projectRoot } =
+                this.docManager.ensure(absolutePath);
+              if (isNewRoot && projectRoot !== this.initialWorkspaceRoot) {
+                this.addWorkspaceFolder(projectRoot);
+              }
+              if (notification) {
+                this.diagnostics.delete(uri);
+                this.sendLsp({
+                  jsonrpc: "2.0",
+                  method: `textDocument/${notification.type}`,
+                  params: notification.params,
+                });
+              }
+              for (const evictedUri of this.docManager.evict(MAX_OPEN_DOCUMENTS)) {
+                this.sendLsp({
+                  jsonrpc: "2.0",
+                  method: "textDocument/didClose",
+                  params: { textDocument: { uri: evictedUri } },
+                });
+                this.diagnostics.delete(evictedUri);
+              }
+              return uri;
+            },
+            catch: (cause) =>
+              backendErrorFromCause(
+                LspBackendErrorKind.Document,
+                `${this.name} document open failed`,
+                cause,
+              ),
+          }),
+        ),
+      );
+    });
   }
 
   ensureFile(absolutePath: string): Promise<string> {
@@ -615,9 +750,13 @@ export class LspBackend {
     return this.diagnostics.get(uri);
   }
 
-  lspRequestEffect(method: string, params: unknown): Effect.Effect<LspMessage | null> {
+  lspRequestEffect(method: string, params: unknown): Effect.Effect<LspMessage | null, LspBackendError> {
     return Effect.suspend(() => {
-      if (this.lifecycle._tag !== "running") return Effect.succeed(null);
+      if (this.lifecycle._tag !== "running") {
+        return Effect.fail(
+          backendError(LspBackendErrorKind.Request, `${this.name} LSP is not running`),
+        );
+      }
       const generation = this.lifecycle.generation;
       const id = this.nextLspId++;
       const deferred = Deferred.makeUnsafe<LspMessage, LspBackendError>();
@@ -625,7 +764,7 @@ export class LspBackend {
         id,
         deferred,
         generation,
-        LSP_REQUEST_TIMEOUT_MS,
+        lspRequestTimeoutMs(method),
         backendError(
           LspBackendErrorKind.Request,
           `${this.name} LSP request timed out: ${method}`,
@@ -649,7 +788,11 @@ export class LspBackend {
         { operation: DevToolsOperation.Request, backend: this.name, method },
         request,
         (error) => error.kind,
-      ).pipe(Effect.catch(() => Effect.succeed(null)));
+      ).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() => this.recordSemanticFailure(method, error.message)),
+        ),
+      );
     });
   }
 
@@ -803,6 +946,10 @@ export class LspBackend {
     error: LspBackendError,
   ): Effect.Effect<void> {
     return Effect.suspend(() => {
+      this.semanticAvailable = false;
+      if (this.lifecycle._tag === "starting") {
+        this.startupFailureDetail = compactStatusDetail(error.message);
+      }
       const state = this.lifecycle;
       if (
         (state._tag !== "starting" && state._tag !== "running") ||

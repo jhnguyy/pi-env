@@ -395,28 +395,35 @@ describeIfEnabled("dev-tools", "Formatters", () => {
   describe("formatStatus", () => {
     it("formats running daemon status", () => {
       const r: StatusResult = {
-        action: "status", running: true, pid: 12345,
+        action: "status", state: "ready", running: true, pid: 12345,
+        backend: { name: "typescript", running: true },
+        project: { mode: "configured", root: "/project/a", tsconfigPath: "/project/a/tsconfig.json" },
+        initialization: { state: "initialized" },
+        semantic: { available: true, lastRequest: { method: "textDocument/references", itemCount: 0 } },
         projects: ["/project/a", "/project/b"],
         openFiles: ["/project/a/src/index.ts", "/project/a/src/client.ts"],
         watchedFiles: 2, idleMs: 5000,
       };
       const text = formatStatus(r);
-      expect(text).toContain("LSP daemon running");
-      expect(text).toContain("PID: 12345");
-      expect(text).toContain("/project/a");
-      expect(text).toContain("Open files (2):");
-      expect(text).toContain("/project/a/src/index.ts");
-      expect(text).toContain("/project/a/src/client.ts");
-      expect(text).toContain("Idle: 5s");
+      expect(text).toContain("daemon: running");
+      expect(text).toContain("pid: 12345");
+      expect(text).toContain("projects: /project/a, /project/b");
+      expect(text).toContain("open files: 2");
+      expect(text).toContain("idle: 5s");
     });
 
     it("formats stopped daemon status", () => {
       const r: StatusResult = {
-        action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
+        action: "status", state: "initializing", running: false,
+        backend: { name: "unknown", running: false },
+        project: { mode: "unknown" },
+        initialization: { state: "initializing" },
+        semantic: { available: false },
+        projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
       const text = formatStatus(r);
-      expect(text).toContain("LSP daemon stopped");
-      expect(text).toContain("Open files: none");
+      expect(text).toContain("daemon: stopped");
+      expect(text).toContain("open files: none");
     });
   });
 

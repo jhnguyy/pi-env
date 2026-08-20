@@ -213,7 +213,11 @@ describeIfEnabled("dev-tools", "Renderers", () => {
 
     it("renders status running", () => {
       const r: StatusResult = {
-        action: "status", running: true, pid: 1234,
+        action: "status", state: "ready", running: true, pid: 1234,
+        backend: { name: "typescript", running: true },
+        project: { mode: "unknown" },
+        initialization: { state: "initialized" },
+        semantic: { available: true, lastRequest: { method: "textDocument/references", itemCount: 0 } },
         projects: [], openFiles: [], watchedFiles: 0, idleMs: 100,
       };
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
@@ -223,7 +227,12 @@ describeIfEnabled("dev-tools", "Renderers", () => {
 
     it("renders status stopped", () => {
       const r: StatusResult = {
-        action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
+        action: "status", state: "initializing", running: false,
+        backend: { name: "unknown", running: false },
+        project: { mode: "unknown" },
+        initialization: { state: "initializing" },
+        semantic: { available: false },
+        projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
       };
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("stopped");

@@ -13,6 +13,7 @@ export const VerificationCapability = Object.freeze({
   InstallIntegrity: "install-integrity",
   LicenseCompliance: "license-compliance",
   RuntimeBehavior: "runtime-behavior",
+  WorkspaceSemantics: "workspace-semantics",
 });
 
 function phase(id, label, command, args, classification, capability) {
@@ -107,6 +108,14 @@ export const VerificationPhase = Object.freeze({
     VerificationClass.Contract,
     VerificationCapability.RuntimeBehavior,
   ),
+  RealWorkspaceSemanticCanary: phase(
+    "real-workspace-semantic-canary",
+    "real workspace semantic canary",
+    "nub",
+    ["run", "test:e2e:real-workspace-canary"],
+    VerificationClass.SafetyIntegration,
+    VerificationCapability.WorkspaceSemantics,
+  ),
   SafeUnitTests: phase(
     "unit-tests",
     "unit tests (one worker)",
@@ -139,6 +148,11 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.Build,
 ]);
 
-export function verificationPhaseById(id, phases = STANDARD_VERIFICATION_PHASES) {
+export const EXPLICIT_VERIFICATION_PHASES = Object.freeze([
+  ...STANDARD_VERIFICATION_PHASES,
+  VerificationPhase.RealWorkspaceSemanticCanary,
+]);
+
+export function verificationPhaseById(id, phases = EXPLICIT_VERIFICATION_PHASES) {
   return phases.find((candidate) => candidate.id === id);
 }

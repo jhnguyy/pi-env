@@ -228,10 +228,42 @@ export interface SymbolsResult {
   truncated: boolean;
 }
 
+export type HealthState = "ready" | "initializing" | "degraded" | "failed";
+export type ProjectMode = "configured" | "inferred" | "unknown";
+export type InitializationState = "initializing" | "initialized" | "failed";
+
 export interface StatusResult {
   action: "status";
+  /** Overall semantic health. Ready requires an initialized, live backend and semantic availability. */
+  state: HealthState;
+  /** Daemon process liveness (compatibility field; backend liveness is in backend.running). */
   running: boolean;
   pid?: number;
+  backend: {
+    name: string;
+    running: boolean;
+    stderrTail?: string;
+    startupFailure?: string;
+  };
+  project: {
+    mode: ProjectMode;
+    root?: string;
+    tsconfigPath?: string;
+  };
+  initialization: {
+    state: InitializationState;
+  };
+  semantic: {
+    available: boolean;
+    lastRequest?: {
+      method: string;
+      itemCount: number;
+    };
+    semanticFailure?: {
+      method: string;
+      detail: string;
+    };
+  };
   projects: string[];
   /** Absolute paths of files currently open in the LSP (didOpen'd). */
   openFiles: string[];

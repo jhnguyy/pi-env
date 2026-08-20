@@ -29,7 +29,7 @@ import { removeStaleArtifact } from "./socket-artifacts";
 const SPAWN_RETRY_INTERVAL_MS = 200;
 const SPAWN_RETRY_MAX_MS = 10_000;
 const SPAWN_RETRY_MAX_INTERVAL_MS = 1_000;
-const REQUEST_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = 25_000;
 const SOCKET_LISTENER_COUNT = 3;
 
 export class ClientClosedError extends Data.TaggedError("ClientClosedError")<{

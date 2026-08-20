@@ -264,17 +264,39 @@ export function formatSymbols(r: SymbolsResult): string {
 
 // ─── Status ─────────────────────────────────────────────────────────────────
 
+const MAX_STATUS_DETAIL_LENGTH = 256;
+
+function normalizeStatusDetail(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= MAX_STATUS_DETAIL_LENGTH
+    ? normalized
+    : `${normalized.slice(0, MAX_STATUS_DETAIL_LENGTH - 3)}...`;
+}
+
 export function formatStatus(r: StatusResult): string {
   const lines: string[] = [];
-  lines.push(`LSP daemon ${r.running ? "running" : "stopped"}`);
-  if (r.pid) lines.push(`PID: ${r.pid}`);
-  lines.push(`Projects: ${r.projects.length === 0 ? "none" : r.projects.join(", ")}`);
-  if (r.openFiles.length === 0) {
-    lines.push("Open files: none");
-  } else {
-    lines.push(`Open files (${r.openFiles.length}):`);
-    for (const f of r.openFiles) lines.push(`  ${f}`);
+  lines.push(`state: ${r.state}`);
+  lines.push(`daemon: ${r.running ? "running" : "stopped"}`);
+  if (r.pid) lines.push(`pid: ${r.pid}`);
+  lines.push(`backend: ${r.backend.name} ${r.backend.running ? "running" : "stopped"}`);
+  lines.push(`project mode: ${r.project.mode}`);
+  if (r.project.root) lines.push(`project root: ${r.project.root}`);
+  if (r.project.tsconfigPath) lines.push(`tsconfig: ${r.project.tsconfigPath}`);
+  lines.push(`initialization: ${r.initialization.state}`);
+  lines.push(`semantic: ${r.semantic.available ? "available" : "unavailable"}`);
+  if (r.semantic.lastRequest) {
+    lines.push(`last semantic request: ${r.semantic.lastRequest.method} (${r.semantic.lastRequest.itemCount} items)`);
   }
-  lines.push(`Idle: ${Math.round(r.idleMs / 1000)}s`);
+  if (r.semantic.semanticFailure) {
+    const failure = normalizeStatusDetail(r.semantic.semanticFailure.detail);
+    lines.push(`semantic failure: ${r.semantic.semanticFailure.method}: ${failure}`);
+  }
+  if (r.backend.stderrTail) lines.push(`stderr: ${normalizeStatusDetail(r.backend.stderrTail)}`);
+  if (r.backend.startupFailure) {
+    lines.push(`startup failure: ${normalizeStatusDetail(r.backend.startupFailure)}`);
+  }
+  lines.push(`projects: ${r.projects.length === 0 ? "none" : r.projects.join(", ")}`);
+  lines.push(`open files: ${r.openFiles.length === 0 ? "none" : r.openFiles.length}`);
+  lines.push(`idle: ${Math.round(r.idleMs / 1000)}s`);
   return lines.join("\n");
 }
