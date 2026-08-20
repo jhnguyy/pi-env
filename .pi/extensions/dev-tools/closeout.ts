@@ -2,8 +2,13 @@ import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
+import { Type, type Static } from "typebox";
+import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { execEffect } from "../_shared/exec";
-import { parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
+import { parseGitHubPullRequestUrl } from "../_shared/github";
+import { txt } from "../_shared/result";
+import { toAgentTool, toPiTool, type ToolContract } from "../_shared/tool-contract";
+import { isProtectedBranch, parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
 
 type Exec = ExtensionAPI["exec"];
 
@@ -40,18 +45,25 @@ const PullRequestSchema = Schema.Struct({
 
 type PullRequest = typeof PullRequestSchema.Type;
 
-const githubName = "[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?";
-const pullRequestUrlPattern = new RegExp(
-  `^https://github\\.com/(${githubName})/(${githubName})/pull/([1-9][0-9]{0,9})(?:[/?#].*)?$`,
-);
-const protectedBranches = new Set(["main", "master", "develop", "dev", "prod", "production"]);
+export const CLOSEOUT_TOOL_PARAMETERS = Type.Object({
+  pr: Type.Optional(
+    Type.String({
+      description: "GitHub pull request number or URL. Omit to resolve the current checkout.",
+    }),
+  ),
+  repo: Type.Optional(
+    Type.String({ description: "Local repository path. Defaults to the Pi working directory." }),
+  ),
+});
+export type CloseoutToolInput = Static<typeof CLOSEOUT_TOOL_PARAMETERS>;
 
-interface ParsedPullRequestUrl {
-  readonly owner: string;
-  readonly repo: string;
-  readonly number: number;
-  readonly url: string;
-}
+const CLOSEOUT_DESCRIPTION =
+  "Verify and close out one merged GitHub pull request. Synchronizes its base branch, removes only its head worktree, and deletes its matching local branch. Invoke only after explicit user authorization for cleanup.";
+const CLOSEOUT_PROMPT_SNIPPET =
+  "Close out a verified merged GitHub pull request and clean up its local worktree and branch";
+const CLOSEOUT_PROMPT_GUIDELINES = [
+  "Use closeout only after the user explicitly confirms that the pull request is merged and requests cleanup.",
+];
 
 export function parseCloseoutArgs(args: string | undefined): CloseoutRequest {
   const tokens = (args ?? "").trim().split(/\s+/).filter(Boolean);
@@ -82,20 +94,9 @@ export function parseCloseoutArgs(args: string | undefined): CloseoutRequest {
 
 function normalizePullRequestReference(value: string): string {
   if (/^[1-9][0-9]{0,9}$/.test(value)) return value;
-  const parsed = parsePullRequestUrl(value);
+  const parsed = parseGitHubPullRequestUrl(value);
   if (parsed) return parsed.url;
   throw new Error("Expected a PR number or GitHub PR URL.");
-}
-
-function parsePullRequestUrl(value: string): ParsedPullRequestUrl | undefined {
-  const match = value.match(pullRequestUrlPattern);
-  if (!match) return undefined;
-  return {
-    owner: match[1]!,
-    repo: match[2]!,
-    number: Number(match[3]),
-    url: `https://github.com/${match[1]}/${match[2]}/pull/${match[3]}`,
-  };
 }
 
 function closeoutFailure(message: string, cause?: unknown): CloseoutError {
@@ -162,17 +163,69 @@ function ensure(condition: boolean, message: string): Effect.Effect<void, Closeo
   return condition ? Effect.void : Effect.fail(closeoutFailure(message));
 }
 
-function githubRepositoryFromRemote(value: string): string | undefined {
-  const trimmed = value.trim().replace(/\.git$/, "");
-  const scp = trimmed.match(/^git@github\.com:([^/]+\/[^/]+)$/i);
-  if (scp) return scp[1]!.toLowerCase();
-  try {
-    const url = new URL(trimmed);
-    if (url.hostname.toLowerCase() !== "github.com") return undefined;
-    return url.pathname.replace(/^\//, "").toLowerCase();
-  } catch {
-    return undefined;
+interface GitRemoteRepository {
+  readonly host: string;
+  readonly repository: string;
+  readonly resolvesSshAlias: boolean;
+}
+
+function normalizeRepositoryPath(value: string): string | undefined {
+  const path = value.replace(/^\//, "").replace(/\.git$/, "");
+  return /^[^/]+\/[^/]+$/.test(path) ? path.toLowerCase() : undefined;
+}
+
+function parseGitRemoteRepository(value: string): GitRemoteRepository | undefined {
+  const trimmed = value.trim();
+  if (trimmed.includes("://")) {
+    try {
+      const url = new URL(trimmed);
+      const repository = normalizeRepositoryPath(url.pathname);
+      if (!repository) return undefined;
+      const protocol = url.protocol.toLowerCase();
+      return {
+        host: url.hostname.toLowerCase(),
+        repository,
+        resolvesSshAlias: protocol === "ssh:" || protocol === "git+ssh:",
+      };
+    } catch {
+      return undefined;
+    }
   }
+  const scp = trimmed.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
+  if (!scp) return undefined;
+  const repository = normalizeRepositoryPath(scp[2]!);
+  return repository
+    ? { host: scp[1]!.toLowerCase(), repository, resolvesSshAlias: true }
+    : undefined;
+}
+
+function sshConfigHostname(raw: string): string | undefined {
+  return raw
+    .split("\n")
+    .map((line) => line.trim().match(/^hostname\s+(\S+)$/i)?.[1])
+    .find((hostname) => Boolean(hostname))
+    ?.toLowerCase();
+}
+
+function githubRepositoryFromRemote(
+  exec: Exec,
+  cwd: string,
+  value: string,
+): Effect.Effect<string | void, CloseoutError> {
+  const remote = parseGitRemoteRepository(value);
+  if (!remote) return Effect.void;
+  if (remote.host === "github.com") return Effect.succeed(remote.repository);
+  if (!remote.resolvesSshAlias) return Effect.void;
+  return run(exec, "ssh", ["-G", "--", remote.host], {
+    cwd,
+    failOnNonZero: false,
+  }).pipe(
+    Effect.map((result) =>
+      result.code === 0 && sshConfigHostname(result.stdout) === "github.com"
+        ? remote.repository
+        : undefined,
+    ),
+  );
 }
 
 function canonicalPath(path: string): string {
@@ -194,10 +247,6 @@ function samePath(left: string, right: string): boolean {
 
 function findWorktree(worktrees: WorktreeEntry[], branch: string): WorktreeEntry | undefined {
   return worktrees.find((entry) => entry.branch === branch);
-}
-
-function isProtectedBranch(branch: string): boolean {
-  return protectedBranches.has(branch) || branch.startsWith("release/");
 }
 
 function isDirty(exec: Exec, cwd: string): Effect.Effect<boolean, CloseoutError> {
@@ -246,7 +295,7 @@ function closeoutWorkflow(
   return Effect.gen(function* () {
     const lookupCwd = request.repoPath ? resolve(cwd, request.repoPath) : cwd;
     const pr = yield* loadPullRequest(exec, lookupCwd, request.pr);
-    const parsedUrl = parsePullRequestUrl(pr.url);
+    const parsedUrl = parseGitHubPullRequestUrl(pr.url);
     yield* ensure(Boolean(parsedUrl), "GitHub returned an invalid pull request URL.");
     yield* ensure(
       pr.state === "MERGED" && Boolean(pr.mergedAt) && Boolean(pr.mergeCommit?.oid),
@@ -264,7 +313,7 @@ function closeoutWorkflow(
 
     const repoRoot = yield* gitText(exec, lookupCwd, ["rev-parse", "--show-toplevel"]);
     const originUrl = yield* gitText(exec, repoRoot, ["remote", "get-url", "origin"]);
-    const localRepository = githubRepositoryFromRemote(originUrl);
+    const localRepository = yield* githubRepositoryFromRemote(exec, repoRoot, originUrl);
     const expectedRepository = `${parsedUrl!.owner}/${parsedUrl!.repo}`.toLowerCase();
     yield* ensure(
       localRepository === expectedRepository,
@@ -395,8 +444,10 @@ export function closeoutPullRequest(
   exec: Exec,
   cwd: string,
   request: CloseoutRequest,
+  signal?: AbortSignal,
 ): Promise<CloseoutResult> {
-  return Effect.runPromise(closeoutWorkflow(exec, cwd, request));
+  const workflow = closeoutWorkflow(exec, cwd, request);
+  return signal ? Effect.runPromise(workflow, { signal }) : Effect.runPromise(workflow);
 }
 
 export function formatCloseoutResult(result: CloseoutResult): string {
@@ -414,7 +465,44 @@ export function formatCloseoutResult(result: CloseoutResult): string {
   ].join("\n");
 }
 
-export function registerCloseoutCommand(pi: ExtensionAPI): void {
+export function createCloseoutToolContract(
+  exec: Exec,
+): ToolContract<CloseoutToolInput, CloseoutResult, typeof CLOSEOUT_TOOL_PARAMETERS> {
+  return {
+    name: "closeout",
+    label: "Close Out Pull Request",
+    description: CLOSEOUT_DESCRIPTION,
+    parameters: CLOSEOUT_TOOL_PARAMETERS,
+    async execute(params, context) {
+      const result = await closeoutPullRequest(
+        exec,
+        context.cwd,
+        {
+          pr: params.pr ? normalizePullRequestReference(params.pr) : undefined,
+          repoPath: params.repo,
+        },
+        context.signal,
+      );
+      return { content: [txt(formatCloseoutResult(result))], details: result };
+    },
+  };
+}
+
+export function registerCloseout(pi: ExtensionAPI): void {
+  const contract = createCloseoutToolContract((command, args, options) =>
+    pi.exec(command, args, options),
+  );
+  pi.registerTool({
+    ...toPiTool(contract),
+    promptSnippet: CLOSEOUT_PROMPT_SNIPPET,
+    promptGuidelines: CLOSEOUT_PROMPT_GUIDELINES,
+  });
+  registerAgentToolsOnSessionStart(pi, (_generation, ctx) => ({
+    tool: toAgentTool(contract, () => ctx),
+    createTool: ({ cwd, parentContext }) => toAgentTool(contract, () => parentContext ?? { cwd }),
+    capabilities: [ToolCapability.Write, ToolCapability.Execute],
+  }));
+
   pi.registerCommand("closeout", {
     description:
       "Close out one merged GitHub pull request without an LLM. Usage: /closeout [PR number-or-URL] [--repo <path>]. The repository defaults to the Pi working directory.",

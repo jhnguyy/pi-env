@@ -344,7 +344,7 @@ function gitOutput(cwd: string, args: string[]): string {
   return result.status === 0 ? result.stdout.trim() : "";
 }
 
-function isProtectedBranch(branch: string): boolean {
+export function isProtectedBranch(branch: string): boolean {
   return PROTECTED_BRANCHES.includes(branch) || branch.startsWith("release/");
 }
 

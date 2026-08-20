@@ -28,6 +28,9 @@ describe("pr-review deterministic contracts", () => {
     expect(extractPrUrl("Review this PR https://github.com/acme/widgets/pull/123 please")).toBe(
       "https://github.com/acme/widgets/pull/123",
     );
+    expect(
+      extractPrUrl("Review this PR https://github.com/acme/widgets/pull/12345678901 please"),
+    ).toBeUndefined();
   });
 
   it("validates strict plan and review shapes", () => {
