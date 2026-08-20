@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
+import { Type, type Static } from "typebox";
 import { execEffect } from "../_shared/exec";
 import { parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
 
@@ -39,6 +40,18 @@ const PullRequestSchema = Schema.Struct({
 });
 
 type PullRequest = typeof PullRequestSchema.Type;
+
+const CloseoutToolParameters = Type.Object({
+  pr: Type.Optional(
+    Type.String({
+      description: "GitHub pull request number or URL. Omit to resolve the current checkout.",
+    }),
+  ),
+  repo: Type.Optional(
+    Type.String({ description: "Local repository path. Defaults to the Pi working directory." }),
+  ),
+});
+type CloseoutToolInput = Static<typeof CloseoutToolParameters>;
 
 const githubName = "[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?";
 const pullRequestUrlPattern = new RegExp(
@@ -162,17 +175,69 @@ function ensure(condition: boolean, message: string): Effect.Effect<void, Closeo
   return condition ? Effect.void : Effect.fail(closeoutFailure(message));
 }
 
-function githubRepositoryFromRemote(value: string): string | undefined {
-  const trimmed = value.trim().replace(/\.git$/, "");
-  const scp = trimmed.match(/^git@github\.com:([^/]+\/[^/]+)$/i);
-  if (scp) return scp[1]!.toLowerCase();
-  try {
-    const url = new URL(trimmed);
-    if (url.hostname.toLowerCase() !== "github.com") return undefined;
-    return url.pathname.replace(/^\//, "").toLowerCase();
-  } catch {
-    return undefined;
+interface GitRemoteRepository {
+  readonly host: string;
+  readonly repository: string;
+  readonly resolvesSshAlias: boolean;
+}
+
+function normalizeRepositoryPath(value: string): string | undefined {
+  const path = value.replace(/^\//, "").replace(/\.git$/, "");
+  return /^[^/]+\/[^/]+$/.test(path) ? path.toLowerCase() : undefined;
+}
+
+function parseGitRemoteRepository(value: string): GitRemoteRepository | undefined {
+  const trimmed = value.trim();
+  if (trimmed.includes("://")) {
+    try {
+      const url = new URL(trimmed);
+      const repository = normalizeRepositoryPath(url.pathname);
+      if (!repository) return undefined;
+      const protocol = url.protocol.toLowerCase();
+      return {
+        host: url.hostname.toLowerCase(),
+        repository,
+        resolvesSshAlias: protocol === "ssh:" || protocol === "git+ssh:",
+      };
+    } catch {
+      return undefined;
+    }
   }
+  const scp = trimmed.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
+  if (!scp) return undefined;
+  const repository = normalizeRepositoryPath(scp[2]!);
+  return repository
+    ? { host: scp[1]!.toLowerCase(), repository, resolvesSshAlias: true }
+    : undefined;
+}
+
+function sshConfigHostname(raw: string): string | undefined {
+  return raw
+    .split("\n")
+    .map((line) => line.trim().match(/^hostname\s+(\S+)$/i)?.[1])
+    .find((hostname) => Boolean(hostname))
+    ?.toLowerCase();
+}
+
+function githubRepositoryFromRemote(
+  exec: Exec,
+  cwd: string,
+  value: string,
+): Effect.Effect<string | void, CloseoutError> {
+  const remote = parseGitRemoteRepository(value);
+  if (!remote) return Effect.void;
+  if (remote.host === "github.com") return Effect.succeed(remote.repository);
+  if (!remote.resolvesSshAlias) return Effect.void;
+  return run(exec, "ssh", ["-G", "--", remote.host], {
+    cwd,
+    failOnNonZero: false,
+  }).pipe(
+    Effect.map((result) =>
+      result.code === 0 && sshConfigHostname(result.stdout) === "github.com"
+        ? remote.repository
+        : undefined,
+    ),
+  );
 }
 
 function canonicalPath(path: string): string {
@@ -264,7 +329,7 @@ function closeoutWorkflow(
 
     const repoRoot = yield* gitText(exec, lookupCwd, ["rev-parse", "--show-toplevel"]);
     const originUrl = yield* gitText(exec, repoRoot, ["remote", "get-url", "origin"]);
-    const localRepository = githubRepositoryFromRemote(originUrl);
+    const localRepository = yield* githubRepositoryFromRemote(exec, repoRoot, originUrl);
     const expectedRepository = `${parsedUrl!.owner}/${parsedUrl!.repo}`.toLowerCase();
     yield* ensure(
       localRepository === expectedRepository,
@@ -395,8 +460,10 @@ export function closeoutPullRequest(
   exec: Exec,
   cwd: string,
   request: CloseoutRequest,
+  signal?: AbortSignal,
 ): Promise<CloseoutResult> {
-  return Effect.runPromise(closeoutWorkflow(exec, cwd, request));
+  const workflow = closeoutWorkflow(exec, cwd, request);
+  return signal ? Effect.runPromise(workflow, { signal }) : Effect.runPromise(workflow);
 }
 
 export function formatCloseoutResult(result: CloseoutResult): string {
@@ -414,7 +481,35 @@ export function formatCloseoutResult(result: CloseoutResult): string {
   ].join("\n");
 }
 
-export function registerCloseoutCommand(pi: ExtensionAPI): void {
+export function registerCloseout(pi: ExtensionAPI): void {
+  pi.registerTool({
+    name: "closeout",
+    label: "Close Out Pull Request",
+    description:
+      "Verify and close out one merged GitHub pull request. Synchronizes its base branch, removes only its head worktree, and deletes its matching local branch.",
+    promptSnippet:
+      "Close out a verified merged GitHub pull request and clean up its local worktree and branch",
+    promptGuidelines: [
+      "Use closeout only after the user explicitly confirms that the pull request is merged and requests cleanup.",
+    ],
+    parameters: CloseoutToolParameters,
+    async execute(_toolCallId, params: CloseoutToolInput, signal, _onUpdate, ctx) {
+      const result = await closeoutPullRequest(
+        pi.exec.bind(pi),
+        ctx.cwd,
+        {
+          pr: params.pr ? normalizePullRequestReference(params.pr) : undefined,
+          repoPath: params.repo,
+        },
+        signal,
+      );
+      return {
+        content: [{ type: "text", text: formatCloseoutResult(result) }],
+        details: result,
+      };
+    },
+  });
+
   pi.registerCommand("closeout", {
     description:
       "Close out one merged GitHub pull request without an LLM. Usage: /closeout [PR number-or-URL] [--repo <path>]. The repository defaults to the Pi working directory.",
