@@ -5,7 +5,14 @@ import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { closeoutPullRequest, parseCloseoutArgs, type CloseoutRequest } from "../closeout";
+import { AgentToolEvent, PiEvent } from "../../_shared/agent-tools";
+import { toAgentTool, toPiTool } from "../../_shared/tool-contract";
+import {
+  closeoutPullRequest,
+  createCloseoutToolContract,
+  parseCloseoutArgs,
+  type CloseoutRequest,
+} from "../closeout";
 
 const ok = (stdout = ""): ExecResult => ({ stdout, stderr: "", code: 0, killed: false });
 const fixtureRoots: string[] = [];
@@ -154,6 +161,17 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     expect(() => parseCloseoutArgs("41 42 --repo /repo")).toThrow("one PR");
   });
 
+  it("exposes one host-independent contract through the shared adapters", () => {
+    const contract = createCloseoutToolContract(async () => ok());
+    const piTool = toPiTool(contract);
+    const agentTool = toAgentTool(contract, () => ({ cwd: "/session" }));
+
+    expect(agentTool.name).toBe(piTool.name);
+    expect(agentTool.label).toBe(piTool.label);
+    expect(agentTool.description).toBe(piTool.description);
+    expect(agentTool.parameters).toBe(piTool.parameters);
+  });
+
   it("registers closeout as both a slash command and an authorized LLM tool", async () => {
     const commands: Array<{ name: string; description: string }> = [];
     const tools: Array<{ name: string; description: string; promptGuidelines?: string[] }> = [];
@@ -230,6 +248,64 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     });
   });
 
+  it("uses the agent-tool factory cwd and propagates cancellation", async () => {
+    const registrations: any[] = [];
+    const sessionStartHandlers: Array<(...args: any[]) => void> = [];
+    let started!: () => void;
+    const commandStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let commandWasCancelled = false;
+    let commandCwd: string | undefined;
+    const exec: ExtensionAPI["exec"] = async (_command, _args, options) => {
+      commandCwd = options?.cwd;
+      return new Promise<ExecResult>((_resolve, reject) => {
+        const signal = options?.signal;
+        const cancel = () => {
+          commandWasCancelled = true;
+          reject(new Error("cancelled"));
+        };
+        if (signal?.aborted) cancel();
+        else signal?.addEventListener("abort", cancel, { once: true });
+        started();
+      });
+    };
+    const { default: initDevTools } = await import("../index");
+    initDevTools({
+      exec,
+      events: {
+        emit(event: string, registration: unknown) {
+          if (event === AgentToolEvent.Register) registrations.push(registration);
+        },
+      },
+      registerCommand() {},
+      registerTool() {},
+      on(event: string, handler: (...args: any[]) => void) {
+        if (event === PiEvent.SessionStart) sessionStartHandlers.push(handler);
+      },
+    } as unknown as ExtensionAPI);
+    for (const handler of sessionStartHandlers) handler(undefined, { cwd: "/session" });
+    const registration = registrations.find(({ tool }) => tool.name === "closeout");
+    const tool = registration.createTool({
+      cwd: "/child",
+      sessionGeneration: "test",
+    });
+    const controller = new AbortController();
+
+    const execution = tool.execute(
+      "agent-closeout-call",
+      { pr: "42", repo: "repo" },
+      controller.signal,
+    );
+    const rejected = expect(execution).rejects.toThrow();
+    await commandStarted;
+    controller.abort();
+
+    await rejected;
+    expect(commandCwd).toBe("/child/repo");
+    expect(commandWasCancelled).toBe(true);
+  });
+
   it("resolves a GitHub SSH host alias before closeout", async () => {
     const fixture = createCloseoutFixture();
     const { exec, calls } = createExec(fixture, {}, githubAlias);
@@ -264,6 +340,33 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     );
     expect(hasMutatingGitCall(calls)).toBe(false);
   });
+
+  it.each(["production", "release/2026.08"])(
+    "rejects protected head branch %s before running git",
+    async (headRefName) => {
+      const calls: ExecCall[] = [];
+      const exec: ExtensionAPI["exec"] = async (command, args, options) => {
+        calls.push({ command, args: [...args], cwd: options?.cwd });
+        return ok(
+          JSON.stringify({
+            state: "MERGED",
+            mergedAt: "2026-08-19T12:00:00Z",
+            mergeCommit: { oid: "a".repeat(40) },
+            url: "https://github.com/acme/demo/pull/42",
+            headRefName,
+            headRefOid: "b".repeat(40),
+            baseRefName: "main",
+            isCrossRepository: false,
+          }),
+        );
+      };
+
+      await expect(closeoutPullRequest(exec, "/repo", { pr: "42" })).rejects.toThrow(
+        "protected branch",
+      );
+      expect(calls.filter(({ command }) => command === "git")).toEqual([]);
+    },
+  );
 
   it("rejects a PR that is not merged before running git", async () => {
     const fixture = createCloseoutFixture();

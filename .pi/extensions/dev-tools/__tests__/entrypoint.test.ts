@@ -41,6 +41,7 @@ describeIfEnabled("dev-tools", "extension entrypoint", () => {
     vi.resetModules();
     const sessionStartHandlers: Array<() => void> = [];
     const registrations: any[] = [];
+    const piTools: any[] = [];
     const pi = {
       events: {
         emit(event: string, registration: unknown) {
@@ -48,7 +49,9 @@ describeIfEnabled("dev-tools", "extension entrypoint", () => {
         },
       },
       registerCommand() {},
-      registerTool() {},
+      registerTool(tool: any) {
+        piTools.push(tool);
+      },
       on(event: string, handler: () => void) {
         if (event === PiEvent.SessionStart) sessionStartHandlers.push(handler);
       },
@@ -60,9 +63,17 @@ describeIfEnabled("dev-tools", "extension entrypoint", () => {
 
     const readRegistration = registrations.find(({ tool }) => tool.name === "dev-tools");
     const writeRegistration = registrations.find(({ tool }) => tool.name === "dev-tools-edit");
+    const closeoutRegistration = registrations.find(({ tool }) => tool.name === "closeout");
+    const closeoutPiTool = piTools.find(({ name }) => name === "closeout");
     expect(readRegistration.capabilities).toEqual([ToolCapability.Read]);
     expect(readRegistration.tool.parameters.properties.action.enum).not.toContain("rename");
     expect(writeRegistration.capabilities).toEqual([ToolCapability.Write]);
     expect(writeRegistration.tool.parameters.properties.action.enum).toEqual(["rename"]);
+    expect(closeoutRegistration.capabilities).toEqual([
+      ToolCapability.Write,
+      ToolCapability.Execute,
+    ]);
+    expect(closeoutRegistration.tool.parameters).toBe(closeoutPiTool.parameters);
+    expect(closeoutRegistration.tool.description).toContain("explicit user authorization");
   });
 });
