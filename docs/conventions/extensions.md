@@ -46,6 +46,31 @@ Schema decoding should happen once at the consumer boundary with `decodeSettings
 
 Agent settings use Effect Schema for `enabledModels`, `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. The subagent extension decodes its `subagent` resource-limit block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
 
+## Cross-host tool registration
+
+Generally reusable tools that should behave the same in Pi and AgentTool hosts should register through `.pi/extensions/_shared/register-cross-host-tool.ts` via the canonical shape:
+
+```ts
+registerCrossHostTool(pi, {
+  contract,
+  capabilities: [ToolCapability.Read],
+  piOptions: {
+    promptSnippet,
+    promptGuidelines,
+    renderCall,
+    renderResult,
+  },
+});
+```
+
+Use `jit_catch` as the canonical shared-contract example and `closeout` as the migrated example. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
+
+Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration automatically exposes eligible tools to subagents and PTC, subject to the PTC blocklist in `.pi/extensions/ptc/types.ts`.
+
+Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start`, `subagent`, `subagent_start`, and `subagent_job`.
+
+The public test boundary for shared cross-host tools is the helper contract in `.pi/extensions/__tests__/register-cross-host-tool.test.ts` plus representative tool coverage such as `.pi/extensions/jit-catch/__tests__/contract.test.ts`: schema identity, capabilities, cwd/context behavior, cancellation, progress, Pi-only metadata, and unregister lifecycle. Safety-sensitive descriptions must state side effects and operational boundaries.
+
 ## Cross-extension singletons
 
 Store shared services on `globalThis`, not at module level. Module-level variables are per-bundle. `globalThis` is process-wide.

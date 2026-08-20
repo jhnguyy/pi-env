@@ -3,11 +3,12 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
 import { Type, type Static } from "typebox";
-import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import { ToolCapability } from "../_shared/agent-tools";
 import { execEffect } from "../_shared/exec";
 import { parseGitHubPullRequestUrl } from "../_shared/github";
+import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 import { txt } from "../_shared/result";
-import { toAgentTool, toPiTool, type ToolContract } from "../_shared/tool-contract";
+import { type ToolContract } from "../_shared/tool-contract";
 import { isProtectedBranch, parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
 
 type Exec = ExtensionAPI["exec"];
@@ -492,16 +493,14 @@ export function registerCloseout(pi: ExtensionAPI): void {
   const contract = createCloseoutToolContract((command, args, options) =>
     pi.exec(command, args, options),
   );
-  pi.registerTool({
-    ...toPiTool(contract),
-    promptSnippet: CLOSEOUT_PROMPT_SNIPPET,
-    promptGuidelines: CLOSEOUT_PROMPT_GUIDELINES,
-  });
-  registerAgentToolsOnSessionStart(pi, (_generation, ctx) => ({
-    tool: toAgentTool(contract, () => ctx),
-    createTool: ({ cwd, parentContext }) => toAgentTool(contract, () => parentContext ?? { cwd }),
+  registerCrossHostTool(pi, {
+    contract,
     capabilities: [ToolCapability.Write, ToolCapability.Execute],
-  }));
+    piOptions: {
+      promptSnippet: CLOSEOUT_PROMPT_SNIPPET,
+      promptGuidelines: CLOSEOUT_PROMPT_GUIDELINES,
+    },
+  });
 
   pi.registerCommand("closeout", {
     description:
