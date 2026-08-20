@@ -82,7 +82,7 @@ orch cleanup {}
 
 **Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona. For complex tasks, write a brief (`write { path: '$ORCH_DIR/brief-a.md' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context.
 
-**Model selection** — pass the full `provider/model-id`, not an alias. The **`subagent` tool description** is the live source for available models and model-selection tags. Pi regenerates it during each `session_start`. Its underlying source is `~/.pi/agent/settings.json` → `modelAnnotations`. Machine-policy annotations such as `reviewer` are intentionally omitted from the tool description. Route by visible tag intent:
+**Model selection** — pass the full `provider/model-id`, not an alias. The **`subagent` tool description** is the live source for available models and their tags. Pi regenerates it during each `session_start`. Its underlying source is `~/.pi/agent/settings.json` → `modelAnnotations`. Route by tag intent:
 
 | Intent | Tag query | Typical pick |
 |---|---|---|
