@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { AgentToolEvent, PiEvent } from "../../_shared/agent-tools";
+import { AgentToolEvent, PiEvent, ToolCapability } from "../../_shared/agent-tools";
 import { toAgentTool, toPiTool } from "../../_shared/tool-contract";
 import {
   closeoutPullRequest,
@@ -248,7 +248,7 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     });
   });
 
-  it("uses the agent-tool factory cwd and propagates cancellation", async () => {
+  it("uses the actual session generation in the child factory, preserves capabilities, and propagates cancellation", async () => {
     const registrations: any[] = [];
     const sessionStartHandlers: Array<(...args: any[]) => void> = [];
     let started!: () => void;
@@ -286,9 +286,13 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     } as unknown as ExtensionAPI);
     for (const handler of sessionStartHandlers) handler(undefined, { cwd: "/session" });
     const registration = registrations.find(({ tool }) => tool.name === "closeout");
+    expect(registration.capabilities).toEqual([
+      ToolCapability.Write,
+      ToolCapability.Execute,
+    ]);
     const tool = registration.createTool({
       cwd: "/child",
-      sessionGeneration: "test",
+      sessionGeneration: registration.sessionGeneration,
     });
     const controller = new AbortController();
 

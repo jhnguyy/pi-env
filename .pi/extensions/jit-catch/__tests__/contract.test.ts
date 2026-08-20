@@ -97,18 +97,22 @@ describe("jit_catch tool contract", () => {
     vi.clearAllMocks();
   });
 
-  it("uses one schema and description across Pi and AgentTool registration", () => {
+  it("uses one schema and description across public Pi registration and AgentTool registration", () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
 
+    expect(harness.tools[0].name).toBe("jit_catch");
+    expect(harness.tools[0].label).toBe("JiT-Catch");
     expect(harness.tools[0].parameters).toBe(JIT_CATCH_PARAMETERS);
     expect(harness.tools[0].description).toBe(JIT_CATCH_DESCRIPTION);
+    expect(harness.registrations[0].tool.name).toBe(harness.tools[0].name);
+    expect(harness.registrations[0].tool.label).toBe(harness.tools[0].label);
     expect(harness.registrations[0].tool.parameters).toBe(JIT_CATCH_PARAMETERS);
     expect(harness.registrations[0].tool.description).toBe(harness.tools[0].description);
   });
 
-  it("preserves jit_catch capabilities", () => {
+  it("preserves jit_catch capabilities through public registration events", () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
