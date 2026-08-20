@@ -1,7 +1,8 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { validateSkill } from "../validator";
 
@@ -15,210 +16,159 @@ afterEach(() => {
   rmSync(tempDir, { recursive: true, force: true });
 });
 
-/** Helper: create a minimal valid skill directory. */
+function writeSkill(name: string, content: string): string {
+  const dir = join(tempDir, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "SKILL.md"), content);
+  return dir;
+}
+
 function createSkill(
-  name: string,
-  frontmatter: Record<string, string | boolean> = {},
-  body: string = "# My Skill\n\nInstructions here.",
+  dirName: string,
+  frontmatter: Record<string, unknown> = {},
+  body = "# My Skill\n\nInstructions here.",
 ): string {
-  const skillDir = join(tempDir, name);
-  mkdirSync(skillDir, { recursive: true });
-
-  const fm = { name, description: "A useful skill for doing things.", ...frontmatter };
-  const fmBlock = Object.entries(fm)
-    .map(([k, v]) => `${k}: ${typeof v === "string" ? v : String(v)}`)
+  const values = {
+    name: dirName,
+    description: "Performs a focused task. Use when that task is required.",
+    ...frontmatter,
+  };
+  const yaml = Object.entries(values)
+    .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
     .join("\n");
-
-  writeFileSync(join(skillDir, "SKILL.md"), `---\n${fmBlock}\n---\n\n${body}`);
-  return skillDir;
+  return writeSkill(dirName, `---\n${yaml}\n---\n\n${body}`);
 }
 
 describeIfEnabled("skill-builder", "Validator", () => {
-  // ─── Directory Structure ───────────────────────────────────────
-
   describe("directory structure", () => {
-    it("fails when path does not exist", () => {
+    it("fails when the path does not exist", () => {
       const result = validateSkill(join(tempDir, "nonexistent"));
       expect(result.valid).toBe(false);
-      expect(result.issues.some((i) => i.rule === "dir-exists")).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "dir-exists")).toBe(true);
     });
 
     it("fails when SKILL.md is missing", () => {
       const dir = join(tempDir, "empty-skill");
       mkdirSync(dir);
       const result = validateSkill(dir);
-      expect(result.valid).toBe(false);
-      expect(result.issues.some((i) => i.rule === "skill-md-exists")).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "skill-md-exists")).toBe(true);
     });
 
-    it("passes with a valid minimal skill", () => {
-      const dir = createSkill("my-skill");
-      const result = validateSkill(dir);
+    it("passes a valid minimal skill", () => {
+      const result = validateSkill(createSkill("my-skill"));
       expect(result.valid).toBe(true);
-      expect(result.issues.filter((i) => i.severity === "error")).toHaveLength(0);
+      expect(result.name).toBe("my-skill");
     });
   });
 
-  // ─── Name Validation ──────────────────────────────────────────
+  describe("frontmatter", () => {
+    it("fails when frontmatter is missing", () => {
+      const result = validateSkill(writeSkill("no-frontmatter", "# No Frontmatter\n"));
+      expect(result.issues.some((issue) => issue.rule === "frontmatter-exists")).toBe(true);
+    });
 
-  describe("name validation", () => {
+    it("accepts quoted and multiline YAML and a name that differs from the directory", () => {
+      const dir = writeSkill(
+        "directory-name",
+        [
+          "---",
+          'name: "frontmatter-name"',
+          "description: |",
+          "  First line.",
+          "  Second line.",
+          "---",
+          "",
+          "# Skill",
+        ].join("\n"),
+      );
+      const result = validateSkill(dir);
+      expect(result.valid).toBe(true);
+      expect(result.name).toBe("frontmatter-name");
+      expect(result.issues.some((issue) => issue.rule === "name-matches-dir")).toBe(false);
+    });
+
+    it("fails on malformed YAML", () => {
+      const dir = writeSkill(
+        "bad-yaml",
+        "---\nname: [oops\ndescription: Valid description.\n---\n\nBody.",
+      );
+      const result = validateSkill(dir);
+      expect(result.valid).toBe(false);
+      expect(result.issues.some((issue) => issue.rule === "frontmatter-parse")).toBe(true);
+    });
+
+    it("requires an explicit name", () => {
+      const dir = writeSkill("missing-name", "---\ndescription: Valid description.\n---\n\nBody.");
+      expect(validateSkill(dir).issues.some((issue) => issue.rule === "name-exists")).toBe(true);
+    });
+
+    it("requires a description", () => {
+      const dir = writeSkill("missing-description", "---\nname: missing-description\n---\n\nBody.");
+      expect(validateSkill(dir).issues.some((issue) => issue.rule === "description-exists")).toBe(
+        true,
+      );
+    });
+
+    it("rejects non-string names and descriptions", () => {
+      const dir = writeSkill("bad-types", "---\nname: 123\ndescription: [one, two]\n---\n\nBody.");
+      const result = validateSkill(dir);
+      expect(result.issues.some((issue) => issue.rule === "name-type")).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "description-type")).toBe(true);
+    });
+
+    it("accepts a short specific description", () => {
+      const result = validateSkill(
+        createSkill("short-description", { description: "Checks YAML." }),
+      );
+      expect(result.valid).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "description-quality")).toBe(false);
+    });
+
     it.each([
       { condition: "contains uppercase", name: "My-Skill" },
       { condition: "has consecutive hyphens", name: "my--skill" },
       { condition: "starts with a hyphen", name: "-my-skill" },
       { condition: "ends with a hyphen", name: "my-skill-" },
-    ])("fails when name $condition", ({ name }) => {
-      const dir = createSkill(name, { name });
-      const result = validateSkill(dir);
+    ])("rejects a name that $condition", ({ name }) => {
+      const result = validateSkill(createSkill("skill-directory", { name }));
       expect(result.issues.some((issue) => issue.rule === "name-format")).toBe(true);
     });
 
-    it("fails when name exceeds 64 characters", () => {
-      const longName = "a".repeat(65);
-      const dir = createSkill(longName, { name: longName });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-length")).toBe(true);
-    });
-
-    it("warns when name doesn't match directory name", () => {
-      const dir = createSkill("my-skill", { name: "other-name" });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "name-matches-dir")).toBe(true);
-    });
-
-    it("passes with valid lowercase-hyphen name matching directory", () => {
-      const dir = createSkill("code-review");
-      const result = validateSkill(dir);
-      const nameIssues = result.issues.filter((i) => i.rule.startsWith("name-"));
-      expect(nameIssues.filter((i) => i.severity === "error")).toHaveLength(0);
+    it("rejects overlong names and descriptions", () => {
+      const result = validateSkill(
+        createSkill("long-fields", {
+          name: "a".repeat(65),
+          description: "x".repeat(1025),
+        }),
+      );
+      expect(result.issues.some((issue) => issue.rule === "name-length")).toBe(true);
+      expect(result.issues.some((issue) => issue.rule === "description-length")).toBe(true);
     });
   });
 
-  // ─── Frontmatter ──────────────────────────────────────────────
-
-  describe("frontmatter", () => {
-    it("fails when frontmatter is missing entirely", () => {
-      const dir = join(tempDir, "no-fm");
-      mkdirSync(dir);
-      writeFileSync(join(dir, "SKILL.md"), "# No Frontmatter\n\nJust a body.");
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "frontmatter-exists")).toBe(true);
+  describe("references", () => {
+    it("warns when a referenced file does not exist", () => {
+      const result = validateSkill(
+        createSkill("broken-ref", {}, "# Skill\n\nRun `./scripts/setup.sh`."),
+      );
+      expect(result.issues.some((issue) => issue.rule === "reference-exists")).toBe(true);
     });
 
-    it("fails when description is missing", () => {
-      const dir = join(tempDir, "no-desc");
-      mkdirSync(dir);
-      writeFileSync(join(dir, "SKILL.md"), "---\nname: no-desc\n---\n\n# No Desc");
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "description-exists")).toBe(true);
-    });
-
-    it("fails when description exceeds 1024 characters", () => {
-      const dir = createSkill("long-desc", { description: "x".repeat(1025) });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "description-length")).toBe(true);
-    });
-  });
-
-  // ─── Description Quality ──────────────────────────────────────
-
-  describe("description quality", () => {
-    it("warns on vague description (too short / generic)", () => {
-      const dir = createSkill("vague", { description: "Helps with stuff." });
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "description-quality")).toBe(true);
-    });
-
-    it("passes with a specific, actionable description", () => {
-      const dir = createSkill("good-desc", {
-        description:
-          "Validates skill directories against the Agent Skills spec, checks frontmatter schema, naming conventions, and context efficiency. Use when building or reviewing skills.",
-      });
-      const result = validateSkill(dir);
-      const qualityIssues = result.issues.filter((i) => i.rule === "description-quality");
-      expect(qualityIssues).toHaveLength(0);
-    });
-  });
-
-  // ─── Context Efficiency ───────────────────────────────────────
-
-  describe("context efficiency", () => {
-    it("warns when SKILL.md body exceeds 8KB", () => {
-      const largeBody = "# Big Skill\n\n" + "x".repeat(9000);
-      const dir = createSkill("big-skill", {}, largeBody);
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "context-size")).toBe(true);
-    });
-
-    it("info when SKILL.md body exceeds 4KB without references to external files", () => {
-      const mediumBody = "# Medium Skill\n\n" + "Detailed instructions. ".repeat(250);
-      const dir = createSkill("medium-skill", {}, mediumBody);
-      const result = validateSkill(dir);
-      expect(
-        result.issues.some(
-          (i) => i.rule === "context-compression" && i.severity === "info",
-        ),
-      ).toBe(true);
-    });
-
-    it("passes context-compression when body references external files", () => {
-      const body =
-        "# Indexed Skill\n\nSee [reference](references/api.md) for details.\n\n" +
-        "More instructions. ".repeat(250);
-      const dir = createSkill("indexed-skill", {}, body);
-      // Create the referenced file
-      mkdirSync(join(dir, "references"), { recursive: true });
-      writeFileSync(join(dir, "references", "api.md"), "# API Reference\nDetails...");
-      const result = validateSkill(dir);
-      expect(
-        result.issues.filter(
-          (i) => i.rule === "context-compression" && i.severity === "info",
-        ),
-      ).toHaveLength(0);
-    });
-  });
-
-  // ─── Broken References ────────────────────────────────────────
-
-  describe("broken references", () => {
-    it("warns when SKILL.md references a file that doesn't exist", () => {
-      const body = "# My Skill\n\nRun the setup:\n```bash\n./scripts/setup.sh\n```";
-      const dir = createSkill("broken-ref", {}, body);
-      const result = validateSkill(dir);
-      expect(result.issues.some((i) => i.rule === "reference-exists")).toBe(true);
-    });
-
-    it("passes when referenced files exist", () => {
-      const body =
-        "# My Skill\n\nRun the setup:\n```bash\n./scripts/setup.sh\n```";
-      const dir = createSkill("good-ref", {}, body);
-      mkdirSync(join(dir, "scripts"));
-      writeFileSync(join(dir, "scripts", "setup.sh"), "#!/bin/bash\necho hi");
-      const result = validateSkill(dir);
-      expect(result.issues.filter((i) => i.rule === "reference-exists")).toHaveLength(0);
-    });
-  });
-
-  // ─── Aggregate ────────────────────────────────────────────────
-
-  describe("aggregate result", () => {
-    it("returns valid:false when any error-severity issue exists", () => {
-      const dir = join(tempDir, "missing");
-      const result = validateSkill(dir);
+    it("rejects a reference outside the skill directory", () => {
+      const result = validateSkill(
+        createSkill("outside-ref", {}, "# Skill\n\nSee [secret](../secret.md)."),
+      );
       expect(result.valid).toBe(false);
+      expect(result.issues.some((issue) => issue.rule === "reference-scope")).toBe(true);
     });
 
-    it("returns valid:true when only warnings exist", () => {
-      const dir = createSkill("warn-only", { description: "Helps with stuff." });
-      const result = validateSkill(dir);
-      // Should have a description-quality warning but no errors
-      expect(result.valid).toBe(true);
-    });
-
-    it("extracts skill name from frontmatter", () => {
-      const dir = createSkill("named-skill");
-      const result = validateSkill(dir);
-      expect(result.name).toBe("named-skill");
+    it("accepts an existing in-scope reference", () => {
+      const dir = createSkill("good-ref", {}, "# Skill\n\nRun `./scripts/setup.sh`.");
+      mkdirSync(join(dir, "scripts"));
+      writeFileSync(join(dir, "scripts", "setup.sh"), "#!/bin/sh\n");
+      expect(validateSkill(dir).issues.some((issue) => issue.rule.startsWith("reference-"))).toBe(
+        false,
+      );
     });
   });
 });

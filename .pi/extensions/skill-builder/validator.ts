@@ -1,169 +1,121 @@
-/**
- * Skill validator — checks a skill directory against the Agent Skills spec
- * and pi context-efficiency best practices.
- */
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { loadSkillsFromDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
-import { basename, join, relative } from "path";
 import type { SkillFrontmatter, ValidationIssue, ValidationResult } from "./types";
 
-/** Parse YAML-like frontmatter from a markdown string. Simple key: value parser. */
-export function parseFrontmatter(content: string): {
-  frontmatter: SkillFrontmatter;
-  body: string;
-} | null {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!match) return null;
+const FILE_REF_PATTERNS = [/\.\/([\w./-]+)/g, /\]\(([^)]+)\)/g];
 
-  const fmBlock = match[1];
-  const body = match[2];
-  const frontmatter: Record<string, unknown> = {};
-
-  for (const line of fmBlock.split("\n")) {
-    const colonIdx = line.indexOf(":");
-    if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim();
-    let value: unknown = line.slice(colonIdx + 1).trim();
-
-    // Handle booleans
-    if (value === "true") value = true;
-    else if (value === "false") value = false;
-
-    frontmatter[key] = value;
-  }
-
-  return { frontmatter: frontmatter as SkillFrontmatter, body };
+function addIssue(issues: ValidationIssue[], issue: ValidationIssue): void {
+  if (issues.some((current) => current.rule === issue.rule)) return;
+  issues.push(issue);
 }
 
-/** Name format: lowercase a-z, 0-9, single hyphens, no leading/trailing hyphens. */
-const NAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-const CONSECUTIVE_HYPHENS_RE = /--/;
+function hasFrontmatter(content: string): boolean {
+  const normalized = content.replace(/\r\n?/g, "\n");
+  return normalized.startsWith("---\n") && normalized.indexOf("\n---", 4) >= 0;
+}
 
-/** Words too vague for a skill description. */
-const VAGUE_WORDS = ["stuff", "things", "helps", "does", "misc", "general", "various"];
-const MIN_DESCRIPTION_LENGTH = 30;
-
-/** Patterns that look like file references in markdown. */
-const FILE_REF_PATTERNS = [
-  /\.\/([\w./-]+)/g, // ./path/to/file
-  /\]\(([\w./-]+)\)/g, // [text](path)
-  /`\.\/([\w./-]+)`/g, // `./path/to/file`
-];
-
-/** Extract relative file references from markdown body. */
 function extractFileReferences(body: string): string[] {
   const refs = new Set<string>();
   for (const pattern of FILE_REF_PATTERNS) {
     for (const match of body.matchAll(pattern)) {
-      const ref = match[1];
-      if (ref && !ref.startsWith("http") && !ref.startsWith("#")) {
-        refs.add(ref);
+      let ref = match[1]?.trim();
+      if (!ref) continue;
+      if (ref.startsWith("<") && ref.endsWith(">")) ref = ref.slice(1, -1);
+      ref = ref.split(/[?#]/, 1)[0] ?? "";
+      if (!ref || ref.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//")) {
+        continue;
       }
+      refs.add(ref);
     }
   }
-  return Array.from(refs);
+  return [...refs];
 }
 
-function validateName(
+function validateRequiredFields(
   frontmatter: SkillFrontmatter,
-  dirName: string,
   issues: ValidationIssue[],
-): void {
-  if (!frontmatter.name) return;
-
-  const name = String(frontmatter.name);
-  if (!NAME_RE.test(name) || CONSECUTIVE_HYPHENS_RE.test(name)) {
-    issues.push({
-      rule: "name-format",
+): { name?: string; fieldsHaveValidTypes: boolean } {
+  let fieldsHaveValidTypes = true;
+  const name = frontmatter.name;
+  if (name === undefined || name === null || name === "") {
+    addIssue(issues, {
+      rule: "name-exists",
       severity: "error",
-      message: `Name "${name}" must be lowercase a-z, 0-9, single hyphens only, no leading/trailing hyphens.`,
+      message: "Name is required in frontmatter.",
       file: "SKILL.md",
     });
-  }
-  if (name.length > 64) {
-    issues.push({
-      rule: "name-length",
+  } else if (typeof name !== "string") {
+    fieldsHaveValidTypes = false;
+    addIssue(issues, {
+      rule: "name-type",
       severity: "error",
-      message: `Name exceeds 64 characters (${name.length}).`,
+      message: "Name must be a string.",
       file: "SKILL.md",
     });
   }
-  if (name !== dirName) {
-    issues.push({
-      rule: "name-matches-dir",
-      severity: "warning",
-      message: `Frontmatter name "${name}" doesn't match directory name "${dirName}".`,
-      file: "SKILL.md",
-    });
-  }
-}
 
-function validateDescription(frontmatter: SkillFrontmatter, issues: ValidationIssue[]): void {
-  if (!frontmatter.description) {
-    issues.push({
+  const description = frontmatter.description;
+  if (description === undefined || description === null || description === "") {
+    addIssue(issues, {
       rule: "description-exists",
       severity: "error",
       message: "Description is required in frontmatter.",
       file: "SKILL.md",
     });
-    return;
-  }
-
-  const description = String(frontmatter.description);
-  if (description.length > 1024) {
-    issues.push({
-      rule: "description-length",
+  } else if (typeof description !== "string") {
+    fieldsHaveValidTypes = false;
+    addIssue(issues, {
+      rule: "description-type",
       severity: "error",
-      message: `Description exceeds 1024 characters (${description.length}).`,
+      message: "Description must be a string.",
       file: "SKILL.md",
     });
   }
 
-  const descriptionLower = description.toLowerCase();
-  const isVague =
-    description.length < MIN_DESCRIPTION_LENGTH ||
-    VAGUE_WORDS.some((word) => {
-      const pattern = new RegExp(`\\b${word}\\b`, "i");
-      return pattern.test(descriptionLower);
-    });
-  if (isVague) {
-    issues.push({
-      rule: "description-quality",
-      severity: "warning",
-      message: "Description is vague. Be specific about what the skill does and when to use it.",
-      file: "SKILL.md",
-    });
-  }
+  return {
+    name: typeof name === "string" && name.length > 0 ? name : undefined,
+    fieldsHaveValidTypes,
+  };
 }
 
-function validateContextEfficiency(body: string, issues: ValidationIssue[]): void {
-  const bodyBytes = Buffer.byteLength(body, "utf-8");
-  if (bodyBytes > 8192) {
-    issues.push({
-      rule: "context-size",
-      severity: "info",
-      message: `SKILL.md body is ${(bodyBytes / 1024).toFixed(1)}KB. Consider: does this skill cover one cohesive concern, or could it decompose into smaller skills? If it's cohesive, the size is fine. If sections are independently useful, splitting reduces per-invocation context cost.`,
-      file: "SKILL.md",
-    });
-  }
-  if (bodyBytes <= 4096) return;
+function loaderRule(message: string): string {
+  if (message.startsWith("name exceeds")) return "name-length";
+  if (message.startsWith("name ")) return "name-format";
+  if (message.startsWith("description exceeds")) return "description-length";
+  if (message === "description is required") return "description-exists";
+  return "frontmatter-parse";
+}
 
-  const refs = extractFileReferences(body);
-  const hasExternalRefs = refs.length > 0 || /references?\//i.test(body);
-  if (!hasExternalRefs) {
-    issues.push({
-      rule: "context-compression",
-      severity: "info",
-      message:
-        "SKILL.md body exceeds 4KB without referencing external files. Consider using the index pattern: keep SKILL.md as a compressed index and move detailed docs to references/.",
+function appendLoaderDiagnostics(skillDir: string, issues: ValidationIssue[]): void {
+  const result = loadSkillsFromDir({ dir: skillDir, source: "path" });
+  for (const diagnostic of result.diagnostics) {
+    const rule = loaderRule(diagnostic.message);
+    addIssue(issues, {
+      rule,
+      severity: "error",
+      message: diagnostic.message,
       file: "SKILL.md",
     });
   }
 }
 
 function validateReferences(skillDir: string, body: string, issues: ValidationIssue[]): void {
+  const root = resolve(skillDir);
   for (const ref of extractFileReferences(body)) {
-    if (existsSync(join(skillDir, ref))) continue;
+    const target = resolve(root, ref);
+    const relativeTarget = relative(root, target);
+    if (isAbsolute(ref) || relativeTarget === ".." || relativeTarget.startsWith(`..${sep}`)) {
+      issues.push({
+        rule: "reference-scope",
+        severity: "error",
+        message: `Referenced file "${ref}" resolves outside the skill directory.`,
+        file: "SKILL.md",
+      });
+      continue;
+    }
+    if (existsSync(target)) continue;
     issues.push({
       rule: "reference-exists",
       severity: "warning",
@@ -175,62 +127,67 @@ function validateReferences(skillDir: string, body: string, issues: ValidationIs
 
 export function validateSkill(skillDir: string): ValidationResult {
   const issues: ValidationIssue[] = [];
-  let parsed: ReturnType<typeof parseFrontmatter> = null;
-
-  // ─── Directory exists ──────────────────────────────────────────
   if (!existsSync(skillDir)) {
-    issues.push({
-      rule: "dir-exists",
-      severity: "error",
-      message: `Skill directory does not exist: ${skillDir}`,
-    });
-    return { valid: false, issues };
+    return {
+      valid: false,
+      issues: [
+        {
+          rule: "dir-exists",
+          severity: "error",
+          message: `Skill directory does not exist: ${skillDir}`,
+        },
+      ],
+    };
   }
 
-  // ─── SKILL.md exists ──────────────────────────────────────────
   const skillMdPath = join(skillDir, "SKILL.md");
   if (!existsSync(skillMdPath)) {
-    issues.push({
-      rule: "skill-md-exists",
-      severity: "error",
-      message: "SKILL.md not found in skill directory.",
-      file: "SKILL.md",
-    });
-    return { valid: false, issues };
+    return {
+      valid: false,
+      issues: [
+        {
+          rule: "skill-md-exists",
+          severity: "error",
+          message: "SKILL.md not found in skill directory.",
+          file: "SKILL.md",
+        },
+      ],
+    };
   }
 
-  // ─── Parse frontmatter ────────────────────────────────────────
   const content = readFileSync(skillMdPath, "utf-8");
-  parsed = parseFrontmatter(content);
-
-  if (!parsed) {
-    issues.push({
-      rule: "frontmatter-exists",
-      severity: "error",
-      message: "SKILL.md has no YAML frontmatter (expected --- delimited block).",
-      file: "SKILL.md",
-    });
-    return { valid: false, issues };
+  if (!hasFrontmatter(content)) {
+    return {
+      valid: false,
+      issues: [
+        {
+          rule: "frontmatter-exists",
+          severity: "error",
+          message: "SKILL.md has no YAML frontmatter.",
+          file: "SKILL.md",
+        },
+      ],
+    };
   }
 
-  const { frontmatter, body } = parsed;
-  const dirName = basename(skillDir);
+  let parsed: ReturnType<typeof parseFrontmatter<SkillFrontmatter>>;
+  try {
+    parsed = parseFrontmatter<SkillFrontmatter>(content);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "YAML parsing failed.";
+    return {
+      valid: false,
+      issues: [{ rule: "frontmatter-parse", severity: "error", message, file: "SKILL.md" }],
+    };
+  }
 
-  validateName(frontmatter, dirName, issues);
-  validateDescription(frontmatter, issues);
-
-  // ─── Context efficiency ───────────────────────────────────────
-  validateContextEfficiency(body, issues);
-
-  // ─── Broken references ────────────────────────────────────────
-  validateReferences(skillDir, body, issues);
-
-  // ─── Aggregate ────────────────────────────────────────────────
-  const hasErrors = issues.some((i) => i.severity === "error");
+  const required = validateRequiredFields(parsed.frontmatter, issues);
+  if (required.fieldsHaveValidTypes) appendLoaderDiagnostics(skillDir, issues);
+  validateReferences(skillDir, parsed.body, issues);
 
   return {
-    valid: !hasErrors,
+    valid: !issues.some((issue) => issue.severity === "error"),
     issues,
-    name: frontmatter.name ? String(frontmatter.name) : undefined,
+    name: required.name,
   };
 }

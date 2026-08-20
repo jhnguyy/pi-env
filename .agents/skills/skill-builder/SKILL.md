@@ -9,7 +9,7 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 
 **Reference skills** — lightweight skills that live in `~/.agents/skills/reference/` or a package-root `.agents/skills/reference/` directory as plain `.md` files. They are loaded only when explicitly referenced, not through passive skill context.
 
-**Auto-discovered skills** — directories with `SKILL.md` in `~/.agents/skills/` (global) or `.pi/skills/` (project). Names: lowercase, a-z, 0-9, single hyphens, 1–64 chars, must match directory name.
+**Auto-discovered skills** — directories with `SKILL.md` in a configured Pi skill path. Names use lowercase letters, digits, and single hyphens, with a maximum of 64 characters.
 
 ## Building a New Skill
 
@@ -27,23 +27,31 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 skill_build({ name: "...", description: "...", template: "with-index" })
 ```
 
-Scaffolds and validates the structure. Replace the placeholders with the smallest sufficient method, then review the finished skill by path.
+Scaffolds and validates the structure. Replace the placeholders with the smallest sufficient method, then validate the finished skill by path.
 
 Description must be specific and actionable: "Extracts text from PDFs and fills forms" not "Helps with PDFs".
 
-### 3. Write instructions, then review
+### 3. Write instructions, then validate
 
 ```
 skill_build({ path: "/path/to/skill-dir" })
 ```
 
-Runs validate → evaluate. Validation errors are requirements. Evaluation findings are advisory. Apply only findings that improve the user's actual scope.
+Validation is deterministic. Fix validation errors before evaluation.
 
-Pass `diff` to focus evaluation on what changed:
+Run one advisory evaluation only when the user requests qualitative review:
 
 ```
-skill_build({ path: "...", diff: "<unified diff>" })
+skill_build({
+  path: "/path/to/skill-dir",
+  action: "evaluate",
+  goal: "The user's requested outcome and scope."
+})
 ```
+
+The evaluator uses uncommitted `SKILL.md` index and working-tree changes against `HEAD`.
+If no local diff exists, it reviews the full file.
+Return findings for user review. Do not rerun only to obtain a pass.
 
 **Context engineering principles:**
 
