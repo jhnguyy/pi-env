@@ -11,13 +11,14 @@ The brief should contain everything a downstream agent needs to start work — a
 ## Process
 
 1. **Orient.** Identify the project root, stack, and toolchain. Check for context files (AGENTS.md, README.md, package.json, Cargo.toml, go.mod, etc.) — use whatever exists, don't assume any particular structure.
-2. **Scope.** Match the stated intent to the relevant parts of the codebase. Use dev-tools symbols on entry points and key files to get structure efficiently. Use dev-tools definition/references to trace relationships for the specific intent.
-3. **Gather.** For each relevant area:
-   - Capture structure (exports, types, interfaces) via dev-tools rather than reading entire files
+2. **Probe semantic readiness first.** Before any supported-language reconnaissance, run `dev-tools status`. Then pick one relevant supported-language file that is known to contain declarations and request document symbols for that file. If status is not ready, the symbols probe fails, or that known declaration file returns no semantic data, record `LSP degraded` in the workspace brief immediately, including the failed semantic action and fallback reason so downstream agents do not repeat it. Do not treat every empty symbols result as degraded — only the known declaration probe file qualifies. Use `rg` or direct reads only after recording the degraded result.
+3. **Scope.** Match the stated intent to the relevant parts of the codebase. When the semantic probe succeeded, use dev-tools symbols on entry points and key files to get structure efficiently. Use dev-tools definition/references to trace relationships for the specific intent.
+4. **Gather.** For each relevant area:
+   - Capture structure (exports, types, interfaces) via dev-tools rather than reading entire files when semantic tooling is ready
    - Identify tests, configs, and conventions that constrain implementation
    - Note dependencies and files that would be affected by changes
-   - Reserve full file reads for content where structure isn't indexed (config, prose, templates)
-4. **Compress.** The output is a handoff document — include exact paths, key code snippets, and relationships. Exclude anything a competent agent could infer from the file tree alone.
+   - Reserve full file reads for content where structure isn't indexed (config, prose, templates) or when the semantic probe was degraded
+5. **Compress.** The output is a handoff document — include exact paths, key code snippets, and relationships. Exclude anything a competent agent could infer from the file tree alone.
 
 ## Output
 
@@ -25,7 +26,7 @@ The brief should contain everything a downstream agent needs to start work — a
 Exact paths. Group by "must read" vs "reference only".
 
 ### Workspace Context
-How the relevant pieces connect. Entry points, data flow, dependencies — scoped to the intent. Include build/test/lint commands if discoverable.
+How the relevant pieces connect. Entry points, data flow, dependencies — scoped to the intent. Include build/test/lint commands if discoverable. If the semantic readiness probe degraded, begin this section with `LSP degraded` and preserve the exact failed semantic action plus fallback reason.
 
 ### Patterns and Conventions
 Specific conventions observed in the codebase that apply to this task. Include code snippets from source when the pattern is non-obvious.
