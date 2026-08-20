@@ -64,13 +64,24 @@ const MODEL_TAG_GUIDANCE = {
   free: "No-cost iteration",
 } as const;
 
+const ModelPolicyTag = {
+  Reviewer: "reviewer",
+} as const;
+const MODEL_POLICY_TAGS: ReadonlySet<string> = new Set(Object.values(ModelPolicyTag));
+
+function modelDescriptionTags(tags?: readonly string[]): string[] {
+  return tags?.filter((tag) => !MODEL_POLICY_TAGS.has(tag)) ?? [];
+}
+
 function appendModelTagGuidance(
   lines: string[],
   models: AvailableModel[],
   annotations?: Record<string, string[]>,
 ): boolean {
   const availableTags = new Set(
-    models.flatMap((model) => annotations?.[`${model.provider}/${model.id}`] ?? []),
+    models.flatMap((model) =>
+      modelDescriptionTags(annotations?.[`${model.provider}/${model.id}`]),
+    ),
   );
   const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => availableTags.has(tag));
   if (guidance.length === 0) return false;
@@ -96,8 +107,8 @@ function appendModels(
   lines.push("", "Available models (use 'provider/model-id' format):");
   for (const model of models) {
     const modelKey = `${model.provider}/${model.id}`;
-    const tags = annotations?.[modelKey];
-    const tagSuffix = tags && tags.length > 0 ? ` [${tags.join(", ")}]` : "";
+    const tags = modelDescriptionTags(annotations?.[modelKey]);
+    const tagSuffix = tags.length > 0 ? ` [${tags.join(", ")}]` : "";
     lines.push(`  ${modelKey} — ${model.name}${tagSuffix}`);
   }
   const hasTagGuidance = appendModelTagGuidance(lines, models, annotations);

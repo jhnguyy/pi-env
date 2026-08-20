@@ -14,12 +14,12 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
   const annotations = {
     "test/quick": ["preferred", "fast", "experimental"],
     "test/coder": ["codex"],
-    "test/deep": ["heavy"],
+    "test/deep": ["heavy", "reviewer"],
     "test/offline": ["local", "free"],
     "test/excluded": ["heavy", "free"],
   };
 
-  it("maps known live tags to task intents without hiding unknown tags", () => {
+  it("maps routing tags without exposing policy annotations", () => {
     const description = buildDynamicDescription(
       ["test/quick", "test/coder", "test/deep", "test/offline"],
       availableModels,
@@ -31,6 +31,7 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
 
     expect(description).toContain("Available models (use 'provider/model-id' format):");
     expect(description).toContain("test/quick — Quick [preferred, fast, experimental]");
+    expect(description).toContain("test/deep — Deep [heavy]");
     expect(description).toContain(
       "[preferred] Cost-effective gathering, summarization, and mechanical edits.",
     );
@@ -40,6 +41,7 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
     expect(description).toContain("[local] Local execution when remote providers are unnecessary.");
     expect(description).toContain("[free] No-cost iteration.");
     expect(description.match(/experimental/g)).toHaveLength(1);
+    expect(description).not.toContain("reviewer");
     expect(description).toContain("Always pass model explicitly — there is no default.");
   });
 
