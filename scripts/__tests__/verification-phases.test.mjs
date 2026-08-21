@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  EXPLICIT_VERIFICATION_PHASES,
   SAFE_VERIFICATION_PHASES,
   STANDARD_VERIFICATION_PHASES,
   VerificationClass,
@@ -60,5 +61,33 @@ describe("verification phase registry", () => {
     const logError = vi.fn();
     expect(runVerificationPhase("missing", { run, logError })).toBe(2);
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("unknown phase"));
+  });
+
+  it("makes the slow real-workspace canary explicitly invocable only", () => {
+    expect(STANDARD_VERIFICATION_PHASES.map((phase) => phase.id)).not.toContain(
+      "real-workspace-semantic-canary",
+    );
+    expect(SAFE_VERIFICATION_PHASES.map((phase) => phase.id)).not.toContain(
+      "real-workspace-semantic-canary",
+    );
+
+    const canary = EXPLICIT_VERIFICATION_PHASES.find(
+      (phase) => phase.id === "real-workspace-semantic-canary",
+    );
+    expect([canary?.command, ...(canary?.args ?? [])]).toEqual([
+      "nub",
+      "run",
+      "test:e2e:real-workspace-canary",
+    ]);
+
+    const run = vi.fn(() => ({ status: 0 }));
+    expect(
+      runVerificationPhase("real-workspace-semantic-canary", { run, now: () => 0, log: () => {} }),
+    ).toBe(0);
+    expect(run).toHaveBeenCalledWith(
+      "nub",
+      ["run", "test:e2e:real-workspace-canary"],
+      { stdio: "inherit" },
+    );
   });
 });

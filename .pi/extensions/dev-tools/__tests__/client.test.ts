@@ -12,6 +12,7 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   ClientTransportError,
   LspClient,
+  REQUEST_TIMEOUT_MS,
   RequestTimeoutError,
   resolveDaemonNodeBinary,
   type LspClientDependencies,
@@ -25,7 +26,6 @@ import {
   type SymbolsResult,
 } from "../protocol";
 
-const REQUEST_TIMEOUT_MS = 15_000;
 const CONNECT_RETRY_MS = 200;
 
 type RequestHandler = (request: DaemonRequest, socket: Socket) => void;
@@ -41,8 +41,13 @@ type FakeSocket = Socket & {
 function statusResult(pid = 999): StatusResult {
   return {
     action: "status",
+    state: "ready",
     running: true,
     pid,
+    backend: { name: "typescript", running: true },
+    project: { mode: "unknown" },
+    initialization: { state: "initialized" },
+    semantic: { available: true, lastRequest: { method: "textDocument/references", itemCount: 0 } },
     projects: [],
     openFiles: [],
     watchedFiles: 0,

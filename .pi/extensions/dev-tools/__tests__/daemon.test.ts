@@ -51,6 +51,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
   function createMockedDaemon(
     lspResponses: Map<string, any> = new Map(),
     diagsByUri: Map<string, any[]> = new Map(),
+    projectRoots: string[] = [tmpDir],
   ): LspDaemon {
     const d = new LspDaemon(socketPath, pidPath, 60_000);
     const tsBackend = (d as any).backends[0];
@@ -61,12 +62,14 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
     // Override lspRequest to return canned responses
     tsBackend.lspRequest = async (method: string, _params: any) => {
       const result = lspResponses.get(method);
+      if (result instanceof Error) throw result;
       if (result === undefined) return { jsonrpc: "2.0", id: 1, result: null };
       return { jsonrpc: "2.0", id: 1, result };
     };
 
     // Override ensureReady so workspace/symbol queries don't spin up LSP
     tsBackend.ensureReady = async () => {};
+    Object.defineProperty(tsBackend, "projectRoots", { get: () => projectRoots });
 
     // Override ensureFile to return a predictable URI without real LSP calls
     tsBackend.ensureFile = async (p: string) => `file://${resolve(p)}`;
@@ -277,7 +280,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect((res.result as any).signature).toContain("const greeting: string");
     });
 
-    it("returns error when LSP returns null", async () => {
+    it("records a valid empty hover while preserving the public error", async () => {
       const tsFile = join(tmpDir, "foo.ts");
       writeFileSync(tsFile, "const x = 1;", "utf8");
 
@@ -289,6 +292,10 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/No hover information/);
+      expect((daemon as any).backends[0].getStatusSnapshot().lastSemanticRequest).toEqual({
+        method: "textDocument/hover",
+        itemCount: 0,
+      });
     });
 
     it("returns error when params missing", async () => {
@@ -327,7 +334,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect((res.result as any).locations[0].body).toContain("interface User");
     });
 
-    it("returns error when LSP returns null", async () => {
+    it("records a valid empty definition while preserving the public error", async () => {
       const tsFile = join(tmpDir, "foo.ts");
       writeFileSync(tsFile, "const x = 1;", "utf8");
 
@@ -338,6 +345,11 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       sock.destroy();
 
       expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/No definition found/);
+      expect((daemon as any).backends[0].getStatusSnapshot().lastSemanticRequest).toEqual({
+        method: "textDocument/definition",
+        itemCount: 0,
+      });
     });
   });
 
@@ -378,6 +390,22 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect(res.ok).toBe(true);
       expect((res.result as any).total).toBe(0);
     });
+
+    it("returns request errors instead of translating them to empty references", async () => {
+      const tsFile = join(tmpDir, "x.ts");
+      writeFileSync(tsFile, "const x = 1;", "utf8");
+
+      daemon = createMockedDaemon(new Map([
+        ["textDocument/references", new Error("typescript LSP request timed out: textDocument/references")],
+      ]));
+
+      const sock = await startAndConnect(daemon);
+      const res = await send(sock, { id: 111, action: "references", path: tsFile, line: 1, character: 1 });
+      sock.destroy();
+
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/timed out: textDocument\/references/);
+    });
   });
 
   // ─── Symbols ─────────────────────────────────────────────────────────────
@@ -403,6 +431,35 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect(result.items).toHaveLength(2);
       expect(result.items[0].name).toBe("Foo");
       expect(result.items[0].kind).toBe("interface");
+    });
+
+    it("returns request errors instead of translating them to empty document symbols", async () => {
+      const tsFile = join(tmpDir, "types.ts");
+      writeFileSync(tsFile, "interface Foo {}\n", "utf8");
+
+      daemon = createMockedDaemon(new Map([
+        ["textDocument/documentSymbol", new Error("typescript LSP request timed out: textDocument/documentSymbol")],
+      ]));
+
+      const sock = await startAndConnect(daemon);
+      const res = await send(sock, { id: 112, action: "symbols", path: tsFile });
+      sock.destroy();
+
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/timed out: textDocument\/documentSymbol/);
+    });
+
+    it("rejects a cold workspace query before a project file opens", async () => {
+      daemon = createMockedDaemon(new Map(), new Map(), []);
+      const sock = await startAndConnect(daemon);
+
+      const res = await send(sock, { id: 12, action: "symbols", query: "User" });
+      sock.end();
+
+      expect(res).toMatchObject({
+        ok: false,
+        error: "Workspace symbols require an opened project file. Request document symbols first.",
+      });
     });
 
     it("returns workspace symbols for a query", async () => {

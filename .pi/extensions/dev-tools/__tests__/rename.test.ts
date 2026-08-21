@@ -49,6 +49,8 @@ describeIfEnabled("dev-tools", "rename action", () => {
         content: path === declarationPath ? declarationContent : usageContent,
       }),
       lspRequest,
+      recordSemanticResult: vi.fn(),
+      didLastSemanticRequestFail: vi.fn(() => false),
       projectRoots: [root],
     };
     const deps = {

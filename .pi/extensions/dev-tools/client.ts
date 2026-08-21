@@ -5,7 +5,7 @@
  * - Connect to the daemon socket (auto-spawn if not running)
  * - Send JSON-over-newline requests, receive responses
  * - Handle ECONNREFUSED / ENOENT (stale socket → remove + respawn)
- * - Timeout individual requests (15s default)
+ * - Bound individual daemon requests, including cold language-server startup
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -23,13 +23,14 @@ import {
   type LspResult,
 } from "./protocol";
 import { removeStaleArtifact } from "./socket-artifacts";
+import { CLIENT_REQUEST_TIMEOUT_MS } from "./timeouts";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const SPAWN_RETRY_INTERVAL_MS = 200;
 const SPAWN_RETRY_MAX_MS = 10_000;
 const SPAWN_RETRY_MAX_INTERVAL_MS = 1_000;
-const REQUEST_TIMEOUT_MS = 15_000;
+export const REQUEST_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const SOCKET_LISTENER_COUNT = 3;
 
 export class ClientClosedError extends Data.TaggedError("ClientClosedError")<{

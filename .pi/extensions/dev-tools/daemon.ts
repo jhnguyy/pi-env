@@ -224,7 +224,17 @@ export class LspDaemon {
     // Shutdown is handled inline — not a registered action
     if (req.action === "shutdown") {
       return okResponse(req.id, {
-        action: "status", running: false, projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
+        action: "status",
+        state: "initializing",
+        running: false,
+        backend: { name: "unknown", running: false },
+        project: { mode: "unknown" },
+        initialization: { state: "initializing" },
+        semantic: { available: false },
+        projects: [],
+        openFiles: [],
+        watchedFiles: 0,
+        idleMs: 0,
       } as StatusResult);
     }
 

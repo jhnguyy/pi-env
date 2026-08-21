@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import { STANDARD_VERIFICATION_PHASES, verificationPhaseById } from "./verification-phases.mjs";
+import {
+  EXPLICIT_VERIFICATION_PHASES,
+  STANDARD_VERIFICATION_PHASES,
+  verificationPhaseById,
+} from "./verification-phases.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
 export function runVerificationPhase(id, options = {}) {
-  const phases = options.phases ?? STANDARD_VERIFICATION_PHASES;
+  const phases = options.phases ?? EXPLICIT_VERIFICATION_PHASES;
   const phase = verificationPhaseById(id, phases);
   if (phase === undefined) {
     const expected = phases.map((candidate) => candidate.id).join(", ");
