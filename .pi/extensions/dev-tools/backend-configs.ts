@@ -115,6 +115,12 @@ function packageBinEntry(packageName: string, binName: string): string {
   return join(dirname(packageJsonPath), bin);
 }
 
+function packagePluginProbeLocation(packageName: string): string {
+  let location = dirname(require.resolve(`${packageName}/package.json`));
+  for (const _segment of packageName.split("/")) location = dirname(location);
+  return dirname(location);
+}
+
 function nodeExecPathShim(): string {
   return `data:text/javascript,${encodeURIComponent(`const configured = process.env.${ProcessEnvironmentName.NodeBinary}?.trim(); if (configured) Object.defineProperty(process, 'execPath', { value: configured, configurable: true, writable: true });`)}`;
 }
@@ -193,6 +199,12 @@ export const BACKEND_CONFIGS: BackendConfig[] = [
     initializationOptions: {
       disableAutomaticTypingAcquisition: true,
       maxTsServerMemory: 768,
+      plugins: [
+        {
+          name: "@effect/language-service",
+          location: packagePluginProbeLocation("@effect/language-service"),
+        },
+      ],
       tsserver: {
         path: resolveTypeScriptServerPath(),
         useSyntaxServer: "never",

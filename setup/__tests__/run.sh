@@ -28,6 +28,7 @@ SETUP_TESTS=(
   setup/__tests__/verify-install.test.sh
   setup/__tests__/verify.test.sh
   setup/__tests__/effect-runtime.test.sh
+  setup/__tests__/effect-language-service.test.sh
 )
 
 for test_script in "${SETUP_TESTS[@]}"; do

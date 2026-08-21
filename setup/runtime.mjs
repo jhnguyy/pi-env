@@ -49,6 +49,11 @@ function installWithRetry(args) {
   if (!nubInstall(args)) fail('  ✗  Nub install failed after the retry.');
 }
 
+function patchEffectTypeScript() {
+  const cli = join(repo, 'node_modules', '@effect', 'language-service', 'cli.js');
+  runChecked(setupNodeBin, [cli, 'patch'], { cwd: repo });
+}
+
 function installDependencies() {
   section('Dependencies');
   console.log('  —  Setup will install repository dependencies with Nub.');
@@ -56,7 +61,6 @@ function installDependencies() {
     case InstallStrategy.PlainNodeBootstrap:
       console.log('  —  Nub cannot run Node in this environment. Setup will use plain Node for setup scripts.');
       installWithRetry(['--ignore-scripts']);
-      runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
       runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
       break;
     case InstallStrategy.NubManaged:
@@ -66,6 +70,8 @@ function installDependencies() {
     default:
       fail('unknown install strategy');
   }
+  patchEffectTypeScript();
+  runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
   ok('node_modules up to date');
 }
 

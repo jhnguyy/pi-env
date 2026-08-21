@@ -42,6 +42,26 @@ run_verify() {
 
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
 run_verify >/dev/null
+mkdir -p "$TMP_DIR/node_modules/@effect/language-service"
+cat > "$TMP_DIR/node_modules/@effect/language-service/cli.js" <<'JS'
+process.stderr.write("fixture TypeScript is not patched\n");
+process.exit(1);
+JS
+"$NODE_RUN" - "$TMP_DIR/package.json" <<'JS'
+const fs = require('node:fs');
+const path = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+pkg.devDependencies = { '@effect/language-service': '1.0.0' };
+fs.writeFileSync(path, JSON.stringify(pkg));
+JS
+output="$(run_verify || true)"
+if grep -q 'Effect TypeScript patch check failed: fixture TypeScript is not patched' <<<"$output"; then
+  echo 'ok: unpatched Effect TypeScript installation is rejected'
+else
+  echo 'missing Effect TypeScript patch failure' >&2
+  exit 1
+fi
+write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
 "$NODE_RUN" - "$ROOT_DIR" "$TMP_DIR" <<'JS'
 const { join } = await import('node:path');
 const { pathToFileURL } = await import('node:url');

@@ -167,6 +167,13 @@ function backendErrorFromCause(
   return backendError(kind, `${prefix}: ${detail}`.slice(0, 4_000));
 }
 
+function formatDiagnosticCode(diagnostic: { code?: unknown; source?: unknown }, prefix: string): string {
+  const rawCode = diagnostic.code != null ? String(diagnostic.code) : "";
+  if (!rawCode) return "";
+  if (diagnostic.source === "effect") return `effect(${rawCode})`;
+  return prefix && !rawCode.startsWith(prefix) ? `${prefix}${rawCode}` : rawCode;
+}
+
 function emptyResource(): BackendResource {
   return { stderrTail: "" };
 }
@@ -843,9 +850,7 @@ export class LspBackend {
         diagnostic.range.start.line,
         diagnostic.range.start.character,
       );
-      const rawCode = diagnostic.code != null ? String(diagnostic.code) : "";
-      const code =
-        rawCode && prefix && !rawCode.startsWith(prefix) ? `${prefix}${rawCode}` : rawCode;
+      const code = formatDiagnosticCode(diagnostic, prefix);
       return {
         line: position.line,
         character: position.character,
