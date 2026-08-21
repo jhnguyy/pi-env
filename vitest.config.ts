@@ -16,8 +16,7 @@ export default defineConfig({
         ]
       : [
           ".pi/extensions/**/__tests__/**/*.test.ts",
-          "src/analyze/__tests__/**/*.test.ts",
-          "src/process/__tests__/**/*.test.ts",
+          "src/**/__tests__/**/*.test.ts",
           "scripts/__tests__/**/*.test.mjs",
           "setup/__tests__/**/*.test.mjs",
         ],
