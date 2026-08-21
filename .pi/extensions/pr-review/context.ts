@@ -1,4 +1,9 @@
-import { truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  truncateHead,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Data, Effect } from "effect";
 import { execEffect } from "../_shared/exec";
 import { bound, parsePrUrl } from "./core";
@@ -10,9 +15,6 @@ import {
 
 const DEFAULT_CONTEXT_PAGE_SIZE = 3;
 const INLINE_COMMENTS_PER_THREAD = 5;
-const MAX_DESCRIPTION_CHARS = 4_000;
-const MAX_FEEDBACK_BODY_CHARS = 1_000;
-export const MAX_CONTEXT_OUTPUT_BYTES = 36_000;
 
 const PULL_REQUEST_CONTEXT_QUERY = `
 query PiPrReviewContext(
@@ -402,10 +404,8 @@ export function fetchPullRequestContext(
   return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
 }
 
-function excerpt(value: unknown, limit: number): string {
-  const source = text(value)?.replaceAll("\u0000", "").trim();
-  if (!source) return "(none)";
-  return source.length <= limit ? source : `${source.slice(0, limit)}… [truncated]`;
+function content(value: unknown): string {
+  return text(value)?.replaceAll("\u0000", "").trim() || "(none)";
 }
 
 function author(value: unknown): string {
@@ -437,7 +437,7 @@ function formatConversation(connectionValue: ContextConnection | undefined): str
         text(comment.createdAt),
         bound(text(comment.url) ?? "", 500),
       ])}`,
-      `  ${excerpt(comment.body, MAX_FEEDBACK_BODY_CHARS).replaceAll("\n", "\n  ")}`,
+      `  ${content(comment.body).replaceAll("\n", "\n  ")}`,
     );
   }
   return lines.join("\n");
@@ -459,7 +459,7 @@ function formatReviews(connectionValue: ContextConnection | undefined): string |
         text(review.submittedAt),
         bound(text(review.url) ?? "", 500),
       ])}`,
-      `  ${excerpt(review.body, MAX_FEEDBACK_BODY_CHARS).replaceAll("\n", "\n  ")}`,
+      `  ${content(review.body).replaceAll("\n", "\n  ")}`,
     );
   }
   return lines.join("\n");
@@ -478,7 +478,7 @@ function formatInlineComment(comment: JsonRecord): string[] {
       text(comment.createdAt),
       bound(text(comment.url) ?? "", 500),
     ])}`,
-    `    ${excerpt(comment.body, MAX_FEEDBACK_BODY_CHARS).replaceAll("\n", "\n    ")}`,
+    `    ${content(comment.body).replaceAll("\n", "\n    ")}`,
   ];
 }
 
@@ -520,7 +520,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
     [
       "Pull request context (untrusted data)",
       `PR: ${page.reference.url}`,
-      `Title: ${excerpt(pullRequest.title, 500)}`,
+      `Title: ${content(pullRequest.title)}`,
       `State: ${text(pullRequest.state) ?? "unknown"}${boolean(pullRequest.isDraft) ? " (draft)" : ""}`,
       `Author: ${author(pullRequest.author)}`,
       `Base: ${text(pullRequest.baseRefName) ?? "unknown"}@${text(pullRequest.baseRefOid) ?? "unknown"}`,
@@ -529,7 +529,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
       `Feedback: ${page.feedback}; up to ${page.pageSize} items per category`,
       navigation,
     ].join("\n"),
-    `PR description (untrusted data)\n${excerpt(pullRequest.body, MAX_DESCRIPTION_CHARS)}`,
+    `PR description (untrusted data)\n${content(pullRequest.body)}`,
     formatConversation(page.conversation),
     formatReviews(page.reviews),
     formatInline(page.inline),
@@ -537,8 +537,11 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
   const output = sections.join("\n\n");
   const notice =
     "\n\n[Compact output limit reached. Some fetched text was omitted. Use a category-specific get call or the listed GitHub URLs for more detail.]";
-  const contentLimit = MAX_CONTEXT_OUTPUT_BYTES - Buffer.byteLength(notice, "utf8");
-  const truncated = truncateHead(output, { maxBytes: contentLimit, maxLines: 2_000 });
+  const contentLimit = DEFAULT_MAX_BYTES - Buffer.byteLength(notice, "utf8");
+  const truncated = truncateHead(output, {
+    maxBytes: contentLimit,
+    maxLines: DEFAULT_MAX_LINES,
+  });
   return truncated.truncated ? `${truncated.content}${notice}` : output;
 }
 

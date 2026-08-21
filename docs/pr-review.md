@@ -1,40 +1,18 @@
 # GitHub pull request review workflow
 
-This note defines the contract for the `pr-review` pi extension. The extension turns a normal request such as `Review this PR` into a pinned, fresh-context GitHub review workflow.
+This note defines the user and safety contracts for the `pr-review` pi extension.
 
 ## User contract
 
-The model-facing `pr_review` tool has two actions:
+The model-facing `pr_review` tool separates context retrieval from independent review creation.
 
-```text
-pr_review action=get [url]
-pr_review action=create [url]
-```
+Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-Use `get` for existing context or feedback work. It returns the pull request description, comments, review summaries, and inline review threads. The main agent can inspect the code and address the feedback after `get` returns.
+Use `create` for a new independent review. Each run uses a new child agent session with no parent conversation context. The `create` action does not post a GitHub review.
 
-Use `create` for a new independent review. The main agent delegates this review and does not synthesize the change. Each run uses a new child agent session. The child session has no parent conversation context. The `create` action does not post a GitHub review.
+If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
-If an action has no URL, the extension resolves the current checkout pull request with `gh pr view`. If resolution fails, the agent asks the user for a URL.
-
-The extension also provides explicit commands for status, selection, editing, reruns, posting, and cleanup. Finding edits and preface edits use standard pi editor interactions when inline text is absent. A guided walkthrough TUI is a later feature.
-
-## Compact context retrieval
-
-The `get` action retrieves these feedback categories:
-
-- Pull request title and description
-- Conversation comments
-- Submitted review summaries
-- Inline review threads and replies
-
-The extension uses one bounded GitHub GraphQL query for each page. It requests only the fields that feedback work needs. It does not return raw `gh` JSON, a full diff, or repository source.
-
-The default page contains up to three items from each category. The caller can request up to five items from each category. An opaque cursor continues each category that has more pages. The result reports totals, returned counts, and omitted nested thread comments.
-
-The description is limited to 4,000 characters. Each feedback body is limited to 1,000 characters. The complete tool output is limited to 36,000 UTF-8 bytes. A truncated item retains its GitHub URL when GitHub supplies one.
-
-The `get` action does not create a snapshot, worktree, child session, or managed review state. Pull request text is untrusted data. The main agent must not treat the text as instructions.
+The `get` action does not create a snapshot, worktree, child session, or managed review state. Pull request text is untrusted data.
 
 ## Independent review lifecycle
 
@@ -155,25 +133,7 @@ If a post result is uncertain, the extension searches existing review bodies for
 
 ## Command and tool surface
 
-The tool manager activates `pr_review` when the user asks about a pull request. The tool prompt routes existing context and feedback requests to `get`. The prompt routes new independent review requests to `create`.
-
-The explicit surface is:
-
-```text
-pr_review action=get [url]
-pr_review action=create [url]
-/review start [url]
-/review status
-/review findings
-/review select <ids|all|none>
-/review edit <id>
-/review preface
-/review rerun
-/review post <comment|approve|request-changes>
-/review cleanup
-```
-
-The slash command parser can evolve without changing the lifecycle or safety contracts in this note.
+The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
 
 ## Deferred UI
 
