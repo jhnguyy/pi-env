@@ -2,6 +2,61 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 
+export const PrReviewAction = {
+  Get: "get",
+  Create: "create",
+} as const;
+export type PrReviewAction = (typeof PrReviewAction)[keyof typeof PrReviewAction];
+
+export const PrReviewFeedback = {
+  All: "all",
+  Conversation: "conversation",
+  Reviews: "reviews",
+  Inline: "inline",
+} as const;
+export type PrReviewFeedback = (typeof PrReviewFeedback)[keyof typeof PrReviewFeedback];
+
+const PR_REVIEW_ACTION_VALUES = [PrReviewAction.Get, PrReviewAction.Create] as const;
+const PR_REVIEW_FEEDBACK_VALUES = [
+  PrReviewFeedback.All,
+  PrReviewFeedback.Conversation,
+  PrReviewFeedback.Reviews,
+  PrReviewFeedback.Inline,
+] as const;
+
+export const MAX_CONTEXT_PAGE_SIZE = 5;
+export const PrReviewParamsSchema = Type.Object(
+  {
+    action: StringEnum(PR_REVIEW_ACTION_VALUES),
+    url: Type.Optional(
+      Type.String({
+        description:
+          "GitHub pull request URL. Omit to resolve the current checkout with gh pr view.",
+      }),
+    ),
+    feedback: Type.Optional(
+      StringEnum(PR_REVIEW_FEEDBACK_VALUES, {
+        description: "Feedback category for action=get. Defaults to all categories.",
+      }),
+    ),
+    cursor: Type.Optional(
+      Type.String({
+        maxLength: 4096,
+        description: "Opaque pagination cursor returned by a prior action=get result.",
+      }),
+    ),
+    pageSize: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: MAX_CONTEXT_PAGE_SIZE,
+        description: "Items per feedback category. Defaults to 3 and is capped at 5.",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type PrReviewParams = Static<typeof PrReviewParamsSchema>;
+
 export const REVIEW_TOOL_NAMES = [
   "review_read",
   "review_grep",

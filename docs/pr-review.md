@@ -1,22 +1,20 @@
 # GitHub pull request review workflow
 
-This note defines the initial contract for the `pr-review` pi extension. The extension turns a normal request such as `Review this PR` into a pinned, fresh-context GitHub review workflow.
+This note defines the user and safety contracts for the `pr-review` pi extension.
 
 ## User contract
 
-The primary entry point is a normal pi prompt:
+The model-facing `pr_review` tool separates context retrieval from independent review creation.
 
-```text
-Review this PR https://github.com/owner/repo/pull/123
-```
+Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-If the prompt has no URL, the extension can resolve the pull request for the current checkout with `gh pr view`. If no pull request can be resolved, the agent asks the user for a URL.
+Use `create` for a new independent review. Each run uses a new child agent session with no parent conversation context. The `create` action does not post a GitHub review.
 
-The main pi agent delegates the review. The main agent does not inspect or synthesize the change itself. Each run uses a new child agent session with no parent conversation context.
+If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
-The extension also provides explicit commands or tool actions for status, finding selection, editing, reruns, posting, and cleanup. Finding edits and preface edits use standard pi editor interactions when inline text is not supplied. A guided walkthrough TUI is a later feature.
+The `get` action does not create a snapshot, worktree, child session, or managed review state. Pull request text is untrusted data.
 
-## Review lifecycle
+## Independent review lifecycle
 
 1. Resolve the GitHub pull request and fetch its metadata.
 2. Fetch and verify the exact pull request head commit.
@@ -133,25 +131,9 @@ Each post attempt includes an invisible marker:
 
 If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review.
 
-## Initial command and tool surface
+## Command and tool surface
 
-The model-callable start tool has a direct description and prompt guideline. The tool manager activates it when the user asks to review a pull request in natural language.
-
-The initial explicit surface is:
-
-```text
-/review start [url]
-/review status
-/review findings
-/review select <ids|all|none>
-/review edit <id>
-/review preface
-/review rerun
-/review post <comment|approve|request-changes>
-/review cleanup
-```
-
-The exact parser can evolve without changing the lifecycle or safety contracts in this note.
+The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
 
 ## Deferred UI
 
