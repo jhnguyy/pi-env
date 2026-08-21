@@ -51,6 +51,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
   function createMockedDaemon(
     lspResponses: Map<string, any> = new Map(),
     diagsByUri: Map<string, any[]> = new Map(),
+    projectRoots: string[] = [tmpDir],
   ): LspDaemon {
     const d = new LspDaemon(socketPath, pidPath, 60_000);
     const tsBackend = (d as any).backends[0];
@@ -68,6 +69,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
     // Override ensureReady so workspace/symbol queries don't spin up LSP
     tsBackend.ensureReady = async () => {};
+    Object.defineProperty(tsBackend, "projectRoots", { get: () => projectRoots });
 
     // Override ensureFile to return a predictable URI without real LSP calls
     tsBackend.ensureFile = async (p: string) => `file://${resolve(p)}`;
@@ -445,6 +447,19 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/timed out: textDocument\/documentSymbol/);
+    });
+
+    it("rejects a cold workspace query before a project file opens", async () => {
+      daemon = createMockedDaemon(new Map(), new Map(), []);
+      const sock = await startAndConnect(daemon);
+
+      const res = await send(sock, { id: 12, action: "symbols", query: "User" });
+      sock.end();
+
+      expect(res).toMatchObject({
+        ok: false,
+        error: "Workspace symbols require an opened project file. Request document symbols first.",
+      });
     });
 
     it("returns workspace symbols for a query", async () => {

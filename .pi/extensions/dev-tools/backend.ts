@@ -26,10 +26,17 @@ import {
   inheritDevToolsParentSpan,
   withSafeDevToolsSpan,
 } from "./telemetry";
+import {
+  LSP_INIT_TIMEOUT_MS,
+  LSP_REQUEST_TIMEOUT_MS,
+  LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
+} from "./timeouts";
 
-export const LSP_INIT_TIMEOUT_MS = 10_000;
-export const LSP_REQUEST_TIMEOUT_MS = 5_000;
-export const LSP_SEMANTIC_REQUEST_TIMEOUT_MS = 20_000;
+export {
+  LSP_INIT_TIMEOUT_MS,
+  LSP_REQUEST_TIMEOUT_MS,
+  LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
+} from "./timeouts";
 
 const COLD_SEMANTIC_METHODS = new Set([
   "textDocument/documentSymbol",
@@ -343,6 +350,7 @@ export class LspBackend {
             backendError(LspBackendErrorKind.Unavailable, this.lifecycle.message),
           );
         case "idle": {
+          this.resetSemanticState();
           const ready = Deferred.makeUnsafe<void, LspBackendError>();
           const generation = this.lifecycle.generation + 1;
           this.lifecycle = {
@@ -813,9 +821,18 @@ export class LspBackend {
           this.onDiagnostics(message.params as { uri: string; diagnostics: any[] }),
         );
       }
-      return message.id == null
-        ? Effect.void
-        : this.succeedRequestEffect(message.id as number, message, generation);
+      if (message.id == null) return Effect.void;
+      if (message.error) {
+        return this.failRequestEffect(
+          message.id as number,
+          backendError(
+            LspBackendErrorKind.Request,
+            `${this.name} LSP request failed (${message.error.code}): ${message.error.message}`,
+          ),
+          generation,
+        );
+      }
+      return this.succeedRequestEffect(message.id as number, message, generation);
     });
   }
 
@@ -941,6 +958,12 @@ export class LspBackend {
     this.diagnostics.clear();
   }
 
+  private resetSemanticState(): void {
+    this.semanticAvailable = false;
+    this.lastSemanticRequest = undefined;
+    this.semanticFailure = undefined;
+  }
+
   private failAndResetEffect(
     generation: number,
     error: LspBackendError,
@@ -1033,6 +1056,7 @@ export class LspBackend {
         yield* this.cleanupResourceEffect(stopping.resource);
         yield* Effect.sync(() => {
           this.resetCaches();
+          this.resetSemanticState();
           if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
             this.lifecycle = { _tag: "idle", generation: stopping.generation };
           }

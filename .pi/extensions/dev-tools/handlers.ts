@@ -437,8 +437,17 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
   }
 
   if (req.query) {
-    const wsBackends = deps.getWorkspaceSymbolBackends();
-    if (wsBackends.length === 0) return errorResponse(req.id, "No backends support workspace/symbol");
+    const supportedBackends = deps.getWorkspaceSymbolBackends();
+    if (supportedBackends.length === 0) {
+      return errorResponse(req.id, "No backends support workspace/symbol");
+    }
+    const wsBackends = supportedBackends.filter((backend) => backend.projectRoots.length > 0);
+    if (wsBackends.length === 0) {
+      return errorResponse(
+        req.id,
+        "Workspace symbols require an opened project file. Request document symbols first.",
+      );
+    }
 
     const allRaw: any[] = [];
     for (const b of wsBackends) {

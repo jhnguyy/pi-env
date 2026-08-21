@@ -28,7 +28,11 @@ process.stdin.on("data", (chunk) => {
     const message = JSON.parse(buffer.subarray(split + 4, end).toString("utf8"));
     buffer = buffer.subarray(end);
     if (message.id !== undefined) {
-      send({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { capabilities: {} } : null });
+      if (message.method === "textDocument/hover") {
+        send({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "unsupported hover" } });
+      } else {
+        send({ jsonrpc: "2.0", id: message.id, result: message.method === "initialize" ? { capabilities: {} } : null });
+      }
     }
     if (message.method === "exit") process.exit(0);
   }
@@ -61,13 +65,42 @@ describe("LspBackend lifecycle", () => {
       await Promise.all(Array.from({ length: 8 }, () => backend.ensureStarted()));
       expect(backend.isRunning).toBe(true);
       expect(readFileSync(countFile, "utf8").trim().split("\n")).toHaveLength(1);
+      backend.recordSemanticResult("textDocument/documentSymbol", 1);
+      expect(backend.getStatusSnapshot().semanticAvailable).toBe(true);
 
       await Promise.all([backend.shutdown(), backend.shutdown(), backend.shutdown()]);
       expect(backend.isRunning).toBe(false);
+      expect(backend.getStatusSnapshot()).toMatchObject({
+        semanticAvailable: false,
+      });
+      expect(backend.getStatusSnapshot().lastSemanticRequest).toBeUndefined();
 
       await Promise.all([backend.ensureStarted(), backend.ensureStarted()]);
       expect(backend.isRunning).toBe(true);
+      expect(backend.getStatusSnapshot().semanticAvailable).toBe(false);
       expect(readFileSync(countFile, "utf8").trim().split("\n")).toHaveLength(2);
+    } finally {
+      await backend.shutdown();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects JSON-RPC errors and records degraded semantic health", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-backend-error-"));
+    const backend = testBackend(join(root, "starts"));
+
+    try {
+      await backend.ensureStarted();
+      await expect(backend.lspRequest("textDocument/hover", {})).rejects.toThrow(
+        "typescript LSP request failed (-32601): unsupported hover",
+      );
+      expect(backend.getStatusSnapshot()).toMatchObject({
+        semanticAvailable: false,
+        semanticFailure: {
+          method: "textDocument/hover",
+          detail: "typescript LSP request failed (-32601): unsupported hover",
+        },
+      });
     } finally {
       await backend.shutdown();
       rmSync(root, { recursive: true, force: true });

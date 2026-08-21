@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  LSP_INIT_TIMEOUT_MS,
   LSP_REQUEST_TIMEOUT_MS,
   LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
   LspBackend,
@@ -42,8 +43,10 @@ describe("LSP request timeout policy", () => {
     expect(lspRequestTimeoutMs("textDocument/rename")).toBe(LSP_REQUEST_TIMEOUT_MS);
   });
 
-  it("keeps the client request timeout longer than the backend semantic timeout", () => {
-    expect(CLIENT_REQUEST_TIMEOUT_MS).toBeGreaterThan(LSP_SEMANTIC_REQUEST_TIMEOUT_MS);
+  it("keeps the client timeout longer than cold startup plus one semantic request", () => {
+    expect(CLIENT_REQUEST_TIMEOUT_MS).toBeGreaterThan(
+      LSP_INIT_TIMEOUT_MS + LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
+    );
   });
 });
 
