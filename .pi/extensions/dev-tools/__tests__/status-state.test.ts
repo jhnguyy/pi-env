@@ -142,6 +142,44 @@ describeIfEnabled("dev-tools", "status state model", () => {
     });
   });
 
+  it("uses an active non-TypeScript backend and prioritizes backend failures", () => {
+    const idleTypeScript = {
+      name: "typescript",
+      running: false,
+      initializationState: "initializing",
+      semanticAvailable: false,
+      projectMode: "unknown",
+    };
+    const readyBash = {
+      name: "bash",
+      running: true,
+      initializationState: "initialized",
+      semanticAvailable: true,
+      lastSemanticRequest: { method: "textDocument/documentSymbol", itemCount: 2 },
+      projectMode: "inferred",
+      projectRoot: "/repo",
+    };
+    const dependencies = deps(idleTypeScript);
+    dependencies.backends.push({
+      name: "bash",
+      openUris: [],
+      projectRoots: ["/repo"],
+      getStatusSnapshot: () => readyBash,
+    } as any);
+
+    expect(handleStatus({ id: 1, action: "status" }, dependencies).result).toMatchObject({
+      state: "ready",
+      backend: { name: "bash", running: true },
+    });
+
+    readyBash.initializationState = "failed";
+    readyBash.semanticAvailable = false;
+    expect(handleStatus({ id: 2, action: "status" }, dependencies).result).toMatchObject({
+      state: "failed",
+      backend: { name: "bash", running: true },
+    });
+  });
+
   it("transitions startup failure to failed without using semantic failure", () => {
     expect(status({
       name: "typescript",

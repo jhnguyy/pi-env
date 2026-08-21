@@ -491,8 +491,14 @@ function deriveHealthState(snapshot: ReturnType<LspBackend["getStatusSnapshot"]>
 export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonResponse {
   const allOpenFiles = deps.backends.flatMap((b) => b.openUris.map(uriToPath));
   const allProjects = deps.backends.flatMap((b) => b.projectRoots);
-  const primary = deps.backends.find((b) => b.name === "typescript") ?? deps.backends[0];
-  const snapshot = primary?.getStatusSnapshot();
+  const snapshots = deps.backends.map((backend) => backend.getStatusSnapshot());
+  const snapshot =
+    snapshots.find((item) => item.initializationState === "failed") ??
+    snapshots.find((item) => item.semanticFailure != null) ??
+    snapshots.find((item) => item.semanticAvailable) ??
+    snapshots.find((item) => item.running) ??
+    snapshots.find((item) => item.name === "typescript") ??
+    snapshots[0];
   const state = deriveHealthState(snapshot);
 
   return okResponse(req.id, {
