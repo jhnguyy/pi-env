@@ -2,32 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   DagCompletionGuardKind,
   DagDependencyMode,
-  DagExecutorKind,
   DagValidationErrorTag,
   DagValidationResultTag,
   type DagDefinition,
-  type DagNode,
   type DagValidationLimits,
   validateDagDefinition,
 } from "../index.js";
-
-const executor = {
-  kind: DagExecutorKind.Transform,
-  key: "test",
-  payload: undefined,
-} as const;
-
-function node(
-  id: string,
-  dependencies: DagNode["dependencies"] = [],
-  completionGuard?: DagNode["completionGuard"],
-): DagNode {
-  return { id, executor, dependencies, ...(completionGuard ? { completionGuard } : {}) };
-}
-
-function definition(nodes: readonly DagNode[], concurrency = 2): DagDefinition {
-  return { runId: "run-test", concurrency, nodes };
-}
+import { definition, executor, node } from "./shared.js";
 
 function tags(graph: DagDefinition, limits?: DagValidationLimits): string[] {
   const result = validateDagDefinition(graph, limits);
@@ -178,7 +159,7 @@ describe("DAG validation", () => {
       nodes: [
         {
           id: "task",
-          executor: { kind: DagExecutorKind.Transform, key: "opaque", payload },
+          executor: { ...executor, key: "opaque", payload },
           dependencies: [],
         },
       ],

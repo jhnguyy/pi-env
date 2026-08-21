@@ -9,6 +9,9 @@ import {
   type DagNode,
   type DagValidationLimits,
 } from "./contracts.js";
+import { buildValidatedGraph, ValidatedDagDefinition } from "./internal/validated-graph.js";
+
+export { ValidatedDagDefinition };
 
 export const DagValidationResultTag = {
   Valid: "valid",
@@ -83,38 +86,6 @@ export type DagValidationError =
     }
   | { readonly _tag: typeof DagValidationErrorTag.Cycle; readonly nodeIds: readonly string[] };
 
-interface IndexedDependency {
-  readonly index: number;
-  readonly mode: DagDependencyModeValue;
-}
-
-export interface DagGraphIndex<TPayload> {
-  readonly nodeById: ReadonlyMap<string, number>;
-  readonly dependencies: readonly (readonly IndexedDependency[])[];
-  readonly guardIndices: readonly (readonly number[] | undefined)[];
-  readonly topologicalOrder: readonly number[];
-  readonly nodes: readonly DagNode<TPayload>[];
-}
-
-const ValidatedDagToken = Symbol("ValidatedDag");
-const graphIndices = new WeakMap<object, DagGraphIndex<unknown>>();
-
-export class ValidatedDagDefinition<TPayload = unknown> {
-  readonly #brand = true;
-
-  constructor(
-    token: typeof ValidatedDagToken,
-    readonly runId: string,
-    readonly concurrency: number,
-    readonly nodes: readonly DagNode<TPayload>[],
-  ) {
-    if (token !== ValidatedDagToken) {
-      throw new TypeError("Validated DAGs must be created by validateDagDefinition.");
-    }
-    Object.freeze(this);
-  }
-}
-
 export type DagValidationResult<TPayload = unknown> =
   | {
       readonly _tag: typeof DagValidationResultTag.Valid;
@@ -124,14 +95,6 @@ export type DagValidationResult<TPayload = unknown> =
       readonly _tag: typeof DagValidationResultTag.Invalid;
       readonly errors: readonly DagValidationError[];
     };
-
-export function getDagGraphIndex<TPayload>(
-  graph: ValidatedDagDefinition<TPayload>,
-): DagGraphIndex<TPayload> {
-  const index = graphIndices.get(graph);
-  if (!index) throw new TypeError("The DAG was not created by this kernel.");
-  return index as DagGraphIndex<TPayload>;
-}
 
 function invalid<TPayload>(errors: readonly DagValidationError[]): DagValidationResult<TPayload> {
   return { _tag: DagValidationResultTag.Invalid, errors: Object.freeze([...errors]) };
@@ -153,128 +116,6 @@ function supportedExecutorKind(kind: unknown): boolean {
     kind === DagExecutorKind.Transform ||
     kind === DagExecutorKind.Materialize
   );
-}
-
-function frozenNode<TPayload>(node: DagNode<TPayload>): DagNode<TPayload> {
-  const completionGuard = node.completionGuard
-    ? Object.freeze({
-        kind: node.completionGuard.kind,
-        dependencyIds: Object.freeze([...node.completionGuard.dependencyIds]),
-      })
-    : undefined;
-  return Object.freeze({
-    id: node.id,
-    executor: Object.freeze({
-      kind: node.executor.kind,
-      key: node.executor.key,
-      payload: node.executor.payload,
-    }),
-    dependencies: Object.freeze(
-      node.dependencies.map((dependency) => Object.freeze({ ...dependency })),
-    ),
-    ...(completionGuard ? { completionGuard } : {}),
-  });
-}
-
-interface DfsFrame {
-  readonly node: number;
-  next: number;
-}
-
-function finishOrder(adjacency: readonly (readonly number[])[]): number[] {
-  const visited = new Uint8Array(adjacency.length);
-  const order: number[] = [];
-  for (let start = 0; start < adjacency.length; start++) {
-    if (visited[start] === 1) continue;
-    visited[start] = 1;
-    const stack: DfsFrame[] = [{ node: start, next: 0 }];
-    while (stack.length > 0) {
-      const frame = stack.at(-1);
-      if (!frame) break;
-      const next = adjacency[frame.node]?.[frame.next++];
-      if (next !== undefined && visited[next] === 0) {
-        visited[next] = 1;
-        stack.push({ node: next, next: 0 });
-      } else if (next === undefined) {
-        order.push(frame.node);
-        stack.pop();
-      }
-    }
-  }
-  return order;
-}
-
-function reversedAdjacency(adjacency: readonly (readonly number[])[]): number[][] {
-  const reversed = Array.from({ length: adjacency.length }, (): number[] => []);
-  for (let node = 0; node < adjacency.length; node++) {
-    for (const dependency of adjacency[node] ?? []) reversed[dependency]?.push(node);
-  }
-  return reversed;
-}
-
-function collectComponent(
-  start: number,
-  adjacency: readonly (readonly number[])[],
-  visited: Uint8Array,
-): number[] {
-  const component: number[] = [];
-  const stack = [start];
-  visited[start] = 1;
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === undefined) continue;
-    component.push(node);
-    for (const next of adjacency[node] ?? []) {
-      if (visited[next] === 1) continue;
-      visited[next] = 1;
-      stack.push(next);
-    }
-  }
-  return component;
-}
-
-function cyclicNodeIds(
-  nodes: readonly DagNode[],
-  dependencies: readonly (readonly IndexedDependency[])[],
-): string[] {
-  const adjacency = dependencies.map((items) => items.map((item) => item.index));
-  const reversed = reversedAdjacency(adjacency);
-  const visited = new Uint8Array(nodes.length);
-  const cyclic = new Uint8Array(nodes.length);
-  const order = finishOrder(adjacency);
-  for (let cursor = order.length - 1; cursor >= 0; cursor--) {
-    const start = order[cursor];
-    if (start === undefined || visited[start] === 1) continue;
-    const component = collectComponent(start, reversed, visited);
-    if (component.length > 1 || adjacency[start]?.includes(start)) {
-      for (const node of component) cyclic[node] = 1;
-    }
-  }
-  return nodes.filter((_node, index) => cyclic[index] === 1).map((node) => node.id);
-}
-
-function topologicalOrder(
-  nodeCount: number,
-  dependencies: readonly (readonly IndexedDependency[])[],
-): number[] {
-  const indegree = dependencies.map((items) => items.length);
-  const dependents = Array.from({ length: nodeCount }, (): number[] => []);
-  for (let consumer = 0; consumer < nodeCount; consumer++) {
-    for (const dependency of dependencies[consumer] ?? []) {
-      dependents[dependency.index]?.push(consumer);
-    }
-  }
-  const queue = indegree.flatMap((degree, index) => (degree === 0 ? [index] : []));
-  for (let cursor = 0; cursor < queue.length; cursor++) {
-    const producer = queue[cursor];
-    if (producer === undefined) continue;
-    for (const consumer of dependents[producer] ?? []) {
-      const next = (indegree[consumer] ?? 0) - 1;
-      indegree[consumer] = next;
-      if (next === 0) queue.push(consumer);
-    }
-  }
-  return queue;
 }
 
 function guardIsValid<TPayload>(
@@ -426,50 +267,15 @@ function collectDependencyErrors(
   }
 }
 
-function buildValidatedGraph<TPayload>(
+function validatedResult<TPayload>(
   definition: DagDefinition<TPayload>,
   nodeById: ReadonlyMap<string, number>,
 ): DagValidationResult<TPayload> {
-  const nodes = Object.freeze(definition.nodes.map(frozenNode));
-  const dependencies = Object.freeze(
-    nodes.map((node) =>
-      Object.freeze(
-        node.dependencies.map((dependency) => ({
-          index: nodeById.get(dependency.nodeId) as number,
-          mode: dependency.mode,
-        })),
-      ),
-    ),
-  );
-  const cycleNodeIds = cyclicNodeIds(nodes, dependencies);
-  if (cycleNodeIds.length > 0) {
-    return invalid([{ _tag: DagValidationErrorTag.Cycle, nodeIds: cycleNodeIds }]);
+  const result = buildValidatedGraph(definition, nodeById);
+  if (result._tag === "cycle") {
+    return invalid([{ _tag: DagValidationErrorTag.Cycle, nodeIds: result.nodeIds }]);
   }
-  const guardIndices = Object.freeze(
-    nodes.map((node) =>
-      node.completionGuard
-        ? Object.freeze(
-            node.completionGuard.dependencyIds.map(
-              (dependencyId) => nodeById.get(dependencyId) as number,
-            ),
-          )
-        : undefined,
-    ),
-  );
-  const graph = new ValidatedDagDefinition(
-    ValidatedDagToken,
-    definition.runId,
-    definition.concurrency,
-    nodes,
-  );
-  graphIndices.set(graph, {
-    nodeById,
-    dependencies,
-    guardIndices,
-    topologicalOrder: Object.freeze(topologicalOrder(nodes.length, dependencies)),
-    nodes,
-  });
-  return { _tag: DagValidationResultTag.Valid, graph };
+  return { _tag: DagValidationResultTag.Valid, graph: result.graph };
 }
 
 export function validateDagDefinition<TPayload = unknown>(
@@ -482,5 +288,5 @@ export function validateDagDefinition<TPayload = unknown>(
   collectDefinitionErrors(definition, limits, errors);
   const nodeById = collectNodeErrors(definition, errors);
   collectDependencyErrors(definition, nodeById, errors);
-  return errors.length > 0 ? invalid(errors) : buildValidatedGraph(definition, nodeById);
+  return errors.length > 0 ? invalid(errors) : validatedResult(definition, nodeById);
 }
