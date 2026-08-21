@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@linear/sdk": "89.0.0",
-    "effect": "4.0.0-beta.97"
+    "effect": "4.0.0-rc.108"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
