@@ -17,16 +17,15 @@ import {
 import { type ValidatedDagDefinition } from "../validation.js";
 import {
   computeDagSessionGraphId,
+  computeTransitionAttemptUpdate,
   decodeEntry,
   deepFreeze,
   isRecord,
-  recordAttempt,
   validateGraph,
   validateLimits,
 } from "./codec.js";
 import {
   DagSessionEntryType,
-  DagSessionAttemptInconsistent,
   DagSessionDuplicate,
   DagSessionFinalInconsistent,
   DagSessionGraphMismatch,
@@ -41,7 +40,6 @@ import {
   DagSessionTruncated,
   toSessionFailure,
   type DagSessionAttempt,
-  type DagSessionAttemptStatus,
   type DagSessionEntry,
   type DagSessionEvent,
   type DagSessionFailure,
@@ -49,47 +47,6 @@ import {
   type DagSessionManagerSeam,
   type DagSessionReconstruction,
 } from "./contracts.js";
-
-function terminalStatus(
-  transition: DagTransition<unknown, unknown>,
-): DagSessionAttemptStatus["status"] | undefined {
-  if (transition.type === DagTransitionType.Start) return DagNodeStatus.Running;
-  if (transition.type === DagTransitionType.Cancel) return DagNodeStatus.Cancelled;
-  if (transition.type === DagTransitionType.Complete) return transition.result._tag;
-  return undefined;
-}
-
-export function requireAttemptFor(
-  transition: DagTransition<unknown, unknown>,
-  wasRunning: boolean,
-  attempt: DagSessionAttemptStatus | undefined,
-  attempts: Map<string, DagSessionAttempt>,
-  runId: string,
-): void {
-  const expected =
-    transition.type === DagTransitionType.Cancel && !wasRunning
-      ? undefined
-      : terminalStatus(transition);
-  if (!expected) {
-    if (attempt)
-      throw new DagSessionAttemptInconsistent({
-        message: "unexpected attempt status",
-        nodeId: transition.nodeId,
-      });
-    return;
-  }
-  if (!attempt)
-    throw new DagSessionAttemptInconsistent({
-      message: "missing attempt status",
-      nodeId: transition.nodeId,
-    });
-  if (attempt.nodeId !== transition.nodeId)
-    throw new DagSessionAttemptInconsistent({
-      message: "attempt node does not match transition",
-      nodeId: attempt.nodeId,
-    });
-  recordAttempt(attempts, attempt, expected, runId);
-}
 
 export function applyTransition(
   graph: ValidatedDagDefinition<unknown>,
@@ -133,17 +90,19 @@ function projectProcessLoss(
       const applied = applyTransition(graph, state, t);
       state = applied.state;
       transitions.push(applied.transition);
-      recordAttempt(
-        attempts,
+      const attemptUpdate = computeTransitionAttemptUpdate(
+        applied.transition,
+        true,
         {
           nodeId: node.nodeId,
           attemptId: `${graph.runId}:${node.nodeId}:1`,
           ordinal: 1,
           status: DagNodeStatus.Interrupted,
         },
-        DagNodeStatus.Interrupted,
+        attempts.get(node.nodeId),
         graph.runId,
       );
+      if (attemptUpdate) attempts.set(attemptUpdate.nodeId, attemptUpdate);
     }
   for (;;) {
     const step = deriveDagSchedulingStep(graph, state);
@@ -246,7 +205,14 @@ function replaySession(
       (node) => node.nodeId === event.transition.nodeId && node.status === DagNodeStatus.Running,
     );
     const applied = applyTransition(graph, state, event.transition);
-    requireAttemptFor(applied.transition, wasRunning, event.attempt, attempts, graph.runId);
+    const attemptUpdate = computeTransitionAttemptUpdate(
+      applied.transition,
+      wasRunning,
+      event.attempt,
+      attempts.get(applied.transition.nodeId),
+      graph.runId,
+    );
+    if (attemptUpdate) attempts.set(attemptUpdate.nodeId, attemptUpdate);
     state = applied.state;
     transitions.push(applied.transition);
   }
