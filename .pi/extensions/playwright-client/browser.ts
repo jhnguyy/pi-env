@@ -274,7 +274,7 @@ export class BrowserClient {
       // @ts-ignore - the extension-level inferred LSP project does not see root dependencies; root tsc resolves playwright.
       mod = await import("playwright") as PlaywrightModule;
     } catch (error) {
-      throw new Error(`Playwright is not installed for playwright-client extension: ${formatError(error)}`);
+      throw new Error(`Playwright is not installed for playwright-client extension: ${formatError(error)}`, { cause: error });
     }
     try {
       const browser = await mod.chromium.connectOverCDP(target.cdpUrl);
@@ -290,7 +290,7 @@ export class BrowserClient {
     } catch (error) {
       throw new Error(
         `Unable to connect to Chrome CDP target ${target.name} at ${target.cdpUrl}. ` +
-        `Start Chrome with --remote-debugging-port and profile ${this.config.profilePath}. ${formatError(error)}`,
+        `Start Chrome with --remote-debugging-port and profile ${this.config.profilePath}. ${formatError(error)}`, { cause: error },
       );
     }
   }

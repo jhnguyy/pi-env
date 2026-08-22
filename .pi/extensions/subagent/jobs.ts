@@ -27,7 +27,8 @@ import {
   type SubagentDetails,
   type SubagentJobStatus as SubagentJobStatusValue,
 } from "./types";
-import { formatUsageCompact, SubagentUsageLedger, SubagentUsageMode } from "./usage";
+import type { SubagentUsageLedger} from "./usage";
+import { formatUsageCompact, SubagentUsageMode } from "./usage";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = DEFAULT_SUBAGENT_LIMITS.maxConcurrentRuns;
 export { SubagentJobStatus } from "./types";

@@ -23,7 +23,7 @@ import {
 import { toolExpandHint } from "../_shared/tool-render";
 import { Text } from "@earendil-works/pi-tui";
 import { DevToolsAction } from "./action-contract";
-import type { RenderTheme } from "./renderers";
+import type { RenderTheme } from "./render-contracts";
 import type {
   DiagnosticsResult, IncomingCallsResult, OutgoingCallsResult, RenameResult, SymbolsResult, StatusResult,
 } from "./protocol";

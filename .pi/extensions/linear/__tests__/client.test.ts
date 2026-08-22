@@ -25,7 +25,7 @@ function credentials(): CredentialSource & { use: ReturnType<typeof vi.fn> } {
   return {
     has: vi.fn(() => true),
     use: vi.fn(async (_request, consume) => consume(SENTINEL)),
-  } as any;
+  };
 }
 
 function api() {

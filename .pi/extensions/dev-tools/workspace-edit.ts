@@ -242,7 +242,7 @@ function applyTextEdits(content: string, file: WorkspaceFileEdits): string {
     (left, right) => left.start - right.start || right.end - left.end || left.index - right.index,
   );
   for (let index = 1; index < ascending.length; index++) {
-    if (ascending[index]!.start < ascending[index - 1]!.end) {
+    if (ascending[index].start < ascending[index - 1].end) {
       throw workspaceEditError(`${file.absolutePath} contains overlapping text edits.`);
     }
   }
@@ -341,9 +341,9 @@ async function replaceWorkspaceFiles(updates: PreparedWorkspaceFileEdit[]): Prom
       staged.map((update) => readFile(update.writePath, "utf8")),
     );
     for (let index = 0; index < staged.length; index++) {
-      if (currentContents[index] !== staged[index]!.content) {
+      if (currentContents[index] !== staged[index].content) {
         throw workspaceEditError(
-          `${staged[index]!.absolutePath} changed while the workspace edit was staged.`,
+          `${staged[index].absolutePath} changed while the workspace edit was staged.`,
         );
       }
     }

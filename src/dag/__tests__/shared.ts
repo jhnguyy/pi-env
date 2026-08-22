@@ -52,7 +52,7 @@ export function apply(
   const result = reduceDagRunState(dag, state, {
     ...transition,
     runId: dag.runId,
-  } as DagTransition);
+  });
   expect(result._tag).toBe(DagTransitionResultTag.Applied);
   if (result._tag !== DagTransitionResultTag.Applied) throw new Error(JSON.stringify(result.error));
   return result.state;

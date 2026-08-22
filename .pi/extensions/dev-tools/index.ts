@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
   /** Shared execute — used by both registerTool and AgentTool registration. */
   async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
     try {
-      const result = await client.call(buildClientRequest(params as DevToolsParams));
+      const result = await client.call(buildClientRequest(params));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
       return { content: [txt(formatError(e))], details: null };

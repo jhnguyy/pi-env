@@ -282,7 +282,7 @@ function parseJournalLine(line: string): AnalysisDiagnosticEvent | undefined {
       value.runId,
       value.timestampMs,
       value.type as AnalyzeDiagnosticEventType,
-      value.attributes as Record<string, unknown>,
+      value.attributes,
     );
     return sanitized.terminal === value.terminal ? sanitized : undefined;
   } catch {

@@ -22,10 +22,10 @@ describe("FileCache", () => {
     const paths = Array.from({ length: 65 }, (_, index) => `/file-${index}.ts`);
 
     for (const path of paths.slice(0, 64)) await cache.readFile(path);
-    await cache.readFile(paths[0]!);
-    await cache.readFile(paths[64]!);
-    await cache.readFile(paths[0]!);
-    await cache.readFile(paths[1]!);
+    await cache.readFile(paths[0]);
+    await cache.readFile(paths[64]);
+    await cache.readFile(paths[0]);
+    await cache.readFile(paths[1]);
 
     expect(fsMocks.readFile.mock.calls.filter(([path]) => path === paths[0])).toHaveLength(1);
     expect(fsMocks.readFile.mock.calls.filter(([path]) => path === paths[1])).toHaveLength(2);

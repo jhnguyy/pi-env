@@ -142,7 +142,7 @@ export default function (pi: ExtensionAPI) {
     ctx: ExtensionContext,
   ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
     if (signal?.aborted) throw new Error("Subagent start aborted.");
-    return runtime.startJob(params as SubagentParams, ctx, signal);
+    return runtime.startJob(params, ctx, signal);
   };
   const executeSubagentJob = async (
     _id: string,

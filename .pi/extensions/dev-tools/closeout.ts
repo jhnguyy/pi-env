@@ -8,7 +8,7 @@ import { execEffect } from "../_shared/exec";
 import { parseGitHubPullRequestUrl } from "../_shared/github";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 import { txt } from "../_shared/result";
-import { type ToolContract } from "../_shared/tool-contract";
+import type { ToolContract } from "../_shared/tool-contract";
 import { isProtectedBranch, parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
 
 type Exec = ExtensionAPI["exec"];
@@ -72,7 +72,7 @@ export function parseCloseoutArgs(args: string | undefined): CloseoutRequest {
   let repoPath: string | undefined;
 
   for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
+    const token = tokens[index];
     if (token === "--repo") {
       const value = tokens[index + 1];
       if (!value || value.startsWith("--")) throw new Error("--repo requires a path.");
@@ -194,9 +194,9 @@ function parseGitRemoteRepository(value: string): GitRemoteRepository | undefine
   }
   const scp = trimmed.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
   if (!scp) return undefined;
-  const repository = normalizeRepositoryPath(scp[2]!);
+  const repository = normalizeRepositoryPath(scp[2]);
   return repository
-    ? { host: scp[1]!.toLowerCase(), repository, resolvesSshAlias: true }
+    ? { host: scp[1].toLowerCase(), repository, resolvesSshAlias: true }
     : undefined;
 }
 

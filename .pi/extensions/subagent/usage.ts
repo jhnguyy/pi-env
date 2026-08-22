@@ -77,7 +77,7 @@ export class SubagentRunAccumulator {
 
   acceptEvent(event: AgentEvent): AgentMessage | undefined {
     if (event.type === "message_end") {
-      const message = event.message as AgentMessage;
+      const message = event.message;
       this.transcript.push(message);
       this.acceptAssistantMessage(message);
       return message;

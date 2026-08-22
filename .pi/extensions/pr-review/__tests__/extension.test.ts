@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
@@ -14,7 +15,7 @@ import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
-  ...(await orig<typeof import("@earendil-works/pi-coding-agent")>()),
+  ...(await orig<typeof CodingAgent>()),
   getAgentDir: () => mocked.agentDir,
 }));
 const temps: string[] = [];
@@ -280,7 +281,7 @@ describe("pr-review extension surface", () => {
     expect(pi.appended).toHaveLength(0);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ cmd: "gh" });
-    expect(calls[0]!.args).toContain("graphql");
+    expect(calls[0].args).toContain("graphql");
   });
 
   it("uses the shared total output boundary without fixed body truncation", () => {
@@ -387,7 +388,7 @@ describe("pr-review extension surface", () => {
     const result = await get.execute("get-2", { action: "get" }, undefined, undefined, {
       cwd: "/repo",
     });
-    expect(calls[0]!.args).toEqual(["pr", "view", "--json", "url", "--jq", ".url"]);
+    expect(calls[0].args).toEqual(["pr", "view", "--json", "url", "--jq", ".url"]);
     expect(result.details.nextCursor).toBeTypeOf("string");
     expect(result.content[0].text).toContain("More feedback is available");
     expect(result.content[0].text).toContain("7 comments; 7 omitted");
@@ -404,9 +405,9 @@ describe("pr-review extension surface", () => {
       { cwd: "/repo" },
     );
     expect(next.details.nextCursor).toBeUndefined();
-    expect(calls[2]!.args).toContain("conversationCursor=next-conversation");
-    expect(calls[2]!.args).toContain("includeReviews=false");
-    expect(calls[2]!.args).toContain("includeInline=false");
+    expect(calls[2].args).toContain("conversationCursor=next-conversation");
+    expect(calls[2].args).toContain("includeReviews=false");
+    expect(calls[2].args).toContain("includeInline=false");
     expect(pi.appended).toHaveLength(0);
     expect(calls.every((call) => call.cmd === "gh")).toBe(true);
   });
@@ -484,7 +485,7 @@ describe("pr-review extension surface", () => {
       if (args[0] === "rev-parse")
         return {
           code: 0,
-          stdout: `${args[1]!.startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
           stderr: "",
         };
       if (args[0] === "merge-base") return { code: 0, stdout: "b\n", stderr: "" };
@@ -547,7 +548,7 @@ describe("pr-review extension surface", () => {
       if (args[0] === "rev-parse")
         return {
           code: 0,
-          stdout: `${args[1]!.startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
           stderr: "",
         };
       if (args[0] === "merge-base") return { code: 0, stdout: "b\n", stderr: "" };

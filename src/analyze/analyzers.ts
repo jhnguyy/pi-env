@@ -44,7 +44,7 @@ function isTestEachFactory(node: ts.Expression): boolean {
 function inlineTestCallback(node: ts.CallExpression): BodyFunction | undefined {
   if (!isTestCallee(node.expression) && !isTestEachFactory(node.expression)) return undefined;
   for (let index = node.arguments.length - 1; index >= 0; index--) {
-    const argument = node.arguments[index]!;
+    const argument = node.arguments[index];
     if (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)) return argument;
   }
   return undefined;
@@ -389,7 +389,7 @@ function propertyShapes(
   return properties
     .filter((property) => property.valueDeclaration !== undefined || property.declarations?.length)
     .map((property) => {
-      const declaration = property.valueDeclaration ?? property.declarations![0]!;
+      const declaration = property.valueDeclaration ?? property.declarations![0];
       const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
       const optional = (property.flags & ts.SymbolFlags.Optional) !== 0 ? "?" : "";
       const readonly = ts.canHaveModifiers(declaration)

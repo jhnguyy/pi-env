@@ -13,7 +13,7 @@ function freezeOutputs<TOutputReference>(
 ): DagNamedOutputs<TOutputReference> {
   return Object.freeze(
     Object.fromEntries(Object.entries(outputs)),
-  ) as DagNamedOutputs<TOutputReference>;
+  );
 }
 
 export function validResultShape(result: unknown): result is DagNodeResult {

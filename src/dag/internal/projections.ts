@@ -8,7 +8,8 @@ import {
   type DagTransition,
 } from "../contracts.js";
 import { classifyQueuedNode, QueuedNodeClassification, terminal } from "./readiness.js";
-import { assertMatchingState, DagRunState, getRunningCount, makeRunState } from "./run-state.js";
+import type { DagRunState} from "./run-state.js";
+import { assertMatchingState, getRunningCount, makeRunState } from "./run-state.js";
 import { canonicalTransition, nodeStateFromTransition } from "./transitions.js";
 import { getDagGraphIndex, type ValidatedDagDefinition } from "./validated-graph.js";
 

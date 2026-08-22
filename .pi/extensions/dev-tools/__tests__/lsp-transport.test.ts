@@ -21,7 +21,7 @@ describeIfEnabled("dev-tools", "LspTransport", () => {
       expect(headerMatch).not.toBeNull();
       const bodyStart = buf.indexOf("\r\n\r\n") + 4;
       const body = buf.subarray(bodyStart);
-      expect(body.length).toBe(parseInt(headerMatch![1]!, 10));
+      expect(body.length).toBe(parseInt(headerMatch![1], 10));
     });
 
     it("body is valid JSON matching the original message", () => {
@@ -36,7 +36,7 @@ describeIfEnabled("dev-tools", "LspTransport", () => {
       const msg: LspMessage = { jsonrpc: "2.0", method: "test", params: { text: "こんにちは" } };
       const buf = serializeMessage(msg);
       const headerStr = buf.toString("ascii", 0, buf.indexOf("\r\n\r\n"));
-      const declared = parseInt(headerStr.match(/Content-Length: (\d+)/)![1]!, 10);
+      const declared = parseInt(headerStr.match(/Content-Length: (\d+)/)![1], 10);
       const bodyStart = buf.indexOf("\r\n\r\n") + 4;
       const actualBodyLen = buf.length - bodyStart;
       expect(actualBodyLen).toBe(declared);

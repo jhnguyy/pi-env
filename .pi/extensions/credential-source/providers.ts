@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import { Effect, Redacted } from "effect";
 import {
-  ProcessFailure,
   resolveNodeCommand,
   streamProcess,
+  type ProcessFailure,
   type ProcessOutput,
   type StreamProcessOptions,
 } from "../../../src/process/platform.js";

@@ -56,7 +56,7 @@ const TOOL_TYPES: Record<AnthropicHostedToolName, AnthropicHostedToolType> = {
 };
 
 export function loadAnthropicWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): AnthropicWebToolSettings {
-  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, AnthropicWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({} as AnthropicHostedToolsSettings);
+  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, AnthropicWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({});
 
   return {
     enabled: booleanSetting(settings[AnthropicHostedToolSettingKey.Enabled], env[AnthropicHostedToolEnvVar.Enabled], true),

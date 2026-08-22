@@ -13,6 +13,7 @@ describe("verification phase registry", () => {
       "setup-tests",
       "typecheck",
       "pattern-check",
+      "dependency-check",
       "changed-code-quality",
       "license-compliance",
       "build",
@@ -34,6 +35,7 @@ describe("verification phase registry", () => {
       ["typecheck", "nub", "run", "typecheck"],
       ["type-aware-lint", "nub", "run", "lint:type"],
       ["pattern-check", "nub", "run", "check:patterns"],
+      ["dependency-check", "nub", "run", "check:dependencies"],
       ["changed-code-quality", "nub", "run", "quality:changed"],
       ["license-compliance", "nub", "run", "licenses:check"],
       ["unit-tests", "nub", "run", "test:safe"],
@@ -43,6 +45,7 @@ describe("verification phase registry", () => {
     for (const id of [
       "typecheck",
       "pattern-check",
+      "dependency-check",
       "changed-code-quality",
       "license-compliance",
       "build",

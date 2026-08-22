@@ -2,7 +2,6 @@ import { Effect, Exit, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   DagBlockedReason,
-  DagCompletionGuardKind,
   DagDependencyMode,
   DagNodeResultTag,
   DagNodeStatus,
@@ -14,6 +13,7 @@ import {
   makeDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
+  type DagCompletionGuardKind,
   type DagDefinition,
   type DagSessionEntry,
   type DagSessionManagerSeam,

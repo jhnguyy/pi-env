@@ -96,7 +96,7 @@ export class FileCache {
     let depth = 0;
     let foundOpen = false;
     for (let i = startLine; i < lines.length && i < startLine + maxLines; i++) {
-      for (const character of lines[i]!) {
+      for (const character of lines[i]) {
         if (character === "{") {
           depth++;
           foundOpen = true;

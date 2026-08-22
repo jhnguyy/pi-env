@@ -2,7 +2,7 @@ import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect } from "effect";
 import {
   type BoundedOtelConfig,
-  BoundedOtelConfigError,
+  type BoundedOtelConfigError,
   DEFAULT_BOUNDED_OTEL_BOUNDS,
   makeBoundedOtelLayer,
   resolveBoundedOtelConfig,

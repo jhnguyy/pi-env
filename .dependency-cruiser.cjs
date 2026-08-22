@@ -13,10 +13,19 @@ function escapeRegex(value) {
 
 module.exports = {
   forbidden: [
+    {
+      name: "no-circular",
+      severity: "error",
+      comment:
+        "Circular dependencies make module initialization order implicit and can expose partially initialized exports.",
+      from: {},
+      to: { circular: true },
+    },
     ...extensionNames.map((name) => ({
       name: `${name}-no-cross-extension-imports`,
       severity: "error",
-      comment: "Extensions should depend on their own files or _shared only; cross-extension reuse belongs in _shared so load order and package boundaries stay explicit.",
+      comment:
+        "Extensions should depend on their own files or _shared only; cross-extension reuse belongs in _shared so load order and package boundaries stay explicit.",
       from: { path: `^\\.pi/extensions/${escapeRegex(name)}/` },
       to: { path: `^\\.pi/extensions/(?!(_shared|${escapeRegex(name)})/)` },
     })),

@@ -2,7 +2,7 @@
  * backend.ts — LspBackend: Effect-owned per-language-server subprocess manager.
  */
 
-import { type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, extname, join, resolve as resolvePath } from "node:path";
 

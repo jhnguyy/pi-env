@@ -19,8 +19,8 @@ export function parseGitHubPullRequestUrl(value: string): GitHubPullRequestRefer
   const number = Number(match[3]);
   if (!Number.isSafeInteger(number) || number < 1) return undefined;
   return {
-    owner: match[1]!,
-    repo: match[2]!,
+    owner: match[1],
+    repo: match[2],
     number,
     url: `https://github.com/${match[1]}/${match[2]}/pull/${match[3]}`,
   };

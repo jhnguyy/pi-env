@@ -100,7 +100,7 @@ describe("registerCrossHostTool contract", () => {
       capabilities: [ToolCapability.Write, ToolCapability.Execute],
     });
 
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" } as ExtensionContext);
+    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
 
     expect(registration.capabilities).toEqual([ToolCapability.Write, ToolCapability.Execute]);
     expect(harness.registrations[0]?.capabilities).toEqual([ToolCapability.Write, ToolCapability.Execute]);
@@ -141,7 +141,7 @@ describe("registerCrossHostTool contract", () => {
     });
 
     expect(added).toEqual([]);
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" } as ExtensionContext);
+    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
     expect(added).toEqual(["cross_host_sample"]);
     harness.pi.trigger(PiEvent.SessionShutdown, { type: PiEvent.SessionShutdown });
     expect(removed).toEqual(["cross_host_sample"]);
@@ -168,9 +168,9 @@ describe("registerCrossHostTool contract", () => {
       capabilities: [ToolCapability.Read],
     });
 
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main-session" } as ExtensionContext);
+    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main-session" });
 
-    const active = harness.registrations[0]!;
+    const active = harness.registrations[0];
     await active.tool.execute("main", { value: "x" }, undefined);
     await active.createTool!({
       cwd: "/child-session",
@@ -191,10 +191,10 @@ describe("registerCrossHostTool contract", () => {
       capabilities: [ToolCapability.Read],
     });
 
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/agent" } as ExtensionContext);
+    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/agent" });
 
-    await harness.tools[0]!.execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionContext);
-    await harness.registrations[0]!.tool.execute("agent", { value: "a" }, signal, (update) => agentUpdates.push(update));
+    await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionContext);
+    await harness.registrations[0].tool.execute("agent", { value: "a" }, signal, (update) => agentUpdates.push(update));
 
     expect(seen.map((entry) => entry.signal)).toEqual([signal, signal]);
     expect(piUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/pi" }], details: { phase: "cwd:/pi" } }]);

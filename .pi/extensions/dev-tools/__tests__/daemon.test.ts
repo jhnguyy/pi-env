@@ -531,7 +531,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       const tsBackend = (daemon as any).backends[0];
       const uri = "file:///test.ts";
 
-      (tsBackend as any).onDiagnostics({
+      (tsBackend).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 4, character: 2 } }, severity: 1, code: 2339, message: "Property 'x' does not exist on type 'Y'." },
@@ -554,7 +554,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       const uri = "file:///test.ts";
       const longMsg = "A".repeat(250);
 
-      (tsBackend as any).onDiagnostics({
+      (tsBackend).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 0, character: 0 } }, severity: 1, code: 2322, message: longMsg },
@@ -571,7 +571,7 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       const uri = "file:///test2.ts";
       const msg = "Type 'number' is not assignable to type 'string'. Did you mean 'foo'?";
 
-      (tsBackend as any).onDiagnostics({
+      (tsBackend).onDiagnostics({
         uri,
         diagnostics: [
           { range: { start: { line: 0, character: 0 } }, severity: 1, code: 2322, message: msg },

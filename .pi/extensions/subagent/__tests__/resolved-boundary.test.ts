@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import type * as AgentCore from "@earendil-works/pi-agent-core";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -8,7 +9,7 @@ import { runResolvedSubagentEffect } from "../execute";
 
 const captured = vi.hoisted(() => ({ prompts: undefined as any, context: undefined as any }));
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@earendil-works/pi-agent-core")>();
+  const actual = await importOriginal<typeof AgentCore>();
   return {
     ...actual,
     agentLoop: (prompts: unknown, context: unknown) => {

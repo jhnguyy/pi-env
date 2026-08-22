@@ -14,7 +14,7 @@ import {
   reduceDagRunState,
   type DagRunState,
 } from "../kernel.js";
-import { type ValidatedDagDefinition } from "../validation.js";
+import type { ValidatedDagDefinition } from "../validation.js";
 import {
   computeDagSessionGraphId,
   computeTransitionAttemptUpdate,
@@ -155,10 +155,10 @@ function selectRequestedEntries(
 
 function validateEntryOrder(entries: readonly DagSessionEntry[]): void {
   for (let i = 1; i < entries.length; i++)
-    if (entries[i]!.seq <= entries[i - 1]!.seq)
-      throw entries[i]!.seq === entries[i - 1]!.seq
-        ? new DagSessionDuplicate({ seq: entries[i]!.seq })
-        : new DagSessionOrdering({ message: "sequence decreased", seq: entries[i]!.seq });
+    if (entries[i].seq <= entries[i - 1].seq)
+      throw entries[i].seq === entries[i - 1].seq
+        ? new DagSessionDuplicate({ seq: entries[i].seq })
+        : new DagSessionOrdering({ message: "sequence decreased", seq: entries[i].seq });
   entries.forEach((entry, index) => {
     if (entry.seq !== index)
       throw new DagSessionTruncated({ expectedSeq: index, actualSeq: entry.seq });

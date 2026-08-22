@@ -246,7 +246,7 @@ function makeToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>>
           };
         if (!validateReviewShape(params))
           return { content: [txt("Review is malformed.")], isError: true, details: { ok: false } };
-        const result = validateFindingAnchors(params as ReviewResult, getDiff());
+        const result = validateFindingAnchors(params, getDiff());
         const next = {
           ...store.state,
           result,

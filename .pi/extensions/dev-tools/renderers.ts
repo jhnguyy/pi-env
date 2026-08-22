@@ -11,13 +11,8 @@
 import { Text } from "@earendil-works/pi-tui";
 import type { LspResult, LspAction } from "./protocol";
 import { getAction } from "./action-registry";
-
-// ─── Theme interface (minimal, matches pi-tui theme API) ─────────────────────
-
-export interface RenderTheme {
-  fg(color: string, text: string): string;
-  bold(text: string): string;
-}
+import type { RenderTheme } from "./render-contracts";
+export type { RenderTheme } from "./render-contracts";
 
 // ─── Main renderResult ────────────────────────────────────────────────────────
 
@@ -40,7 +35,7 @@ export function renderDevToolsResult(
     return new Text(theme.fg("muted", result.content[0]?.text ?? ""), 0, 0);
   }
 
-  const entry = getAction(details.action as LspAction);
+  const entry = getAction(details.action);
   if (entry) return entry.renderer(details, opts, theme);
 
   // Fallback for unknown action types

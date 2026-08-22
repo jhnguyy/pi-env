@@ -60,8 +60,8 @@ export function renderSubagentCall(
 ) {
   const preview = formatPromptPreview(args.task ?? "");
   const nameStr = args.name ? `${theme.fg("accent", args.name)} ` : "";
-  const agentStr = args.agent ? theme.fg("accent", args.agent as string) + " " : "";
-  const tools = args.tools as string[] | undefined;
+  const agentStr = args.agent ? theme.fg("accent", args.agent) + " " : "";
+  const tools = args.tools;
   const toolsStr = tools ? `[${tools.join(", ")}]` : "";
   const modelStr = args.model ? ` (${args.model})` : "";
   const text =

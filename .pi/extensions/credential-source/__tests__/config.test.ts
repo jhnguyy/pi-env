@@ -15,7 +15,7 @@ function envWith(globalValue: unknown, projectValue?: unknown): SettingsEnv {
     globalSettingsPath: () => "/global/settings.json",
     projectSettingsPath: () => "/repo/.pi/settings.json",
     readFile: (path) => {
-      if (path in files) return files[path]!;
+      if (path in files) return files[path];
       throw Object.assign(new Error("missing"), { code: "ENOENT" });
     },
   };
