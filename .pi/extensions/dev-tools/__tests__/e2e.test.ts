@@ -66,6 +66,24 @@ describeE2E("LSP E2E", () => {
     expect(result.items[0].code).toMatch(/^TS\d+/);
   });
 
+  it("reports Effect diagnostics with Effect identity", async () => {
+    let result: any;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await sleep(300);
+      result = await fixture.callDaemon({ action: "diagnostics", path: fixture.effectFile });
+      if (result.items.some((item: any) => item.code.startsWith("effect("))) break;
+    }
+
+    expect(result.action).toBe("diagnostics");
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: expect.stringMatching(/^effect\([^)]+\)$/),
+        message: expect.stringContaining("neither yielded nor used in an assignment"),
+      }),
+    ]));
+    expect(result.items.some((item: any) => item.code.startsWith("TSeffect"))).toBe(false);
+  });
+
   // ─── Hover ────────────────────────────────────────────────────────────
 
   it("returns hover information for a type reference", async () => {

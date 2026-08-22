@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LspDaemon } from "../daemon";
@@ -9,6 +9,7 @@ export interface TypeScriptE2EProject {
   pidPath: string;
   typesFile: string;
   mainFile: string;
+  effectFile: string;
 }
 
 export interface LspE2EFixture extends TypeScriptE2EProject {
@@ -29,12 +30,14 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
     return filePath;
   };
 
+  symlinkSync(join(process.cwd(), "node_modules"), join(tmpDir, "node_modules"), "dir");
   writeFile("tsconfig.json", JSON.stringify({
     compilerOptions: {
       target: "ESNext",
       module: "ESNext",
       moduleResolution: "bundler",
       strict: true,
+      plugins: [{ name: "@effect/language-service" }],
     },
   }, null, 2));
 
@@ -62,6 +65,10 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
     "",
     "console.log(greet(bob));",
   ]);
+  const effectFile = writeFile("effect.ts", [
+    'import { Effect } from "effect";',
+    "Effect.succeed(1);",
+  ]);
 
   const { LspDaemon } = await import("../daemon");
   daemon = new LspDaemon(socketPath, pidPath, 5 * 60_000);
@@ -73,6 +80,7 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
     pidPath,
     typesFile,
     mainFile,
+    effectFile,
     writeFile,
     async callDaemon(req: object): Promise<any> {
       const { LspClient } = await import("../client");
