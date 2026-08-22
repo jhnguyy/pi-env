@@ -20,5 +20,6 @@ export function parseDagArtifactRelativePath(relativePath: string): DagArtifactR
 
 export function isCanonicalChild(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
-  return relative === "" || (relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative));
+  return relative === "" ||
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }

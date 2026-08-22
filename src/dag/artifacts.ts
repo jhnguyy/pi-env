@@ -58,13 +58,13 @@ export function admitDagTextArtifacts(
         message: "run id, producer node id, output names, and paths must be non-empty strings",
       });
     let nodeBytes = 0;
-    const admitted: Record<string, ArtifactContracts.DagTextArtifactReference> = {};
+    const admitted: Array<readonly [string, ArtifactContracts.DagTextArtifactReference]> = [];
     for (const [outputName, relativePath] of entries.sort(([left], [right]) => left.localeCompare(right))) {
       const reference = yield* ArtifactFs.admitDagArtifactFile(root, runId, producerNodeId, outputName, relativePath, nodeBytes);
       nodeBytes += reference.bytes;
-      admitted[outputName] = reference;
+      admitted.push([outputName, reference]);
     }
-    return Object.freeze(admitted);
+    return Object.freeze(Object.fromEntries(admitted));
   });
 }
 

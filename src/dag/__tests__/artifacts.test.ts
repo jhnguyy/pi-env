@@ -45,6 +45,16 @@ describe("DAG text artifact contract", () => {
       const root = yield* Effect.promise(() => tempRoot());
       yield* Effect.promise(() => mkdir(path.join(root, "out")));
       yield* Effect.promise(() => writeFile(path.join(root, "out", "hello.txt"), "hello π"));
+      yield* Effect.promise(() => writeFile(path.join(root, "..inside.txt"), "inside"));
+      const unusualNames = yield* admitDagTextArtifacts(
+        root,
+        "run-test",
+        "producer",
+        Object.fromEntries([["__proto__", "out/hello.txt"], ["dot-prefix", "..inside.txt"]]),
+      );
+      expect(Object.hasOwn(unusualNames, "__proto__")).toBe(true);
+      expect(unusualNames["__proto__"].outputName).toBe("__proto__");
+      expect(unusualNames["dot-prefix"].path).toBe("..inside.txt");
       const malformedIdentity = yield* admitDagTextArtifacts(root, "", "producer", { answer: "out/hello.txt" }).pipe(Effect.flip);
       expect(malformedIdentity._tag).toBe(DagArtifactFailureTag.MalformedReference);
       const outputs = yield* admitDagTextArtifacts(root, "run-test", "producer", { answer: "out/hello.txt" });
