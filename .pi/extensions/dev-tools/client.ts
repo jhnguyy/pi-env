@@ -12,7 +12,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { resolve } from "node:path";
-import { Data, Deferred, Duration, Effect, Fiber, Schedule } from "effect";
+import type { Fiber} from "effect";
+import { Data, Deferred, Duration, Effect, Schedule } from "effect";
 import { resolveNodeCommand } from "../../../src/process/platform.js";
 import {
   parseResponse,

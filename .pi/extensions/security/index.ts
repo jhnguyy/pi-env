@@ -15,7 +15,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on(PiEvent.ToolResult, async (event) => {
     if (event.toolName !== "read") return undefined;
-    const path = (event.input as Record<string, unknown>)?.path;
+    const path = (event.input)?.path;
     if (typeof path !== "string") return undefined;
     if (!scanner.isSensitiveFileName(path)) return undefined;
     const filename = path.split("/").pop() ?? path;

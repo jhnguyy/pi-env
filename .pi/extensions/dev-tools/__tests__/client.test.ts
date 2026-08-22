@@ -611,7 +611,7 @@ describeIfEnabled("dev-tools", "LspClient", () => {
           new LspClient(socketPath, join(tmpDir, "daemon.js"), {
             socketExists: () => true,
             connect: () => {
-              const socket = sockets[connectCalls++]!;
+              const socket = sockets[connectCalls++];
               emitConnected(socket);
               return socket;
             },

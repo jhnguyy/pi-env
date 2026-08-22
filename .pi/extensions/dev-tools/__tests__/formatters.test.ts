@@ -58,7 +58,7 @@ describeIfEnabled("dev-tools", "Formatters", () => {
     });
 
     it("error-only count: singular", () => {
-      const r: DiagnosticsResult = { ...noErrors, errorCount: 1, items: [withErrors.items[0]!] };
+      const r: DiagnosticsResult = { ...noErrors, errorCount: 1, items: [withErrors.items[0]] };
       expect(formatDiagnostics(r)).toContain("1 error");
       expect(formatDiagnostics(r)).not.toContain("errors");
     });

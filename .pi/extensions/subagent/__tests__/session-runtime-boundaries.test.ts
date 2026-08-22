@@ -2,21 +2,23 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import type * as AgentCore from "@earendil-works/pi-agent-core";
+import type { Text } from "@earendil-works/pi-tui";
+import { Container } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
 
 const state = vi.hoisted(() => ({
-  mode: "complete" as "complete" | "blockUntilAbort" | "fail",
+  mode: "complete",
   startCount: 0,
   abortCount: 0,
   onBlockedStart: undefined as (() => void) | undefined,
 }));
 
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@earendil-works/pi-agent-core")>();
+  const actual = await importOriginal<typeof AgentCore>();
   return {
     ...actual,
     agentLoop: (_prompts: unknown, _context: unknown, _config: unknown, signal: AbortSignal) => ({

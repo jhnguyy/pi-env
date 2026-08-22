@@ -4,9 +4,9 @@ import {
   DEFAULT_BENCHMARK_TIMEOUT_MS,
   DEFAULT_EXTERNAL_TIMEOUT_MS,
   DEFAULT_STREAM_LIMIT_BYTES,
-  ProcessFailure,
   ProcessFailureKind,
   streamProcess,
+  type ProcessFailure,
   type ProcessOutput,
   type StreamProcessOptions,
 } from "../process/platform.js";

@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +8,7 @@ import { clearInMemoryStateForTests, postReview, restore } from "../index";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
-  ...(await orig<typeof import("@earendil-works/pi-coding-agent")>()),
+  ...(await orig<typeof CodingAgent>()),
   getAgentDir: () => mocked.agentDir,
 }));
 const temps: string[] = [];

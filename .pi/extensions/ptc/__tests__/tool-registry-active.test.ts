@@ -32,13 +32,13 @@ function createHarness(activeNames: string[]) {
   const bus = eventBus();
   const active = [...activeNames];
   const tools: ToolInfo[] = [
-    { name: "read", description: "read", parameters: {}, sourceInfo: sourceInfo("builtin") as ToolInfo["sourceInfo"] },
+    { name: "read", description: "read", parameters: {}, sourceInfo: sourceInfo("builtin") },
   ];
   const appended: Array<{ type: string; data: unknown }> = [];
 
   const createApi = (): ExtensionAPI => ({
     registerTool(tool: ToolDefinition<any, any, any>) {
-      tools.push({ ...tool, sourceInfo: sourceInfo("extension") as ToolInfo["sourceInfo"] });
+      tools.push({ ...tool, sourceInfo: sourceInfo("extension") });
     },
     registerCommand() {},
     appendEntry: (type: string, data: unknown) => appended.push({ type, data }),
@@ -107,7 +107,7 @@ describe("ToolRegistry active filtering", () => {
   it("dispatches real search_tools from a distinct extension API without agent-channel emission", async () => {
     const harness = createHarness(["search_tools"]);
     harness.tools.push(
-      { name: "web_fetch", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") as ToolInfo["sourceInfo"] },
+      { name: "web_fetch", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") },
     );
 
     const ptcApi = harness.createApi();

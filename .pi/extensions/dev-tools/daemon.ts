@@ -29,7 +29,7 @@ import { Data, Effect, Result } from "effect";
 import { LspBackend } from "./backend";
 import { BACKEND_CONFIGS, BackendMode, type LspBackendConfig } from "./backend-configs";
 import { FileCache } from "./file-cache";
-import { type HandlerDeps } from "./handlers";
+import type { HandlerDeps } from "./handlers";
 import { getAction } from "./action-registry";
 import "./register-actions"; // side-effect: populates the action registry
 import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH, PID_PATH } from "./protocol";
@@ -93,7 +93,7 @@ export class LspDaemon {
     private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
   ) {
     this.backends = (
-      BACKEND_CONFIGS.filter((config) => config.mode === BackendMode.Lsp) as LspBackendConfig[]
+      BACKEND_CONFIGS.filter((config) => config.mode === BackendMode.Lsp)
     ).map((config) => new LspBackend(config, telemetry));
   }
 
@@ -235,7 +235,7 @@ export class LspDaemon {
         openFiles: [],
         watchedFiles: 0,
         idleMs: 0,
-      } as StatusResult);
+      });
     }
 
     // Try the registry first

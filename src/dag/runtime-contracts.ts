@@ -1,13 +1,13 @@
-import { Context, Data, Effect, Layer, Scope } from "effect";
-import {
+import type { Effect, Scope } from "effect";
+import { Context, Data, Layer } from "effect";
+import type {
+  DagExecutorKind,
+  DagNamedOutputs,
+  DagNode,
   DagNodeStatus,
-  type DagExecutorKind,
-  type DagNamedOutputs,
-  type DagNode,
-  type DagTransition,
+  DagTransition,
 } from "./contracts.js";
-import type { DagRunOutcomeResult, DagTransitionError } from "./kernel.js";
-import type { DagRunState } from "./kernel.js";
+import type { DagRunOutcomeResult, DagRunState, DagTransitionError } from "./kernel.js";
 import type { ValidatedDagDefinition } from "./validation.js";
 
 export class DagRuntimeGraphStateMismatch extends Data.TaggedError("DagRuntimeGraphStateMismatch")<{

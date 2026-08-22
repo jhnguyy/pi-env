@@ -109,7 +109,7 @@ describe("DAG validation", () => {
     const unsupported = definition([
       node("source"),
       node("consumer", [{ nodeId: "source", mode: "optional" as never }]),
-    ] as unknown as DagDefinition["nodes"]);
+    ]);
     expect(tags(unsupported)).toEqual([DagValidationErrorTag.UnsupportedDependencyMode]);
 
     const duplicate = definition([

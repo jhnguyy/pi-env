@@ -1,4 +1,5 @@
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
+import type * as AgentCore from "@earendil-works/pi-agent-core";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@earendil-works/pi-agent-core")>();
+  const actual = await importOriginal<typeof AgentCore>();
   return {
     ...actual,
     agentLoop: (_prompts: unknown, _context: unknown, _config: unknown, signal: AbortSignal) => ({

@@ -7,8 +7,7 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Effect, PartitionedSemaphore } from "effect";
-import { Schema } from "effect";
+import { Effect, PartitionedSemaphore, Schema } from "effect";
 import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { decodeSettingsBlockSync } from "../_shared/settings";
@@ -642,7 +641,7 @@ const handlers: Partial<
   >
 > = {
   start: async (pi, rest, ctx) =>
-    (await startReview(pi, { url: extractPrUrl(rest.join(" ")) }, undefined, ctx as any)).content[0]
+    (await startReview(pi, { url: extractPrUrl(rest.join(" ")) }, undefined, ctx)).content[0]
       ?.text ?? "Started.",
   status: () => renderStatus(),
   findings: () => renderFindings(),
@@ -653,7 +652,7 @@ const handlers: Partial<
     const s = latestState();
     if (!s) return "No active PR review.";
     return (
-      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx as any)).content[0]
+      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx)).content[0]
         ?.text ?? "Rerun started."
     );
   },

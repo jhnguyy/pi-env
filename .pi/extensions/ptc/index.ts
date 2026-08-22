@@ -40,7 +40,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
         const output = await executor.execute(code, ctx.cwd, signal, onUpdate, ctx);
         return { content: [txt(output || "(no output)")], details: {} };
       } catch (e: unknown) {
-        throw new Error(formatError(e, "ptc"));
+        throw new Error(formatError(e, "ptc"), { cause: e });
       }
     },
 
@@ -90,7 +90,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
         const output = await executor.execute(code, cwd, signal, onUpdate);
         return { content: [txt(output || "(no output)")], details: {} };
       } catch (e: unknown) {
-        throw new Error(formatError(e, "ptc"));
+        throw new Error(formatError(e, "ptc"), { cause: e });
       }
     },
   });

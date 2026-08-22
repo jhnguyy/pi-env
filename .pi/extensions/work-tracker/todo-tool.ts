@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { setSlot } from "../_shared/ui-render";
 import { formatTodoMilestoneLabel } from "./milestones";
-import { TodoStore } from "./store";
+import type { TodoStore } from "./store";
 
 export const TodoAction = {
   Add: "add",

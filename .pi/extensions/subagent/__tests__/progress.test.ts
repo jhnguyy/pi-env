@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import type * as AgentCore from "@earendil-works/pi-agent-core";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +15,7 @@ const assistant = {
 };
 
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@earendil-works/pi-agent-core")>();
+  const actual = await importOriginal<typeof AgentCore>();
   return {
     ...actual,
     agentLoop: () => ({

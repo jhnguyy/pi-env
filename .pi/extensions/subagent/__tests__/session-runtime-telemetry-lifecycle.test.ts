@@ -106,7 +106,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     expect([...runtimeState.disposed.values()]).toEqual([1]);
     expect(runtime.state).toBe("inactive");
 
-    const job = runtime.startJob({ name: "job", task: "task" } as any, { cwd: "/tmp" } as any);
+    const job = runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any);
     expect(job.details.status).toBe("inactive");
     expect(job.content[0]?.type === "text" ? job.content[0].text : "").toContain("Cannot start a subagent job");
   });

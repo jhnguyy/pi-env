@@ -1,11 +1,11 @@
 import {
   defineTool,
+  getSettingsListTheme,
   type ExtensionAPI,
   type ExtensionCommandContext,
   type ExtensionContext,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { type SettingItem, SettingsList } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { Effect } from "effect";

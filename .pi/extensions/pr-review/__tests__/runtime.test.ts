@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type ReviewState } from "../core";
+import type { ReviewState } from "../core";
 import { makeReviewTools } from "../runtime";
 
 const temps: string[] = [];
@@ -129,14 +129,14 @@ describe("pr-review run-scoped tools", () => {
     );
     const first = await tools.review_changed_files.execute(
       "1",
-      { page: 1, pageSize: 500 } as any,
-      undefined as any,
+      { page: 1, pageSize: 500 },
+      undefined,
       undefined as any,
     );
     const last = await tools.review_changed_files.execute(
       "2",
-      { page: 3, pageSize: 500 } as any,
-      undefined as any,
+      { page: 3, pageSize: 500 },
+      undefined,
       undefined as any,
     );
     expect(
@@ -247,8 +247,8 @@ describe("pr-review run-scoped tools", () => {
         riskReasons: [],
         cohorts: [{ label: "source", purpose: "Review source", paths: ["src/a.ts"] }],
         files: [{ path: "src/a.ts", attention: "normal", role: "r" }],
-      } as any,
-      undefined as any,
+      },
+      undefined,
       undefined as any,
     );
     expect(
@@ -333,8 +333,8 @@ describe("pr-review run-scoped tools", () => {
         riskReasons: [],
         cohorts: [{ label: "source", purpose: "Review source", paths: ["src/late.ts"] }],
         files: [{ path: "src/late.ts", attention: "normal", role: "r" }],
-      } as any,
-      undefined as any,
+      },
+      undefined,
       undefined as any,
     );
     await tools.submit_review.execute(
@@ -353,8 +353,8 @@ describe("pr-review run-scoped tools", () => {
             line: 2,
           },
         ],
-      } as any,
-      undefined as any,
+      },
+      undefined,
       undefined as any,
     );
     expect(s.result?.findings[0]?.anchorValid).toBe(true);
@@ -366,7 +366,7 @@ describe("pr-review run-scoped tools", () => {
     const ac = new AbortController();
     ac.abort();
     await expect(
-      tools[0]!.execute("1", { path: "src/a.ts" } as any, ac.signal, undefined as any),
+      tools[0].execute("1", { path: "src/a.ts" } as any, ac.signal, undefined as any),
     ).rejects.toThrow(/cancelled/);
   });
 });

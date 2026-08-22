@@ -10,11 +10,10 @@
  * No more switch statements in formatters.ts, renderers.ts, or daemon.ts dispatch.
  */
 
-import type { LspResult, LspAction, PublicLspAction } from "./protocol";
-import type { DaemonRequest, DaemonResponse } from "./protocol";
+import type { DaemonRequest, DaemonResponse, LspAction, LspResult, PublicLspAction } from "./protocol";
 import type { HandlerDeps } from "./handlers";
-import type { RenderTheme } from "./renderers";
-import { Text } from "@earendil-works/pi-tui";
+import type { RenderTheme } from "./render-contracts";
+import type { Text } from "@earendil-works/pi-tui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,7 +46,7 @@ export function getAction(action: LspAction): ActionEntry | undefined {
 
 /** Format any LspResult by dispatching to the registered formatter. */
 export function formatResult(result: LspResult): string {
-  const entry = registry.get(result.action as PublicLspAction);
+  const entry = registry.get(result.action);
   if (!entry) return JSON.stringify(result);
   return entry.formatter(result);
 }

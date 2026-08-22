@@ -749,7 +749,7 @@ export default function (pi: ExtensionAPI) {
     description: REFERENCE_SKILL_TOOL_DESCRIPTION,
     parameters: REFERENCE_SKILL_PARAMETERS,
     async execute(_toolCallId, params) {
-      return executeReferenceSkill(params as ReferenceSkillParams);
+      return executeReferenceSkill(params);
     },
   });
 
@@ -764,7 +764,7 @@ export default function (pi: ExtensionAPI) {
       "Evaluation uses local SKILL.md changes against Git HEAD when available.",
     parameters: SKILL_BUILD_PARAMETERS,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return runSkillBuild(pi, params as SkillBuildParams, {
+      return runSkillBuild(pi, params, {
         cwd: ctx.cwd,
         signal,
         ctx,

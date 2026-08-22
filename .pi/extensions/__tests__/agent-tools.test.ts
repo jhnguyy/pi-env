@@ -5,6 +5,7 @@ import {
   PiEvent,
   ToolCapability,
   listenForAgentTools,
+  resetAgentToolRegistryForTests,
   registerAgentTools,
   registerAgentToolsOnSessionStart,
   unregisterAgentTools,
@@ -12,7 +13,6 @@ import {
   type AgentToolEvents,
   type ExtToolRegistration,
 } from "../_shared/agent-tools";
-import { resetAgentToolRegistryForTests } from "../_shared/agent-tools";
 
 function createPi(): AgentToolEvents & { trigger(event: string): void } {
   const eventHandlers = new Map<string, Array<(data: unknown) => void>>();
@@ -98,7 +98,7 @@ describe("agent tool registration", () => {
     const stop = listenForAgentTools(pi, () => {});
     stop();
 
-    unregisterAgentTools(pi, [registration!]);
+    unregisterAgentTools(pi, [registration]);
     const replayed: string[] = [];
     listenForAgentTools(pi, (entry) => replayed.push(entry.tool.name));
     expect(replayed).toEqual([]);
@@ -117,7 +117,7 @@ describe("agent tool registration", () => {
 
     pi.trigger(PiEvent.SessionStart);
     expect(added).toHaveLength(1);
-    const registration = added[0]!;
+    const registration = added[0];
     const child = registration.createTool?.({
       cwd: "/child",
       sessionGeneration: registration.sessionGeneration!,

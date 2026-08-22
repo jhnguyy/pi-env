@@ -28,8 +28,8 @@ import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { loadSubagentRuntimeConfig, resolveSubagentRuntimeConfig } from "./config";
 import {
   getOrCreateSubagentRunSupervisor,
-  SubagentAdmissionError,
   WorkspaceAccess,
+  type SubagentAdmissionError,
   type SubagentRunSupervisor,
   type WorkspaceAccess as WorkspaceAccessValue,
 } from "./control";
@@ -39,8 +39,8 @@ import type { SubagentDetails } from "./types";
 import {
   recordSubagentResult,
   SubagentRunAccumulator,
-  SubagentUsageLedger,
   SubagentUsageMode,
+  type SubagentUsageLedger,
   zeroUsage,
 } from "./usage";
 
@@ -230,7 +230,7 @@ function runResolvedSubagentWorkflow(
             : effectSignal;
           const stream = agentLoop(prompts, agentContext, config, signal, streamSimple);
           for await (const event of stream) {
-            const ev = event as AgentEvent;
+            const ev = event;
             const appended = accumulator.acceptEvent(ev);
             if (appended) childSession.manager.appendMessage(appended as any);
             if (appended?.role === "assistant")

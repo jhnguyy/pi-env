@@ -108,7 +108,7 @@ export function validatePlan(
 function decodeGitQuotedPath(path: string): string {
   const bytes: number[] = [];
   for (let i = 1; i < path.length - 1; i += 1) {
-    const ch = path[i]!;
+    const ch = path[i];
     if (ch !== "\\") {
       bytes.push(ch.charCodeAt(0));
       continue;
@@ -117,7 +117,7 @@ function decodeGitQuotedPath(path: string): string {
     if (next === undefined) throw new Error("Invalid Git quoted path.");
     if (/[0-7]/.test(next)) {
       let octal = next;
-      for (let n = 0; n < 2 && /[0-7]/.test(path[i + 1] ?? ""); n += 1) octal += path[++i]!;
+      for (let n = 0; n < 2 && /[0-7]/.test(path[i + 1] ?? ""); n += 1) octal += path[++i];
       bytes.push(Number.parseInt(octal, 8));
       continue;
     }
@@ -140,7 +140,7 @@ function decodeGitQuotedPath(path: string): string {
 function quotedGitPathEnd(text: string, start: number): number {
   let escaped = false;
   for (let index = start + 1; index < text.length; index += 1) {
-    const ch = text[index]!;
+    const ch = text[index];
     if (escaped) {
       escaped = false;
       continue;
@@ -201,12 +201,12 @@ export function parseDiffGitPath(line: string): string | undefined {
   }
   const parts = parseGitPathList(rest);
   if (parts.length !== 2) return undefined;
-  return stripGitPrefix(parts[1]!, "b");
+  return stripGitPrefix(parts[1], "b");
 }
 export function parsePatchFilePath(line: string): string | undefined {
   const match = line.match(/^(---|\+\+\+) (.+?)(?:\t.*)?$/);
   if (!match) return undefined;
-  const path = match[2]!.startsWith('"') ? parseGitPathList(match[2]!).at(0) : match[2];
+  const path = match[2].startsWith('"') ? parseGitPathList(match[2]).at(0) : match[2];
   return stripGitPrefix(path ?? "", match[1] === "---" ? "a" : "b");
 }
 function ensureAnchorFile(

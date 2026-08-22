@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 
-import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } from "../../_shared/agent-tools";
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
+import { AgentToolEvent, PiEvent, ToolCapability, resetAgentToolRegistryForTests, type ExtToolRegistration } from "../../_shared/agent-tools";
 import { err } from "../../_shared/result";
 import jitCatchExtension from "../index";
 import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
@@ -17,7 +16,7 @@ const runnerState = vi.hoisted(() => ({
 }));
 
 vi.mock("../runner", async () => {
-  const actual = await vi.importActual<typeof import("../runner")>("../runner");
+  const actual = await vi.importActual<typeof runner>("../runner");
   return {
     ...actual,
     resolveGitRoot: vi.fn(async (_exec, cwd: string) => `${cwd}/root`),

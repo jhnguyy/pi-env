@@ -3,7 +3,7 @@ import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffec
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import { AnalyzerName, AnalyzerRunError, type Finding } from "./model.js";
 import { isTypeProject, ProjectRequirement, SyntaxSourceSelection, type Project } from "./program.js";
-import { ProcessService } from "./process.js";
+import type { ProcessService } from "./process.js";
 import type { Scope } from "./scope.js";
 
 export interface AnalyzerContext {

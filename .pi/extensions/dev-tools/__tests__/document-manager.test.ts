@@ -151,7 +151,7 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
         const p = mkFile(filename, "// hello");
         const result = (dm as any).open(p);
         expect(result).not.toBeNull();
-        expect((result!.params as any).textDocument.languageId).toBe(expectedId);
+        expect((result!.params).textDocument.languageId).toBe(expectedId);
       });
     }
   });

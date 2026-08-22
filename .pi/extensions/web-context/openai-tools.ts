@@ -59,7 +59,7 @@ const OpenAIWebContextSettingsSchema = Schema.Struct({
 type OpenAIHostedToolsSettings = typeof OpenAIHostedToolsSettingsSchema.Type;
 
 export function loadOpenAIWebToolSettings(cwd = process.cwd(), env: Record<string, string | undefined> = process.env): OpenAIWebToolSettings {
-  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, OpenAIWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({} as OpenAIHostedToolsSettings);
+  const settings = decodeSettingsBlockSync(WebContextSettingKey.Root, OpenAIWebContextSettingsSchema, cwd)[WebContextSettingKey.HostedTools] ?? ({});
 
   return {
     enabled: booleanSetting(settings[OpenAIHostedToolSettingKey.Enabled], env[OpenAIHostedToolEnvVar.Enabled], true),

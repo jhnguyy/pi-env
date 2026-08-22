@@ -26,7 +26,7 @@ export default function (pi: ExtensionAPI) {
       return prepareTodoArguments(args);
     },
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      return executeTodo(store, params as TodoParams, ctx, pi);
+      return executeTodo(store, params, ctx, pi);
     },
   });
 

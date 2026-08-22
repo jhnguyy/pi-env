@@ -387,7 +387,7 @@ describeIfEnabled("dev-tools", "rename action", () => {
       deps.getBackend = ((path: string) => {
         if (path === realTarget) throw new Error("Unsupported file type: target.ts");
         return originalGetBackend(path);
-      }) as HandlerDeps["getBackend"];
+      });
 
       const response = await handleRename({
         id: 7,
@@ -454,7 +454,7 @@ describeIfEnabled("dev-tools", "rename action", () => {
     deps.getBackend = ((path: string) => {
       if (path === unsupportedPath) throw new Error("Unsupported file type: unsupported.py");
       return originalGetBackend(path);
-    }) as HandlerDeps["getBackend"];
+    });
 
     const response = await handleRename({
       id: 8,

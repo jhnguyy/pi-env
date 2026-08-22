@@ -68,7 +68,7 @@ export default function playwrightClientExtension(pi: ExtensionAPI) {
         const page = target ? await browser.currentPageSummary(target).catch(() => undefined) : undefined;
         const message = translateBrowserError(error);
         if (action !== "history") browser.recordHistory({ action, target, pageTitle: page?.title, pageUrl: page?.url, error: message });
-        throw new Error(message);
+        throw new Error(message, { cause: error });
       }
     },
     renderCall(args: Record<string, unknown>, theme: { fg(scope: string, text: string): string; bold(text: string): string }) {

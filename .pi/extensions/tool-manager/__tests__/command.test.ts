@@ -29,7 +29,7 @@ describe("/tools command", () => {
 
   it("falls back to notify with no args outside TUI", async () => {
     const h = harness();
-    await handleToolsCommand(h.pi, "", { ...h.ctx, mode: "print" } as ExtensionCommandContext, resolveConfig());
+    await handleToolsCommand(h.pi, "", { ...h.ctx, mode: "print" }, resolveConfig());
     expect(h.custom).not.toHaveBeenCalled();
     expect(h.notify).toHaveBeenCalledWith(expect.stringContaining("Active tools"), "info");
   });

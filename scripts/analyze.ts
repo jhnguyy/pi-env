@@ -28,7 +28,7 @@ const paths: string[] = [];
 let parseError: string | undefined;
 
 for (let index = 0; index < args.length; index++) {
-  const argument = args[index]!;
+  const argument = args[index];
   if (argument === "--") {
     continue;
   }

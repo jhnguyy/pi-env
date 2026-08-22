@@ -28,7 +28,7 @@ function dependencyViolation(value: unknown, context: string): DependencyViolati
   if (severity !== "error" && severity !== "warn" && severity !== "info" && severity !== "ignore") invalidDependencyCruiserJson(`${context}.rule.severity is not supported`);
   const cycle = item.cycle;
   if (cycle !== undefined && (!Array.isArray(cycle) || !cycle.every((entry) => typeof entry === "string"))) invalidDependencyCruiserJson(`${context}.cycle must be an array of strings`);
-  const cycleValues = cycle === undefined ? undefined : cycle as string[];
+  const cycleValues = cycle === undefined ? undefined : cycle;
   return {
     from: optionalDependencyString(item.from, `${context}.from`),
     to: optionalDependencyString(item.to, `${context}.to`),
@@ -154,7 +154,7 @@ export function parseOxlintJson(text: string, cwd: string): Finding[] {
       kind: FindingKind.Lint,
       severity: item.severity === "error" ? Severity.Error : item.severity === "warning" ? Severity.Warning : Severity.Info,
       message: `${ruleId}: ${item.message}`,
-      location: labels[0]!,
+      location: labels[0],
       ...(related.length > 0 ? { related } : {}),
       data: { ruleId },
     }];

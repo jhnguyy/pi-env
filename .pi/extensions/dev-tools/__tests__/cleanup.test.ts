@@ -122,7 +122,7 @@ describeIfEnabled("dev-tools", "/cleanup command", () => {
       ],
     };
 
-    const text = formatCleanupPlan(plan as Parameters<typeof formatCleanupPlan>[0], false);
+    const text = formatCleanupPlan(plan, false);
     expect(text).toContain("Cleanup plan for /repo");
     expect(text).toContain("Safe:");
     expect(text).toContain("worktree /tmp/repo-feat-done");

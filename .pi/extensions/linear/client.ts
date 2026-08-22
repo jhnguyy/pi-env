@@ -47,7 +47,7 @@ function selectResource(
     : candidates.filter((item) =>
         resourceAliases(item).some((alias) => alias.includes(normalized)),
       );
-  if (matches.length === 1) return matches[0]!;
+  if (matches.length === 1) return matches[0];
   if (matches.length > 1) {
     throw linearError(
       LinearErrorCode.AmbiguousReference,

@@ -5,7 +5,8 @@ import {
   type DagTransition,
 } from "../contracts.js";
 import { classifyQueuedNode, QueuedNodeClassification } from "./readiness.js";
-import { DagRunState, getRunningCount, makeRunState } from "./run-state.js";
+import type { DagRunState} from "./run-state.js";
+import { getRunningCount, makeRunState } from "./run-state.js";
 import {
   canonicalTransition,
   nodeStateFromTransition,

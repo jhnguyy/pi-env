@@ -7,14 +7,13 @@ import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
-import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
+import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, findingId, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
-import { findingId } from "../engine.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
 import { createAnalysisProjectEffect, createProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
 import { analyzerDescriptor, projectRequirement, projectSourceSelection } from "../registry.js";
-import { childHeapLimitMb, ProcessServiceLive, processServiceLayer, streamProcessEffect } from "../process.js";
+import { childHeapLimitMb, ProcessServiceLive, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
 import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
@@ -225,7 +224,7 @@ describe("analyze contracts", () => {
 
   it("accepts the exact external budget boundary and does not give native Oxlint NODE_OPTIONS", async () => {
     const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    let invocation: { command: string; args: readonly string[]; options?: import("../process.js").StreamProcessOptions } | undefined;
+    let invocation: { command: string; args: readonly string[]; options?: StreamProcessOptions } | undefined;
     const result = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 1536, checks: [AnalyzerName.Eslint],
     }, { processRunner: (command, args, options) => { invocation = { command, args, options }; return Effect.succeed({ stdout: JSON.stringify({ diagnostics: [] }), stderr: "" }); } }));
@@ -730,7 +729,7 @@ describe("bundle entrypoints", () => {
     writeFileSync(join(cwd, "pi-build.config.json"), "{");
     const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, allScope, 2048, undefined, {
       build: async (options) => {
-        const entry = (options.entryPoints as string[])[0]!;
+        const entry = (options.entryPoints as string[])[0];
         return { metafile: { inputs: { [entry]: { bytes: 1, imports: [] } }, outputs: {} } };
       },
     }).pipe(Effect.provide(ProcessServiceLive)));
@@ -742,7 +741,7 @@ describe("bundle entrypoints", () => {
     writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/a", ".pi/extensions/b"] } }));
     writeFileSync(join(cwd, "pi-build.config.json"), JSON.stringify({ externals: ["pkg-a", "pkg-b"] }));
     const calls: Array<{ entryPoints: readonly string[]; external?: readonly string[] }> = [];
-    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, allScope, 2048, undefined, { build: async (options) => { calls.push({ entryPoints: options.entryPoints as readonly string[], external: options.external as readonly string[] | undefined }); const entry = (options.entryPoints as string[])[0]!; return { errors: [], warnings: [], metafile: { inputs: { [entry]: { bytes: 1, imports: [] } }, outputs: { "out.js": { bytes: 2, inputs: {}, imports: [], exports: [], entryPoint: entry } } } }; } }).pipe(Effect.provide(ProcessServiceLive)));
+    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, allScope, 2048, undefined, { build: async (options) => { calls.push({ entryPoints: options.entryPoints as readonly string[], external: options.external }); const entry = (options.entryPoints as string[])[0]; return { errors: [], warnings: [], metafile: { inputs: { [entry]: { bytes: 1, imports: [] } }, outputs: { "out.js": { bytes: 2, inputs: {}, imports: [], exports: [], entryPoint: entry } } } }; } }).pipe(Effect.provide(ProcessServiceLive)));
     expect(calls).toEqual([{ entryPoints: [".pi/extensions/a/index.ts"], external: ["pkg-a", "pkg-b"] }, { entryPoints: [".pi/extensions/b/index.ts"], external: ["pkg-a", "pkg-b"] }]);
     expect(findings).toHaveLength(2);
     expect(findings.map(item => item.location.path)).toEqual([".pi/extensions/a/index.ts", ".pi/extensions/b/index.ts"]);
@@ -830,8 +829,8 @@ describe("bounded hardening", () => {
       .map((declaration) => declaration.initializer)
       .filter((value): value is ts.ArrowFunction => value !== undefined && ts.isArrowFunction(value));
     expect(arrows).toHaveLength(2);
-    const left = canonicalizeWithCap(arrows[0]!.body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
-    const right = canonicalizeWithCap(arrows[1]!.body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
+    const left = canonicalizeWithCap(arrows[0].body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
+    const right = canonicalizeWithCap(arrows[1].body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
     expect(left.canonical).toBe(right.canonical);
     expect(left.nodeCount).toBeLessThan(20);
     expect(left.tokenCount).toBeLessThan(24);

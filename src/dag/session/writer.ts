@@ -11,7 +11,7 @@ import {
   deriveDagRunOutcome,
   type DagRunState,
 } from "../kernel.js";
-import { type ValidatedDagDefinition } from "../validation.js";
+import type { ValidatedDagDefinition } from "../validation.js";
 import {
   byteSize,
   computeDagSessionGraphId,

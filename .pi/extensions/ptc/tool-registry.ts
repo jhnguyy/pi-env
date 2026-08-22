@@ -59,13 +59,13 @@ export class ToolRegistry {
     listenForAgentTools(pi, ({ tool }) =>
       this.rememberTool({
         name: tool.name,
-        execute: (id, params, signal) => tool.execute(id, params as any, signal, undefined),
+        execute: (id, params, signal) => tool.execute(id, params, signal, undefined),
       }),
     );
   }
 
   private installPtcToolsListener(pi: ExtensionAPI): void {
-    listenForPtcTools(pi, ({ tool }) => this.rememberTool(tool as unknown as { name: string; execute: ExecuteFn }));
+    listenForPtcTools(pi, ({ tool }) => this.rememberTool(tool));
   }
 
   /** Returns the active tools available inside PTC. */
@@ -106,7 +106,7 @@ export class ToolRegistry {
         def = factory(cwd);
         this.builtinCache.set(cacheKey, def);
       }
-      result = await def.execute(toolCallId, params as any, signal, undefined, effectiveCtx);
+      result = await def.execute(toolCallId, params, signal, undefined, effectiveCtx);
     } else {
       const execute = this.extensionTools.get(toolName);
       if (!execute) {

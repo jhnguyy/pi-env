@@ -89,7 +89,7 @@ describe("getBackendConfig", () => {
 
 describe("LspBackend.handles and getLanguageId (via configs)", () => {
   // LspBackend only consumes LSP-mode configs — mirror the daemon's filter.
-  const backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[])
+  const backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp))
     .map((c) => new LspBackend(c));
   const getBackend = (path: string) => backends.find((b) => b.handles(path));
 
@@ -136,7 +136,7 @@ describe("LspBackend.handles and getLanguageId (via configs)", () => {
 
 describe("LSP launch plans", () => {
   it("launches Node-module servers through the resolved Node command and package JS entrypoints", () => {
-    const lspConfigs = BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[];
+    const lspConfigs = BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp);
     for (const name of ["typescript", "bash"] as const) {
       const config = lspConfigs.find((c) => c.name === name)!;
       expect(config.launchCommand).not.toContain("node_modules/.bin");
@@ -149,7 +149,7 @@ describe("LSP launch plans", () => {
   });
 
   it("keeps nil as a native binary discovery plan", () => {
-    const config = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp) as LspBackendConfig[])
+    const config = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp))
       .find((c) => c.name === "nil")!;
     expect(config.launchCommand).toBe("nil");
     expect(config.launchArgs).toEqual([]);

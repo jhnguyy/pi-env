@@ -41,7 +41,7 @@ export function toPiTool<Params, Details = unknown, Schema extends TSchema = TSc
     description: contract.description,
     parameters: contract.parameters,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      return contract.execute(params as Params, {
+      return contract.execute(params, {
         cwd: ctx.cwd,
         signal,
         progress: (message) => onUpdate?.(progressResult(message) as AgentToolResult<Details>),

@@ -249,7 +249,7 @@ it("returns subagent failure as unavailable advisory review", async () => {
         isError: true,
         errorMessage: "provider unavailable",
       },
-    } as any)) as any);
+    })) as any);
 
   const result = await runSkillBuild(
     { exec } as any,

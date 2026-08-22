@@ -27,7 +27,7 @@ import {
   type ScopeMode,
 } from "./model.js";
 import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget, type SyntaxSourceSelection } from "./program.js";
-import { ProcessService, processServiceLayer, type streamProcessEffect } from "./process.js";
+import { processServiceLayer, type ProcessService, type streamProcessEffect } from "./process.js";
 import {
   analyzerDescriptor,
   defaultAnalyzerNames,

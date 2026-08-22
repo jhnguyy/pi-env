@@ -153,7 +153,7 @@ export async function handleDiagnostics(req: DaemonRequest, deps: HandlerDeps): 
       errorCount: totalErrors,
       warnCount: totalWarns,
       items: [],
-    } as DiagnosticsResult);
+    });
   }
 
   if (!req.path) return errorResponse(req.id, "path or paths required for diagnostics");
@@ -433,7 +433,7 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
     return okResponse(req.id, {
       action: "symbols", path: req.path,
       total: items.length, items, truncated: raw.length > MAX,
-    } as SymbolsResult);
+    });
   }
 
   if (req.query) {
@@ -474,7 +474,7 @@ export async function handleSymbols(req: DaemonRequest, deps: HandlerDeps): Prom
     return okResponse(req.id, {
       action: "symbols", query: req.query,
       total: allRaw.length, items, truncated: allRaw.length > MAX,
-    } as SymbolsResult);
+    });
   }
 
   return errorResponse(req.id, "symbols requires either path or query");
@@ -527,7 +527,7 @@ export function handleStatus(req: DaemonRequest, deps: HandlerDeps): DaemonRespo
     openFiles: allOpenFiles,
     watchedFiles: allOpenFiles.length,
     idleMs: deps.getIdleMs(),
-  } as StatusResult);
+  });
 }
 
 function parseHoverContent(hover: any): { signature: string; docs?: string } {

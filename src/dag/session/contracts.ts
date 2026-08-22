@@ -1,13 +1,13 @@
 import { Data } from "effect";
-import {
-  type DagDefinition,
-  type DagNodeStatus as DagNodeStatusValue,
+import type {
+  DagDefinition,
   DagNodeStatus,
-  type DagRunOutcome,
-  type DagTransition,
+  DagNodeStatus as DagNodeStatusValue,
+  DagRunOutcome,
+  DagTransition,
 } from "../contracts.js";
-import { type DagRunState } from "../kernel.js";
-import { type ValidatedDagDefinition } from "../validation.js";
+import type { DagRunState } from "../kernel.js";
+import type { ValidatedDagDefinition } from "../validation.js";
 
 export const DagSessionEntryType = "pi/dag-run-event" as const;
 export const DagSessionWireVersion = 1 as const;

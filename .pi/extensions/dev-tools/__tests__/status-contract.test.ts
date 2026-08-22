@@ -38,7 +38,7 @@ type ExpectedStatusContract = {
 };
 
 function formatExpectedStatus(result: ExpectedStatusContract): string {
-  return formatStatus(result as unknown as StatusResult);
+  return formatStatus(result);
 }
 
 describeIfEnabled("dev-tools", "status contract", () => {

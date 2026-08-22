@@ -32,7 +32,7 @@ process.stdin.on("end", () => {
   session = session.replace(/[\r\n]+$/, "");
   if (!session) process.exit(65);
 
-  const child = spawn(executable, ["get", field, itemId!, "--nointeraction"], {
+  const child = spawn(executable, ["get", field, itemId, "--nointeraction"], {
     env: { ...minimalEnvironment(process.env), BW_SESSION: session },
     stdio: ["ignore", "inherit", "inherit"],
   });
