@@ -93,7 +93,7 @@ function configureEffect() {
         yield* configureRepoToolsEffect(ctx, policy);
         break;
       default:
-        yield* Effect.fail(new SetupUsageError(`unknown configure command: ${command}`, 2));
+        return yield* Effect.fail(new SetupUsageError(`unknown configure command: ${command}`, 2));
     }
   });
 }

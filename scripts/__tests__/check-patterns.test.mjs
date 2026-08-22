@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { analyzeFile, analyzeText, GUARDED_EFFECT_COMBINATORS } from "../check-patterns.js";
+import {
+  analyzeFile,
+  analyzeText,
+  GUARDED_EFFECT_COMBINATORS,
+  TERMINAL_EFFECT_OPERATIONS,
+} from "../check-patterns.js";
 
 const CHECKER_PATH = fileURLToPath(new URL("../check-patterns.js", import.meta.url));
 const NODE_RUNNER_PATH = fileURLToPath(new URL("../node-run.sh", import.meta.url));
@@ -109,6 +114,90 @@ describe("check-patterns", () => {
       const b = value.pipe(Effect.map(fn));
       const c = Effect.void;
       const d = Effect.succeed(1);
+    `,
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it("rejects JavaScript try/catch inside Effect.gen", () => {
+    const findings = analyzeText(
+      "src/example.ts",
+      `
+      const program = Effect.gen(function* () {
+        try {
+          yield* operation;
+        } catch (error) {
+          return yield* Effect.fail(error);
+        }
+      });
+    `,
+    );
+
+    expect(findings).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining("try/catch is not allowed inside Effect.gen"),
+      }),
+    ]);
+  });
+
+  it("allows Effect failure handling and JavaScript try/catch outside Effect.gen", () => {
+    const findings = analyzeText(
+      "src/example.ts",
+      `
+      const program = Effect.gen(function* () {
+        yield* Effect.sync(() => {
+          try {
+            compatibilityOperation();
+          } catch (error) {
+            reportCompatibilityFailure(error);
+          }
+        });
+        return yield* Effect.try({ try: operation, catch: toFailure });
+      });
+      try {
+        compatibilityOperation();
+      } catch (error) {
+        reportCompatibilityFailure(error);
+      }
+    `,
+    );
+
+    expect(findings).toEqual([]);
+  });
+
+  it("requires return yield* for terminal effects inside Effect.gen", () => {
+    const source = TERMINAL_EFFECT_OPERATIONS.map((name) => {
+      const effect = name === "interrupt" ? "Effect.interrupt" : `Effect.${name}(failure)`;
+      return `const ${name}Program = Effect.gen(function* () { yield* ${effect}; });`;
+    }).join("\n");
+
+    const findings = analyzeText("src/example.ts", source);
+
+    expect(findings.map((finding) => finding.message)).toEqual(
+      TERMINAL_EFFECT_OPERATIONS.map(
+        (name) => `Terminal Effect.${name} in Effect.gen must use return yield*.`,
+      ),
+    );
+  });
+
+  it("allows return yield* terminal effects and terminal effects outside Effect.gen", () => {
+    const findings = analyzeText(
+      "src/example.ts",
+      `
+      const failed = Effect.gen(function* () {
+        return yield* Effect.fail(failure);
+      });
+      const interrupted = Effect.gen(function* () {
+        const nestedGenerator = function* () {
+          yield* Effect.fail(failure);
+        };
+        yield* Effect.succeed(nestedGenerator);
+        return yield* Effect.interrupt;
+      });
+      function* compatibilityGenerator() {
+        yield* Effect.fail(failure);
+      }
     `,
     );
 

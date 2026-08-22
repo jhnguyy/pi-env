@@ -9,6 +9,7 @@
     "verbatimModuleSyntax": true,
     "rewriteRelativeImportExtensions": true,
     "strict": true,
+    "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "skipLibCheck": true,
     "noEmit": true,
