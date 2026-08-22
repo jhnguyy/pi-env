@@ -7,6 +7,7 @@ import ts from "typescript";
 
 const ROOT = process.cwd();
 const SOURCE_ROOTS = [".pi/extensions", "src", "scripts", "setup", ".agents"];
+export const LOCAL_NAMESPACE_IMPORT_ROOTS = ["src/dag/"];
 export const GUARDED_EFFECT_COMBINATORS = ["andThen", "catch", "flatMap", "map", "match", "tap"];
 export const TERMINAL_EFFECT_OPERATIONS = [
   "die",
@@ -90,6 +91,28 @@ function effectGenTryCatchFindings(file, sourceFile, node) {
   ];
 }
 
+function localNamespaceImportFindings(file, sourceFile, node) {
+  if (
+    !LOCAL_NAMESPACE_IMPORT_ROOTS.some((root) => file.startsWith(root)) ||
+    !ts.isImportDeclaration(node) ||
+    !ts.isStringLiteral(node.moduleSpecifier) ||
+    !node.moduleSpecifier.text.startsWith(".") ||
+    /(^|\/)index\.js$/.test(node.moduleSpecifier.text) ||
+    !node.importClause?.namedBindings ||
+    !ts.isNamedImports(node.importClause.namedBindings)
+  ) {
+    return [];
+  }
+  return [
+    {
+      file,
+      ...location(sourceFile, node),
+      message:
+        "Named imports from local module APIs are not allowed in this migrated root. Use a namespace import or an intended public barrel.",
+    },
+  ];
+}
+
 function terminalEffectFindings(file, sourceFile, node) {
   if (
     !ts.isYieldExpression(node) ||
@@ -160,6 +183,7 @@ export function analyzeText(file, text) {
     }
 
     findings.push(...effectGenTryCatchFindings(file, sourceFile, node));
+    findings.push(...localNamespaceImportFindings(file, sourceFile, node));
     findings.push(...terminalEffectFindings(file, sourceFile, node));
 
     ts.forEachChild(node, visit);

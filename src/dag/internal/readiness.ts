@@ -1,10 +1,5 @@
-import {
-  DagBlockedReason,
-  DagDependencyMode,
-  DagNodeStatus,
-  type DagNodeState,
-} from "../contracts.js";
-import type { DagGraphIndex } from "./validated-graph.js";
+import * as DagContracts from "../contracts.js";
+import type * as ValidatedGraph from "./validated-graph.js";
 
 export const QueuedNodeClassification = {
   Ready: "ready",
@@ -17,37 +12,40 @@ export type QueuedNodeClassification =
   | { readonly kind: typeof QueuedNodeClassification.Waiting }
   | {
       readonly kind: typeof QueuedNodeClassification.Blocked;
-      readonly reason: DagBlockedReason;
+      readonly reason: DagContracts.DagBlockedReason;
       readonly blockedBy: readonly string[];
     };
 
 const ready = Object.freeze({ kind: QueuedNodeClassification.Ready });
 const waiting = Object.freeze({ kind: QueuedNodeClassification.Waiting });
 
-export function terminal(status: DagNodeStatus): boolean {
-  return (
-    status === DagNodeStatus.Succeeded ||
-    status === DagNodeStatus.Failed ||
-    status === DagNodeStatus.Blocked ||
-    status === DagNodeStatus.Cancelled ||
-    status === DagNodeStatus.Interrupted
-  );
+export function terminal(status: DagContracts.DagNodeStatus): boolean {
+  switch (status) {
+    case DagContracts.DagNodeStatus.Succeeded:
+    case DagContracts.DagNodeStatus.Failed:
+    case DagContracts.DagNodeStatus.Blocked:
+    case DagContracts.DagNodeStatus.Cancelled:
+    case DagContracts.DagNodeStatus.Interrupted:
+      return true;
+    default:
+      return false;
+  }
 }
 
 function classifyDependencies<TPayload, TOutputReference, TFailure>(
-  index: DagGraphIndex<TPayload>,
-  states: readonly DagNodeState<TOutputReference, TFailure>[],
+  index: ValidatedGraph.DagGraphIndex<TPayload>,
+  states: readonly DagContracts.DagNodeState<TOutputReference, TFailure>[],
   nodeIndex: number,
 ): QueuedNodeClassification {
   let failedRequired: string[] | undefined;
   let hasWaitingDependency = false;
   for (const dependency of index.dependencies[nodeIndex] ?? []) {
     const status = states[dependency.index]?.status;
-    if (dependency.mode === DagDependencyMode.Settled) {
+    if (dependency.mode === DagContracts.DagDependencyMode.Settled) {
       if (status === undefined || !terminal(status)) hasWaitingDependency = true;
       continue;
     }
-    if (status === DagNodeStatus.Succeeded) continue;
+    if (status === DagContracts.DagNodeStatus.Succeeded) continue;
     if (status !== undefined && terminal(status)) {
       (failedRequired ??= []).push(index.nodes[dependency.index]?.id ?? "");
     } else hasWaitingDependency = true;
@@ -55,7 +53,7 @@ function classifyDependencies<TPayload, TOutputReference, TFailure>(
   if (failedRequired) {
     return {
       kind: QueuedNodeClassification.Blocked,
-      reason: DagBlockedReason.RequiredDependency,
+      reason: DagContracts.DagBlockedReason.RequiredDependency,
       blockedBy: failedRequired,
     };
   }
@@ -63,11 +61,11 @@ function classifyDependencies<TPayload, TOutputReference, TFailure>(
 }
 
 export function classifyQueuedNode<TPayload, TOutputReference, TFailure>(
-  index: DagGraphIndex<TPayload>,
-  states: readonly DagNodeState<TOutputReference, TFailure>[],
+  index: ValidatedGraph.DagGraphIndex<TPayload>,
+  states: readonly DagContracts.DagNodeState<TOutputReference, TFailure>[],
   nodeIndex: number,
 ): QueuedNodeClassification {
-  if (states[nodeIndex]?.status !== DagNodeStatus.Queued) {
+  if (states[nodeIndex]?.status !== DagContracts.DagNodeStatus.Queued) {
     return waiting;
   }
 
@@ -80,12 +78,12 @@ export function classifyQueuedNode<TPayload, TOutputReference, TFailure>(
   if (
     guardIndices &&
     !guardIndices.some(
-      (dependencyIndex) => states[dependencyIndex]?.status === DagNodeStatus.Succeeded,
+      (dependencyIndex) => states[dependencyIndex]?.status === DagContracts.DagNodeStatus.Succeeded,
     )
   ) {
     return {
       kind: QueuedNodeClassification.Blocked,
-      reason: DagBlockedReason.CompletionGuard,
+      reason: DagContracts.DagBlockedReason.CompletionGuard,
       blockedBy: guardIndices.map((dependencyIndex) => index.nodes[dependencyIndex]?.id ?? ""),
     };
   }

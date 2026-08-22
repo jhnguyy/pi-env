@@ -18,7 +18,7 @@ import {
   type DagSessionEntry,
   type DagSessionManagerSeam,
 } from "../index.js";
-import { definition, status } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 function node(
   id: string,
@@ -66,7 +66,7 @@ function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
 
 describe("DAG session codec", () => {
   it("wraps getBranch seam failures without classifying them as malformed", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const store: DagSessionManagerSeam = {
       getBranch: () => {
         throw new Error("storage unavailable");
@@ -78,7 +78,7 @@ describe("DAG session codec", () => {
   });
 
   it("strictly rejects nested malformed inline graph shape before semantic validation", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const graphId = computeDagSessionGraphId(def);
     const graphEntry: DagSessionEntry = {
       v: 1,
@@ -129,7 +129,7 @@ describe("DAG session codec", () => {
   });
 
   it("rejects malformed ordering, duplicate, truncated, reducer, version, and limit histories", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const graphId = computeDagSessionGraphId(def);
     const graphEntry: DagSessionEntry = {
       v: 1,
@@ -208,7 +208,7 @@ describe("DAG session codec", () => {
   });
 
   it("rejects wrong-run transitions, malformed wire payloads, repeated graphs, projection limits, and inconsistent finals with typed tags", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const graphId = computeDagSessionGraphId(def);
     const graphEntry: DagSessionEntry = {
       v: 1,

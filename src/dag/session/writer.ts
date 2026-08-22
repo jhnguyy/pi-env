@@ -1,92 +1,58 @@
 import { Effect } from "effect";
-import {
-  DagNodeStatus,
-  type DagDefinition,
-  type DagRunOutcome,
-  type DagTransition,
-} from "../contracts.js";
-import {
-  DagRunOutcomeResultTag,
-  createDagRunState,
-  deriveDagRunOutcome,
-  type DagRunState,
-} from "../kernel.js";
-import type { ValidatedDagDefinition } from "../validation.js";
-import {
-  byteSize,
-  computeDagSessionGraphId,
-  computeTransitionAttemptUpdate,
-  decodeOutcome,
-  deepFreeze,
-  validateGraph,
-  validateLimits,
-} from "./codec.js";
-import { applyTransition } from "./replay.js";
-import {
-  DagSessionEntryType,
-  DagSessionFinalInconsistent,
-  DagSessionGraphMismatch,
-  DagSessionLimitExceeded,
-  DagSessionOrdering,
-  DagSessionRunMismatch,
-  DagSessionSeamFailed,
-  DagSessionWireVersion,
-  toSessionFailure,
-  type DagSessionAttempt,
-  type DagSessionAttemptStatus,
-  type DagSessionEntry,
-  type DagSessionFailure,
-  type DagSessionLimits,
-  type DagSessionManagerSeam,
-} from "./contracts.js";
+import * as DagContracts from "../contracts.js";
+import * as DagKernel from "../kernel.js";
+import type * as DagValidation from "../validation.js";
+import * as SessionCodec from "./codec.js";
+import * as SessionReplay from "./replay.js";
+import * as SessionContracts from "./contracts.js";
 
 export interface DagSessionWriter {
   readonly appendGraph: (
-    graph: DagDefinition<unknown>,
-  ) => Effect.Effect<DagSessionEntry, DagSessionFailure>;
+    graph: DagContracts.DagDefinition<unknown>,
+  ) => Effect.Effect<SessionContracts.DagSessionEntry, SessionContracts.DagSessionFailure>;
   readonly appendTransition: (
-    transition: DagTransition<unknown, unknown>,
-    attempt?: DagSessionAttemptStatus,
-  ) => Effect.Effect<DagSessionEntry, DagSessionFailure>;
+    transition: DagContracts.DagTransition<unknown, unknown>,
+    attempt?: SessionContracts.DagSessionAttemptStatus,
+  ) => Effect.Effect<SessionContracts.DagSessionEntry, SessionContracts.DagSessionFailure>;
   readonly appendFinal: (
-    outcome: DagRunOutcome,
-  ) => Effect.Effect<DagSessionEntry, DagSessionFailure>;
+    outcome: DagContracts.DagRunOutcome,
+  ) => Effect.Effect<SessionContracts.DagSessionEntry, SessionContracts.DagSessionFailure>;
 }
 
-function appendCustomEntry(seam: DagSessionManagerSeam, entry: DagSessionEntry): void {
+function appendCustomEntry(seam: SessionContracts.DagSessionManagerSeam, entry: SessionContracts.DagSessionEntry): void {
   try {
-    seam.appendCustomEntry(DagSessionEntryType, entry);
+    seam.appendCustomEntry(SessionContracts.DagSessionEntryType, entry);
   } catch (cause) {
-    throw new DagSessionSeamFailed({ operation: "appendCustomEntry", cause });
+    throw new SessionContracts.DagSessionSeamFailed({ operation: "appendCustomEntry", cause });
   }
 }
 
 export function makeDagSessionWriter(
-  seam: DagSessionManagerSeam,
-  graph: ValidatedDagDefinition<unknown>,
-  graphDefinition: DagDefinition<unknown>,
-  options?: { readonly limits?: Partial<DagSessionLimits> },
+  seam: SessionContracts.DagSessionManagerSeam,
+  graph: DagValidation.ValidatedDagDefinition<unknown>,
+  graphDefinition: DagContracts.DagDefinition<unknown>,
+  options?: { readonly limits?: Partial<SessionContracts.DagSessionLimits> },
 ): DagSessionWriter {
-  const limits = validateLimits(options?.limits);
-  const graphId = computeDagSessionGraphId(graphDefinition);
-  const validatedGraphId = computeDagSessionGraphId(graph);
+  const limits = SessionCodec.validateLimits(options?.limits);
+  const graphId = SessionCodec.computeDagSessionGraphId(graphDefinition);
+  const validatedGraphId = SessionCodec.computeDagSessionGraphId(graph);
   let seq = 0;
-  let state: DagRunState<unknown, unknown> = createDagRunState(graph);
+  let state: DagKernel.DagRunState<unknown, unknown> = DagKernel.createDagRunState(graph);
   let final = false;
-  const attempts = new Map<string, DagSessionAttempt>();
-  const append = (entry: DagSessionEntry) => {
+  const attempts = new Map<string, SessionContracts.DagSessionAttempt>();
+  const append = (entry: SessionContracts.DagSessionEntry) => {
     if (entry.seq >= limits.totalMatchingEntries)
-      throw new DagSessionLimitExceeded({
+      throw new SessionContracts.DagSessionLimitExceeded({
         limit: "totalMatchingEntries",
         actual: entry.seq + 1,
         max: limits.totalMatchingEntries,
       });
-    const frozen = deepFreeze(entry);
-    const size = byteSize(frozen);
+    const frozen = SessionCodec.deepFreeze(entry);
+    const size = SessionCodec.byteSize(frozen);
     const sizeLimit = entry.event._tag === "graph" ? limits.graphBytes : limits.eventBytes;
     const limitName = entry.event._tag === "graph" ? "graphBytes" : "eventBytes";
     if (size > sizeLimit)
-      throw new DagSessionLimitExceeded({ limit: limitName, actual: size, max: sizeLimit });
+      throw new SessionContracts.DagSessionLimitExceeded({ limit: limitName, actual: size, max: sizeLimit });
     appendCustomEntry(seam, frozen);
     return frozen;
   };
@@ -95,47 +61,47 @@ export function makeDagSessionWriter(
       Effect.try({
         try: () => {
           if (seq !== 0)
-            throw new DagSessionOrdering({ message: "graph must be appended exactly once" });
-          validateGraph(definition, graphId, limits);
+            throw new SessionContracts.DagSessionOrdering({ message: "graph must be appended exactly once" });
+          SessionCodec.validateGraph(definition, graphId, limits);
           if (validatedGraphId !== graphId)
-            throw new DagSessionGraphMismatch({
+            throw new SessionContracts.DagSessionGraphMismatch({
               expectedGraphId: graphId,
               actualGraphId: validatedGraphId,
             });
           const entry = {
-            v: DagSessionWireVersion,
+            v: SessionContracts.DagSessionWireVersion,
             runId: graph.runId,
             graphId,
             seq,
             event: { _tag: "graph", graph: definition },
-          } satisfies DagSessionEntry;
+          } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           seq += 1;
           return persisted;
         },
-        catch: toSessionFailure,
+        catch: SessionContracts.toSessionFailure,
       }),
     appendTransition: (transition, attempt) =>
       Effect.try({
         try: () => {
-          if (final) throw new DagSessionOrdering({ message: "cannot append after final" });
-          if (seq === 0) throw new DagSessionOrdering({ message: "graph must be appended first" });
+          if (final) throw new SessionContracts.DagSessionOrdering({ message: "cannot append after final" });
+          if (seq === 0) throw new SessionContracts.DagSessionOrdering({ message: "graph must be appended first" });
           if (transition.runId !== graph.runId)
-            throw new DagSessionRunMismatch({
+            throw new SessionContracts.DagSessionRunMismatch({
               expectedRunId: graph.runId,
               actualRunId: transition.runId,
             });
           if (seq - 1 >= limits.transitions)
-            throw new DagSessionLimitExceeded({
+            throw new SessionContracts.DagSessionLimitExceeded({
               limit: "transitions",
               actual: seq,
               max: limits.transitions,
             });
           const wasRunning = state.nodes.some(
-            (node) => node.nodeId === transition.nodeId && node.status === DagNodeStatus.Running,
+            (node) => node.nodeId === transition.nodeId && node.status === DagContracts.DagNodeStatus.Running,
           );
-          const applied = applyTransition(graph, state, transition);
-          const attemptUpdate = computeTransitionAttemptUpdate(
+          const applied = SessionReplay.applyTransition(graph, state, transition);
+          const attemptUpdate = SessionCodec.computeTransitionAttemptUpdate(
             applied.transition,
             wasRunning,
             attempt,
@@ -143,7 +109,7 @@ export function makeDagSessionWriter(
             graph.runId,
           );
           const entry = {
-            v: DagSessionWireVersion,
+            v: SessionContracts.DagSessionWireVersion,
             runId: graph.runId,
             graphId,
             seq,
@@ -152,39 +118,39 @@ export function makeDagSessionWriter(
               transition: applied.transition,
               ...(attempt ? { attempt } : {}),
             },
-          } satisfies DagSessionEntry;
+          } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           state = applied.state;
           if (attemptUpdate) attempts.set(attemptUpdate.nodeId, attemptUpdate);
           seq += 1;
           return persisted;
         },
-        catch: toSessionFailure,
+        catch: SessionContracts.toSessionFailure,
       }),
     appendFinal: (outcome) =>
       Effect.try({
         try: () => {
-          if (final) throw new DagSessionOrdering({ message: "cannot append after final" });
-          if (seq === 0) throw new DagSessionOrdering({ message: "graph must be appended first" });
-          decodeOutcome(outcome, outcome);
-          const derived = deriveDagRunOutcome(graph, state);
-          if (derived._tag !== DagRunOutcomeResultTag.Terminal || derived.outcome !== outcome)
-            throw new DagSessionFinalInconsistent({
+          if (final) throw new SessionContracts.DagSessionOrdering({ message: "cannot append after final" });
+          if (seq === 0) throw new SessionContracts.DagSessionOrdering({ message: "graph must be appended first" });
+          SessionCodec.decodeOutcome(outcome, outcome);
+          const derived = DagKernel.deriveDagRunOutcome(graph, state);
+          if (derived._tag !== DagKernel.DagRunOutcomeResultTag.Terminal || derived.outcome !== outcome)
+            throw new SessionContracts.DagSessionFinalInconsistent({
               message: "final outcome does not match state",
             });
           const entry = {
-            v: DagSessionWireVersion,
+            v: SessionContracts.DagSessionWireVersion,
             runId: graph.runId,
             graphId,
             seq,
             event: { _tag: "final", outcome },
-          } satisfies DagSessionEntry;
+          } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           final = true;
           seq += 1;
           return persisted;
         },
-        catch: toSessionFailure,
+        catch: SessionContracts.toSessionFailure,
       }),
   };
 }

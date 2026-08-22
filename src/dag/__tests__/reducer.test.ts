@@ -14,33 +14,33 @@ import {
   reduceDagRunState,
   type DagTransition,
 } from "../index.js";
-import { apply, finish, graph, node, terminalResult } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 describe("DAG state reduction", () => {
   it("represents all seven node states", () => {
-    const dag = graph([
-      node("source"),
-      node("dependent", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
+    const dag = Fixtures.graph([
+      Fixtures.node("source"),
+      Fixtures.node("dependent", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
     ]);
     const statuses = new Set<DagNodeStatus>();
     const initial = createDagRunState(dag);
     statuses.add(getDagNodeState(dag, initial, "source")!.status);
-    const running = apply(dag, initial, { type: DagTransitionType.Start, nodeId: "source" });
+    const running = Fixtures.apply(dag, initial, { type: DagTransitionType.Start, nodeId: "source" });
     statuses.add(getDagNodeState(dag, running, "source")!.status);
     for (const tag of Object.values(DagNodeResultTag)) {
       statuses.add(
         getDagNodeState(
           dag,
-          apply(dag, running, {
+          Fixtures.apply(dag, running, {
             type: DagTransitionType.Complete,
             nodeId: "source",
-            result: terminalResult(tag),
+            result: Fixtures.terminalResult(tag),
           }),
           "source",
         )!.status,
       );
     }
-    const failed = finish(dag, initial, "source", terminalResult(DagNodeResultTag.Failed));
+    const failed = Fixtures.finish(dag, initial, "source", Fixtures.terminalResult(DagNodeResultTag.Failed));
     statuses.add(
       getDagNodeState(dag, deriveDagSchedulingStep(dag, failed).state, "dependent")!.status,
     );
@@ -48,9 +48,9 @@ describe("DAG state reduction", () => {
   });
 
   it("rejects starts before readiness and transitions from terminal states", () => {
-    const dag = graph([
-      node("source"),
-      node("consumer", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
+    const dag = Fixtures.graph([
+      Fixtures.node("source"),
+      Fixtures.node("consumer", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
     ]);
     const initial = createDagRunState(dag);
     expect(
@@ -63,7 +63,7 @@ describe("DAG state reduction", () => {
       _tag: DagTransitionResultTag.Rejected,
       error: { _tag: DagTransitionErrorTag.InvalidTransition },
     });
-    const succeeded = finish(dag, initial, "source", terminalResult(DagNodeResultTag.Succeeded));
+    const succeeded = Fixtures.finish(dag, initial, "source", Fixtures.terminalResult(DagNodeResultTag.Succeeded));
     expect(
       reduceDagRunState(dag, succeeded, {
         runId: dag.runId,
@@ -77,7 +77,7 @@ describe("DAG state reduction", () => {
   });
 
   it("rejects malformed results and canonicalizes accepted events", () => {
-    const dag = graph([node("task")]);
+    const dag = Fixtures.graph([Fixtures.node("task")]);
     const initial = createDagRunState(dag);
     const started = reduceDagRunState(dag, initial, {
       runId: dag.runId,
@@ -113,19 +113,19 @@ describe("DAG state reduction", () => {
   });
 
   it("rejects incomplete block provenance", () => {
-    const dag = graph([
-      node("a"),
-      node("b"),
-      node("join", [
+    const dag = Fixtures.graph([
+      Fixtures.node("a"),
+      Fixtures.node("b"),
+      Fixtures.node("join", [
         { nodeId: "a", mode: DagDependencyMode.Required },
         { nodeId: "b", mode: DagDependencyMode.Required },
       ]),
     ]);
-    const failed = finish(
+    const failed = Fixtures.finish(
       dag,
-      finish(dag, createDagRunState(dag), "a", terminalResult(DagNodeResultTag.Failed)),
+      Fixtures.finish(dag, createDagRunState(dag), "a", Fixtures.terminalResult(DagNodeResultTag.Failed)),
       "b",
-      terminalResult(DagNodeResultTag.Failed),
+      Fixtures.terminalResult(DagNodeResultTag.Failed),
     );
     expect(
       reduceDagRunState(dag, failed, {
@@ -142,9 +142,9 @@ describe("DAG state reduction", () => {
   });
 
   it("stores generic outputs by node and output name", () => {
-    const dag = graph([node("producer")]);
+    const dag = Fixtures.graph([Fixtures.node("producer")]);
     const artifact = { kind: "managed-file", relativePath: "outputs/report.json" };
-    const succeeded = finish(dag, createDagRunState(dag), "producer", {
+    const succeeded = Fixtures.finish(dag, createDagRunState(dag), "producer", {
       _tag: DagNodeResultTag.Succeeded,
       outputs: { report: artifact },
     });

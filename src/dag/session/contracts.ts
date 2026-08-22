@@ -1,13 +1,7 @@
 import { Data } from "effect";
-import type {
-  DagDefinition,
-  DagNodeStatus,
-  DagNodeStatus as DagNodeStatusValue,
-  DagRunOutcome,
-  DagTransition,
-} from "../contracts.js";
-import type { DagRunState } from "../kernel.js";
-import type { ValidatedDagDefinition } from "../validation.js";
+import type * as DagContracts from "../contracts.js";
+import type * as DagKernel from "../kernel.js";
+import type * as DagValidation from "../validation.js";
 
 export const DagSessionEntryType = "pi/dag-run-event" as const;
 export const DagSessionWireVersion = 1 as const;
@@ -30,30 +24,30 @@ export const DagSessionDefaultLimits = Object.freeze({
 } as const satisfies DagSessionLimits);
 
 export type DagAttemptTerminalStatus = Exclude<
-  DagNodeStatusValue,
-  typeof DagNodeStatus.Queued | typeof DagNodeStatus.Blocked
+  DagContracts.DagNodeStatus,
+  typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
 >;
 export interface DagSessionAttemptStatus {
   readonly nodeId: string;
   readonly attemptId: string;
   readonly ordinal: 1;
-  readonly status: typeof DagNodeStatus.Running | DagAttemptTerminalStatus;
+  readonly status: typeof DagContracts.DagNodeStatus.Running | DagAttemptTerminalStatus;
 }
 export interface DagSessionAttempt {
   readonly nodeId: string;
   readonly attemptId: string;
   readonly ordinal: 1;
-  readonly statuses: readonly (typeof DagNodeStatus.Running | DagAttemptTerminalStatus)[];
+  readonly statuses: readonly (typeof DagContracts.DagNodeStatus.Running | DagAttemptTerminalStatus)[];
 }
 
 export type DagSessionEvent =
-  | { readonly _tag: "graph"; readonly graph: DagDefinition<unknown> }
+  | { readonly _tag: "graph"; readonly graph: DagContracts.DagDefinition<unknown> }
   | {
       readonly _tag: "transition";
-      readonly transition: DagTransition<unknown, unknown>;
+      readonly transition: DagContracts.DagTransition<unknown, unknown>;
       readonly attempt?: DagSessionAttemptStatus;
     }
-  | { readonly _tag: "final"; readonly outcome: DagRunOutcome };
+  | { readonly _tag: "final"; readonly outcome: DagContracts.DagRunOutcome };
 
 export interface DagSessionEntry {
   readonly v: typeof DagSessionWireVersion;
@@ -165,11 +159,11 @@ export function toSessionFailure(error: unknown): DagSessionFailure {
 }
 
 export interface DagSessionReconstruction {
-  readonly graph: ValidatedDagDefinition<unknown>;
+  readonly graph: DagValidation.ValidatedDagDefinition<unknown>;
   readonly graphId: string;
-  readonly state: DagRunState<unknown, unknown>;
-  readonly terminalOutcome: DagRunOutcome;
-  readonly transitions: readonly DagTransition<unknown, unknown>[];
+  readonly state: DagKernel.DagRunState<unknown, unknown>;
+  readonly terminalOutcome: DagContracts.DagRunOutcome;
+  readonly transitions: readonly DagContracts.DagTransition<unknown, unknown>[];
   readonly attempts: readonly DagSessionAttempt[];
   readonly persistedEntryCount: number;
   readonly recoveredFromProcessLoss: boolean;

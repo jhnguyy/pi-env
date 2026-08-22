@@ -6,33 +6,33 @@ import {
   createDagRunState,
   deriveDagRunOutcome,
 } from "../index.js";
-import { finish as finishNode, graph, node, terminalResult } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 const finish = (
-  dag: ReturnType<typeof graph>,
+  dag: ReturnType<typeof Fixtures.graph>,
   nodeId: string,
-  result: ReturnType<typeof terminalResult>,
-) => finishNode(dag, createDagRunState(dag), nodeId, result);
+  result: ReturnType<typeof Fixtures.terminalResult>,
+) => Fixtures.finish(dag, createDagRunState(dag), nodeId, result);
 
 describe("DAG terminal outcomes", () => {
   it("uses fixed precedence independent of completion order", () => {
-    const dag = graph([node("first"), node("second")]);
+    const dag = Fixtures.graph([Fixtures.node("first"), Fixtures.node("second")]);
     const initial = createDagRunState(dag);
     expect(deriveDagRunOutcome(dag, initial)).toEqual({
       _tag: DagRunOutcomeResultTag.NonTerminal,
       nodeIds: ["first", "second"],
     });
-    const failedThenCancelled = finishNode(
+    const failedThenCancelled = Fixtures.finish(
       dag,
-      finish(dag, "first", terminalResult(DagNodeResultTag.Failed)),
+      finish(dag, "first", Fixtures.terminalResult(DagNodeResultTag.Failed)),
       "second",
-      terminalResult(DagNodeResultTag.Cancelled),
+      Fixtures.terminalResult(DagNodeResultTag.Cancelled),
     );
-    const cancelledThenFailed = finishNode(
+    const cancelledThenFailed = Fixtures.finish(
       dag,
-      finish(dag, "second", terminalResult(DagNodeResultTag.Cancelled)),
+      finish(dag, "second", Fixtures.terminalResult(DagNodeResultTag.Cancelled)),
       "first",
-      terminalResult(DagNodeResultTag.Failed),
+      Fixtures.terminalResult(DagNodeResultTag.Failed),
     );
     expect(deriveDagRunOutcome(dag, failedThenCancelled)).toEqual({
       _tag: DagRunOutcomeResultTag.Terminal,
@@ -49,8 +49,8 @@ describe("DAG terminal outcomes", () => {
     [DagNodeResultTag.Interrupted, DagRunOutcome.Interrupted],
     [DagNodeResultTag.Failed, DagRunOutcome.Failed],
   ] as const)("maps %s to run outcome %s", (tag, outcome) => {
-    const dag = graph([node("task")]);
-    const state = finish(dag, "task", terminalResult(tag));
+    const dag = Fixtures.graph([Fixtures.node("task")]);
+    const state = finish(dag, "task", Fixtures.terminalResult(tag));
     expect(deriveDagRunOutcome(dag, state)).toEqual({
       _tag: DagRunOutcomeResultTag.Terminal,
       outcome,

@@ -1,14 +1,8 @@
 import type { Effect, Scope } from "effect";
 import { Context, Data, Layer } from "effect";
-import type {
-  DagExecutorKind,
-  DagNamedOutputs,
-  DagNode,
-  DagNodeStatus,
-  DagTransition,
-} from "./contracts.js";
-import type { DagRunOutcomeResult, DagRunState, DagTransitionError } from "./kernel.js";
-import type { ValidatedDagDefinition } from "./validation.js";
+import type * as DagContracts from "./contracts.js";
+import type * as DagKernel from "./kernel.js";
+import type * as DagValidation from "./validation.js";
 
 export class DagRuntimeGraphStateMismatch extends Data.TaggedError("DagRuntimeGraphStateMismatch")<{
   readonly message: string;
@@ -29,7 +23,7 @@ export class DagRuntimeCoordinatorFatal extends Data.TaggedError("DagRuntimeCoor
 
 export class DagExecutorMissing extends Data.TaggedError("DagExecutorMissing")<{
   readonly message: string;
-  readonly kind: DagExecutorKind;
+  readonly kind: DagContracts.DagExecutorKind;
   readonly key: string;
 }> {}
 
@@ -45,7 +39,7 @@ export class DagExecutorDefected extends Data.TaggedError("DagExecutorDefected")
 
 export class DagRuntimeReducerFatal extends Data.TaggedError("DagRuntimeReducerFatal")<{
   readonly message: string;
-  readonly error: DagTransitionError;
+  readonly error: DagKernel.DagTransitionError;
 }> {}
 
 export type DagRuntimeError =
@@ -57,19 +51,19 @@ export type DagFailedNodePayload = DagExecutorMissing | DagExecutorFailed | DagE
 
 export interface DagExecutorRequest {
   readonly runId: string;
-  readonly node: DagNode<unknown>;
+  readonly node: DagContracts.DagNode<unknown>;
   readonly attemptId: string;
   readonly attemptOrdinal: 1;
-  readonly graphState: DagRunState<unknown, DagFailedNodePayload>;
+  readonly graphState: DagKernel.DagRunState<unknown, DagFailedNodePayload>;
 }
 
 export type DagEffectExecutor = (
   request: DagExecutorRequest,
-) => Effect.Effect<DagNamedOutputs<unknown>, unknown, Scope.Scope>;
+) => Effect.Effect<DagContracts.DagNamedOutputs<unknown>, unknown, Scope.Scope>;
 
 export interface DagExecutorRegistryService {
   readonly lookup: (
-    kind: DagExecutorKind,
+    kind: DagContracts.DagExecutorKind,
     key: string,
   ) => Effect.Effect<DagEffectExecutor | undefined>;
 }
@@ -88,18 +82,18 @@ export interface DagNodeAttempt {
   readonly attemptId: string;
   readonly ordinal: 1;
   readonly statuses: readonly (
-    | typeof DagNodeStatus.Running
+    | typeof DagContracts.DagNodeStatus.Running
     | Exclude<
-        (typeof DagNodeStatus)[keyof typeof DagNodeStatus],
-        typeof DagNodeStatus.Queued | typeof DagNodeStatus.Blocked
+        (typeof DagContracts.DagNodeStatus)[keyof typeof DagContracts.DagNodeStatus],
+        typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
       >
   )[];
 }
 
 export interface DagRunSnapshot {
-  readonly state: DagRunState<unknown, DagFailedNodePayload>;
-  readonly outcome: DagRunOutcomeResult;
-  readonly transitions: readonly DagTransition<unknown, DagFailedNodePayload>[];
+  readonly state: DagKernel.DagRunState<unknown, DagFailedNodePayload>;
+  readonly outcome: DagKernel.DagRunOutcomeResult;
+  readonly transitions: readonly DagContracts.DagTransition<unknown, DagFailedNodePayload>[];
   readonly attempts: readonly DagNodeAttempt[];
 }
 
@@ -117,8 +111,8 @@ export interface DagRunHandle {
 
 export interface DagRuntimeServiceShape {
   readonly submit: <TPayload>(
-    graph: ValidatedDagDefinition<TPayload>,
-    initialState?: DagRunState<unknown, DagFailedNodePayload>,
+    graph: DagValidation.ValidatedDagDefinition<TPayload>,
+    initialState?: DagKernel.DagRunState<unknown, DagFailedNodePayload>,
   ) => Effect.Effect<DagRunHandle, DagRuntimeError, DagExecutorRegistry | Scope.Scope>;
 }
 
