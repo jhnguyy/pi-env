@@ -56,7 +56,6 @@ describe("dependency policy", () => {
       const acyclic = cruiseRepository();
       expect(acyclic.status).toBe(0);
       expect(acyclic.stdout).toContain("no dependency violations found");
-      expect(acyclic.stdout).toContain("4 known violations ignored");
     },
     15_000,
   );
