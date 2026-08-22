@@ -213,6 +213,25 @@ describe("DAG text artifact contract", () => {
     expect(selected.map((item) => item.outputName)).toEqual(["alpha", "gamma"]);
     expect(Object.isFrozen(selected)).toBe(true);
     expect(Object.isFrozen(selected[0])).toBe(true);
+
+    const codeUnitProducers = [Shared.node("z"), Shared.node("ä")];
+    const codeUnitTarget = Shared.node("code-unit-target", codeUnitProducers.map((node) => ({
+      nodeId: node.id,
+      mode: DagDependencyMode.Required,
+    })));
+    const codeUnitDag = Shared.graph([...codeUnitProducers, codeUnitTarget]);
+    const codeUnitState = Shared.finish(
+      codeUnitDag,
+      Shared.finish(codeUnitDag, createDagRunState(codeUnitDag), "ä", {
+        _tag: DagNodeResultTag.Succeeded,
+        outputs: { unicode: ref("ä", "unicode") },
+      }),
+      "z",
+      { _tag: DagNodeResultTag.Succeeded, outputs: { ascii: ref("z", "ascii") } },
+    );
+    expect(selectDagTextArtifactReferences("run-test", codeUnitTarget, codeUnitState, ["unicode", "ascii"])
+      .map((item) => item.outputName)).toEqual(["ascii", "unicode"]);
+
     expect(() => selectDagTextArtifactReferences("run-test", target, state, ["missing"])).toThrow(DagArtifactMissingOutput);
     expect(() => selectDagTextArtifactReferences("run-test", target, state, ["alpha", "alpha"])).toThrow(DagArtifactAmbiguousOutput);
 

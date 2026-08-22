@@ -4,6 +4,10 @@ import * as ArtifactFs from "./artifact-fs.js";
 import * as DagContracts from "./contracts.js";
 import type * as DagKernel from "./kernel.js";
 
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export type {
   DagArtifactFailure,
   DagArtifactLimits,
@@ -59,7 +63,7 @@ export function admitDagTextArtifacts(
       });
     let nodeBytes = 0;
     const admitted: Array<readonly [string, ArtifactContracts.DagTextArtifactReference]> = [];
-    for (const [outputName, relativePath] of entries.sort(([left], [right]) => left.localeCompare(right))) {
+    for (const [outputName, relativePath] of entries.sort(([left], [right]) => compareText(left, right))) {
       const reference = yield* ArtifactFs.admitDagArtifactFile(root, runId, producerNodeId, outputName, relativePath, nodeBytes);
       nodeBytes += reference.bytes;
       admitted.push([outputName, reference]);
@@ -113,7 +117,8 @@ export function selectDagTextArtifactReferences(
     requested.add(outputName);
     selected.push(candidates[0]);
   }
-  return Object.freeze(selected.sort((left, right) => left.producerNodeId.localeCompare(right.producerNodeId) || left.outputName.localeCompare(right.outputName)));
+  return Object.freeze(selected.sort((left, right) =>
+    compareText(left.producerNodeId, right.producerNodeId) || compareText(left.outputName, right.outputName)));
 }
 
 export function materializeDagTextContext(
