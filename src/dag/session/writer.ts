@@ -14,8 +14,8 @@ import {
 import { type ValidatedDagDefinition } from "../validation.js";
 import {
   byteSize,
-  computeAttemptUpdate,
   computeDagSessionGraphId,
+  computeTransitionAttemptUpdate,
   decodeOutcome,
   deepFreeze,
   validateGraph,
@@ -24,7 +24,6 @@ import {
 import { applyTransition } from "./replay.js";
 import {
   DagSessionEntryType,
-  DagSessionAttemptInconsistent,
   DagSessionFinalInconsistent,
   DagSessionGraphMismatch,
   DagSessionLimitExceeded,
@@ -52,45 +51,6 @@ export interface DagSessionWriter {
   readonly appendFinal: (
     outcome: DagRunOutcome,
   ) => Effect.Effect<DagSessionEntry, DagSessionFailure>;
-}
-
-function expectedAttemptStatus(
-  transition: DagTransition<unknown, unknown>,
-  wasRunning: boolean,
-): DagSessionAttemptStatus["status"] | undefined {
-  if (transition.type === "start") return DagNodeStatus.Running;
-  if (transition.type === "cancel") return wasRunning ? DagNodeStatus.Cancelled : undefined;
-  if (transition.type === "complete") return transition.result._tag;
-  return undefined;
-}
-
-function computeWriterAttemptUpdate(
-  transition: DagTransition<unknown, unknown>,
-  wasRunning: boolean,
-  attempt: DagSessionAttemptStatus | undefined,
-  attempts: ReadonlyMap<string, DagSessionAttempt>,
-  runId: string,
-): DagSessionAttempt | undefined {
-  const expected = expectedAttemptStatus(transition, wasRunning);
-  if (!expected) {
-    if (attempt)
-      throw new DagSessionAttemptInconsistent({
-        message: "unexpected attempt status",
-        nodeId: transition.nodeId,
-      });
-    return undefined;
-  }
-  if (!attempt)
-    throw new DagSessionAttemptInconsistent({
-      message: "missing attempt status",
-      nodeId: transition.nodeId,
-    });
-  if (attempt.nodeId !== transition.nodeId)
-    throw new DagSessionAttemptInconsistent({
-      message: "attempt node does not match transition",
-      nodeId: attempt.nodeId,
-    });
-  return computeAttemptUpdate(attempts.get(attempt.nodeId), attempt, expected, runId);
 }
 
 function appendCustomEntry(seam: DagSessionManagerSeam, entry: DagSessionEntry): void {
@@ -175,11 +135,11 @@ export function makeDagSessionWriter(
             (node) => node.nodeId === transition.nodeId && node.status === DagNodeStatus.Running,
           );
           const applied = applyTransition(graph, state, transition);
-          const attemptUpdate = computeWriterAttemptUpdate(
+          const attemptUpdate = computeTransitionAttemptUpdate(
             applied.transition,
             wasRunning,
             attempt,
-            attempts,
+            attempts.get(applied.transition.nodeId),
             graph.runId,
           );
           const entry = {

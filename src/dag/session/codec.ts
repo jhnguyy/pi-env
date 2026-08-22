@@ -359,16 +359,18 @@ export function validateGraph(
   return result.graph;
 }
 
-export function recordAttempt(
-  map: Map<string, DagSessionAttempt>,
-  status: DagSessionAttemptStatus,
-  expected: DagSessionAttemptStatus["status"],
-  runId: string,
-): void {
-  map.set(status.nodeId, computeAttemptUpdate(map.get(status.nodeId), status, expected, runId));
+function deriveTransitionAttemptStatus(
+  transition: DagTransition<unknown, unknown>,
+  wasRunning: boolean,
+): DagSessionAttemptStatus["status"] | undefined {
+  if (transition.type === DagTransitionType.Start) return DagNodeStatus.Running;
+  if (transition.type === DagTransitionType.Cancel)
+    return wasRunning ? DagNodeStatus.Cancelled : undefined;
+  if (transition.type === DagTransitionType.Complete) return transition.result._tag;
+  return undefined;
 }
 
-export function computeAttemptUpdate(
+function computeAttemptUpdate(
   prior: DagSessionAttempt | undefined,
   status: DagSessionAttemptStatus,
   expected: DagSessionAttemptStatus["status"],
@@ -415,4 +417,33 @@ export function computeAttemptUpdate(
     ordinal: 1,
     statuses: Object.freeze(next),
   });
+}
+
+export function computeTransitionAttemptUpdate(
+  transition: DagTransition<unknown, unknown>,
+  wasRunning: boolean,
+  attempt: DagSessionAttemptStatus | undefined,
+  prior: DagSessionAttempt | undefined,
+  runId: string,
+): DagSessionAttempt | undefined {
+  const expected = deriveTransitionAttemptStatus(transition, wasRunning);
+  if (!expected) {
+    if (attempt)
+      throw new DagSessionAttemptInconsistent({
+        message: "unexpected attempt status",
+        nodeId: transition.nodeId,
+      });
+    return undefined;
+  }
+  if (!attempt)
+    throw new DagSessionAttemptInconsistent({
+      message: "missing attempt status",
+      nodeId: transition.nodeId,
+    });
+  if (attempt.nodeId !== transition.nodeId)
+    throw new DagSessionAttemptInconsistent({
+      message: "attempt node does not match transition",
+      nodeId: attempt.nodeId,
+    });
+  return computeAttemptUpdate(prior, attempt, expected, runId);
 }

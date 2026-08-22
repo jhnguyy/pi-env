@@ -138,74 +138,64 @@ describe("DAG session codec", () => {
       seq: 0,
       event: { _tag: "graph", graph: def },
     };
+    const malformedTransition = {
+      ...graphEntry,
+      seq: 1,
+      event: {
+        _tag: "transition",
+        transition: {
+          runId: def.runId,
+          nodeId: "a",
+          type: DagTransitionType.Complete,
+          result: { _tag: DagNodeResultTag.Succeeded, outputs: {} },
+        },
+      },
+    } satisfies DagSessionEntry;
 
-    expect(() =>
-      Effect.runSync(
-        reconstructDagSession(
-          seam([
-            { type: "custom", customType: DagSessionEntryType, data: { ...graphEntry, v: 2 } },
-          ]),
-          def.runId,
+    const cases: readonly {
+      readonly name: string;
+      readonly entries: readonly unknown[];
+      readonly expectedTag: string;
+      readonly limits?: { readonly graphBytes?: number };
+    }[] = [
+      {
+        name: "unsupported wire version",
+        entries: [wrapper({ ...graphEntry, v: 2 as never })],
+        expectedTag: "unsupported-version",
+      },
+      {
+        name: "truncated first sequence",
+        entries: [wrapper({ ...graphEntry, seq: 1 })],
+        expectedTag: "truncated",
+      },
+      {
+        name: "duplicate sequence",
+        entries: [wrapper(graphEntry), wrapper({ ...graphEntry, seq: 0 })],
+        expectedTag: "duplicate",
+      },
+      {
+        name: "illegal reducer transition",
+        entries: [wrapper(graphEntry), wrapper(malformedTransition)],
+        expectedTag: "reducer-illegal",
+      },
+      {
+        name: "graph byte limit",
+        entries: [wrapper(graphEntry)],
+        expectedTag: "limit",
+        limits: { graphBytes: 8 },
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(
+        failureTag(
+          reconstructDagSession(seam([...testCase.entries]), def.runId, {
+            limits: testCase.limits,
+          }),
         ),
-      ),
-    ).toThrow();
-    expect(() =>
-      Effect.runSync(
-        reconstructDagSession(
-          seam([
-            { type: "custom", customType: DagSessionEntryType, data: { ...graphEntry, seq: 1 } },
-          ]),
-          def.runId,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      Effect.runSync(
-        reconstructDagSession(
-          seam([
-            { type: "custom", customType: DagSessionEntryType, data: graphEntry },
-            { type: "custom", customType: DagSessionEntryType, data: { ...graphEntry, seq: 0 } },
-          ]),
-          def.runId,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      Effect.runSync(
-        reconstructDagSession(
-          seam([
-            { type: "custom", customType: DagSessionEntryType, data: graphEntry },
-            {
-              type: "custom",
-              customType: DagSessionEntryType,
-              data: {
-                ...graphEntry,
-                seq: 1,
-                event: {
-                  _tag: "transition",
-                  transition: {
-                    runId: def.runId,
-                    nodeId: "a",
-                    type: DagTransitionType.Complete,
-                    result: { _tag: DagNodeResultTag.Succeeded, outputs: {} },
-                  },
-                },
-              },
-            },
-          ]),
-          def.runId,
-        ),
-      ),
-    ).toThrow();
-    expect(() =>
-      Effect.runSync(
-        reconstructDagSession(
-          seam([{ type: "custom", customType: DagSessionEntryType, data: graphEntry }]),
-          def.runId,
-          { limits: { graphBytes: 8 } },
-        ),
-      ),
-    ).toThrow();
+        testCase.name,
+      ).toBe(testCase.expectedTag);
+    }
     expect(
       failureTag(
         reconstructDagSession(

@@ -13,7 +13,6 @@ import {
   deriveDagRunOutcome,
   deriveDagSchedulingStep,
   reduceDagRunState,
-  type DagRunOutcomeResult,
 } from "../kernel.js";
 import type { DagRunState } from "../kernel.js";
 import type { ValidatedDagDefinition } from "../validation.js";
@@ -58,17 +57,10 @@ function freezeAttempt(attempt: DagNodeAttempt): DagNodeAttempt {
   return Object.freeze({ ...attempt, statuses: Object.freeze([...attempt.statuses]) });
 }
 
-function terminalOutcome(
-  graph: ValidatedDagDefinition<unknown>,
-  state: DagRunState<unknown, DagFailedNodePayload>,
-): DagRunOutcomeResult {
-  return deriveDagRunOutcome(graph, state);
-}
-
 function snapshot(mutable: RuntimeMutable): DagRunSnapshot {
   return Object.freeze({
     state: mutable.state,
-    outcome: Object.freeze(terminalOutcome(mutable.graph, mutable.state)),
+    outcome: Object.freeze(deriveDagRunOutcome(mutable.graph, mutable.state)),
     transitions: Object.freeze([...mutable.transitions]),
     attempts: Object.freeze(mutable.attempts.map(freezeAttempt)),
   });
@@ -306,7 +298,7 @@ function coordinator<TPayload>(
       return next;
     };
     const finishIfTerminal = function* (mutable: RuntimeMutable) {
-      if (terminalOutcome(graph, mutable.state)._tag === DagRunOutcomeResultTag.NonTerminal)
+      if (deriveDagRunOutcome(graph, mutable.state)._tag === DagRunOutcomeResultTag.NonTerminal)
         return false;
       yield* Deferred.succeed(done, snapshot(mutable));
       return true;

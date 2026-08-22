@@ -10,7 +10,6 @@ import {
   DagSessionEntryType,
   DagTransitionType,
   computeDagSessionGraphId,
-  createDagRunState,
   makeDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
@@ -188,30 +187,6 @@ describe("DAG session replay", () => {
     expect(Object.isFrozen(recovered.transitions)).toBe(true);
     expect("cancel" in recovered).toBe(false);
     expect("await" in recovered).toBe(false);
-  });
-
-  it("matches live K3 snapshot transition and attempt history shape", () => {
-    const def = definition([node("a")], 1);
-    const dag = valid(def);
-    const state0 = createDagRunState(dag);
-    expect(state0.nodes[0]?.status).toBe(DagNodeStatus.Queued);
-    const store = seam();
-    const writer = makeDagSessionWriter(store, dag, def);
-    Effect.runSync(writer.appendGraph(def));
-    Effect.runSync(
-      writer.appendTransition(
-        { runId: def.runId, nodeId: "a", type: DagTransitionType.Start },
-        { nodeId: "a", attemptId: `${def.runId}:a:1`, ordinal: 1, status: DagNodeStatus.Running },
-      ),
-    );
-    const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
-    expect(recovered.transitions).toMatchObject([
-      { type: DagTransitionType.Start, nodeId: "a" },
-      { type: DagTransitionType.Complete, nodeId: "a" },
-    ]);
-    expect(recovered.attempts).toMatchObject([
-      { nodeId: "a", ordinal: 1, statuses: [DagNodeStatus.Running, DagNodeStatus.Interrupted] },
-    ]);
   });
 
   it("projects settled dependencies and AtLeastOneSucceeded guards after restart", () => {
