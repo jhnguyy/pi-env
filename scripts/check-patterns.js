@@ -8,7 +8,16 @@ import ts from "typescript";
 const ROOT = process.cwd();
 const SOURCE_ROOTS = [".pi/extensions", "src", "scripts", "setup", ".agents"];
 export const GUARDED_EFFECT_COMBINATORS = ["andThen", "catch", "flatMap", "map", "match", "tap"];
+export const TERMINAL_EFFECT_OPERATIONS = [
+  "die",
+  "fail",
+  "failCause",
+  "failCauseSync",
+  "failSync",
+  "interrupt",
+];
 const GUARDED_EFFECT_COMBINATOR_SET = new Set(GUARDED_EFFECT_COMBINATORS);
+const TERMINAL_EFFECT_OPERATION_SET = new Set(TERMINAL_EFFECT_OPERATIONS);
 
 function trackedFiles(pathspecs = []) {
   const result = spawnSync("git", ["ls-files", ...pathspecs], { encoding: "utf8" });
@@ -41,6 +50,65 @@ function isEffectPropertyAccess(node) {
     ts.isIdentifier(node.expression) &&
     node.expression.text === "Effect"
   );
+}
+
+function isEffectGenCall(node) {
+  return (
+    ts.isCallExpression(node) &&
+    isEffectPropertyAccess(node.expression) &&
+    node.expression.name.text === "gen"
+  );
+}
+
+function isInsideEffectGen(node) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (!ts.isFunctionLike(current)) continue;
+    return Boolean(
+      current.parent &&
+      isEffectGenCall(current.parent) &&
+      current.parent.arguments.includes(current),
+    );
+  }
+  return false;
+}
+
+function terminalEffectOperation(node) {
+  const expression = ts.isCallExpression(node) ? node.expression : node;
+  if (!isEffectPropertyAccess(expression)) return undefined;
+  return TERMINAL_EFFECT_OPERATION_SET.has(expression.name.text) ? expression.name.text : undefined;
+}
+
+function effectGenTryCatchFindings(file, sourceFile, node) {
+  if (!ts.isTryStatement(node) || !node.catchClause || !isInsideEffectGen(node)) return [];
+  return [
+    {
+      file,
+      ...location(sourceFile, node),
+      message:
+        "JavaScript try/catch is not allowed inside Effect.gen. Model expected failures in the Effect error channel.",
+    },
+  ];
+}
+
+function terminalEffectFindings(file, sourceFile, node) {
+  if (
+    !ts.isYieldExpression(node) ||
+    !node.asteriskToken ||
+    !node.expression ||
+    !isInsideEffectGen(node) ||
+    (ts.isReturnStatement(node.parent) && node.parent.expression === node)
+  ) {
+    return [];
+  }
+  const operation = terminalEffectOperation(node.expression);
+  if (!operation) return [];
+  return [
+    {
+      file,
+      ...location(sourceFile, node),
+      message: `Terminal Effect.${operation} in Effect.gen must use return yield*.`,
+    },
+  ];
 }
 
 export function analyzeText(file, text) {
@@ -90,6 +158,9 @@ export function analyzeText(file, text) {
         message: `Bare Effect.${node.name.text} reference is not allowed. Call the combinator explicitly at the composition site.`,
       });
     }
+
+    findings.push(...effectGenTryCatchFindings(file, sourceFile, node));
+    findings.push(...terminalEffectFindings(file, sourceFile, node));
 
     ts.forEachChild(node, visit);
   }
