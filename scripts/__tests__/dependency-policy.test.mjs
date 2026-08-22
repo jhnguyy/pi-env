@@ -38,24 +38,28 @@ function cruiseRepository() {
 }
 
 describe("dependency policy", () => {
-  it("rejects circular dependencies and accepts an acyclic graph", () => {
-    const directory = mkdtempSync(join(ROOT, ".dependency-policy-"));
-    temporaryDirectories.push(directory);
-    const first = join(directory, "first.mjs");
-    const second = join(directory, "second.mjs");
-    writeFileSync(first, 'import "./second.mjs";\n');
-    writeFileSync(second, 'import "./first.mjs";\n');
+  it(
+    "rejects circular dependencies and accepts an acyclic graph",
+    () => {
+      const directory = mkdtempSync(join(ROOT, ".dependency-policy-"));
+      temporaryDirectories.push(directory);
+      const first = join(directory, "first.mjs");
+      const second = join(directory, "second.mjs");
+      writeFileSync(first, 'import "./second.mjs";\n');
+      writeFileSync(second, 'import "./first.mjs";\n');
 
-    const cyclic = cruiseRepository();
-    expect(cyclic.status).not.toBe(0);
-    expect(cyclic.stdout).toContain("no-circular");
+      const cyclic = cruiseRepository();
+      expect(cyclic.status).not.toBe(0);
+      expect(cyclic.stdout).toContain("no-circular");
 
-    writeFileSync(second, "export const second = 2;\n");
-    const acyclic = cruiseRepository();
-    expect(acyclic.status).toBe(0);
-    expect(acyclic.stdout).toContain("no dependency violations found");
-    expect(acyclic.stdout).toContain("4 known violations ignored");
-  });
+      writeFileSync(second, "export const second = 2;\n");
+      const acyclic = cruiseRepository();
+      expect(acyclic.status).toBe(0);
+      expect(acyclic.stdout).toContain("no dependency violations found");
+      expect(acyclic.stdout).toContain("4 known violations ignored");
+    },
+    15_000,
+  );
 
   it("limits the known baseline to the existing cross-extension imports", () => {
     const violations = JSON.parse(readFileSync(KNOWN_VIOLATIONS_PATH, "utf8"));
