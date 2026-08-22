@@ -86,6 +86,7 @@ export {
   DagSessionReducerIllegal,
   DagSessionRunMismatch,
   DagSessionRunNotFound,
+  DagSessionSeamFailed,
   DagSessionTruncated,
   DagSessionUnsupportedVersion,
   DagSessionWireVersion,
