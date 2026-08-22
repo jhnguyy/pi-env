@@ -18,7 +18,7 @@ import {
   type DagSessionEntry,
   type DagSessionManagerSeam,
 } from "../index.js";
-import { definition, status } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 function node(
   id: string,
@@ -66,7 +66,7 @@ function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
 
 describe("DAG session writer", () => {
   it("does not advance writer sequence or state when append fails", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     let fail = true;
     const entries: unknown[] = [];
@@ -87,7 +87,7 @@ describe("DAG session writer", () => {
     Effect.runSync(writer.appendGraph(def));
     expect(Effect.runSync(reconstructDagSession(store, def.runId)).persistedEntryCount).toBe(1);
 
-    const mismatchedDefinition = definition([node("other")], 1);
+    const mismatchedDefinition = Fixtures.definition([node("other")], 1);
     const mismatchWriter = makeDagSessionWriter(seam(), dag, mismatchedDefinition);
     expect(failureTag(mismatchWriter.appendGraph(mismatchedDefinition))).toBe("graph-mismatch");
 

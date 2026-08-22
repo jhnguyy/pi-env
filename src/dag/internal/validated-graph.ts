@@ -1,13 +1,9 @@
-import type {
-  DagDefinition,
-  DagDependencyMode as DagDependencyModeValue,
-  DagNode,
-} from "../contracts.js";
-import { cyclicNodeIndices, topologicalOrder } from "./graph-order.js";
+import type * as DagContracts from "../contracts.js";
+import * as GraphOrder from "./graph-order.js";
 
 interface IndexedDependency {
   readonly index: number;
-  readonly mode: DagDependencyModeValue;
+  readonly mode: DagContracts.DagDependencyMode;
 }
 
 export interface DagGraphIndex<TPayload> {
@@ -15,7 +11,7 @@ export interface DagGraphIndex<TPayload> {
   readonly dependencies: readonly (readonly IndexedDependency[])[];
   readonly guardIndices: readonly (readonly number[] | undefined)[];
   readonly topologicalOrder: readonly number[];
-  readonly nodes: readonly DagNode<TPayload>[];
+  readonly nodes: readonly DagContracts.DagNode<TPayload>[];
 }
 
 const ValidatedDagToken = Symbol("ValidatedDag");
@@ -28,7 +24,7 @@ export class ValidatedDagDefinition<TPayload = unknown> {
     token: typeof ValidatedDagToken,
     readonly runId: string,
     readonly concurrency: number,
-    readonly nodes: readonly DagNode<TPayload>[],
+    readonly nodes: readonly DagContracts.DagNode<TPayload>[],
   ) {
     if (token !== ValidatedDagToken) {
       throw new TypeError("Validated DAGs must be created by validateDagDefinition.");
@@ -60,7 +56,7 @@ export function getDagGraphIndex<TPayload>(
   return index as DagGraphIndex<TPayload>;
 }
 
-function frozenNode<TPayload>(node: DagNode<TPayload>): DagNode<TPayload> {
+function frozenNode<TPayload>(node: DagContracts.DagNode<TPayload>): DagContracts.DagNode<TPayload> {
   const completionGuard = node.completionGuard
     ? Object.freeze({
         kind: node.completionGuard.kind,
@@ -82,7 +78,7 @@ function frozenNode<TPayload>(node: DagNode<TPayload>): DagNode<TPayload> {
 }
 
 export function buildValidatedGraph<TPayload>(
-  definition: DagDefinition<TPayload>,
+  definition: DagContracts.DagDefinition<TPayload>,
   nodeById: ReadonlyMap<string, number>,
 ): BuildValidatedGraphResult<TPayload> {
   const ownedNodeById = new Map(nodeById);
@@ -97,7 +93,7 @@ export function buildValidatedGraph<TPayload>(
       ),
     ),
   );
-  const cycleNodeIds = cyclicNodeIndices(nodes.length, dependencies).map(
+  const cycleNodeIds = GraphOrder.cyclicNodeIndices(nodes.length, dependencies).map(
     (index) => nodes[index]?.id ?? "",
   );
   if (cycleNodeIds.length > 0) {
@@ -124,7 +120,7 @@ export function buildValidatedGraph<TPayload>(
     nodeById: ownedNodeById,
     dependencies,
     guardIndices,
-    topologicalOrder: Object.freeze(topologicalOrder(nodes.length, dependencies)),
+    topologicalOrder: Object.freeze(GraphOrder.topologicalOrder(nodes.length, dependencies)),
     nodes,
   });
   return { _tag: BuildValidatedGraphResultTag.Valid, graph };

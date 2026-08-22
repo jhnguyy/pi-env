@@ -120,6 +120,40 @@ describe("check-patterns", () => {
     expect(findings).toEqual([]);
   });
 
+  it("requires namespace imports for local module APIs in migrated roots", () => {
+    expect(
+      analyzeText(
+        "src/dag/example.ts",
+        `
+        import { run } from "./runtime.js";
+        import type { DagNode } from "./contracts.js";
+      `,
+      ).map((finding) => finding.message),
+    ).toEqual([
+      expect.stringContaining("Use a namespace import"),
+      expect.stringContaining("Use a namespace import"),
+    ]);
+  });
+
+  it("allows namespace, public-barrel, package, default, and side-effect imports", () => {
+    expect(
+      analyzeText(
+        "src/dag/example.ts",
+        `
+        import * as Runtime from "./runtime.js";
+        import type * as Contracts from "./contracts.js";
+        import { submitDagRun } from "./index.js";
+        import { Effect } from "effect";
+        import extension from "./extension.js";
+        import "./register.js";
+      `,
+      ),
+    ).toEqual([]);
+    expect(analyzeText("src/analyze/example.ts", 'import { run } from "./runtime.js";')).toEqual(
+      [],
+    );
+  });
+
   it("rejects JavaScript try/catch inside Effect.gen", () => {
     const findings = analyzeText(
       "src/example.ts",

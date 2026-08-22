@@ -27,7 +27,7 @@ import {
   type DagExecutorRequest,
   type DagNode,
 } from "../index.js";
-import { graph } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 const testExecutor = (key: string, payload?: unknown) =>
   ({ kind: DagExecutorKind.Transform, key, payload }) as const;
@@ -72,7 +72,7 @@ function dependency(
 describe("DAG runtime", () => {
   it.effect("invokes the injected executor resolved by kind and key", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task", "executor-key")]);
+      const dag = Fixtures.graph([runtimeNode("task", "executor-key")]);
       const requestRef = yield* Ref.make<DagExecutorRequest | undefined>(undefined);
       const { service, lookups } = registryFromMap({
         "executor-key": (request) =>
@@ -104,7 +104,7 @@ describe("DAG runtime", () => {
 
   it.effect("starts exactly up to graph concurrency and refills capacity after completion", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("a"), runtimeNode("b"), runtimeNode("c")], 2);
+      const dag = Fixtures.graph([runtimeNode("a"), runtimeNode("b"), runtimeNode("c")], 2);
       const started = yield* Queue.unbounded<string>();
       const requests = yield* Queue.unbounded<DagExecutorRequest>();
       const releases = new Map<string, Deferred.Deferred<void>>();
@@ -171,7 +171,7 @@ describe("DAG runtime", () => {
 
   it.effect("preserves start before complete transition ordering", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const { service } = registryFromMap({ task: () => Effect.succeed({}) });
       const snapshot = yield* submitDagRun(dag).pipe(
         Effect.flatMap((handle) => handle.await),
@@ -187,7 +187,7 @@ describe("DAG runtime", () => {
 
   it.effect("surfaces typed executor failure as expected failed node outcome", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const { service } = registryFromMap({
         task: () => Effect.fail({ code: "EXPECTED" } as const),
       });
@@ -219,7 +219,7 @@ describe("DAG runtime", () => {
 
   it.effect("continues an independent branch after a required dependency failure", () =>
     Effect.gen(function* () {
-      const dag = graph([
+      const dag = Fixtures.graph([
         runtimeNode("root"),
         runtimeNode("blocked", "blocked", [dependency("root", DagDependencyMode.Required)]),
         runtimeNode("independent"),
@@ -249,7 +249,7 @@ describe("DAG runtime", () => {
 
   it.effect("blocks required descendants after ancestor failure", () =>
     Effect.gen(function* () {
-      const dag = graph([
+      const dag = Fixtures.graph([
         runtimeNode("root"),
         runtimeNode("child", "child", [dependency("root", DagDependencyMode.Required)]),
         runtimeNode("grandchild", "grandchild", [dependency("child", DagDependencyMode.Required)]),
@@ -281,7 +281,7 @@ describe("DAG runtime", () => {
 
   it.effect("continues from a settled dependency after failure", () =>
     Effect.gen(function* () {
-      const dag = graph([
+      const dag = Fixtures.graph([
         runtimeNode("producer"),
         runtimeNode("observer", "observer", [dependency("producer", DagDependencyMode.Settled)]),
       ]);
@@ -303,7 +303,7 @@ describe("DAG runtime", () => {
 
   it.effect("fails the node when an executor is missing", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task", "missing-key")]);
+      const dag = Fixtures.graph([runtimeNode("task", "missing-key")]);
       const { service, lookups } = registryFromMap({});
       const snapshot = yield* submitDagRun(dag).pipe(
         Effect.flatMap((handle) => handle.await),
@@ -327,7 +327,7 @@ describe("DAG runtime", () => {
 
   it.effect("distinguishes executor defects from expected failures", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const { service } = registryFromMap({ task: () => Effect.die("defect") });
       const snapshot = yield* submitDagRun(dag).pipe(
         Effect.flatMap((handle) => handle.await),
@@ -347,7 +347,7 @@ describe("DAG runtime", () => {
 
   it.effect("fails a node exactly once when registry lookup defects", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const service: DagExecutorRegistryService = { lookup: () => Effect.die("lookup-defect") };
       const snapshot = yield* submitDagRun(dag).pipe(
         Effect.flatMap((handle) => handle.await),
@@ -374,7 +374,7 @@ describe("DAG runtime", () => {
     "cancels a never-ending registry lookup through the legal queued-scope-cancel limitation",
     () =>
       Effect.gen(function* () {
-        const dag = graph([runtimeNode("task")]);
+        const dag = Fixtures.graph([runtimeNode("task")]);
         const lookupStarted = yield* Deferred.make<void>();
         const finalizers = yield* Ref.make(0);
         const service: DagExecutorRegistryService = {
@@ -402,7 +402,7 @@ describe("DAG runtime", () => {
 
   it.effect("rejects same-graph non-fresh initial state before executor lookup", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const fresh = createDagRunState<unknown, unknown, DagFailedNodePayload>(dag);
       const started = reduceDagRunState(dag, fresh, {
         runId: dag.runId,
@@ -426,7 +426,7 @@ describe("DAG runtime", () => {
 
   it.effect("does not clean up the run when one await observer is interrupted", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       const { service } = registryFromMap({
@@ -461,7 +461,7 @@ describe("DAG runtime", () => {
     "preserves explicit cancellation if caller scope shutdown races after cancel is queued",
     () =>
       Effect.gen(function* () {
-        const dag = graph([runtimeNode("task")]);
+        const dag = Fixtures.graph([runtimeNode("task")]);
         const started = yield* Deferred.make<void>();
         const { service } = registryFromMap({
           task: () =>
@@ -489,7 +489,7 @@ describe("DAG runtime", () => {
 
   it.effect("applies completion guards when settled dependencies do not include a success", () =>
     Effect.gen(function* () {
-      const dag = graph([
+      const dag = Fixtures.graph([
         runtimeNode("review-a"),
         runtimeNode("review-b"),
         runtimeNode(
@@ -526,7 +526,7 @@ describe("DAG runtime", () => {
 
   it.effect("records running before terminal attempt state", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const started = yield* Deferred.make<void>();
       const gate = yield* Deferred.make<void>();
       const { service } = registryFromMap({
@@ -565,7 +565,7 @@ describe("DAG runtime", () => {
 
   it.effect("marks cancellation before any start without executor invocation", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const lookupCount = yield* Ref.make(0);
       const service: DagExecutorRegistryService = {
         lookup: () =>
@@ -592,7 +592,7 @@ describe("DAG runtime", () => {
 
   it.effect("cancels a running executor and reaches terminal cancelled outcome", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const started = yield* Deferred.make<void>();
       const release = yield* Deferred.make<void>();
       const finalizers = yield* Ref.make(0);
@@ -627,7 +627,7 @@ describe("DAG runtime", () => {
 
   it.effect("interrupts owned runs on scope close and executes finalizers", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const finalizers = yield* Ref.make(0);
       const started = yield* Deferred.make<void>();
       const childScope = yield* Scope.make();
@@ -665,8 +665,8 @@ describe("DAG runtime", () => {
 
   it.effect("rejects initial state from a different graph before executor lookup", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
-      const other = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
+      const other = Fixtures.graph([runtimeNode("task")]);
       const lookupCount = yield* Ref.make(0);
       const service: DagExecutorRegistryService = {
         lookup: () =>
@@ -686,7 +686,7 @@ describe("DAG runtime", () => {
 
   it.effect("publishes deeply immutable runtime snapshots", () =>
     Effect.gen(function* () {
-      const dag = graph([runtimeNode("task")]);
+      const dag = Fixtures.graph([runtimeNode("task")]);
       const { service } = registryFromMap({ task: () => Effect.succeed({ artifact: "ok" }) });
       const snapshot = yield* submitDagRun(dag).pipe(
         Effect.flatMap((handle) => handle.await),
@@ -717,7 +717,7 @@ describe("DAG runtime", () => {
       const completionStarted = yield* Deferred.make<void>();
       const completionGate = yield* Deferred.make<void>();
       const completionScope = yield* Scope.make();
-      const completionHandle = yield* submitDagRun(graph([runtimeNode("done")])).pipe(
+      const completionHandle = yield* submitDagRun(Fixtures.graph([runtimeNode("done")])).pipe(
         Effect.provide(
           runtimeLayer(
             registryFromMap({ done: () => makeExecutor(completionStarted, completionGate) })
@@ -738,7 +738,7 @@ describe("DAG runtime", () => {
       const cancelStarted = yield* Deferred.make<void>();
       const cancelGate = yield* Deferred.make<void>();
       const cancelScope = yield* Scope.make();
-      const cancelHandle = yield* submitDagRun(graph([runtimeNode("cancel")])).pipe(
+      const cancelHandle = yield* submitDagRun(Fixtures.graph([runtimeNode("cancel")])).pipe(
         Effect.provide(
           runtimeLayer(
             registryFromMap({ cancel: () => makeExecutor(cancelStarted, cancelGate) }).service,

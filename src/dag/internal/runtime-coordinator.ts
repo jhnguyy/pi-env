@@ -1,43 +1,14 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Scope } from "effect";
-import {
-  DagNodeResultTag,
-  DagNodeStatus,
-  DagTransitionType,
-  type DagNode,
-  type DagNodeResult,
-  type DagTransition,
-} from "../contracts.js";
-import {
-  DagRunOutcomeResultTag,
-  createDagRunState,
-  deriveDagRunOutcome,
-  deriveDagSchedulingStep,
-  reduceDagRunState,
-} from "../kernel.js";
-import type { DagRunState } from "../kernel.js";
-import type { ValidatedDagDefinition } from "../validation.js";
-
-import {
-  DagExecutorDefected,
-  DagExecutorFailed,
-  DagExecutorMissing,
-  DagExecutorRegistry,
-  DagRuntimeCoordinatorFatal,
-  DagRuntimeGraphStateMismatch,
-  DagRuntimeNonFreshInitialState,
-  DagRuntimeReducerFatal,
-  type DagFailedNodePayload,
-  type DagNodeAttempt,
-  type DagRunHandle,
-  type DagRunSnapshot,
-  type DagRuntimeError,
-} from "../runtime-contracts.js";
+import * as DagContracts from "../contracts.js";
+import * as DagKernel from "../kernel.js";
+import * as RuntimeContracts from "../runtime-contracts.js";
+import type * as DagValidation from "../validation.js";
 
 interface RuntimeMutable {
-  readonly graph: ValidatedDagDefinition<unknown>;
-  readonly state: DagRunState<unknown, DagFailedNodePayload>;
-  readonly transitions: readonly DagTransition<unknown, DagFailedNodePayload>[];
-  readonly attempts: readonly DagNodeAttempt[];
+  readonly graph: DagValidation.ValidatedDagDefinition<unknown>;
+  readonly state: DagKernel.DagRunState<unknown, RuntimeContracts.DagFailedNodePayload>;
+  readonly transitions: readonly DagContracts.DagTransition<unknown, RuntimeContracts.DagFailedNodePayload>[];
+  readonly attempts: readonly RuntimeContracts.DagNodeAttempt[];
   readonly active: ReadonlyMap<string, Fiber.Fiber<void, never>>;
   readonly cancelRequested: boolean;
 }
@@ -45,7 +16,7 @@ interface RuntimeMutable {
 type Completion = {
   readonly _tag: "complete";
   readonly nodeId: string;
-  readonly result: DagNodeResult<unknown, DagFailedNodePayload>;
+  readonly result: DagContracts.DagNodeResult<unknown, RuntimeContracts.DagFailedNodePayload>;
 };
 
 type RuntimeEvent =
@@ -53,14 +24,14 @@ type RuntimeEvent =
   | { readonly _tag: "cancel"; readonly reason: string }
   | { readonly _tag: "shutdown" };
 
-function freezeAttempt(attempt: DagNodeAttempt): DagNodeAttempt {
+function freezeAttempt(attempt: RuntimeContracts.DagNodeAttempt): RuntimeContracts.DagNodeAttempt {
   return Object.freeze({ ...attempt, statuses: Object.freeze([...attempt.statuses]) });
 }
 
-function snapshot(mutable: RuntimeMutable): DagRunSnapshot {
+function snapshot(mutable: RuntimeMutable): RuntimeContracts.DagRunSnapshot {
   return Object.freeze({
     state: mutable.state,
-    outcome: Object.freeze(deriveDagRunOutcome(mutable.graph, mutable.state)),
+    outcome: Object.freeze(DagKernel.deriveDagRunOutcome(mutable.graph, mutable.state)),
     transitions: Object.freeze([...mutable.transitions]),
     attempts: Object.freeze(mutable.attempts.map(freezeAttempt)),
   });
@@ -68,12 +39,12 @@ function snapshot(mutable: RuntimeMutable): DagRunSnapshot {
 
 function applyTransition(
   mutable: RuntimeMutable,
-  transition: DagTransition<unknown, DagFailedNodePayload>,
-): Effect.Effect<RuntimeMutable, DagRuntimeReducerFatal> {
-  const reduced = reduceDagRunState(mutable.graph, mutable.state, transition);
+  transition: DagContracts.DagTransition<unknown, RuntimeContracts.DagFailedNodePayload>,
+): Effect.Effect<RuntimeMutable, RuntimeContracts.DagRuntimeReducerFatal> {
+  const reduced = DagKernel.reduceDagRunState(mutable.graph, mutable.state, transition);
   if (reduced._tag !== "applied") {
     return Effect.fail(
-      new DagRuntimeReducerFatal({
+      new RuntimeContracts.DagRuntimeReducerFatal({
         message: "DAG reducer rejected a runtime transition.",
         error: reduced.error,
       }),
@@ -89,17 +60,17 @@ function applyTransition(
 function completeForCause(
   cause: Cause.Cause<unknown>,
   cancelled: boolean,
-): DagNodeResult<unknown, DagFailedNodePayload> {
+): DagContracts.DagNodeResult<unknown, RuntimeContracts.DagFailedNodePayload> {
   if (Cause.hasInterruptsOnly(cause)) {
     return {
-      _tag: cancelled ? DagNodeResultTag.Cancelled : DagNodeResultTag.Interrupted,
+      _tag: cancelled ? DagContracts.DagNodeResultTag.Cancelled : DagContracts.DagNodeResultTag.Interrupted,
       reason: cancelled ? "explicit run cancellation" : "scope interruption",
     } as const;
   }
   if (Cause.hasDies(cause)) {
     return {
-      _tag: DagNodeResultTag.Failed,
-      failure: new DagExecutorDefected({
+      _tag: DagContracts.DagNodeResultTag.Failed,
+      failure: new RuntimeContracts.DagExecutorDefected({
         message: "DAG executor defected.",
         defect: Cause.squash(cause),
       }),
@@ -107,12 +78,12 @@ function completeForCause(
   }
   const error = Cause.findErrorOption(cause);
   const failure = Option.isSome(error) ? error.value : Cause.squash(cause);
-  if (failure instanceof DagExecutorMissing) {
-    return { _tag: DagNodeResultTag.Failed, failure };
+  if (failure instanceof RuntimeContracts.DagExecutorMissing) {
+    return { _tag: DagContracts.DagNodeResultTag.Failed, failure };
   }
   return {
-    _tag: DagNodeResultTag.Failed,
-    failure: new DagExecutorFailed({
+    _tag: DagContracts.DagNodeResultTag.Failed,
+    failure: new RuntimeContracts.DagExecutorFailed({
       message: "DAG executor failed.",
       error: failure,
     }),
@@ -120,10 +91,10 @@ function completeForCause(
 }
 
 function runNode<TPayload>(
-  graph: ValidatedDagDefinition<TPayload>,
+  graph: DagValidation.ValidatedDagDefinition<TPayload>,
   mutableRef: Ref.Ref<RuntimeMutable>,
   events: Queue.Queue<RuntimeEvent>,
-  node: DagNode<TPayload>,
+  node: DagContracts.DagNode<TPayload>,
   startPermit: Deferred.Deferred<void>,
 ) {
   const attemptId = `${graph.runId}:${node.id}:1`;
@@ -135,10 +106,10 @@ function runNode<TPayload>(
       const exit = yield* Effect.exit(
         restore(
           Effect.gen(function* () {
-            const registry = yield* DagExecutorRegistry;
+            const registry = yield* RuntimeContracts.DagExecutorRegistry;
             const executor = yield* registry.lookup(node.executor.kind, node.executor.key);
             if (!executor) {
-              return yield* new DagExecutorMissing({
+              return yield* new RuntimeContracts.DagExecutorMissing({
                 message: "DAG executor was not found.",
                 kind: node.executor.kind,
                 key: node.executor.key,
@@ -162,7 +133,7 @@ function runNode<TPayload>(
       const result =
         exit._tag === "Success"
           ? ({
-              _tag: DagNodeResultTag.Succeeded,
+              _tag: DagContracts.DagNodeResultTag.Succeeded,
               outputs: Object.freeze({ ...exit.value }),
             } as const)
           : completeForCause(exit.cause, latest.cancelRequested || latestBefore.cancelRequested);
@@ -172,7 +143,7 @@ function runNode<TPayload>(
 }
 
 function applyCompletion(
-  graph: ValidatedDagDefinition<unknown>,
+  graph: DagValidation.ValidatedDagDefinition<unknown>,
   mutable: RuntimeMutable,
   event: Completion,
 ) {
@@ -182,12 +153,12 @@ function applyCompletion(
     let next: RuntimeMutable = { ...mutable, active };
     if (
       next.state.nodes.find((node) => node.nodeId === event.nodeId)?.status ===
-      DagNodeStatus.Running
+      DagContracts.DagNodeStatus.Running
     ) {
       next = yield* applyTransition(next, {
         runId: graph.runId,
         nodeId: event.nodeId,
-        type: DagTransitionType.Complete,
+        type: DagContracts.DagTransitionType.Complete,
         result: event.result,
       });
       next = {
@@ -209,7 +180,7 @@ function applyCompletion(
 }
 
 function drainActiveCompletions(
-  graph: ValidatedDagDefinition<unknown>,
+  graph: DagValidation.ValidatedDagDefinition<unknown>,
   mutable: RuntimeMutable,
   events: Queue.Queue<RuntimeEvent>,
 ) {
@@ -234,16 +205,16 @@ function interruptAndJoinActive(mutable: RuntimeMutable) {
 }
 
 function coordinator<TPayload>(
-  graph: ValidatedDagDefinition<TPayload>,
+  graph: DagValidation.ValidatedDagDefinition<TPayload>,
   mutableRef: Ref.Ref<RuntimeMutable>,
   events: Queue.Queue<RuntimeEvent>,
-  done: Deferred.Deferred<DagRunSnapshot, DagRuntimeReducerFatal | DagRuntimeCoordinatorFatal>,
+  done: Deferred.Deferred<RuntimeContracts.DagRunSnapshot, RuntimeContracts.DagRuntimeReducerFatal | RuntimeContracts.DagRuntimeCoordinatorFatal>,
   runScope: Scope.Scope,
 ) {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node] as const));
   return Effect.gen(function* () {
     const startReady = function* (mutable: RuntimeMutable) {
-      const step = deriveDagSchedulingStep(graph, mutable.state);
+      const step = DagKernel.deriveDagSchedulingStep(graph, mutable.state);
       let next =
         step.state === mutable.state && step.transitions.length === 0
           ? mutable
@@ -252,20 +223,20 @@ function coordinator<TPayload>(
               state: step.state,
               transitions: Object.freeze([...mutable.transitions, ...step.transitions]),
             };
-      const newAttempts: DagNodeAttempt[] = [];
+      const newAttempts: RuntimeContracts.DagNodeAttempt[] = [];
       const newActive = new Map(next.active);
-      const newTransitions: DagTransition<unknown, DagFailedNodePayload>[] = [];
+      const newTransitions: DagContracts.DagTransition<unknown, RuntimeContracts.DagFailedNodePayload>[] = [];
       const permits: Deferred.Deferred<void>[] = [];
       for (const nodeId of step.readyNodeIds) {
         const node = nodesById.get(nodeId);
         if (!node) continue;
-        const reduced = reduceDagRunState(graph, next.state, {
+        const reduced = DagKernel.reduceDagRunState(graph, next.state, {
           runId: graph.runId,
           nodeId,
-          type: DagTransitionType.Start,
+          type: DagContracts.DagTransitionType.Start,
         });
         if (reduced._tag !== "applied") {
-          return yield* new DagRuntimeReducerFatal({
+          return yield* new RuntimeContracts.DagRuntimeReducerFatal({
             message: "DAG reducer rejected a runtime transition.",
             error: reduced.error,
           });
@@ -277,7 +248,7 @@ function coordinator<TPayload>(
             nodeId,
             attemptId: `${graph.runId}:${nodeId}:1`,
             ordinal: 1,
-            statuses: Object.freeze([DagNodeStatus.Running]),
+            statuses: Object.freeze([DagContracts.DagNodeStatus.Running]),
           }),
         );
         const startPermit = yield* Deferred.make<void>();
@@ -298,7 +269,7 @@ function coordinator<TPayload>(
       return next;
     };
     const finishIfTerminal = function* (mutable: RuntimeMutable) {
-      if (deriveDagRunOutcome(graph, mutable.state)._tag === DagRunOutcomeResultTag.NonTerminal)
+      if (DagKernel.deriveDagRunOutcome(graph, mutable.state)._tag === DagKernel.DagRunOutcomeResultTag.NonTerminal)
         return false;
       yield* Deferred.succeed(done, snapshot(mutable));
       return true;
@@ -351,13 +322,13 @@ function coordinator<TPayload>(
         const mutable = yield* Ref.get(mutableRef);
         yield* interruptAndJoinActive(mutable).pipe(Effect.ignore);
         const error = Cause.findErrorOption(cause);
-        if (Option.isSome(error) && error.value instanceof DagRuntimeReducerFatal) {
+        if (Option.isSome(error) && error.value instanceof RuntimeContracts.DagRuntimeReducerFatal) {
           yield* Deferred.fail(done, error.value);
           return;
         }
         yield* Deferred.fail(
           done,
-          new DagRuntimeCoordinatorFatal({
+          new RuntimeContracts.DagRuntimeCoordinatorFatal({
             message: "DAG runtime coordinator failed.",
             cause: Cause.squash(cause),
           }),
@@ -371,11 +342,11 @@ function cancelQueued(mutable: RuntimeMutable, reason: string) {
   return Effect.gen(function* () {
     let next = mutable;
     for (const node of next.state.nodes) {
-      if (node.status === DagNodeStatus.Queued) {
+      if (node.status === DagContracts.DagNodeStatus.Queued) {
         next = yield* applyTransition(next, {
           runId: next.graph.runId,
           nodeId: node.nodeId,
-          type: DagTransitionType.Cancel,
+          type: DagContracts.DagTransitionType.Cancel,
           reason,
         });
       }
@@ -388,11 +359,11 @@ function interruptQueued(mutable: RuntimeMutable) {
   return Effect.gen(function* () {
     let next = mutable;
     for (const node of next.state.nodes) {
-      if (node.status === DagNodeStatus.Queued) {
+      if (node.status === DagContracts.DagNodeStatus.Queued) {
         next = yield* applyTransition(next, {
           runId: next.graph.runId,
           nodeId: node.nodeId,
-          type: DagTransitionType.Cancel,
+          type: DagContracts.DagTransitionType.Cancel,
           reason: "scope interruption projected through queued cancel transition",
         });
       }
@@ -402,19 +373,19 @@ function interruptQueued(mutable: RuntimeMutable) {
 }
 
 export const submitDagRunInternal = <TPayload>(
-  graph: ValidatedDagDefinition<TPayload>,
-  initialState?: DagRunState<unknown, DagFailedNodePayload>,
-): Effect.Effect<DagRunHandle, DagRuntimeError, DagExecutorRegistry | Scope.Scope> =>
+  graph: DagValidation.ValidatedDagDefinition<TPayload>,
+  initialState?: DagKernel.DagRunState<unknown, RuntimeContracts.DagFailedNodePayload>,
+): Effect.Effect<RuntimeContracts.DagRunHandle, RuntimeContracts.DagRuntimeError, RuntimeContracts.DagExecutorRegistry | Scope.Scope> =>
   Effect.gen(function* () {
-    const state = initialState ?? createDagRunState<TPayload, unknown, DagFailedNodePayload>(graph);
+    const state = initialState ?? DagKernel.createDagRunState<TPayload, unknown, RuntimeContracts.DagFailedNodePayload>(graph);
     if (!state.belongsTo(graph)) {
-      return yield* new DagRuntimeGraphStateMismatch({
+      return yield* new RuntimeContracts.DagRuntimeGraphStateMismatch({
         message: "Initial DAG run state belongs to a different graph.",
         runId: graph.runId,
       });
     }
-    if (initialState && state.nodes.some((node) => node.status !== DagNodeStatus.Queued)) {
-      return yield* new DagRuntimeNonFreshInitialState({
+    if (initialState && state.nodes.some((node) => node.status !== DagContracts.DagNodeStatus.Queued)) {
+      return yield* new RuntimeContracts.DagRuntimeNonFreshInitialState({
         message:
           "Same-graph initial DAG run state must be fresh; replay and resume are not supported by submitDagRun.",
         runId: graph.runId,
@@ -431,8 +402,8 @@ export const submitDagRunInternal = <TPayload>(
     const ref = yield* Ref.make(initial);
     const events = yield* Queue.unbounded<RuntimeEvent>();
     const done = yield* Deferred.make<
-      DagRunSnapshot,
-      DagRuntimeReducerFatal | DagRuntimeCoordinatorFatal
+      RuntimeContracts.DagRunSnapshot,
+      RuntimeContracts.DagRuntimeReducerFatal | RuntimeContracts.DagRuntimeCoordinatorFatal
     >();
     yield* Effect.uninterruptible(
       Effect.gen(function* () {

@@ -17,7 +17,7 @@ import {
   type DagSessionEntry,
   type DagSessionManagerSeam,
 } from "../index.js";
-import { definition, status } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 function node(
   id: string,
@@ -65,7 +65,7 @@ function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
 
 describe("DAG session replay", () => {
   it("replays a valid terminal history through public writer and reconstruction", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = seam();
     const writer = makeDagSessionWriter(store, dag, def);
@@ -93,7 +93,7 @@ describe("DAG session replay", () => {
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
     expect(recovered.graphId).toBe(computeDagSessionGraphId(def));
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Succeeded);
-    expect(status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Succeeded);
+    expect(Fixtures.status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Succeeded);
     expect(recovered.attempts[0]?.statuses).toEqual([
       DagNodeStatus.Running,
       DagNodeStatus.Succeeded,
@@ -103,7 +103,7 @@ describe("DAG session replay", () => {
   });
 
   it("projects an open running prefix to interrupted without invoking work", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = seam();
     const writer = makeDagSessionWriter(store, dag, def);
@@ -121,7 +121,7 @@ describe("DAG session replay", () => {
       DagTransitionType.Start,
       DagTransitionType.Complete,
     ]);
-    expect(status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Interrupted);
+    expect(Fixtures.status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Interrupted);
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Interrupted);
     expect(recovered.attempts[0]?.statuses).toEqual([
       DagNodeStatus.Running,
@@ -130,7 +130,7 @@ describe("DAG session replay", () => {
   });
 
   it("projects queued process-loss prefixes with reducer-derived blocks before cancellations", () => {
-    const def = definition(
+    const def = Fixtures.definition(
       [node("a"), node("b", [{ nodeId: "a", mode: "required" }]), node("c")],
       1,
     );
@@ -157,13 +157,13 @@ describe("DAG session replay", () => {
     );
 
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
-    expect(status(recovered.graph, recovered.state, "b")).toBe(DagNodeStatus.Blocked);
-    expect(status(recovered.graph, recovered.state, "c")).toBe(DagNodeStatus.Cancelled);
+    expect(Fixtures.status(recovered.graph, recovered.state, "b")).toBe(DagNodeStatus.Blocked);
+    expect(Fixtures.status(recovered.graph, recovered.state, "c")).toBe(DagNodeStatus.Cancelled);
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Failed);
   });
 
   it("uses only getBranch, excludes sibling branch entries, and returns immutable data", () => {
-    const def = definition([node("a")], 1);
+    const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = seam([
       {
@@ -190,7 +190,7 @@ describe("DAG session replay", () => {
   });
 
   it("projects settled dependencies and AtLeastOneSucceeded guards after restart", () => {
-    const def = definition(
+    const def = Fixtures.definition(
       [
         node("review-a"),
         node("review-b"),
@@ -243,7 +243,7 @@ describe("DAG session replay", () => {
     }
 
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
-    expect(status(recovered.graph, recovered.state, "synthesize")).toBe(DagNodeStatus.Blocked);
+    expect(Fixtures.status(recovered.graph, recovered.state, "synthesize")).toBe(DagNodeStatus.Blocked);
     expect(recovered.state.nodes[2]).toEqual({
       nodeId: "synthesize",
       status: DagNodeStatus.Blocked,

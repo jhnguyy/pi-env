@@ -1,35 +1,27 @@
-import {
-  DagNodeResultTag,
-  DagNodeStatus,
-  DagTransitionType,
-  type DagNamedOutputs,
-  type DagNodeResult,
-  type DagNodeState,
-  type DagTransition,
-} from "../contracts.js";
+import * as DagContracts from "../contracts.js";
 
 function freezeOutputs<TOutputReference>(
-  outputs: DagNamedOutputs<TOutputReference>,
-): DagNamedOutputs<TOutputReference> {
+  outputs: DagContracts.DagNamedOutputs<TOutputReference>,
+): DagContracts.DagNamedOutputs<TOutputReference> {
   return Object.freeze(
     Object.fromEntries(Object.entries(outputs)),
   );
 }
 
-export function validResultShape(result: unknown): result is DagNodeResult {
+export function validResultShape(result: unknown): result is DagContracts.DagNodeResult {
   if (typeof result !== "object" || result === null) return false;
   const candidate = result as Record<string, unknown>;
   switch (candidate._tag) {
-    case DagNodeResultTag.Succeeded:
+    case DagContracts.DagNodeResultTag.Succeeded:
       return (
         typeof candidate.outputs === "object" &&
         candidate.outputs !== null &&
         !Array.isArray(candidate.outputs)
       );
-    case DagNodeResultTag.Failed:
+    case DagContracts.DagNodeResultTag.Failed:
       return Object.hasOwn(candidate, "failure");
-    case DagNodeResultTag.Cancelled:
-    case DagNodeResultTag.Interrupted:
+    case DagContracts.DagNodeResultTag.Cancelled:
+    case DagContracts.DagNodeResultTag.Interrupted:
       return candidate.reason === undefined || typeof candidate.reason === "string";
     default:
       return false;
@@ -37,15 +29,15 @@ export function validResultShape(result: unknown): result is DagNodeResult {
 }
 
 function canonicalResult<TOutputReference, TFailure>(
-  result: DagNodeResult<TOutputReference, TFailure>,
-): DagNodeResult<TOutputReference, TFailure> {
+  result: DagContracts.DagNodeResult<TOutputReference, TFailure>,
+): DagContracts.DagNodeResult<TOutputReference, TFailure> {
   switch (result._tag) {
-    case DagNodeResultTag.Succeeded:
+    case DagContracts.DagNodeResultTag.Succeeded:
       return Object.freeze({ _tag: result._tag, outputs: freezeOutputs(result.outputs) });
-    case DagNodeResultTag.Failed:
+    case DagContracts.DagNodeResultTag.Failed:
       return Object.freeze({ _tag: result._tag, failure: result.failure });
-    case DagNodeResultTag.Cancelled:
-    case DagNodeResultTag.Interrupted:
+    case DagContracts.DagNodeResultTag.Cancelled:
+    case DagContracts.DagNodeResultTag.Interrupted:
       return Object.freeze({
         _tag: result._tag,
         ...(result.reason === undefined ? {} : { reason: result.reason }),
@@ -54,23 +46,23 @@ function canonicalResult<TOutputReference, TFailure>(
 }
 
 export function canonicalTransition<TOutputReference, TFailure>(
-  transition: DagTransition<TOutputReference, TFailure>,
-): DagTransition<TOutputReference, TFailure> {
+  transition: DagContracts.DagTransition<TOutputReference, TFailure>,
+): DagContracts.DagTransition<TOutputReference, TFailure> {
   switch (transition.type) {
-    case DagTransitionType.Start:
+    case DagContracts.DagTransitionType.Start:
       return Object.freeze({
         runId: transition.runId,
         nodeId: transition.nodeId,
         type: transition.type,
       });
-    case DagTransitionType.Complete:
+    case DagContracts.DagTransitionType.Complete:
       return Object.freeze({
         runId: transition.runId,
         nodeId: transition.nodeId,
         type: transition.type,
         result: canonicalResult(transition.result),
       });
-    case DagTransitionType.Block:
+    case DagContracts.DagTransitionType.Block:
       return Object.freeze({
         runId: transition.runId,
         nodeId: transition.nodeId,
@@ -78,7 +70,7 @@ export function canonicalTransition<TOutputReference, TFailure>(
         reason: transition.reason,
         blockedBy: Object.freeze([...transition.blockedBy]),
       });
-    case DagTransitionType.Cancel:
+    case DagContracts.DagTransitionType.Cancel:
       return Object.freeze({
         runId: transition.runId,
         nodeId: transition.nodeId,
@@ -90,61 +82,61 @@ export function canonicalTransition<TOutputReference, TFailure>(
 
 function stateFromResult<TOutputReference, TFailure>(
   nodeId: string,
-  result: DagNodeResult<TOutputReference, TFailure>,
-): DagNodeState<TOutputReference, TFailure> {
+  result: DagContracts.DagNodeResult<TOutputReference, TFailure>,
+): DagContracts.DagNodeState<TOutputReference, TFailure> {
   switch (result._tag) {
-    case DagNodeResultTag.Succeeded:
-      return Object.freeze({ nodeId, status: DagNodeStatus.Succeeded, outputs: result.outputs });
-    case DagNodeResultTag.Failed:
-      return Object.freeze({ nodeId, status: DagNodeStatus.Failed, failure: result.failure });
-    case DagNodeResultTag.Cancelled:
+    case DagContracts.DagNodeResultTag.Succeeded:
+      return Object.freeze({ nodeId, status: DagContracts.DagNodeStatus.Succeeded, outputs: result.outputs });
+    case DagContracts.DagNodeResultTag.Failed:
+      return Object.freeze({ nodeId, status: DagContracts.DagNodeStatus.Failed, failure: result.failure });
+    case DagContracts.DagNodeResultTag.Cancelled:
       return Object.freeze({
         nodeId,
-        status: DagNodeStatus.Cancelled,
+        status: DagContracts.DagNodeStatus.Cancelled,
         ...(result.reason === undefined ? {} : { reason: result.reason }),
       });
-    case DagNodeResultTag.Interrupted:
+    case DagContracts.DagNodeResultTag.Interrupted:
       return Object.freeze({
         nodeId,
-        status: DagNodeStatus.Interrupted,
+        status: DagContracts.DagNodeStatus.Interrupted,
         ...(result.reason === undefined ? {} : { reason: result.reason }),
       });
   }
 }
 
 export function nodeStateFromTransition<TOutputReference, TFailure>(
-  transition: DagTransition<TOutputReference, TFailure>,
-): DagNodeState<TOutputReference, TFailure> {
+  transition: DagContracts.DagTransition<TOutputReference, TFailure>,
+): DagContracts.DagNodeState<TOutputReference, TFailure> {
   switch (transition.type) {
-    case DagTransitionType.Start:
-      return Object.freeze({ nodeId: transition.nodeId, status: DagNodeStatus.Running });
-    case DagTransitionType.Complete:
+    case DagContracts.DagTransitionType.Start:
+      return Object.freeze({ nodeId: transition.nodeId, status: DagContracts.DagNodeStatus.Running });
+    case DagContracts.DagTransitionType.Complete:
       return stateFromResult(transition.nodeId, transition.result);
-    case DagTransitionType.Block:
+    case DagContracts.DagTransitionType.Block:
       return Object.freeze({
         nodeId: transition.nodeId,
-        status: DagNodeStatus.Blocked,
+        status: DagContracts.DagNodeStatus.Blocked,
         reason: transition.reason,
         blockedBy: transition.blockedBy,
       });
-    case DagTransitionType.Cancel:
+    case DagContracts.DagTransitionType.Cancel:
       return Object.freeze({
         nodeId: transition.nodeId,
-        status: DagNodeStatus.Cancelled,
+        status: DagContracts.DagNodeStatus.Cancelled,
         ...(transition.reason === undefined ? {} : { reason: transition.reason }),
       });
   }
 }
 
-export function transitionTargetStatus(transition: DagTransition): DagNodeStatus {
+export function transitionTargetStatus(transition: DagContracts.DagTransition): DagContracts.DagNodeStatus {
   switch (transition.type) {
-    case DagTransitionType.Start:
-      return DagNodeStatus.Running;
-    case DagTransitionType.Block:
-      return DagNodeStatus.Blocked;
-    case DagTransitionType.Cancel:
-      return DagNodeStatus.Cancelled;
-    case DagTransitionType.Complete:
+    case DagContracts.DagTransitionType.Start:
+      return DagContracts.DagNodeStatus.Running;
+    case DagContracts.DagTransitionType.Block:
+      return DagContracts.DagNodeStatus.Blocked;
+    case DagContracts.DagTransitionType.Cancel:
+      return DagContracts.DagNodeStatus.Cancelled;
+    case DagContracts.DagTransitionType.Complete:
       return transition.result._tag;
   }
 }

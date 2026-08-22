@@ -1,23 +1,8 @@
-import {
-  DagNodeStatus,
-  DagTransitionType,
-  type DagBlockedReason,
-  type DagTransition,
-} from "../contracts.js";
-import { classifyQueuedNode, QueuedNodeClassification } from "./readiness.js";
-import type { DagRunState} from "./run-state.js";
-import { getRunningCount, makeRunState } from "./run-state.js";
-import {
-  canonicalTransition,
-  nodeStateFromTransition,
-  transitionTargetStatus,
-  validResultShape,
-} from "./transitions.js";
-import {
-  getDagGraphIndex,
-  type DagGraphIndex,
-  type ValidatedDagDefinition,
-} from "./validated-graph.js";
+import * as DagContracts from "../contracts.js";
+import * as Readiness from "./readiness.js";
+import * as RunState from "./run-state.js";
+import * as Transitions from "./transitions.js";
+import * as ValidatedGraph from "./validated-graph.js";
 
 export const DagTransitionResultTag = {
   Applied: "applied",
@@ -49,21 +34,21 @@ export type DagTransitionError =
   | {
       readonly _tag: typeof DagTransitionErrorTag.InvalidTransition;
       readonly nodeId: string;
-      readonly from: DagNodeStatus;
-      readonly to: DagNodeStatus;
+      readonly from: DagContracts.DagNodeStatus;
+      readonly to: DagContracts.DagNodeStatus;
     }
   | {
       readonly _tag: typeof DagTransitionErrorTag.InvalidBlock;
       readonly nodeId: string;
-      readonly reason: DagBlockedReason;
+      readonly reason: DagContracts.DagBlockedReason;
       readonly blockedBy: readonly string[];
     };
 
 export type DagTransitionResult<TOutputReference = unknown, TFailure = unknown> =
   | {
       readonly _tag: typeof DagTransitionResultTag.Applied;
-      readonly state: DagRunState<TOutputReference, TFailure>;
-      readonly transition: DagTransition<TOutputReference, TFailure>;
+      readonly state: RunState.DagRunState<TOutputReference, TFailure>;
+      readonly transition: DagContracts.DagTransition<TOutputReference, TFailure>;
     }
   | {
       readonly _tag: typeof DagTransitionResultTag.Rejected;
@@ -75,28 +60,28 @@ function equalIds(left: readonly string[], right: readonly string[]): boolean {
 }
 
 function transitionIsLegal<TPayload, TOutputReference, TFailure>(
-  graph: ValidatedDagDefinition<TPayload>,
-  index: DagGraphIndex<TPayload>,
-  state: DagRunState<TOutputReference, TFailure>,
+  graph: ValidatedGraph.ValidatedDagDefinition<TPayload>,
+  index: ValidatedGraph.DagGraphIndex<TPayload>,
+  state: RunState.DagRunState<TOutputReference, TFailure>,
   nodeIndex: number,
-  transition: DagTransition<TOutputReference, TFailure>,
+  transition: DagContracts.DagTransition<TOutputReference, TFailure>,
 ): boolean {
   const current = state.nodes[nodeIndex];
   if (!current) return false;
   switch (transition.type) {
-    case DagTransitionType.Start:
+    case DagContracts.DagTransitionType.Start:
       return (
-        getRunningCount(state) < graph.concurrency &&
-        classifyQueuedNode(index, state.nodes, nodeIndex).kind === QueuedNodeClassification.Ready
+        RunState.getRunningCount(state) < graph.concurrency &&
+        Readiness.classifyQueuedNode(index, state.nodes, nodeIndex).kind === Readiness.QueuedNodeClassification.Ready
       );
-    case DagTransitionType.Complete:
-      return current.status === DagNodeStatus.Running;
-    case DagTransitionType.Cancel:
-      return current.status === DagNodeStatus.Queued || current.status === DagNodeStatus.Running;
-    case DagTransitionType.Block: {
-      const classification = classifyQueuedNode(index, state.nodes, nodeIndex);
+    case DagContracts.DagTransitionType.Complete:
+      return current.status === DagContracts.DagNodeStatus.Running;
+    case DagContracts.DagTransitionType.Cancel:
+      return current.status === DagContracts.DagNodeStatus.Queued || current.status === DagContracts.DagNodeStatus.Running;
+    case DagContracts.DagTransitionType.Block: {
+      const classification = Readiness.classifyQueuedNode(index, state.nodes, nodeIndex);
       return (
-        classification.kind === QueuedNodeClassification.Blocked &&
+        classification.kind === Readiness.QueuedNodeClassification.Blocked &&
         classification.reason === transition.reason &&
         equalIds(classification.blockedBy, transition.blockedBy)
       );
@@ -105,9 +90,9 @@ function transitionIsLegal<TPayload, TOutputReference, TFailure>(
 }
 
 export function reduceDagRunState<TPayload, TOutputReference = unknown, TFailure = unknown>(
-  graph: ValidatedDagDefinition<TPayload>,
-  state: DagRunState<TOutputReference, TFailure>,
-  transition: DagTransition<TOutputReference, TFailure>,
+  graph: ValidatedGraph.ValidatedDagDefinition<TPayload>,
+  state: RunState.DagRunState<TOutputReference, TFailure>,
+  transition: DagContracts.DagTransition<TOutputReference, TFailure>,
 ): DagTransitionResult<TOutputReference, TFailure> {
   if (transition.runId !== graph.runId) {
     return {
@@ -125,7 +110,7 @@ export function reduceDagRunState<TPayload, TOutputReference = unknown, TFailure
       error: { _tag: DagTransitionErrorTag.StateMismatch },
     };
   }
-  const index = getDagGraphIndex(graph);
+  const index = ValidatedGraph.getDagGraphIndex(graph);
   const nodeIndex = index.nodeById.get(transition.nodeId);
   if (nodeIndex === undefined) {
     return {
@@ -134,7 +119,7 @@ export function reduceDagRunState<TPayload, TOutputReference = unknown, TFailure
     };
   }
   const current = state.nodes[nodeIndex];
-  if (transition.type === DagTransitionType.Complete && !validResultShape(transition.result)) {
+  if (transition.type === DagContracts.DagTransitionType.Complete && !Transitions.validResultShape(transition.result)) {
     return {
       _tag: DagTransitionResultTag.Rejected,
       error: { _tag: DagTransitionErrorTag.MalformedTransition, nodeId: transition.nodeId },
@@ -144,7 +129,7 @@ export function reduceDagRunState<TPayload, TOutputReference = unknown, TFailure
     return {
       _tag: DagTransitionResultTag.Rejected,
       error:
-        transition.type === DagTransitionType.Block
+        transition.type === DagContracts.DagTransitionType.Block
           ? {
               _tag: DagTransitionErrorTag.InvalidBlock,
               nodeId: transition.nodeId,
@@ -154,24 +139,24 @@ export function reduceDagRunState<TPayload, TOutputReference = unknown, TFailure
           : {
               _tag: DagTransitionErrorTag.InvalidTransition,
               nodeId: transition.nodeId,
-              from: current?.status ?? DagNodeStatus.Queued,
-              to: transitionTargetStatus(transition),
+              from: current?.status ?? DagContracts.DagNodeStatus.Queued,
+              to: Transitions.transitionTargetStatus(transition),
             },
     };
   }
 
-  const accepted = canonicalTransition(transition);
+  const accepted = Transitions.canonicalTransition(transition);
   const nodes = [...state.nodes];
-  nodes[nodeIndex] = nodeStateFromTransition(accepted);
+  nodes[nodeIndex] = Transitions.nodeStateFromTransition(accepted);
   const runningDelta =
-    accepted.type === DagTransitionType.Start
+    accepted.type === DagContracts.DagTransitionType.Start
       ? 1
-      : current.status === DagNodeStatus.Running
+      : current.status === DagContracts.DagNodeStatus.Running
         ? -1
         : 0;
   return {
     _tag: DagTransitionResultTag.Applied,
-    state: makeRunState(graph, nodes, getRunningCount(state) + runningDelta),
+    state: RunState.makeRunState(graph, nodes, RunState.getRunningCount(state) + runningDelta),
     transition: accepted,
   };
 }

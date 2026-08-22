@@ -8,7 +8,7 @@ import {
   type DagValidationLimits,
   validateDagDefinition,
 } from "../index.js";
-import { definition, executor, node } from "./shared.js";
+import * as Fixtures from "./shared.js";
 
 function tags(graph: DagDefinition, limits?: DagValidationLimits): string[] {
   const result = validateDagDefinition(graph, limits);
@@ -20,7 +20,7 @@ function tags(graph: DagDefinition, limits?: DagValidationLimits): string[] {
 
 describe("DAG validation", () => {
   it("rejects duplicate node IDs", () => {
-    expect(validateDagDefinition(definition([node("build"), node("build")]))).toEqual({
+    expect(validateDagDefinition(Fixtures.definition([Fixtures.node("build"), Fixtures.node("build")]))).toEqual({
       _tag: DagValidationResultTag.Invalid,
       errors: [
         {
@@ -36,9 +36,9 @@ describe("DAG validation", () => {
   it("rejects missing and self dependencies", () => {
     expect(
       tags(
-        definition([
-          node("self", [{ nodeId: "self", mode: DagDependencyMode.Required }]),
-          node("missing", [{ nodeId: "absent", mode: DagDependencyMode.Required }]),
+        Fixtures.definition([
+          Fixtures.node("self", [{ nodeId: "self", mode: DagDependencyMode.Required }]),
+          Fixtures.node("missing", [{ nodeId: "absent", mode: DagDependencyMode.Required }]),
         ]),
       ),
     ).toEqual([DagValidationErrorTag.SelfDependency, DagValidationErrorTag.MissingDependency]);
@@ -46,14 +46,14 @@ describe("DAG validation", () => {
 
   it("rejects every cyclic member but excludes acyclic descendants", () => {
     const result = validateDagDefinition(
-      definition([
-        node("descendant", [{ nodeId: "a", mode: DagDependencyMode.Required }]),
-        node("a", [{ nodeId: "b", mode: DagDependencyMode.Required }]),
-        node("b", [
+      Fixtures.definition([
+        Fixtures.node("descendant", [{ nodeId: "a", mode: DagDependencyMode.Required }]),
+        Fixtures.node("a", [{ nodeId: "b", mode: DagDependencyMode.Required }]),
+        Fixtures.node("b", [
           { nodeId: "a", mode: DagDependencyMode.Required },
           { nodeId: "c", mode: DagDependencyMode.Settled },
         ]),
-        node("c", [{ nodeId: "b", mode: DagDependencyMode.Settled }]),
+        Fixtures.node("c", [{ nodeId: "b", mode: DagDependencyMode.Settled }]),
       ]),
     );
 
@@ -69,25 +69,25 @@ describe("DAG validation", () => {
       maxEdges: 2,
       maxConcurrency: 3,
     };
-    const atLimits = definition([
-      node("a"),
-      node("b"),
-      node("c", [
+    const atLimits = Fixtures.definition([
+      Fixtures.node("a"),
+      Fixtures.node("b"),
+      Fixtures.node("c", [
         { nodeId: "a", mode: DagDependencyMode.Required },
         { nodeId: "b", mode: DagDependencyMode.Settled },
       ]),
     ]);
     expect(validateDagDefinition(atLimits, limits)._tag).toBe(DagValidationResultTag.Valid);
-    expect(tags(definition([...atLimits.nodes, node("d")]), limits)).toEqual([
+    expect(tags(Fixtures.definition([...atLimits.nodes, Fixtures.node("d")]), limits)).toEqual([
       DagValidationErrorTag.NodeLimitExceeded,
     ]);
     expect(
       tags(
-        definition([
-          node("a"),
-          node("b"),
-          node("c"),
-          node("d", [
+        Fixtures.definition([
+          Fixtures.node("a"),
+          Fixtures.node("b"),
+          Fixtures.node("c"),
+          Fixtures.node("d", [
             { nodeId: "a", mode: DagDependencyMode.Required },
             { nodeId: "b", mode: DagDependencyMode.Required },
             { nodeId: "c", mode: DagDependencyMode.Required },
@@ -99,22 +99,22 @@ describe("DAG validation", () => {
   });
 
   it("rejects empty graphs and invalid concurrency", () => {
-    expect(tags(definition([]))).toEqual([DagValidationErrorTag.EmptyGraph]);
-    expect(tags(definition([node("task")], 0))).toEqual([
+    expect(tags(Fixtures.definition([]))).toEqual([DagValidationErrorTag.EmptyGraph]);
+    expect(tags(Fixtures.definition([Fixtures.node("task")], 0))).toEqual([
       DagValidationErrorTag.ConcurrencyLimitExceeded,
     ]);
   });
 
   it("rejects unsupported and duplicate dependency modes", () => {
-    const unsupported = definition([
-      node("source"),
-      node("consumer", [{ nodeId: "source", mode: "optional" as never }]),
+    const unsupported = Fixtures.definition([
+      Fixtures.node("source"),
+      Fixtures.node("consumer", [{ nodeId: "source", mode: "optional" as never }]),
     ]);
     expect(tags(unsupported)).toEqual([DagValidationErrorTag.UnsupportedDependencyMode]);
 
-    const duplicate = definition([
-      node("source"),
-      node("consumer", [
+    const duplicate = Fixtures.definition([
+      Fixtures.node("source"),
+      Fixtures.node("consumer", [
         { nodeId: "source", mode: DagDependencyMode.Required },
         { nodeId: "source", mode: DagDependencyMode.Settled },
       ]),
@@ -127,10 +127,10 @@ describe("DAG validation", () => {
       kind: DagCompletionGuardKind.AtLeastOneSucceeded,
       dependencyIds: ["a", "b"],
     } as const;
-    const valid = definition([
-      node("a"),
-      node("b"),
-      node(
+    const valid = Fixtures.definition([
+      Fixtures.node("a"),
+      Fixtures.node("b"),
+      Fixtures.node(
         "join",
         [
           { nodeId: "a", mode: DagDependencyMode.Settled },
@@ -141,9 +141,9 @@ describe("DAG validation", () => {
     ]);
     expect(validateDagDefinition(valid)._tag).toBe(DagValidationResultTag.Valid);
 
-    const invalid = definition([
-      node("a"),
-      node("join", [{ nodeId: "a", mode: DagDependencyMode.Required }], {
+    const invalid = Fixtures.definition([
+      Fixtures.node("a"),
+      Fixtures.node("join", [{ nodeId: "a", mode: DagDependencyMode.Required }], {
         ...guard,
         dependencyIds: ["a"],
       }),
@@ -159,7 +159,7 @@ describe("DAG validation", () => {
       nodes: [
         {
           id: "task",
-          executor: { ...executor, key: "opaque", payload },
+          executor: { ...Fixtures.executor, key: "opaque", payload },
           dependencies: [],
         },
       ],

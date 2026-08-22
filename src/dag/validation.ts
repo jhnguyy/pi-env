@@ -1,17 +1,7 @@
-import {
-  DagCompletionGuardKind,
-  DagDefaultValidationLimits,
-  DagDependencyMode,
-  DagExecutorKind,
-  type DagDefinition,
-  type DagDependency,
-  type DagDependencyMode as DagDependencyModeValue,
-  type DagNode,
-  type DagValidationLimits,
-} from "./contracts.js";
-import { buildValidatedGraph, ValidatedDagDefinition } from "./internal/validated-graph.js";
+import * as DagContracts from "./contracts.js";
+import * as ValidatedGraph from "./internal/validated-graph.js";
 
-export { ValidatedDagDefinition };
+export { ValidatedDagDefinition } from "./internal/validated-graph.js";
 
 export const DagValidationResultTag = {
   Valid: "valid",
@@ -89,7 +79,7 @@ export type DagValidationError =
 export type DagValidationResult<TPayload = unknown> =
   | {
       readonly _tag: typeof DagValidationResultTag.Valid;
-      readonly graph: ValidatedDagDefinition<TPayload>;
+      readonly graph: ValidatedGraph.ValidatedDagDefinition<TPayload>;
     }
   | {
       readonly _tag: typeof DagValidationResultTag.Invalid;
@@ -100,42 +90,42 @@ function invalid<TPayload>(errors: readonly DagValidationError[]): DagValidation
   return { _tag: DagValidationResultTag.Invalid, errors: Object.freeze([...errors]) };
 }
 
-function validLimits(limits: DagValidationLimits): boolean {
+function validLimits(limits: DagContracts.DagValidationLimits): boolean {
   return [limits.maxNodes, limits.maxEdges, limits.maxConcurrency].every(
     (limit) => Number.isSafeInteger(limit) && limit > 0,
   );
 }
 
-function supportedMode(mode: unknown): mode is DagDependencyModeValue {
-  return mode === DagDependencyMode.Required || mode === DagDependencyMode.Settled;
+function supportedMode(mode: unknown): mode is DagContracts.DagDependencyMode {
+  return mode === DagContracts.DagDependencyMode.Required || mode === DagContracts.DagDependencyMode.Settled;
 }
 
 function supportedExecutorKind(kind: unknown): boolean {
   return (
-    kind === DagExecutorKind.Subagent ||
-    kind === DagExecutorKind.Transform ||
-    kind === DagExecutorKind.Materialize
+    kind === DagContracts.DagExecutorKind.Subagent ||
+    kind === DagContracts.DagExecutorKind.Transform ||
+    kind === DagContracts.DagExecutorKind.Materialize
   );
 }
 
 function guardIsValid<TPayload>(
-  node: DagNode<TPayload>,
-  dependencyModes: ReadonlyMap<string, DagDependencyModeValue>,
+  node: DagContracts.DagNode<TPayload>,
+  dependencyModes: ReadonlyMap<string, DagContracts.DagDependencyMode>,
 ): boolean {
   const guard = node.completionGuard;
   if (!guard) return true;
-  if (guard.kind !== DagCompletionGuardKind.AtLeastOneSucceeded) return false;
+  if (guard.kind !== DagContracts.DagCompletionGuardKind.AtLeastOneSucceeded) return false;
   if (guard.dependencyIds.length === 0) return false;
   if (guard.dependencyIds.length > node.dependencies.length) return false;
   if (new Set(guard.dependencyIds).size !== guard.dependencyIds.length) return false;
   return guard.dependencyIds.every(
-    (dependencyId) => dependencyModes.get(dependencyId) === DagDependencyMode.Settled,
+    (dependencyId) => dependencyModes.get(dependencyId) === DagContracts.DagDependencyMode.Settled,
   );
 }
 
 function boundaryError(
-  definition: DagDefinition,
-  limits: DagValidationLimits,
+  definition: DagContracts.DagDefinition,
+  limits: DagContracts.DagValidationLimits,
 ): DagValidationError | undefined {
   if (!validLimits(limits)) return { _tag: DagValidationErrorTag.InvalidLimits };
   if (definition.nodes.length > limits.maxNodes) {
@@ -160,8 +150,8 @@ function boundaryError(
 }
 
 function collectDefinitionErrors(
-  definition: DagDefinition,
-  limits: DagValidationLimits,
+  definition: DagContracts.DagDefinition,
+  limits: DagContracts.DagValidationLimits,
   errors: DagValidationError[],
 ): void {
   if (definition.nodes.length === 0) errors.push({ _tag: DagValidationErrorTag.EmptyGraph });
@@ -182,7 +172,7 @@ function collectDefinitionErrors(
 }
 
 function collectNodeErrors(
-  definition: DagDefinition,
+  definition: DagContracts.DagDefinition,
   errors: DagValidationError[],
 ): Map<string, number> {
   const nodeById = new Map<string, number>();
@@ -219,9 +209,9 @@ function collectNodeErrors(
 
 function collectDependencyError(
   nodeId: string,
-  dependency: DagDependency,
+  dependency: DagContracts.DagDependency,
   nodeById: ReadonlyMap<string, number>,
-  dependencyModes: Map<string, DagDependencyModeValue>,
+  dependencyModes: Map<string, DagContracts.DagDependencyMode>,
   errors: DagValidationError[],
 ): void {
   const modeSupported = supportedMode(dependency.mode);
@@ -252,12 +242,12 @@ function collectDependencyError(
 }
 
 function collectDependencyErrors(
-  definition: DagDefinition,
+  definition: DagContracts.DagDefinition,
   nodeById: ReadonlyMap<string, number>,
   errors: DagValidationError[],
 ): void {
   for (const node of definition.nodes) {
-    const dependencyModes = new Map<string, DagDependencyModeValue>();
+    const dependencyModes = new Map<string, DagContracts.DagDependencyMode>();
     for (const dependency of node.dependencies) {
       collectDependencyError(node.id, dependency, nodeById, dependencyModes, errors);
     }
@@ -268,10 +258,10 @@ function collectDependencyErrors(
 }
 
 function validatedResult<TPayload>(
-  definition: DagDefinition<TPayload>,
+  definition: DagContracts.DagDefinition<TPayload>,
   nodeById: ReadonlyMap<string, number>,
 ): DagValidationResult<TPayload> {
-  const result = buildValidatedGraph(definition, nodeById);
+  const result = ValidatedGraph.buildValidatedGraph(definition, nodeById);
   if (result._tag === "cycle") {
     return invalid([{ _tag: DagValidationErrorTag.Cycle, nodeIds: result.nodeIds }]);
   }
@@ -279,8 +269,8 @@ function validatedResult<TPayload>(
 }
 
 export function validateDagDefinition<TPayload = unknown>(
-  definition: DagDefinition<TPayload>,
-  limits: DagValidationLimits = DagDefaultValidationLimits,
+  definition: DagContracts.DagDefinition<TPayload>,
+  limits: DagContracts.DagValidationLimits = DagContracts.DagDefaultValidationLimits,
 ): DagValidationResult<TPayload> {
   const exceededBoundary = boundaryError(definition, limits);
   if (exceededBoundary) return invalid([exceededBoundary]);
