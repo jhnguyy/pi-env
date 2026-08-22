@@ -2,13 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
 
 const state = vi.hoisted(() => ({
-  mode: "complete" as "complete" | "blockUntilAbort",
+  mode: "complete" as "complete" | "blockUntilAbort" | "fail",
   startCount: 0,
   abortCount: 0,
   onBlockedStart: undefined as (() => void) | undefined,
@@ -35,6 +36,7 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
           });
           return;
         }
+        if (state.mode === "fail") throw new Error("test failure");
         yield {
           type: "message_end",
           message: {
@@ -78,6 +80,13 @@ afterEach(() => {
   }
 });
 
+function extractText(component: Text | Container): string {
+  if (component instanceof Container) {
+    return component.children.map((child: any) => extractText(child)).join("\n");
+  }
+  return (component as any).text ?? "";
+}
+
 function createContext(cwd: string) {
   const sessionManager = SessionManager.create(cwd, cwd);
   return {
@@ -111,9 +120,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
       ctx,
     );
     expect(syncBeforeStart.details.isError).toBe(false);
-    expect(
-      syncBeforeStart.content[0]?.type === "text" ? syncBeforeStart.content[0].text : "",
-    ).toContain("done-");
+    expect(syncBeforeStart.content).toEqual([{ type: "text", text: "done-1" }]);
 
     await startSession({ type: "session_start" }, ctx);
 
@@ -133,7 +140,38 @@ describe("SubagentSessionRuntime public boundaries", () => {
       undefined,
       ctx,
     );
-    expect(waitedA.details.status).toBe("completed");
+    expect(waitedA.content).toEqual([{ type: "text", text: "done-2" }]);
+    expect(waitedA.details).toMatchObject({
+      jobId: asyncA.details.jobId,
+      status: "completed",
+      usage: { input: 2, output: 3, turns: 1 },
+      sessionName: "sub-async-a",
+      sessionFile: expect.any(String),
+      resultTruncated: false,
+    });
+
+    const resultA = await jobTool.execute(
+      "result-a",
+      { action: "result", job_id: asyncA.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(resultA.content).toEqual([{ type: "text", text: "done-2" }]);
+    expect(resultA.details).toMatchObject({ jobId: asyncA.details.jobId, status: "completed" });
+
+    const renderedResult = extractText(
+      jobTool.renderResult(
+        { ...resultA, details: { ...resultA.details, resultTruncated: true } },
+        {},
+        { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+      ),
+    );
+    expect(renderedResult).toContain(asyncA.details.jobId);
+    expect(renderedResult).toContain("completed");
+    expect(renderedResult).toContain("1 turn");
+    expect(renderedResult).toContain(resultA.details.sessionFile);
+    expect(renderedResult).toContain("result truncated");
 
     const usageAfterA = await jobTool.execute(
       "usage-a",
@@ -168,16 +206,26 @@ describe("SubagentSessionRuntime public boundaries", () => {
       undefined,
       ctx,
     );
-    const replaceSession = startSession({ type: "session_start" }, ctx);
     waitController.abort();
     const waitResult = await interruptedWait;
     expect(waitResult.content[0]?.text).toContain("Stopped waiting");
+    expect(waitResult.content[0]?.text).not.toContain("done-");
     expect(waitResult.details).toMatchObject({
       jobId: asyncB.details.jobId,
+      status: "running",
       name: "async-b",
       task: "must cancel",
     });
-    await replaceSession;
+    const preservedJob = await jobTool.execute(
+      "status-preserved",
+      { action: "status", job_id: asyncB.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(preservedJob.details.status).toBe("running");
+
+    await startSession({ type: "session_start" }, ctx);
 
     const oldList = await jobTool.execute(
       "list-old",
@@ -210,8 +258,27 @@ describe("SubagentSessionRuntime public boundaries", () => {
     );
     expect(usageAfterReplace.content[0]?.text).toBe("No subagent usage recorded.");
 
-    state.mode = "complete";
+    state.mode = "fail";
     state.onBlockedStart = undefined;
+    const failed = await startTool.execute(
+      "async-failed",
+      { name: "async-failed", task: "fail", tools: ["read"], model: "test-provider/test-model" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const waitedFailure = await jobTool.execute(
+      "wait-failed",
+      { action: "wait", job_id: failed.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(waitedFailure.details.status).toBe("failed");
+    expect(waitedFailure.content[0]?.text).toContain("[failed]");
+    expect(waitedFailure.content[0]?.text).not.toContain("done-");
+
+    state.mode = "complete";
     const asyncC = await startTool.execute(
       "async-c",
       {
@@ -232,6 +299,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
       ctx,
     );
     expect(waitedC.details.status).toBe("completed");
+    expect(waitedC.content[0]?.text).toMatch(/^done-/);
 
     await shutdownSession({ type: "session_shutdown" }, ctx);
     const usageAfterShutdown = await jobTool.execute(

@@ -56,6 +56,7 @@ export interface SubagentJobRenderDetails {
   usage?: UsageStats;
   model?: string;
   sessionName?: string;
+  sessionFile?: string;
   count?: number;
   resultTruncated?: boolean;
 }

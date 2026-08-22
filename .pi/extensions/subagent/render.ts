@@ -229,6 +229,8 @@ function appendJobStats(parts: string[], details: SubagentJobRenderDetails): voi
     if (usage) parts.push(usage);
   }
   if (details.sessionName) parts.push(details.sessionName);
+  if (details.sessionFile) parts.push(details.sessionFile);
+  if (details.resultTruncated) parts.push("result truncated");
 }
 
 /** Render the non-blocking start acknowledgement without exposing raw arguments. */

@@ -421,7 +421,8 @@ export function formatJobMetadata(job: SubagentJob): string {
 }
 
 export function formatJobResult(job: SubagentJob): string {
-  return `${formatJobMetadata(job)}${job.resultText ? `\n${job.resultText}` : "\n(no result available; inspect the child session if present)"}`;
+  if (job.status === SubagentJobStatus.Completed) return job.resultText ?? "";
+  return formatJobMetadata(job);
 }
 
 /** Compatibility alias. Metadata-only callers should use formatJobMetadata. */
