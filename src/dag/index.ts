@@ -46,3 +46,28 @@ export {
   validateDagDefinition,
 } from "./validation.js";
 export type { DagValidationError, DagValidationResult } from "./validation.js";
+export {
+  DagExecutorDefected,
+  DagExecutorFailed,
+  DagExecutorMissing,
+  DagExecutorRegistry,
+  DagExecutorRegistryLayer,
+  DagRuntimeCoordinatorFatal,
+  DagRuntimeGraphStateMismatch,
+  DagRuntimeLive,
+  DagRuntimeNonFreshInitialState,
+  DagRuntimeReducerFatal,
+  DagRuntimeService,
+  submitDagRun,
+} from "./runtime.js";
+export type {
+  DagEffectExecutor,
+  DagExecutorRegistryService,
+  DagExecutorRequest,
+  DagFailedNodePayload,
+  DagNodeAttempt,
+  DagRunHandle,
+  DagRunSnapshot,
+  DagRuntimeError,
+  DagRuntimeServiceShape,
+} from "./runtime.js";
