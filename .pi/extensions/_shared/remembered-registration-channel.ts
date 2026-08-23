@@ -1,4 +1,3 @@
-type NamedRegistration = { tool: { name: string } };
 type Handler<T> = (registration: T) => void;
 type EventBus<TEvent extends string, TRegistration> = {
   emit(event: TEvent, data: TRegistration): void;
@@ -8,22 +7,22 @@ type ChannelState<T> = {
   registrations: Map<string, T>;
   listeners: Set<Handler<T>>;
   removalListeners: Set<Handler<T>>;
+  pendingRemovals: Set<T>;
 };
 
-export function createRememberedRegistrationChannel<
-  TRegistration extends NamedRegistration,
-  TEvent extends string,
->({
+export function createRememberedRegistrationChannel<TRegistration, TEvent extends string>({
   storeKey,
   legacyStoreKey,
   registerEvent,
   unregisterEvent,
+  keyOf,
   isDuplicate,
 }: {
   storeKey: string;
   legacyStoreKey?: string;
   registerEvent: TEvent;
   unregisterEvent: TEvent;
+  keyOf(registration: TRegistration): string;
   isDuplicate(previous: TRegistration | undefined, next: TRegistration): boolean;
 }) {
   const root = globalThis as typeof globalThis & Record<string, unknown>;
@@ -32,24 +31,28 @@ export function createRememberedRegistrationChannel<
       registrations: new Map<string, TRegistration>(),
       listeners: new Set<Handler<TRegistration>>(),
       removalListeners: new Set<Handler<TRegistration>>(),
+      pendingRemovals: new Set<TRegistration>(),
     };
     const current = root[storeKey] as Partial<ChannelState<TRegistration>>;
     current.registrations ??= new Map<string, TRegistration>();
     current.listeners ??= new Set<Handler<TRegistration>>();
     current.removalListeners ??= new Set<Handler<TRegistration>>();
+    current.pendingRemovals ??= new Set<TRegistration>();
     if (legacyStoreKey) delete root[legacyStoreKey];
     return current as ChannelState<TRegistration>;
   };
   const remember = (registration: TRegistration): boolean => {
     const registrations = state().registrations;
-    if (isDuplicate(registrations.get(registration.tool.name), registration)) return false;
-    registrations.set(registration.tool.name, registration);
+    const key = keyOf(registration);
+    if (isDuplicate(registrations.get(key), registration)) return false;
+    registrations.set(key, registration);
     return true;
   };
   const forget = (registration: TRegistration): boolean => {
     const registrations = state().registrations;
-    if (registrations.get(registration.tool.name) !== registration) return false;
-    registrations.delete(registration.tool.name);
+    const key = keyOf(registration);
+    if (registrations.get(key) !== registration) return false;
+    registrations.delete(key);
     return true;
   };
 
@@ -63,9 +66,15 @@ export function createRememberedRegistrationChannel<
     },
     unpublish(events: EventBus<TEvent, TRegistration>, registration: TRegistration): void {
       if (!forget(registration)) return;
-      events.emit(unregisterEvent, registration);
+      const store = state();
+      store.pendingRemovals.add(registration);
+      try {
+        events.emit(unregisterEvent, registration);
+      } finally {
+        store.pendingRemovals.delete(registration);
+      }
       if (!events.on) {
-        for (const listener of state().removalListeners) listener(registration);
+        for (const listener of store.removalListeners) listener(registration);
       }
     },
     subscribe(
@@ -85,7 +94,18 @@ export function createRememberedRegistrationChannel<
         handler(registration);
       });
       const removeUnregisterListener = events.on?.(unregisterEvent, (data) => {
-        if (active) removalHandler?.(data as TRegistration);
+        if (!active) return;
+        const registration = data as TRegistration;
+        const store = state();
+        const current = store.registrations.get(keyOf(registration));
+        if (current === registration) {
+          forget(registration);
+          removalHandler?.(registration);
+          return;
+        }
+        if (current === undefined && store.pendingRemovals.has(registration)) {
+          removalHandler?.(registration);
+        }
       });
       return () => {
         active = false;

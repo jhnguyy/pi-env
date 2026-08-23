@@ -21,6 +21,15 @@ export class DagRuntimeCoordinatorFatal extends Data.TaggedError("DagRuntimeCoor
   readonly cause: unknown;
 }> {}
 
+export class DagRuntimeNotAccepting extends Data.TaggedError("DagRuntimeNotAccepting")<{
+  readonly message: string;
+}> {}
+
+export class DagRuntimeJournalFailed extends Data.TaggedError("DagRuntimeJournalFailed")<{
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
+
 export class DagExecutorMissing extends Data.TaggedError("DagExecutorMissing")<{
   readonly message: string;
   readonly kind: DagContracts.DagExecutorKind;
@@ -45,7 +54,9 @@ export class DagRuntimeReducerFatal extends Data.TaggedError("DagRuntimeReducerF
 export type DagRuntimeError =
   | DagRuntimeGraphStateMismatch
   | DagRuntimeNonFreshInitialState
+  | DagRuntimeNotAccepting
   | DagRuntimeReducerFatal
+  | DagRuntimeJournalFailed
   | DagRuntimeCoordinatorFatal;
 export type DagFailedNodePayload = DagExecutorMissing | DagExecutorFailed | DagExecutorDefected;
 
@@ -97,22 +108,49 @@ export interface DagRunSnapshot {
   readonly attempts: readonly DagNodeAttempt[];
 }
 
+export interface DagRuntimeJournalAttemptStatus {
+  readonly nodeId: string;
+  readonly attemptId: string;
+  readonly ordinal: 1;
+  readonly status:
+    | typeof DagContracts.DagNodeStatus.Running
+    | Exclude<
+        (typeof DagContracts.DagNodeStatus)[keyof typeof DagContracts.DagNodeStatus],
+        typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
+      >;
+}
+
+export interface DagRuntimeJournal {
+  readonly beforeRun: (
+    graph: DagValidation.ValidatedDagDefinition<unknown>,
+  ) => Effect.Effect<void, unknown>;
+  readonly appendTransition: (
+    transition: DagContracts.DagTransition<unknown, DagFailedNodePayload>,
+    attempt?: DagRuntimeJournalAttemptStatus,
+  ) => Effect.Effect<void, unknown>;
+  readonly appendFinal: (outcome: DagContracts.DagRunOutcome) => Effect.Effect<void, unknown>;
+}
+
+export interface DagRuntimeSubmitOptions {
+  readonly journal?: DagRuntimeJournal;
+}
+
+export type DagRunAwaitError =
+  | DagRuntimeReducerFatal
+  | DagRuntimeJournalFailed
+  | DagRuntimeCoordinatorFatal;
+
 export interface DagRunHandle {
   readonly snapshot: Effect.Effect<DagRunSnapshot>;
-  readonly cancel: Effect.Effect<
-    DagRunSnapshot,
-    DagRuntimeReducerFatal | DagRuntimeCoordinatorFatal
-  >;
-  readonly await: Effect.Effect<
-    DagRunSnapshot,
-    DagRuntimeReducerFatal | DagRuntimeCoordinatorFatal
-  >;
+  readonly cancel: Effect.Effect<DagRunSnapshot, DagRunAwaitError>;
+  readonly await: Effect.Effect<DagRunSnapshot, DagRunAwaitError>;
 }
 
 export interface DagRuntimeServiceShape {
   readonly submit: <TPayload>(
     graph: DagValidation.ValidatedDagDefinition<TPayload>,
     initialState?: DagKernel.DagRunState<unknown, DagFailedNodePayload>,
+    options?: DagRuntimeSubmitOptions,
   ) => Effect.Effect<DagRunHandle, DagRuntimeError, DagExecutorRegistry | Scope.Scope>;
 }
 

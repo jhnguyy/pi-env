@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Ref, Scope } from "effect";
 import { describe, expect } from "vitest";
 import {
   DagBlockedReason,
@@ -15,8 +15,10 @@ import {
   DagRunOutcome,
   DagRunOutcomeResultTag,
   DagRuntimeGraphStateMismatch,
+  DagRuntimeJournalFailed,
   DagRuntimeLive,
   DagRuntimeNonFreshInitialState,
+  DagSessionSeamFailed,
   DagTransitionType,
   createDagRunState,
   reduceDagRunState,
@@ -26,6 +28,7 @@ import {
   type DagFailedNodePayload,
   type DagExecutorRequest,
   type DagNode,
+  type DagRuntimeJournal,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
@@ -183,6 +186,218 @@ describe("DAG runtime", () => {
         DagTransitionType.Complete,
       ]);
     }),
+  );
+
+  it.effect("appends graph and start before executor invocation", () =>
+    Effect.gen(function* () {
+      const dag = Fixtures.graph([runtimeNode("task")]);
+      const events = yield* Ref.make<string[]>([]);
+      const graphAppendEntered = yield* Deferred.make<void>();
+      const releaseGraphAppend = yield* Deferred.make<void>();
+      const startAppendEntered = yield* Deferred.make<void>();
+      const releaseStartAppend = yield* Deferred.make<void>();
+      const executorStarted = yield* Deferred.make<void>();
+      const record = (event: string) => Ref.update(events, (existing) => [...existing, event]);
+      const journal: DagRuntimeJournal = {
+        beforeRun: () =>
+          record("graph").pipe(
+            Effect.andThen(Deferred.succeed(graphAppendEntered, undefined)),
+            Effect.andThen(Deferred.await(releaseGraphAppend)),
+          ),
+        appendTransition: (transition) =>
+          record(transition.type).pipe(
+            Effect.andThen(
+              transition.type === DagTransitionType.Start
+                ? Deferred.succeed(startAppendEntered, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseStartAppend)),
+                  )
+                : Effect.void,
+            ),
+          ),
+        appendFinal: () => record("final"),
+      };
+      const { service } = registryFromMap({
+        task: () =>
+          Deferred.succeed(executorStarted, undefined).pipe(
+            Effect.andThen(record("executor")),
+            Effect.as({}),
+          ),
+      });
+      const scope = yield* Scope.make();
+      const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
+        Effect.provide(runtimeLayer(service)),
+        Scope.provide(scope),
+      );
+
+      yield* Deferred.await(graphAppendEntered);
+      expect(yield* Deferred.isDone(startAppendEntered)).toBe(false);
+      expect(yield* Deferred.isDone(executorStarted)).toBe(false);
+      yield* Deferred.succeed(releaseGraphAppend, undefined);
+      yield* Deferred.await(startAppendEntered);
+      expect(yield* Deferred.isDone(executorStarted)).toBe(false);
+      yield* Deferred.succeed(releaseStartAppend, undefined);
+      yield* handle.await;
+      yield* Scope.close(scope, Exit.void);
+
+      expect(yield* Ref.get(events)).toEqual(["graph", "start", "executor", "complete", "final"]);
+    }),
+  );
+
+  it.effect("journals accepted transitions in order through final", () =>
+    Effect.gen(function* () {
+      const dag = Fixtures.graph([
+        runtimeNode("root"),
+        runtimeNode("blocked", "blocked", [dependency("root", DagDependencyMode.Required)]),
+      ]);
+      const events = yield* Ref.make<string[]>([]);
+      const journal: DagRuntimeJournal = {
+        beforeRun: () => Ref.update(events, (existing) => [...existing, "graph"]),
+        appendTransition: (transition) =>
+          Ref.update(events, (existing) => [
+            ...existing,
+            `${transition.nodeId}:${transition.type}`,
+          ]),
+        appendFinal: (outcome) =>
+          Ref.update(events, (existing) => [...existing, `final:${outcome}`]),
+      };
+      const { service } = registryFromMap({
+        root: () => Effect.fail("boom"),
+        blocked: () => Effect.succeed({ unreachable: true }),
+      });
+
+      yield* submitDagRun(dag, undefined, { journal }).pipe(
+        Effect.flatMap((handle) => handle.await),
+        Effect.provide(runtimeLayer(service)),
+        Effect.scoped,
+      );
+
+      expect(yield* Ref.get(events)).toEqual([
+        "graph",
+        "root:start",
+        "root:complete",
+        "blocked:block",
+        "final:failed",
+      ]);
+    }),
+  );
+
+  it.effect("fails typed before start publication without invoking the executor", () =>
+    Effect.gen(function* () {
+      const dag = Fixtures.graph([runtimeNode("task")]);
+      const invocations = yield* Ref.make(0);
+      const sessionFailure = new DagSessionSeamFailed({
+        operation: "appendCustomEntry",
+        cause: new Error("append failed"),
+      });
+      const journal: DagRuntimeJournal = {
+        beforeRun: () => Effect.void,
+        appendTransition: (transition) =>
+          transition.type === DagTransitionType.Start ? Effect.fail(sessionFailure) : Effect.void,
+        appendFinal: () => Effect.void,
+      };
+      const { service } = registryFromMap({
+        task: () => Ref.update(invocations, (count) => count + 1).pipe(Effect.as({})),
+      });
+      const scope = yield* Scope.make();
+      const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
+        Effect.provide(runtimeLayer(service)),
+        Scope.provide(scope),
+      );
+
+      const awaitExit = yield* Effect.exit(handle.await);
+      const cancelExit = yield* Effect.exit(handle.cancel);
+
+      expect(awaitExit._tag).toBe("Failure");
+      expect(cancelExit._tag).toBe("Failure");
+      expect(yield* Ref.get(invocations)).toBe(0);
+      if (awaitExit._tag === "Failure") {
+        const failure = Cause.findErrorOption(awaitExit.cause);
+        expect(Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed).toBe(
+          true,
+        );
+        if (Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed) {
+          expect(failure.value.cause).toBe(sessionFailure);
+        }
+      }
+      if (cancelExit._tag === "Failure") {
+        const failure = Cause.findErrorOption(cancelExit.cause);
+        expect(Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed).toBe(
+          true,
+        );
+        if (Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed) {
+          expect(failure.value.cause).toBe(sessionFailure);
+        }
+      }
+      yield* Scope.close(scope, Exit.void);
+    }),
+  );
+
+  it.effect(
+    "stops after completion journal failure without starting dependents and preserves persisted snapshot",
+    () =>
+      Effect.gen(function* () {
+        const dag = Fixtures.graph(
+          [
+            runtimeNode("root"),
+            runtimeNode("active"),
+            runtimeNode("dependent", "dependent", [dependency("root", DagDependencyMode.Required)]),
+          ],
+          2,
+        );
+        const started = yield* Queue.unbounded<string>();
+        const interrupted = yield* Queue.unbounded<string>();
+        const releaseRoot = yield* Deferred.make<void>();
+        const journal: DagRuntimeJournal = {
+          beforeRun: () => Effect.void,
+          appendTransition: (transition) =>
+            transition.nodeId === "root" && transition.type === DagTransitionType.Complete
+              ? Effect.fail("root complete append failed")
+              : Effect.void,
+          appendFinal: () => Effect.void,
+        };
+        const { service } = registryFromMap({
+          root: () =>
+            Queue.offer(started, "root").pipe(
+              Effect.andThen(Deferred.await(releaseRoot)),
+              Effect.as({}),
+            ),
+          active: () =>
+            Queue.offer(started, "active").pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(Queue.offer(interrupted, "active")),
+            ),
+          dependent: () => Queue.offer(started, "dependent").pipe(Effect.as({})),
+        });
+        const scope = yield* Scope.make();
+        const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
+          Effect.provide(runtimeLayer(service)),
+          Scope.provide(scope),
+        );
+        expect([yield* Queue.take(started), yield* Queue.take(started)]).toEqual([
+          "root",
+          "active",
+        ]);
+
+        yield* Deferred.succeed(releaseRoot, undefined);
+        const exit = yield* Effect.exit(handle.await);
+        const persisted = yield* handle.snapshot;
+
+        expect(exit._tag).toBe("Failure");
+        if (exit._tag === "Failure") {
+          const failure = Cause.findErrorOption(exit.cause);
+          expect(Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed).toBe(
+            true,
+          );
+        }
+        expect(yield* Queue.take(interrupted)).toBe("active");
+        expect(yield* Queue.poll(started)).toEqual(Option.none());
+        expect(persisted.state.nodes).toEqual([
+          { nodeId: "root", status: DagNodeStatus.Running },
+          { nodeId: "active", status: DagNodeStatus.Running },
+          { nodeId: "dependent", status: DagNodeStatus.Queued },
+        ]);
+        yield* Scope.close(scope, Exit.void);
+      }),
   );
 
   it.effect("surfaces typed executor failure as expected failed node outcome", () =>

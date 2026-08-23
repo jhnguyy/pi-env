@@ -44,10 +44,7 @@ export interface ExtToolRegistration {
 
 interface AgentToolEventBus {
   emit(event: AgentToolEvent, data: ExtToolRegistration): void;
-  on?(
-    event: AgentToolEvent,
-    handler: (data: unknown) => void,
-  ): void | (() => void);
+  on?(event: AgentToolEvent, handler: (data: unknown) => void): void | (() => void);
 }
 
 export interface AgentToolEvents {
@@ -57,14 +54,12 @@ export interface AgentToolEvents {
 
 type AgentToolHandler = (registration: ExtToolRegistration) => void;
 
-const agentToolChannel = createRememberedRegistrationChannel<
-  ExtToolRegistration,
-  AgentToolEvent
->({
+const agentToolChannel = createRememberedRegistrationChannel<ExtToolRegistration, AgentToolEvent>({
   storeKey: "__piEnvAgentToolRegistry",
   legacyStoreKey: "__piEnvAgentToolStore",
   registerEvent: AgentToolEvent.Register,
   unregisterEvent: AgentToolEvent.Unregister,
+  keyOf: (registration) => registration.tool.name,
   isDuplicate: (previous, next) => previous === next,
 });
 
@@ -77,8 +72,7 @@ function withFactory(
     ...registration,
     sessionGeneration: generation,
     createTool:
-      registration.createTool ??
-      (() => ({ ...registration.tool } as AgentTool<any, any>)),
+      registration.createTool ?? (() => ({ ...registration.tool }) as AgentTool<any, any>),
   };
 }
 

@@ -6,15 +6,19 @@ import type * as DagValidation from "./validation.js";
 
 export * from "./runtime-contracts.js";
 
-export const DagRuntimeLive: Layer.Layer<RuntimeContracts.DagRuntimeService> = Layer.succeed(RuntimeContracts.DagRuntimeService, {
-  submit: RuntimeCoordinator.submitDagRunInternal,
-});
+export const DagRuntimeLive: Layer.Layer<RuntimeContracts.DagRuntimeService> = Layer.succeed(
+  RuntimeContracts.DagRuntimeService,
+  {
+    submit: RuntimeCoordinator.submitDagRunInternal,
+  },
+);
 
 export const submitDagRun = <TPayload>(
   graph: DagValidation.ValidatedDagDefinition<TPayload>,
   initialState?: DagKernel.DagRunState<unknown, RuntimeContracts.DagFailedNodePayload>,
+  options?: RuntimeContracts.DagRuntimeSubmitOptions,
 ) =>
   Effect.gen(function* () {
     const runtime = yield* RuntimeContracts.DagRuntimeService;
-    return yield* runtime.submit(graph, initialState);
+    return yield* runtime.submit(graph, initialState, options);
   });
