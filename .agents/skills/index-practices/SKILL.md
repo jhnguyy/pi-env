@@ -23,8 +23,6 @@ Lead with the most distinctive fact. File names, format names, numbers, decision
 
 ## Format
 
-Do not turn a directory README into a linked file inventory when filenames and folders already provide enough context. Use the README to state directory purpose and tell readers to navigate by filename. Create a separate index only when it adds retrieval information that the file tree cannot show.
-
 Pipe-delimited, one line per group. Use for structural indices where the file is meant to be a navigational map.
 
 ```

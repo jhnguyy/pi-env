@@ -2,9 +2,9 @@
 
 Use the repo docs as the navigation path:
 
-1. Start with `README.md` for project purpose, setup modes, and directory navigation policy.
-2. Use `CONTRIBUTING.md` for branch/worktree workflow, runtime requirements, and development process.
-3. Navigate `docs/` by filename for area-specific conventions.
+1. Start with `README.md` for project purpose and setup modes.
+2. Use `CONTRIBUTING.md` for branch/worktree workflow, runtime requirements, development process, and documentation policy.
+3. Use `docs/` for area-specific conventions.
 4. Follow `docs/conventions/change-discipline.md` for change scope and validation discipline.
 
 For prose and comments:
@@ -14,4 +14,4 @@ For prose and comments:
 3. Write documentation for external, operator, and agent contracts, durable decisions, and navigation.
 4. Link to the source authority instead of repeating its content.
 
-Keep this file as a navigation map. Update the source document that owns each rule. Do not add linked file catalogs to README files when the directory structure already supplies the map.
+Keep this file as a navigation map. Update the source document that owns each rule.
