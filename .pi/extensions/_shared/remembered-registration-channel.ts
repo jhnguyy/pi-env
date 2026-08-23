@@ -116,6 +116,7 @@ export function createRememberedRegistrationChannel<
         if (!active) return;
         const registration = data as TRegistration;
         remember(registration);
+        seenRemovals.delete(registration);
         handler(registration);
       });
       const removeUnregisterListener = events.on?.(unregisterEvent, (data) => {

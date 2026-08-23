@@ -156,9 +156,11 @@ describe("DAG runtime service registration", () => {
 
     events.events.emit(DagRuntimeServiceEvent.Unregister, registration);
     events.events.emit(DagRuntimeServiceEvent.Unregister, registration);
+    events.events.emit(DagRuntimeServiceEvent.Register, registration);
+    events.events.emit(DagRuntimeServiceEvent.Unregister, registration);
 
-    expect(removedA).toEqual([registration]);
-    expect(removedB).toEqual([registration]);
+    expect(removedA).toEqual([registration, registration]);
+    expect(removedB).toEqual([registration, registration]);
     const late: DagRuntimeServiceRegistration[] = [];
     listenForDagRuntimeService(events, (active) => late.push(active));
     expect(late).toEqual([]);
