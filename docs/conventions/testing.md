@@ -35,16 +35,22 @@ Use composition to improve the suite as a whole. Do not use test count, assertio
 
 ## Independent hardening workflow
 
-Risk-triggered changes require requirement-derived test design that is independent of the implementation session:
+Risk-triggered changes require requirement-derived test design that is independent of the implementation session.
 
-1. The implementation owner records the requirement or regression, public boundary, expected outcomes, and risk. Catching tests may be generated and discarded.
-2. A test-design session starts from the base worktree. It receives the requirement, public contracts, and existing tests, but not the implementation diff.
+1. The implementation owner creates an evidence map. For each requirement or risk, record the owning boundary, existing evidence, missing evidence, and test class.
+2. A test-design session starts from the base worktree. It receives the requirement, public contracts, evidence map, and existing tests, but not the implementation diff.
 3. The designer fixes behavioral scenarios and expected outcomes before implementation details are available.
-4. A test builder may inspect the branch only after those assertions are fixed, to connect public APIs and fixtures.
-5. Regression tests must fail on the base revision and pass on the branch. New capabilities use requirement-first evidence plus a negative control when practical.
-6. If implementation constraints require changing an assertion, return that decision to the independent designer or reviewer.
+4. The implementation session can create and discard catching tests. It must not promote each internal branch to permanent evidence.
+5. A test builder may inspect the branch only after the scenarios are fixed. The builder connects assertions to public APIs and fixtures.
+6. Regression tests must fail on the base revision and pass on the branch. This red/green result is the counterfactual evidence for an ordinary bug fix.
+7. New capabilities use requirement-first evidence plus a practical negative control when one exists. A negative control changes or bypasses the behavior under test and confirms that the test detects the difference.
+8. For concurrency, cancellation, cleanup, persistence, resource admission, authority, credential, and security boundaries, a separate adversarial pass proves the highest-risk evidence through a narrow mutation, removed admission check, injected failure, corrupted persisted value, or equivalent counterfactual.
+9. Before merge, review the portfolio. Name the unique claim for each new test. Identify existing tests that would fail for the same defect. Remove repeated evidence at the same public boundary.
+10. If implementation constraints require an assertion change, return the decision to the independent designer or reviewer.
 
-This separation is mandatory for changed tool contracts, reproducible bug fixes, concurrency/cancellation/resource/error paths, setup/settings/install/local-adapter policy, and new slow integration tests. Small internal refactors may rely on existing coverage when no durable behavior changes.
+Keep interaction matrices when representation, error translation, state, concurrency, cancellation, cleanup, persistence, authority, or resource admission differs. Do not repeat a complete pure-policy matrix at every integration layer. Keep one cross-layer case when composition itself can fail.
+
+Scale the artifact, not the rule. A low-risk evidence map can be a few lines in the pull request, and red/green can satisfy the adversarial requirement for an ordinary bug. Use the full separate-pass workflow for changed tool contracts, concurrency, cancellation, cleanup, persistence, resource, setup, settings, credential, security, local-adapter policy, and new slow integration tests. Small internal refactors may rely on existing coverage when no durable behavior changes.
 
 Promoting a generated catching test means independently re-deriving the hardening case. Renaming the generated file is not sufficient.
 
@@ -66,7 +72,8 @@ For risk-triggered work, the pull request records:
 
 - Test class and protected capability, regression, or safety invariant
 - Independent design origin
-- Red/green or negative-control evidence
+- Red/green, mutation, or negative-control evidence
+- Added, reused, and removed portfolio evidence
 - Integration or end-to-end runtime impact
 - Omitted coverage and the reason that existing tests are sufficient
 
