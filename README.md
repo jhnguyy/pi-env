@@ -29,13 +29,7 @@ Portable fallback setup intentionally uses whatever tools are already on `PATH`.
 
 ## Documentation
 
-Repository conventions and area-specific documentation live under `docs/`.
-
-- [Container image](docs/container-image.md)
-- [GitHub pull request review workflow](docs/pr-review.md)
-- [License compliance](docs/licensing.md)
-- [Nix integration](docs/nix.md)
-- [Subagents](docs/subagents.md)
+Repository conventions and area-specific documentation live under `docs/`. Navigate that directory by filename. README files state directory purpose and navigation policy. They do not duplicate the visible file tree with linked catalogs.
 
 ## License
 

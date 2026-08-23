@@ -19,15 +19,15 @@ chore/<name>      config, docs, cleanup
 
 ## Documentation changes
 
-Implementation conventions live under [`docs/conventions/`](docs/conventions/README.md). Start with the overview and follow the area-specific page that matches the work.
+Implementation conventions live under `docs/conventions/`. Navigate that directory by filename and read the area-specific page that matches the work.
 
 Keep documentation targeted:
 
-- `README.md`: purpose, setup choices, navigation.
+- `README.md`: purpose, setup choices, and directory navigation policy. Do not duplicate a visible directory tree with a linked file catalog.
 - `CONTRIBUTING.md`: branch, PR, worktree, reviewer, and test policy.
 - `AGENTS.md`: coding-agent workflow.
 
-Cross-link when useful. Keep navigation docs as thin link chains. Link to guidance owned by code, config, or scripts. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
+Cross-link a specific dependency or source authority when the relationship is not clear from the file structure. Do not use README files as linked inventories. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
 
 First-pass rule for prose and comments:
 
