@@ -58,10 +58,21 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
 
   return {
     publish(events: EventBus<TEvent, TRegistration>, registration: TRegistration): void {
+      const store = state();
+      const key = keyOf(registration);
+      const previous = store.registrations.get(key);
       const changed = remember(registration);
-      events.emit(registerEvent, registration);
+      try {
+        events.emit(registerEvent, registration);
+      } catch (cause) {
+        if (changed && store.registrations.get(key) === registration) {
+          if (previous === undefined) store.registrations.delete(key);
+          else store.registrations.set(key, previous);
+        }
+        throw cause;
+      }
       if (changed && !events.on) {
-        for (const listener of state().listeners) listener(registration);
+        for (const listener of store.listeners) listener(registration);
       }
     },
     unpublish(events: EventBus<TEvent, TRegistration>, registration: TRegistration): void {

@@ -25,6 +25,11 @@ export class DagRuntimeNotAccepting extends Data.TaggedError("DagRuntimeNotAccep
   readonly message: string;
 }> {}
 
+export class DagRuntimeRunAlreadyExists extends Data.TaggedError("DagRuntimeRunAlreadyExists")<{
+  readonly message: string;
+  readonly runId: string;
+}> {}
+
 export class DagRuntimeJournalFailed extends Data.TaggedError("DagRuntimeJournalFailed")<{
   readonly message: string;
   readonly cause: unknown;
@@ -55,6 +60,7 @@ export type DagRuntimeError =
   | DagRuntimeGraphStateMismatch
   | DagRuntimeNonFreshInitialState
   | DagRuntimeNotAccepting
+  | DagRuntimeRunAlreadyExists
   | DagRuntimeReducerFatal
   | DagRuntimeJournalFailed
   | DagRuntimeCoordinatorFatal;

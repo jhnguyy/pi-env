@@ -5,6 +5,8 @@ import {
   DagExecutorRegistryLayer,
   DagRuntimeLive,
   DagRuntimeNotAccepting,
+  DagRuntimeRunAlreadyExists,
+  DagSessionEntryType,
   makeDagSessionWriter,
   reconstructDagSession,
   submitDagRun,
@@ -26,6 +28,29 @@ import type { SubagentRunSupervisor } from "./control";
 import { makeDagSubagentExecutorRegistry } from "./dag-runtime";
 import type { SubagentUsageLedger } from "./usage";
 
+function persistedRunIds(branch: readonly unknown[]): Set<string> {
+  const runIds = new Set<string>();
+  for (const entry of branch) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const wrapper = entry as {
+      readonly type?: unknown;
+      readonly customType?: unknown;
+      readonly data?: unknown;
+    };
+    if (
+      wrapper.type !== "custom" ||
+      wrapper.customType !== DagSessionEntryType ||
+      typeof wrapper.data !== "object" ||
+      wrapper.data === null
+    ) {
+      continue;
+    }
+    const runId = (wrapper.data as { readonly runId?: unknown }).runId;
+    if (typeof runId === "string") runIds.add(runId);
+  }
+  return runIds;
+}
+
 interface DagSessionRuntimeDependencies {
   readonly sessionGeneration: string;
   readonly supervisor: SubagentRunSupervisor;
@@ -45,6 +70,7 @@ export class DagSessionRuntime {
     private readonly seam: DagSessionManagerSeam,
     private readonly scope: Scope.Closeable,
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
+    private readonly claimedRunIds: Set<string>,
     ctx: ExtensionContext,
     sessionGeneration: string,
   ) {
@@ -85,14 +111,20 @@ export class DagSessionRuntime {
       appendCustomEntry: (customType, data) =>
         writableSessionManager.appendCustomEntry(customType, data),
     };
-    return new DagSessionRuntime(
-      pi,
-      seam,
-      scope,
-      Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
-      ctx,
-      dependencies.sessionGeneration,
-    );
+    try {
+      return new DagSessionRuntime(
+        pi,
+        seam,
+        scope,
+        Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
+        persistedRunIds(writableSessionManager.getBranch()),
+        ctx,
+        dependencies.sessionGeneration,
+      );
+    } catch (cause) {
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      throw cause;
+    }
   }
 
   stopAccepting(): void {
@@ -127,6 +159,15 @@ export class DagSessionRuntime {
           new DagRuntimeNotAccepting({ message: "The session DAG runtime is shutting down." }),
         );
       }
+      if (this.claimedRunIds.has(graph.runId)) {
+        return Effect.fail(
+          new DagRuntimeRunAlreadyExists({
+            message: "The parent session already contains this DAG run ID.",
+            runId: graph.runId,
+          }),
+        );
+      }
+      this.claimedRunIds.add(graph.runId);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;

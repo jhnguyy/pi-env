@@ -119,6 +119,7 @@ export {
   DagRuntimeLive,
   DagRuntimeNonFreshInitialState,
   DagRuntimeNotAccepting,
+  DagRuntimeRunAlreadyExists,
   DagRuntimeReducerFatal,
   DagRuntimeService,
   submitDagRun,

@@ -42,6 +42,46 @@ describe("DAG runtime service registration", () => {
     resetDagRuntimeServiceRegistryForTests();
   });
 
+  it("rolls back remembered state when registration publication fails", () => {
+    const events = createEvents();
+    const throwingEvents: DagRuntimeServiceEvents = {
+      events: {
+        emit() {
+          throw new Error("listener failed");
+        },
+      },
+    };
+
+    expect(() =>
+      registerDagRuntimeService(throwingEvents, {
+        parentSessionId: "failed",
+        sessionGeneration: "failed",
+        service,
+      }),
+    ).toThrow("listener failed");
+    const afterInitialFailure: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(events, (registration) => afterInitialFailure.push(registration));
+    expect(afterInitialFailure).toEqual([]);
+
+    const stable = registerDagRuntimeService(events, {
+      parentSessionId: "stable",
+      sessionGeneration: "stable",
+      service,
+    });
+    expect(() =>
+      registerDagRuntimeService(throwingEvents, {
+        parentSessionId: "replacement",
+        sessionGeneration: "replacement",
+        service,
+      }),
+    ).toThrow("listener failed");
+    const afterReplacementFailure: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(events, (registration) =>
+      afterReplacementFailure.push(registration),
+    );
+    expect(afterReplacementFailure).toEqual([stable]);
+  });
+
   it("replays the active generation and preserves its replacement against stale removal", () => {
     const events = createEvents();
     const first = registerDagRuntimeService(events, {

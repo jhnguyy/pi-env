@@ -50,6 +50,7 @@ import {
   DagExecutorKind,
   DagRuntimeJournalFailed,
   DagRuntimeNotAccepting,
+  DagRuntimeRunAlreadyExists,
   DagSessionEntryType,
   DagSessionSeamFailed,
   DagTransitionType,
@@ -186,6 +187,30 @@ describe("session-owned DAG runtime composition", () => {
     expect(Object.isFrozen(reconstruction.state)).toBe(true);
     expect(Object.isFrozen(reconstruction.transitions)).toBe(true);
 
+    const duplicate = await Effect.runPromise(
+      Effect.exit(registration.service.submit(graph("composed-run"))),
+    );
+    expect(duplicate._tag).toBe("Failure");
+    if (duplicate._tag === "Failure") {
+      const failure = Cause.findErrorOption(duplicate.cause);
+      expect(Option.isSome(failure) && failure.value instanceof DagRuntimeRunAlreadyExists).toBe(
+        true,
+      );
+    }
+
+    await runtime.shutdownSession();
+    await runtime.startSession(ctx);
+    const afterRestart = registrations.at(-1)!;
+    const persistedDuplicate = await Effect.runPromise(
+      Effect.exit(afterRestart.service.submit(graph("composed-run"))),
+    );
+    expect(persistedDuplicate._tag).toBe("Failure");
+    if (persistedDuplicate._tag === "Failure") {
+      const failure = Cause.findErrorOption(persistedDuplicate.cause);
+      expect(Option.isSome(failure) && failure.value instanceof DagRuntimeRunAlreadyExists).toBe(
+        true,
+      );
+    }
     await runtime.shutdownSession();
   });
 
