@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Cause, Effect, Option } from "effect";
+import { Cause, Effect, Fiber, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtToolRegistration } from "../../_shared/agent-tools";
 
@@ -285,8 +285,10 @@ describe("session-owned DAG runtime composition", () => {
       );
 
     await runtime.startSession(ctx);
-    await Effect.runPromise(registration!.service.submit(graph("shutdown-run")));
+    const handle = await Effect.runPromise(registration!.service.submit(graph("shutdown-run")));
     await started;
+    const interruptedObserver = Effect.runFork(handle.await);
+    await Effect.runPromise(Fiber.interrupt(interruptedObserver));
 
     const shutdown = runtime.shutdownSession();
     const admissionExit = await Effect.runPromise(
@@ -298,6 +300,8 @@ describe("session-owned DAG runtime composition", () => {
       expect(Option.isSome(failure) && failure.value instanceof DagRuntimeNotAccepting).toBe(true);
     }
     await shutdown;
+    const cancelled = await Effect.runPromise(handle.await);
+    expect(cancelled.state.nodes[0]).toMatchObject({ status: "cancelled" });
     expect(state.lifecycle).toEqual(["executor-interrupted", "unregistered", "telemetry-disposed"]);
 
     const late: DagRuntimeServiceRegistration[] = [];

@@ -80,6 +80,11 @@ export function createRememberedRegistrationChannel<
           if (previous !== undefined) {
             store.registrations.set(key, previous);
             store.removedRegistrations.delete(previous);
+            try {
+              events.emit(registerEvent, previous);
+            } catch {
+              // Preserve the original registration failure after restoration notification.
+            }
           }
         }
         throw cause;

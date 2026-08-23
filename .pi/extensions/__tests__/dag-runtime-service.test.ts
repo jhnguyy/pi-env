@@ -101,6 +101,37 @@ describe("DAG runtime service registration", () => {
       afterReplacementFailure.push(registration),
     );
     expect(afterReplacementFailure).toEqual([stable]);
+
+    resetDagRuntimeServiceRegistryForTests();
+    const replacementEvents = createEvents();
+    const added: DagRuntimeServiceRegistration[] = [];
+    const removed: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(
+      replacementEvents,
+      (registration) => added.push(registration),
+      (registration) => removed.push(registration),
+    );
+    let rejectRegistration = false;
+    replacementEvents.events.on?.(DagRuntimeServiceEvent.Register, () => {
+      if (rejectRegistration) throw new Error("replacement listener failed");
+    });
+    const previous = registerDagRuntimeService(replacementEvents, {
+      parentSessionId: "previous",
+      sessionGeneration: "previous",
+      service,
+    });
+    rejectRegistration = true;
+    expect(() =>
+      registerDagRuntimeService(replacementEvents, {
+        parentSessionId: "failed-replacement",
+        sessionGeneration: "failed-replacement",
+        service,
+      }),
+    ).toThrow("replacement listener failed");
+    expect(added).toHaveLength(3);
+    expect(added[0]).toBe(previous);
+    expect(added[2]).toBe(previous);
+    expect(removed).toEqual([added[1]]);
   });
 
   it("delivers a raw current unregister once to every subscriber", () => {

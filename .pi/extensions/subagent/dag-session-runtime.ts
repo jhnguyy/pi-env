@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Effect, Exit, Layer, Scope } from "effect";
+import { Cause, Effect, Exit, Layer, Scope } from "effect";
 import {
   DagExecutorRegistryLayer,
   DagRuntimeLive,
@@ -199,11 +199,18 @@ export class DagSessionRuntime {
         Scope.provide(this.scope),
         Effect.map((handle) => {
           this.activeRuns.add(handle);
-          const remove = Effect.sync(() => this.activeRuns.delete(handle));
+          const removeAfterTerminal = <A, E>(effect: Effect.Effect<A, E>) =>
+            effect.pipe(
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+                  ? Effect.void
+                  : Effect.sync(() => this.activeRuns.delete(handle)),
+              ),
+            );
           return Object.freeze({
             snapshot: handle.snapshot,
-            await: handle.await.pipe(Effect.ensuring(remove)),
-            cancel: handle.cancel.pipe(Effect.ensuring(remove)),
+            await: removeAfterTerminal(handle.await),
+            cancel: removeAfterTerminal(handle.cancel),
           } satisfies DagRunHandle);
         }),
         Effect.ensuring(finishSubmission),
