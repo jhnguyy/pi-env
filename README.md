@@ -31,12 +31,6 @@ Portable fallback setup intentionally uses whatever tools are already on `PATH`.
 
 Repository conventions and area-specific documentation live under `docs/`.
 
-- [Container image](docs/container-image.md)
-- [GitHub pull request review workflow](docs/pr-review.md)
-- [License compliance](docs/licensing.md)
-- [Nix integration](docs/nix.md)
-- [Subagents](docs/subagents.md)
-
 ## License
 
 pi-env is available under the [MIT License](LICENSE).

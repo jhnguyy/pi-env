@@ -19,23 +19,7 @@ chore/<name>      config, docs, cleanup
 
 ## Documentation changes
 
-Implementation conventions live under [`docs/conventions/`](docs/conventions/README.md). Start with the overview and follow the area-specific page that matches the work.
-
-Keep documentation targeted:
-
-- `README.md`: purpose, setup choices, navigation.
-- `CONTRIBUTING.md`: branch, PR, worktree, reviewer, and test policy.
-- `AGENTS.md`: coding-agent workflow.
-
-Cross-link when useful. Keep navigation docs as thin link chains. Link to guidance owned by code, config, or scripts. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
-
-First-pass rule for prose and comments:
-
-1. Make names, types, decomposition, and tests explain behavior.
-2. Leave self-descriptive code uncommented.
-3. Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.
-4. Write documentation for an external, operator, or agent contract, a durable decision, or navigation.
-5. Link to the source authority instead of repeating its content.
+Follow `docs/conventions/documentation.md` for documentation placement, README scope, navigation, cross-links, prose, and comments.
 
 ## Runtime requirements
 
