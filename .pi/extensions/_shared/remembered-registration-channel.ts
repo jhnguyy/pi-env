@@ -7,7 +7,7 @@ type ChannelState<T> = {
   registrations: Map<string, T>;
   listeners: Set<Handler<T>>;
   removalListeners: Set<Handler<T>>;
-  pendingRemovals: Set<T>;
+  removedRegistrations: Set<T>;
 };
 
 export function createRememberedRegistrationChannel<TRegistration, TEvent extends string>({
@@ -31,28 +31,30 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
       registrations: new Map<string, TRegistration>(),
       listeners: new Set<Handler<TRegistration>>(),
       removalListeners: new Set<Handler<TRegistration>>(),
-      pendingRemovals: new Set<TRegistration>(),
+      removedRegistrations: new Set<TRegistration>(),
     };
     const current = root[storeKey] as Partial<ChannelState<TRegistration>>;
     current.registrations ??= new Map<string, TRegistration>();
     current.listeners ??= new Set<Handler<TRegistration>>();
     current.removalListeners ??= new Set<Handler<TRegistration>>();
-    current.pendingRemovals ??= new Set<TRegistration>();
+    current.removedRegistrations ??= new Set<TRegistration>();
     if (legacyStoreKey) delete root[legacyStoreKey];
     return current as ChannelState<TRegistration>;
   };
   const remember = (registration: TRegistration): boolean => {
-    const registrations = state().registrations;
+    const store = state();
     const key = keyOf(registration);
-    if (isDuplicate(registrations.get(key), registration)) return false;
-    registrations.set(key, registration);
+    if (isDuplicate(store.registrations.get(key), registration)) return false;
+    store.registrations.set(key, registration);
+    store.removedRegistrations.delete(registration);
     return true;
   };
   const forget = (registration: TRegistration): boolean => {
-    const registrations = state().registrations;
+    const store = state();
     const key = keyOf(registration);
-    if (registrations.get(key) !== registration) return false;
-    registrations.delete(key);
+    if (store.registrations.get(key) !== registration) return false;
+    store.registrations.delete(key);
+    store.removedRegistrations.add(registration);
     return true;
   };
 
@@ -67,7 +69,10 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
       } catch (cause) {
         if (changed && store.registrations.get(key) === registration) {
           if (previous === undefined) store.registrations.delete(key);
-          else store.registrations.set(key, previous);
+          else {
+            store.registrations.set(key, previous);
+            store.removedRegistrations.delete(previous);
+          }
         }
         throw cause;
       }
@@ -78,12 +83,7 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
     unpublish(events: EventBus<TEvent, TRegistration>, registration: TRegistration): void {
       if (!forget(registration)) return;
       const store = state();
-      store.pendingRemovals.add(registration);
-      try {
-        events.emit(unregisterEvent, registration);
-      } finally {
-        store.pendingRemovals.delete(registration);
-      }
+      events.emit(unregisterEvent, registration);
       if (!events.on) {
         for (const listener of store.removalListeners) listener(registration);
       }
@@ -94,6 +94,7 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
       removalHandler?: Handler<TRegistration>,
     ): () => void {
       const store = state();
+      const seenRemovals = new Set<TRegistration>();
       let active = true;
       store.listeners.add(handler);
       if (removalHandler) store.removalListeners.add(removalHandler);
@@ -109,14 +110,11 @@ export function createRememberedRegistrationChannel<TRegistration, TEvent extend
         const registration = data as TRegistration;
         const store = state();
         const current = store.registrations.get(keyOf(registration));
-        if (current === registration) {
-          forget(registration);
-          removalHandler?.(registration);
-          return;
-        }
-        if (current === undefined && store.pendingRemovals.has(registration)) {
-          removalHandler?.(registration);
-        }
+        if (current !== undefined && current !== registration) return;
+        if (current === registration) forget(registration);
+        if (!store.removedRegistrations.has(registration) || seenRemovals.has(registration)) return;
+        seenRemovals.add(registration);
+        removalHandler?.(registration);
       });
       return () => {
         active = false;

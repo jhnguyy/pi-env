@@ -82,6 +82,36 @@ describe("DAG runtime service registration", () => {
     expect(afterReplacementFailure).toEqual([stable]);
   });
 
+  it("delivers a raw current unregister once to every subscriber", () => {
+    const events = createEvents();
+    const registration = registerDagRuntimeService(events, {
+      parentSessionId: "parent",
+      sessionGeneration: "generation",
+      service,
+    });
+    const removedA: DagRuntimeServiceRegistration[] = [];
+    const removedB: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(
+      events,
+      () => {},
+      (removed) => removedA.push(removed),
+    );
+    listenForDagRuntimeService(
+      events,
+      () => {},
+      (removed) => removedB.push(removed),
+    );
+
+    events.events.emit(DagRuntimeServiceEvent.Unregister, registration);
+    events.events.emit(DagRuntimeServiceEvent.Unregister, registration);
+
+    expect(removedA).toEqual([registration]);
+    expect(removedB).toEqual([registration]);
+    const late: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(events, (active) => late.push(active));
+    expect(late).toEqual([]);
+  });
+
   it("replays the active generation and preserves its replacement against stale removal", () => {
     const events = createEvents();
     const first = registerDagRuntimeService(events, {
