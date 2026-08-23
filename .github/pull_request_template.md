@@ -11,7 +11,8 @@
 - **Class:** <!-- requirement | regression | safety invariant | integration/e2e | existing coverage only -->
 - **Protected capability/regression:**
 - **Independent design origin:** <!-- base-worktree session/agent, or why separation was not triggered -->
-- **Red/green or negative-control evidence:**
+- **Red/green, mutation, or negative-control evidence:**
+- **Added, reused, or removed portfolio evidence:**
 - **Runtime impact:**
 
 ## Validation

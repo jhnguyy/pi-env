@@ -59,7 +59,7 @@ Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vites
 
 Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, independent hardening-test design, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed.
 
-Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request. Reviewers should verify that the chosen tests match the risk and that source-owned scripts/config remain the authority.
+Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request. Before implementation, map each risk to its owning boundary and existing evidence. The pull request records added, reused, and removed portfolio evidence. Reviewers should verify that the chosen tests match the risk and that source-owned scripts/config remain the authority.
 
 Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs).
 
