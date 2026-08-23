@@ -18,6 +18,12 @@ import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails
 import { SubagentSessionRuntime } from "./session-runtime";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
+export {
+  DagSubagentAdapterFailure,
+  DagSubagentExecutorKey,
+  makeDagSubagentExecutorRegistry,
+  makeDagSubagentRuntime,
+} from "./dag-runtime";
 
 const SUBAGENT_PARAMETERS = Type.Object({
   name: Type.String({

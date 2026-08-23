@@ -1,4 +1,28 @@
 export {
+  DagSubagentPayloadFailure,
+  DagSubagentContextFailure,
+  DagSubagentRuntimeFailure,
+  DagSubagentPromptLimitFailure,
+  DagSubagentResultLimitFailure,
+  DagSubagentOutputFailure,
+  DagSubagentPayloadVersion,
+  DagSubagentTaskSchema,
+  DagSubagentPromptMaxBytes,
+  DagSubagentPayloadMaxBytes,
+  DagSubagentReservedOutputTokens,
+  buildDagSubagentPrompt,
+  makeDagSubagentExecutor,
+  parseDagSubagentPayload,
+  publishDagSubagentTextResult,
+} from "./subagent.js";
+export type {
+  DagSubagentFailure,
+  DagSubagentPayloadV1,
+  DagSubagentPrompt,
+  DagSubagentRuntime,
+  DagSubagentRuntimeRequest,
+} from "./subagent.js";
+export {
   DagArtifactAmbiguousOutput,
   DagArtifactChanged,
   DagArtifactContainment,
