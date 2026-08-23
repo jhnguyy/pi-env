@@ -178,8 +178,18 @@ export class DagSessionRuntime {
         resolveSubmission();
       });
       const writer = makeDagSessionWriter(this.seam, graph, graph);
+      let graphPersisted = false;
       const journal: DagRuntimeJournal = {
-        beforeRun: (definition) => writer.appendGraph(definition).pipe(Effect.asVoid),
+        beforeRun: (definition) =>
+          writer.appendGraph(definition).pipe(
+            Effect.tap(() => Effect.sync(() => (graphPersisted = true))),
+            Effect.onExit(() =>
+              Effect.sync(() => {
+                if (!graphPersisted) this.claimedRunIds.delete(graph.runId);
+              }),
+            ),
+            Effect.asVoid,
+          ),
         appendTransition: (transition, attempt) =>
           writer.appendTransition(transition, attempt).pipe(Effect.asVoid),
         appendFinal: (outcome) => writer.appendFinal(outcome).pipe(Effect.asVoid),

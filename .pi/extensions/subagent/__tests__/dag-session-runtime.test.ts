@@ -231,7 +231,7 @@ describe("session-owned DAG runtime composition", () => {
       );
 
     await runtime.startSession(ctx);
-    vi.spyOn(ctx.sessionManager, "appendCustomEntry").mockImplementation(() => {
+    const appendSpy = vi.spyOn(ctx.sessionManager, "appendCustomEntry").mockImplementation(() => {
       throw seamCause;
     });
     const handle = await Effect.runPromise(
@@ -251,6 +251,12 @@ describe("session-owned DAG runtime composition", () => {
       }
     }
     expect(state.lifecycle).not.toContain("executor-invoked");
+    appendSpy.mockRestore();
+    const retry = await Effect.runPromise(
+      registration!.service.submit(graph("append-failure-run")),
+    );
+    const retried = await Effect.runPromise(retry.await);
+    expect(retried.state.nodes[0]).toMatchObject({ status: "succeeded" });
     await runtime.shutdownSession();
   });
 

@@ -63,6 +63,27 @@ describe("DAG runtime service registration", () => {
     listenForDagRuntimeService(events, (registration) => afterInitialFailure.push(registration));
     expect(afterInitialFailure).toEqual([]);
 
+    const partialEvents = createEvents();
+    const partiallyAdded: DagRuntimeServiceRegistration[] = [];
+    const rolledBack: DagRuntimeServiceRegistration[] = [];
+    listenForDagRuntimeService(
+      partialEvents,
+      (registration) => partiallyAdded.push(registration),
+      (registration) => rolledBack.push(registration),
+    );
+    partialEvents.events.on?.(DagRuntimeServiceEvent.Register, () => {
+      throw new Error("later listener failed");
+    });
+    expect(() =>
+      registerDagRuntimeService(partialEvents, {
+        parentSessionId: "partial",
+        sessionGeneration: "partial",
+        service,
+      }),
+    ).toThrow("later listener failed");
+    expect(partiallyAdded).toHaveLength(1);
+    expect(rolledBack).toEqual(partiallyAdded);
+
     const stable = registerDagRuntimeService(events, {
       parentSessionId: "stable",
       sessionGeneration: "stable",
