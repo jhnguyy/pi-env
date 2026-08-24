@@ -15,7 +15,15 @@ export interface DagGraphIndex<TPayload> {
 }
 
 const ValidatedDagToken = Symbol("ValidatedDag");
-const graphIndices = new WeakMap<object, DagGraphIndex<unknown>>();
+const GraphIndexStoreKey = Symbol.for("pi-env.dag.graph-indices.v1");
+type GraphIndexGlobal = typeof globalThis & {
+  [GraphIndexStoreKey]?: WeakMap<object, DagGraphIndex<unknown>>;
+};
+function graphIndexStore(): WeakMap<object, DagGraphIndex<unknown>> {
+  const global = globalThis as GraphIndexGlobal;
+  return (global[GraphIndexStoreKey] ??= new WeakMap<object, DagGraphIndex<unknown>>());
+}
+const graphIndices = graphIndexStore();
 
 export class ValidatedDagDefinition<TPayload = unknown> {
   readonly #brand = true;
@@ -56,7 +64,9 @@ export function getDagGraphIndex<TPayload>(
   return index as DagGraphIndex<TPayload>;
 }
 
-function frozenNode<TPayload>(node: DagContracts.DagNode<TPayload>): DagContracts.DagNode<TPayload> {
+function frozenNode<TPayload>(
+  node: DagContracts.DagNode<TPayload>,
+): DagContracts.DagNode<TPayload> {
   const completionGuard = node.completionGuard
     ? Object.freeze({
         kind: node.completionGuard.kind,
