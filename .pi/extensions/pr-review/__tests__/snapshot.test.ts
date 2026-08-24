@@ -104,8 +104,7 @@ describe("pr-review snapshot", () => {
     expect(
       calls.some(
         (c) =>
-          c.args[0] === "fetch" &&
-          c.args.at(-1)!.startsWith("+refs/heads/trunk:refs/pi-pr-review/base/7/"),
+          c.args[0] === "fetch" && c.args.at(-1)!.startsWith(`+${base}:refs/pi-pr-review/base/7/`),
       ),
     ).toBe(true);
   });

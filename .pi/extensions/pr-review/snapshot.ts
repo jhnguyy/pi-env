@@ -181,13 +181,7 @@ function prepareSnapshotWorkflow(
         headRef,
         metadata.headOid,
       );
-      yield* fetchAndVerifyEffect(
-        exec,
-        repoDir,
-        `refs/heads/${metadata.baseRef}`,
-        baseRef,
-        metadata.baseOid,
-      );
+      yield* fetchAndVerifyEffect(exec, repoDir, metadata.baseOid, baseRef, metadata.baseOid);
 
       const mergeBase = (yield* runEffect(
         exec,
