@@ -514,7 +514,7 @@ describe("pr-review extension surface", () => {
     expect(pi.appended[0][1].state.dag).toMatchObject({
       status: "interrupted",
       recoveredFromProcessLoss: true,
-      failedNodes: ["review-correctness"],
+      failedNodes: ["review-correctness", "synthesis"],
     });
     expect(pi.appended[0][1].state.dag.rawResultReferences).toHaveLength(0);
   });
@@ -688,9 +688,10 @@ describe("pr-review extension surface", () => {
       },
     });
     expect(result.content[0].text).toContain("Next: /review open");
-    expect(pi.appended).toHaveLength(2);
+    expect(pi.appended).toHaveLength(3);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
-    expect(pi.appended[1]?.[1].state).toMatchObject({
+    expect(pi.appended[0]?.[1].state.snapshot.diffHash).toBe("");
+    expect(pi.appended.at(-1)?.[1].state).toMatchObject({
       preparation: {
         status: "failed",
         stage: "dag-service",

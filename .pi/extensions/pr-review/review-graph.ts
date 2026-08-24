@@ -83,6 +83,7 @@ function roleInstructions(role: ReviewRole): string {
 function payload(
   node: ReviewNode,
   assignment: ReviewRoleAssignment,
+  runId: string,
   cwd: string,
   tools: ReviewGraphToolNames,
 ): DagSubagentPayloadV1 {
@@ -94,7 +95,7 @@ function payload(
         : [tools.deck, ...tools.read, tools.reviewerSubmission];
   return {
     v: DagSubagentPayloadVersion,
-    name: `pr-review-${node.role}`,
+    name: `${runId}-${node.role}`,
     instructions: roleInstructions(node.role),
     model: assignment.model,
     tools: roleTools,
@@ -127,7 +128,13 @@ export function compileReviewGraph(options: {
         executor: {
           kind: DagExecutorKind.Subagent,
           key: "pi/subagent-v1",
-          payload: payload(node, options.assignments[node.role], options.cwd, options.tools),
+          payload: payload(
+            node,
+            options.assignments[node.role],
+            options.runId,
+            options.cwd,
+            options.tools,
+          ),
         },
         dependencies: [],
       })),
@@ -139,6 +146,7 @@ export function compileReviewGraph(options: {
           payload: payload(
             SynthesisNode,
             options.assignments[SynthesisNode.role],
+            options.runId,
             options.cwd,
             options.tools,
           ),

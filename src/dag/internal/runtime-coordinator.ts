@@ -325,11 +325,7 @@ function startReadyNodes<TPayload>(
         next,
         { runId: graph.runId, nodeId, type: DagContracts.DagTransitionType.Start },
         journal,
-        DagAttempt.dagAttemptStatus(
-          graph.runId,
-          nodeId,
-          DagContracts.DagNodeStatus.Running,
-        ),
+        DagAttempt.dagAttemptStatus(graph.runId, nodeId, DagContracts.DagNodeStatus.Running),
       );
       starts.push({ nodeId, node, startPermit: yield* Deferred.make<void>() });
     }
@@ -397,6 +393,7 @@ function coordinator<TPayload>(
   graph: DagValidation.ValidatedDagDefinition<TPayload>,
   mutableRef: Ref.Ref<RuntimeMutable>,
   events: Queue.Queue<RuntimeEvent>,
+  accepted: Deferred.Deferred<void, RuntimeContracts.DagRunAwaitError>,
   done: Deferred.Deferred<RuntimeContracts.DagRunSnapshot, RuntimeContracts.DagRunAwaitError>,
   runScope: Scope.Scope,
   journal?: RuntimeContracts.DagRuntimeJournal,
@@ -404,6 +401,7 @@ function coordinator<TPayload>(
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node] as const));
   return Effect.gen(function* () {
     if (journal) yield* runJournal(journal.beforeRun(graph));
+    yield* Deferred.succeed(accepted, undefined);
     yield* Effect.yieldNow;
     let mutable = yield* Ref.get(mutableRef);
     const firstEvent = yield* Queue.poll(events);
@@ -450,21 +448,17 @@ function coordinator<TPayload>(
           const mutable = yield* Ref.get(mutableRef);
           yield* interruptAndJoinActive(mutable).pipe(Effect.ignore);
           const error = Cause.findErrorOption(cause);
-          if (
+          const runtimeError =
             Option.isSome(error) &&
             (error.value instanceof RuntimeContracts.DagRuntimeReducerFatal ||
               error.value instanceof RuntimeContracts.DagRuntimeJournalFailed)
-          ) {
-            yield* Deferred.fail(done, error.value);
-            return;
-          }
-          yield* Deferred.fail(
-            done,
-            new RuntimeContracts.DagRuntimeCoordinatorFatal({
-              message: "DAG runtime coordinator failed.",
-              cause: Cause.squash(cause),
-            }),
-          );
+              ? error.value
+              : new RuntimeContracts.DagRuntimeCoordinatorFatal({
+                  message: "DAG runtime coordinator failed.",
+                  cause: Cause.squash(cause),
+                });
+          yield* Deferred.fail(accepted, runtimeError);
+          yield* Deferred.fail(done, runtimeError);
         }),
       ),
     ),
@@ -565,6 +559,7 @@ export const submitDagRunInternal = <TPayload>(
     const journalActive = yield* Ref.make(false);
     const journal = options?.journal ? trackJournal(options.journal, journalActive) : undefined;
     const events = yield* Queue.unbounded<RuntimeEvent>();
+    const accepted = yield* Deferred.make<void, RuntimeContracts.DagRunAwaitError>();
     const done = yield* Deferred.make<
       RuntimeContracts.DagRunSnapshot,
       RuntimeContracts.DagRunAwaitError
@@ -572,7 +567,7 @@ export const submitDagRunInternal = <TPayload>(
     yield* Effect.gen(function* () {
       const runScope = yield* Scope.make();
       const cleaned = yield* Ref.make(false);
-      const fiber = yield* coordinator(graph, ref, events, done, runScope, journal).pipe(
+      const fiber = yield* coordinator(graph, ref, events, accepted, done, runScope, journal).pipe(
         Effect.interruptible,
         Effect.forkIn(runScope, { startImmediately: true }),
       );
@@ -602,6 +597,7 @@ export const submitDagRunInternal = <TPayload>(
     });
     const awaitSnapshot = Deferred.await(done);
     return Object.freeze({
+      accepted: Deferred.await(accepted),
       snapshot: Ref.get(ref).pipe(Effect.map(snapshot)),
       await: awaitSnapshot,
       cancel: Effect.uninterruptibleMask((restore) =>

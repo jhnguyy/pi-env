@@ -4,7 +4,7 @@ This note defines the user and safety contracts for the `pr-review` pi extension
 
 ## User contract
 
-The model-facing `pr_review` tool separates context retrieval from independent review creation.
+The model-facing `review` tool separates context retrieval from independent review creation.
 
 Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 

@@ -267,6 +267,24 @@ describe("DAG-backed PR review runner", () => {
     ).toBe(true);
   });
 
+  it("reports a failed synthesis node while preserving reviewer findings", async () => {
+    const f = fixture();
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service: serviceFor(f.artifactRoot, { synthesis: "failed" }),
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.dag).toMatchObject({
+      status: "degraded",
+      failedNodes: ["synthesis"],
+    });
+    expect(result.result?.findings[0]?.problem).toBe("The value is wrong.");
+  });
+
   it("rejects synthesis provenance that is not present in the claimed reviewer output", async () => {
     const f = fixture();
     const invented = JSON.parse(synthesis());

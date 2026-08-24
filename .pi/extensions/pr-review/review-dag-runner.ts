@@ -159,9 +159,7 @@ function outcomeStatus(
 }
 function failedNodeIds(reconstruction: DagSessionReconstruction): string[] {
   return reconstruction.state.nodes
-    .filter(
-      (node) => node.nodeId !== SynthesisNode.nodeId && node.status !== DagNodeStatus.Succeeded,
-    )
+    .filter((node) => node.status !== DagNodeStatus.Succeeded)
     .map((node) => node.nodeId)
     .sort();
 }
@@ -272,6 +270,7 @@ async function awaitSubmittedGraph(
   signal?: AbortSignal,
 ): Promise<void> {
   const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
+  if (handle.accepted) await Effect.runPromise(handle.accepted, { signal });
   onSubmitted();
   try {
     await Effect.runPromise(handle.await, { signal });

@@ -519,6 +519,7 @@ async function createReviewAttempt(
     selectedFindingIds: [],
     posts: [],
   };
+  saveState(pi, state);
   try {
     const snapshot = await prepareResolvedSnapshot(
       pi.exec.bind(pi),
@@ -702,13 +703,13 @@ async function startReview(
   const parentSessionId = ctx.sessionManager.getSessionId();
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
   if (!forceRerun) {
+    const active = createOperations.get(identityKey);
+    if (active) return active;
     const existing = matchingReview(identityKey, parentSessionId);
     if (existing) {
       remember(existing);
       return reviewActionResult(existing, true);
     }
-    const active = createOperations.get(identityKey);
-    if (active) return active;
   }
   const operation = createReviewAttempt(pi, metadata, signal, ctx);
   if (!forceRerun) createOperations.set(identityKey, operation);
@@ -1201,10 +1202,10 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const worktreeCleaned = await removeManagedWorktree(pi, state);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
   const root = join(getAgentDir(), "pr-review");
-  assertManagedPath(root, state.snapshot.artifactDir);
-  state.cleaned = true;
+  if (existsSync(state.snapshot.artifactDir)) assertManagedPath(root, state.snapshot.artifactDir);
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  const cleaned = { ...state, cleaned: true };
+  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(cleaned));
   states.delete(state.snapshot.id);
   if (latestReviewId === state.snapshot.id) latestReviewId = [...states.keys()].at(-1);
   return `Review cleanup complete: ${state.snapshot.id}.`;

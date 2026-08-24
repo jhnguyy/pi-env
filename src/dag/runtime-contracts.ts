@@ -127,6 +127,7 @@ export type DagRunAwaitError =
   | DagRuntimeCoordinatorFatal;
 
 export interface DagRunHandle {
+  readonly accepted?: Effect.Effect<void, DagRunAwaitError>;
   readonly snapshot: Effect.Effect<DagRunSnapshot>;
   readonly cancel: Effect.Effect<DagRunSnapshot, DagRunAwaitError>;
   readonly await: Effect.Effect<DagRunSnapshot, DagRunAwaitError>;

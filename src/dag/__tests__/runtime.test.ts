@@ -229,10 +229,17 @@ describe("DAG runtime", () => {
         Scope.provide(scope),
       );
 
+      const accepted = yield* Deferred.make<void>();
+      yield* (handle.accepted ?? Effect.die("DAG run handle did not expose acceptance.")).pipe(
+        Effect.andThen(Deferred.succeed(accepted, undefined)),
+        Effect.forkIn(scope),
+      );
       yield* Deferred.await(graphAppendEntered);
+      expect(yield* Deferred.isDone(accepted)).toBe(false);
       expect(yield* Deferred.isDone(startAppendEntered)).toBe(false);
       expect(yield* Deferred.isDone(executorStarted)).toBe(false);
       yield* Deferred.succeed(releaseGraphAppend, undefined);
+      yield* Deferred.await(accepted);
       yield* Deferred.await(startAppendEntered);
       expect(yield* Deferred.isDone(executorStarted)).toBe(false);
       yield* Deferred.succeed(releaseStartAppend, undefined);
