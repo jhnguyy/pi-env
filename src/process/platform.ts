@@ -220,30 +220,30 @@ function waitForExit(command: string, proc: ChildProcess): Effect.Effect<number,
   });
 }
 
-/** Runs an inherited-stdio command with a wall-clock bound and child-tree cleanup. */
+/** Runs an inherited-stdio command with child-tree cleanup and an optional wall-clock bound. */
 export function runInheritedProcess(
   command: string,
   args: readonly string[],
   options: ScopedChildProcessOptions = {},
 ): Effect.Effect<number, ProcessFailure> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs;
   const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
-  const invalid = validatePositiveInteger(timeoutMs, "timeoutMs", command)
+  const invalid = (timeoutMs === undefined ? undefined : validatePositiveInteger(timeoutMs, "timeoutMs", command))
     ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
   if (invalid) return Effect.fail(invalid);
-  return Effect.scoped(
-    scopedChildProcess(command, args, { ...options, timeoutMs, killGraceMs, stdio: "inherit" }).pipe(
-      Effect.flatMap((proc) => waitForExit(command, proc)),
-      Effect.timeoutOrElse({
-        duration: timeoutMs,
-        orElse: () => Effect.fail(new ProcessFailure({
-          kind: ProcessFailureKind.Timeout,
-          command,
-          message: `Process timed out after ${timeoutMs}ms: ${command}`,
-        })),
-      }),
-    ),
+  const running = scopedChildProcess(command, args, { ...options, killGraceMs, stdio: "inherit" }).pipe(
+    Effect.flatMap((proc) => waitForExit(command, proc)),
   );
+  return Effect.scoped(timeoutMs === undefined
+    ? running
+    : running.pipe(Effect.timeoutOrElse({
+      duration: timeoutMs,
+      orElse: () => Effect.fail(new ProcessFailure({
+        kind: ProcessFailureKind.Timeout,
+        command,
+        message: `Process timed out after ${timeoutMs}ms: ${command}`,
+      })),
+    })));
 }
 
 function collectProcess(

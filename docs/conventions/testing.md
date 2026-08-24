@@ -64,7 +64,7 @@ Promoting a generated catching test means independently re-deriving the hardenin
 - `nub run test:changed main` is early feedback only. It is not merge authority.
 - `nub run test:e2e` remains explicit for hosted or environment-dependent behavior.
 
-Canonical Vitest scripts use a bounded Node command runner. The runner terminates the owned process group after `PI_ENV_TEST_TIMEOUT_MS`, which defaults to eight minutes, and escalates after `PI_ENV_TEST_KILL_GRACE_MS`, which defaults to one second. A calling tool must use a longer timeout so the repository runner owns cleanup. Vitest continues to use thread workers because fork workers cannot relaunch a Nub-managed Node binary that requires a Nix dynamic-loader wrapper.
+Canonical Vitest scripts share one supervised Node command. Tests have no repository wall-clock limit by default. On `SIGINT` or `SIGTERM`, the supervisor terminates the owned process group and escalates after `PI_ENV_TEST_KILL_GRACE_MS`, which defaults to one second. Set `PI_ENV_TEST_TIMEOUT_MS` to a positive millisecond value only when a caller or environment requires a command limit. Vitest continues to use thread workers because fork workers cannot relaunch a Nub-managed Node binary that requires a Nix dynamic-loader wrapper.
 
 The safe and standard portfolios must preserve blocking setup, type, packaging, policy, and runtime checks. Analyze stays outside aggregate verification until strict containment exists. CI may run only the documented bounded Analyze canary.
 

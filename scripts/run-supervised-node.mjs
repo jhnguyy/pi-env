@@ -6,7 +6,6 @@ import {
   runInheritedProcess,
 } from "../src/process/platform.ts";
 
-const DEFAULT_TEST_TIMEOUT_MS = 8 * 60_000;
 const SIGNAL_EXIT_CODE = { SIGINT: 130, SIGTERM: 143 };
 
 function positiveInteger(value, fallback, name) {
@@ -15,17 +14,17 @@ function positiveInteger(value, fallback, name) {
   if (Number.isInteger(parsed) && parsed > 0) return parsed;
   console.error(`${name} must be a positive integer.`);
   process.exitCode = 2;
-  return undefined;
+  return null;
 }
 
 const [script, ...args] = process.argv.slice(2);
 if (!script) {
-  console.error("usage: scripts/run-bounded-node.mjs <script> [args...]");
+  console.error("usage: scripts/run-supervised-node.mjs <script> [args...]");
   process.exitCode = 2;
 } else {
   const timeoutMs = positiveInteger(
     process.env.PI_ENV_TEST_TIMEOUT_MS,
-    DEFAULT_TEST_TIMEOUT_MS,
+    undefined,
     "PI_ENV_TEST_TIMEOUT_MS",
   );
   const killGraceMs = positiveInteger(
@@ -34,7 +33,7 @@ if (!script) {
     "PI_ENV_TEST_KILL_GRACE_MS",
   );
 
-  if (timeoutMs !== undefined && killGraceMs !== undefined) {
+  if (timeoutMs !== null && killGraceMs !== null) {
     const controller = new AbortController();
     let receivedSignal;
     const interrupt = (signal) => {
@@ -50,7 +49,7 @@ if (!script) {
       const result = await Effect.runPromise(
         Effect.result(
           runInheritedProcess(resolveNodeCommand(), [script, ...args], {
-            timeoutMs,
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
             killGraceMs,
           }),
         ),

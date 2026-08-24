@@ -27,9 +27,12 @@ async function eventually(assertion, attempts = 40) {
   throw lastError;
 }
 
-describe("bounded Node command runner", () => {
-  it("owns every canonical Vitest command", () => {
+describe("supervised Node command runner", () => {
+  it("owns one normalized Vitest command used by every portfolio", () => {
     const manifest = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
+    expect(manifest.scripts["test:vitest"]).toBe(
+      "scripts/node-run.sh scripts/run-supervised-node.mjs node_modules/vitest/vitest.mjs run --pool=threads",
+    );
     for (const name of [
       "test:unit",
       "test:changed",
@@ -37,17 +40,14 @@ describe("bounded Node command runner", () => {
       "test:e2e",
       "test:e2e:real-workspace-canary",
     ]) {
-      expect(manifest.scripts[name]).toContain(
-        "scripts/node-run.sh scripts/run-bounded-node.mjs node_modules/vitest/vitest.mjs",
-      );
-      expect(manifest.scripts[name]).toContain("--pool=threads");
+      expect(manifest.scripts[name]).toContain("nub run test:vitest");
     }
   });
 
   it("preserves the child command exit status", () => {
     const result = spawnSync(
       "scripts/node-run.sh",
-      ["scripts/run-bounded-node.mjs", "-e", "process.exit(7)"],
+      ["scripts/run-supervised-node.mjs", "-e", "process.exit(7)"],
       { cwd: process.cwd(), encoding: "utf8", timeout: 5_000 },
     );
     expect(result.error).toBeUndefined();
@@ -56,7 +56,7 @@ describe("bounded Node command runner", () => {
     if (process.platform !== "win32") {
       const signalled = spawnSync(
         "scripts/node-run.sh",
-        ["scripts/run-bounded-node.mjs", "-e", "process.kill(process.pid, 'SIGTERM')"],
+        ["scripts/run-supervised-node.mjs", "-e", "process.kill(process.pid, 'SIGTERM')"],
         { cwd: process.cwd(), encoding: "utf8", timeout: 5_000 },
       );
       expect(signalled.error).toBeUndefined();
@@ -67,7 +67,7 @@ describe("bounded Node command runner", () => {
   it.runIf(process.platform !== "win32")(
     "cleans descendants when its caller sends SIGTERM",
     async () => {
-      const directory = mkdtempSync(join(tmpdir(), "pi-bounded-signal-"));
+      const directory = mkdtempSync(join(tmpdir(), "pi-supervised-signal-"));
       const childPidFile = join(directory, "child-pid");
       const parentScript = join(directory, "parent.mjs");
       const childCode = [
@@ -81,11 +81,15 @@ describe("bounded Node command runner", () => {
         `import { spawn } from "node:child_process";\nspawn(process.env.PI_ENV_NODE_BIN, ["-e", ${JSON.stringify(childCode)}], { stdio: "ignore" });\nsetInterval(() => {}, 1000);\n`,
       );
 
-      const runner = spawn("scripts/node-run.sh", ["scripts/run-bounded-node.mjs", parentScript], {
-        cwd: process.cwd(),
-        env: { ...process.env, PI_ENV_TEST_KILL_GRACE_MS: "50" },
-        stdio: "ignore",
-      });
+      const runner = spawn(
+        "scripts/node-run.sh",
+        ["scripts/run-supervised-node.mjs", parentScript],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, PI_ENV_TEST_KILL_GRACE_MS: "50" },
+          stdio: "ignore",
+        },
+      );
       const closed = new Promise((resolve) =>
         runner.once("close", (code, signal) => resolve({ code, signal })),
       );
@@ -107,7 +111,7 @@ describe("bounded Node command runner", () => {
   it.runIf(process.platform !== "win32")(
     "times out and removes a TERM-ignoring descendant",
     async () => {
-      const directory = mkdtempSync(join(tmpdir(), "pi-bounded-node-"));
+      const directory = mkdtempSync(join(tmpdir(), "pi-supervised-node-"));
       const childPidFile = join(directory, "child-pid");
       const parentScript = join(directory, "parent.mjs");
       const childCode = [
@@ -125,7 +129,7 @@ describe("bounded Node command runner", () => {
       try {
         const result = spawnSync(
           "scripts/node-run.sh",
-          ["scripts/run-bounded-node.mjs", parentScript],
+          ["scripts/run-supervised-node.mjs", parentScript],
           {
             cwd: process.cwd(),
             encoding: "utf8",
