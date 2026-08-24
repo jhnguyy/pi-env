@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect, Result } from "effect";
@@ -18,6 +19,7 @@ import {
   SubagentAdmissionError,
   type SubagentRunSupervisor,
 } from "./control";
+import { DagSessionRuntime } from "./dag-session-runtime";
 import { buildErrorDetails, runSubagentEffect, SUBAGENT_TELEMETRY_SERVICE_NAME } from "./execute";
 import { SubagentJobManager, type SubagentJob } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
@@ -36,6 +38,7 @@ export class SubagentSessionRuntime {
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
   private jobs: SubagentJobManager | undefined;
+  private dagRuntime: DagSessionRuntime | undefined;
   private sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
   private lifecycleGeneration = 0;
   private transitionTail: Promise<void> = Promise.resolve();
@@ -83,6 +86,7 @@ export class SubagentSessionRuntime {
   startSession(ctx: ExtensionContext): Promise<boolean> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
+    this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       await this.disposeActiveResources();
       if (generation !== this.lifecycleGeneration) return false;
@@ -107,11 +111,7 @@ export class SubagentSessionRuntime {
       const sessionId = ctx.sessionManager.getSessionId();
       const supervisor = getOrCreateSubagentRunSupervisor(sessionId, config);
 
-      this.ledger.clear();
-      this.telemetryRuntime = nextRuntime;
-      this.supervisor = supervisor;
-      this.supervisorSessionId = sessionId;
-      this.jobs = new SubagentJobManager(
+      const jobs = new SubagentJobManager(
         this.pi,
         this.registeredExtTools,
         undefined,
@@ -120,6 +120,32 @@ export class SubagentSessionRuntime {
         config,
         supervisor,
       );
+      let dagRuntime: DagSessionRuntime;
+      try {
+        dagRuntime = await DagSessionRuntime.create(this.pi, ctx, this.registeredExtTools, {
+          sessionGeneration: randomUUID(),
+          supervisor,
+          telemetryRuntime: nextRuntime,
+          ledger: this.ledger,
+        });
+      } catch (cause) {
+        await disposeSubagentRunSupervisor(sessionId);
+        await this.disposeTelemetry(nextRuntime);
+        throw cause;
+      }
+      if (generation !== this.lifecycleGeneration) {
+        await dagRuntime.dispose();
+        await disposeSubagentRunSupervisor(sessionId);
+        await this.disposeTelemetry(nextRuntime);
+        return false;
+      }
+
+      this.ledger.clear();
+      this.telemetryRuntime = nextRuntime;
+      this.supervisor = supervisor;
+      this.supervisorSessionId = sessionId;
+      this.jobs = jobs;
+      this.dagRuntime = dagRuntime;
       this.sessionState = SubagentSessionState.Active;
       return true;
     });
@@ -128,11 +154,15 @@ export class SubagentSessionRuntime {
   shutdownSession(): Promise<void> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
+    this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
-      await this.disposeActiveResources();
-      if (generation === this.lifecycleGeneration) {
-        this.ledger.clear();
-        this.sessionState = SubagentSessionState.Inactive;
+      try {
+        await this.disposeActiveResources();
+      } finally {
+        if (generation === this.lifecycleGeneration) {
+          this.ledger.clear();
+          this.sessionState = SubagentSessionState.Inactive;
+        }
       }
     });
   }
@@ -224,18 +254,31 @@ export class SubagentSessionRuntime {
 
   private async disposeActiveResources(): Promise<void> {
     const manager = this.jobs;
+    const dagRuntime = this.dagRuntime;
     const runtime = this.telemetryRuntime;
     const supervisorSessionId = this.supervisorSessionId;
-    try {
-      await manager?.shutdown();
-      if (supervisorSessionId) await disposeSubagentRunSupervisor(supervisorSessionId);
-    } finally {
-      this.jobs = undefined;
-      this.supervisor = undefined;
-      this.supervisorSessionId = undefined;
-      this.telemetryRuntime = undefined;
-      if (runtime) await this.disposeTelemetry(runtime);
-    }
+    const dagDisposal = dagRuntime?.dispose();
+    let failure: unknown;
+    const settle = async (operation: Promise<unknown> | undefined): Promise<void> => {
+      try {
+        await operation;
+      } catch (cause) {
+        failure ??= cause;
+      }
+    };
+
+    await settle(manager?.shutdown());
+    await settle(dagDisposal);
+    await settle(
+      supervisorSessionId ? disposeSubagentRunSupervisor(supervisorSessionId) : undefined,
+    );
+    this.jobs = undefined;
+    this.dagRuntime = undefined;
+    this.supervisor = undefined;
+    this.supervisorSessionId = undefined;
+    this.telemetryRuntime = undefined;
+    await settle(runtime ? this.disposeTelemetry(runtime) : undefined);
+    if (failure !== undefined) throw failure;
   }
 
   private disposeTelemetry(runtime: ToolingTelemetryRuntime): Promise<void> {

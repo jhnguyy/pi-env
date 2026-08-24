@@ -5,7 +5,7 @@ export const PtcToolEvent = {
   Register: "ptc-tools:register",
   Unregister: "ptc-tools:unregister",
 } as const;
-export type PtcToolEvent = typeof PtcToolEvent[keyof typeof PtcToolEvent];
+export type PtcToolEvent = (typeof PtcToolEvent)[keyof typeof PtcToolEvent];
 
 export interface PtcToolRegistration {
   tool: ToolDefinition<any, any, any>;
@@ -28,6 +28,7 @@ const ptcToolChannel = createRememberedRegistrationChannel<PtcToolRegistration, 
   storeKey: "__piEnvPtcToolRegistry",
   registerEvent: PtcToolEvent.Register,
   unregisterEvent: PtcToolEvent.Unregister,
+  keyOf: (registration) => registration.tool.name,
   isDuplicate: (previous, next) => previous?.tool === next.tool,
 });
 
