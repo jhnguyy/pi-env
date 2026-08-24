@@ -267,6 +267,28 @@ describe("DAG-backed PR review runner", () => {
     ).toBe(true);
   });
 
+  it("rejects synthesis provenance that is not present in the claimed reviewer output", async () => {
+    const f = fixture();
+    const invented = JSON.parse(synthesis());
+    invented.findings[0].problem = "The synthesis invented this problem.";
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service: serviceFor(f.artifactRoot, { synthesis: JSON.stringify(invented) }),
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.dag?.status).toBe("degraded");
+    expect(result.result?.verdict).toContain("Reviewer synthesis failed");
+    expect(result.result?.findings[0]?.problem).toBe("The value is wrong.");
+    expect(result.result?.findings[0]).toMatchObject({
+      sourceReviewers: ["correctness"],
+      agreement: 1,
+    });
+  });
+
   it("fails when every reviewer output is malformed but preserves every raw reference", async () => {
     const f = fixture();
     const malformed = Object.fromEntries(

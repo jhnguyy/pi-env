@@ -52,13 +52,21 @@ The review deck stores one shared metadata reference, one shared pinned-diff ref
 
 Repository cache operations use a per-repository lock. A successful review worktree remains available until explicit cleanup. If preparation fails before DAG submission, the extension removes the worktree and retains a bounded failed review record and artifacts for inspection.
 
-## Fresh review agent
+## Review DAG and model policy
 
-The existing subagent extension remains responsible for the child agent loop, child session persistence, parent linkage, cancellation, usage accounting, telemetry, and shutdown.
+The review extension submits one fixed graph through the session-owned DAG service. The graph contains a reading-plan node, five focused reviewers, one whole-change reviewer, and one synthesis node. The subagent extension owns child execution, sessions, cancellation, usage, telemetry, and shutdown.
 
-The subagent runtime exposes a lower-level service for callers that already resolved the model, system prompt, task, working directory, and tool instances. The review extension uses this service instead of asking the parent model to invoke the public `subagent` tool.
+A model is eligible only when `modelAnnotations` contains the exact `reviewer` annotation for its fully qualified ID:
 
-The default review model is the current parent model. A `prReview.model` setting can override it.
+```json
+{
+  "modelAnnotations": {
+    "provider/model": ["reviewer"]
+  }
+}
+```
+
+One approved model can fill every role. Optional `prReview.roleModels` entries can pin `reading-plan`, `correctness`, `intent`, `maintainability`, `tests`, `security`, `whole-change`, or `synthesis`. Each pinned model must have the exact annotation and must be available. The obsolete `prReview.model` setting has no effect.
 
 ## Untrusted input boundary
 
@@ -66,47 +74,30 @@ Pull request content is untrusted. This includes source files, diffs, pull reque
 
 The review child must not discover an agent definition from the reviewed worktree. The review extension supplies an inline system prompt.
 
-The child receives no generic `bash`, `read`, `write`, `edit`, language-server, or analyzer tool. The extension creates run-scoped tools that enforce the managed worktree as their filesystem boundary:
+A child receives no generic `bash`, `read`, `write`, `edit`, language-server, analyzer, network, or spawn tool. The extension creates run-scoped tools for these operations:
 
-- `review_read`
-- `review_grep`
-- `review_find`
-- `review_list`
-- `review_diff`
-- `review_changed_files`
-- `submit_review_plan`
-- `submit_review`
+- page the pinned title and body;
+- read selected source line ranges;
+- page the pinned diff or one file section;
+- page the complete changed-file manifest;
+- list, find, and fixed-string search within the worktree;
+- read the bounded review deck;
+- submit a reading plan, reviewer result, or synthesis;
+- load verified reviewer result references during synthesis.
 
-The read tools reject path traversal and resolved paths outside the worktree. `review_diff` returns bounded file sections. `review_changed_files` pages the complete changed-file manifest. The agent does not receive the complete diff in its initial prompt.
+Filesystem tools reject path traversal and resolved paths outside the worktree. Metadata access does not expose a filesystem path. Diff and metadata tools return a `nextOffset` when more content remains. The child does not receive the complete diff in its initial prompt.
 
-The system prompt states that all reviewed material is data, not instructions. The child prompt guides the agent to use `review_changed_files` for the authoritative pinned changed-file manifest before selectively reading diffs and source.
+The system instructions state that reviewed material is data. Each child must inspect the deck and use only its assigned run-scoped tools.
 
 ## Structured review contract
 
-The review agent first calls `submit_review_plan`. The plan contains:
+The reading-plan node submits the pull request goal, goal assessment, risk, conceptual cohorts, and one file entry for every changed path. The submission rejects missing, duplicate, or invented paths.
 
-- the pull request goal and goal assessment
-- the risk level and reasons
-- ordered conceptual cohorts
-- each changed file exactly once
-- an attention class for each file
-- a short file role
-- optional walkthrough and out-of-diff ripple notes
+Each reviewer submits its fixed role, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
 
-The submission tool rejects missing, duplicate, or invented changed paths. A failed submission returns exact correction information to the child agent.
+The synthesis node reads verified result references. It reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
 
-The agent then calls `submit_review`. The result contains a bottom-line verdict and findings. Each finding contains:
-
-- severity and goal-relative impact
-- file and side
-- line when available
-- the problem
-- the consequence
-- a suggested fix
-
-The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding instead of deleting the finding.
-
-High-impact, blocking, and serious findings start selected. Other findings start unselected.
+The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. High-impact, blocking, and serious findings start selected. Other findings start unselected.
 
 ## Parent session state
 
@@ -137,7 +128,7 @@ If a post result is uncertain, the extension searches existing review bodies for
 
 ## Command and tool surface
 
-The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
+The tool manager activates `review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
 
 Use `/review list`, `/review open <review-id>`, and `/review cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
 

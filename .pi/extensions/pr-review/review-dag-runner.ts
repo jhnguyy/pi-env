@@ -97,15 +97,40 @@ function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): Re
     coverage: { status: "degraded", succeeded: [], failed: [], malformed: [] },
   };
 }
+function findingInputFromSynthesis(finding: SynthesisReview["findings"][number]): FindingInput {
+  const { sourceReviewers: _sourceReviewers, agreement: _agreement, ...input } = finding;
+  return input;
+}
+function sameFinding(left: FindingInput, right: FindingInput): boolean {
+  const key = (finding: FindingInput) =>
+    JSON.stringify([
+      finding.severity,
+      finding.impact,
+      finding.file,
+      finding.side,
+      finding.line,
+      finding.problem,
+      finding.consequence,
+      finding.suggestedFix,
+    ]);
+  return key(left) === key(right);
+}
 function validSynthesisSources(
   synthesis: SynthesisReview,
-  validRoles: ReadonlySet<ReviewerRole>,
+  reviewers: readonly ReviewerOutput[],
 ): boolean {
-  return synthesis.findings.every(
-    (finding) =>
-      finding.agreement === new Set(finding.sourceReviewers).size &&
-      finding.sourceReviewers.every((role) => validRoles.has(role)),
-  );
+  const reviewerByRole = new Map(reviewers.map((reviewer) => [reviewer.role, reviewer]));
+  return synthesis.findings.every((finding) => {
+    const uniqueSources = new Set(finding.sourceReviewers);
+    const input = findingInputFromSynthesis(finding);
+    return (
+      finding.sourceReviewers.length === uniqueSources.size &&
+      finding.agreement === uniqueSources.size &&
+      finding.sourceReviewers.every((role) =>
+        reviewerByRole.get(role)?.findings.some((candidate) => sameFinding(candidate, input)),
+      )
+    );
+  });
 }
 function outcomeStatus(
   reconstruction: DagSessionReconstruction,
@@ -118,9 +143,7 @@ function outcomeStatus(
 function failedNodeIds(reconstruction: DagSessionReconstruction): string[] {
   return reconstruction.state.nodes
     .filter(
-      (node) =>
-        node.nodeId !== SynthesisNode.nodeId &&
-        node.status !== DagNodeStatus.Succeeded,
+      (node) => node.nodeId !== SynthesisNode.nodeId && node.status !== DagNodeStatus.Succeeded,
     )
     .map((node) => node.nodeId)
     .sort();
@@ -180,8 +203,7 @@ function decodeSynthesis(
 ): ReviewResult | undefined {
   try {
     const decoded = parseJson(text);
-    const validRoles = new Set(reviewers.map((output) => output.role));
-    if (!Check(SynthesisReviewSchema, decoded) || !validSynthesisSources(decoded, validRoles))
+    if (!Check(SynthesisReviewSchema, decoded) || !validSynthesisSources(decoded, reviewers))
       return undefined;
     const validated = validateFindingAnchors(
       { verdict: decoded.verdict, findings: decoded.findings as Finding[] },
@@ -295,8 +317,7 @@ async function finalizeReview(input: {
   const synthesized = synthesisOutput
     ? decodeSynthesis(synthesisOutput.text, collected.reviewers, diff)
     : undefined;
-  if (synthesisOutput && !synthesized)
-    collected.malformedNodes.push(SynthesisNode.nodeId);
+  if (synthesisOutput && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
   const result = synthesized ?? fallbackSynthesis(collected.reviewers, diff);
   const successfulRoles = collected.reviewers.map((output) => output.role).sort();
   const failedRoles = reviewerRolesForNodes(failedNodes);

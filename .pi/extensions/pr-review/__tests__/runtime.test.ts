@@ -37,6 +37,8 @@ function state(): ReviewState {
         url: "https://github.com/o/r/pull/1",
         baseOid: "b",
         headOid: "h",
+        title: "Pinned title",
+        body: "Pinned body",
         changedFiles: [{ path: "src/a.ts" }],
       },
     },
@@ -117,6 +119,61 @@ describe("pr-review run-scoped tools", () => {
         )) as any
       ).content[0].text,
     ).toContain("dir b/part/a.ts");
+  });
+
+  it("pages pinned metadata, late source ranges, and diff sections", async () => {
+    const s = state();
+    s.snapshot.metadata.body = `start-${"🙂".repeat(20)}-end`;
+    const latePath = join(s.snapshot.worktree, "src", "late.ts");
+    writeFileSync(
+      latePath,
+      Array.from({ length: 300 }, (_, index) => `line-${index + 1}`).join("\n"),
+    );
+    writeFileSync(
+      s.snapshot.diffPath,
+      [
+        "diff --git a/src/late.ts b/src/late.ts",
+        "--- a/src/late.ts",
+        "+++ b/src/late.ts",
+        "@@ -1,1 +1,300 @@",
+        ...Array.from({ length: 300 }, (_, index) => `+line-${index + 1}`),
+      ].join("\n"),
+    );
+    const tools = Object.fromEntries(
+      makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
+    );
+    const metadataFirst = (await tools.review_metadata.execute(
+      "metadata-1",
+      { offset: 0, maxBytes: 8 },
+      undefined,
+      undefined as any,
+    )) as any;
+    const metadataFirstBody = JSON.parse(metadataFirst.content[0].text);
+    expect(metadataFirstBody.title).toBe("Pinned title");
+    expect(metadataFirstBody.body).not.toContain("�");
+    expect(metadataFirst.details.nextOffset).toBeTypeOf("number");
+    const source = (await tools.review_read.execute(
+      "read-late",
+      { path: "src/late.ts", startLine: 200, endLine: 202 },
+      undefined,
+      undefined as any,
+    )) as any;
+    expect(source.content[0].text).toBe("line-200\nline-201\nline-202");
+    const diffFirst = (await tools.review_diff.execute(
+      "diff-1",
+      { path: "src/late.ts", maxBytes: 100 },
+      undefined,
+      undefined as any,
+    )) as any;
+    const diffSecond = (await tools.review_diff.execute(
+      "diff-2",
+      { path: "src/late.ts", offset: diffFirst.details.nextOffset, maxBytes: 100 },
+      undefined,
+      undefined as any,
+    )) as any;
+    expect(diffFirst.details.nextOffset).toBeTypeOf("number");
+    expect(diffSecond.details.offset).toBe(diffFirst.details.nextOffset);
+    expect(diffSecond.content[0].text).not.toBe(diffFirst.content[0].text);
   });
 
   it("pages the complete changed-file manifest beyond prompt and scan limits", async () => {

@@ -195,12 +195,31 @@ export const PathParamSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export const ReadParamSchema = Type.Object(
+  {
+    path: Type.String({ description: "File path relative to the managed review worktree." }),
+    startLine: Type.Optional(Type.Integer({ minimum: 1 })),
+    endLine: Type.Optional(Type.Integer({ minimum: 1 })),
+  },
+  { additionalProperties: false },
+);
+export const MetadataParamSchema = Type.Object(
+  {
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+    maxBytes: Type.Optional(Type.Integer({ minimum: 4, maximum: 12_000 })),
+  },
+  { additionalProperties: false },
+);
 export const GrepParamSchema = Type.Object(
   { pattern: Type.String({ minLength: 1, maxLength: 200 }), path: Type.Optional(Type.String()) },
   { additionalProperties: false },
 );
 export const DiffParamSchema = Type.Object(
-  { path: Type.Optional(Type.String()) },
+  {
+    path: Type.Optional(Type.String()),
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+    maxBytes: Type.Optional(Type.Integer({ minimum: 4, maximum: 12_000 })),
+  },
   { additionalProperties: false },
 );
 export const ChangedFilesParamSchema = Type.Object(
