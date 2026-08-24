@@ -16,6 +16,7 @@ export interface ReviewModelCandidate {
   readonly model: string;
   readonly reasoning?: ThinkingLevel;
   readonly fqid: string;
+  readonly contextWindow: number;
 }
 export interface ReviewModelAssignment extends ReviewModelCandidate {
   readonly role: ReviewRole;
@@ -80,6 +81,7 @@ export function resolvePrReviewModelPolicy(
       model: model.id,
       fqid: fqid(model),
       reasoning: highestReasoning(model),
+      contextWindow: model.contextWindow,
     }))
     .sort(compare);
   if (approvedRoster.length === 0)

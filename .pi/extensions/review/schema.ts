@@ -353,7 +353,13 @@ export interface ReviewState {
   deck?: { path: string; digest: string; bytes: number };
   roleAssignments?: Record<
     string,
-    { model: string; provider: string; reasoning?: string; pinned: boolean }
+    {
+      model: string;
+      provider: string;
+      reasoning?: string;
+      pinned: boolean;
+      contextWindow: number;
+    }
   >;
   dag?: {
     runId: string;

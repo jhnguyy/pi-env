@@ -13,6 +13,7 @@ import {
 import {
   ReviewEvidenceChunkOutputs,
   ReviewEvidenceCoverageOutput,
+  ReviewEvidenceDossierMaxBytes,
   ReviewEvidenceExecutorKind,
   ReviewEvidenceResolverKey,
   type ReviewEvidenceResolverPayloadV1,
@@ -44,6 +45,7 @@ export {
 export interface ReviewRoleAssignment {
   readonly model: string;
   readonly reasoning?: DagSubagentPayloadV1["reasoning"];
+  readonly contextWindow: number;
 }
 export type ReviewRoleAssignments = Readonly<Record<ReviewRole, ReviewRoleAssignment>>;
 export interface ReviewGraphToolNames {
@@ -66,6 +68,7 @@ function roleInstructions(role: ReviewRole): string {
       "Inspect the review deck and pinned snapshot with the supplied tools.",
       "Build the reading plan. Cover every changed path exactly once.",
       "Add at least one strict file or diff line-range evidence reference for every changed path.",
+      `Keep the combined exact evidence at or below ${ReviewEvidenceDossierMaxBytes} UTF-8 bytes. Select the smallest ranges that preserve review meaning. Do not select the same text as both file and diff evidence.`,
       "Call the structured plan submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");
   }

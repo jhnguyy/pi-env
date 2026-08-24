@@ -7,6 +7,7 @@ import { Data, Effect } from "effect";
 import { Check } from "typebox/value";
 import {
   DagExecutorKind,
+  DagSubagentReservedOutputTokens,
   materializeDagTextContext,
   publishDagSubagentTextResult,
   type DagEffectExecutor,
@@ -17,6 +18,7 @@ import { parseDiffGitPath, parsePatchFilePath, sha256, validatePlan } from "./co
 import { PlanSchema, type EvidenceReference, type ReviewPlan } from "./schema";
 
 export const ReviewEvidenceResolverKey = "pr-review/evidence-resolver-v1" as const;
+export const ReviewEvidenceDossierMaxBytes = 160_000 as const;
 export const ReviewEvidenceCoverageOutput = "evidence_coverage" as const;
 export const ReviewEvidenceChunkOutputs = Object.freeze([
   "evidence_chunk_1",
@@ -31,6 +33,7 @@ export const ReviewEvidenceOutputs = Object.freeze([
 const ChunkMaxBytes = 220_000;
 const MaxRangeLines = 1_000;
 const MaxSourceFileBytes = 8_000_000;
+const ReviewerPromptFixedReserveBytes = 24_000;
 const execFileAsync = promisify(execFile);
 
 export interface ReviewEvidenceResolverPayloadV1 {
@@ -42,6 +45,7 @@ export interface ReviewEvidenceResolverPayloadV1 {
   readonly diffPath: string;
   readonly changedPaths: readonly string[];
   readonly planOutputName: string;
+  readonly reviewerContextWindow: number;
 }
 
 export interface ReviewEvidenceCoverage {
@@ -72,7 +76,8 @@ export class ReviewEvidenceResolutionFailure extends Data.TaggedError(
     | "containment"
     | "symlink-escape"
     | "artifact-overflow"
-    | "producer-overflow";
+    | "producer-overflow"
+    | "prompt-overflow";
   readonly message: string;
   readonly path?: string;
   readonly actual?: number;
@@ -100,6 +105,7 @@ const PayloadKeys = Object.freeze([
   "diffPath",
   "changedPaths",
   "planOutputName",
+  "reviewerContextWindow",
 ]);
 function validAbsolutePath(value: unknown): value is string {
   return nonEmpty(value) && path.isAbsolute(value);
@@ -114,7 +120,13 @@ function validPayloadRecord(value: Record<string, unknown>): boolean {
   if (!nonEmpty(value.snapshotId) || !nonEmpty(value.headOid)) return false;
   if (!nonEmpty(value.diffHash) || !/^[0-9a-f]{64}$/u.test(value.diffHash)) return false;
   if (!validAbsolutePath(value.worktree) || !validAbsolutePath(value.diffPath)) return false;
-  return validChangedPaths(value.changedPaths) && nonEmpty(value.planOutputName);
+  return (
+    validChangedPaths(value.changedPaths) &&
+    nonEmpty(value.planOutputName) &&
+    typeof value.reviewerContextWindow === "number" &&
+    Number.isSafeInteger(value.reviewerContextWindow) &&
+    value.reviewerContextWindow > 4_096
+  );
 }
 function parsePayload(value: unknown): ReviewEvidenceResolverPayloadV1 {
   if (!isRecord(value) || !validPayloadRecord(value))
@@ -131,6 +143,7 @@ function parsePayload(value: unknown): ReviewEvidenceResolverPayloadV1 {
     diffPath: value.diffPath as string,
     changedPaths: Object.freeze([...(value.changedPaths as string[])]),
     planOutputName: value.planOutputName as string,
+    reviewerContextWindow: value.reviewerContextWindow as number,
   });
 }
 
@@ -356,14 +369,15 @@ async function resolveEvidence(
     );
   }
   const dossier = blocks.join("\n\n");
-  const chunks = byteChunks(dossier);
-  if (chunks.length > ReviewEvidenceChunkOutputs.length)
+  const dossierBytes = Buffer.byteLength(dossier, "utf8");
+  if (dossierBytes > ReviewEvidenceDossierMaxBytes)
     throw new ReviewEvidenceResolutionFailure({
       code: "producer-overflow",
       message: "Resolved evidence exceeds the fixed dossier admission limit.",
-      actual: Buffer.byteLength(dossier, "utf8"),
-      limit: ChunkMaxBytes * ReviewEvidenceChunkOutputs.length,
+      actual: dossierBytes,
+      limit: ReviewEvidenceDossierMaxBytes,
     });
+  const chunks = byteChunks(dossier);
   const padded = ReviewEvidenceChunkOutputs.map((_, index) => chunks[index] ?? "");
   const coverage = Object.freeze({
     v: 1,
@@ -372,7 +386,7 @@ async function resolveEvidence(
     diffHash: payload.diffHash,
     digest: createHash("sha256").update(dossier).digest("hex"),
     uniqueBytes,
-    dossierBytes: Buffer.byteLength(dossier, "utf8"),
+    dossierBytes,
     chunks: chunks.length,
     chunkOutputs: Object.freeze(ReviewEvidenceChunkOutputs.slice(0, chunks.length)),
     omissions: Object.freeze([...(plan.evidenceOmissions ?? [])]),
@@ -435,6 +449,22 @@ export function makeReviewEvidenceResolverExecutor(options: {
                 cause,
               }),
       });
+      const projectedPromptBytes =
+        Buffer.byteLength(JSON.stringify(context.outputs[0]?.text ?? ""), "utf8") +
+        Buffer.byteLength(JSON.stringify(resolved.coverage), "utf8") +
+        resolved.chunks.reduce(
+          (total, chunk) => total + Buffer.byteLength(JSON.stringify(chunk), "utf8"),
+          0,
+        ) +
+        ReviewerPromptFixedReserveBytes;
+      const promptLimit = payload.reviewerContextWindow - DagSubagentReservedOutputTokens;
+      if (projectedPromptBytes > promptLimit)
+        return yield* new ReviewEvidenceResolutionFailure({
+          code: "prompt-overflow",
+          message: "Resolved evidence exceeds conservative reviewer prompt admission.",
+          actual: projectedPromptBytes,
+          limit: promptLimit,
+        });
       const outputs: Record<string, DagTextArtifactReference> = {};
       const content = {
         [ReviewEvidenceCoverageOutput]: JSON.stringify(resolved.coverage),

@@ -739,6 +739,7 @@ async function createReviewAttempt(
             provider: assignment.provider,
             ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
             pinned: assignment.pinned,
+            contextWindow: assignment.contextWindow,
           },
         ]),
       ),
@@ -749,6 +750,7 @@ async function createReviewAttempt(
         {
           model: assignment.fqid,
           ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
+          contextWindow: assignment.contextWindow,
         },
       ]),
     );

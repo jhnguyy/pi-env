@@ -68,6 +68,7 @@ async function execute(input: {
   plan: ReviewPlan;
   changedPaths?: string[];
   diffHash?: string;
+  reviewerContextWindow?: number;
 }) {
   const runId = "review-run";
   const planOutputs = await Effect.runPromise(
@@ -94,6 +95,7 @@ async function execute(input: {
         diffPath: input.fixture.diffPath,
         changedPaths: input.changedPaths ?? ["a.ts"],
         planOutputName: "reading_plan",
+        reviewerContextWindow: input.reviewerContextWindow ?? 272_000,
       },
     },
     dependencies: [{ nodeId: "reading-plan", mode: DagDependencyMode.Required }],
@@ -266,6 +268,19 @@ describe("pull request evidence resolver", () => {
         ]),
       }),
     ).rejects.toMatchObject({ code: "producer-overflow" });
+  });
+
+  it("rejects evidence that exceeds the reviewer context window", async () => {
+    const f = fixture();
+    await expect(
+      execute({
+        fixture: f,
+        reviewerContextWindow: 4_500,
+        plan: plan([
+          { kind: "file", path: "a.ts", startLine: 1, endLine: 2, purpose: "source" },
+        ]),
+      }),
+    ).rejects.toMatchObject({ code: "prompt-overflow" });
   });
 
   it("rejects a symlink that resolves outside the pinned worktree", async () => {

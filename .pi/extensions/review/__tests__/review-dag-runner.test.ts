@@ -95,7 +95,11 @@ function fixture(): {
 const assignments = Object.fromEntries(
   ReviewRoles.map((role, index) => [
     role,
-    { model: index % 2 ? "provider-b/model" : "provider-a/model", reasoning: "high" },
+    {
+      model: index % 2 ? "provider-b/model" : "provider-a/model",
+      reasoning: "high",
+      contextWindow: 272_000,
+    },
   ]),
 ) as ReviewRoleAssignments;
 
@@ -543,6 +547,7 @@ describe("DAG-backed pull request review runner", () => {
             diffPath: f.state.snapshot.diffPath,
             changedPaths: ["a.ts"],
             planOutputName: "reading_plan",
+            reviewerContextWindow: 272_000,
           },
         }),
       ),

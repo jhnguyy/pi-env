@@ -20,7 +20,11 @@ import {
 const assignments = Object.fromEntries(
   ReviewRoles.map((role, index) => [
     role,
-    { model: index % 2 ? "provider-b/model" : "provider-a/model", reasoning: "high" },
+    {
+      model: index % 2 ? "provider-b/model" : "provider-a/model",
+      reasoning: "high",
+      contextWindow: 272_000,
+    },
   ]),
 ) as ReviewRoleAssignments;
 const tools = {
@@ -46,6 +50,7 @@ const evidence = {
   diffPath: "/artifacts/diff.patch",
   changedPaths: ["a.ts"],
   planOutputName: "reading_plan",
+  reviewerContextWindow: 272_000,
 };
 function graph(runId = "review-run") {
   return compileReviewGraph({ runId, cwd: "/workspace", assignments, tools, evidence });

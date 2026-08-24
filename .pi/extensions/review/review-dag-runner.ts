@@ -669,6 +669,9 @@ export async function runReviewDag(options: {
         diffPath: state.snapshot.diffPath,
         changedPaths: state.snapshot.metadata.changedFiles.map((file) => file.path),
         planOutputName: ReadingPlanNode.outputName,
+        reviewerContextWindow: Math.min(
+          ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
+        ),
       },
     });
     state = {
