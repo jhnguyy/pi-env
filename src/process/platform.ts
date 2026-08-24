@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import { Data, Effect } from "effect";
 import type { Scope } from "effect/Scope";
 
@@ -185,6 +186,64 @@ export function scopedChildProcess(
     spawnStarted(command, args, options),
     (proc) => Effect.promise(() => terminateAndWait(proc, killGraceMs)),
   );
+}
+
+function waitForExit(command: string, proc: ChildProcess): Effect.Effect<number, ProcessFailure> {
+  return Effect.callback<number, ProcessFailure>((resume) => {
+    const cleanup = (): void => {
+      proc.off("error", onError);
+      proc.off("close", onClose);
+    };
+    const onError = (cause: Error): void => {
+      cleanup();
+      resume(Effect.fail(new ProcessFailure({ kind: ProcessFailureKind.Exit, command, message: cause.message })));
+    };
+    const onClose = (code: number | null, closeSignal: NodeJS.Signals | null): void => {
+      cleanup();
+      if (code !== null) {
+        resume(Effect.succeed(code));
+        return;
+      }
+      if (closeSignal) {
+        resume(Effect.succeed(128 + osConstants.signals[closeSignal]));
+        return;
+      }
+      resume(Effect.fail(new ProcessFailure({
+        kind: ProcessFailureKind.Exit,
+        command,
+        message: `Process exited without a code or signal: ${command}`,
+      })));
+    };
+    proc.once("error", onError);
+    proc.once("close", onClose);
+    return Effect.sync(cleanup);
+  });
+}
+
+/** Runs an inherited-stdio command with child-tree cleanup and an optional wall-clock bound. */
+export function runInheritedProcess(
+  command: string,
+  args: readonly string[],
+  options: ScopedChildProcessOptions = {},
+): Effect.Effect<number, ProcessFailure> {
+  const timeoutMs = options.timeoutMs;
+  const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+  const invalid = (timeoutMs === undefined ? undefined : validatePositiveInteger(timeoutMs, "timeoutMs", command))
+    ?? validateNonNegativeInteger(killGraceMs, "killGraceMs", command);
+  if (invalid) return Effect.fail(invalid);
+  const running = scopedChildProcess(command, args, { ...options, killGraceMs, stdio: "inherit" }).pipe(
+    Effect.flatMap((proc) => waitForExit(command, proc)),
+  );
+  return Effect.scoped(timeoutMs === undefined
+    ? running
+    : running.pipe(Effect.timeoutOrElse({
+      duration: timeoutMs,
+      orElse: () => Effect.fail(new ProcessFailure({
+        kind: ProcessFailureKind.Timeout,
+        command,
+        message: `Process timed out after ${timeoutMs}ms: ${command}`,
+      })),
+    })));
 }
 
 function collectProcess(
