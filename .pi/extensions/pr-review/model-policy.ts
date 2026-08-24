@@ -36,11 +36,7 @@ export interface ReviewModelPolicySuccess {
   readonly approvedRoster: readonly ReviewModelCandidate[];
   readonly assignments: Readonly<Record<ReviewRoleName, ReviewModelAssignment>>;
 }
-export type ReviewModelPolicyErrorCode =
-  | "no_approved_models"
-  | "invalid_pin"
-  | "unapproved_model"
-  | "provider_diversity_required";
+export type ReviewModelPolicyErrorCode = "no_approved_models" | "invalid_pin" | "unapproved_model";
 export class ReviewModelPolicyError extends Error {
   constructor(
     readonly code: ReviewModelPolicyErrorCode,
@@ -123,12 +119,6 @@ export function resolvePrReviewModelPolicy(
         `Pinned role ${role} references model ${pin} without reviewer approval.`,
       );
   }
-  const providers = [...new Set(approvedRoster.map((candidate) => candidate.provider))];
-  if (providers.length < 2)
-    throw new ReviewModelPolicyError(
-      "provider_diversity_required",
-      "PR review requires approved models from at least two providers.",
-    );
   const assignments = {} as Record<ReviewRoleName, ReviewModelAssignment>;
   const choose = (role: ReviewRoleName, fallbackIndex: number): ReviewModelAssignment => {
     const pin = pins[role];
@@ -144,29 +134,12 @@ export function resolvePrReviewModelPolicy(
   };
   assignments["reading-plan"] = choose("reading-plan", 0);
   FocusedRoles.forEach((role, index) => {
-    const provider = providers[index % providers.length];
-    const fallback = approvedRoster.findIndex((candidate) => candidate.provider === provider);
-    assignments[role] = choose(role, fallback < 0 ? index : fallback);
+    assignments[role] = choose(role, index);
   });
-  if (pins["whole-change"]) assignments["whole-change"] = choose("whole-change", 1);
-  else {
-    const baselineProvider = assignments.correctness.provider;
-    const candidate = approvedRoster.find((item) => item.provider !== baselineProvider)!;
-    assignments["whole-change"] = assignment("whole-change", candidate, false);
-  }
-  if (
-    FocusedRoles.every(
-      (role) => assignments[role].provider === assignments["whole-change"].provider,
-    )
-  )
-    throw new ReviewModelPolicyError(
-      "provider_diversity_required",
-      "The whole-change reviewer must differ from at least one focused reviewer provider.",
-    );
-  assignments.synthesis = choose(
-    "synthesis",
-    approvedRoster.indexOf(approvedById.get(assignments["whole-change"].fqid)!),
-  );
+  assignments["whole-change"] = choose("whole-change", 1);
+  assignments.synthesis = pins.synthesis
+    ? choose("synthesis", 1)
+    : assignment("synthesis", assignments["whole-change"], false);
   return Object.freeze({
     ok: true,
     approvedRoster: Object.freeze(approvedRoster),

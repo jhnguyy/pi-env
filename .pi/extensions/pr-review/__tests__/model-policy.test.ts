@@ -48,14 +48,10 @@ describe("resolvePrReviewModelPolicy", () => {
     );
   });
 
-  it("rejects approved models from only one provider", () => {
-    const sameProvider = [model("anthropic", "a"), model("anthropic", "b")];
-    expect(() =>
-      resolvePrReviewModelPolicy(settings("anthropic/a", "anthropic/b"), sameProvider),
-    ).toThrowError(
-      expect.objectContaining<Partial<ReviewModelPolicyError>>({
-        code: "provider_diversity_required",
-      }),
+  it("assigns every role when only one approved model is available", () => {
+    const result = resolvePrReviewModelPolicy(settings("openai/model"), [model("openai", "model")]);
+    expect(new Set(Object.values(result.assignments).map((assignment) => assignment.fqid))).toEqual(
+      new Set(["openai/model"]),
     );
   });
 
@@ -82,9 +78,6 @@ describe("resolvePrReviewModelPolicy", () => {
       "google/gemini-2.5",
       "openai/gpt-5",
     ]);
-    expect(result.assignments["whole-change"].provider).not.toBe(
-      result.assignments.correctness.provider,
-    );
     expect(resolvePrReviewModelPolicy(approved, [...available].reverse()).assignments).toEqual(
       result.assignments,
     );

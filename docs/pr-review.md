@@ -68,7 +68,7 @@ The graph runs these reviewer roles:
 
 The reading plan runs beside the reviewers. Synthesis waits for all reviewer paths to become terminal. Synthesis requires at least one successful reviewer path.
 
-Agent settings approve models with the exact `reviewer` annotation. The review extension rejects unapproved role pins. The approved roster must contain at least two providers. The extension derives the highest supported reasoning level from model metadata.
+Agent settings approve models with the exact `reviewer` annotation. The review extension rejects unapproved role pins. One approved model can fill all roles. The extension derives the highest supported reasoning level from model metadata.
 
 ## Untrusted input boundary
 
