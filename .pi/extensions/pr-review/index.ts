@@ -110,6 +110,11 @@ function nestedReviewUsage(state: ReviewState): Usage | undefined {
   };
 }
 
+function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
+  const { usage: _usage, ...withoutUsage } = result;
+  return withoutUsage;
+}
+
 function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): string {
   return [parentSessionId, metadata.owner, metadata.repo, metadata.number, metadata.headOid].join(
     ":",
@@ -333,6 +338,11 @@ async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionConte
       );
     } finally {
       reconcilingRunIds.delete(current.dag.runId);
+      if (
+        states.get(current.snapshot.id)?.dag?.status === "running" &&
+        dagRegistration?.registrationId !== registration.registrationId
+      )
+        queueMicrotask(() => void reconcilePersistedDagStates(pi, ctx));
     }
   }
 }
@@ -783,7 +793,7 @@ async function startReview(
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
   if (!forceRerun) {
     const active = createOperations.get(identityKey);
-    if (active) return active;
+    if (active) return active.then(withoutNestedUsage);
     const existing = matchingReview(identityKey, parentSessionId);
     if (existing) {
       remember(existing);
@@ -1078,6 +1088,12 @@ async function postingPreflight(
   event: ReviewEventValue,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
+  if (
+    s.preparation?.status === "failed" ||
+    !s.result ||
+    (s.dag?.status !== "succeeded" && s.dag?.status !== "degraded")
+  )
+    return "Review is not complete and cannot be posted.";
   const remote = await currentRemoteHead(
     pi.exec.bind(pi),
     ctx.cwd,
@@ -1101,6 +1117,45 @@ function contentHashFor(s: ReviewState, event: ReviewEventValue): string {
       head: s.snapshot.metadata.headOid,
     }),
   );
+}
+
+async function existingPostDisposition(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  state: ReviewState,
+  contentHash: string,
+  signal?: AbortSignal,
+): Promise<{ attempt?: PostAttempt; result?: string }> {
+  const attempt = state.posts.find(
+    (candidate) => candidate.contentHash === contentHash && candidate.status !== "posted",
+  );
+  const posted = state.posts.find(
+    (candidate) => candidate.contentHash === contentHash && candidate.status === "posted",
+  );
+  if (posted) return { result: `Review already posted (${posted.reviewId ?? posted.id}).` };
+  const prior = attempt ? await reconcileAttempt(pi, ctx, state, attempt, signal) : undefined;
+  if (prior) return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
+  if (attempt?.status === "uncertain")
+    return {
+      result:
+        "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
+    };
+  return { attempt };
+}
+
+async function confirmedPostingState(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  reviewId: string,
+  event: ReviewEventValue,
+  contentHash: string,
+  signal?: AbortSignal,
+): Promise<{ state?: ReviewState; error?: string }> {
+  const state = states.get(reviewId);
+  if (!state || contentHashFor(state, event) !== contentHash)
+    return { error: "The review changed during confirmation. Confirm the updated review again." };
+  const blocked = await postingPreflight(pi, ctx, state, event, signal);
+  return blocked ? { error: blocked } : { state };
 }
 
 async function handlePostFailure(
@@ -1132,20 +1187,16 @@ async function postReviewCritical(
   expectedContentHash: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const s = states.get(reviewId);
+  let s = states.get(reviewId);
   if (!s) return `Review not found: ${reviewId}.`;
   if (contentHashFor(s, event) !== expectedContentHash)
     return "The review changed while posting was queued. Confirm the updated review again.";
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
   if (blocked) return blocked;
   const contentHash = contentHashFor(s, event);
-  let attempt = s.posts.find((p) => p.contentHash === contentHash && p.status !== "posted");
-  const posted = s.posts.find((p) => p.contentHash === contentHash && p.status === "posted");
-  if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-  const prior = attempt ? await reconcileAttempt(pi, ctx, s, attempt, signal) : undefined;
-  if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
-  if (attempt?.status === "uncertain")
-    return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
+  const disposition = await existingPostDisposition(pi, ctx, s, contentHash, signal);
+  if (disposition.result) return disposition.result;
+  let attempt = disposition.attempt;
   const selected = selectedFindings(s);
   if (
     !(await confirm(
@@ -1155,6 +1206,16 @@ async function postReviewCritical(
     ))
   )
     return "Posting cancelled.";
+  const confirmed = await confirmedPostingState(
+    pi,
+    ctx,
+    reviewId,
+    event,
+    contentHash,
+    signal,
+  );
+  if (confirmed.error) return confirmed.error;
+  s = confirmed.state!;
   if (!attempt) {
     attempt = newAttempt(s, event, contentHash);
     saveState(pi, s);
@@ -1280,6 +1341,8 @@ function openReview(reviewId: string): string {
 async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const state = stateById(reviewId);
   if (!state || state.cleaned) return "Review cleanup complete.";
+  if (preparingReviewIds.has(state.snapshot.id) || state.dag?.status === "running")
+    return `Review ${state.snapshot.id} is active. Cancel or wait for it before cleanup.`;
   const worktreeCleaned = await removeManagedWorktree(pi, state);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
   const root = join(getAgentDir(), "pr-review");

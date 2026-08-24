@@ -307,6 +307,42 @@ describe("DAG-backed PR review runner", () => {
     ).toBe(true);
   });
 
+  it("fails closed when a published reviewer artifact changes before collection", async () => {
+    const f = fixture();
+    const service = serviceFor(f.artifactRoot, {});
+    const reconstruct = service.reconstruct;
+    service.reconstruct = () =>
+      reconstruct().pipe(
+        Effect.tap((value) =>
+          Effect.sync(() => {
+            const reconstruction = value as DagSessionReconstruction;
+            const node = reconstruction.state.nodes.find(
+              (candidate) =>
+                candidate.nodeId === "review-correctness" &&
+                candidate.status === DagNodeStatus.Succeeded,
+            );
+            const reference = Object.values(
+              node?.status === DagNodeStatus.Succeeded ? node.outputs : {},
+            )[0] as any;
+            writeFileSync(path.join(f.artifactRoot, reference.path), "tampered");
+          }),
+        ),
+      );
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service,
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.dag?.status).toBe("degraded");
+    expect(result.dag?.malformedNodes).toEqual(
+      expect.arrayContaining(["review-correctness"]),
+    );
+  });
+
   it("reports a failed synthesis node while preserving reviewer findings", async () => {
     const f = fixture();
     const result = await runReviewDag({

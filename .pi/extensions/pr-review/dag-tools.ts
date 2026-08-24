@@ -32,6 +32,7 @@ import {
 import type { ReviewGraphToolNames } from "./review-graph";
 
 const MAX_DECK_BYTES = 256_000;
+const MAX_SUBMISSION_BYTES = 262_144;
 const MAX_RESULT_CONTEXT_BYTES = 1_750_000;
 const EmptySchema = Type.Object({}, { additionalProperties: false });
 
@@ -49,6 +50,14 @@ function customTool(contract: ToolContract<any, any>, cwd: string): AgentTool<an
 
 function canonical(value: unknown): string {
   return JSON.stringify(value);
+}
+
+function boundedSubmission(value: unknown): string {
+  const text = canonical(value);
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes > MAX_SUBMISSION_BYTES)
+    throw new Error(`Review submission exceeds the byte limit: ${bytes}/${MAX_SUBMISSION_BYTES}.`);
+  return text;
 }
 
 export async function readVerifiedReviewArtifact(
@@ -161,7 +170,7 @@ export function registerReviewDagTools(options: {
         const validation = validatePlan(plan, options.store.state.snapshot.metadata.changedFiles);
         if (!validation.ok)
           return { content: [txt(validation.message)], isError: true, details: validation };
-        return { content: [txt(canonical(plan))], details: validation };
+        return { content: [txt(boundedSubmission(plan))], details: validation };
       },
     },
     options.store.state.snapshot.worktree,
@@ -176,7 +185,7 @@ export function registerReviewDagTools(options: {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const raw = params as ReviewerOutput;
         return {
-          content: [txt(canonical(raw))],
+          content: [txt(boundedSubmission(raw))],
           details: { ok: true, findings: raw.findings.length },
         };
       },
@@ -225,7 +234,7 @@ export function registerReviewDagTools(options: {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const raw = params as SynthesisReview;
         return {
-          content: [txt(canonical(raw))],
+          content: [txt(boundedSubmission(raw))],
           details: { ok: true, findings: raw.findings.length, status: raw.coverage.status },
         };
       },

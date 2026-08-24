@@ -310,15 +310,16 @@ async function awaitSubmittedGraph(
       pollActive = false;
     }
   };
-  await Effect.runPromise(handle.accepted, { signal });
-  onSubmitted();
-  await reportProgress();
-  const interval = onProgress ? setInterval(() => void reportProgress(), 2_000) : undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
   try {
+    await Effect.runPromise(handle.accepted, { signal });
+    onSubmitted();
+    await reportProgress();
+    interval = onProgress ? setInterval(() => void reportProgress(), 2_000) : undefined;
     await Effect.runPromise(handle.await, { signal });
   } catch (cause) {
-    if (!signal?.aborted) throw cause;
     await Effect.runPromise(Effect.result(handle.cancel));
+    if (!signal?.aborted) throw cause;
   } finally {
     if (interval) clearInterval(interval);
     await reportProgress();

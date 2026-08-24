@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "../config";
@@ -40,6 +41,24 @@ describe("shared subagent run supervisor", () => {
     await expect(pending).rejects.toMatchObject({ reason: "aborted" });
     active.release();
 
+    const replacement = await supervisor.acquire(request("/replacement"));
+    replacement.release();
+    await supervisor.shutdown();
+  });
+
+  it("removes a pending admission when its Effect is interrupted", async () => {
+    const supervisor = new SubagentRunSupervisor(
+      "session",
+      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
+    );
+    const active = await supervisor.acquire(request("/active"));
+    const controller = new AbortController();
+    const pending = Effect.runPromise(supervisor.acquireEffect(request("/pending")), {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toBeDefined();
+    active.release();
     const replacement = await supervisor.acquire(request("/replacement"));
     replacement.release();
     await supervisor.shutdown();

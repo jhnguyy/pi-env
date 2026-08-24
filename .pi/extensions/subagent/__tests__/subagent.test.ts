@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { Container, Text } from "@earendil-works/pi-tui";
-import initSubagent from "../index";
+import initSubagent, { completedJobUsageOnce } from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
 
@@ -105,6 +105,21 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("has a description string", () => {
       expect(typeof registeredTool.description).toBe("string");
       expect(registeredTool.description.length).toBeGreaterThan(0);
+    });
+
+    it("reports completed asynchronous usage exactly once", () => {
+      const reported = new Set<string>();
+      const job = {
+        id: "job-1",
+        status: "completed",
+        latestDetails: {
+          usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7, cost: 1, turns: 1 },
+        },
+      } as any;
+      expect(completedJobUsageOnce(reported, job)).toMatchObject({
+        usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7 },
+      });
+      expect(completedJobUsageOnce(reported, job)).toEqual({});
     });
 
     it("supports compact usage reporting for the active session", async () => {

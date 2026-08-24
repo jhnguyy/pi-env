@@ -125,7 +125,13 @@ export class SubagentRunSupervisor {
     request: SubagentAdmissionRequest,
   ): Effect.Effect<SubagentRunLease, SubagentAdmissionError> {
     return Effect.tryPromise({
-      try: () => this.acquire(request),
+      try: (effectSignal) =>
+        this.acquire({
+          ...request,
+          signal: request.signal
+            ? AbortSignal.any([request.signal, effectSignal])
+            : effectSignal,
+        }),
       catch: (cause) =>
         cause instanceof SubagentAdmissionError
           ? cause

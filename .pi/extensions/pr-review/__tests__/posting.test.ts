@@ -78,6 +78,12 @@ function state(): ReviewState {
         },
       ],
     },
+    dag: {
+      runId: "run",
+      status: "degraded",
+      submitted: true,
+      rawResultReferences: [],
+    },
     selectedFindingIds: ["F1", "F2"],
     posts: [],
   };
@@ -214,6 +220,40 @@ describe("pr-review posting", () => {
     expect(confirms).toHaveLength(1);
     expect(confirms[0]).toContain("Preface preview:");
     expect(confirms[0].length).toBeLessThan(700);
+  });
+
+  it("blocks incomplete reviews and revalidates content after confirmation", async () => {
+    const incomplete = { ...state(), result: undefined };
+    restore({ sessionManager: { getBranch: () => [custom(incomplete)] } } as any);
+    const pi = {
+      appendEntry() {},
+      exec: async () => ({ code: 0, stdout: "head\n", stderr: "" }),
+    } as any;
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } } as any;
+    await expect(postReview(pi, ctx, ReviewEvent.Approve)).resolves.toContain("not complete");
+
+    clearInMemoryStateForTests();
+    const changed = state();
+    restore({ sessionManager: { getBranch: () => [custom(changed)] } } as any);
+    let posts = 0;
+    pi.exec = async (_cmd: string, args: string[]) => {
+      if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+      if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+      posts += 1;
+      return { code: 0, stdout: "{}", stderr: "" };
+    };
+    ctx.ui.confirm = async () => {
+      restore({
+        sessionManager: {
+          getBranch: () => [custom({ ...changed, preface: "changed during confirmation" })],
+        },
+      } as any);
+      return true;
+    };
+    await expect(postReview(pi, ctx, ReviewEvent.Comment)).resolves.toContain(
+      "changed during confirmation",
+    );
+    expect(posts).toBe(0);
   });
 
   it("blocks posting before confirmation when the remote head is stale", async () => {

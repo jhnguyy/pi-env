@@ -65,6 +65,7 @@ function roleInstructions(role: ReviewRole): string {
       ...common,
       "Load the successful reading-plan and reviewer result references with the result-reference tool.",
       "Report failed or malformed reviewer paths as degraded coverage. Do not invent agreement.",
+      "Use only these coverage role values: correctness, intent, maintainability, tests, security, whole-change. Do not use DAG node IDs or reading-plan.",
       "Preserve source reviewer names and agreement counts on each finding.",
       "Call the structured synthesis submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");

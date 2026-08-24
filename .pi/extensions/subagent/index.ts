@@ -99,6 +99,22 @@ const SUBAGENT_JOB_PARAMETERS = Type.Object({
 type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
 type SubagentJobParams = Static<typeof SUBAGENT_JOB_PARAMETERS>;
 
+export function completedJobUsageOnce(
+  reportedJobUsage: Set<string>,
+  job: SubagentJob,
+) {
+  if (
+    job.status === SubagentJobStatus.Queued ||
+    job.status === SubagentJobStatus.Running ||
+    job.status === SubagentJobStatus.Cancelling ||
+    reportedJobUsage.has(job.id) ||
+    !job.latestDetails?.usage
+  )
+    return {};
+  reportedJobUsage.add(job.id);
+  return { usage: toNestedToolUsage(job.latestDetails.usage) };
+}
+
 function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
   const details = job.latestDetails;
   return {
@@ -131,18 +147,6 @@ export default function (pi: ExtensionAPI) {
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
   const reportedJobUsage = new Set<string>();
-  const reportCompletedJobUsage = (job: SubagentJob) => {
-    if (
-      job.status === SubagentJobStatus.Queued ||
-      job.status === SubagentJobStatus.Running ||
-      job.status === SubagentJobStatus.Cancelling ||
-      reportedJobUsage.has(job.id) ||
-      !job.latestDetails?.usage
-    )
-      return {};
-    reportedJobUsage.add(job.id);
-    return { usage: toNestedToolUsage(job.latestDetails.usage) };
-  };
 
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
@@ -206,7 +210,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
-        ...reportCompletedJobUsage(waited.job),
+        ...completedJobUsageOnce(reportedJobUsage, waited.job),
       };
     }
     if (params.action === SubagentJobAction.Result) {
@@ -215,7 +219,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(job) }],
         details: getJobRenderDetails(job),
-        ...reportCompletedJobUsage(job),
+        ...completedJobUsageOnce(reportedJobUsage, job),
       };
     }
     const job =

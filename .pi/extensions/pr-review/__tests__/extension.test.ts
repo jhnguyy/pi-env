@@ -622,11 +622,26 @@ describe("pr-review extension surface", () => {
       terminalOutcome: "interrupted",
       recoveredFromProcessLoss: true,
     });
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(pi.appended).toHaveLength(0);
-    pi.handlers.session_tree({}, ctx);
     await vi.waitFor(() => expect(pi.appended).toHaveLength(1));
     expect(pi.appended[0][1].state.dag.status).toBe("interrupted");
+  });
+
+  it("refuses cleanup while the review DAG is active", async () => {
+    tempRoot();
+    const state = {
+      ...sampleState("active", []),
+      dag: { runId: "run", status: "running" as const, rawResultReferences: [] },
+    };
+    mkdirSync(state.snapshot.artifactDir, { recursive: true });
+    restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+    const pi = extensionPi();
+    const notes: string[] = [];
+    await pi.command("cleanup active", {
+      ui: { notify: (message: string) => notes.push(message) },
+    } as any);
+    expect(notes[0]).toContain("is active");
+    expect(existsSync(state.snapshot.artifactDir)).toBe(true);
+    expect(pi.appended).toHaveLength(0);
   });
 
   it("cleanup uses a temporary managed root and appends durable cleanup state", async () => {

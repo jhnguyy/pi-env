@@ -194,13 +194,30 @@ function prepareSnapshotWorkflow(
       const diff = (yield* runEffect(
         exec,
         "git",
-        ["diff", "--no-ext-diff", "--no-color", "--find-renames", mergeBase, metadata.headOid],
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-color",
+          "--find-renames",
+          mergeBase,
+          metadata.headOid,
+        ],
         { cwd: repoDir, timeout: 180000 },
       )).stdout;
       const manifestRaw = (yield* runEffect(
         exec,
         "git",
-        ["diff", "--name-status", "-z", "--find-renames", mergeBase, metadata.headOid],
+        [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--name-status",
+          "-z",
+          "--find-renames",
+          mergeBase,
+          metadata.headOid,
+        ],
         { cwd: repoDir, timeout: 180000 },
       )).stdout;
       metadata.changedFiles = parseNameStatusZ(manifestRaw);

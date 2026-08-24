@@ -177,9 +177,18 @@ export const SynthesisReviewSchema = Type.Object(
     coverage: Type.Object(
       {
         status: StringEnum(["complete", "degraded"] as const),
-        succeeded: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
-        failed: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
-        malformed: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
+        succeeded: Type.Array(StringEnum(ReviewerRoleValues), {
+          maxItems: ReviewerRoleValues.length,
+          uniqueItems: true,
+        }),
+        failed: Type.Array(StringEnum(ReviewerRoleValues), {
+          maxItems: ReviewerRoleValues.length,
+          uniqueItems: true,
+        }),
+        malformed: Type.Array(StringEnum(ReviewerRoleValues), {
+          maxItems: ReviewerRoleValues.length,
+          uniqueItems: true,
+        }),
       },
       { additionalProperties: false },
     ),
