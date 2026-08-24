@@ -201,8 +201,17 @@ export class DagSessionRuntime {
       return submitDagRun(graph, undefined, { journal }).pipe(
         Effect.provide(this.runtimeLayer),
         Scope.provide(this.scope),
+        Effect.tap((handle) =>
+          Effect.sync(() => this.activeRuns.add(handle)).pipe(
+            Effect.andThen(
+              handle.await.pipe(
+                Effect.onExit(() => Effect.sync(() => this.activeRuns.delete(handle))),
+                Effect.forkIn(this.scope),
+              ),
+            ),
+          ),
+        ),
         Effect.map((handle) => {
-          this.activeRuns.add(handle);
           const removeAfterTerminal = <A, E>(effect: Effect.Effect<A, E>) =>
             effect.pipe(
               Effect.onExit((exit) =>

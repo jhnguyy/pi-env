@@ -281,6 +281,41 @@ describe("DAG runtime", () => {
     }),
   );
 
+  it.effect("interrupts a blocked journal append when the owner scope closes", () =>
+    Effect.gen(function* () {
+      const dag = Fixtures.graph([runtimeNode("task")]);
+      const appendEntered = yield* Deferred.make<void>();
+      const invocations = yield* Ref.make(0);
+      const journal: DagRuntimeJournal = {
+        beforeRun: () =>
+          Deferred.succeed(appendEntered, undefined).pipe(Effect.andThen(Effect.never)),
+        appendTransition: () => Effect.void,
+        appendFinal: () => Effect.void,
+      };
+      const { service } = registryFromMap({
+        task: () => Ref.update(invocations, (count) => count + 1).pipe(Effect.as({})),
+      });
+      const scope = yield* Scope.make();
+      const handle = yield* submitDagRun(dag, undefined, { journal }).pipe(
+        Effect.provide(runtimeLayer(service)),
+        Scope.provide(scope),
+      );
+
+      yield* Deferred.await(appendEntered);
+      yield* Scope.close(scope, Exit.void);
+      const exit = yield* Effect.exit(handle.await);
+
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") {
+        const failure = Cause.findErrorOption(exit.cause);
+        expect(Option.isSome(failure) && failure.value instanceof DagRuntimeJournalFailed).toBe(
+          true,
+        );
+      }
+      expect(yield* Ref.get(invocations)).toBe(0);
+    }),
+  );
+
   it.effect("fails typed before start publication without invoking the executor", () =>
     Effect.gen(function* () {
       const dag = Fixtures.graph([runtimeNode("task")]);

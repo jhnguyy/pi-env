@@ -109,6 +109,19 @@ function runJournal<A>(
   return effect.pipe(Effect.catchCause((cause) => Effect.fail(journalFailed(cause))));
 }
 
+function trackJournal(
+  journal: RuntimeContracts.DagRuntimeJournal,
+  active: Ref.Ref<boolean>,
+): RuntimeContracts.DagRuntimeJournal {
+  const track = <A, E>(effect: Effect.Effect<A, E>) =>
+    Ref.set(active, true).pipe(Effect.andThen(effect), Effect.ensuring(Ref.set(active, false)));
+  return {
+    beforeRun: (graph) => track(journal.beforeRun(graph)),
+    appendTransition: (transition, attempt) => track(journal.appendTransition(transition, attempt)),
+    appendFinal: (outcome) => track(journal.appendFinal(outcome)),
+  };
+}
+
 function appendJournalTransition(
   journal: RuntimeContracts.DagRuntimeJournal | undefined,
   transition: DagContracts.DagTransition<unknown, RuntimeContracts.DagFailedNodePayload>,
@@ -432,26 +445,28 @@ function coordinator<TPayload>(
     }
   }).pipe(
     Effect.catchCause((cause) =>
-      Effect.gen(function* () {
-        const mutable = yield* Ref.get(mutableRef);
-        yield* interruptAndJoinActive(mutable).pipe(Effect.ignore);
-        const error = Cause.findErrorOption(cause);
-        if (
-          Option.isSome(error) &&
-          (error.value instanceof RuntimeContracts.DagRuntimeReducerFatal ||
-            error.value instanceof RuntimeContracts.DagRuntimeJournalFailed)
-        ) {
-          yield* Deferred.fail(done, error.value);
-          return;
-        }
-        yield* Deferred.fail(
-          done,
-          new RuntimeContracts.DagRuntimeCoordinatorFatal({
-            message: "DAG runtime coordinator failed.",
-            cause: Cause.squash(cause),
-          }),
-        );
-      }),
+      Effect.uninterruptible(
+        Effect.gen(function* () {
+          const mutable = yield* Ref.get(mutableRef);
+          yield* interruptAndJoinActive(mutable).pipe(Effect.ignore);
+          const error = Cause.findErrorOption(cause);
+          if (
+            Option.isSome(error) &&
+            (error.value instanceof RuntimeContracts.DagRuntimeReducerFatal ||
+              error.value instanceof RuntimeContracts.DagRuntimeJournalFailed)
+          ) {
+            yield* Deferred.fail(done, error.value);
+            return;
+          }
+          yield* Deferred.fail(
+            done,
+            new RuntimeContracts.DagRuntimeCoordinatorFatal({
+              message: "DAG runtime coordinator failed.",
+              cause: Cause.squash(cause),
+            }),
+          );
+        }),
+      ),
     ),
   );
 }
@@ -547,32 +562,44 @@ export const submitDagRunInternal = <TPayload>(
       cancelRequested: false,
     };
     const ref = yield* Ref.make(initial);
+    const journalActive = yield* Ref.make(false);
+    const journal = options?.journal ? trackJournal(options.journal, journalActive) : undefined;
     const events = yield* Queue.unbounded<RuntimeEvent>();
     const done = yield* Deferred.make<
       RuntimeContracts.DagRunSnapshot,
       RuntimeContracts.DagRunAwaitError
     >();
-    yield* Effect.uninterruptible(
-      Effect.gen(function* () {
-        const runScope = yield* Scope.make();
-        const cleaned = yield* Ref.make(false);
-        const fiber = yield* coordinator(graph, ref, events, done, runScope, options?.journal).pipe(
-          Effect.forkIn(runScope, { startImmediately: true }),
-        );
-        const cleanup = Effect.gen(function* () {
-          const shouldClean = yield* Ref.modify(cleaned, (wasCleaned) => [!wasCleaned, true]);
-          if (!shouldClean) return;
-          if (!(yield* Deferred.isDone(done))) {
+    yield* Effect.gen(function* () {
+      const runScope = yield* Scope.make();
+      const cleaned = yield* Ref.make(false);
+      const fiber = yield* coordinator(graph, ref, events, done, runScope, journal).pipe(
+        Effect.interruptible,
+        Effect.forkIn(runScope, { startImmediately: true }),
+      );
+      const cleanup = Effect.gen(function* () {
+        const shouldClean = yield* Ref.modify(cleaned, (wasCleaned) => [!wasCleaned, true]);
+        if (!shouldClean) return;
+        if (!(yield* Deferred.isDone(done))) {
+          if (yield* Ref.get(journalActive)) {
+            yield* Fiber.interrupt(fiber).pipe(Effect.ignore);
+            yield* Deferred.fail(
+              done,
+              new RuntimeContracts.DagRuntimeJournalFailed({
+                message: "DAG runtime journal was interrupted during owner shutdown.",
+                cause: new Error("Owner scope closed during a journal operation."),
+              }),
+            );
+          } else {
             yield* Queue.offer(events, { _tag: "shutdown" });
-            yield* Deferred.await(done).pipe(Effect.ignore);
           }
-          yield* Fiber.interrupt(fiber).pipe(Effect.ignore);
-          yield* Scope.close(runScope, Exit.void).pipe(Effect.ignore);
-          yield* Queue.shutdown(events).pipe(Effect.ignore);
-        });
-        yield* Effect.addFinalizer(() => cleanup);
-      }),
-    );
+          yield* Deferred.await(done).pipe(Effect.ignore);
+        }
+        yield* Fiber.interrupt(fiber).pipe(Effect.ignore);
+        yield* Scope.close(runScope, Exit.void).pipe(Effect.ignore);
+        yield* Queue.shutdown(events).pipe(Effect.ignore);
+      });
+      yield* Effect.addFinalizer(() => cleanup);
+    });
     const awaitSnapshot = Deferred.await(done);
     return Object.freeze({
       snapshot: Ref.get(ref).pipe(Effect.map(snapshot)),
