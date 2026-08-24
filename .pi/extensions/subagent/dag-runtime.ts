@@ -120,12 +120,19 @@ function isContainedWorkspace(root: string, candidate: string): boolean {
   );
 }
 
-function resolveContainedCwd(request: DagSubagentRuntimeRequest, ctx: ExtensionContext): string {
+function resolveContainedCwd(
+  request: DagSubagentRuntimeRequest,
+  ctx: ExtensionContext,
+  workspaceRoot?: string,
+): string {
   const resolved = resolveEffectiveCwd(
     { task: request.prompt.user, cwd: request.payload.workspace.cwd },
     ctx.cwd,
   );
-  const root = resolveEffectiveCwd({ task: request.prompt.user, cwd: ctx.cwd }, ctx.cwd);
+  const root = resolveEffectiveCwd(
+    { task: request.prompt.user, cwd: workspaceRoot ?? ctx.cwd },
+    ctx.cwd,
+  );
   if (!isResolutionOk(resolved))
     throw new DagSubagentAdapterFailure({ phase: "resolution", message: resolved.error.message });
   if (!isResolutionOk(root) || !isContainedWorkspace(root.value, resolved.value))
@@ -167,8 +174,9 @@ function resolveRun(
   request: DagSubagentRuntimeRequest,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+  workspaceRoot?: string,
 ): ResolvedSubagentRun {
-  const cwd = resolveContainedCwd(request, ctx);
+  const cwd = resolveContainedCwd(request, ctx, workspaceRoot);
   const agentPrompt = resolveAgentPrompt(request.payload.agent, cwd, ctx);
   const explicit = materializeExplicitTools(request.payload.tools, cwd, ctx, registeredExtTools);
   const derivedAccess = toolAccess(explicit.capabilities);
@@ -194,21 +202,31 @@ function resolveRun(
     systemPrompt,
     cwd,
     maxTurns: request.payload.maxTurns,
+    reasoning: request.payload.reasoning,
     workspaceAccess:
       request.payload.workspace.access === "write" ? WorkspaceAccess.Write : WorkspaceAccess.Read,
   };
 }
 
+interface DagSubagentRuntimeOptions extends RunSubagentOptions {
+  readonly workspaceRootForRun?: (runId: string) => string | undefined;
+}
 export function makeDagSubagentRuntime(
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  options: RunSubagentOptions,
+  options: DagSubagentRuntimeOptions,
 ): DagSubagentRuntime {
   return {
     run: (request) =>
       Effect.gen(function* () {
         const run = yield* Effect.try({
-          try: () => resolveRun(request, ctx, registeredExtTools),
+          try: () =>
+            resolveRun(
+              request,
+              ctx,
+              registeredExtTools,
+              options.workspaceRootForRun?.(request.runId),
+            ),
           catch: (cause) =>
             runtimeFailure(
               cause instanceof DagSubagentAdapterFailure
@@ -251,7 +269,7 @@ export function makeDagSubagentExecutorRegistry(
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   artifactRoot: string,
-  options: RunSubagentOptions,
+  options: DagSubagentRuntimeOptions,
 ): DagExecutorRegistryService {
   const executor = makeDagSubagentExecutor({
     artifactRoot,

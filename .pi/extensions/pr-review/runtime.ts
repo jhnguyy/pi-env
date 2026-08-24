@@ -89,7 +89,7 @@ export function boundedChangedFileContext(state: ReviewState): string {
   );
 }
 
-function makeToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
+export function makeReviewToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
   const root = store.state.snapshot.worktree;
   const diffPath = store.state.snapshot.diffPath;
   let diffText: string | undefined;
@@ -279,7 +279,7 @@ function makeToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>>
 }
 
 export function makeReviewTools(store: ReviewRunStore) {
-  return makeToolContracts(store).map((contract) =>
+  return makeReviewToolContracts(store).map((contract) =>
     toAgentTool(contract, () => ({ cwd: store.state.snapshot.worktree })),
   );
 }

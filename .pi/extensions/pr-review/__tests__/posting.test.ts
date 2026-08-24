@@ -216,6 +216,32 @@ describe("pr-review posting", () => {
     expect(confirms[0].length).toBeLessThan(700);
   });
 
+  it("blocks posting before confirmation when the remote head is stale", async () => {
+    const s = state();
+    restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
+    let confirmed = false;
+    let posted = false;
+    const pi = {
+      appendEntry() {},
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "new-head\n", stderr: "" };
+        posted = true;
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    } as any;
+    const ctx = {
+      ui: {
+        confirm: async () => {
+          confirmed = true;
+          return true;
+        },
+      },
+    } as any;
+    await expect(postReview(pi, ctx, ReviewEvent.Comment)).resolves.toMatch(/stale/);
+    expect(confirmed).toBe(false);
+    expect(posted).toBe(false);
+  });
+
   it("rejects unknown post events through the command", async () => {
     restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
     const notes: string[] = [];

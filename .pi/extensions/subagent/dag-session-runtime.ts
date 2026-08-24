@@ -22,6 +22,8 @@ import {
   registerDagRuntimeService,
   unregisterDagRuntimeService,
   type DagRuntimeServiceRegistration,
+  type DagRuntimeSubmissionAuthority,
+  type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import type { SubagentRunSupervisor } from "./control";
@@ -71,12 +73,37 @@ export class DagSessionRuntime {
     private readonly scope: Scope.Closeable,
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
     private readonly claimedRunIds: Set<string>,
+    private readonly workspaceRoots: Map<string, string>,
+    private readonly ledger: SubagentUsageLedger,
     ctx: ExtensionContext,
     sessionGeneration: string,
   ) {
     const service = Object.freeze({
-      submit: <TPayload>(graph: ValidatedDagDefinition<TPayload>) => this.submit(graph),
+      submit: <TPayload>(
+        graph: ValidatedDagDefinition<TPayload>,
+        authority?: DagRuntimeSubmissionAuthority,
+      ) => this.submit(graph, authority),
       reconstruct: (runId: string) => reconstructDagSession(this.seam, runId),
+      usage: (runId: string): DagRuntimeUsage => {
+        const total = {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: 0,
+          turns: 0,
+        };
+        for (const record of this.ledger.rows()) {
+          if (!record.id.startsWith(`${runId}:`)) continue;
+          total.input += record.usage.input;
+          total.output += record.usage.output;
+          total.cacheRead += record.usage.cacheRead;
+          total.cacheWrite += record.usage.cacheWrite;
+          total.cost += record.usage.cost;
+          total.turns += record.usage.turns;
+        }
+        return Object.freeze(total);
+      },
     });
     this.registration = registerDagRuntimeService(pi, {
       parentSessionId: ctx.sessionManager.getSessionId(),
@@ -97,7 +124,9 @@ export class DagSessionRuntime {
       "dag-artifacts",
       parentSessionId,
     );
+    const workspaceRoots = new Map<string, string>();
     const registry = makeDagSubagentExecutorRegistry(ctx, registeredExtTools, artifactRoot, {
+      workspaceRootForRun: (runId) => workspaceRoots.get(runId),
       ledger: dependencies.ledger,
       supervisor: dependencies.supervisor,
       telemetryRuntime: dependencies.telemetryRuntime,
@@ -118,6 +147,8 @@ export class DagSessionRuntime {
         scope,
         Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
         persistedRunIds(writableSessionManager.getBranch()),
+        workspaceRoots,
+        dependencies.ledger,
         ctx,
         dependencies.sessionGeneration,
       );
@@ -146,6 +177,7 @@ export class DagSessionRuntime {
         await Effect.runPromise(Scope.close(this.scope, Exit.void));
       } finally {
         this.activeRuns.clear();
+        this.workspaceRoots.clear();
         try {
           unregisterDagRuntimeService(this.pi, this.registration);
         } catch {
@@ -156,7 +188,10 @@ export class DagSessionRuntime {
     return this.disposePromise;
   }
 
-  private submit<TPayload>(graph: ValidatedDagDefinition<TPayload>) {
+  private submit<TPayload>(
+    graph: ValidatedDagDefinition<TPayload>,
+    authority?: DagRuntimeSubmissionAuthority,
+  ) {
     return Effect.suspend(() => {
       if (!this.accepting) {
         return Effect.fail(
@@ -172,6 +207,7 @@ export class DagSessionRuntime {
         );
       }
       this.claimedRunIds.add(graph.runId);
+      if (authority?.workspaceRoot) this.workspaceRoots.set(graph.runId, authority.workspaceRoot);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;
@@ -189,7 +225,10 @@ export class DagSessionRuntime {
             Effect.tap(() => Effect.sync(() => (graphPersisted = true))),
             Effect.onExit(() =>
               Effect.sync(() => {
-                if (!graphPersisted) this.claimedRunIds.delete(graph.runId);
+                if (!graphPersisted) {
+                  this.claimedRunIds.delete(graph.runId);
+                  this.workspaceRoots.delete(graph.runId);
+                }
               }),
             ),
             Effect.asVoid,
@@ -205,7 +244,12 @@ export class DagSessionRuntime {
           Effect.sync(() => this.activeRuns.add(handle)).pipe(
             Effect.andThen(
               handle.await.pipe(
-                Effect.onExit(() => Effect.sync(() => this.activeRuns.delete(handle))),
+                Effect.onExit(() =>
+                  Effect.sync(() => {
+                    this.activeRuns.delete(handle);
+                    this.workspaceRoots.delete(graph.runId);
+                  }),
+                ),
                 Effect.forkIn(this.scope),
               ),
             ),
@@ -217,7 +261,10 @@ export class DagSessionRuntime {
               Effect.onExit((exit) =>
                 Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
                   ? Effect.void
-                  : Effect.sync(() => this.activeRuns.delete(handle)),
+                  : Effect.sync(() => {
+                      this.activeRuns.delete(handle);
+                      this.workspaceRoots.delete(graph.runId);
+                    }),
               ),
             );
           return Object.freeze({

@@ -8,7 +8,7 @@ The model-facing `pr_review` tool separates context retrieval from independent r
 
 Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-Use `create` for a new independent review. Each run uses a new child agent session with no parent conversation context. The `create` action does not post a GitHub review.
+Use `create` for a new independent review. Each run uses a fixed review DAG with fresh child sessions. The child sessions receive no parent conversation context. The `create` action does not post a GitHub review.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
@@ -20,12 +20,15 @@ The `get` action does not create a snapshot, worktree, child session, or managed
 2. Fetch and verify the exact pull request head commit.
 3. Compute and persist a pinned diff.
 4. Create a detached managed worktree at the reviewed commit.
-5. Start a fresh review agent through the shared subagent runtime.
-6. Give the review agent only worktree-confined read tools and structured submission tools.
-7. Validate the reading plan and findings against the pinned diff.
-8. Store the review state in the parent pi session.
-9. Let the user select, reject, or edit findings.
-10. Post one review to GitHub only after an explicit user confirmation.
+5. Build a bounded review deck under the managed artifact directory.
+6. Resolve the approved reviewer roster and persist role assignments.
+7. Submit the fixed review DAG through the session-owned DAG service.
+8. Run the reading plan, five focused reviewers, and one whole-change reviewer in parallel.
+9. Synthesize successful reviewer artifacts after all reviewer paths become terminal.
+10. Validate the plan, result schemas, changed paths, and anchors against the pinned diff.
+11. Store references and bounded review state in the parent pi session.
+12. Let the user select, reject, or edit findings.
+13. Post one review to GitHub only after an explicit user confirmation.
 
 A changed remote head makes the review stale. The extension blocks posting until a fresh agent reviews the new head.
 
@@ -48,22 +51,34 @@ The preparation step records the base commit, head commit, diff hash, changed-fi
 
 Repository cache operations use a per-repository lock. A review worktree remains available until explicit cleanup.
 
-## Fresh review agent
+## Review DAG and child sessions
 
-The existing subagent extension remains responsible for the child agent loop, child session persistence, parent linkage, cancellation, usage accounting, telemetry, and shutdown.
+The subagent extension owns the session DAG service and the shared subagent supervisor. It also owns child persistence, cancellation, usage accounting, telemetry, and shutdown.
 
-The subagent runtime exposes a lower-level service for callers that already resolved the model, system prompt, task, working directory, and tool instances. The review extension uses this service instead of asking the parent model to invoke the public `subagent` tool.
+The review extension submits a code-owned graph. A child cannot add nodes, change dependencies, or start another child. Each child receives only run-scoped review tools.
 
-The default review model is the current parent model. A `prReview.model` setting can override it.
+The graph runs these reviewer roles:
+
+- `correctness`
+- `intent`
+- `maintainability`
+- `tests`
+- `security`
+- `whole-change`
+
+The reading plan runs beside the reviewers. Synthesis waits for all reviewer paths to become terminal. Synthesis requires at least one successful reviewer path.
+
+Agent settings approve models with the exact `reviewer` annotation. The review extension rejects unapproved role pins. The approved roster must contain at least two providers. The extension derives the highest supported reasoning level from model metadata.
 
 ## Untrusted input boundary
 
 Pull request content is untrusted. This includes source files, diffs, pull request text, comments, repository instructions, and project agent definitions.
 
-The review child must not discover an agent definition from the reviewed worktree. The review extension supplies an inline system prompt.
+The review child must not discover an agent definition from the reviewed worktree. The shared DAG adapter supplies a fixed system prompt. The review extension supplies domain instructions as trusted payload fields.
 
-The child receives no generic `bash`, `read`, `write`, `edit`, language-server, or analyzer tool. The extension creates run-scoped tools that enforce the managed worktree as their filesystem boundary:
+The child receives no generic `bash`, `read`, `write`, `edit`, language-server, or analyzer tool. The extension adds a run suffix to each tool name. It creates these run-scoped tool classes:
 
+- `review_deck`
 - `review_read`
 - `review_grep`
 - `review_find`
@@ -71,7 +86,9 @@ The child receives no generic `bash`, `read`, `write`, `edit`, language-server, 
 - `review_diff`
 - `review_changed_files`
 - `submit_review_plan`
-- `submit_review`
+- `submit_reviewer_result`
+- `review_result_refs`
+- `submit_review_synthesis`
 
 The read tools reject path traversal and resolved paths outside the worktree. `review_diff` returns bounded file sections. `review_changed_files` pages the complete changed-file manifest. The agent does not receive the complete diff in its initial prompt.
 
@@ -79,7 +96,7 @@ The system prompt states that all reviewed material is data, not instructions. T
 
 ## Structured review contract
 
-The review agent first calls `submit_review_plan`. The plan contains:
+The reading-plan child calls `submit_review_plan`. The plan contains:
 
 - the pull request goal and goal assessment
 - the risk level and reasons
@@ -91,7 +108,7 @@ The review agent first calls `submit_review_plan`. The plan contains:
 
 The submission tool rejects missing, duplicate, or invented changed paths. A failed submission returns exact correction information to the child agent.
 
-The agent then calls `submit_review`. The result contains a bottom-line verdict and findings. Each finding contains:
+Each focused reviewer calls its structured submission tool. The result contains a bottom-line verdict and findings. Each finding contains:
 
 - severity and goal-relative impact
 - file and side
@@ -100,15 +117,17 @@ The agent then calls `submit_review`. The result contains a bottom-line verdict 
 - the consequence
 - a suggested fix
 
-The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding instead of deleting the finding.
+The synthesis result preserves source reviewer names and agreement counts. The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding instead of deleting the finding.
 
 High-impact, blocking, and serious findings start selected. Other findings start unselected.
+
+One failed or malformed reviewer produces a degraded review when another reviewer succeeds. If all reviewers fail or return malformed results, the review fails. Raw reviewer outputs remain external artifact references.
 
 ## Parent session state
 
 The parent pi session stores review snapshots, agent run results, reviewer decisions, posting attempts, and cleanup state as custom entries. The extension reconstructs state from the active branch on `session_start` and `session_tree`.
 
-The child session name includes the repository, pull request number, and reviewed head. The parent state records the child session file for inspection.
+The parent state records the review deck, role assignments, DAG run ID, terminal status, plan and result projections, and raw artifact references. It also records latency, deck bytes, result bytes, usage, reviewer failures, finding count, and anchored finding count. Session replay reconstructs an active DAG attempt as interrupted after process loss. Reconstruction does not require a live run handle.
 
 ## Posting contract
 
@@ -134,6 +153,8 @@ If a post result is uncertain, the extension searches existing review bodies for
 ## Command and tool surface
 
 The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
+
+`/review draft-plan` creates a local draft implementation plan from selected findings. The command does not execute the plan. The user must approve the plan before a later orchestration workflow can use it.
 
 ## Deferred UI
 

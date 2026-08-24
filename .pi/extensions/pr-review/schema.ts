@@ -76,6 +76,7 @@ export const REVIEW_COMMANDS = [
   "preface",
   "rerun",
   "post",
+  "draft-plan",
   "cleanup",
 ] as const;
 export const ReviewEvent = {
@@ -149,6 +150,50 @@ export const ReviewSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const ReviewerRoleValues = [
+  "correctness",
+  "intent",
+  "maintainability",
+  "tests",
+  "security",
+  "whole-change",
+] as const;
+export const ReviewerOutputSchema = Type.Object(
+  {
+    role: StringEnum(ReviewerRoleValues),
+    verdict: NonEmptyString,
+    findings: Type.Array(FindingInputSchema, { maxItems: 1000 }),
+  },
+  { additionalProperties: false },
+);
+export const SynthesisFindingSchema = Type.Object(
+  {
+    ...FindingInputSchema.properties,
+    sourceReviewers: Type.Array(StringEnum(ReviewerRoleValues), {
+      minItems: 1,
+      maxItems: ReviewerRoleValues.length,
+      uniqueItems: true,
+    }),
+    agreement: Type.Integer({ minimum: 1, maximum: ReviewerRoleValues.length }),
+  },
+  { additionalProperties: false },
+);
+export const SynthesisReviewSchema = Type.Object(
+  {
+    verdict: NonEmptyString,
+    coverage: Type.Object(
+      {
+        status: StringEnum(["complete", "degraded"] as const),
+        succeeded: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
+        failed: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
+        malformed: Type.Array(NonEmptyString, { maxItems: 7, uniqueItems: true }),
+      },
+      { additionalProperties: false },
+    ),
+    findings: Type.Array(SynthesisFindingSchema, { maxItems: 1000 }),
+  },
+  { additionalProperties: false },
+);
 export const PathParamSchema = Type.Object(
   {
     path: Type.Optional(
@@ -177,15 +222,20 @@ export type PlanCohort = Static<typeof PlanCohortSchema>;
 export type PlanFile = Static<typeof PlanFileSchema>;
 export type ReviewPlan = Static<typeof PlanSchema>;
 export type FindingInput = Static<typeof FindingInputSchema>;
+export type ReviewerOutput = Static<typeof ReviewerOutputSchema>;
+export type SynthesisReview = Static<typeof SynthesisReviewSchema>;
 export type Finding = Omit<FindingInput, "side"> & {
   side?: AnchorSide;
   id?: string;
   selected?: boolean;
   anchorValid?: boolean;
+  sourceReviewers?: ReviewerOutput["role"][];
+  agreement?: number;
 };
 export interface ReviewResult {
   verdict: string;
   findings: Finding[];
+  coverage?: SynthesisReview["coverage"];
 }
 export type AnchorSide = "LEFT" | "RIGHT";
 
@@ -226,8 +276,52 @@ export interface PostAttempt {
   at: string;
   contentHash?: string;
 }
+export interface ReviewArtifactReference {
+  readonly v: 1;
+  readonly path: string;
+  readonly bytes: number;
+  readonly digest: string;
+  readonly runId: string;
+  readonly producerNodeId: string;
+  readonly outputName: string;
+}
 export interface ReviewState {
   snapshot: ReviewSnapshot;
+  deck?: { path: string; digest: string; bytes: number };
+  roleAssignments?: Record<
+    string,
+    { model: string; provider: string; reasoning?: string; pinned: boolean }
+  >;
+  dag?: {
+    runId: string;
+    startedAt?: string;
+    status: "running" | "succeeded" | "degraded" | "failed" | "cancelled" | "interrupted";
+    rawResultReferences: ReviewArtifactReference[];
+    readingPlanReference?: ReviewArtifactReference;
+    synthesisReference?: ReviewArtifactReference;
+    failedNodes?: string[];
+    malformedNodes?: string[];
+    error?: string;
+    recoveredFromProcessLoss?: boolean;
+  };
+  metrics?: {
+    durationMs: number;
+    deckBytes: number;
+    reviewerOutputBytes: number;
+    reviewersSucceeded: number;
+    reviewersFailed: number;
+    reviewersMalformed: number;
+    findings: number;
+    anchoredFindings: number;
+    usage?: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      cost: number;
+      turns: number;
+    };
+  };
   plan?: ReviewPlan;
   result?: ReviewResult;
   selectedFindingIds: string[];
@@ -239,6 +333,7 @@ export interface ReviewState {
     message?: string;
   };
   posts: PostAttempt[];
+  implementationPlan?: { path: string; digest: string; status: "draft" };
   cleaned?: boolean;
 }
 

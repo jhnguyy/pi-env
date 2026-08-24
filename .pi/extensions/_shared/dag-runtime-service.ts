@@ -16,13 +16,26 @@ export const DagRuntimeServiceEvent = {
 export type DagRuntimeServiceEvent =
   (typeof DagRuntimeServiceEvent)[keyof typeof DagRuntimeServiceEvent];
 
+export interface DagRuntimeSubmissionAuthority {
+  readonly workspaceRoot?: string;
+}
+export interface DagRuntimeUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+  readonly cost: number;
+  readonly turns: number;
+}
 export interface ActiveDagRuntimeService {
   readonly submit: <TPayload>(
     graph: ValidatedDagDefinition<TPayload>,
+    authority?: DagRuntimeSubmissionAuthority,
   ) => Effect.Effect<DagRunHandle, DagRuntimeError>;
   readonly reconstruct: (
     runId: string,
   ) => Effect.Effect<DagSessionReconstruction, DagSessionFailure>;
+  readonly usage?: (runId: string) => DagRuntimeUsage;
 }
 
 export interface DagRuntimeServiceRegistration {

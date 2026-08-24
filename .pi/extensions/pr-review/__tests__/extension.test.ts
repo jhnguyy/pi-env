@@ -3,15 +3,15 @@ import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import prReviewExtension, {
-  clearInMemoryStateForTests,
-  restore,
-  setPrReviewSubagentRunnerForTests,
-} from "../index";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import prReviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import {
+  registerDagRuntimeService,
+  resetDagRuntimeServiceRegistryForTests,
+} from "../../_shared/dag-runtime-service";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
@@ -21,6 +21,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
 const temps: string[] = [];
 afterEach(() => {
   clearInMemoryStateForTests();
+  resetDagRuntimeServiceRegistryForTests();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -92,11 +93,23 @@ function extensionPi() {
   const tools: any[] = [];
   const commands: Record<string, any> = {};
   const handlers: Record<string, any> = {};
+  const eventHandlers = new Map<string, Array<(data: unknown) => void>>();
   const pi: any = {
     tools,
     commands,
     handlers,
     appended: [] as any[],
+    events: {
+      emit(event: string, data: unknown) {
+        for (const handler of eventHandlers.get(event) ?? []) handler(data);
+      },
+      on(event: string, handler: (data: unknown) => void) {
+        const listeners = eventHandlers.get(event) ?? [];
+        listeners.push(handler);
+        eventHandlers.set(event, listeners);
+        return () => listeners.splice(listeners.indexOf(handler), 1);
+      },
+    },
     registerTool(tool: any) {
       tools.push(tool);
     },
@@ -139,7 +152,6 @@ describe("pr-review extension surface", () => {
 
   it("gets compact conversation, review, and inline feedback without review side effects", async () => {
     tempRoot();
-    setPrReviewSubagentRunnerForTests(() => Effect.die("get must not start a child"));
     const pi = extensionPi();
     const calls: Array<{ cmd: string; args: string[] }> = [];
     pi.exec = async (cmd: string, args: string[]) => {
@@ -430,6 +442,105 @@ describe("pr-review extension surface", () => {
     expect(notes.at(-1)).toContain("Selected: 0");
   });
 
+  it("reconstructs a running review as interrupted after process loss without a live handle", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("running", []),
+      dag: { runId: "run", status: "running" as const, rawResultReferences: [] },
+    };
+    const pi = extensionPi();
+    registerDagRuntimeService(pi, {
+      parentSessionId: "parent",
+      sessionGeneration: "generation",
+      service: {
+        submit: () => Effect.die("submit must not run during reconstruction"),
+        reconstruct: () =>
+          Effect.succeed({
+            state: {
+              nodes: [
+                { nodeId: "review-correctness", status: "interrupted", reason: "process loss" },
+                { nodeId: "synthesis", status: "interrupted", reason: "process loss" },
+              ],
+            },
+            terminalOutcome: "interrupted",
+            recoveredFromProcessLoss: true,
+          } as any),
+      },
+    });
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [custom(state)],
+        getSessionId: () => "parent",
+        getSessionDir: () => root,
+      },
+    } as any;
+    pi.handlers.session_start({}, ctx);
+    await vi.waitFor(() => expect(pi.appended).toHaveLength(1));
+    expect(pi.appended[0][1].state.dag).toMatchObject({
+      status: "interrupted",
+      recoveredFromProcessLoss: true,
+      failedNodes: ["review-correctness"],
+    });
+    expect(pi.appended[0][1].state.dag.rawResultReferences).toHaveLength(0);
+  });
+
+  it("does not append a stale reconstruction after the service generation rotates", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("rotating", []),
+      dag: { runId: "run", status: "running" as const, rawResultReferences: [] },
+    };
+    const pi = extensionPi();
+    let resolveFirst!: (value: any) => void;
+    let firstCalled = false;
+    const firstResult = new Promise<any>((resolve) => {
+      resolveFirst = resolve;
+    });
+    registerDagRuntimeService(pi, {
+      parentSessionId: "parent",
+      sessionGeneration: "old-generation",
+      service: {
+        submit: () => Effect.die("submit must not run"),
+        reconstruct: () => {
+          firstCalled = true;
+          return Effect.promise(() => firstResult);
+        },
+      },
+    });
+    const ctx = {
+      sessionManager: {
+        getBranch: () => [custom(state)],
+        getSessionId: () => "parent",
+        getSessionDir: () => root,
+      },
+    } as any;
+    pi.handlers.session_start({}, ctx);
+    await vi.waitFor(() => expect(firstCalled).toBe(true));
+    registerDagRuntimeService(pi, {
+      parentSessionId: "parent",
+      sessionGeneration: "new-generation",
+      service: {
+        submit: () => Effect.die("submit must not run"),
+        reconstruct: () =>
+          Effect.succeed({
+            state: { nodes: [{ nodeId: "review-correctness", status: "interrupted" }] },
+            terminalOutcome: "interrupted",
+            recoveredFromProcessLoss: true,
+          } as any),
+      },
+    });
+    resolveFirst({
+      state: { nodes: [{ nodeId: "review-correctness", status: "interrupted" }] },
+      terminalOutcome: "interrupted",
+      recoveredFromProcessLoss: true,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(pi.appended).toHaveLength(0);
+    pi.handlers.session_tree({}, ctx);
+    await vi.waitFor(() => expect(pi.appended).toHaveLength(1));
+    expect(pi.appended[0][1].state.dag.status).toBe("interrupted");
+  });
+
   it("cleanup uses a temporary managed root and appends durable cleanup state", async () => {
     const root = tempRoot();
     const state = sampleState("r", []);
@@ -449,6 +560,22 @@ describe("pr-review extension surface", () => {
     expect(pi.appended.at(-1)?.[1].state.snapshot.cache.repoDir).toContain(root);
   });
 
+  it("creates an approval-required draft plan from selected findings", async () => {
+    const root = tempRoot();
+    const state = sampleState("r", ["F1"]);
+    mkdirSync(join(root, "pr-review", "artifacts", "r"), { recursive: true });
+    restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+    const pi = extensionPi();
+    const notes: string[] = [];
+    await pi.command("draft-plan", {
+      ui: { notify: (message: string) => notes.push(message) },
+    } as any);
+    expect(notes[0]).toMatch(/User approval is required/);
+    expect(pi.appended.at(-1)?.[1].state.implementationPlan).toMatchObject({
+      status: "draft",
+    });
+  });
+
   it("edit and preface cancellation do not append mutated state", async () => {
     tempRoot();
     const state = sampleState("r", []);
@@ -466,7 +593,7 @@ describe("pr-review extension surface", () => {
     expect(pi.appended).toHaveLength(0);
   });
 
-  it("persists initial snapshot if model resolution fails", async () => {
+  it("persists the pinned snapshot before a missing DAG service blocks the run", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "pr-review", "artifacts"), { recursive: true });
     const pi = extensionPi();
@@ -493,86 +620,23 @@ describe("pr-review extension surface", () => {
         return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
       return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
     };
-    const ctx: any = { cwd: root, modelRegistry: { getAvailable: () => [] } };
-    await expect(
-      pi.tools[0].execute(
-        "1",
-        { action: "create", url: "https://github.com/o/r/pull/1" },
-        undefined,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow(/No usable model/);
-    expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
-    expect(pi.appended[0]?.[1].state.child).toBeUndefined();
-    expect(pi.appended.at(-1)?.[1].state.child.isError).toBe(true);
-  });
-
-  it("preserves child runtime errors, missing submissions, signal, and scoped tools", async () => {
-    tempRoot();
-    const state = sampleState("r", []);
-    setPrReviewSubagentRunnerForTests((run, _ctx, options) =>
-      Effect.sync(() => {
-        expect(run.toolNames).toContain("review_changed_files");
-        expect(
-          run.toolNames.every((n) => n.startsWith("review_") || n.startsWith("submit_review")),
-        ).toBe(true);
-        expect(run.systemPrompt).toContain("fresh pull request review agent");
-        expect(run.task).toContain("Use review_changed_files");
-        expect(run.tools.map((t) => t.name).sort()).toEqual([...run.toolNames].sort());
-        expect(options?.signal).toBe(ac.signal);
-        return {
-          content: [],
-          details: {
-            isError: true,
-            sessionFile: "child.json",
-            sessionName: "child",
-            toolNames: run.toolNames,
-          },
-        } as any;
-      }),
-    );
-    const pi = extensionPi();
-    pi.exec = async (cmd: string, args: string[]) => {
-      if (cmd === "gh")
-        return {
-          code: 0,
-          stdout: JSON.stringify({
-            url: "https://github.com/o/r/pull/1",
-            baseRefName: "trunk",
-            baseRefOid: "b",
-            headRefOid: "h",
-          }),
-          stderr: "",
-        };
-      if (args[0] === "rev-parse")
-        return {
-          code: 0,
-          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
-          stderr: "",
-        };
-      if (args[0] === "merge-base") return { code: 0, stdout: "b\n", stderr: "" };
-      if (args[0] === "diff" && args.includes("--name-status"))
-        return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
-      return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
-    };
-    const ac = new AbortController();
     const ctx: any = {
-      cwd: state.snapshot.worktree,
-      modelRegistry: { getAvailable: () => [{ provider: "p", id: "m" }] },
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent" },
+      modelRegistry: { getAvailable: () => [] },
     };
     await expect(
       pi.tools[0].execute(
         "1",
         { action: "create", url: "https://github.com/o/r/pull/1" },
-        ac.signal,
+        undefined,
         undefined,
         ctx,
       ),
-    ).rejects.toThrow(/valid plan and final review/);
-    expect(pi.appended.at(-1)?.[1].state.child).toMatchObject({
-      isError: true,
-      sessionFile: "child.json",
-    });
+    ).rejects.toThrow(/DAG runtime is not available/);
+    expect(pi.appended).toHaveLength(1);
+    expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
+    expect(pi.appended[0]?.[1].state.snapshot.metadata.headOid).toBe("h");
+    expect(pi.appended[0]?.[1].state.dag).toBeUndefined();
   });
 });

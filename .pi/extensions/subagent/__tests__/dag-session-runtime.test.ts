@@ -165,6 +165,14 @@ describe("session-owned DAG runtime composition", () => {
     const handle = await Effect.runPromise(registration.service.submit(graph("composed-run")));
     const completed = await Effect.runPromise(handle.await);
     expect(completed.state.nodes[0]).toMatchObject({ status: "succeeded" });
+    expect(registration.service.usage?.("composed-run")).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      turns: 0,
+    });
 
     const entries = ctx.sessionManager
       .getBranch()

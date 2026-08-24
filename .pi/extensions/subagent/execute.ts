@@ -3,6 +3,7 @@
  */
 
 import { agentLoop } from "@earendil-works/pi-agent-core";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type {
   AgentContext,
@@ -137,6 +138,7 @@ export interface ResolvedSubagentRun {
   systemPrompt: string;
   cwd: string;
   maxTurns?: number;
+  reasoning?: ThinkingLevel;
   workspaceAccess?: WorkspaceAccessValue;
 }
 
@@ -178,6 +180,7 @@ function runResolvedSubagentWorkflow(
             (resolvedModel as AgentLoopConfig["model"]).provider,
             (resolvedModel as AgentLoopConfig["model"]).id,
           );
+          if (run.reasoning) session.manager.appendThinkingLevelChange(run.reasoning);
           return session;
         },
         catch: () => executionError(SubagentExecutionPhase.Session),
@@ -200,6 +203,7 @@ function runResolvedSubagentWorkflow(
     );
     const config: AgentLoopConfig = {
       model: resolvedModel as AgentLoopConfig["model"],
+      reasoning: run.reasoning,
       convertToLlm,
       getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
       headers: { "X-Initiator": "agent" },

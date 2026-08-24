@@ -18,6 +18,7 @@ export {
 export type {
   DagSubagentFailure,
   DagSubagentPayloadV1,
+  DagSubagentReasoningLevel,
   DagSubagentPrompt,
   DagSubagentRuntime,
   DagSubagentRuntimeRequest,

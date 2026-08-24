@@ -101,7 +101,9 @@ describe("DAG shared subagent runtime adapter", () => {
     const cwd = root();
     const runtime = adapter(context(cwd, { provider: "test", id: "model", contextWindow: 32_000 }));
 
-    await expect(Effect.runPromise(runtime.run(request(cwd)))).resolves.toBe("complete result");
+    await expect(Effect.runPromise(runtime.run(request(cwd, { reasoning: "high" })))).resolves.toBe(
+      "complete result",
+    );
     expect(shared.calls).toHaveLength(1);
     expect(shared.calls[0].run).toMatchObject({
       modelOverride: "test/model",
@@ -109,6 +111,7 @@ describe("DAG shared subagent runtime adapter", () => {
       tools: [],
       cwd,
       workspaceAccess: "read",
+      reasoning: "high",
     });
   });
 
@@ -155,6 +158,19 @@ describe("DAG shared subagent runtime adapter", () => {
 
     expect((await failure(runtime.run(request(outside)))).phase).toBe("resolution");
     expect(shared.calls).toHaveLength(0);
+  });
+
+  it("uses a run-scoped workspace authority outside the parent checkout", async () => {
+    const parent = root();
+    const managed = root();
+    const outside = root();
+    const ctx = context(parent, { provider: "test", id: "model", contextWindow: 32_000 });
+    const runtime = makeDagSubagentRuntime(ctx, new Map(), {
+      workspaceRootForRun: (runId) => (runId === "run" ? managed : undefined),
+    });
+
+    await expect(Effect.runPromise(runtime.run(request(managed)))).resolves.toBe("complete result");
+    expect((await failure(runtime.run(request(outside)))).phase).toBe("resolution");
   });
 
   it("fails closed for missing or insufficient model context metadata", async () => {
