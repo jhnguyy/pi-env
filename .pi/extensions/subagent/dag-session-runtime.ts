@@ -146,7 +146,11 @@ export class DagSessionRuntime {
         await Effect.runPromise(Scope.close(this.scope, Exit.void));
       } finally {
         this.activeRuns.clear();
-        unregisterDagRuntimeService(this.pi, this.registration);
+        try {
+          unregisterDagRuntimeService(this.pi, this.registration);
+        } catch {
+          // The registration is already removed. A consumer failure must not stop owner cleanup.
+        }
       }
     })();
     return this.disposePromise;

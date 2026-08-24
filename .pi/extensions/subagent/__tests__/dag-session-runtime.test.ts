@@ -57,6 +57,7 @@ import {
   validateDagDefinition,
 } from "../../../../src/dag/index.js";
 import {
+  DagRuntimeServiceEvent,
   listenForDagRuntimeService,
   resetDagRuntimeServiceRegistryForTests,
   type DagRuntimeServiceRegistration,
@@ -289,6 +290,9 @@ describe("session-owned DAG runtime composition", () => {
     await started;
     const interruptedObserver = Effect.runFork(handle.await);
     await Effect.runPromise(Fiber.interrupt(interruptedObserver));
+    pi.events.on(DagRuntimeServiceEvent.Unregister, () => {
+      throw new Error("consumer unregister failure");
+    });
 
     const shutdown = runtime.shutdownSession();
     const admissionExit = await Effect.runPromise(
