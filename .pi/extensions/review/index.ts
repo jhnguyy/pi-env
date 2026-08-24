@@ -58,6 +58,7 @@ import {
   type DeckReference,
 } from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
+import { formatPiSessionReview, runPiSessionReview } from "./pi-session-review";
 import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
@@ -251,10 +252,7 @@ function isCurrentReconciliation(
 }
 function isDagSessionRunNotFound(cause: unknown): cause is { readonly _tag: "run-not-found" } {
   return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "_tag" in cause &&
-    cause._tag === "run-not-found"
+    typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "run-not-found"
   );
 }
 
@@ -268,30 +266,14 @@ async function saveReconciliationFailure(
   cause: unknown,
 ): Promise<void> {
   const runId = current.dag!.runId;
-  if (
-    !isCurrentReconciliation(
-      registration,
-      ctx,
-      current.snapshot.id,
-      runId,
-      expectedStateHash,
-    )
-  )
+  if (!isCurrentReconciliation(registration, ctx, current.snapshot.id, runId, expectedStateHash))
     return;
   if (current.dag!.submitted !== false || !isDagSessionRunNotFound(cause)) {
     saveState(pi, failedReconstructionState(projected, cause));
     return;
   }
   const worktreeCleaned = await removeManagedWorktree(pi, current).catch(() => false);
-  if (
-    isCurrentReconciliation(
-      registration,
-      ctx,
-      current.snapshot.id,
-      runId,
-      expectedStateHash,
-    )
-  )
+  if (isCurrentReconciliation(registration, ctx, current.snapshot.id, runId, expectedStateHash))
     saveState(pi, {
       ...current,
       preparation: {
@@ -1156,7 +1138,8 @@ async function existingPostDisposition(
   );
   if (posted) return { result: `Review already posted (${posted.reviewId ?? posted.id}).` };
   const prior = attempt ? await reconcileAttempt(pi, ctx, state, attempt, signal) : undefined;
-  if (prior) return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
+  if (prior)
+    return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
   if (attempt?.status === "uncertain")
     return {
       result:
@@ -1228,14 +1211,7 @@ async function postReviewCritical(
     ))
   )
     return "Posting cancelled.";
-  const confirmed = await confirmedPostingState(
-    pi,
-    ctx,
-    reviewId,
-    event,
-    contentHash,
-    signal,
-  );
+  const confirmed = await confirmedPostingState(pi, ctx, reviewId, event, contentHash, signal);
   if (confirmed.error) return confirmed.error;
   s = confirmed.state!;
   if (!attempt) {
@@ -1414,24 +1390,70 @@ const handlers: Partial<
   "draft-plan": (pi) => draftImplementationPlan(pi),
   cleanup: (pi, rest) => cleanup(pi, rest[0]),
 };
+async function reviewPiSession(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  selector?: string,
+): Promise<string> {
+  if (selector && selector !== "current") return "Usage: /review pi-session [current]";
+  await ctx.waitForIdle();
+  const registration = dagRegistration;
+  if (!registration || registration.parentSessionId !== ctx.sessionManager.getSessionId())
+    throw new Error("The session DAG runtime is not available for Pi session review.");
+  const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
+  const agentSettings = await Effect.runPromise(
+    decodeGlobalAgentSettingsSnapshotEffect(settingsSnapshot),
+  );
+  const policy = resolvePrReviewModelPolicy(agentSettings, ctx.modelRegistry.getAvailable());
+  const reviewer = policy.approvedRoster[0];
+  if (!reviewer) throw new Error("No approved session reviewer model is available.");
+  const result = await runPiSessionReview({
+    pi,
+    ctx,
+    service: registration.service,
+    model: reviewer.fqid,
+    reasoning: reviewer.reasoning,
+  });
+  pi.sendMessage(
+    {
+      customType: "review-pi-session",
+      content: formatPiSessionReview(result.review),
+      display: true,
+      details: { runId: result.runId, review: result.review, usage: result.usage },
+    },
+    { triggerTurn: false },
+  );
+  return `Pi session review complete: ${result.review.findings.length} finding(s).`;
+}
+
 async function command(
   pi: ExtensionAPI,
   args: string,
   ctx: ExtensionCommandContext,
 ): Promise<void> {
-  const [cmd = "status", ...rest] = args.trim().split(/\s+/);
+  const words = args.trim().split(/\s+/).filter(Boolean);
+  const domain = words.shift() ?? "pull-request";
   try {
-    const fn = handlers[cmd];
+    if (domain === "pi-session") {
+      const message = await reviewPiSession(pi, ctx, words[0]);
+      ctx.ui.notify(message, "info");
+      return;
+    }
+    const pullRequestCommand =
+      domain === "pull-request" || domain === "pr" ? (words.shift() ?? "status") : domain;
+    const fn = handlers[pullRequestCommand];
     ctx.ui.notify(
-      fn ? await fn(pi, rest, ctx) : `Usage: /review ${REVIEW_COMMANDS.join("|")}`,
+      fn
+        ? await fn(pi, words, ctx)
+        : `Usage: /review pull-request ${REVIEW_COMMANDS.join("|")} | /review pi-session [current]`,
       fn ? "info" : "warning",
     );
   } catch (e) {
-    ctx.ui.notify(`PR review failed: ${e instanceof Error ? e.message : String(e)}`, "error");
+    ctx.ui.notify(`Review failed: ${e instanceof Error ? e.message : String(e)}`, "error");
   }
 }
 
-export default function prReviewExtension(pi: ExtensionAPI) {
+export default function reviewExtension(pi: ExtensionAPI) {
   if ((pi as { events?: unknown }).events)
     listenForDagRuntimeService(
       pi,
@@ -1472,7 +1494,7 @@ export default function prReviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage PR reviews. Usage: /review create [url]|get [url]|list|open <id>|status|findings|select|edit|preface|rerun|post|draft-plan|cleanup [id]",
+      "Run review domains. Usage: /review pull-request create|get|list|open|status|findings|select|edit|preface|rerun|post|draft-plan|cleanup, or /review pi-session [current]. Legacy pull-request actions remain accepted at the top level.",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {

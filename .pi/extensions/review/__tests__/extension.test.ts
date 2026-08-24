@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
+import type * as PiSessionReviewModule from "../pi-session-review";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
@@ -14,13 +15,21 @@ import {
   resetDagRuntimeServiceRegistryForTests,
 } from "../../_shared/dag-runtime-service";
 
-const mocked = vi.hoisted(() => ({ agentDir: "" }));
+const mocked = vi.hoisted(() => ({
+  agentDir: "",
+  sessionReview: vi.fn(),
+}));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
   ...(await orig<typeof CodingAgent>()),
   getAgentDir: () => mocked.agentDir,
 }));
+vi.mock("../pi-session-review", async (orig) => ({
+  ...(await orig<typeof PiSessionReviewModule>()),
+  runPiSessionReview: mocked.sessionReview,
+}));
 const temps: string[] = [];
 afterEach(() => {
+  mocked.sessionReview.mockReset();
   clearInMemoryStateForTests();
   resetDagRuntimeServiceRegistryForTests();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -100,6 +109,8 @@ function extensionPi() {
     commands,
     handlers,
     appended: [] as any[],
+    messages: [] as any[],
+    userMessages: [] as any[],
     events: {
       emit(event: string, data: unknown) {
         for (const handler of eventHandlers.get(event) ?? []) handler(data);
@@ -123,6 +134,12 @@ function extensionPi() {
     },
     appendEntry(...args: any[]) {
       this.appended.push(args);
+    },
+    sendMessage(...args: any[]) {
+      this.messages.push(args);
+    },
+    sendUserMessage(...args: any[]) {
+      this.userMessages.push(args);
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
@@ -149,8 +166,82 @@ describe("pr-review extension surface", () => {
     expect(pi.commands.review.description).toContain("create");
     expect(pi.commands.review.description).toContain("get");
     expect(pi.commands.review.description).toContain("edit");
+    expect(pi.commands.review.description).toContain("pi-session");
     expect(pi.handlers.session_start).toBeTypeOf("function");
     expect(pi.handlers.session_tree).toBeTypeOf("function");
+  });
+
+  it("runs pi-session review through the registered DAG service without triggering the parent model", async () => {
+    const root = tempRoot();
+    writeFileSync(
+      join(root, "settings.json"),
+      JSON.stringify({ modelAnnotations: { "test/reviewer": ["reviewer"] } }),
+    );
+    mocked.sessionReview.mockResolvedValue({
+      runId: "review-pi-session-run",
+      review: {
+        verdict: "No material environment problem was found.",
+        evidenceLimitations: [],
+        findings: [],
+      },
+    });
+    const pi = extensionPi();
+    const service = { submit: vi.fn(), reconstruct: vi.fn() };
+    registerDagRuntimeService(pi, {
+      parentSessionId: "parent-session",
+      sessionGeneration: "generation-1",
+      service,
+    });
+    const notifications: string[] = [];
+    const waitForIdle = vi.fn(async () => {});
+    const ctx = {
+      cwd: "/workspace",
+      waitForIdle,
+      sessionManager: { getSessionId: () => "parent-session" },
+      modelRegistry: {
+        getAvailable: () => [
+          {
+            id: "reviewer",
+            name: "reviewer",
+            api: "openai-responses",
+            provider: "test",
+            baseUrl: "https://test.invalid",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 100_000,
+            maxTokens: 4_096,
+          },
+        ],
+      },
+      ui: { notify: (message: string) => notifications.push(message) },
+    };
+
+    await pi.command("pi-session", ctx as any);
+
+    expect(waitForIdle).toHaveBeenCalledOnce();
+    expect(mocked.sessionReview).toHaveBeenCalledWith(
+      expect.objectContaining({ pi, ctx, service, model: "test/reviewer" }),
+    );
+    expect(pi.messages).toHaveLength(1);
+    expect(pi.messages[0][0]).toMatchObject({
+      customType: "review-pi-session",
+      display: true,
+    });
+    expect(pi.messages[0][1]).toEqual({ triggerTurn: false });
+    expect(pi.userMessages).toEqual([]);
+    expect(notifications).toContain("Pi session review complete: 0 finding(s).");
+  });
+
+  it("rejects historical pi-session selectors before starting a child", async () => {
+    tempRoot();
+    const pi = extensionPi();
+    const notifications: string[] = [];
+    await pi.command("pi-session /old/session.jsonl", {
+      ui: { notify: (message: string) => notifications.push(message) },
+    } as any);
+    expect(mocked.sessionReview).not.toHaveBeenCalled();
+    expect(notifications).toEqual(["Usage: /review pi-session [current]"]);
   });
 
   it("gets compact conversation, review, and inline feedback without review side effects", async () => {

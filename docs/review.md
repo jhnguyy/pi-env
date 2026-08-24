@@ -1,10 +1,10 @@
-# GitHub pull request review workflow
+# Review workflows
 
-This note defines the user and safety contracts for the `pr-review` pi extension.
+This note defines the user and safety contracts for the `review` Pi extension. The extension owns review domains. Pull-request review and Pi-session review use the shared subagent runtime, but each domain owns its source and result semantics.
 
-## User contract
+## Pull-request user contract
 
-The model-facing `review` tool separates context retrieval from independent review creation.
+The model-facing `review` tool separates pull-request context retrieval from independent review creation.
 
 Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
@@ -134,11 +134,25 @@ Each post attempt includes an invisible marker:
 
 If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review.
 
+## Pi-session review contract
+
+Use `/review pi-session` to review the current active session branch. The command snapshots normalized evidence before it starts one isolated child investigator through the session-owned DAG service.
+
+The active agent does not perform the retrospective. The child receives no ambient parent conversation and cannot spawn another child. Its only tools page the frozen evidence and submit one structured result. The child workspace and both tools have read-only capability.
+
+Normalized evidence includes bounded user and assistant text, tool-call names and redacted arguments, tool-result status, compaction summaries, branch summaries, and deterministic counts. Evidence pages preserve active-branch order. The extension does not expose raw session JSONL or unbounded tool output.
+
+The child reviews navigation, automated checks, tool economy, instruction quality, information access, and review coverage. It separates observations from recommendations, reports evidence limitations, and can return no findings. The command displays the validated result as a custom session message. It does not edit files, create tasks, or write a separate report.
+
+Only models with the exact `reviewer` annotation can investigate a Pi session. The first slice selects the first available approved model in deterministic order.
+
 ## Command and tool surface
 
-The tool manager activates `review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
+The tool manager activates `review` for pull-request review and feedback requests. The `/review` command is the human-facing interface for all review domains.
 
-Use `/review list`, `/review open <review-id>`, and `/review cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
+Use `/review pull-request <action>` for the managed pull-request lifecycle. The legacy top-level pull-request actions remain compatible. Use `/review list`, `/review open <review-id>`, and `/review cleanup <review-id>` when a session has multiple pull-request records. A successful create returns the review ID and the exact open command.
+
+Use `/review pi-session [current]` for an isolated review of the active Pi session branch. Historical session selection is deferred.
 
 ## Deferred UI
 

@@ -1,24 +1,24 @@
 [
   {
     "type": "dependency",
-    "from": ".pi/extensions/pr-review/index.ts",
+    "from": ".pi/extensions/review/index.ts",
     "to": ".pi/extensions/subagent/control.ts",
     "unresolvedTo": "../subagent/control",
     "dependencyTypes": ["local", "import"],
     "rule": {
       "severity": "error",
-      "name": "pr-review-no-cross-extension-imports"
+      "name": "review-no-cross-extension-imports"
     }
   },
   {
     "type": "dependency",
-    "from": ".pi/extensions/pr-review/index.ts",
+    "from": ".pi/extensions/review/index.ts",
     "to": ".pi/extensions/subagent/execute.ts",
     "unresolvedTo": "../subagent/execute",
     "dependencyTypes": ["local", "import"],
     "rule": {
       "severity": "error",
-      "name": "pr-review-no-cross-extension-imports"
+      "name": "review-no-cross-extension-imports"
     }
   },
   {
