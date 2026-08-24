@@ -1,17 +1,16 @@
-import {
-  DagNodeResultTag,
-  DagNodeStatus,
-  type DagNodeResult,
-  type DagNodeStatus as DagNodeStatusValue,
-} from "./contracts.js";
+import * as DagContracts from "./contracts.js";
 
 export const DagAttemptOrdinal = 1 as const;
 
 export type DagAttemptTerminalStatus = Exclude<
-  DagNodeStatusValue,
-  typeof DagNodeStatus.Queued | typeof DagNodeStatus.Blocked | typeof DagNodeStatus.Running
+  DagContracts.DagNodeStatus,
+  | typeof DagContracts.DagNodeStatus.Queued
+  | typeof DagContracts.DagNodeStatus.Blocked
+  | typeof DagContracts.DagNodeStatus.Running
 >;
-export type DagAttemptStatusValue = typeof DagNodeStatus.Running | DagAttemptTerminalStatus;
+export type DagAttemptStatusValue =
+  | typeof DagContracts.DagNodeStatus.Running
+  | DagAttemptTerminalStatus;
 
 export interface DagAttemptStatus {
   readonly nodeId: string;
@@ -45,26 +44,26 @@ export function dagAttemptStatus(
 }
 
 export function dagResultStatus(
-  result: DagNodeResult<unknown, unknown>,
+  result: DagContracts.DagNodeResult<unknown, unknown>,
 ): DagAttemptTerminalStatus {
   switch (result._tag) {
-    case DagNodeResultTag.Succeeded:
-      return DagNodeStatus.Succeeded;
-    case DagNodeResultTag.Failed:
-      return DagNodeStatus.Failed;
-    case DagNodeResultTag.Cancelled:
-      return DagNodeStatus.Cancelled;
-    case DagNodeResultTag.Interrupted:
-      return DagNodeStatus.Interrupted;
+    case DagContracts.DagNodeResultTag.Succeeded:
+      return DagContracts.DagNodeStatus.Succeeded;
+    case DagContracts.DagNodeResultTag.Failed:
+      return DagContracts.DagNodeStatus.Failed;
+    case DagContracts.DagNodeResultTag.Cancelled:
+      return DagContracts.DagNodeStatus.Cancelled;
+    case DagContracts.DagNodeResultTag.Interrupted:
+      return DagContracts.DagNodeStatus.Interrupted;
   }
 }
 
 export function isDagAttemptStatus(value: unknown): value is DagAttemptStatusValue {
   return (
-    value === DagNodeStatus.Running ||
-    value === DagNodeStatus.Succeeded ||
-    value === DagNodeStatus.Failed ||
-    value === DagNodeStatus.Cancelled ||
-    value === DagNodeStatus.Interrupted
+    value === DagContracts.DagNodeStatus.Running ||
+    value === DagContracts.DagNodeStatus.Succeeded ||
+    value === DagContracts.DagNodeStatus.Failed ||
+    value === DagContracts.DagNodeStatus.Cancelled ||
+    value === DagContracts.DagNodeStatus.Interrupted
   );
 }
