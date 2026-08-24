@@ -52,6 +52,14 @@ describe("fixed PR review graph", () => {
     expect(synthesis.completionGuard?.dependencyIds).toEqual(
       ReviewerNodes.map((node) => node.nodeId),
     );
+    const plan = graph.nodes.find((node) => node.id === "reading-plan")!;
+    expect(plan.dependencies).toEqual([]);
+    for (const reviewer of graph.nodes.filter((node) => node.id.startsWith("review-"))) {
+      expect(reviewer.dependencies).toEqual([
+        { nodeId: "reading-plan", mode: DagDependencyMode.Required },
+      ]);
+      expect(reviewer.executor.payload.context.outputs).toEqual(["reading_plan"]);
+    }
   });
 
   it("gives each child only explicit confined review tools and no spawning authority", () => {

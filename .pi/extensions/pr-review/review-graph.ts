@@ -76,6 +76,7 @@ function roleInstructions(role: ReviewRole): string {
       : `Review only the ${role} dimension while considering the complete stated intent.`;
   return [
     ...common,
+    "Use the supplied validated reading plan to select relevant cohorts and files. Do not rebuild the plan or rediscover the changed-file inventory.",
     focus,
     "Return goal-relative, actionable findings only.",
     "Call the structured reviewer submission tool. Then return only the accepted canonical JSON from that tool.",
@@ -102,7 +103,12 @@ function payload(
     model: assignment.model,
     tools: roleTools,
     workspace: { cwd, access: "read" },
-    context: { outputs: [] },
+    context: {
+      outputs:
+        node.kind === "focused-reviewer" || node.kind === "whole-change-reviewer"
+          ? [ReadingPlanNode.outputName]
+          : [],
+    },
     output: { name: node.outputName },
     ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
   };
@@ -138,7 +144,10 @@ export function compileReviewGraph(options: {
             options.tools,
           ),
         },
-        dependencies: [],
+        dependencies:
+          node.kind === "plan"
+            ? []
+            : [{ nodeId: ReadingPlanNode.nodeId, mode: DagDependencyMode.Required }],
       })),
       {
         id: SynthesisNode.nodeId,

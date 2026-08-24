@@ -204,6 +204,7 @@ function runResolvedSubagentWorkflow(
     const config: AgentLoopConfig = {
       model: resolvedModel as AgentLoopConfig["model"],
       reasoning: run.reasoning,
+      sessionId: childSession.id,
       convertToLlm,
       getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
       headers: { "X-Initiator": "agent" },

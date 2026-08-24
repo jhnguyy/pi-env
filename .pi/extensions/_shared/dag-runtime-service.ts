@@ -20,14 +20,8 @@ export function dagUsagePrefix(runId: string): string {
   return `dag-${createHash("sha256").update(runId).digest("hex")}:`;
 }
 
-export interface DagRuntimeBudget {
-  readonly maxTotalTokens: number;
-  readonly maxCost: number;
-  readonly maxTurns: number;
-}
 export interface DagRuntimeSubmissionAuthority {
   readonly workspaceRoot?: string;
-  readonly budget?: DagRuntimeBudget;
 }
 export interface DagRuntimeUsage {
   readonly input: number;
@@ -36,11 +30,6 @@ export interface DagRuntimeUsage {
   readonly cacheWrite: number;
   readonly cost: number;
   readonly turns: number;
-  readonly budget?: {
-    readonly limits: DagRuntimeBudget;
-    readonly exceeded: boolean;
-    readonly reason?: string;
-  };
 }
 export interface ActiveDagRuntimeService {
   readonly submit: <TPayload>(

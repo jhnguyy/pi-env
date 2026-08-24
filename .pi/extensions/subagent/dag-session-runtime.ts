@@ -65,12 +65,7 @@ export class DagSessionRuntime {
       reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
       usage: (runId: string): DagRuntimeUsage => {
         const prefix = dagUsagePrefix(runId);
-        return Object.freeze({
-          ...this.supervisor.usage(prefix),
-          ...(this.supervisor.budget(prefix)
-            ? { budget: this.supervisor.budget(prefix) }
-            : {}),
-        });
+        return Object.freeze(this.supervisor.usage(prefix));
       },
     });
     this.registration = registerDagRuntimeService(pi, {
@@ -173,8 +168,6 @@ export class DagSessionRuntime {
       }
       this.claimedRunIds.add(graph.runId);
       if (authority?.workspaceRoot) this.workspaceRoots.set(graph.runId, authority.workspaceRoot);
-      if (authority?.budget)
-        this.supervisor.registerBudget(dagUsagePrefix(graph.runId), authority.budget);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;

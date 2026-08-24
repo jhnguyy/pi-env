@@ -385,7 +385,7 @@ function summarizeResult(s: ReviewState): string {
       `Malformed nodes: ${s.dag?.malformedNodes?.join(", ") || "none"}`,
       `Findings: ${findings.length}`,
       s.metrics
-        ? `Metrics: ${Math.round(s.metrics.durationMs)}ms; deck ${s.metrics.deckBytes}B; results ${s.metrics.reviewerOutputBytes}B; reviewers ${s.metrics.reviewersSucceeded} succeeded/${s.metrics.reviewersFailed} failed/${s.metrics.reviewersMalformed} malformed; anchors ${s.metrics.anchoredFindings}/${s.metrics.findings}; usage ${s.metrics.usage?.turns ?? 0} turns, ${s.metrics.usage?.input ?? 0} input, ${s.metrics.usage?.output ?? 0} output, ${s.metrics.usage?.cacheRead ?? 0} cache read, cost ${s.metrics.usage?.cost ?? 0}; budget ${s.metrics.usage?.budget?.exceeded ? s.metrics.usage.budget.reason : "within limits"}.`
+        ? `Metrics: ${Math.round(s.metrics.durationMs)}ms; deck ${s.metrics.deckBytes}B; results ${s.metrics.reviewerOutputBytes}B; reviewers ${s.metrics.reviewersSucceeded} succeeded/${s.metrics.reviewersFailed} failed/${s.metrics.reviewersMalformed} malformed; anchors ${s.metrics.anchoredFindings}/${s.metrics.findings}; usage ${s.metrics.usage?.turns ?? 0} turns, ${s.metrics.usage?.input ?? 0} input, ${s.metrics.usage?.output ?? 0} output, ${s.metrics.usage?.cacheRead ?? 0} cache read, cost ${s.metrics.usage?.cost ?? 0}.`
         : "Metrics: unavailable.",
       index,
     ].join("\n"),

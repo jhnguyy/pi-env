@@ -359,11 +359,6 @@ export interface ReviewState {
       cacheWrite: number;
       cost: number;
       turns: number;
-      budget?: {
-        limits: { maxTotalTokens: number; maxCost: number; maxTurns: number };
-        exceeded: boolean;
-        reason?: string;
-      };
     };
   };
   plan?: ReviewPlan;

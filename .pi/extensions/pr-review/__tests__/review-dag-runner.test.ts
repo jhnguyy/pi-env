@@ -277,11 +277,7 @@ describe("DAG-backed PR review runner", () => {
       save: (state) => saved.push(structuredClone(state)),
       onProgress: (update) => progress.push(update),
     });
-    expect(authority.budget).toEqual({
-      maxTotalTokens: 55_000_000,
-      maxCost: 70,
-      maxTurns: 600,
-    });
+    expect(authority).toEqual({ workspaceRoot: f.state.snapshot.worktree });
     expect(progress).not.toHaveLength(0);
     expect(result.dag).toMatchObject({
       status: "degraded",

@@ -11,7 +11,6 @@ import {
 } from "../../../src/dag/index.js";
 import type {
   ActiveDagRuntimeService,
-  DagRuntimeBudget,
   DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
@@ -43,11 +42,6 @@ const reviewerRoleByNode = new Map<string, ReviewerRole>(
   ReviewerNodes.map((node) => [node.nodeId, node.role]),
 );
 const AllReviewersFailed = "All PR reviewers failed or returned malformed output.";
-export const ReviewDagBudget = Object.freeze({
-  maxTotalTokens: 55_000_000,
-  maxCost: 70,
-  maxTurns: 600,
-} satisfies DagRuntimeBudget);
 type NodeOutput = { reference: DagTextArtifactReference; text: string };
 interface CollectedOutputs {
   readonly plan?: ReviewPlan;
@@ -255,9 +249,7 @@ async function awaitSubmittedGraph(
   onProgress?: (progress: ReviewDagProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const handle = await Effect.runPromise(
-    service.submit(graph, { workspaceRoot, budget: ReviewDagBudget }),
-  );
+  const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
   let pollActive = false;
   const reportProgress = async () => {
     if (!onProgress || pollActive) return;
