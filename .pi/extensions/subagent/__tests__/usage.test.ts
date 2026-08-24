@@ -92,9 +92,30 @@ describe("subagent usage accumulation", () => {
       } as any,
     });
 
+    accumulator.acceptEvent({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "nested",
+        toolName: "subagent",
+        content: [],
+        details: {},
+        usage: {
+          input: 10,
+          output: 20,
+          cacheRead: 30,
+          cacheWrite: 40,
+          totalTokens: 100,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.5 },
+        },
+        isError: false,
+        timestamp: 2,
+      } as any,
+    });
+
     expect(accumulator.output()).toBe("answer");
     expect(accumulator.toolCallCount).toBe(1);
-    expect(accumulator.usage).toMatchObject({ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5, turns: 1 });
+    expect(accumulator.usage).toMatchObject({ input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 1 });
     expect(accumulator.turnLimitExceeded).toBe(true);
   });
 });

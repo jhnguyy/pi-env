@@ -194,11 +194,13 @@ async function reconstructionFor(
 function serviceFor(
   artifactRoot: string,
   overrides: Readonly<Record<string, string | "failed">>,
+  onSubmit?: (authority: unknown) => void,
 ): any {
   let ready: Promise<DagSessionReconstruction>;
   return {
-    submit: (graph: ValidatedDagDefinition<any>) =>
+    submit: (graph: ValidatedDagDefinition<any>, authority: unknown) =>
       Effect.sync(() => {
+        onSubmit?.(authority);
         ready = reconstructionFor(artifactRoot, graph, overrides);
         return {
           accepted: Effect.void,
@@ -256,18 +258,31 @@ describe("DAG-backed PR review runner", () => {
   it("preserves valid findings and reports failed and malformed reviewer paths as degraded", async () => {
     const f = fixture();
     const saved: ReviewState[] = [];
+    const progress: unknown[] = [];
+    let authority: any;
     const result = await runReviewDag({
       pi: piEvents(),
       ctx: f.ctx,
-      service: serviceFor(f.artifactRoot, {
-        "review-maintainability": reviewer("security"),
-        "review-security": "failed",
-      }),
+      service: serviceFor(
+        f.artifactRoot,
+        {
+          "review-maintainability": reviewer("security"),
+          "review-security": "failed",
+        },
+        (submittedAuthority) => (authority = submittedAuthority),
+      ),
       assignments,
       deckPath: f.deckPath,
       state: f.state,
       save: (state) => saved.push(structuredClone(state)),
+      onProgress: (update) => progress.push(update),
     });
+    expect(authority.budget).toEqual({
+      maxTotalTokens: 55_000_000,
+      maxCost: 70,
+      maxTurns: 600,
+    });
+    expect(progress).not.toHaveLength(0);
     expect(result.dag).toMatchObject({
       status: "degraded",
       failedNodes: ["review-security"],

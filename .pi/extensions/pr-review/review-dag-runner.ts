@@ -9,7 +9,11 @@ import {
   type DagTextArtifactReference,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
-import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
+import type {
+  ActiveDagRuntimeService,
+  DagRuntimeBudget,
+  DagRuntimeUsage,
+} from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
 import { readVerifiedReviewArtifact, registerReviewDagTools } from "./dag-tools";
 import {
@@ -38,6 +42,11 @@ const reviewerRoleByNode = new Map<string, ReviewerRole>(
   ReviewerNodes.map((node) => [node.nodeId, node.role]),
 );
 const AllReviewersFailed = "All PR reviewers failed or returned malformed output.";
+export const ReviewDagBudget = Object.freeze({
+  maxTotalTokens: 55_000_000,
+  maxCost: 70,
+  maxTurns: 600,
+} satisfies DagRuntimeBudget);
 type NodeOutput = { reference: DagTextArtifactReference; text: string };
 interface CollectedOutputs {
   readonly plan?: ReviewPlan;
@@ -267,21 +276,52 @@ function reviewMetrics(input: {
     ...(input.usage ? { usage: input.usage } : {}),
   };
 }
+export interface ReviewDagProgress {
+  readonly runId: string;
+  readonly nodes: Readonly<Record<string, string>>;
+  readonly usage?: DagRuntimeUsage;
+}
+
 async function awaitSubmittedGraph(
   service: ActiveDagRuntimeService,
   graph: ValidatedDagDefinition<unknown>,
   workspaceRoot: string,
   onSubmitted: () => void,
+  onProgress?: (progress: ReviewDagProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
+  const handle = await Effect.runPromise(
+    service.submit(graph, { workspaceRoot, budget: ReviewDagBudget }),
+  );
+  let pollActive = false;
+  const reportProgress = async () => {
+    if (!onProgress || pollActive) return;
+    pollActive = true;
+    try {
+      const snapshot = await Effect.runPromise(handle.snapshot);
+      onProgress({
+        runId: graph.runId,
+        nodes: Object.fromEntries(
+          snapshot.state.nodes.map((node) => [node.nodeId, node.status]),
+        ),
+        ...(service.usage ? { usage: service.usage(graph.runId) } : {}),
+      });
+    } finally {
+      pollActive = false;
+    }
+  };
   await Effect.runPromise(handle.accepted, { signal });
   onSubmitted();
+  await reportProgress();
+  const interval = onProgress ? setInterval(() => void reportProgress(), 2_000) : undefined;
   try {
     await Effect.runPromise(handle.await, { signal });
   } catch (cause) {
     if (!signal?.aborted) throw cause;
     await Effect.runPromise(Effect.result(handle.cancel));
+  } finally {
+    if (interval) clearInterval(interval);
+    await reportProgress();
   }
 }
 function noReviewerStatus(
@@ -456,6 +496,7 @@ export async function runReviewDag(options: {
   readonly deckPath: string;
   readonly state: ReviewState;
   readonly save: (state: ReviewState) => void;
+  readonly onProgress?: (progress: ReviewDagProgress) => void;
 }): Promise<ReviewState> {
   const startedAt = Date.now();
   let state = options.state;
@@ -508,6 +549,7 @@ export async function runReviewDag(options: {
         state = { ...state, dag: { ...state.dag!, submitted: true } };
         options.save(state);
       },
+      options.onProgress,
       options.signal,
     );
     const reconstruction = await Effect.runPromise(options.service.reconstruct(runId));

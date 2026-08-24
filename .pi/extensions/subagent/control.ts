@@ -3,9 +3,10 @@ import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Data, Effect } from "effect";
 
+import type { DagRuntimeBudget } from "../_shared/dag-runtime-service";
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
-import { zeroUsage } from "./usage";
+import { addUsage, zeroUsage } from "./usage";
 
 export const WorkspaceAccess = {
   Read: "read",
@@ -14,7 +15,7 @@ export const WorkspaceAccess = {
 export type WorkspaceAccess = (typeof WorkspaceAccess)[keyof typeof WorkspaceAccess];
 
 export class SubagentAdmissionError extends Data.TaggedError("SubagentAdmissionError")<{
-  readonly reason: "closed" | "capacity" | "aborted";
+  readonly reason: "closed" | "capacity" | "aborted" | "budget";
   readonly message: string;
 }> {}
 
@@ -48,6 +49,12 @@ interface ActiveRun {
   usage: UsageStats;
   released: boolean;
   timeout?: ReturnType<typeof setTimeout>;
+}
+
+interface BudgetState {
+  readonly limits: DagRuntimeBudget;
+  exceeded: boolean;
+  reason?: string;
 }
 
 interface SupervisorRegistry {
@@ -89,11 +96,24 @@ function addUsageDelta(total: UsageStats, previous: UsageStats, next: UsageStats
   total.turns += Math.max(0, next.turns - previous.turns);
 }
 
+function budgetExceededReason(usage: UsageStats, limits: DagRuntimeBudget): string | undefined {
+  const totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+  if (totalTokens > limits.maxTotalTokens)
+    return `Subagent aggregate token budget exceeded: ${totalTokens}/${limits.maxTotalTokens}.`;
+  if (usage.cost > limits.maxCost)
+    return `Subagent aggregate cost budget exceeded: ${usage.cost}/${limits.maxCost}.`;
+  if (usage.turns > limits.maxTurns)
+    return `Subagent aggregate turn budget exceeded: ${usage.turns}/${limits.maxTurns}.`;
+  return undefined;
+}
+
 export class SubagentRunSupervisor {
   private readonly active = new Map<string, ActiveRun>();
   private readonly pending: PendingAdmission[] = [];
   private readonly activeWorkspaceWriters = new Set<string>();
   private readonly totalUsage = zeroUsage();
+  private readonly usageByRun = new Map<string, UsageStats>();
+  private readonly budgets = new Map<string, BudgetState>();
   private closed = false;
 
   constructor(
@@ -144,8 +164,23 @@ export class SubagentRunSupervisor {
     });
   }
 
-  usage(): UsageStats {
-    return cloneUsage(this.totalUsage);
+  usage(prefix?: string): UsageStats {
+    if (!prefix) return cloneUsage(this.totalUsage);
+    return [...this.usageByRun.entries()].reduce(
+      (total, [runId, usage]) => (runId.startsWith(prefix) ? addUsage(total, usage) : total),
+      zeroUsage(),
+    );
+  }
+
+  registerBudget(prefix: string, limits: DagRuntimeBudget): void {
+    this.budgets.set(prefix, { limits, exceeded: false });
+  }
+
+  budget(prefix: string):
+    | { readonly limits: DagRuntimeBudget; readonly exceeded: boolean; readonly reason?: string }
+    | undefined {
+    const state = this.budgets.get(prefix);
+    return state ? { ...state, limits: { ...state.limits } } : undefined;
   }
 
   async shutdown(): Promise<void> {
@@ -173,6 +208,15 @@ export class SubagentRunSupervisor {
       return new SubagentAdmissionError({
         reason: "closed",
         message: "Parent subagent session is not active.",
+      });
+    }
+    const exceededBudget = [...this.budgets.entries()].find(
+      ([prefix, budget]) => budget.exceeded && request.runId?.startsWith(prefix),
+    );
+    if (exceededBudget) {
+      return new SubagentAdmissionError({
+        reason: "budget",
+        message: exceededBudget[1].reason ?? "Subagent aggregate budget was exceeded.",
       });
     }
     if (request.signal?.aborted) {
@@ -260,6 +304,31 @@ export class SubagentRunSupervisor {
     if (!active || active.released) return;
     addUsageDelta(this.totalUsage, active.usage, usage);
     active.usage = cloneUsage(usage);
+    this.usageByRun.set(runId, cloneUsage(usage));
+    this.enforceBudgets(runId);
+  }
+
+  private enforceBudgets(updatedRunId: string): void {
+    for (const [prefix, state] of this.budgets) {
+      if (state.exceeded || !updatedRunId.startsWith(prefix)) continue;
+      const reason = budgetExceededReason(this.usage(prefix), state.limits);
+      if (reason) this.exceedBudget(prefix, state, reason);
+    }
+  }
+
+  private exceedBudget(prefix: string, state: BudgetState, reason: string): void {
+    state.exceeded = true;
+    state.reason = reason;
+    const error = new SubagentAdmissionError({ reason: "budget", message: reason });
+    for (const [runId, active] of this.active)
+      if (runId.startsWith(prefix)) active.controller.abort(error);
+    for (let index = this.pending.length - 1; index >= 0; index--) {
+      const pending = this.pending[index];
+      if (!pending.runId.startsWith(prefix)) continue;
+      this.pending.splice(index, 1);
+      pending.cleanupAbort?.();
+      pending.reject(error);
+    }
   }
 
   private release(runId: string, usage?: UsageStats): void {

@@ -68,6 +68,12 @@ A model is eligible only when `modelAnnotations` contains the exact `reviewer` a
 
 One approved model can fill every role. Optional `prReview.roleModels` entries can pin `reading-plan`, `correctness`, `intent`, `maintainability`, `tests`, `security`, `whole-change`, or `synthesis`. Each pinned model must have the exact annotation and must be available. The obsolete `prReview.model` setting has no effect.
 
+The runtime enforces one machine-owned aggregate review budget across all review children and their nested model work. The limits are 55,000,000 total billed tokens, 70 reported cost, and 600 direct child turns. A completed child can exceed a limit by at most its final in-flight model turn. When a limit is exceeded, the supervisor aborts active siblings, rejects pending siblings, and records the reason in review usage metrics.
+
+Pi computes a usage tree recursively. Each subagent result includes its own assistant usage plus nested tool usage. The calling session adds that nested total to its own assistant usage. Repeated review reuse and repeated asynchronous job retrieval do not add the same nested usage again.
+
+Interactive review tools publish structured progress updates every two seconds. The updates contain node statuses and aggregate usage. Noninteractive `pi -p` output shows only the final result.
+
 ## Untrusted input boundary
 
 Pull request content is untrusted. This includes source files, diffs, pull request text, comments, repository instructions, and project agent definitions.

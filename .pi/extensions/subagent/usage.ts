@@ -96,7 +96,7 @@ export class SubagentRunAccumulator {
     if (event.type === "message_end") {
       const message = event.message;
       this.transcript.push(message);
-      this.acceptAssistantMessage(message);
+      this.acceptMessageUsage(message);
       return message;
     }
     if (event.type === "tool_execution_start") this.toolCallCount++;
@@ -146,7 +146,17 @@ export class SubagentRunAccumulator {
     };
   }
 
-  private acceptAssistantMessage(message: AgentMessage): void {
+  private acceptMessageUsage(message: AgentMessage): void {
+    if (message.role === "toolResult") {
+      addUsage(this.usage, {
+        input: message.usage?.input ?? 0,
+        output: message.usage?.output ?? 0,
+        cacheRead: message.usage?.cacheRead ?? 0,
+        cacheWrite: message.usage?.cacheWrite ?? 0,
+        cost: message.usage?.cost?.total ?? 0,
+      });
+      return;
+    }
     const msg = message as AssistantMessage;
     if (msg.role !== "assistant") return;
     addUsage(this.usage, {

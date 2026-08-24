@@ -163,7 +163,10 @@ describe("session-owned DAG runtime composition", () => {
     expect(statSync(adapter.artifactRoot).isDirectory()).toBe(true);
 
     const registration = registrations[0];
-    const handle = await Effect.runPromise(registration.service.submit(graph("composed-run")));
+    const budget = { maxTotalTokens: 1000, maxCost: 5, maxTurns: 20 };
+    const handle = await Effect.runPromise(
+      registration.service.submit(graph("composed-run"), { budget }),
+    );
     await Effect.runPromise(handle.accepted);
     const completed = await Effect.runPromise(handle.await);
     expect(completed.state.nodes[0]).toMatchObject({ status: "succeeded" });
@@ -174,6 +177,7 @@ describe("session-owned DAG runtime composition", () => {
       cacheWrite: 0,
       cost: 0,
       turns: 0,
+      budget: { limits: budget, exceeded: false },
     });
 
     const entries = ctx.sessionManager

@@ -52,7 +52,7 @@ export class DagSessionRuntime {
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
     private readonly claimedRunIds: Set<string>,
     private readonly workspaceRoots: Map<string, string>,
-    private readonly ledger: SubagentUsageLedger,
+    private readonly supervisor: SubagentRunSupervisor,
     ctx: ExtensionContext,
     sessionGeneration: string,
   ) {
@@ -63,24 +63,13 @@ export class DagSessionRuntime {
       ) => this.submit(graph, authority),
       reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
       usage: (runId: string): DagRuntimeUsage => {
-        const total = {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          cost: 0,
-          turns: 0,
-        };
-        for (const record of this.ledger.rows()) {
-          if (!record.id.startsWith(`${runId}:`)) continue;
-          total.input += record.usage.input;
-          total.output += record.usage.output;
-          total.cacheRead += record.usage.cacheRead;
-          total.cacheWrite += record.usage.cacheWrite;
-          total.cost += record.usage.cost;
-          total.turns += record.usage.turns;
-        }
-        return Object.freeze(total);
+        const prefix = `${runId}:`;
+        return Object.freeze({
+          ...this.supervisor.usage(prefix),
+          ...(this.supervisor.budget(prefix)
+            ? { budget: this.supervisor.budget(prefix) }
+            : {}),
+        });
       },
     });
     this.registration = registerDagRuntimeService(pi, {
@@ -123,7 +112,7 @@ export class DagSessionRuntime {
         Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
         persistedDagRunIds(store),
         workspaceRoots,
-        dependencies.ledger,
+        dependencies.supervisor,
         ctx,
         dependencies.sessionGeneration,
       );
@@ -183,6 +172,8 @@ export class DagSessionRuntime {
       }
       this.claimedRunIds.add(graph.runId);
       if (authority?.workspaceRoot) this.workspaceRoots.set(graph.runId, authority.workspaceRoot);
+      if (authority?.budget)
+        this.supervisor.registerBudget(`${graph.runId}:`, authority.budget);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;

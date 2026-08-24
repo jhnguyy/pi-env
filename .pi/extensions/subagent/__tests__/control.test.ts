@@ -70,6 +70,29 @@ describe("shared subagent run supervisor", () => {
     rmSync(workspace, { recursive: true, force: true });
   });
 
+  it("enforces one aggregate budget across sibling runs", async () => {
+    const supervisor = new SubagentRunSupervisor("session", config());
+    supervisor.registerBudget("dag:", {
+      maxTotalTokens: 100,
+      maxCost: 10,
+      maxTurns: 10,
+    });
+    const first = await supervisor.acquire({ ...request("/first"), runId: "dag:first" });
+    const second = await supervisor.acquire({ ...request("/second"), runId: "dag:second" });
+    first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
+    second.updateUsage({ input: 41, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
+    expect(first.signal.aborted).toBe(true);
+    expect(second.signal.aborted).toBe(true);
+    expect(supervisor.usage("dag:")).toMatchObject({ input: 81, output: 20, cost: 4 });
+    expect(supervisor.budget("dag:")).toMatchObject({ exceeded: true });
+    await expect(
+      supervisor.acquire({ ...request("/third"), runId: "dag:third" }),
+    ).rejects.toMatchObject({ reason: "budget" });
+    first.release();
+    second.release();
+    await supervisor.shutdown();
+  });
+
   it("aborts a run at its wall-time limit", async () => {
     vi.useFakeTimers();
     try {
