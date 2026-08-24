@@ -1,4 +1,5 @@
 import path from "node:path";
+import { mkdir } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Cause, Effect, Exit, Layer, Scope } from "effect";
 import {
@@ -125,6 +126,7 @@ export class DagSessionRuntime {
       parentSessionId,
     );
     const workspaceRoots = new Map<string, string>();
+    await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
     const registry = makeDagSubagentExecutorRegistry(ctx, registeredExtTools, artifactRoot, {
       workspaceRootForRun: (runId) => workspaceRoots.get(runId),
       ledger: dependencies.ledger,

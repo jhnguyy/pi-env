@@ -123,7 +123,7 @@ function payload(
     workspace: { cwd, access: "read" },
     context: { outputs: [] },
     output: { name: outputNameByRole[role] },
-    maxTurns: role === "synthesis" ? 16 : 12,
+    maxTurns: role === "synthesis" ? 20 : role === "reading-plan" ? 16 : 24,
     ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
   };
 }

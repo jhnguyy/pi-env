@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -160,6 +160,7 @@ describe("session-owned DAG runtime composition", () => {
         ctx.sessionManager.getSessionId(),
       ),
     );
+    expect(statSync(adapter.artifactRoot).isDirectory()).toBe(true);
 
     const registration = registrations[0];
     const handle = await Effect.runPromise(registration.service.submit(graph("composed-run")));

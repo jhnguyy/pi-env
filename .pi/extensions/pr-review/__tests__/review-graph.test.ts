@@ -46,6 +46,13 @@ describe("fixed PR review graph", () => {
       "synthesis",
     ]);
     const synthesis = graph.nodes.find((node) => node.id === "synthesis")!;
+    expect(graph.nodes.find((node) => node.id === "reading-plan")?.executor.payload.maxTurns).toBe(
+      16,
+    );
+    expect(
+      graph.nodes.find((node) => node.id === "review-correctness")?.executor.payload.maxTurns,
+    ).toBe(24);
+    expect(synthesis.executor.payload.maxTurns).toBe(20);
     expect(synthesis.dependencies).toHaveLength(7);
     expect(
       synthesis.dependencies.every((dependency) => dependency.mode === DagDependencyMode.Settled),
