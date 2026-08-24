@@ -62,6 +62,7 @@ import {
   resetDagRuntimeServiceRegistryForTests,
   type DagRuntimeServiceRegistration,
 } from "../../_shared/dag-runtime-service";
+import { SubagentJobManager } from "../jobs";
 import { SubagentSessionRuntime } from "../session-runtime";
 
 const tempDirectories: string[] = [];
@@ -293,6 +294,8 @@ describe("session-owned DAG runtime composition", () => {
     pi.events.on(DagRuntimeServiceEvent.Unregister, () => {
       throw new Error("consumer unregister failure");
     });
+    const jobShutdownFailure = new Error("job shutdown failure");
+    vi.spyOn(SubagentJobManager.prototype, "shutdown").mockRejectedValueOnce(jobShutdownFailure);
 
     const shutdown = runtime.shutdownSession();
     const admissionExit = await Effect.runPromise(
@@ -303,7 +306,8 @@ describe("session-owned DAG runtime composition", () => {
       const failure = Cause.findErrorOption(admissionExit.cause);
       expect(Option.isSome(failure) && failure.value instanceof DagRuntimeNotAccepting).toBe(true);
     }
-    await shutdown;
+    await expect(shutdown).rejects.toBe(jobShutdownFailure);
+    expect(runtime.state).toBe("inactive");
     const cancelled = await Effect.runPromise(handle.await);
     expect(cancelled.state.nodes[0]).toMatchObject({ status: "cancelled" });
     expect(state.lifecycle).toEqual(["executor-interrupted", "unregistered", "telemetry-disposed"]);

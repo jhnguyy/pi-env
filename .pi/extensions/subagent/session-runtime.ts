@@ -156,10 +156,13 @@ export class SubagentSessionRuntime {
     this.sessionState = SubagentSessionState.ShuttingDown;
     this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
-      await this.disposeActiveResources();
-      if (generation === this.lifecycleGeneration) {
-        this.ledger.clear();
-        this.sessionState = SubagentSessionState.Inactive;
+      try {
+        await this.disposeActiveResources();
+      } finally {
+        if (generation === this.lifecycleGeneration) {
+          this.ledger.clear();
+          this.sessionState = SubagentSessionState.Inactive;
+        }
       }
     });
   }
@@ -255,18 +258,27 @@ export class SubagentSessionRuntime {
     const runtime = this.telemetryRuntime;
     const supervisorSessionId = this.supervisorSessionId;
     const dagDisposal = dagRuntime?.dispose();
-    try {
-      await manager?.shutdown();
-      await dagDisposal;
-      if (supervisorSessionId) await disposeSubagentRunSupervisor(supervisorSessionId);
-    } finally {
-      this.jobs = undefined;
-      this.dagRuntime = undefined;
-      this.supervisor = undefined;
-      this.supervisorSessionId = undefined;
-      this.telemetryRuntime = undefined;
-      if (runtime) await this.disposeTelemetry(runtime);
-    }
+    let failure: unknown;
+    const settle = async (operation: Promise<unknown> | undefined): Promise<void> => {
+      try {
+        await operation;
+      } catch (cause) {
+        failure ??= cause;
+      }
+    };
+
+    await settle(manager?.shutdown());
+    await settle(dagDisposal);
+    await settle(
+      supervisorSessionId ? disposeSubagentRunSupervisor(supervisorSessionId) : undefined,
+    );
+    this.jobs = undefined;
+    this.dagRuntime = undefined;
+    this.supervisor = undefined;
+    this.supervisorSessionId = undefined;
+    this.telemetryRuntime = undefined;
+    await settle(runtime ? this.disposeTelemetry(runtime) : undefined);
+    if (failure !== undefined) throw failure;
   }
 
   private disposeTelemetry(runtime: ToolingTelemetryRuntime): Promise<void> {
