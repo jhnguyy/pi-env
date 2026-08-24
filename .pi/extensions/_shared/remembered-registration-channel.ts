@@ -3,11 +3,16 @@ type EventBus<TEvent extends string, TRegistration> = {
   emit(event: TEvent, data: TRegistration): void;
   on?(event: TEvent, handler: (data: unknown) => void): void | (() => void);
 };
+type Bridge = {
+  count: number;
+  stopRegister?: () => void;
+  stopUnregister?: () => void;
+};
 type ChannelState<T extends object> = {
   registrations: Map<string, T>;
   listeners: Set<Handler<T>>;
   removalListeners: Set<Handler<T>>;
-  removedRegistrations: WeakSet<T>;
+  bridges: WeakMap<object, Bridge>;
 };
 
 export function createRememberedRegistrationChannel<
@@ -34,31 +39,70 @@ export function createRememberedRegistrationChannel<
       registrations: new Map<string, TRegistration>(),
       listeners: new Set<Handler<TRegistration>>(),
       removalListeners: new Set<Handler<TRegistration>>(),
-      removedRegistrations: new WeakSet<TRegistration>(),
+      bridges: new WeakMap<object, Bridge>(),
     };
     const current = root[storeKey] as Partial<ChannelState<TRegistration>>;
     current.registrations ??= new Map<string, TRegistration>();
     current.listeners ??= new Set<Handler<TRegistration>>();
     current.removalListeners ??= new Set<Handler<TRegistration>>();
-    current.removedRegistrations ??= new WeakSet<TRegistration>();
+    current.bridges ??= new WeakMap<object, Bridge>();
     if (legacyStoreKey) delete root[legacyStoreKey];
     return current as ChannelState<TRegistration>;
   };
+  const notify = (handlers: Iterable<Handler<TRegistration>>, registration: TRegistration) => {
+    for (const handler of handlers) {
+      try {
+        handler(registration);
+      } catch {
+        // One consumer must not prevent lifecycle delivery to other consumers.
+      }
+    }
+  };
   const remember = (registration: TRegistration): boolean => {
-    const store = state();
+    const registrations = state().registrations;
     const key = keyOf(registration);
-    if (isDuplicate(store.registrations.get(key), registration)) return false;
-    store.registrations.set(key, registration);
-    store.removedRegistrations.delete(registration);
+    if (isDuplicate(registrations.get(key), registration)) return false;
+    registrations.set(key, registration);
     return true;
   };
   const forget = (registration: TRegistration): boolean => {
-    const store = state();
+    const registrations = state().registrations;
     const key = keyOf(registration);
-    if (store.registrations.get(key) !== registration) return false;
-    store.registrations.delete(key);
-    store.removedRegistrations.add(registration);
+    if (registrations.get(key) !== registration) return false;
+    registrations.delete(key);
     return true;
+  };
+  const bridge = (events: EventBus<TEvent, TRegistration>): (() => void) => {
+    if (!events.on) return () => {};
+    const store = state();
+    const existing = store.bridges.get(events);
+    if (existing) {
+      existing.count += 1;
+      return () => {
+        existing.count -= 1;
+        if (existing.count !== 0) return;
+        existing.stopRegister?.();
+        existing.stopUnregister?.();
+        store.bridges.delete(events);
+      };
+    }
+    const active: Bridge = { count: 1 };
+    active.stopRegister = events.on(registerEvent, (data) => {
+      const registration = data as TRegistration;
+      if (remember(registration)) notify(state().listeners, registration);
+    }) as (() => void) | undefined;
+    active.stopUnregister = events.on(unregisterEvent, (data) => {
+      const registration = data as TRegistration;
+      if (forget(registration)) notify(state().removalListeners, registration);
+    }) as (() => void) | undefined;
+    store.bridges.set(events, active);
+    return () => {
+      active.count -= 1;
+      if (active.count !== 0) return;
+      active.stopRegister?.();
+      active.stopUnregister?.();
+      store.bridges.delete(events);
+    };
   };
 
   return {
@@ -67,19 +111,21 @@ export function createRememberedRegistrationChannel<
       const key = keyOf(registration);
       const previous = store.registrations.get(key);
       const changed = remember(registration);
+      if (changed) notify(store.listeners, registration);
       try {
         events.emit(registerEvent, registration);
       } catch (cause) {
         if (changed && store.registrations.get(key) === registration) {
           forget(registration);
+          notify(store.removalListeners, registration);
           try {
             events.emit(unregisterEvent, registration);
           } catch {
             // Preserve the original registration failure after rollback notification.
           }
           if (previous !== undefined) {
-            store.registrations.set(key, previous);
-            store.removedRegistrations.delete(previous);
+            remember(previous);
+            notify(store.listeners, previous);
             try {
               events.emit(registerEvent, previous);
             } catch {
@@ -89,17 +135,11 @@ export function createRememberedRegistrationChannel<
         }
         throw cause;
       }
-      if (changed && !events.on) {
-        for (const listener of store.listeners) listener(registration);
-      }
     },
     unpublish(events: EventBus<TEvent, TRegistration>, registration: TRegistration): void {
       if (!forget(registration)) return;
-      const store = state();
+      notify(state().removalListeners, registration);
       events.emit(unregisterEvent, registration);
-      if (!events.on) {
-        for (const listener of store.removalListeners) listener(registration);
-      }
     },
     subscribe(
       events: EventBus<TEvent, TRegistration>,
@@ -107,35 +147,14 @@ export function createRememberedRegistrationChannel<
       removalHandler?: Handler<TRegistration>,
     ): () => void {
       const store = state();
-      const seenRemovals = new WeakSet<TRegistration>();
-      let active = true;
       store.listeners.add(handler);
       if (removalHandler) store.removalListeners.add(removalHandler);
       for (const registration of store.registrations.values()) handler(registration);
-      const removeRegisterListener = events.on?.(registerEvent, (data) => {
-        if (!active) return;
-        const registration = data as TRegistration;
-        remember(registration);
-        seenRemovals.delete(registration);
-        handler(registration);
-      });
-      const removeUnregisterListener = events.on?.(unregisterEvent, (data) => {
-        if (!active) return;
-        const registration = data as TRegistration;
-        const store = state();
-        const current = store.registrations.get(keyOf(registration));
-        if (current !== undefined && current !== registration) return;
-        if (current === registration) forget(registration);
-        if (!store.removedRegistrations.has(registration) || seenRemovals.has(registration)) return;
-        seenRemovals.add(registration);
-        removalHandler?.(registration);
-      });
+      const stopBridge = bridge(events);
       return () => {
-        active = false;
         store.listeners.delete(handler);
         if (removalHandler) store.removalListeners.delete(removalHandler);
-        if (typeof removeRegisterListener === "function") removeRegisterListener();
-        if (typeof removeUnregisterListener === "function") removeUnregisterListener();
+        stopBridge();
       };
     },
     reset(): void {
