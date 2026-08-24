@@ -130,6 +130,19 @@ export default function (pi: ExtensionAPI) {
   );
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
+  const reportedJobUsage = new Set<string>();
+  const reportCompletedJobUsage = (job: SubagentJob) => {
+    if (
+      job.status === SubagentJobStatus.Queued ||
+      job.status === SubagentJobStatus.Running ||
+      job.status === SubagentJobStatus.Cancelling ||
+      reportedJobUsage.has(job.id) ||
+      !job.latestDetails?.usage
+    )
+      return {};
+    reportedJobUsage.add(job.id);
+    return { usage: toNestedToolUsage(job.latestDetails.usage) };
+  };
 
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
@@ -193,6 +206,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
+        ...reportCompletedJobUsage(waited.job),
       };
     }
     if (params.action === SubagentJobAction.Result) {
@@ -201,6 +215,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(job) }],
         details: getJobRenderDetails(job),
+        ...reportCompletedJobUsage(job),
       };
     }
     const job =
