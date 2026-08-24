@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
+import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import prReviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
@@ -464,6 +465,58 @@ describe("pr-review extension surface", () => {
       sessionManager: {
         getBranch: () => [custom(state)],
         getSessionId: () => "parent",
+      },
+    } as any);
+    await vi.waitFor(() =>
+      expect(pi.appended.at(-1)?.[1].state.preparation).toMatchObject({
+        status: "failed",
+        stage: "process-loss",
+        code: "preparation_interrupted",
+        worktreeCleaned: true,
+      }),
+    );
+    expect(existsSync(state.snapshot.cache!.worktree)).toBe(false);
+  });
+
+  it("cleans an unaccepted running review after process loss", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("unaccepted", []),
+      plan: undefined,
+      result: undefined,
+      dag: {
+        runId: "missing-run",
+        status: "running" as const,
+        submitted: false,
+        rawResultReferences: [],
+      },
+    };
+    mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    const pi = extensionPi();
+    pi.exec = async (_cmd: string, args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "remove")
+        rmSync(args[3], { recursive: true, force: true });
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    registerDagRuntimeService(pi, {
+      parentSessionId: "parent",
+      sessionGeneration: "generation",
+      service: {
+        submit: () => Effect.die("submit must not run during reconstruction"),
+        reconstruct: () =>
+          Effect.fail(
+            new DagSessionRunNotFound({
+              runId: "missing-run",
+            }),
+          ),
+      },
+    });
+    pi.handlers.session_start({}, {
+      sessionManager: {
+        getBranch: () => [custom(state)],
+        getSessionId: () => "parent",
+        getSessionDir: () => root,
       },
     } as any);
     await vi.waitFor(() =>

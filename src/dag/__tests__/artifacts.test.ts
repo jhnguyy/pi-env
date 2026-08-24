@@ -25,6 +25,7 @@ import {
   DagTransitionResultTag,
   DagTransitionType,
   makeDagSessionWriter,
+  materializeDagTextArtifact,
   materializeDagTextContext,
   parseDagTextArtifactReference,
   reconstructDagSession,
@@ -70,6 +71,19 @@ describe("DAG text artifact contract", () => {
         outputName: "answer",
       });
       expect(outputs.answer.digest).toMatch(/^[0-9a-f]{64}$/u);
+      expect(
+        yield* materializeDagTextArtifact(root, outputs.answer, {
+          runId: "run-test",
+          producerNodeId: "producer",
+          outputName: "answer",
+        }),
+      ).toMatchObject({ text: "hello π", reference: outputs.answer });
+      const identityFailure = yield* materializeDagTextArtifact(root, outputs.answer, {
+        runId: "other-run",
+        producerNodeId: "producer",
+        outputName: "answer",
+      }).pipe(Effect.flip);
+      expect(identityFailure).toBeInstanceOf(DagArtifactIdentityMismatch);
 
       const producer = Shared.node("producer");
       const target = Shared.node("target", [{ nodeId: "producer", mode: DagDependencyMode.Required }]);

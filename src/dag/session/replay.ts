@@ -211,7 +211,13 @@ export function reconstructDagSession(
   return Effect.try({
     try: () => {
       const limits = SessionCodec.validateLimits(options?.limits);
-      const storedEntries = readEntries(store);
+      const storedEntries = readEntries(store).filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          !Array.isArray(entry) &&
+          (entry as Record<string, unknown>).runId === requestedRunId,
+      );
       if (storedEntries.length > limits.totalMatchingEntries)
         throw new SessionContracts.DagSessionLimitExceeded({
           limit: "totalMatchingEntries",

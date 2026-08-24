@@ -201,6 +201,7 @@ function serviceFor(
       Effect.sync(() => {
         ready = reconstructionFor(artifactRoot, graph, overrides);
         return {
+          accepted: Effect.void,
           snapshot: Effect.promise(() => ready).pipe(Effect.map((value) => value as any)),
           await: Effect.promise(() => ready).pipe(Effect.map((value) => value as any)),
           cancel: Effect.promise(() => ready).pipe(Effect.map((value) => value as any)),
@@ -228,6 +229,30 @@ function piEvents(): any {
 }
 
 describe("DAG-backed PR review runner", () => {
+  it("unregisters run-scoped tools when the first state save fails", async () => {
+    const f = fixture();
+    const pi = piEvents();
+    let registered = 0;
+    let unregistered = 0;
+    pi.events.on("agent-tools:register", () => registered++);
+    pi.events.on("agent-tools:unregister", () => unregistered++);
+    await expect(
+      runReviewDag({
+        pi,
+        ctx: f.ctx,
+        service: serviceFor(f.artifactRoot, {}),
+        assignments,
+        deckPath: f.deckPath,
+        state: f.state,
+        save: () => {
+          throw new Error("state append failed");
+        },
+      }),
+    ).rejects.toThrow("state append failed");
+    expect(registered).toBeGreaterThan(0);
+    expect(unregistered).toBe(registered);
+  });
+
   it("preserves valid findings and reports failed and malformed reviewer paths as degraded", async () => {
     const f = fixture();
     const saved: ReviewState[] = [];
@@ -454,6 +479,7 @@ describe("DAG-backed PR review runner", () => {
         Effect.sync(() => {
           graph = submitted;
           return {
+            accepted: Effect.void,
             snapshot: Effect.never,
             await: Effect.never,
             cancel: Effect.sync(() => {

@@ -71,8 +71,11 @@ describe("DAG session replay", () => {
       ),
     );
     Effect.runSync(writer.appendFinal(DagRunOutcome.Succeeded));
+    store.entries.push({ runId: "unrelated-run", malformed: true });
 
-    const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
+    const recovered = Effect.runSync(
+      reconstructDagSession(store, def.runId, { limits: { totalMatchingEntries: 4 } }),
+    );
     expect(recovered.graphId).toBe(computeDagSessionGraphId(def));
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Succeeded);
     expect(Fixtures.status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Succeeded);
@@ -221,7 +224,9 @@ describe("DAG session replay", () => {
     }
 
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
-    expect(Fixtures.status(recovered.graph, recovered.state, "synthesize")).toBe(DagNodeStatus.Blocked);
+    expect(Fixtures.status(recovered.graph, recovered.state, "synthesize")).toBe(
+      DagNodeStatus.Blocked,
+    );
     expect(recovered.state.nodes[2]).toEqual({
       nodeId: "synthesize",
       status: DagNodeStatus.Blocked,

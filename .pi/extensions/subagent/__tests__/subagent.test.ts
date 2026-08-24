@@ -177,6 +177,14 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("No tools or capabilities specified");
       expect(result.details.stopReason).toBe("no_tools");
       expect(result.details.isError).toBe(true);
+      expect(result.usage).toEqual({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      });
     });
 
     it("returns error when tools is empty array", async () => {

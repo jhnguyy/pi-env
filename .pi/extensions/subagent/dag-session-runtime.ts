@@ -243,6 +243,7 @@ export class DagSessionRuntime {
               ),
             );
           return Object.freeze({
+            accepted: handle.accepted,
             snapshot: handle.snapshot,
             await: removeAfterTerminal(handle.await),
             cancel: removeAfterTerminal(handle.cancel),

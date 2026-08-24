@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, zeroUsage } from "../usage";
+import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, toNestedToolUsage, zeroUsage } from "../usage";
 import type { SubagentDetails } from "../types";
 
 function details(name: string, input: number, output: number): SubagentDetails {
@@ -18,6 +18,24 @@ function details(name: string, input: number, output: number): SubagentDetails {
 }
 
 describe("subagent usage accumulation", () => {
+  it("converts nested work into parent-session tool usage", () => {
+    expect(toNestedToolUsage({
+      input: 2,
+      output: 3,
+      cacheRead: 5,
+      cacheWrite: 7,
+      cost: 1.25,
+      turns: 4,
+    })).toEqual({
+      input: 2,
+      output: 3,
+      cacheRead: 5,
+      cacheWrite: 7,
+      totalTokens: 17,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 },
+    });
+  });
+
   it("aggregates sync and async records exactly and idempotently", () => {
     const ledger = new SubagentUsageLedger();
     ledger.record("sync-1", "sync", details("scout", 2, 3));

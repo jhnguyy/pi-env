@@ -43,6 +43,45 @@ export {
   parseDagTextArtifactReference,
 } from "./artifact-contracts.js";
 
+export interface DagExpectedTextArtifactIdentity {
+  readonly runId: string;
+  readonly producerNodeId: string;
+  readonly outputName: string;
+}
+
+export function materializeDagTextArtifact(
+  root: string,
+  rawReference: unknown,
+  expected: DagExpectedTextArtifactIdentity,
+  maxBytes: number = ArtifactContracts.DagDefaultArtifactLimits.maxArtifactBytes,
+): Effect.Effect<
+  { readonly reference: ArtifactContracts.DagTextArtifactReference; readonly text: string },
+  ArtifactContracts.DagArtifactFailure
+> {
+  return Effect.gen(function* () {
+    const reference = yield* Effect.try({
+      try: () => ArtifactContracts.parseDagTextArtifactReference(rawReference),
+      catch: (cause) => cause as ArtifactContracts.DagArtifactFailure,
+    });
+    yield* Effect.try({
+      try: () =>
+        ArtifactContracts.assertDagTextArtifactIdentity(
+          reference,
+          expected.runId,
+          expected.producerNodeId,
+          expected.outputName,
+        ),
+      catch: (cause) => cause as ArtifactContracts.DagArtifactFailure,
+    });
+    const bytes = yield* ArtifactFs.readDagArtifactBytes(root, reference, maxBytes);
+    const text = yield* Effect.try({
+      try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      catch: (cause) => new ArtifactContracts.DagArtifactUtf8({ path: reference.path, cause }),
+    });
+    return Object.freeze({ reference, text });
+  });
+}
+
 export function admitDagTextArtifacts(
   root: string,
   runId: string,

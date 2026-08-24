@@ -164,6 +164,7 @@ describe("session-owned DAG runtime composition", () => {
 
     const registration = registrations[0];
     const handle = await Effect.runPromise(registration.service.submit(graph("composed-run")));
+    await Effect.runPromise(handle.accepted);
     const completed = await Effect.runPromise(handle.await);
     expect(completed.state.nodes[0]).toMatchObject({ status: "succeeded" });
     expect(registration.service.usage?.("composed-run")).toEqual({
@@ -248,10 +249,11 @@ describe("session-owned DAG runtime composition", () => {
     const handle = await Effect.runPromise(
       registration!.service.submit(graph("append-failure-run")),
     );
+    const acceptedExit = await Effect.runPromise(Effect.exit(handle.accepted));
     const awaitExit = await Effect.runPromise(Effect.exit(handle.await));
     const cancelExit = await Effect.runPromise(Effect.exit(handle.cancel));
 
-    for (const exit of [awaitExit, cancelExit]) {
+    for (const exit of [acceptedExit, awaitExit, cancelExit]) {
       expect(exit._tag).toBe("Failure");
       if (exit._tag !== "Failure") continue;
       const failure = Cause.findErrorOption(exit.cause);
@@ -266,6 +268,7 @@ describe("session-owned DAG runtime composition", () => {
     const retry = await Effect.runPromise(
       registration!.service.submit(graph("append-failure-run")),
     );
+    await Effect.runPromise(retry.accepted);
     const retried = await Effect.runPromise(retry.await);
     expect(retried.state.nodes[0]).toMatchObject({ status: "succeeded" });
     await runtime.shutdownSession();

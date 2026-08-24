@@ -16,6 +16,7 @@ import {
 } from "./render";
 import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
 import { SubagentSessionRuntime } from "./session-runtime";
+import { toNestedToolUsage } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 export {
@@ -136,7 +137,10 @@ export default function (pi: ExtensionAPI) {
       label: "Subagent",
       description,
       parameters: SUBAGENT_PARAMETERS,
-      execute: runtime.execute,
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        const result = await runtime.execute(toolCallId, params, signal, onUpdate, ctx);
+        return { ...result, usage: toNestedToolUsage(result.details.usage) };
+      },
       renderCall: renderSubagentCall,
       renderResult: renderSubagentResult,
     });

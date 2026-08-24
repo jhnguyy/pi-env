@@ -1,13 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import path from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { Effect } from "effect";
 import {
-  admitDagTextArtifacts,
   DagNodeStatus,
-  parseDagTextArtifactReference,
+  materializeDagTextArtifact,
   type DagSessionReconstruction,
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
@@ -56,17 +54,15 @@ function canonical(value: unknown): string {
 export async function readVerifiedReviewArtifact(
   artifactRoot: string,
   referenceValue: unknown,
+  expected: {
+    readonly runId: string;
+    readonly producerNodeId: string;
+    readonly outputName: string;
+  },
 ): Promise<{ reference: DagTextArtifactReference; text: string }> {
-  const reference = parseDagTextArtifactReference(referenceValue);
-  const admitted = await Effect.runPromise(
-    admitDagTextArtifacts(artifactRoot, reference.runId, reference.producerNodeId, {
-      [reference.outputName]: reference.path,
-    }),
+  return Effect.runPromise(
+    materializeDagTextArtifact(artifactRoot, referenceValue, expected, MAX_RESULT_CONTEXT_BYTES),
   );
-  const verified = admitted[reference.outputName];
-  if (!verified || canonical(verified) !== canonical(reference))
-    throw new Error("DAG reviewer artifact reference changed after publication.");
-  return { reference, text: readFileSync(path.join(artifactRoot, reference.path), "utf8") };
 }
 
 export async function collectReviewResultArtifacts(
@@ -96,7 +92,11 @@ export async function collectReviewResultArtifacts(
       continue;
     }
     for (const [outputName, referenceValue] of Object.entries(node.outputs)) {
-      const artifact = await readVerifiedReviewArtifact(artifactRoot, referenceValue);
+      const artifact = await readVerifiedReviewArtifact(artifactRoot, referenceValue, {
+        runId: reconstruction.graph.runId,
+        producerNodeId: node.nodeId,
+        outputName,
+      });
       bytes += Buffer.byteLength(artifact.text, "utf8");
       if (bytes > MAX_RESULT_CONTEXT_BYTES)
         throw new Error("Reviewer result context exceeds the absolute byte limit.");

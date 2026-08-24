@@ -69,9 +69,14 @@ async function outputForNode(
 ): Promise<NodeOutput | undefined> {
   const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
   if (!node || node.status !== DagNodeStatus.Succeeded) return undefined;
-  const outputs = Object.values(node.outputs);
+  const outputs = Object.entries(node.outputs);
   if (outputs.length !== 1) throw new Error(`DAG node ${nodeId} did not publish one output.`);
-  return readVerifiedReviewArtifact(root, outputs[0]);
+  const [outputName, reference] = outputs[0];
+  return readVerifiedReviewArtifact(root, reference, {
+    runId: reconstruction.graph.runId,
+    producerNodeId: nodeId,
+    outputName,
+  });
 }
 async function admittedOutputForNode(
   root: string,
@@ -270,7 +275,7 @@ async function awaitSubmittedGraph(
   signal?: AbortSignal,
 ): Promise<void> {
   const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
-  if (handle.accepted) await Effect.runPromise(handle.accepted, { signal });
+  await Effect.runPromise(handle.accepted, { signal });
   onSubmitted();
   try {
     await Effect.runPromise(handle.await, { signal });
@@ -477,24 +482,24 @@ export async function runReviewDag(options: {
     store,
     service: options.service,
   });
-  const graph = compileReviewGraph({
-    runId,
-    cwd: state.snapshot.worktree,
-    assignments: options.assignments,
-    tools: tools.names,
-  });
-  state = {
-    ...state,
-    dag: {
-      runId,
-      startedAt: new Date(startedAt).toISOString(),
-      status: "running",
-      submitted: false,
-      rawResultReferences: [],
-    },
-  };
-  options.save(state);
   try {
+    const graph = compileReviewGraph({
+      runId,
+      cwd: state.snapshot.worktree,
+      assignments: options.assignments,
+      tools: tools.names,
+    });
+    state = {
+      ...state,
+      dag: {
+        runId,
+        startedAt: new Date(startedAt).toISOString(),
+        status: "running",
+        submitted: false,
+        rawResultReferences: [],
+      },
+    };
+    options.save(state);
     await awaitSubmittedGraph(
       options.service,
       graph,

@@ -1,4 +1,4 @@
-import { DagDependencyMode } from "../../../../src/dag/index.js";
+import { DagDependencyMode, parseDagSubagentPayload } from "../../../../src/dag/index.js";
 import { describe, expect, it } from "vitest";
 import {
   ReviewFanoutNodes,
@@ -70,8 +70,30 @@ describe("fixed PR review graph", () => {
       expect(payload.tools).not.toContain("subagent");
       expect(payload.tools).not.toContain("review");
       expect(payload.tools).not.toContain("pr_review");
+      expect(payload.tools).toEqual(
+        node.id === "reading-plan"
+          ? [tools.deck, ...tools.read, tools.planSubmission]
+          : node.id === "synthesis"
+            ? [tools.deck, tools.resultReferences, tools.synthesisSubmission]
+            : [tools.deck, ...tools.read, tools.reviewerSubmission],
+      );
       expect(payload.agent).toBeUndefined();
       expect(payload.reasoning).toBe("high");
     }
+  });
+
+  it("uses bounded unique child-session names for long run identifiers", () => {
+    const graph = compileReviewGraph({
+      runId: `review-${"owner-repository-".repeat(20)}`,
+      cwd: "/workspace",
+      assignments,
+      tools,
+    });
+    const names = graph.nodes.map((node) => {
+      const payload = parseDagSubagentPayload(node.executor.payload);
+      expect(Buffer.byteLength(payload.name, "utf8")).toBeLessThanOrEqual(128);
+      return payload.name;
+    });
+    expect(new Set(names).size).toBe(names.length);
   });
 });

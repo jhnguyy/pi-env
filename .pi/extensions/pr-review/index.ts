@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   type ExtensionAPI,
@@ -11,6 +12,7 @@ import { Effect, PartitionedSemaphore, Schema } from "effect";
 import {
   DagNodeStatus,
   DagRunOutcome,
+  DagSessionRunNotFound,
   type DagSessionReconstruction,
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
@@ -86,7 +88,27 @@ type ReviewActionResult = {
   content: Array<{ type: "text"; text: string }>;
   details: Record<string, unknown>;
   isError?: boolean;
+  usage?: Usage;
 };
+
+function nestedReviewUsage(state: ReviewState): Usage | undefined {
+  const usage = state.metrics?.usage;
+  if (!usage) return undefined;
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: usage.cost,
+    },
+  };
+}
 
 function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): string {
   return [parentSessionId, metadata.owner, metadata.repo, metadata.number, metadata.headOid].join(
@@ -219,6 +241,52 @@ function isCurrentReconciliation(
     sha256(JSON.stringify(current)) === expectedStateHash
   );
 }
+async function saveReconciliationFailure(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  registration: DagRuntimeServiceRegistration,
+  current: ReviewState,
+  projected: ReviewState,
+  expectedStateHash: string,
+  cause: unknown,
+): Promise<void> {
+  const runId = current.dag!.runId;
+  if (
+    !isCurrentReconciliation(
+      registration,
+      ctx,
+      current.snapshot.id,
+      runId,
+      expectedStateHash,
+    )
+  )
+    return;
+  if (current.dag!.submitted !== false || !(cause instanceof DagSessionRunNotFound)) {
+    saveState(pi, failedReconstructionState(projected, cause));
+    return;
+  }
+  const worktreeCleaned = await removeManagedWorktree(pi, current).catch(() => false);
+  if (
+    isCurrentReconciliation(
+      registration,
+      ctx,
+      current.snapshot.id,
+      runId,
+      expectedStateHash,
+    )
+  )
+    saveState(pi, {
+      ...current,
+      preparation: {
+        status: "failed",
+        stage: "process-loss",
+        code: "preparation_interrupted",
+        message: "Review preparation was interrupted before durable DAG acceptance.",
+        worktreeCleaned,
+      },
+    });
+}
+
 async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const registration = dagRegistration;
   if (!registration || registration.parentSessionId !== ctx.sessionManager.getSessionId()) return;
@@ -254,16 +322,15 @@ async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionConte
       )
         saveState(pi, finalized);
     } catch (cause) {
-      if (
-        isCurrentReconciliation(
-          registration,
-          ctx,
-          current.snapshot.id,
-          current.dag.runId,
-          expectedStateHash,
-        )
-      )
-        saveState(pi, failedReconstructionState(projected, cause));
+      await saveReconciliationFailure(
+        pi,
+        ctx,
+        registration,
+        current,
+        projected,
+        expectedStateHash,
+        cause,
+      );
     } finally {
       reconcilingRunIds.delete(current.dag.runId);
     }
@@ -292,7 +359,12 @@ function summarizeResult(s: ReviewState): string {
       `PR review ${s.snapshot.id}`,
       `DAG status: ${s.dag?.status ?? "failed"}`,
       `Verdict: ${s.result?.verdict ?? "failed"}`,
+      `Failed nodes: ${s.dag?.failedNodes?.join(", ") || "none"}`,
+      `Malformed nodes: ${s.dag?.malformedNodes?.join(", ") || "none"}`,
       `Findings: ${findings.length}`,
+      s.metrics
+        ? `Metrics: ${Math.round(s.metrics.durationMs)}ms; deck ${s.metrics.deckBytes}B; results ${s.metrics.reviewerOutputBytes}B; reviewers ${s.metrics.reviewersSucceeded} succeeded/${s.metrics.reviewersFailed} failed/${s.metrics.reviewersMalformed} malformed; anchors ${s.metrics.anchoredFindings}/${s.metrics.findings}; usage ${s.metrics.usage?.turns ?? 0} turns, ${s.metrics.usage?.input ?? 0} input, ${s.metrics.usage?.output ?? 0} output, ${s.metrics.usage?.cacheRead ?? 0} cache read, cost ${s.metrics.usage?.cost ?? 0}.`
+        : "Metrics: unavailable.",
       index,
     ].join("\n"),
   );
@@ -397,6 +469,7 @@ function reviewActionResult(state: ReviewState, reused = false): ReviewActionRes
       ),
     ],
     ...(dagFailed ? { isError: true } : {}),
+    ...(!reused && nestedReviewUsage(state) ? { usage: nestedReviewUsage(state) } : {}),
     details: {
       status: state.dag?.status ?? "prepared",
       reviewId: state.snapshot.id,
@@ -405,6 +478,9 @@ function reviewActionResult(state: ReviewState, reused = false): ReviewActionRes
       error: state.dag?.error,
       failedNodes: state.dag?.failedNodes ?? [],
       malformedNodes: state.dag?.malformedNodes ?? [],
+      metrics: state.metrics,
+      coverage: state.result?.coverage,
+      selectedFindingIds: state.selectedFindingIds,
       verdict: state.result?.verdict,
       findings: state.result?.findings ?? [],
       rawResultReferences: state.dag?.rawResultReferences ?? [],
@@ -418,7 +494,7 @@ async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Prom
   const root = join(getAgentDir(), "pr-review");
   const repoDir = state.snapshot.cache?.repoDir;
   const worktree = state.snapshot.cache?.worktree ?? state.snapshot.worktree;
-  if (!repoDir) {
+  if (!repoDir || !existsSync(repoDir)) {
     if (existsSync(worktree)) {
       assertManagedPath(root, worktree);
       rmSync(worktree, { recursive: true, force: true });

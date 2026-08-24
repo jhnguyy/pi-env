@@ -62,6 +62,7 @@ export {
   DagTextArtifactMediaType,
   DagTextArtifactReferenceVersion,
   admitDagTextArtifacts,
+  materializeDagTextArtifact,
   materializeDagTextContext,
   parseDagTextArtifactReference,
   selectDagTextArtifactReferences,
@@ -69,6 +70,7 @@ export {
 export type {
   DagArtifactFailure,
   DagArtifactLimits,
+  DagExpectedTextArtifactIdentity,
   DagMaterializedTextArtifact,
   DagMaterializedTextContext,
   DagTextArtifactReference,

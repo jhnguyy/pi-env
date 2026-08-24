@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   DagCompletionGuardKind,
   DagDependencyMode,
@@ -95,7 +96,7 @@ function payload(
         : [tools.deck, ...tools.read, tools.reviewerSubmission];
   return {
     v: DagSubagentPayloadVersion,
-    name: `${runId}-${node.role}`,
+    name: `pr-review-${node.role}-${createHash("sha256").update(runId).digest("hex").slice(0, 12)}`,
     instructions: roleInstructions(node.role),
     model: assignment.model,
     tools: roleTools,

@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 
 import type { SubagentDetails, UsageStats } from "./types";
 
@@ -28,6 +28,23 @@ export function addUsage(
 
 export function cloneUsage(usage: UsageStats): UsageStats {
   return { ...usage };
+}
+
+export function toNestedToolUsage(usage: UsageStats): Usage {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: usage.cost,
+    },
+  };
 }
 
 export function formatUsageCompact(usage: UsageStats): string {
