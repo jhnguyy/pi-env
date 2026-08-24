@@ -2,11 +2,11 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 
-export const PrReviewAction = {
+export const ReviewCommand = {
   Get: "get",
   Create: "create",
 } as const;
-export type PrReviewAction = (typeof PrReviewAction)[keyof typeof PrReviewAction];
+export type ReviewCommand = (typeof ReviewCommand)[keyof typeof ReviewCommand];
 
 export const PrReviewFeedback = {
   All: "all",
@@ -16,7 +16,7 @@ export const PrReviewFeedback = {
 } as const;
 export type PrReviewFeedback = (typeof PrReviewFeedback)[keyof typeof PrReviewFeedback];
 
-const PR_REVIEW_ACTION_VALUES = [PrReviewAction.Get, PrReviewAction.Create] as const;
+const REVIEW_COMMAND_VALUES = [ReviewCommand.Get, ReviewCommand.Create] as const;
 const PR_REVIEW_FEEDBACK_VALUES = [
   PrReviewFeedback.All,
   PrReviewFeedback.Conversation,
@@ -27,7 +27,7 @@ const PR_REVIEW_FEEDBACK_VALUES = [
 export const MAX_CONTEXT_PAGE_SIZE = 5;
 export const PrReviewParamsSchema = Type.Object(
   {
-    action: StringEnum(PR_REVIEW_ACTION_VALUES),
+    command: StringEnum(REVIEW_COMMAND_VALUES),
     url: Type.Optional(
       Type.String({
         description:
@@ -36,13 +36,13 @@ export const PrReviewParamsSchema = Type.Object(
     ),
     feedback: Type.Optional(
       StringEnum(PR_REVIEW_FEEDBACK_VALUES, {
-        description: "Feedback category for action=get. Defaults to all categories.",
+        description: "Feedback category for `review get`. Defaults to all categories.",
       }),
     ),
     cursor: Type.Optional(
       Type.String({
         maxLength: 4096,
-        description: "Opaque pagination cursor returned by a prior action=get result.",
+        description: "Opaque pagination cursor returned by a prior `review get` result.",
       }),
     ),
     pageSize: Type.Optional(
@@ -68,7 +68,8 @@ export const REVIEW_TOOL_NAMES = [
   "submit_review",
 ] as const;
 export const REVIEW_COMMANDS = [
-  "start",
+  "create",
+  "get",
   "status",
   "findings",
   "select",

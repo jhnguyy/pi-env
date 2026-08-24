@@ -6,35 +6,84 @@ function extensionHarness() {
   const handlers = new Map<string, Function>();
   const entries: unknown[] = [];
   let active = ["read", "analyze", SEARCH_TOOL_NAME];
-  const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", "analyze", "notes", "linear_viewer", "linear_list_resources", "linear_list_issues", "linear_search_issues", "linear_get_issue", "linear_create_issue", "linear_update_issue", "linear_create_comment"].map((name) => ({ name, description: name, parameters: {}, sourceInfo: { source: "test" } as any }));
+  const tools = [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "dev-tools",
+    "ptc",
+    "analyze",
+    "notes",
+    "linear_viewer",
+    "linear_list_resources",
+    "linear_list_issues",
+    "linear_search_issues",
+    "linear_get_issue",
+    "linear_create_issue",
+    "linear_update_issue",
+    "linear_create_comment",
+  ].map((name) => ({
+    name,
+    description: name,
+    parameters: {},
+    sourceInfo: { source: "test" } as any,
+  }));
   return {
     pi: {
-      registerTool(tool: any) { tools.push({ ...tool, sourceInfo: { source: "extension" } }); },
+      registerTool(tool: any) {
+        tools.push({ ...tool, sourceInfo: { source: "extension" } });
+      },
       registerCommand() {},
-      on(event: string, handler: Function) { handlers.set(event, handler); },
+      on(event: string, handler: Function) {
+        handlers.set(event, handler);
+      },
       events: { emit() {}, on() {} },
       getAllTools: () => tools,
       getActiveTools: () => active,
-      setActiveTools(next: string[]) { active = next; },
-      appendEntry(_customType: string, data: unknown) { entries.push(data); },
+      setActiveTools(next: string[]) {
+        active = next;
+      },
+      appendEntry(_customType: string, data: unknown) {
+        entries.push(data);
+      },
     } as any,
     entries,
     handlers,
     tools,
-    get active() { return active; },
+    get active() {
+      return active;
+    },
   };
 }
 
 describe("tool manager branch restore", () => {
   it("falls back to the default profile, then replays a supplied branch state with normalization", () => {
-    const sibling = { customType: "tool-manager:state", data: { active: ["missing", "analyze"], reason: "toggle", at: "x" } };
+    const sibling = {
+      customType: "tool-manager:state",
+      data: { active: ["missing", "analyze"], reason: "toggle", at: "x" },
+    };
     const h = extensionHarness();
     toolManager(h.pi);
 
-    h.handlers.get("session_start")?.({}, { cwd: process.cwd(), sessionManager: { getBranch: () => [] } });
-    expect(h.active).toEqual(["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME]);
+    h.handlers.get("session_start")?.(
+      {},
+      { cwd: process.cwd(), sessionManager: { getBranch: () => [] } },
+    );
+    expect(h.active).toEqual([
+      "read",
+      "bash",
+      "edit",
+      "write",
+      "dev-tools",
+      "ptc",
+      SEARCH_TOOL_NAME,
+    ]);
 
-    h.handlers.get("session_tree")?.({}, { cwd: process.cwd(), sessionManager: { getBranch: () => [sibling] } });
+    h.handlers.get("session_tree")?.(
+      {},
+      { cwd: process.cwd(), sessionManager: { getBranch: () => [sibling] } },
+    );
     expect(h.active).toEqual(["analyze", SEARCH_TOOL_NAME]);
   });
 

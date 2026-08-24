@@ -133,11 +133,11 @@ describe("pr-review extension surface", () => {
   it("registers the suite tool with intent-specific routing", () => {
     tempRoot();
     const pi = extensionPi();
-    const review = pi.tools.find((tool: any) => tool.name === "pr_review");
+    const review = pi.tools.find((tool: any) => tool.name === "review");
     expect(review).toBeTruthy();
     expect(pi.tools.some((tool: any) => tool.name === "pr_review_start")).toBe(false);
-    expect(review.description).toContain("action=get");
-    expect(review.description).toContain("action=create");
+    expect(review.description).toContain("`review get`");
+    expect(review.description).toContain("`review create`");
     expect(review.description).toContain("does not post");
     expect(review.promptGuidelines.join("\n")).toContain("existing pull request feedback");
     expect(review.promptGuidelines.join("\n")).toContain("new independent pull request review");
@@ -145,6 +145,8 @@ describe("pr-review extension surface", () => {
     const promptText = [review.description, ...review.promptGuidelines].join("\n");
     expect(promptText).not.toContain("Do not inspect files");
     expect(promptText).not.toMatch(/\b(?:do not|must not|never)\b[^\n]*(?:\bgh\b|GitHub CLI)/i);
+    expect(pi.commands.review.description).toContain("create");
+    expect(pi.commands.review.description).toContain("get");
     expect(pi.commands.review.description).toContain("edit");
     expect(pi.handlers.session_start).toBeTypeOf("function");
     expect(pi.handlers.session_tree).toBeTypeOf("function");
@@ -267,11 +269,11 @@ describe("pr-review extension surface", () => {
         stderr: "",
       };
     };
-    const get = pi.tools.find((tool: any) => tool.name === "pr_review");
+    const get = pi.tools.find((tool: any) => tool.name === "review");
     expect(get).toBeTruthy();
     const result = await get.execute(
       "get-1",
-      { action: "get", url: "https://github.com/o/r/pull/1" },
+      { command: "get", url: "https://github.com/o/r/pull/1" },
       undefined,
       undefined,
       { cwd: "/repo" },
@@ -395,9 +397,9 @@ describe("pr-review extension surface", () => {
         stderr: "",
       };
     };
-    const get = pi.tools.find((tool: any) => tool.name === "pr_review");
+    const get = pi.tools.find((tool: any) => tool.name === "review");
     expect(get).toBeTruthy();
-    const result = await get.execute("get-2", { action: "get" }, undefined, undefined, {
+    const result = await get.execute("get-2", { command: "get" }, undefined, undefined, {
       cwd: "/repo",
     });
     expect(calls[0].args).toEqual(["pr", "view", "--json", "url", "--jq", ".url"]);
@@ -408,7 +410,7 @@ describe("pr-review extension surface", () => {
     const next = await get.execute(
       "get-3",
       {
-        action: "get",
+        command: "get",
         url: "https://github.com/o/r/pull/1",
         cursor: result.details.nextCursor,
       },
@@ -625,15 +627,22 @@ describe("pr-review extension surface", () => {
       sessionManager: { getSessionId: () => "parent" },
       modelRegistry: { getAvailable: () => [] },
     };
-    await expect(
-      pi.tools[0].execute(
-        "1",
-        { action: "create", url: "https://github.com/o/r/pull/1" },
-        undefined,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow(/DAG runtime is not available/);
+    const result = await pi.tools[0].execute(
+      "1",
+      { command: "create", url: "https://github.com/o/r/pull/1" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(result).toMatchObject({
+      isError: true,
+      details: {
+        command: "create",
+        status: "failed",
+        error: "The session DAG runtime is not available for PR review.",
+      },
+    });
+    expect(result.content[0].text).toContain("Review create failed");
     expect(pi.appended).toHaveLength(1);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
     expect(pi.appended[0]?.[1].state.snapshot.metadata.headOid).toBe("h");

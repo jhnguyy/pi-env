@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe("pr-review deterministic contracts", () => {
-  it("extracts natural PR URLs for model-facing start selection", () => {
+  it("extracts natural PR URLs for model-facing create selection", () => {
     expect(extractPrUrl("Review this PR https://github.com/acme/widgets/pull/123 please")).toBe(
       "https://github.com/acme/widgets/pull/123",
     );

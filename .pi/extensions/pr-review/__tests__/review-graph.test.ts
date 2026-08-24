@@ -46,13 +46,7 @@ describe("fixed PR review graph", () => {
       "synthesis",
     ]);
     const synthesis = graph.nodes.find((node) => node.id === "synthesis")!;
-    expect(graph.nodes.find((node) => node.id === "reading-plan")?.executor.payload.maxTurns).toBe(
-      16,
-    );
-    expect(
-      graph.nodes.find((node) => node.id === "review-correctness")?.executor.payload.maxTurns,
-    ).toBe(24);
-    expect(synthesis.executor.payload.maxTurns).toBe(20);
+    expect(graph.nodes.every((node) => node.executor.payload.maxTurns === undefined)).toBe(true);
     expect(synthesis.dependencies).toHaveLength(7);
     expect(
       synthesis.dependencies.every((dependency) => dependency.mode === DagDependencyMode.Settled),
@@ -77,6 +71,7 @@ describe("fixed PR review graph", () => {
       expect(payload.tools).not.toContain("read");
       expect(payload.tools).not.toContain("write");
       expect(payload.tools).not.toContain("subagent");
+      expect(payload.tools).not.toContain("review");
       expect(payload.tools).not.toContain("pr_review");
       expect(payload.agent).toBeUndefined();
       expect(payload.reasoning).toBe("high");

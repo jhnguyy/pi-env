@@ -4,11 +4,11 @@ This note defines the user and safety contracts for the `pr-review` pi extension
 
 ## User contract
 
-The model-facing `pr_review` tool separates context retrieval from independent review creation.
+The model-facing `review` tool separates context retrieval from independent review creation.
 
-Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
+Use `review get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-Use `create` for a new independent review. Each run uses a fixed review DAG with fresh child sessions. The child sessions receive no parent conversation context. The `create` action does not post a GitHub review.
+Use `review create` for a new independent review. Each run uses a fixed review DAG with fresh child sessions. The child sessions receive no parent conversation context. The `create` action does not post a GitHub review.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
@@ -67,6 +67,8 @@ The graph runs these reviewer roles:
 - `whole-change`
 
 The reading plan runs beside the reviewers. Synthesis waits for all reviewer paths to become terminal. Synthesis requires at least one successful reviewer path.
+
+Reviewer nodes do not have a fixed turn count. Context admission, artifact limits, cancellation, and the shared supervisor bound execution.
 
 Agent settings approve models with the exact `reviewer` annotation. The review extension rejects unapproved role pins. One approved model can fill all roles. The extension derives the highest supported reasoning level from model metadata.
 
@@ -152,7 +154,7 @@ If a post result is uncertain, the extension searches existing review bodies for
 
 ## Command and tool surface
 
-The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
+The tool manager activates `review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
 
 `/review draft-plan` creates a local draft implementation plan from selected findings. The command does not execute the plan. The user must approve the plan before a later orchestration workflow can use it.
 

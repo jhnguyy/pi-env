@@ -513,7 +513,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
   const navigation = page.nextCursor
     ? [
         "More feedback is available.",
-        `Call pr_review with action=get and cursor=${JSON.stringify(page.nextCursor)}.`,
+        `Use \`review get\` with cursor ${JSON.stringify(page.nextCursor)}.`,
       ].join("\n")
     : "No additional feedback pages are available.";
   const sections = [
@@ -548,7 +548,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
 export function pullRequestContextDetails(page: PullRequestContextPage) {
   return {
     status: "ok" as const,
-    action: "get" as const,
+    command: "get" as const,
     url: page.reference.url,
     feedback: page.feedback,
     pageSize: page.pageSize,
