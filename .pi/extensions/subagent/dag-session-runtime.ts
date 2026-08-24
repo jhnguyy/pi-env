@@ -19,6 +19,7 @@ import {
 } from "../../../src/dag/index.js";
 import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
 import {
+  dagUsagePrefix,
   registerDagRuntimeService,
   unregisterDagRuntimeService,
   type DagRuntimeServiceRegistration,
@@ -63,7 +64,7 @@ export class DagSessionRuntime {
       ) => this.submit(graph, authority),
       reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
       usage: (runId: string): DagRuntimeUsage => {
-        const prefix = `${runId}:`;
+        const prefix = dagUsagePrefix(runId);
         return Object.freeze({
           ...this.supervisor.usage(prefix),
           ...(this.supervisor.budget(prefix)
@@ -173,7 +174,7 @@ export class DagSessionRuntime {
       this.claimedRunIds.add(graph.runId);
       if (authority?.workspaceRoot) this.workspaceRoots.set(graph.runId, authority.workspaceRoot);
       if (authority?.budget)
-        this.supervisor.registerBudget(`${graph.runId}:`, authority.budget);
+        this.supervisor.registerBudget(dagUsagePrefix(graph.runId), authority.budget);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;

@@ -57,6 +57,7 @@ import {
   validateDagDefinition,
 } from "../../../../src/dag/index.js";
 import {
+  dagUsagePrefix,
   DagRuntimeServiceEvent,
   listenForDagRuntimeService,
   resetDagRuntimeServiceRegistryForTests,
@@ -135,6 +136,11 @@ afterEach(() => {
 });
 
 describe("session-owned DAG runtime composition", () => {
+  it("uses collision-resistant usage namespaces for nested run IDs", () => {
+    expect(dagUsagePrefix("a")).not.toBe(dagUsagePrefix("a:b"));
+    expect(dagUsagePrefix("a:b")).not.toMatch(new RegExp(`^${dagUsagePrefix("a")}`));
+  });
+
   it("reuses active authorities, persists one run in order, and reconstructs an immutable result", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-session-"));
     tempDirectories.push(cwd);

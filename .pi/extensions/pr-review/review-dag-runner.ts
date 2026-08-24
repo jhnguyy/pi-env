@@ -35,6 +35,7 @@ import {
   type ReviewState,
   type SynthesisReview,
 } from "./schema";
+import { findingKey, validSynthesisSources } from "./synthesis-provenance";
 
 type ReviewerRole = ReviewerOutput["role"];
 
@@ -98,18 +99,6 @@ async function admittedOutputForNode(
     return undefined;
   }
 }
-function findingKey(finding: FindingInput): string {
-  return JSON.stringify([
-    finding.severity,
-    finding.impact,
-    finding.file,
-    finding.side,
-    finding.line,
-    finding.problem,
-    finding.consequence,
-    finding.suggestedFix,
-  ]);
-}
 function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): ReviewResult {
   const grouped = new Map<
     string,
@@ -138,30 +127,6 @@ function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): Re
     ),
     coverage: { status: "degraded", succeeded: [], failed: [], malformed: [] },
   };
-}
-function findingInputFromSynthesis(finding: SynthesisReview["findings"][number]): FindingInput {
-  const { sourceReviewers: _sourceReviewers, agreement: _agreement, ...input } = finding;
-  return input;
-}
-function sameFinding(left: FindingInput, right: FindingInput): boolean {
-  return findingKey(left) === findingKey(right);
-}
-function validSynthesisSources(
-  synthesis: SynthesisReview,
-  reviewers: readonly ReviewerOutput[],
-): boolean {
-  const reviewerByRole = new Map(reviewers.map((reviewer) => [reviewer.role, reviewer]));
-  return synthesis.findings.every((finding) => {
-    const uniqueSources = new Set(finding.sourceReviewers);
-    const input = findingInputFromSynthesis(finding);
-    return (
-      finding.sourceReviewers.length === uniqueSources.size &&
-      finding.agreement === uniqueSources.size &&
-      finding.sourceReviewers.every((role) =>
-        reviewerByRole.get(role)?.findings.some((candidate) => sameFinding(candidate, input)),
-      )
-    );
-  });
 }
 function outcomeStatus(
   reconstruction: DagSessionReconstruction,

@@ -4,6 +4,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Data, Effect } from "effect";
 
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import { dagUsagePrefix } from "../_shared/dag-runtime-service";
 import {
   DagExecutorKind,
   DagSubagentPromptMaxBytes,
@@ -240,7 +241,7 @@ export function makeDagSubagentRuntime(
         });
         const result = yield* runResolvedSubagentEffect(run, ctx, {
           ...options,
-          runId: `${request.runId}:${request.nodeId}:${request.attemptId}`,
+          runId: `${dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
           workspaceAccess: run.workspaceAccess,
         }).pipe(
           Effect.mapError(

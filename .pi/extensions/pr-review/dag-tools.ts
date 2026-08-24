@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
+import { Check } from "typebox/value";
 import { Effect } from "effect";
 import {
   DagNodeStatus,
@@ -29,7 +30,8 @@ import {
   type ReviewPlan,
   type SynthesisReview,
 } from "./schema";
-import type { ReviewGraphToolNames } from "./review-graph";
+import { ReviewerNodes, type ReviewGraphToolNames } from "./review-graph";
+import { validSynthesisSources } from "./synthesis-provenance";
 
 const MAX_DECK_BYTES = 256_000;
 const MAX_SUBMISSION_BYTES = 262_144;
@@ -142,6 +144,7 @@ export function registerReviewDagTools(options: {
   const reviewerName = `submit_reviewer_result_${suffix}`;
   const referencesName = `review_result_refs_${suffix}`;
   const synthesisName = `submit_review_synthesis_${suffix}`;
+  const submittedReviewers = new Map<ReviewerOutput["role"], ReviewerOutput>();
   const deckTool = customTool(
     {
       name: deckName,
@@ -184,8 +187,10 @@ export function registerReviewDagTools(options: {
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const raw = params as ReviewerOutput;
+        const text = boundedSubmission(raw);
+        submittedReviewers.set(raw.role, raw);
         return {
-          content: [txt(boundedSubmission(raw))],
+          content: [txt(text)],
           details: { ok: true, findings: raw.findings.length },
         };
       },
@@ -233,6 +238,29 @@ export function registerReviewDagTools(options: {
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const raw = params as SynthesisReview;
+        const reconstruction = await Effect.runPromise(
+          options.service.reconstruct(options.runId),
+          { signal: context.signal },
+        );
+        const succeededNodeIds = new Set(
+          reconstruction.state.nodes
+            .filter((node) => node.status === DagNodeStatus.Succeeded)
+            .map((node) => node.nodeId),
+        );
+        const reviewers = ReviewerNodes.flatMap((node) => {
+          const reviewer = submittedReviewers.get(node.role);
+          return succeededNodeIds.has(node.nodeId) && reviewer ? [reviewer] : [];
+        });
+        if (!Check(SynthesisReviewSchema, raw) || !validSynthesisSources(raw, reviewers))
+          return {
+            content: [
+              txt(
+                "Synthesis provenance is invalid. Copy each finding exactly from every named source reviewer and retry.",
+              ),
+            ],
+            isError: true,
+            details: { ok: false, reason: "invalid-provenance" },
+          };
         return {
           content: [txt(boundedSubmission(raw))],
           details: { ok: true, findings: raw.findings.length, status: raw.coverage.status },

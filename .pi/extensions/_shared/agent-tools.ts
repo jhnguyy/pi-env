@@ -89,8 +89,18 @@ export function registerAgentTools(
   const active = (Array.isArray(registrations) ? registrations : [registrations]).map(
     (registration) => withFactory(registration, sessionGeneration),
   );
-  for (const registration of active) agentToolChannel.publish(pi.events, registration);
-  return active;
+  const published: ExtToolRegistration[] = [];
+  try {
+    for (const registration of active) {
+      agentToolChannel.publish(pi.events, registration);
+      published.push(registration);
+    }
+    return active;
+  } catch (cause) {
+    for (const registration of published.reverse())
+      agentToolChannel.unpublish(pi.events, registration);
+    throw cause;
+  }
 }
 
 export function unregisterAgentTools(

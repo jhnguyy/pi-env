@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Effect } from "effect";
 import type {
   DagRunHandle,
@@ -15,6 +15,10 @@ export const DagRuntimeServiceEvent = {
 } as const;
 export type DagRuntimeServiceEvent =
   (typeof DagRuntimeServiceEvent)[keyof typeof DagRuntimeServiceEvent];
+
+export function dagUsagePrefix(runId: string): string {
+  return `dag-${createHash("sha256").update(runId).digest("hex")}:`;
+}
 
 export interface DagRuntimeBudget {
   readonly maxTotalTokens: number;

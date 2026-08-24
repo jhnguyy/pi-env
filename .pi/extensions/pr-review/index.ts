@@ -12,7 +12,6 @@ import { Effect, PartitionedSemaphore, Schema } from "effect";
 import {
   DagNodeStatus,
   DagRunOutcome,
-  DagSessionRunNotFound,
   type DagSessionReconstruction,
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
@@ -116,9 +115,13 @@ function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
 }
 
 function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): string {
-  return [parentSessionId, metadata.owner, metadata.repo, metadata.number, metadata.headOid].join(
-    ":",
-  );
+  return [
+    parentSessionId,
+    metadata.owner.toLowerCase(),
+    metadata.repo.toLowerCase(),
+    metadata.number,
+    metadata.headOid,
+  ].join(":");
 }
 
 function matchingReview(identityKey: string, parentSessionId: string): ReviewState | undefined {
@@ -246,6 +249,15 @@ function isCurrentReconciliation(
     sha256(JSON.stringify(current)) === expectedStateHash
   );
 }
+function isDagSessionRunNotFound(cause: unknown): cause is { readonly _tag: "run-not-found" } {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "_tag" in cause &&
+    cause._tag === "run-not-found"
+  );
+}
+
 async function saveReconciliationFailure(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -266,7 +278,7 @@ async function saveReconciliationFailure(
     )
   )
     return;
-  if (current.dag!.submitted !== false || !(cause instanceof DagSessionRunNotFound)) {
+  if (current.dag!.submitted !== false || !isDagSessionRunNotFound(cause)) {
     saveState(pi, failedReconstructionState(projected, cause));
     return;
   }
@@ -764,7 +776,7 @@ async function createReviewAttempt(
         ...state,
         dag: {
           ...terminalDag,
-          status: "degraded",
+          status: terminalDag.status === "succeeded" ? "degraded" : terminalDag.status,
           error: `Review result references were not added to the deck: ${cause instanceof Error ? cause.message : String(cause)}`,
         },
       };
@@ -868,10 +880,20 @@ async function executeReviewTool(
   ctx: ExtensionContext,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ) {
+  const priorReviewIds = new Set(states.keys());
   try {
     return await executePrReview(pi, params, signal, ctx, onProgress);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
+    const owned = [...states.values()].find((state) => !priorReviewIds.has(state.snapshot.id));
+    if (owned) {
+      const result = reviewActionResult(owned);
+      return {
+        ...result,
+        isError: true,
+        details: { ...result.details, command: params.command, error: message },
+      };
+    }
     return {
       content: [
         txt(`Review ${params.command} failed before it created an owned review: ${message}`),
