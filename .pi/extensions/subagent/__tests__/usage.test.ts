@@ -116,6 +116,6 @@ describe("subagent usage accumulation", () => {
     expect(accumulator.output()).toBe("answer");
     expect(accumulator.toolCallCount).toBe(1);
     expect(accumulator.usage).toMatchObject({ input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 1 });
-    expect(accumulator.turnLimitExceeded).toBe(true);
+    expect(accumulator.turnLimitExceeded).toBe(false);
   });
 });

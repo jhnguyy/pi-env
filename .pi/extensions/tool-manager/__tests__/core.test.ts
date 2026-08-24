@@ -50,12 +50,12 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "create a skill for this" }, true)).toContain("skills");
     expect(triggerGroups({ text: "use catching for JIT phrasing" }, true)).toContain("catching-tests");
     expect(triggerGroups({ text: "read previous session conversation" }, true)).toContain("sessions");
-    expect(triggerGroups({ text: "Review this PR https://github.com/acme/widgets/pull/123" }, true)).toContain("pr-review");
-    expect(triggerGroups({ text: "Review this pull request" }, true)).toContain("pr-review");
-    expect(triggerGroups({ text: "Address feedback on this PR" }, true)).toContain("pr-review");
-    expect(triggerGroups({ text: "Get comments from https://github.com/acme/widgets/pull/123" }, true)).toContain("pr-review");
-    expect(triggerGroups({ text: "address this feedback" }, true)).not.toContain("pr-review");
-    expect(triggerGroups({ text: "review this TypeScript file" }, true)).not.toContain("pr-review");
+    expect(triggerGroups({ text: "Review this PR https://github.com/acme/widgets/pull/123" }, true)).toContain("review");
+    expect(triggerGroups({ text: "Review this pull request" }, true)).toContain("review");
+    expect(triggerGroups({ text: "Address feedback on this PR" }, true)).toContain("review");
+    expect(triggerGroups({ text: "Get comments from https://github.com/acme/widgets/pull/123" }, true)).toContain("review");
+    expect(triggerGroups({ text: "address this feedback" }, true)).not.toContain("review");
+    expect(triggerGroups({ text: "review this TypeScript file" }, true)).not.toContain("review");
     expect(triggerGroups({ text: "fetch https://example.com" }, true)).toContain("web");
     expect(triggerGroups({ text: "run extension tests" }, true)).not.toContain("catching-tests");
     expect(triggerGroups({ text: "fetch https://example.com", source: "extension" }, true)).toEqual([]);

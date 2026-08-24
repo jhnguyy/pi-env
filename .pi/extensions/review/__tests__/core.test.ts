@@ -23,7 +23,7 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("pr-review deterministic contracts", () => {
+describe("review pull request deterministic contracts", () => {
   it("extracts natural PR URLs for model-facing create selection", () => {
     expect(extractPrUrl("Review this PR https://github.com/acme/widgets/pull/123 please")).toBe(
       "https://github.com/acme/widgets/pull/123",
@@ -42,6 +42,9 @@ describe("pr-review deterministic contracts", () => {
         riskReasons: ["r"],
         cohorts: [{ label: "all", purpose: "p", paths: ["a.ts"] }],
         files: [{ path: "a.ts", attention: "normal", role: "a" }],
+        evidence: [
+          { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
+        ],
       }),
     ).toBe(true);
     expect(validatePlanShape({ goal: "", files: [] })).toBe(false);
@@ -175,6 +178,10 @@ describe("pr-review deterministic contracts", () => {
             { path: "a.ts", attention: "normal", role: "a" },
             { path: "b.ts", attention: "normal", role: "b" },
           ],
+          evidence: [
+            { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "a" },
+            { kind: "diff", path: "b.ts", startLine: 1, endLine: 1, purpose: "b" },
+          ],
         },
         changed,
       ).ok,
@@ -190,6 +197,10 @@ describe("pr-review deterministic contracts", () => {
           { path: "a.ts", attention: "normal", role: "a" },
           { path: "a.ts", attention: "normal", role: "dup" },
           { path: "c.ts", attention: "normal", role: "invented" },
+        ],
+        evidence: [
+          { kind: "file", path: "a.ts", startLine: 2, endLine: 1, purpose: "bad" },
+          { kind: "diff", path: "c.ts", startLine: 1, endLine: 1, purpose: "invented" },
         ],
       },
       changed,

@@ -56,7 +56,7 @@ function execFor(meta: any, mismatch = false) {
   return { exec, calls };
 }
 
-describe("pr-review snapshot", () => {
+describe("review pull request snapshot", () => {
   it("resolves missing URL through gh pr view or returns a clear needs-url message", async () => {
     const cwd = roots();
     const ok = await resolvePrUrl(

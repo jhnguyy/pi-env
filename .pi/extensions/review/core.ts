@@ -73,34 +73,56 @@ function coverage(
   return { missing: expected.filter((p) => !seen.has(p)), duplicates, invented };
 }
 
+function addCoverageIssues(
+  issues: string[],
+  label: string,
+  result: ReturnType<typeof coverage>,
+): void {
+  const suffix = label === "Files" ? "" : ` ${label.toLowerCase()}`;
+  if (result.missing.length) issues.push(`Missing${suffix}: ${result.missing.join(", ")}`);
+  if (result.duplicates.length)
+    issues.push(`Duplicate${suffix}: ${result.duplicates.join(", ")}`);
+  if (result.invented.length)
+    issues.push(`Invented${suffix}: ${result.invented.join(", ")}`);
+}
+function evidenceIssues(plan: ReviewPlan, expected: readonly string[]): string[] {
+  const issues: string[] = [];
+  const expectedSet = new Set(expected);
+  const evidencePathSet = new Set(plan.evidence.map((reference) => reference.path));
+  const missing = expected.filter((path) => !evidencePathSet.has(path));
+  const invented = [...evidencePathSet].filter((path) => !expectedSet.has(path));
+  const identities = plan.evidence.map((reference) =>
+    `${reference.kind}\0${reference.path}\0${reference.startLine}\0${reference.endLine}`,
+  );
+  if (missing.length) issues.push(`Missing evidence: ${missing.join(", ")}`);
+  if (invented.length) issues.push(`Unplanned evidence: ${invented.join(", ")}`);
+  if (plan.evidence.some((reference) => reference.endLine < reference.startLine))
+    issues.push("Evidence contains reversed line ranges.");
+  if (new Set(identities).size !== identities.length)
+    issues.push("Evidence contains duplicate references.");
+  return issues;
+}
 export function validatePlan(
   plan: ReviewPlan,
   changed: readonly ChangedFile[],
 ): { ok: boolean; message: string } {
   if (!validatePlanShape(plan)) return { ok: false, message: "Plan is malformed." };
-  const expected = changed.map((f) => f.path);
-  const filePaths = plan.files.map((f) => f.path);
-  const cohortPaths = plan.cohorts.flatMap((c) => c.paths);
-  const fileCoverage = coverage(filePaths, expected);
-  const cohortCoverage = coverage(cohortPaths, expected);
-  const bad =
-    fileCoverage.missing.length ||
-    fileCoverage.duplicates.length ||
-    fileCoverage.invented.length ||
-    cohortCoverage.missing.length ||
-    cohortCoverage.duplicates.length ||
-    cohortCoverage.invented.length;
-  if (!bad) return { ok: true, message: "Plan accepted." };
+  const expected = changed.map((file) => file.path);
+  const issues: string[] = [];
+  addCoverageIssues(issues, "Files", coverage(plan.files.map((file) => file.path), expected));
+  addCoverageIssues(
+    issues,
+    "Cohorts",
+    coverage(plan.cohorts.flatMap((cohort) => cohort.paths), expected),
+  );
+  issues.push(...evidenceIssues(plan, expected));
+  if (issues.length === 0) return { ok: true, message: "Plan accepted." };
   return {
     ok: false,
     message: [
-      "Plan must cover each changed path exactly once.",
-      fileCoverage.missing.length ? `Missing: ${fileCoverage.missing.join(", ")}` : "",
-      fileCoverage.duplicates.length ? `Duplicate: ${fileCoverage.duplicates.join(", ")}` : "",
-      fileCoverage.invented.length ? `Invented: ${fileCoverage.invented.join(", ")}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+      "Plan must cover each changed path exactly once and include valid evidence for each path.",
+      ...issues,
+    ].join("\n"),
   };
 }
 

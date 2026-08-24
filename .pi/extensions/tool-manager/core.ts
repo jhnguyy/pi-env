@@ -33,7 +33,7 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   skills: ["reference_skill", "skill_build"],
   "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],
-  "pr-review": ["review"],
+  review: ["review"],
   web: ["web_fetch"],
   "linear-read": LINEAR_READ_TOOLS,
   "linear-write": LINEAR_WRITE_TOOLS,
@@ -46,7 +46,7 @@ export const GROUP_HINTS: Record<string, RegExp[]> = {
   skills: [/\bskills?\b/],
   "catching-tests": [/\bcatching\b/, /\bjit[- ]?catch\b/],
   sessions: [/\bsessions?\b/, /\bconversation history\b/],
-  "pr-review": [
+  review: [
     /\breview\b.*(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+)/,
     /(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+).*\b(?:feedback|comments?|threads?)\b/,
     /\b(?:feedback|comments?|threads?)\b.*(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+)/,
@@ -186,7 +186,7 @@ export function triggerGroups(input: { text: string; source?: string }, autoActi
   if (/\b(create|build|review|reference) (a )?skill\b|\bskill (create|build|review|reference)\b/.test(t)) groups.push("skills");
   if (/\b(catching|jit[- ]?catch)\b/.test(t)) groups.push("catching-tests");
   if (/\b(prior|previous|past) (session|conversation)\b|\bsession history\b/.test(t)) groups.push("sessions");
-  if ((GROUP_HINTS["pr-review"] ?? []).some((rx) => rx.test(t))) groups.push("pr-review");
+  if ((GROUP_HINTS.review ?? []).some((rx) => rx.test(t))) groups.push("review");
   if (/https?:\/\/\S+|\b(web fetch|fetch (the )?(website|url|page)|website context)\b/.test(t)) groups.push("web");
   if (/\blinear\b/.test(t)) groups.push("linear-read");
   return unique(groups);

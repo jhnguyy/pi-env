@@ -18,6 +18,7 @@ import {
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
 import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
+import { removeDagExecutorsForSessionGeneration } from "../_shared/dag-executor-registration";
 import {
   dagUsagePrefix,
   registerDagRuntimeService,
@@ -54,8 +55,9 @@ export class DagSessionRuntime {
     private readonly claimedRunIds: Set<string>,
     private readonly workspaceRoots: Map<string, string>,
     private readonly supervisor: SubagentRunSupervisor,
+    private readonly parentSessionId: string,
+    private readonly sessionGeneration: string,
     ctx: ExtensionContext,
-    sessionGeneration: string,
   ) {
     const service = Object.freeze({
       submit: <TPayload>(
@@ -70,7 +72,7 @@ export class DagSessionRuntime {
     });
     this.registration = registerDagRuntimeService(pi, {
       parentSessionId: ctx.sessionManager.getSessionId(),
-      sessionGeneration,
+      sessionGeneration: this.sessionGeneration,
       service,
     });
   }
@@ -89,12 +91,18 @@ export class DagSessionRuntime {
     );
     const workspaceRoots = new Map<string, string>();
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
-    const registry = makeDagSubagentExecutorRegistry(ctx, registeredExtTools, artifactRoot, {
+    const registry = makeDagSubagentExecutorRegistry(
+      ctx,
+      registeredExtTools,
+      artifactRoot,
+      dependencies.sessionGeneration,
+      {
       workspaceRootForRun: (runId) => workspaceRoots.get(runId),
       ledger: dependencies.ledger,
       supervisor: dependencies.supervisor,
       telemetryRuntime: dependencies.telemetryRuntime,
-    });
+      },
+    );
     const scope = await Effect.runPromise(Scope.make());
     const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
       appendCustomEntry(customType: string, data?: unknown): string;
@@ -109,8 +117,9 @@ export class DagSessionRuntime {
         persistedDagRunIds(store),
         workspaceRoots,
         dependencies.supervisor,
-        ctx,
+        parentSessionId,
         dependencies.sessionGeneration,
+        ctx,
       );
     } catch (cause) {
       await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -138,6 +147,7 @@ export class DagSessionRuntime {
       } finally {
         this.activeRuns.clear();
         this.workspaceRoots.clear();
+        removeDagExecutorsForSessionGeneration(this.parentSessionId, this.sessionGeneration);
         try {
           unregisterDagRuntimeService(this.pi, this.registration);
         } catch {

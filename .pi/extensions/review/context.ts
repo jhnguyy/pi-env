@@ -513,7 +513,7 @@ export function formatPullRequestContext(page: PullRequestContextPage): string {
   const navigation = page.nextCursor
     ? [
         "More feedback is available.",
-        `Use \`review get\` with cursor ${JSON.stringify(page.nextCursor)}.`,
+        `Use \`review pr get\` with cursor ${JSON.stringify(page.nextCursor)}.`,
       ].join("\n")
     : "No additional feedback pages are available.";
   const sections = [

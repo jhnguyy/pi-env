@@ -47,7 +47,7 @@ function state(): ReviewState {
   };
 }
 
-describe("pr-review run-scoped tools", () => {
+describe("review pull request run-scoped tools", () => {
   it("uses fixed-string grep, exact diff path matching, and bounded large-line reads", async () => {
     let s = state();
     const saved: ReviewState[] = [];

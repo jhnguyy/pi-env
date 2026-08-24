@@ -16,12 +16,18 @@ import type {
 import { validateFindingAnchors, validatePlan } from "./core";
 import { readVerifiedReviewArtifact, registerReviewDagTools } from "./dag-tools";
 import {
+  EvidenceResolverNode,
   ReadingPlanNode,
   ReviewerNodes,
   SynthesisNode,
   compileReviewGraph,
   type ReviewRoleAssignments,
 } from "./review-graph";
+import {
+  ReviewEvidenceCoverageOutput,
+  ReviewEvidenceOutputs,
+  type ReviewEvidenceCoverage,
+} from "./evidence-resolver";
 import {
   PlanSchema,
   ReviewerOutputSchema,
@@ -46,6 +52,8 @@ type NodeOutput = { reference: DagTextArtifactReference; text: string };
 interface CollectedOutputs {
   readonly plan?: ReviewPlan;
   readonly readingPlanReference?: DagTextArtifactReference;
+  readonly evidenceCoverage?: ReviewEvidenceCoverage;
+  readonly evidenceReferences: DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
   readonly rawResultReferences: DagTextArtifactReference[];
   readonly malformedNodes: string[];
@@ -89,6 +97,24 @@ async function admittedOutputForNode(
 ): Promise<NodeOutput | undefined> {
   try {
     return await outputForNode(root, reconstruction, nodeId);
+  } catch {
+    return undefined;
+  }
+}
+async function admittedOutputForNodeOutput(
+  root: string,
+  reconstruction: DagSessionReconstruction,
+  nodeId: string,
+  outputName: string,
+): Promise<NodeOutput | undefined> {
+  const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
+  if (!node || node.status !== DagNodeStatus.Succeeded || !node.outputs[outputName]) return undefined;
+  try {
+    return await readVerifiedReviewArtifact(root, node.outputs[outputName], {
+      runId: reconstruction.graph.runId,
+      producerNodeId: nodeId,
+      outputName,
+    });
   } catch {
     return undefined;
   }
@@ -147,44 +173,116 @@ function decodePlan(text: string, state: ReviewState): ReviewPlan | undefined {
     return undefined;
   }
 }
-function decodeReviewer(text: string, expectedRole: ReviewerRole): ReviewerOutput | undefined {
+function decodeReviewer(
+  text: string,
+  expectedRole: ReviewerRole,
+  evidenceDigest: string | undefined,
+): ReviewerOutput | undefined {
   try {
     const decoded = parseJson(text);
-    return Check(ReviewerOutputSchema, decoded) && decoded.role === expectedRole
+    return Check(ReviewerOutputSchema, decoded) &&
+      decoded.role === expectedRole &&
+      decoded.evidenceDigest === evidenceDigest
       ? decoded
       : undefined;
   } catch {
     return undefined;
   }
 }
-async function collectOutputs(
+function decodeEvidenceCoverage(text: string): ReviewEvidenceCoverage | undefined {
+  try {
+    const decoded = parseJson(text) as Partial<ReviewEvidenceCoverage>;
+    return decoded.v === 1 &&
+      typeof decoded.digest === "string" &&
+      /^[0-9a-f]{64}$/u.test(decoded.digest) &&
+      typeof decoded.uniqueBytes === "number" &&
+      typeof decoded.dossierBytes === "number" &&
+      typeof decoded.chunks === "number" &&
+      Array.isArray(decoded.omissions)
+      ? (decoded as ReviewEvidenceCoverage)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+async function collectEvidence(
   root: string,
   reconstruction: DagSessionReconstruction,
-  state: ReviewState,
-): Promise<CollectedOutputs> {
-  const malformedNodes: string[] = [];
-  const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
-  const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
-  if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
-    malformedNodes.push(ReadingPlanNode.nodeId);
+): Promise<{
+  coverage?: ReviewEvidenceCoverage;
+  references: DagTextArtifactReference[];
+  malformed: boolean;
+}> {
+  const node = reconstruction.state.nodes.find(
+    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
+  );
+  if (node?.status !== DagNodeStatus.Succeeded)
+    return { references: [], malformed: false };
+  const references: DagTextArtifactReference[] = [];
+  let coverage: ReviewEvidenceCoverage | undefined;
+  for (const outputName of ReviewEvidenceOutputs) {
+    const output = await admittedOutputForNodeOutput(
+      root,
+      reconstruction,
+      EvidenceResolverNode.nodeId,
+      outputName,
+    );
+    if (!output) continue;
+    references.push(output.reference);
+    if (outputName === ReviewEvidenceCoverageOutput)
+      coverage = decodeEvidenceCoverage(output.text);
+  }
+  return {
+    ...(coverage ? { coverage } : {}),
+    references,
+    malformed: references.length !== ReviewEvidenceOutputs.length || !coverage,
+  };
+}
+async function collectReviewers(
+  root: string,
+  reconstruction: DagSessionReconstruction,
+  evidenceDigest: string | undefined,
+): Promise<{
+  reviewers: ReviewerOutput[];
+  references: DagTextArtifactReference[];
+  malformedNodes: string[];
+}> {
   const reviewers: ReviewerOutput[] = [];
-  const rawResultReferences: DagTextArtifactReference[] = [];
+  const references: DagTextArtifactReference[] = [];
+  const malformedNodes: string[] = [];
   for (const node of ReviewerNodes) {
     const output = await admittedOutputForNode(root, reconstruction, node.nodeId);
     if (!output) {
       if (nodeSucceeded(reconstruction, node.nodeId)) malformedNodes.push(node.nodeId);
       continue;
     }
-    rawResultReferences.push(output.reference);
-    const reviewer = decodeReviewer(output.text, node.role);
+    references.push(output.reference);
+    const reviewer = decodeReviewer(output.text, node.role, evidenceDigest);
     if (reviewer) reviewers.push(reviewer);
     else malformedNodes.push(node.nodeId);
   }
+  return { reviewers, references, malformedNodes };
+}
+async function collectOutputs(
+  root: string,
+  reconstruction: DagSessionReconstruction,
+  state: ReviewState,
+): Promise<CollectedOutputs> {
+  const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
+  const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
+  const evidence = await collectEvidence(root, reconstruction);
+  const reviewerOutputs = await collectReviewers(root, reconstruction, evidence.coverage?.digest);
+  const malformedNodes = [...reviewerOutputs.malformedNodes];
+  if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
+    malformedNodes.push(ReadingPlanNode.nodeId);
+  if (evidence.malformed) malformedNodes.push(EvidenceResolverNode.nodeId);
   return {
     ...(plan ? { plan } : {}),
     ...(planOutput ? { readingPlanReference: planOutput.reference } : {}),
-    reviewers,
-    rawResultReferences,
+    ...(evidence.coverage ? { evidenceCoverage: evidence.coverage } : {}),
+    evidenceReferences: evidence.references,
+    reviewers: reviewerOutputs.reviewers,
+    rawResultReferences: reviewerOutputs.references,
     malformedNodes,
   };
 }
@@ -220,6 +318,8 @@ function reviewMetrics(input: {
   readonly failed: number;
   readonly malformed: number;
   readonly result?: ReviewResult;
+  readonly evidence?: ReviewEvidenceCoverage;
+  readonly reviewerAttempts?: number;
   readonly usage?: DagRuntimeUsage;
 }): NonNullable<ReviewState["metrics"]> {
   const findings = input.result?.findings ?? [];
@@ -232,6 +332,19 @@ function reviewMetrics(input: {
     reviewersMalformed: input.malformed,
     findings: findings.length,
     anchoredFindings: findings.filter((finding) => finding.anchorValid).length,
+    ...(input.evidence
+      ? {
+          evidence: {
+            digest: input.evidence.digest,
+            uniqueBytes: input.evidence.uniqueBytes,
+            dossierBytes: input.evidence.dossierBytes,
+            chunks: input.evidence.chunks,
+            omissions: input.evidence.omissions.length,
+            providerRequests: input.reviewerAttempts ?? 0,
+            reviewerTurns: input.reviewerAttempts ?? 0,
+          },
+        }
+      : {}),
     ...(input.usage ? { usage: input.usage } : {}),
   };
 }
@@ -289,6 +402,23 @@ function noReviewerStatus(
   if (reconstruction.terminalOutcome === DagRunOutcome.Interrupted) return "interrupted";
   return "failed";
 }
+function failureMessageForNode(
+  reconstruction: DagSessionReconstruction,
+  nodeId: string,
+): string | undefined {
+  const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
+  const failure = node && "failure" in node ? node.failure : undefined;
+  if (!failure || typeof failure !== "object") return undefined;
+  const value = failure as { message?: unknown; error?: { message?: unknown; code?: unknown } };
+  const message =
+    typeof value.error?.message === "string"
+      ? value.error.message
+      : typeof value.message === "string"
+        ? value.message
+        : undefined;
+  const code = typeof value.error?.code === "string" ? value.error.code : undefined;
+  return message ? `${code ? `${code}: ` : ""}${message}` : code;
+}
 function preserveAllFailedOutputs(
   state: ReviewState,
   runId: string,
@@ -296,6 +426,10 @@ function preserveAllFailedOutputs(
   collected: CollectedOutputs,
   failedNodes: string[],
 ): ReviewState {
+  const evidenceFailure = failureMessageForNode(
+    reconstruction,
+    EvidenceResolverNode.nodeId,
+  );
   return {
     ...state,
     dag: {
@@ -307,46 +441,67 @@ function preserveAllFailedOutputs(
       ...(collected.readingPlanReference
         ? { readingPlanReference: collected.readingPlanReference }
         : {}),
+      evidenceReferences: collected.evidenceReferences,
+      ...evidenceCoverageState(collected.evidenceCoverage),
       failedNodes,
       malformedNodes: [...new Set(collected.malformedNodes)].sort(),
-      error: AllReviewersFailed,
+      error: evidenceFailure
+        ? `Evidence resolution failed: ${evidenceFailure}`
+        : AllReviewersFailed,
       recoveredFromProcessLoss: reconstruction.recoveredFromProcessLoss,
     },
   };
 }
-async function finalizeReview(input: {
+interface FinalizeReviewInput {
   readonly root: string;
   readonly runId: string;
   readonly state: ReviewState;
   readonly reconstruction: DagSessionReconstruction;
   readonly service: ActiveDagRuntimeService;
   readonly startedAt: number;
-}): Promise<ReviewState> {
-  const failedNodes = failedNodeIds(input.reconstruction);
-  const collected = await collectOutputs(input.root, input.reconstruction, input.state);
-  if (collected.reviewers.length === 0)
-    return preserveAllFailedOutputs(
-      input.state,
-      input.runId,
-      input.reconstruction,
-      collected,
-      failedNodes,
-    );
-  const synthesisOutput = await admittedOutputForNode(
+}
+async function resolveSynthesis(input: FinalizeReviewInput, collected: CollectedOutputs) {
+  const output = await admittedOutputForNode(
     input.root,
     input.reconstruction,
     SynthesisNode.nodeId,
   );
-  if (nodeSucceeded(input.reconstruction, SynthesisNode.nodeId) && !synthesisOutput)
+  if (nodeSucceeded(input.reconstruction, SynthesisNode.nodeId) && !output)
     collected.malformedNodes.push(SynthesisNode.nodeId);
   const diff = await import("node:fs/promises").then((fs) =>
     fs.readFile(input.state.snapshot.diffPath, "utf8"),
   );
-  const synthesized = synthesisOutput
-    ? decodeSynthesis(synthesisOutput.text, collected.reviewers, diff)
+  const synthesized = output
+    ? decodeSynthesis(output.text, collected.reviewers, diff)
     : undefined;
-  if (synthesisOutput && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
-  const result = synthesized ?? fallbackSynthesis(collected.reviewers, diff);
+  if (output && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
+  return { output, result: synthesized ?? fallbackSynthesis(collected.reviewers, diff) };
+}
+function reviewerAttemptCount(reconstruction: DagSessionReconstruction): number {
+  return reconstruction.state.nodes.filter(
+    (node) =>
+      reviewerRoleByNode.has(node.nodeId) &&
+      (node.status === DagNodeStatus.Succeeded || node.status === DagNodeStatus.Failed),
+  ).length;
+}
+function evidenceCoverageState(coverage: ReviewEvidenceCoverage | undefined) {
+  if (!coverage) return {};
+  return {
+    evidenceCoverage: {
+      digest: coverage.digest,
+      uniqueBytes: coverage.uniqueBytes,
+      dossierBytes: coverage.dossierBytes,
+      chunks: coverage.chunks,
+      omissions: [...coverage.omissions],
+    },
+  };
+}
+function finalizedReviewState(
+  input: FinalizeReviewInput,
+  collected: CollectedOutputs,
+  failedNodes: string[],
+  synthesis: Awaited<ReturnType<typeof resolveSynthesis>>,
+): ReviewState {
   const successfulRoles = collected.reviewers.map((output) => output.role).sort();
   const failedRoles = reviewerRolesForNodes(failedNodes);
   const malformedRoles = reviewerRolesForNodes(collected.malformedNodes);
@@ -354,8 +509,8 @@ async function finalizeReview(input: {
     failedNodes.length > 0 ||
     collected.malformedNodes.length > 0 ||
     !collected.plan ||
-    !synthesisOutput;
-  result.coverage = {
+    !synthesis.output;
+  synthesis.result.coverage = {
     status: degraded ? "degraded" : "complete",
     succeeded: successfulRoles,
     failed: failedRoles,
@@ -370,12 +525,14 @@ async function finalizeReview(input: {
       succeeded: successfulRoles.length,
       failed: failedRoles.length,
       malformed: malformedRoles.length,
-      result,
+      result: synthesis.result,
+      evidence: collected.evidenceCoverage,
+      reviewerAttempts: reviewerAttemptCount(input.reconstruction),
       usage: input.service.usage?.(input.runId),
     }),
     ...(collected.plan ? { plan: collected.plan } : {}),
-    result,
-    selectedFindingIds: result.findings.flatMap((finding) =>
+    result: synthesis.result,
+    selectedFindingIds: synthesis.result.findings.flatMap((finding) =>
       finding.selected && finding.id ? [finding.id] : [],
     ),
     dag: {
@@ -387,12 +544,28 @@ async function finalizeReview(input: {
       ...(collected.readingPlanReference
         ? { readingPlanReference: collected.readingPlanReference }
         : {}),
-      ...(synthesisOutput ? { synthesisReference: synthesisOutput.reference } : {}),
+      evidenceReferences: collected.evidenceReferences,
+      ...evidenceCoverageState(collected.evidenceCoverage),
+      ...(synthesis.output ? { synthesisReference: synthesis.output.reference } : {}),
       failedNodes,
       malformedNodes: [...new Set(collected.malformedNodes)].sort(),
       recoveredFromProcessLoss: input.reconstruction.recoveredFromProcessLoss,
     },
   };
+}
+async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> {
+  const failedNodes = failedNodeIds(input.reconstruction);
+  const collected = await collectOutputs(input.root, input.reconstruction, input.state);
+  if (collected.reviewers.length === 0)
+    return preserveAllFailedOutputs(
+      input.state,
+      input.runId,
+      input.reconstruction,
+      collected,
+      failedNodes,
+    );
+  const synthesis = await resolveSynthesis(input, collected);
+  return finalizedReviewState(input, collected, failedNodes, synthesis);
 }
 function failedRunState(
   state: ReviewState,
@@ -458,7 +631,7 @@ export async function runReviewDag(options: {
 }): Promise<ReviewState> {
   const startedAt = Date.now();
   let state = options.state;
-  const runId = `pr-review-${state.snapshot.id}`;
+  const runId = `review-pr-${state.snapshot.id}`;
   const store = {
     get state() {
       return state;
@@ -487,6 +660,16 @@ export async function runReviewDag(options: {
       cwd: state.snapshot.worktree,
       assignments: options.assignments,
       tools: tools.names,
+      evidence: {
+        v: 1,
+        snapshotId: state.snapshot.id,
+        headOid: state.snapshot.metadata.headOid,
+        diffHash: state.snapshot.diffHash,
+        worktree: state.snapshot.worktree,
+        diffPath: state.snapshot.diffPath,
+        changedPaths: state.snapshot.metadata.changedFiles.map((file) => file.path),
+        planOutputName: ReadingPlanNode.outputName,
+      },
     });
     state = {
       ...state,
@@ -520,7 +703,7 @@ export async function runReviewDag(options: {
       startedAt,
     });
     options.save(state);
-    if (state.dag?.error === AllReviewersFailed) throw new Error(AllReviewersFailed);
+    if (state.dag?.error) throw new Error(state.dag.error);
     return state;
   } catch (cause) {
     const next = failedRunState(

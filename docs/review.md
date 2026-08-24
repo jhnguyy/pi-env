@@ -1,20 +1,20 @@
-# GitHub pull request review workflow
+# Review workflow
 
-This note defines the user and safety contracts for the `pr-review` pi extension.
+This note defines the pull request user and safety contracts for the `review` pi extension.
 
 ## User contract
 
-The model-facing `review` tool separates context retrieval from independent review creation.
+The model-facing `review` tool separates review subjects from their actions. Use `review pr get` or `review pr create` for pull request work.
 
-Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
+Use `review pr get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-Use `create` for a new independent review. Each run uses new child agent sessions with no parent conversation context. The `create` action does not post a GitHub review.
+Use `review pr create` for a new independent review. Each run uses new child agent sessions with no parent conversation context. The `create` action does not post a GitHub review.
 
 Within one parent session, `create` is idempotent for the same pull request and pinned head. An identical call opens the existing review. Use the explicit rerun command to create another attempt.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
-The `get` action does not create a snapshot, worktree, child session, or managed review state. Pull request text is untrusted data.
+The `review pr get` action does not create a snapshot, worktree, child session, or managed review state. Pull request text is untrusted data.
 
 ## Independent review lifecycle
 
@@ -54,7 +54,9 @@ Repository cache operations use a per-repository lock. A successful review workt
 
 ## Review DAG and model policy
 
-The review extension submits one fixed graph through the session-owned DAG service. The graph contains a reading-plan node, five focused reviewers, one whole-change reviewer, and one synthesis node. The subagent extension owns child execution, sessions, cancellation, usage, telemetry, and shutdown.
+The review extension submits one fixed graph through the session-owned DAG service. The graph contains a reading-plan node, a deterministic evidence resolver, five focused reviewers, one whole-change reviewer, and one synthesis node. The subagent extension owns child execution, sessions, cancellation, usage, telemetry, and shutdown.
+
+The evidence resolver uses `DagExecutorKind.Materialize` with key `pr-review/evidence-resolver-v1`. The review extension registers this executor for the active session generation. The session runtime removes registered domain executors during generation disposal.
 
 A model is eligible only when `modelAnnotations` contains the exact `reviewer` annotation for its fully qualified ID:
 
@@ -82,7 +84,7 @@ Pull request content is untrusted. This includes source files, diffs, pull reque
 
 The review child must not discover an agent definition from the reviewed worktree. The review extension supplies an inline system prompt.
 
-A child receives no generic `bash`, `read`, `write`, `edit`, language-server, analyzer, network, or spawn tool. The extension creates run-scoped tools for these operations:
+A child receives no generic `bash`, `read`, `write`, `edit`, language-server, analyzer, network, or spawn tool. The reading-plan child receives run-scoped review tools for these operations:
 
 - page the pinned title and body;
 - read selected source line ranges;
@@ -90,8 +92,12 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - page the complete changed-file manifest;
 - list, find, and fixed-string search within the worktree;
 - read the bounded review deck;
-- submit a reading plan, reviewer result, or synthesis;
+- submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
+
+The reading plan contains strict file and pinned-diff line-range references. The deterministic resolver validates snapshot identity, paths, ranges, containment, and admission limits. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+
+Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 
 Filesystem tools reject path traversal and resolved paths outside the worktree. Metadata access does not expose a filesystem path. Diff and metadata tools return a `nextOffset` when more content remains. The child does not receive the complete diff in its initial prompt.
 
@@ -99,9 +105,9 @@ The system instructions state that reviewed material is data. Each child must in
 
 ## Structured review contract
 
-The reading-plan node submits the pull request goal, goal assessment, risk, conceptual cohorts, and one file entry for every changed path. The submission rejects missing, duplicate, or invented paths.
+The reading-plan node submits the pull request goal, goal assessment, risk, conceptual cohorts, one file entry for every changed path, and a bounded evidence index. The submission rejects missing, duplicate, invented, reversed, or unplanned references.
 
-Each reviewer submits its fixed role, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
+Each reviewer returns its fixed role, evidence digest, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
 
 The synthesis node reads verified result references. It reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
 
@@ -138,7 +144,7 @@ If a post result is uncertain, the extension searches existing review bodies for
 
 The tool manager activates `review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
 
-Use `/review list`, `/review open <review-id>`, and `/review cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
+Use `/review pr list`, `/review pr open <review-id>`, and `/review pr cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
 
 ## Deferred UI
 

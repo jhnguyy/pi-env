@@ -115,6 +115,24 @@ describe("DAG shared subagent runtime adapter", () => {
     });
   });
 
+  it("accepts one complete tool-free response at the explicit one-request boundary", async () => {
+    const cwd = root();
+    const runtime = adapter(context(cwd, { provider: "test", id: "model", contextWindow: 32_000 }));
+    shared.result = {
+      details: {
+        finalOutput: '{"role":"correctness","findings":[]}',
+        isError: false,
+        turnLimitExceeded: true,
+        usage: { turns: 1 },
+      },
+    };
+
+    await expect(
+      Effect.runPromise(runtime.run(request(cwd, { maxTurns: 1 }))),
+    ).resolves.toContain('"role":"correctness"');
+    expect(shared.calls).toHaveLength(1);
+  });
+
   it("materializes an explicitly assigned DAG-only extension tool", async () => {
     const cwd = root();
     const reviewTool = {
@@ -242,7 +260,7 @@ describe("DAG shared subagent runtime adapter", () => {
   it("registers only the versioned subagent executor key", async () => {
     const cwd = root();
     const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
-    const registry = makeDagSubagentExecutorRegistry(ctx, new Map(), cwd, {});
+    const registry = makeDagSubagentExecutorRegistry(ctx, new Map(), cwd, "generation", {});
 
     await expect(
       Effect.runPromise(registry.lookup(DagExecutorKind.Subagent, DagSubagentExecutorKey)),

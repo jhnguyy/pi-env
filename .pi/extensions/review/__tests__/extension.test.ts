@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
+import { Check } from "typebox/value";
 import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import prReviewExtension, { clearInMemoryStateForTests, restore } from "../index";
+import reviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
 import {
@@ -72,6 +73,9 @@ function sampleState(id: string, selected: string[]): ReviewState {
       riskReasons: [],
       cohorts: [{ label: "main", purpose: "review changed file", paths: ["a.ts"] }],
       files: [{ path: "a.ts", attention: "normal", role: "changed file" }],
+      evidence: [
+        { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
+      ],
     },
     result: {
       verdict: "v",
@@ -126,20 +130,22 @@ function extensionPi() {
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
-  prReviewExtension(pi);
+  reviewExtension(pi);
   return pi;
 }
 
-describe("pr-review extension surface", () => {
+describe("review extension pull request surface", () => {
   it("registers the suite tool with intent-specific routing", () => {
     tempRoot();
     const pi = extensionPi();
     const review = pi.tools.find((tool: any) => tool.name === "review");
     expect(review).toBeTruthy();
     expect(pi.tools.some((tool: any) => tool.name === "pr_review_start")).toBe(false);
-    expect(review.description).toContain("`review get`");
-    expect(review.description).toContain("`review create`");
+    expect(review.description).toContain("`review pr get`");
+    expect(review.description).toContain("`review pr create`");
     expect(review.description).toContain("does not post");
+    expect(Check(review.parameters, { command: "pr", action: "get" })).toBe(true);
+    expect(Check(review.parameters, { command: "get" })).toBe(false);
     expect(review.promptGuidelines.join("\n")).toContain("existing pull request feedback");
     expect(review.promptGuidelines.join("\n")).toContain("new independent pull request review");
     expect(review.promptGuidelines.join("\n")).toContain("untrusted data");
@@ -274,7 +280,7 @@ describe("pr-review extension surface", () => {
     expect(get).toBeTruthy();
     const result = await get.execute(
       "get-1",
-      { command: "get", url: "https://github.com/o/r/pull/1" },
+      { command: "pr", action: "get", url: "https://github.com/o/r/pull/1" },
       undefined,
       undefined,
       { cwd: "/repo" },
@@ -400,9 +406,13 @@ describe("pr-review extension surface", () => {
     };
     const get = pi.tools.find((tool: any) => tool.name === "review");
     expect(get).toBeTruthy();
-    const result = await get.execute("get-2", { command: "get" }, undefined, undefined, {
-      cwd: "/repo",
-    });
+    const result = await get.execute(
+      "get-2",
+      { command: "pr", action: "get" },
+      undefined,
+      undefined,
+      { cwd: "/repo" },
+    );
     expect(calls[0].args).toEqual(["pr", "view", "--json", "url", "--jq", ".url"]);
     expect(result.details.nextCursor).toBeTypeOf("string");
     expect(result.content[0].text).toContain("More feedback is available");
@@ -411,7 +421,8 @@ describe("pr-review extension surface", () => {
     const next = await get.execute(
       "get-3",
       {
-        command: "get",
+        command: "pr",
+        action: "get",
         url: "https://github.com/o/r/pull/1",
         cursor: result.details.nextCursor,
       },
@@ -435,13 +446,13 @@ describe("pr-review extension surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(cleaned), custom(first)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("status", { ui: { notify: (m: string) => notes.push(m) } } as any);
+    await pi.command("pr status", { ui: { notify: (m: string) => notes.push(m) } } as any);
     expect(notes.at(-1)).toContain("Selected: 1");
     clearInMemoryStateForTests();
     restore({
       sessionManager: { getBranch: () => [custom(first), custom(cleaned), custom(second)] },
     } as any);
-    await pi.command("status", { ui: { notify: (m: string) => notes.push(m) } } as any);
+    await pi.command("pr status", { ui: { notify: (m: string) => notes.push(m) } } as any);
     expect(notes.at(-1)).toContain("Selected: 0");
   });
 
@@ -636,7 +647,7 @@ describe("pr-review extension surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("cleanup active", {
+    await pi.command("pr cleanup active", {
       ui: { notify: (message: string) => notes.push(message) },
     } as any);
     expect(notes[0]).toContain("is active");
@@ -659,8 +670,8 @@ describe("pr-review extension surface", () => {
         rmSync(args[3], { recursive: true, force: true });
       return { code: 0, stdout: "", stderr: "" };
     };
-    await pi.command("cleanup", { ui: { notify() {} } } as any);
-    await pi.command("cleanup", { ui: { notify() {} } } as any);
+    await pi.command("pr cleanup", { ui: { notify() {} } } as any);
+    await pi.command("pr cleanup", { ui: { notify() {} } } as any);
     expect(calls.filter((c) => c.args[0] === "worktree" && c.args[1] === "remove")).toHaveLength(1);
     expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
     expect(pi.appended.at(-1)?.[1].state.snapshot.cache.repoDir).toContain(root);
@@ -675,7 +686,7 @@ describe("pr-review extension surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("draft-plan", {
+    await pi.command("pr draft-plan", {
       ui: { notify: (message: string) => notes.push(message) },
     } as any);
     expect(notes[0]).toMatch(/User approval is required/);
@@ -690,10 +701,10 @@ describe("pr-review extension surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("edit F1", {
+    await pi.command("pr edit F1", {
       ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
     } as any);
-    await pi.command("preface", {
+    await pi.command("pr preface", {
       ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
     } as any);
     expect(notes).toContain("Edit cancelled.");
@@ -739,7 +750,7 @@ describe("pr-review extension surface", () => {
     };
     const result = await pi.tools[0].execute(
       "1",
-      { command: "create", url: "https://github.com/o/r/pull/1" },
+      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
       undefined,
       undefined,
       ctx,
@@ -747,7 +758,8 @@ describe("pr-review extension surface", () => {
     expect(result).toMatchObject({
       isError: true,
       details: {
-        command: "create",
+        command: "pr",
+        action: "create",
         status: "failed",
         stage: "dag-service",
         failureCode: "dag_service_failed",
@@ -755,7 +767,7 @@ describe("pr-review extension surface", () => {
         worktreeCleaned: true,
       },
     });
-    expect(result.content[0].text).toContain("Next: /review open");
+    expect(result.content[0].text).toContain("Next: /review pr open");
     expect(pi.appended).toHaveLength(3);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
     expect(pi.appended[0]?.[1].state.snapshot.diffHash).toBe("");
@@ -768,7 +780,7 @@ describe("pr-review extension surface", () => {
     });
     const second = await pi.tools[0].execute(
       "2",
-      { command: "create", url: "https://github.com/o/r/pull/1" },
+      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
       undefined,
       undefined,
       ctx,
@@ -779,7 +791,7 @@ describe("pr-review extension surface", () => {
     });
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
     const notes: string[] = [];
-    await pi.command("rerun", {
+    await pi.command("pr rerun", {
       ...ctx,
       ui: { notify: (message: string) => notes.push(message) },
     });
@@ -826,14 +838,14 @@ describe("pr-review extension surface", () => {
     const [first, second] = await Promise.all([
       pi.tools[0].execute(
         "1",
-        { command: "create", url: "https://github.com/o/r/pull/1" },
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
         undefined,
         undefined,
         ctx,
       ),
       pi.tools[0].execute(
         "2",
-        { command: "create", url: "https://github.com/o/r/pull/1" },
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
         undefined,
         undefined,
         ctx,
@@ -857,14 +869,14 @@ describe("pr-review extension surface", () => {
     pi.exec = async () => ({ code: 0, stdout: "", stderr: "" });
     const notes: string[] = [];
     const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
-    await pi.command("list", ctx);
+    await pi.command("pr list", ctx);
     expect(notes.at(-1)).toContain("r-one");
     expect(notes.at(-1)).toContain("r-two");
-    await pi.command("open r-one", ctx);
+    await pi.command("pr open r-one", ctx);
     expect(notes.at(-1)).toContain("Review: r-one");
-    await pi.command("cleanup r-two", ctx);
+    await pi.command("pr cleanup r-two", ctx);
     expect(notes.at(-1)).toBe("Review cleanup complete: r-two.");
-    await pi.command("list", ctx);
+    await pi.command("pr list", ctx);
     expect(notes.at(-1)).toContain("r-one");
     expect(notes.at(-1)).not.toContain("r-two");
     const cleanupEntry = {
@@ -877,7 +889,7 @@ describe("pr-review extension surface", () => {
       sessionManager: { getBranch: () => [custom(first), custom(second), cleanupEntry] },
     } as any);
     const restoredPi = extensionPi();
-    await restoredPi.command("list", ctx);
+    await restoredPi.command("pr list", ctx);
     expect(notes.at(-1)).toContain("r-one");
     expect(notes.at(-1)).not.toContain("r-two");
   });

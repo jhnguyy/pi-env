@@ -1,5 +1,5 @@
 {
-  "name": "@pi-env/pr-review",
+  "name": "@pi-env/review",
   "private": true,
   "license": "MIT",
   "type": "module",

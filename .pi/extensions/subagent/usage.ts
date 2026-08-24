@@ -170,7 +170,8 @@ export class SubagentRunAccumulator {
     this.lastModelId ??= msg.model;
     this.lastStopReason = msg.stopReason;
     this.lastErrorMessage = msg.errorMessage;
-    this.turnLimitExceeded = this.hasReachedLimit(this.usage.turns);
+    const completed = msg.stopReason === "stop";
+    this.turnLimitExceeded = this.hasReachedLimit(this.usage.turns) && !completed;
   }
 }
 

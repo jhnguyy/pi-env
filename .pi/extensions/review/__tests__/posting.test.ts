@@ -49,6 +49,9 @@ function state(): ReviewState {
       riskReasons: [],
       cohorts: [{ label: "main", purpose: "review changed file", paths: ["a.ts"] }],
       files: [{ path: "a.ts", attention: "normal", role: "changed file" }],
+      evidence: [
+        { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
+      ],
     },
     result: {
       verdict: "v",
@@ -96,7 +99,7 @@ function custom(s: ReviewState) {
   };
 }
 
-describe("pr-review posting", () => {
+describe("review pull request posting", () => {
   it("uses GET pagination, persists pending before POST, and reuses uncertain attempt on retry", async () => {
     const s = state();
     restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
@@ -295,7 +298,7 @@ describe("pr-review posting", () => {
       },
     };
     (await import("../index")).default(pi);
-    await pi.command("post merge", {
+    await pi.command("pr post merge", {
       ui: { notify: (m: string) => notes.push(m), confirm: async () => true },
       cwd: "/tmp",
     } as any);

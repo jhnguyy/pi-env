@@ -27,7 +27,10 @@ const PR_REVIEW_FEEDBACK_VALUES = [
 export const MAX_CONTEXT_PAGE_SIZE = 5;
 export const PrReviewParamsSchema = Type.Object(
   {
-    command: StringEnum(REVIEW_COMMAND_VALUES),
+    command: Type.Literal("pr", {
+      description: "Review subject. Use `pr` for pull request operations.",
+    }),
+    action: StringEnum(REVIEW_COMMAND_VALUES),
     url: Type.Optional(
       Type.String({
         description:
@@ -36,13 +39,13 @@ export const PrReviewParamsSchema = Type.Object(
     ),
     feedback: Type.Optional(
       StringEnum(PR_REVIEW_FEEDBACK_VALUES, {
-        description: "Feedback category for `review get`. Defaults to all categories.",
+        description: "Feedback category for `review pr get`. Defaults to all categories.",
       }),
     ),
     cursor: Type.Optional(
       Type.String({
         maxLength: 4096,
-        description: "Opaque pagination cursor returned by a prior `review get` result.",
+        description: "Opaque pagination cursor returned by a prior `review pr get` result.",
       }),
     ),
     pageSize: Type.Optional(
@@ -111,6 +114,24 @@ export const PlanFileSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const EvidenceRangeFields = {
+  path: NonEmptyString,
+  startLine: Type.Integer({ minimum: 1, maximum: 999_999 }),
+  endLine: Type.Integer({ minimum: 1, maximum: 999_999 }),
+  purpose: NonEmptyString,
+};
+export const FileEvidenceReferenceSchema = Type.Object(
+  { kind: Type.Literal("file"), ...EvidenceRangeFields },
+  { additionalProperties: false },
+);
+export const DiffEvidenceReferenceSchema = Type.Object(
+  { kind: Type.Literal("diff"), ...EvidenceRangeFields },
+  { additionalProperties: false },
+);
+export const EvidenceReferenceSchema = Type.Union([
+  FileEvidenceReferenceSchema,
+  DiffEvidenceReferenceSchema,
+]);
 export const PlanSchema = Type.Object(
   {
     goal: NonEmptyString,
@@ -119,6 +140,8 @@ export const PlanSchema = Type.Object(
     riskReasons: Type.Array(NonEmptyString, { maxItems: 50 }),
     cohorts: Type.Array(PlanCohortSchema, { minItems: 1, maxItems: 100 }),
     files: Type.Array(PlanFileSchema, { minItems: 1, maxItems: 100_000 }),
+    evidence: Type.Array(EvidenceReferenceSchema, { minItems: 1, maxItems: 512 }),
+    evidenceOmissions: Type.Optional(Type.Array(NonEmptyString, { maxItems: 256 })),
     rippleNotes: Type.Optional(Type.Array(NonEmptyString, { maxItems: 100 })),
   },
   { additionalProperties: false },
@@ -154,6 +177,7 @@ const ReviewerRoleValues = [
 export const ReviewerOutputSchema = Type.Object(
   {
     role: StringEnum(ReviewerRoleValues),
+    evidenceDigest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
     verdict: NonEmptyString,
     findings: Type.Array(FindingInputSchema, { maxItems: 1000 }),
   },
@@ -241,6 +265,7 @@ export const ChangedFilesParamSchema = Type.Object(
 
 export type PlanCohort = Static<typeof PlanCohortSchema>;
 export type PlanFile = Static<typeof PlanFileSchema>;
+export type EvidenceReference = Static<typeof EvidenceReferenceSchema>;
 export type ReviewPlan = Static<typeof PlanSchema>;
 export type FindingInput = Static<typeof FindingInputSchema>;
 export type ReviewerOutput = Static<typeof ReviewerOutputSchema>;
@@ -337,6 +362,14 @@ export interface ReviewState {
     status: "running" | "succeeded" | "degraded" | "failed" | "cancelled" | "interrupted";
     rawResultReferences: ReviewArtifactReference[];
     readingPlanReference?: ReviewArtifactReference;
+    evidenceReferences?: ReviewArtifactReference[];
+    evidenceCoverage?: {
+      digest: string;
+      uniqueBytes: number;
+      dossierBytes: number;
+      chunks: number;
+      omissions: string[];
+    };
     synthesisReference?: ReviewArtifactReference;
     failedNodes?: string[];
     malformedNodes?: string[];
@@ -352,6 +385,15 @@ export interface ReviewState {
     reviewersMalformed: number;
     findings: number;
     anchoredFindings: number;
+    evidence?: {
+      digest: string;
+      uniqueBytes: number;
+      dossierBytes: number;
+      chunks: number;
+      omissions: number;
+      providerRequests: number;
+      reviewerTurns: number;
+    };
     usage?: {
       input: number;
       output: number;

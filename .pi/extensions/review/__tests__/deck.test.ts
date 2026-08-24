@@ -116,7 +116,7 @@ function makeLargeSnapshot(): ReviewSnapshot {
   };
 }
 
-describe("pr-review deck", () => {
+describe("review pull request deck", () => {
   it("builds reproducibly apart from stable snapshot identity", () => {
     const a = makeSnapshot();
     const b = makeSnapshot({ id: "snapshot-b" });

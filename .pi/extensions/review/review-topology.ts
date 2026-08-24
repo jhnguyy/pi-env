@@ -60,6 +60,11 @@ function requiredReviewNode(role: ReviewRole): ReviewNode {
   return node;
 }
 export const ReadingPlanNode = requiredReviewNode("reading-plan");
+export const EvidenceResolverNode = Object.freeze({
+  nodeId: "evidence-resolver",
+  outputName: "evidence_coverage",
+  kind: "evidence-resolver",
+} as const);
 export const SynthesisNode = requiredReviewNode("synthesis");
 export const ReviewFanoutNodes = Object.freeze(
   ReviewNodes.filter((node) => node.kind !== "synthesis"),

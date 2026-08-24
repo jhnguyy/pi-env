@@ -30,7 +30,11 @@ import {
   type ReviewPlan,
   type SynthesisReview,
 } from "./schema";
-import { ReviewerNodes, type ReviewGraphToolNames } from "./review-graph";
+import {
+  EvidenceResolverNode,
+  ReviewerNodes,
+  type ReviewGraphToolNames,
+} from "./review-graph";
 import { validSynthesisSources } from "./synthesis-provenance";
 
 const MAX_DECK_BYTES = 256_000;
@@ -97,7 +101,7 @@ export async function collectReviewResultArtifacts(
   const failed: string[] = [];
   let bytes = 0;
   for (const node of reconstruction.state.nodes) {
-    if (node.nodeId === "synthesis") continue;
+    if (node.nodeId === "synthesis" || node.nodeId === EvidenceResolverNode.nodeId) continue;
     if (node.status !== DagNodeStatus.Succeeded) {
       failed.push(node.nodeId);
       continue;
@@ -141,10 +145,8 @@ export function registerReviewDagTools(options: {
   );
   const deckName = `review_deck_${suffix}`;
   const planName = `submit_review_plan_${suffix}`;
-  const reviewerName = `submit_reviewer_result_${suffix}`;
   const referencesName = `review_result_refs_${suffix}`;
   const synthesisName = `submit_review_synthesis_${suffix}`;
-  const submittedReviewers = new Map<ReviewerOutput["role"], ReviewerOutput>();
   const deckTool = customTool(
     {
       name: deckName,
@@ -174,25 +176,6 @@ export function registerReviewDagTools(options: {
         if (!validation.ok)
           return { content: [txt(validation.message)], isError: true, details: validation };
         return { content: [txt(boundedSubmission(plan))], details: validation };
-      },
-    },
-    options.store.state.snapshot.worktree,
-  );
-  const reviewerTool = customTool(
-    {
-      name: reviewerName,
-      label: "Submit Reviewer Result",
-      description: "Validate and return one canonical focused reviewer result.",
-      parameters: ReviewerOutputSchema,
-      async execute(params, context) {
-        if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const raw = params as ReviewerOutput;
-        const text = boundedSubmission(raw);
-        submittedReviewers.set(raw.role, raw);
-        return {
-          content: [txt(text)],
-          details: { ok: true, findings: raw.findings.length },
-        };
       },
     },
     options.store.state.snapshot.worktree,
@@ -242,14 +225,22 @@ export function registerReviewDagTools(options: {
           options.service.reconstruct(options.runId),
           { signal: context.signal },
         );
-        const succeededNodeIds = new Set(
-          reconstruction.state.nodes
-            .filter((node) => node.status === DagNodeStatus.Succeeded)
-            .map((node) => node.nodeId),
+        const artifacts = await collectReviewResultArtifacts(
+          options.artifactRoot,
+          reconstruction,
+        );
+        const textByNode = new Map(
+          artifacts.succeeded.map((artifact) => [artifact.nodeId, artifact.text]),
         );
         const reviewers = ReviewerNodes.flatMap((node) => {
-          const reviewer = submittedReviewers.get(node.role);
-          return succeededNodeIds.has(node.nodeId) && reviewer ? [reviewer] : [];
+          try {
+            const decoded = JSON.parse(textByNode.get(node.nodeId) ?? "") as unknown;
+            return Check(ReviewerOutputSchema, decoded) && decoded.role === node.role
+              ? [decoded]
+              : [];
+          } catch {
+            return [];
+          }
         });
         if (!Check(SynthesisReviewSchema, raw) || !validSynthesisSources(raw, reviewers))
           return {
@@ -269,7 +260,7 @@ export function registerReviewDagTools(options: {
     },
     options.store.state.snapshot.worktree,
   );
-  const tools = [...base, deckTool, planTool, reviewerTool, referencesTool, synthesisTool];
+  const tools = [...base, deckTool, planTool, referencesTool, synthesisTool];
   const registrations = registerAgentTools(
     options.pi,
     tools.map((tool) => ({
@@ -282,7 +273,6 @@ export function registerReviewDagTools(options: {
     deck: deckName,
     read: base.map((tool) => tool.name),
     planSubmission: planName,
-    reviewerSubmission: reviewerName,
     resultReferences: referencesName,
     synthesisSubmission: synthesisName,
   };

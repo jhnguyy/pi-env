@@ -11,7 +11,16 @@ import {
   type ValidatedDagDefinition,
 } from "../../../../src/dag/index.js";
 import { reconstructReviewDagState, runReviewDag } from "../review-dag-runner";
-import { ReviewRoles, compileReviewGraph, type ReviewRoleAssignments } from "../review-graph";
+import {
+  EvidenceResolverNode,
+  ReviewRoles,
+  compileReviewGraph,
+  type ReviewRoleAssignments,
+} from "../review-graph";
+import {
+  ReviewEvidenceChunkOutputs,
+  ReviewEvidenceCoverageOutput,
+} from "../evidence-resolver";
 import type { ReviewState } from "../schema";
 
 class TestAppendFailure extends Data.TaggedError("TestAppendFailure")<{
@@ -98,11 +107,16 @@ function plan(): string {
     riskReasons: [],
     cohorts: [{ label: "code", purpose: "implementation", paths: ["a.ts"] }],
     files: [{ path: "a.ts", attention: "normal", role: "implementation" }],
+    evidence: [
+      { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "implementation" },
+    ],
   });
 }
+const EvidenceDigest = "d".repeat(64);
 function reviewer(role: string): string {
   return JSON.stringify({
     role,
+    evidenceDigest: EvidenceDigest,
     verdict: `${role} reviewed`,
     findings:
       role === "correctness"
@@ -164,7 +178,43 @@ async function reconstructionFor(
       nodes.push({ nodeId: node.id, status: DagNodeStatus.Failed, failure: { message: "failed" } });
       continue;
     }
-    const outputName = node.executor.payload.output.name;
+    if (node.id === EvidenceResolverNode.nodeId) {
+      const coverage = JSON.stringify({
+        v: 1,
+        snapshotId: "review",
+        headOid: "head",
+        diffHash: "a".repeat(64),
+        digest: EvidenceDigest,
+        uniqueBytes: 10,
+        dossierBytes: 20,
+        chunks: 1,
+        chunkOutputs: [ReviewEvidenceChunkOutputs[0]],
+        omissions: [],
+        references: 1,
+      });
+      const outputs: Record<string, unknown> = {};
+      for (const [outputName, text] of [
+        [ReviewEvidenceCoverageOutput, coverage],
+        ...ReviewEvidenceChunkOutputs.map((name, index) => [name, index === 0 ? "evidence" : ""]),
+      ] as const) {
+        Object.assign(
+          outputs,
+          await Effect.runPromise(
+            publishDagSubagentTextResult(
+              artifactRoot,
+              graph.runId,
+              node.id,
+              `attempt-${node.id}`,
+              outputName,
+              text,
+            ),
+          ),
+        );
+      }
+      nodes.push({ nodeId: node.id, status: DagNodeStatus.Succeeded, outputs });
+      continue;
+    }
+    const outputName = (node.executor.payload as { output: { name: string } }).output.name;
     const outputs = await Effect.runPromise(
       publishDagSubagentTextResult(
         artifactRoot,
@@ -230,7 +280,7 @@ function piEvents(): any {
   };
 }
 
-describe("DAG-backed PR review runner", () => {
+describe("DAG-backed pull request review runner", () => {
   it("unregisters run-scoped tools when the first state save fails", async () => {
     const f = fixture();
     const pi = piEvents();
@@ -379,10 +429,31 @@ describe("DAG-backed PR review runner", () => {
     });
   });
 
+  it("rejects a reviewer that does not return the admitted evidence digest", async () => {
+    const f = fixture();
+    const wrongDigest = JSON.parse(reviewer("intent"));
+    wrongDigest.evidenceDigest = "0".repeat(64);
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service: serviceFor(f.artifactRoot, {
+        "review-intent": JSON.stringify(wrongDigest),
+      }),
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.dag?.status).toBe("degraded");
+    expect(result.dag?.malformedNodes).toContain("review-intent");
+    expect(result.result?.coverage?.succeeded).not.toContain("intent");
+  });
+
   it("deduplicates fallback findings by fields instead of JSON property order", async () => {
     const f = fixture();
     const reordered = JSON.stringify({
       role: "intent",
+      evidenceDigest: EvidenceDigest,
       verdict: "intent reviewed",
       findings: [
         {
@@ -460,9 +531,18 @@ describe("DAG-backed PR review runner", () => {
             deck: "review_deck_test",
             read: [],
             planSubmission: "submit_plan_test",
-            reviewerSubmission: "submit_result_test",
             resultReferences: "review_refs_test",
             synthesisSubmission: "submit_synthesis_test",
+          },
+          evidence: {
+            v: 1,
+            snapshotId: "review",
+            headOid: "head",
+            diffHash: "a".repeat(64),
+            worktree: f.state.snapshot.worktree,
+            diffPath: f.state.snapshot.diffPath,
+            changedPaths: ["a.ts"],
+            planOutputName: "reading_plan",
           },
         }),
       ),

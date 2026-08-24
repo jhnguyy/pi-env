@@ -37,7 +37,13 @@ vi.mock("../../../../src/telemetry/tooling", () => ({
 
 vi.mock("../dag-runtime", () => ({
   makeDagSubagentExecutorRegistry: vi.fn(
-    (ctx: unknown, tools: unknown, artifactRoot: string, options: Record<string, unknown>) => {
+    (
+      ctx: unknown,
+      tools: unknown,
+      artifactRoot: string,
+      _sessionGeneration: string,
+      options: Record<string, unknown>,
+    ) => {
       state.adapterCalls.push({ ctx, tools, artifactRoot, options });
       return {
         lookup: () => Effect.succeed(state.executor),
