@@ -1,4 +1,5 @@
 import { Data } from "effect";
+import type * as DagAttempts from "../attempt.js";
 import type * as DagContracts from "../contracts.js";
 import type * as DagKernel from "../kernel.js";
 import type * as DagValidation from "../validation.js";
@@ -23,22 +24,9 @@ export const DagSessionDefaultLimits = Object.freeze({
   totalMatchingEntries: 16_384,
 } as const satisfies DagSessionLimits);
 
-export type DagAttemptTerminalStatus = Exclude<
-  DagContracts.DagNodeStatus,
-  typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
->;
-export interface DagSessionAttemptStatus {
-  readonly nodeId: string;
-  readonly attemptId: string;
-  readonly ordinal: 1;
-  readonly status: typeof DagContracts.DagNodeStatus.Running | DagAttemptTerminalStatus;
-}
-export interface DagSessionAttempt {
-  readonly nodeId: string;
-  readonly attemptId: string;
-  readonly ordinal: 1;
-  readonly statuses: readonly (typeof DagContracts.DagNodeStatus.Running | DagAttemptTerminalStatus)[];
-}
+export type DagAttemptTerminalStatus = DagAttempts.DagAttemptTerminalStatus;
+export type DagSessionAttemptStatus = DagAttempts.DagAttemptStatus;
+export type DagSessionAttempt = DagAttempts.DagAttempt;
 
 export type DagSessionEvent =
   | { readonly _tag: "graph"; readonly graph: DagContracts.DagDefinition<unknown> }
@@ -57,9 +45,9 @@ export interface DagSessionEntry {
   readonly event: DagSessionEvent;
 }
 
-export interface DagSessionManagerSeam {
-  readonly getBranch: () => readonly unknown[];
-  readonly appendCustomEntry: (customType: string, data?: unknown) => string;
+export interface DagSessionStore {
+  readonly read: () => readonly unknown[];
+  readonly append: (entry: DagSessionEntry) => void;
 }
 
 export class DagSessionMalformed extends Data.TaggedError("malformed")<{
@@ -109,7 +97,7 @@ export class DagSessionFinalInconsistent extends Data.TaggedError("final-inconsi
   readonly message: string;
 }> {}
 export class DagSessionSeamFailed extends Data.TaggedError("seam-failed")<{
-  readonly operation: "getBranch" | "appendCustomEntry";
+  readonly operation: "read" | "append";
   readonly cause: unknown;
 }> {}
 

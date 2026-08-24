@@ -9,33 +9,33 @@ import {
   type DagSubagentPayloadV1,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
+import {
+  ReadingPlanNode,
+  ReviewFanoutNodes,
+  ReviewerNodes,
+  SynthesisNode,
+  type ReviewNode,
+  type ReviewRole,
+} from "./review-topology";
 
-export const ReviewDimension = {
-  Correctness: "correctness",
-  Intent: "intent",
-  Maintainability: "maintainability",
-  Tests: "tests",
-  Security: "security",
-} as const;
-
-export type ReviewDimension = (typeof ReviewDimension)[keyof typeof ReviewDimension];
-export type ReviewRole = "reading-plan" | ReviewDimension | "whole-change" | "synthesis";
-
-export const FocusedReviewRoles = Object.freeze(Object.values(ReviewDimension));
-export const ReviewRoles = Object.freeze([
-  "reading-plan",
-  ...FocusedReviewRoles,
-  "whole-change",
-  "synthesis",
-] as const);
+export {
+  FocusedReviewRoles,
+  ReadingPlanNode,
+  ReviewDimension,
+  ReviewFanoutNodes,
+  ReviewerNodes,
+  ReviewNodes,
+  ReviewRoles,
+  SynthesisNode,
+  type ReviewNode,
+  type ReviewRole,
+} from "./review-topology";
 
 export interface ReviewRoleAssignment {
   readonly model: string;
   readonly reasoning?: DagSubagentPayloadV1["reasoning"];
 }
-
 export type ReviewRoleAssignments = Readonly<Record<ReviewRole, ReviewRoleAssignment>>;
-
 export interface ReviewGraphToolNames {
   readonly deck: string;
   readonly read: readonly string[];
@@ -44,28 +44,6 @@ export interface ReviewGraphToolNames {
   readonly resultReferences: string;
   readonly synthesisSubmission: string;
 }
-
-const nodeIdByRole: Readonly<Record<ReviewRole, string>> = Object.freeze({
-  "reading-plan": "reading-plan",
-  correctness: "review-correctness",
-  intent: "review-intent",
-  maintainability: "review-maintainability",
-  tests: "review-tests",
-  security: "review-security",
-  "whole-change": "review-whole-change",
-  synthesis: "synthesis",
-});
-
-const outputNameByRole: Readonly<Record<ReviewRole, string>> = Object.freeze({
-  "reading-plan": "reading_plan",
-  correctness: "correctness_review",
-  intent: "intent_review",
-  maintainability: "maintainability_review",
-  tests: "tests_review",
-  security: "security_review",
-  "whole-change": "whole_change_review",
-  synthesis: "synthesis",
-});
 
 function roleInstructions(role: ReviewRole): string {
   const common = [
@@ -103,26 +81,26 @@ function roleInstructions(role: ReviewRole): string {
 }
 
 function payload(
-  role: ReviewRole,
+  node: ReviewNode,
   assignment: ReviewRoleAssignment,
   cwd: string,
   tools: ReviewGraphToolNames,
 ): DagSubagentPayloadV1 {
   const roleTools =
-    role === "reading-plan"
+    node.kind === "plan"
       ? [tools.deck, ...tools.read, tools.planSubmission]
-      : role === "synthesis"
+      : node.kind === "synthesis"
         ? [tools.deck, tools.resultReferences, tools.synthesisSubmission]
         : [tools.deck, ...tools.read, tools.reviewerSubmission];
   return {
     v: DagSubagentPayloadVersion,
-    name: `pr-review-${role}`,
-    instructions: roleInstructions(role),
+    name: `pr-review-${node.role}`,
+    instructions: roleInstructions(node.role),
     model: assignment.model,
     tools: roleTools,
     workspace: { cwd, access: "read" },
     context: { outputs: [] },
-    output: { name: outputNameByRole[role] },
+    output: { name: node.outputName },
     ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
   };
 }
@@ -140,35 +118,38 @@ export function compileReviewGraph(options: {
   readonly assignments: ReviewRoleAssignments;
   readonly tools: ReviewGraphToolNames;
 }): ValidatedDagDefinition<DagSubagentPayloadV1> {
-  const fanoutRoles = ["reading-plan", ...FocusedReviewRoles, "whole-change"] as const;
-  const reviewerRoles = [...FocusedReviewRoles, "whole-change"] as const;
   const definition: DagDefinition<DagSubagentPayloadV1> = {
     runId: options.runId,
-    concurrency: fanoutRoles.length,
+    concurrency: ReviewFanoutNodes.length,
     nodes: [
-      ...fanoutRoles.map((role) => ({
-        id: nodeIdByRole[role],
+      ...ReviewFanoutNodes.map((node) => ({
+        id: node.nodeId,
         executor: {
           kind: DagExecutorKind.Subagent,
           key: "pi/subagent-v1",
-          payload: payload(role, options.assignments[role], options.cwd, options.tools),
+          payload: payload(node, options.assignments[node.role], options.cwd, options.tools),
         },
         dependencies: [],
       })),
       {
-        id: nodeIdByRole.synthesis,
+        id: SynthesisNode.nodeId,
         executor: {
           kind: DagExecutorKind.Subagent,
           key: "pi/subagent-v1",
-          payload: payload("synthesis", options.assignments.synthesis, options.cwd, options.tools),
+          payload: payload(
+            SynthesisNode,
+            options.assignments[SynthesisNode.role],
+            options.cwd,
+            options.tools,
+          ),
         },
-        dependencies: fanoutRoles.map((role) => ({
-          nodeId: nodeIdByRole[role],
+        dependencies: ReviewFanoutNodes.map((node) => ({
+          nodeId: node.nodeId,
           mode: DagDependencyMode.Settled,
         })),
         completionGuard: {
           kind: DagCompletionGuardKind.AtLeastOneSucceeded,
-          dependencyIds: reviewerRoles.map((role) => nodeIdByRole[role]),
+          dependencyIds: ReviewerNodes.map((node) => node.nodeId),
         },
       },
     ],
@@ -177,12 +158,4 @@ export function compileReviewGraph(options: {
   if (validated._tag !== DagValidationResultTag.Valid)
     throw new ReviewGraphValidationError(validated.errors);
   return validated.graph;
-}
-
-export function reviewNodeId(role: ReviewRole): string {
-  return nodeIdByRole[role];
-}
-
-export function reviewOutputName(role: ReviewRole): string {
-  return outputNameByRole[role];
 }

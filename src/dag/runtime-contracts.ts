@@ -1,5 +1,6 @@
 import type { Effect, Scope } from "effect";
 import { Context, Data, Layer } from "effect";
+import type * as DagAttempts from "./attempt.js";
 import type * as DagContracts from "./contracts.js";
 import type * as DagKernel from "./kernel.js";
 import type * as DagValidation from "./validation.js";
@@ -94,18 +95,7 @@ export const DagExecutorRegistryLayer = (
   service: DagExecutorRegistryService,
 ): Layer.Layer<DagExecutorRegistry> => Layer.succeed(DagExecutorRegistry, service);
 
-export interface DagNodeAttempt {
-  readonly nodeId: string;
-  readonly attemptId: string;
-  readonly ordinal: 1;
-  readonly statuses: readonly (
-    | typeof DagContracts.DagNodeStatus.Running
-    | Exclude<
-        (typeof DagContracts.DagNodeStatus)[keyof typeof DagContracts.DagNodeStatus],
-        typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
-      >
-  )[];
-}
+export type DagNodeAttempt = DagAttempts.DagAttempt;
 
 export interface DagRunSnapshot {
   readonly state: DagKernel.DagRunState<unknown, DagFailedNodePayload>;
@@ -114,17 +104,7 @@ export interface DagRunSnapshot {
   readonly attempts: readonly DagNodeAttempt[];
 }
 
-export interface DagRuntimeJournalAttemptStatus {
-  readonly nodeId: string;
-  readonly attemptId: string;
-  readonly ordinal: 1;
-  readonly status:
-    | typeof DagContracts.DagNodeStatus.Running
-    | Exclude<
-        (typeof DagContracts.DagNodeStatus)[keyof typeof DagContracts.DagNodeStatus],
-        typeof DagContracts.DagNodeStatus.Queued | typeof DagContracts.DagNodeStatus.Blocked
-      >;
-}
+export type DagRuntimeJournalAttemptStatus = DagAttempts.DagAttemptStatus;
 
 export interface DagRuntimeJournal {
   readonly beforeRun: (

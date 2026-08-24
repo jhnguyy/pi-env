@@ -57,16 +57,6 @@ export const PrReviewParamsSchema = Type.Object(
 );
 export type PrReviewParams = Static<typeof PrReviewParamsSchema>;
 
-export const REVIEW_TOOL_NAMES = [
-  "review_read",
-  "review_grep",
-  "review_find",
-  "review_list",
-  "review_diff",
-  "review_changed_files",
-  "submit_review_plan",
-  "submit_review",
-] as const;
 export const REVIEW_COMMANDS = [
   "create",
   "get",

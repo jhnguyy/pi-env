@@ -30,7 +30,7 @@ import {
   reconstructDagSession,
   reduceDagRunState,
   selectDagTextArtifactReferences,
-  type DagSessionManagerSeam,
+  type DagSessionStore,
   type DagTextArtifactReference,
 } from "../index.js";
 import * as Shared from "./shared.js";
@@ -269,14 +269,13 @@ describe("DAG text artifact contract", () => {
       const dagDefinition = { runId: "run-test", concurrency: 1, nodes: [producer] };
       const dag = Shared.graph([producer], 1);
       const entries: unknown[] = [];
-      const seam: DagSessionManagerSeam = {
-        getBranch: () => entries,
-        appendCustomEntry: (customType, data) => {
-          entries.push({ type: "custom", customType, data });
-          return String(entries.length);
+      const store: DagSessionStore = {
+        read: () => entries,
+        append: (entry) => {
+          entries.push(entry);
         },
       };
-      const writer = makeDagSessionWriter(seam, dag, dagDefinition);
+      const writer = makeDagSessionWriter(store, dag, dagDefinition);
       yield* writer.appendGraph(dagDefinition);
       const start = { runId: "run-test", nodeId: "producer", type: DagTransitionType.Start } as const;
       yield* writer.appendTransition(start, { nodeId: "producer", attemptId: "run-test:producer:1", ordinal: 1, status: DagNodeStatus.Running });
@@ -289,7 +288,7 @@ describe("DAG text artifact contract", () => {
       expect(JSON.stringify(entries)).not.toContain("secret bytes");
       expect(JSON.stringify(entries)).not.toContain('"text":');
       yield* Effect.promise(() => writeFile(path.join(root, "artifact.txt"), "changed after persist"));
-      const replayed = yield* reconstructDagSession(seam, "run-test");
+      const replayed = yield* reconstructDagSession(store, "run-test");
       const replayedProducer = replayed.state.nodes.find((node) => node.nodeId === "producer");
       expect(replayedProducer?.status).toBe(DagNodeStatus.Succeeded);
     }));

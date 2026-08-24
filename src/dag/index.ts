@@ -1,4 +1,17 @@
 export {
+  DagAttemptOrdinal,
+  dagAttemptId,
+  dagAttemptStatus,
+  dagResultStatus,
+  isDagAttemptStatus,
+} from "./attempt.js";
+export type {
+  DagAttempt,
+  DagAttemptStatus,
+  DagAttemptStatusValue,
+  DagAttemptTerminalStatus,
+} from "./attempt.js";
+export {
   DagSubagentPayloadFailure,
   DagSubagentContextFailure,
   DagSubagentRuntimeFailure,
@@ -170,7 +183,7 @@ export type {
   DagSessionEvent,
   DagSessionFailure,
   DagSessionLimits,
-  DagSessionManagerSeam,
+  DagSessionStore,
   DagSessionReconstruction,
   DagSessionWriter,
 } from "./session.js";

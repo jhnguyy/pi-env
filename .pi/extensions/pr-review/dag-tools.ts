@@ -22,7 +22,7 @@ import type { ActiveDagRuntimeService } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { validatePlan } from "./core";
-import { makeReviewToolContracts, type ReviewRunStore } from "./runtime";
+import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
   PlanSchema,
   ReviewerOutputSchema,
@@ -125,11 +125,9 @@ export function registerReviewDagTools(options: {
   readonly service: ActiveDagRuntimeService;
 }): ReviewDagTools {
   const suffix = suffixFor(options.reviewId);
-  const base = makeReviewToolContracts(options.store)
-    .slice(0, 6)
-    .map((contract) =>
-      renamed(customTool(contract, options.store.state.snapshot.worktree), suffix),
-    );
+  const base = makeReviewReadToolContracts(options.store).map((contract) =>
+    renamed(customTool(contract, options.store.state.snapshot.worktree), suffix),
+  );
   const deckName = `review_deck_${suffix}`;
   const planName = `submit_review_plan_${suffix}`;
   const reviewerName = `submit_reviewer_result_${suffix}`;

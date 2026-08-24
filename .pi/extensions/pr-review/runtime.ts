@@ -2,25 +2,13 @@ import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } fr
 import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
-import {
-  bound,
-  confined,
-  parseDiffGitPath,
-  parsePatchFilePath,
-  validateFindingAnchors,
-  validatePlan,
-} from "./core";
+import { bound, confined, parseDiffGitPath, parsePatchFilePath } from "./core";
 import {
   ChangedFilesParamSchema,
   DiffParamSchema,
   GrepParamSchema,
   MAX_PAGE_SIZE,
   PathParamSchema,
-  PlanSchema,
-  ReviewSchema,
-  validateReviewShape,
-  type ReviewPlan,
-  type ReviewResult,
   type ReviewState,
 } from "./schema";
 
@@ -89,7 +77,9 @@ export function boundedChangedFileContext(state: ReviewState): string {
   );
 }
 
-export function makeReviewToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
+export function makeReviewReadToolContracts(
+  store: ReviewRunStore,
+): Array<ToolContract<any, any>> {
   const root = store.state.snapshot.worktree;
   const diffPath = store.state.snapshot.diffPath;
   let diffText: string | undefined;
@@ -213,73 +203,12 @@ export function makeReviewToolContracts(store: ReviewRunStore): Array<ToolContra
         };
       },
     },
-    {
-      name: "submit_review_plan",
-      label: "Submit Review Plan",
-      description: "Submit the structured review plan. Each changed path must appear exactly once.",
-      parameters: PlanSchema,
-      async execute(params, context) {
-        check(context.signal);
-        const plan = params as ReviewPlan;
-        const validation = validatePlan(plan, store.state.snapshot.metadata.changedFiles);
-        if (!validation.ok)
-          return { content: [txt(validation.message)], isError: true, details: validation };
-        const next = { ...store.state, plan: structuredClone(plan) };
-        store.save(next);
-        store.state = next;
-        return { content: [txt(validation.message)], details: validation };
-      },
-    },
-    {
-      name: "submit_review",
-      label: "Submit Review",
-      description:
-        "Submit final verdict and findings. Requires an accepted plan. Invalid anchors become unanchored findings.",
-      parameters: ReviewSchema,
-      async execute(params, context) {
-        check(context.signal);
-        if (!store.state.plan)
-          return {
-            content: [txt("Submit an accepted review plan before final review.")],
-            isError: true,
-            details: { ok: false },
-          };
-        if (!validateReviewShape(params))
-          return { content: [txt("Review is malformed.")], isError: true, details: { ok: false } };
-        const result = validateFindingAnchors(params, getDiff());
-        const next = {
-          ...store.state,
-          result,
-          selectedFindingIds: result.findings.flatMap((finding) =>
-            finding.selected && finding.id ? [finding.id] : [],
-          ),
-        };
-        store.save(next);
-        store.state = next;
-        const index =
-          result.findings
-            .map(
-              (f) =>
-                `${f.id}: ${f.anchorValid ? "anchored" : "unanchored"} ${f.file ?? "no-file"}${f.line ? `:${f.line}` : ""}`,
-            )
-            .join("\n") || "No findings.";
-        return {
-          content: [
-            txt(
-              bound(
-                `Review accepted. Verdict: ${result.verdict}\nFindings: ${result.findings.length}\n${index}`,
-              ),
-            ),
-          ],
-          details: { ok: true },
-        };
-      },
-    },
+
   ];
 }
 
-export function makeReviewTools(store: ReviewRunStore) {
-  return makeReviewToolContracts(store).map((contract) =>
+export function makeReviewReadTools(store: ReviewRunStore) {
+  return makeReviewReadToolContracts(store).map((contract) =>
     toAgentTool(contract, () => ({ cwd: store.state.snapshot.worktree })),
   );
 }

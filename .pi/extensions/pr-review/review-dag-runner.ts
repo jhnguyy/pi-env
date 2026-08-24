@@ -13,9 +13,10 @@ import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-ru
 import { validateFindingAnchors, validatePlan } from "./core";
 import { readVerifiedReviewArtifact, registerReviewDagTools } from "./dag-tools";
 import {
-  FocusedReviewRoles,
+  ReadingPlanNode,
+  ReviewerNodes,
+  SynthesisNode,
   compileReviewGraph,
-  reviewNodeId,
   type ReviewRoleAssignments,
 } from "./review-graph";
 import {
@@ -31,11 +32,12 @@ import {
   type SynthesisReview,
 } from "./schema";
 
-const ReviewerRoles = [...FocusedReviewRoles, "whole-change"] as const;
-const reviewerRoleByNode = new Map(ReviewerRoles.map((role) => [reviewNodeId(role), role]));
-const AllReviewersFailed = "All PR reviewers failed or returned malformed output.";
-
 type ReviewerRole = ReviewerOutput["role"];
+
+const reviewerRoleByNode = new Map<string, ReviewerRole>(
+  ReviewerNodes.map((node) => [node.nodeId, node.role]),
+);
+const AllReviewersFailed = "All PR reviewers failed or returned malformed output.";
 type NodeOutput = { reference: DagTextArtifactReference; text: string };
 interface CollectedOutputs {
   readonly plan?: ReviewPlan;
@@ -117,7 +119,8 @@ function failedNodeIds(reconstruction: DagSessionReconstruction): string[] {
   return reconstruction.state.nodes
     .filter(
       (node) =>
-        node.nodeId !== reviewNodeId("synthesis") && node.status !== DagNodeStatus.Succeeded,
+        node.nodeId !== SynthesisNode.nodeId &&
+        node.status !== DagNodeStatus.Succeeded,
     )
     .map((node) => node.nodeId)
     .sort();
@@ -149,19 +152,18 @@ async function collectOutputs(
   state: ReviewState,
 ): Promise<CollectedOutputs> {
   const malformedNodes: string[] = [];
-  const planOutput = await outputForNode(root, reconstruction, reviewNodeId("reading-plan"));
+  const planOutput = await outputForNode(root, reconstruction, ReadingPlanNode.nodeId);
   const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
-  if (planOutput && !plan) malformedNodes.push(reviewNodeId("reading-plan"));
+  if (planOutput && !plan) malformedNodes.push(ReadingPlanNode.nodeId);
   const reviewers: ReviewerOutput[] = [];
   const rawResultReferences: DagTextArtifactReference[] = [];
-  for (const role of ReviewerRoles) {
-    const nodeId = reviewNodeId(role);
-    const output = await outputForNode(root, reconstruction, nodeId);
+  for (const node of ReviewerNodes) {
+    const output = await outputForNode(root, reconstruction, node.nodeId);
     if (!output) continue;
     rawResultReferences.push(output.reference);
-    const reviewer = decodeReviewer(output.text, role);
+    const reviewer = decodeReviewer(output.text, node.role);
     if (reviewer) reviewers.push(reviewer);
-    else malformedNodes.push(nodeId);
+    else malformedNodes.push(node.nodeId);
   }
   return {
     ...(plan ? { plan } : {}),
@@ -285,7 +287,7 @@ async function finalizeReview(input: {
   const synthesisOutput = await outputForNode(
     input.root,
     input.reconstruction,
-    reviewNodeId("synthesis"),
+    SynthesisNode.nodeId,
   );
   const diff = await import("node:fs/promises").then((fs) =>
     fs.readFile(input.state.snapshot.diffPath, "utf8"),
@@ -293,7 +295,8 @@ async function finalizeReview(input: {
   const synthesized = synthesisOutput
     ? decodeSynthesis(synthesisOutput.text, collected.reviewers, diff)
     : undefined;
-  if (synthesisOutput && !synthesized) collected.malformedNodes.push(reviewNodeId("synthesis"));
+  if (synthesisOutput && !synthesized)
+    collected.malformedNodes.push(SynthesisNode.nodeId);
   const result = synthesized ?? fallbackSynthesis(collected.reviewers, diff);
   const successfulRoles = collected.reviewers.map((output) => output.role).sort();
   const failedRoles = reviewerRolesForNodes(failedNodes);

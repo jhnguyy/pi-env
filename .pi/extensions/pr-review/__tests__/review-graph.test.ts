@@ -1,10 +1,10 @@
 import { DagDependencyMode } from "../../../../src/dag/index.js";
 import { describe, expect, it } from "vitest";
 import {
-  FocusedReviewRoles,
+  ReviewFanoutNodes,
   ReviewRoles,
+  ReviewerNodes,
   compileReviewGraph,
-  reviewNodeId,
   type ReviewRoleAssignments,
 } from "../review-graph";
 
@@ -40,9 +40,7 @@ describe("fixed PR review graph", () => {
     });
     expect(graph.concurrency).toBe(7);
     expect(graph.nodes.map((node) => node.id)).toEqual([
-      "reading-plan",
-      ...FocusedReviewRoles.map((role) => reviewNodeId(role)),
-      "review-whole-change",
+      ...ReviewFanoutNodes.map((node) => node.nodeId),
       "synthesis",
     ]);
     const synthesis = graph.nodes.find((node) => node.id === "synthesis")!;
@@ -51,10 +49,9 @@ describe("fixed PR review graph", () => {
     expect(
       synthesis.dependencies.every((dependency) => dependency.mode === DagDependencyMode.Settled),
     ).toBe(true);
-    expect(synthesis.completionGuard?.dependencyIds).toEqual([
-      ...FocusedReviewRoles.map((role) => reviewNodeId(role)),
-      "review-whole-change",
-    ]);
+    expect(synthesis.completionGuard?.dependencyIds).toEqual(
+      ReviewerNodes.map((node) => node.nodeId),
+    );
   });
 
   it("gives each child only explicit confined review tools and no spawning authority", () => {

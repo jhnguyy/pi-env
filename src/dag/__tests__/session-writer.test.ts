@@ -6,7 +6,6 @@ import {
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
-  DagSessionEntryType,
   DagTransitionType,
   computeDagSessionGraphId,
   createDagRunState,
@@ -15,8 +14,7 @@ import {
   validateDagDefinition,
   type DagCompletionGuardKind,
   type DagDefinition,
-  type DagSessionEntry,
-  type DagSessionManagerSeam,
+  type DagSessionStore,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
@@ -36,26 +34,11 @@ function node(
   };
 }
 
-function seam(entries: unknown[] = []): DagSessionManagerSeam & { readonly entries: unknown[] } {
-  return {
-    entries,
-    getBranch: () => [...entries],
-    appendCustomEntry: (customType, data) => {
-      entries.push({ type: "custom", customType, data });
-      return String(entries.length);
-    },
-  };
-}
-
 function valid(def: DagDefinition) {
   const result = validateDagDefinition(def);
   expect(result._tag).toBe("valid");
   if (result._tag !== "valid") throw new Error("invalid graph");
   return result.graph;
-}
-
-function wrapper(data: DagSessionEntry) {
-  return { type: "custom", customType: DagSessionEntryType, data };
 }
 
 function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
@@ -70,15 +53,14 @@ describe("DAG session writer", () => {
     const dag = valid(def);
     let fail = true;
     const entries: unknown[] = [];
-    const store: DagSessionManagerSeam = {
-      getBranch: () => entries,
-      appendCustomEntry: (customType, data) => {
+    const store: DagSessionStore = {
+      read: () => entries,
+      append: (entry) => {
         if (fail) {
           fail = false;
           throw new Error("disk full");
         }
-        entries.push({ type: "custom", customType, data });
-        return "ok";
+        entries.push(entry);
       },
     };
     const writer = makeDagSessionWriter(store, dag, def);
@@ -88,10 +70,10 @@ describe("DAG session writer", () => {
     expect(Effect.runSync(reconstructDagSession(store, def.runId)).persistedEntryCount).toBe(1);
 
     const mismatchedDefinition = Fixtures.definition([node("other")], 1);
-    const mismatchWriter = makeDagSessionWriter(seam(), dag, mismatchedDefinition);
+    const mismatchWriter = makeDagSessionWriter(Fixtures.sessionStore(), dag, mismatchedDefinition);
     expect(failureTag(mismatchWriter.appendGraph(mismatchedDefinition))).toBe("graph-mismatch");
 
-    const boundedStore = seam();
+    const boundedStore = Fixtures.sessionStore();
     const boundedWriter = makeDagSessionWriter(boundedStore, dag, def, {
       limits: { totalMatchingEntries: 1 },
     });

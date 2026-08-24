@@ -7,7 +7,6 @@ import {
   DagRuntimeLive,
   DagRuntimeNotAccepting,
   DagRuntimeRunAlreadyExists,
-  DagSessionEntryType,
   makeDagSessionWriter,
   reconstructDagSession,
   submitDagRun,
@@ -15,7 +14,7 @@ import {
   type DagRunHandle,
   type DagRuntimeJournal,
   type DagRuntimeService,
-  type DagSessionManagerSeam,
+  type DagSessionStore,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
 import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
@@ -29,30 +28,8 @@ import {
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import type { SubagentRunSupervisor } from "./control";
 import { makeDagSubagentExecutorRegistry } from "./dag-runtime";
+import { makeDagSessionStore, persistedDagRunIds } from "./dag-session-store";
 import type { SubagentUsageLedger } from "./usage";
-
-function persistedRunIds(branch: readonly unknown[]): Set<string> {
-  const runIds = new Set<string>();
-  for (const entry of branch) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const wrapper = entry as {
-      readonly type?: unknown;
-      readonly customType?: unknown;
-      readonly data?: unknown;
-    };
-    if (
-      wrapper.type !== "custom" ||
-      wrapper.customType !== DagSessionEntryType ||
-      typeof wrapper.data !== "object" ||
-      wrapper.data === null
-    ) {
-      continue;
-    }
-    const runId = (wrapper.data as { readonly runId?: unknown }).runId;
-    if (typeof runId === "string") runIds.add(runId);
-  }
-  return runIds;
-}
 
 interface DagSessionRuntimeDependencies {
   readonly sessionGeneration: string;
@@ -70,7 +47,7 @@ export class DagSessionRuntime {
 
   private constructor(
     private readonly pi: ExtensionAPI,
-    private readonly seam: DagSessionManagerSeam,
+    private readonly store: DagSessionStore,
     private readonly scope: Scope.Closeable,
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
     private readonly claimedRunIds: Set<string>,
@@ -84,7 +61,7 @@ export class DagSessionRuntime {
         graph: ValidatedDagDefinition<TPayload>,
         authority?: DagRuntimeSubmissionAuthority,
       ) => this.submit(graph, authority),
-      reconstruct: (runId: string) => reconstructDagSession(this.seam, runId),
+      reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
       usage: (runId: string): DagRuntimeUsage => {
         const total = {
           input: 0,
@@ -137,18 +114,14 @@ export class DagSessionRuntime {
     const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
       appendCustomEntry(customType: string, data?: unknown): string;
     };
-    const seam: DagSessionManagerSeam = {
-      getBranch: () => writableSessionManager.getBranch(),
-      appendCustomEntry: (customType, data) =>
-        writableSessionManager.appendCustomEntry(customType, data),
-    };
+    const store = makeDagSessionStore(writableSessionManager);
     try {
       return new DagSessionRuntime(
         pi,
-        seam,
+        store,
         scope,
         Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
-        persistedRunIds(writableSessionManager.getBranch()),
+        persistedDagRunIds(store),
         workspaceRoots,
         dependencies.ledger,
         ctx,
@@ -219,7 +192,7 @@ export class DagSessionRuntime {
         this.pendingSubmissions.delete(pendingSubmission);
         resolveSubmission();
       });
-      const writer = makeDagSessionWriter(this.seam, graph, graph);
+      const writer = makeDagSessionWriter(this.store, graph, graph);
       let graphPersisted = false;
       const journal: DagRuntimeJournal = {
         beforeRun: (definition) =>

@@ -1,4 +1,5 @@
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Scope } from "effect";
+import * as DagAttempt from "../attempt.js";
 import * as DagContracts from "../contracts.js";
 import * as DagKernel from "../kernel.js";
 import * as RuntimeContracts from "../runtime-contracts.js";
@@ -182,7 +183,7 @@ function runNode<TPayload>(
   node: DagContracts.DagNode<TPayload>,
   startPermit: Deferred.Deferred<void>,
 ) {
-  const attemptId = `${graph.runId}:${node.id}:1`;
+  const attemptId = DagAttempt.dagAttemptId(graph.runId, node.id);
   return Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
       yield* Deferred.await(startPermit);
@@ -206,7 +207,7 @@ function runNode<TPayload>(
                   runId: graph.runId,
                   node,
                   attemptId,
-                  attemptOrdinal: 1,
+                  attemptOrdinal: DagAttempt.DagAttemptOrdinal,
                   graphState,
                 }),
               ),
@@ -256,7 +257,7 @@ function applyCompletion(
               nodeId: attempt.nodeId,
               attemptId: attempt.attemptId,
               ordinal: attempt.ordinal,
-              status: event.result._tag,
+              status: DagAttempt.dagResultStatus(event.result),
             }
           : undefined,
       );
@@ -324,12 +325,11 @@ function startReadyNodes<TPayload>(
         next,
         { runId: graph.runId, nodeId, type: DagContracts.DagTransitionType.Start },
         journal,
-        {
+        DagAttempt.dagAttemptStatus(
+          graph.runId,
           nodeId,
-          attemptId: `${graph.runId}:${nodeId}:1`,
-          ordinal: 1,
-          status: DagContracts.DagNodeStatus.Running,
-        },
+          DagContracts.DagNodeStatus.Running,
+        ),
       );
       starts.push({ nodeId, node, startPermit: yield* Deferred.make<void>() });
     }

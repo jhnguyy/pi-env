@@ -1,22 +1,12 @@
 import { getSupportedThinkingLevels, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
+import {
+  FocusedReviewRoles,
+  ReviewRoles,
+  type ReviewRole,
+} from "./review-topology";
 
 export const PR_REVIEW_APPROVAL_ANNOTATION = "reviewer";
-export const REVIEW_ROLE_NAMES = [
-  "reading-plan",
-  "correctness",
-  "intent",
-  "maintainability",
-  "tests",
-  "security",
-  "whole-change",
-  "synthesis",
-] as const;
-export type ReviewRoleName = (typeof REVIEW_ROLE_NAMES)[number];
-export type ReviewFocusedRoleName = Extract<
-  ReviewRoleName,
-  "correctness" | "intent" | "maintainability" | "tests" | "security"
->;
-export type ReviewRolePins = Partial<Record<ReviewRoleName, string>>;
+export type ReviewRolePins = Partial<Record<ReviewRole, string>>;
 
 export interface AgentSettingsLike {
   readonly modelAnnotations?: Readonly<Record<string, readonly string[]>>;
@@ -28,13 +18,13 @@ export interface ReviewModelCandidate {
   readonly fqid: string;
 }
 export interface ReviewModelAssignment extends ReviewModelCandidate {
-  readonly role: ReviewRoleName;
+  readonly role: ReviewRole;
   readonly pinned: boolean;
 }
 export interface ReviewModelPolicySuccess {
   readonly ok: true;
   readonly approvedRoster: readonly ReviewModelCandidate[];
-  readonly assignments: Readonly<Record<ReviewRoleName, ReviewModelAssignment>>;
+  readonly assignments: Readonly<Record<ReviewRole, ReviewModelAssignment>>;
 }
 export type ReviewModelPolicyErrorCode = "no_approved_models" | "invalid_pin" | "unapproved_model";
 export class ReviewModelPolicyError extends Error {
@@ -47,13 +37,6 @@ export class ReviewModelPolicyError extends Error {
   }
 }
 
-const FocusedRoles: readonly ReviewFocusedRoleName[] = [
-  "correctness",
-  "intent",
-  "maintainability",
-  "tests",
-  "security",
-];
 type ReviewModel = Model<any>;
 
 function fqid(model: Pick<ReviewModel, "provider" | "id">): string {
@@ -71,7 +54,7 @@ function compare(left: ReviewModelCandidate, right: ReviewModelCandidate): numbe
   return left.fqid.localeCompare(right.fqid);
 }
 function assignment(
-  role: ReviewRoleName,
+  role: ReviewRole,
   candidate: ReviewModelCandidate,
   pinned: boolean,
 ): ReviewModelAssignment {
@@ -84,7 +67,7 @@ export function resolvePrReviewModelPolicy(
   pins: ReviewRolePins | Readonly<Record<string, string>> = {},
 ): ReviewModelPolicySuccess {
   for (const role of Object.keys(pins)) {
-    if (!REVIEW_ROLE_NAMES.some((known) => known === role))
+    if (!ReviewRoles.some((known) => known === role))
       throw new ReviewModelPolicyError("invalid_pin", `Unknown PR review role pin: ${role}.`);
   }
   const availableById = new Map(availableModels.map((model) => [fqid(model), model] as const));
@@ -105,7 +88,7 @@ export function resolvePrReviewModelPolicy(
       "No available model has the exact reviewer approval annotation.",
     );
   const approvedById = new Map(approvedRoster.map((candidate) => [candidate.fqid, candidate]));
-  for (const role of REVIEW_ROLE_NAMES) {
+  for (const role of ReviewRoles) {
     const pin = pins[role];
     if (!pin) continue;
     if (!availableById.has(pin))
@@ -119,8 +102,8 @@ export function resolvePrReviewModelPolicy(
         `Pinned role ${role} references model ${pin} without reviewer approval.`,
       );
   }
-  const assignments = {} as Record<ReviewRoleName, ReviewModelAssignment>;
-  const choose = (role: ReviewRoleName, fallbackIndex: number): ReviewModelAssignment => {
+  const assignments = {} as Record<ReviewRole, ReviewModelAssignment>;
+  const choose = (role: ReviewRole, fallbackIndex: number): ReviewModelAssignment => {
     const pin = pins[role];
     const candidate = pin
       ? approvedById.get(pin)
@@ -133,7 +116,7 @@ export function resolvePrReviewModelPolicy(
     return assignment(role, candidate, pin !== undefined);
   };
   assignments["reading-plan"] = choose("reading-plan", 0);
-  FocusedRoles.forEach((role, index) => {
+  FocusedReviewRoles.forEach((role, index) => {
     assignments[role] = choose(role, index);
   });
   assignments["whole-change"] = choose("whole-change", 1);

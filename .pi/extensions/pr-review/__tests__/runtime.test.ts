@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ReviewState } from "../core";
-import { makeReviewTools } from "../runtime";
+import { makeReviewReadTools } from "../runtime";
 
 const temps: string[] = [];
 afterEach(() => {
@@ -50,7 +50,7 @@ describe("pr-review run-scoped tools", () => {
     let s = state();
     const saved: ReviewState[] = [];
     const tools = Object.fromEntries(
-      makeReviewTools({
+      makeReviewReadTools({
         get state() {
           return s;
         },
@@ -105,7 +105,7 @@ describe("pr-review run-scoped tools", () => {
       "diff --git a/dir b/part/a.ts b/dir b/part/a.ts\n--- a/dir b/part/a.ts\n+++ b/dir b/part/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
     );
     const ambiguousTools = Object.fromEntries(
-      makeReviewTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
+      makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
     );
     expect(
       (
@@ -125,7 +125,7 @@ describe("pr-review run-scoped tools", () => {
       path: `src/${index.toString().padStart(5, "0")}-${"x".repeat(20)}.ts`,
     }));
     const tools = Object.fromEntries(
-      makeReviewTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
+      makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
     );
     const first = await tools.review_changed_files.execute(
       "1",
@@ -148,221 +148,9 @@ describe("pr-review run-scoped tools", () => {
     );
   });
 
-  it("requires accepted plan before submit_review and malformed submissions do not mutate state", async () => {
-    let s = state();
-    const saved: ReviewState[] = [];
-    const tools = Object.fromEntries(
-      makeReviewTools({
-        get state() {
-          return s;
-        },
-        set state(v) {
-          s = v;
-        },
-        save: (v) => {
-          saved.push(v);
-          s = v;
-        },
-      }).map((t) => [t.name, t]),
-    );
-    const before = JSON.stringify(s);
-    expect(
-      (
-        (await tools.submit_review.execute(
-          "1",
-          { verdict: "v", findings: [] } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).isError,
-    ).toBe(true);
-    expect(JSON.stringify(s)).toBe(before);
-    expect(
-      (
-        (await tools.submit_review_plan.execute(
-          "1",
-          {
-            goal: "g",
-            goalAssessment: "a",
-            risk: "r",
-            riskReasons: [],
-            cohorts: [{ label: "source", purpose: "Review source", paths: ["src/a.ts"] }],
-            files: [{ path: "src/a.ts", attention: "normal", role: "r" }],
-          } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).isError,
-    ).toBeUndefined();
-    expect(
-      (
-        (await tools.submit_review.execute(
-          "1",
-          {
-            verdict: "v",
-            findings: [
-              {
-                severity: "serious",
-                impact: "low",
-                problem: "p",
-                consequence: "c",
-                suggestedFix: "f",
-                file: "src/a.ts",
-                side: "RIGHT",
-                line: 2,
-              },
-            ],
-          } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).isError,
-    ).toBeUndefined();
-    expect(saved.at(-1)?.selectedFindingIds).toEqual(["F1"]);
-  });
-
-  it("accepts explicit zero-finding and file-only unanchored submissions", async () => {
-    let s = state();
-    const saved: ReviewState[] = [];
-    const tools = Object.fromEntries(
-      makeReviewTools({
-        get state() {
-          return s;
-        },
-        set state(v) {
-          s = v;
-        },
-        save: (v) => {
-          saved.push(v);
-          s = v;
-        },
-      }).map((t) => [t.name, t]),
-    );
-    await tools.submit_review_plan.execute(
-      "1",
-      {
-        goal: "g",
-        goalAssessment: "a",
-        risk: "r",
-        riskReasons: [],
-        cohorts: [{ label: "source", purpose: "Review source", paths: ["src/a.ts"] }],
-        files: [{ path: "src/a.ts", attention: "normal", role: "r" }],
-      },
-      undefined,
-      undefined as any,
-    );
-    expect(
-      (
-        (await tools.submit_review.execute(
-          "1",
-          { verdict: "no issues", findings: [] } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).content[0].text,
-    ).toContain("Findings: 0");
-    expect(
-      (
-        (await tools.submit_review.execute(
-          "1",
-          {
-            verdict: "v",
-            findings: [
-              {
-                severity: "low",
-                impact: "low",
-                file: "src/a.ts",
-                problem: "p",
-                consequence: "c",
-                suggestedFix: "f",
-              },
-            ],
-          } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).isError,
-    ).toBeUndefined();
-    expect(saved.at(-1)?.result?.findings[0]).toMatchObject({
-      id: "F1",
-      file: "src/a.ts",
-      anchorValid: false,
-    });
-  });
-
-  it("validates anchors in diff sections after the first 128 KB", async () => {
-    let s = state();
-    const late = `diff --git a/src/late.ts b/src/late.ts\n--- a/src/late.ts\n+++ b/src/late.ts\n@@ -1,1 +1,2 @@\n old\n+late\n`;
-    writeFileSync(s.snapshot.diffPath, `${"x".repeat(140_000)}\n${late}`);
-    s = {
-      ...s,
-      snapshot: {
-        ...s.snapshot,
-        metadata: { ...s.snapshot.metadata, changedFiles: [{ path: "src/late.ts" }] },
-      },
-    };
-    const tools = Object.fromEntries(
-      makeReviewTools({
-        get state() {
-          return s;
-        },
-        set state(v) {
-          s = v;
-        },
-        save: (v) => {
-          s = v;
-        },
-      }).map((t) => [t.name, t]),
-    );
-    expect(
-      (
-        (await tools.review_diff.execute(
-          "1",
-          { path: "src/late.ts" } as any,
-          undefined as any,
-          undefined as any,
-        )) as any
-      ).content[0].text,
-    ).toContain("late.ts");
-    await tools.submit_review_plan.execute(
-      "1",
-      {
-        goal: "g",
-        goalAssessment: "a",
-        risk: "r",
-        riskReasons: [],
-        cohorts: [{ label: "source", purpose: "Review source", paths: ["src/late.ts"] }],
-        files: [{ path: "src/late.ts", attention: "normal", role: "r" }],
-      },
-      undefined,
-      undefined as any,
-    );
-    await tools.submit_review.execute(
-      "1",
-      {
-        verdict: "v",
-        findings: [
-          {
-            severity: "serious",
-            impact: "low",
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-            file: "src/late.ts",
-            side: "RIGHT",
-            line: 2,
-          },
-        ],
-      },
-      undefined,
-      undefined as any,
-    );
-    expect(s.result?.findings[0]?.anchorValid).toBe(true);
-  });
-
   it("checks cancellation in tool execution", async () => {
     const s = state();
-    const tools = makeReviewTools({ state: s, save: () => {} });
+    const tools = makeReviewReadTools({ state: s, save: () => {} });
     const ac = new AbortController();
     ac.abort();
     await expect(

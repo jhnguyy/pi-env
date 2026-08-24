@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DagExecutorKind } from "../contracts.js";
+import * as DagContracts from "../contracts.js";
 
 describe("validated DAG cross-bundle index", () => {
   it("shares the graph index through globalThis across isolated module instances", async () => {
@@ -14,7 +14,7 @@ describe("validated DAG cross-bundle index", () => {
         nodes: [
           {
             id: "node",
-            executor: { kind: DagExecutorKind.Transform, key: "test", payload: null },
+            executor: { kind: DagContracts.DagExecutorKind.Transform, key: "test", payload: null },
             dependencies: [],
           },
         ],

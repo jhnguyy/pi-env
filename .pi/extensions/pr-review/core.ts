@@ -14,7 +14,6 @@ export {
   Attention,
   Impact,
   REVIEW_COMMANDS,
-  REVIEW_TOOL_NAMES,
   ReviewEvent,
   Severity,
   Side,

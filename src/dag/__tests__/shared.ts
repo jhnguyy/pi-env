@@ -13,9 +13,22 @@ import {
   type DagNodeResult,
   type DagNodeStatus,
   type DagRunState,
+  type DagSessionStore,
   type DagTransition,
   type ValidatedDagDefinition,
 } from "../index.js";
+
+export function sessionStore(
+  entries: unknown[] = [],
+): DagSessionStore & { readonly entries: unknown[] } {
+  return {
+    entries,
+    read: () => [...entries],
+    append: (entry) => {
+      entries.push(entry);
+    },
+  };
+}
 
 export const executor = {
   kind: DagExecutorKind.Transform,

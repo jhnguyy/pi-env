@@ -19,16 +19,19 @@ export interface DagSessionWriter {
   ) => Effect.Effect<SessionContracts.DagSessionEntry, SessionContracts.DagSessionFailure>;
 }
 
-function appendCustomEntry(seam: SessionContracts.DagSessionManagerSeam, entry: SessionContracts.DagSessionEntry): void {
+function appendEntry(
+  store: SessionContracts.DagSessionStore,
+  entry: SessionContracts.DagSessionEntry,
+): void {
   try {
-    seam.appendCustomEntry(SessionContracts.DagSessionEntryType, entry);
+    store.append(entry);
   } catch (cause) {
-    throw new SessionContracts.DagSessionSeamFailed({ operation: "appendCustomEntry", cause });
+    throw new SessionContracts.DagSessionSeamFailed({ operation: "append", cause });
   }
 }
 
 export function makeDagSessionWriter(
-  seam: SessionContracts.DagSessionManagerSeam,
+  store: SessionContracts.DagSessionStore,
   graph: DagValidation.ValidatedDagDefinition<unknown>,
   graphDefinition: DagContracts.DagDefinition<unknown>,
   options?: { readonly limits?: Partial<SessionContracts.DagSessionLimits> },
@@ -53,7 +56,7 @@ export function makeDagSessionWriter(
     const limitName = entry.event._tag === "graph" ? "graphBytes" : "eventBytes";
     if (size > sizeLimit)
       throw new SessionContracts.DagSessionLimitExceeded({ limit: limitName, actual: size, max: sizeLimit });
-    appendCustomEntry(seam, frozen);
+    appendEntry(store, frozen);
     return frozen;
   };
   return {
