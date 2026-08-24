@@ -548,6 +548,7 @@ describe("pr-review extension surface", () => {
     const state = sampleState("r", []);
     mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
     mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(state.snapshot.artifactDir, { recursive: true });
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const calls: any[] = [];
@@ -595,11 +596,15 @@ describe("pr-review extension surface", () => {
     expect(pi.appended).toHaveLength(0);
   });
 
-  it("persists the pinned snapshot before a missing DAG service blocks the run", async () => {
+  it("owns a pre-DAG failure and reopens the same review for an identical create", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "pr-review", "artifacts"), { recursive: true });
     const pi = extensionPi();
+    const calls: string[][] = [];
     pi.exec = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+        mkdirSync(args[3], { recursive: true });
       if (cmd === "gh")
         return {
           code: 0,
@@ -639,13 +644,135 @@ describe("pr-review extension surface", () => {
       details: {
         command: "create",
         status: "failed",
+        stage: "dag-service",
+        failureCode: "dag_service_failed",
         error: "The session DAG runtime is not available for PR review.",
+        worktreeCleaned: true,
       },
     });
-    expect(result.content[0].text).toContain("Review create failed");
-    expect(pi.appended).toHaveLength(1);
+    expect(result.content[0].text).toContain("Next: /review open");
+    expect(pi.appended).toHaveLength(2);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
-    expect(pi.appended[0]?.[1].state.snapshot.metadata.headOid).toBe("h");
-    expect(pi.appended[0]?.[1].state.dag).toBeUndefined();
+    expect(pi.appended[1]?.[1].state).toMatchObject({
+      preparation: {
+        status: "failed",
+        stage: "dag-service",
+        worktreeCleaned: true,
+      },
+    });
+    const second = await pi.tools[0].execute(
+      "2",
+      { command: "create", url: "https://github.com/o/r/pull/1" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(second).toMatchObject({
+      isError: true,
+      details: { reviewId: result.details.reviewId, reused: true },
+    });
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+    const notes: string[] = [];
+    await pi.command("rerun", {
+      ...ctx,
+      ui: { notify: (message: string) => notes.push(message) },
+    });
+    expect(notes.at(-1)).toContain("failed during dag-service");
+    expect(notes.at(-1)).not.toContain(`Review ${result.details.reviewId} failed`);
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
+  });
+
+  it("coalesces concurrent creates for the same session, pull request, and head", async () => {
+    const root = tempRoot();
+    const pi = extensionPi();
+    const calls: string[][] = [];
+    pi.exec = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+        mkdirSync(args[3], { recursive: true });
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/o/r/pull/1",
+            baseRefName: "trunk",
+            baseRefOid: "b",
+            headRefOid: "h",
+          }),
+          stderr: "",
+        };
+      if (args[0] === "rev-parse")
+        return {
+          code: 0,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? "b" : "h"}\n`,
+          stderr: "",
+        };
+      if (args[0] === "merge-base") return { code: 0, stdout: "b\n", stderr: "" };
+      if (args[0] === "diff" && args.includes("--name-status"))
+        return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
+      return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent" },
+      modelRegistry: { getAvailable: () => [] },
+    };
+    const [first, second] = await Promise.all([
+      pi.tools[0].execute(
+        "1",
+        { command: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+      pi.tools[0].execute(
+        "2",
+        { command: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ]);
+    expect(first.details.reviewId).toBe(second.details.reviewId);
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+  });
+
+  it("lists, opens, and cleans a review by ID", async () => {
+    const root = tempRoot();
+    const first = sampleState("r-one", ["F1"]);
+    const second = sampleState("r-two", []);
+    mkdirSync(first.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(first.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(first.snapshot.artifactDir, { recursive: true });
+    mkdirSync(second.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(second.snapshot.artifactDir, { recursive: true });
+    restore({ sessionManager: { getBranch: () => [custom(first), custom(second)] } } as any);
+    const pi = extensionPi();
+    pi.exec = async () => ({ code: 0, stdout: "", stderr: "" });
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
+    await pi.command("list", ctx);
+    expect(notes.at(-1)).toContain("r-one");
+    expect(notes.at(-1)).toContain("r-two");
+    await pi.command("open r-one", ctx);
+    expect(notes.at(-1)).toContain("Review: r-one");
+    await pi.command("cleanup r-two", ctx);
+    expect(notes.at(-1)).toBe("Review cleanup complete: r-two.");
+    await pi.command("list", ctx);
+    expect(notes.at(-1)).toContain("r-one");
+    expect(notes.at(-1)).not.toContain("r-two");
+    const cleanupEntry = {
+      type: "custom",
+      customType: REVIEW_ENTRY_TYPE,
+      data: pi.appended.at(-1)?.[1],
+    };
+    clearInMemoryStateForTests();
+    restore({
+      sessionManager: { getBranch: () => [custom(first), custom(second), cleanupEntry] },
+    } as any);
+    const restoredPi = extensionPi();
+    await restoredPi.command("list", ctx);
+    expect(notes.at(-1)).toContain("r-one");
+    expect(notes.at(-1)).not.toContain("r-two");
   });
 });

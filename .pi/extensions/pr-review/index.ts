@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   getAgentDir,
@@ -33,6 +33,7 @@ import {
   assertContainedResolved,
   bound,
   extractPrUrl,
+  makeReviewId,
   marker,
   parseDiffGitPath,
   parsePatchFilePath,
@@ -41,6 +42,7 @@ import {
   type Finding,
   type PostAttempt,
   type ReviewEvent as ReviewEventValue,
+  type ReviewMetadata,
   type ReviewState,
 } from "./core";
 import {
@@ -48,15 +50,21 @@ import {
   formatPullRequestContext,
   pullRequestContextDetails,
 } from "./context";
-import { buildReviewDeck, updateReviewDeckLaterRefs, type DeckReference } from "./deck";
+import {
+  ReviewDeckLimitError,
+  buildReviewDeck,
+  updateReviewDeckLaterRefs,
+  type DeckReference,
+} from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
 import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
   existingReviewWithMarker,
-  prepareSnapshot,
+  prepareResolvedSnapshot,
   resolvePrUrl,
+  resolveReviewMetadata,
 } from "./snapshot";
 
 type CreateReviewParams = Pick<PrReviewParams, "url">;
@@ -69,8 +77,31 @@ let activeContext: ExtensionContext | undefined;
 const reconcilingRunIds = new Set<string>();
 
 const states = new Map<string, ReviewState>();
+const createOperations = new Map<string, Promise<ReviewActionResult>>();
 let latestReviewId: string | undefined;
 const postSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
+
+type ReviewActionResult = {
+  content: Array<{ type: "text"; text: string }>;
+  details: Record<string, unknown>;
+  isError?: boolean;
+};
+
+function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): string {
+  return [parentSessionId, metadata.owner, metadata.repo, metadata.number, metadata.headOid].join(
+    ":",
+  );
+}
+
+function matchingReview(identityKey: string, parentSessionId: string): ReviewState | undefined {
+  return [...states.values()].find(
+    (state) => reviewIdentityKey(parentSessionId, state.snapshot.metadata) === identityKey,
+  );
+}
+
+function stateById(reviewId?: string): ReviewState | undefined {
+  return reviewId ? states.get(reviewId) : latestState();
+}
 function statePath(id: string): string {
   return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
 }
@@ -100,10 +131,19 @@ function latestState(): ReviewState | undefined {
 export function restore(ctx: ExtensionContext): void {
   states.clear();
   latestReviewId = undefined;
+  const latestById = new Map<string, ReviewState>();
+  const order: string[] = [];
   for (const entry of (ctx.sessionManager as any).getBranch?.() ?? []) {
     const data = customData(entry);
-    if (!data?.reviewId || !data.state || data.state.cleaned) continue;
-    remember(data.state);
+    if (!data?.reviewId || !data.state) continue;
+    const priorIndex = order.indexOf(data.reviewId);
+    if (priorIndex >= 0) order.splice(priorIndex, 1);
+    order.push(data.reviewId);
+    latestById.set(data.reviewId, data.state);
+  }
+  for (const reviewId of order) {
+    const state = latestById.get(reviewId);
+    if (state && !state.cleaned) remember(state);
   }
 }
 function reconstructedReviewStatus(
@@ -209,6 +249,7 @@ export function clearInMemoryStateForTests(): void {
   dagRegistration = undefined;
   activeContext = undefined;
   reconcilingRunIds.clear();
+  createOperations.clear();
 }
 function summarizeResult(s: ReviewState): string {
   const findings = s.result?.findings ?? [];
@@ -287,84 +328,246 @@ function selectedRangeRefs(snapshot: ReviewState["snapshot"]): {
   }
   return { sourceRangeRefs, testRangeRefs, omissions };
 }
-async function startReview(
+type PreparationStage = NonNullable<ReviewState["preparation"]>["stage"];
+
+function reviewActionResult(state: ReviewState, reused = false): ReviewActionResult {
+  if (state.preparation?.status === "failed") {
+    const failure = state.preparation;
+    const measured =
+      failure.actual !== undefined && failure.limit !== undefined
+        ? ` Actual: ${failure.actual}. Limit: ${failure.limit}.`
+        : "";
+    return {
+      content: [
+        txt(
+          `Review ${state.snapshot.id} failed during ${failure.stage}: ${failure.code}. ${failure.message}${measured} Worktree cleaned: ${failure.worktreeCleaned ? "yes" : "no"}. Next: /review open ${state.snapshot.id}`,
+        ),
+      ],
+      isError: true,
+      details: {
+        status: "failed",
+        reviewId: state.snapshot.id,
+        headOid: state.snapshot.metadata.headOid,
+        stage: failure.stage,
+        failureCode: failure.code,
+        error: failure.message,
+        actual: failure.actual,
+        limit: failure.limit,
+        worktreeCleaned: failure.worktreeCleaned,
+        nextAction: `/review open ${state.snapshot.id}`,
+        reused,
+      },
+    };
+  }
+  const dagFailed =
+    state.dag?.status === "failed" ||
+    state.dag?.status === "cancelled" ||
+    state.dag?.status === "interrupted";
+  return {
+    content: [
+      txt(
+        `${reused ? `Review ${state.snapshot.id} already exists.\n` : ""}${summarizeResult(state)}\nOpen: /review open ${state.snapshot.id}`,
+      ),
+    ],
+    ...(dagFailed ? { isError: true } : {}),
+    details: {
+      status: state.dag?.status ?? "prepared",
+      reviewId: state.snapshot.id,
+      dagRunId: state.dag?.runId,
+      dagStatus: state.dag?.status,
+      error: state.dag?.error,
+      failedNodes: state.dag?.failedNodes ?? [],
+      malformedNodes: state.dag?.malformedNodes ?? [],
+      verdict: state.result?.verdict,
+      findings: state.result?.findings ?? [],
+      rawResultReferences: state.dag?.rawResultReferences ?? [],
+      nextAction: `/review open ${state.snapshot.id}`,
+      reused,
+    },
+  };
+}
+
+async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Promise<boolean> {
+  const root = join(getAgentDir(), "pr-review");
+  const repoDir = state.snapshot.cache?.repoDir;
+  const worktree = state.snapshot.cache?.worktree ?? state.snapshot.worktree;
+  if (!repoDir) {
+    if (existsSync(worktree)) {
+      assertManagedPath(root, worktree);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+    return true;
+  }
+  assertManagedPath(root, repoDir);
+  if (existsSync(worktree)) assertManagedPath(root, worktree);
+  const remove = existsSync(worktree)
+    ? await pi.exec("git", ["worktree", "remove", "--force", worktree], {
+        cwd: repoDir,
+        timeout: 120000,
+      })
+    : { code: 0 };
+  if (remove.code !== 0) rmSync(worktree, { recursive: true, force: true });
+  const prune = await pi.exec("git", ["worktree", "prune"], { cwd: repoDir, timeout: 120000 });
+  return prune.code === 0;
+}
+
+function preparationFailure(
+  stage: PreparationStage,
+  cause: unknown,
+  worktreeCleaned: boolean,
+): NonNullable<ReviewState["preparation"]> {
+  if (cause instanceof ReviewDeckLimitError)
+    return {
+      status: "failed",
+      stage,
+      code: cause.failure.code,
+      message: cause.failure.message,
+      actual: cause.failure.actual,
+      limit: cause.failure.limit,
+      worktreeCleaned,
+    };
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return {
+    status: "failed",
+    stage,
+    code: `${stage.replaceAll("-", "_")}_failed`,
+    message,
+    worktreeCleaned,
+  };
+}
+
+async function createReviewAttempt(
   pi: ExtensionAPI,
-  params: CreateReviewParams,
+  metadata: ReviewMetadata,
   signal: AbortSignal | undefined,
   ctx: ExtensionContext,
-) {
-  const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, signal);
-  if (!resolved.url)
-    return {
-      content: [txt(resolved.message ?? "Please provide a GitHub PR URL.")],
-      details: { status: "needs_url" },
+): Promise<ReviewActionResult> {
+  const reviewId = makeReviewId(metadata);
+  const agentDir = getAgentDir();
+  let state: ReviewState = {
+    snapshot: {
+      id: reviewId,
+      metadata,
+      artifactDir: join(agentDir, "pr-review", "artifacts", reviewId),
+      worktree: join(agentDir, "pr-review", "worktrees", reviewId),
+      diffPath: join(agentDir, "pr-review", "artifacts", reviewId, "diff.patch"),
+      diffHash: "",
+      createdAt: new Date().toISOString(),
+      cache: {
+        repoDir: join(agentDir, "pr-review", "repos", metadata.owner, metadata.repo),
+        worktree: join(agentDir, "pr-review", "worktrees", reviewId),
+      },
+    },
+    selectedFindingIds: [],
+    posts: [],
+  };
+  try {
+    const snapshot = await prepareResolvedSnapshot(
+      pi.exec.bind(pi),
+      ctx.cwd,
+      metadata,
+      signal,
+      reviewId,
+    );
+    state = { ...state, snapshot };
+    saveState(pi, state);
+  } catch (cause) {
+    const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
+    state = {
+      ...state,
+      preparation: preparationFailure("snapshot", cause, worktreeCleaned),
     };
-  const snapshot = await prepareSnapshot(pi.exec.bind(pi), ctx.cwd, resolved.url, signal);
-  let state: ReviewState = { snapshot, selectedFindingIds: [], posts: [] };
-  saveState(pi, state);
-  const registration = dagRegistration;
-  if (!registration || registration.parentSessionId !== ctx.sessionManager.getSessionId())
-    throw new Error("The session DAG runtime is not available for PR review.");
-  const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
-  const [agentSettings, reviewSettings] = await Effect.runPromise(
-    Effect.all([
-      decodeAgentSettingsSnapshotEffect(settingsSnapshot),
-      decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
-    ]),
-  );
-  const policy = resolvePrReviewModelPolicy(
-    agentSettings,
-    ctx.modelRegistry.getAvailable(),
-    reviewSettings.roleModels ?? {},
-  );
-  const ranges = selectedRangeRefs(snapshot);
-  const guidance = (reviewSettings.reviewGuidance ?? []).map((guidancePath, index) => ({
-    kind: "review-guidance" as const,
-    id: `guidance-${index + 1}`,
-    path: guidancePath,
-  }));
-  const deck = buildReviewDeck({
-    snapshot,
-    reviewGuidanceRefs: guidance,
-    sourceRangeRefs: ranges.sourceRangeRefs,
-    testRangeRefs: ranges.testRangeRefs,
-    omissions: ranges.omissions,
-  });
-  state = {
-    ...state,
-    deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
-    roleAssignments: Object.fromEntries(
+    saveState(pi, state);
+    return reviewActionResult(state);
+  }
+  const snapshot = state.snapshot;
+  let stage: PreparationStage = "dag-service";
+  let registration: DagRuntimeServiceRegistration;
+  let deck: ReturnType<typeof buildReviewDeck>;
+  let assignments: Record<string, { model: string; reasoning?: string }>;
+  try {
+    const currentRegistration = dagRegistration;
+    if (
+      !currentRegistration ||
+      currentRegistration.parentSessionId !== ctx.sessionManager.getSessionId()
+    )
+      throw new Error("The session DAG runtime is not available for PR review.");
+    registration = currentRegistration;
+    stage = "settings";
+    const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
+    const [agentSettings, reviewSettings] = await Effect.runPromise(
+      Effect.all([
+        decodeAgentSettingsSnapshotEffect(settingsSnapshot),
+        decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
+      ]),
+    );
+    stage = "model-policy";
+    const policy = resolvePrReviewModelPolicy(
+      agentSettings,
+      ctx.modelRegistry.getAvailable(),
+      reviewSettings.roleModels ?? {},
+    );
+    stage = "range-selection";
+    const ranges = selectedRangeRefs(snapshot);
+    const guidance = (reviewSettings.reviewGuidance ?? []).map((guidancePath, index) => ({
+      kind: "review-guidance" as const,
+      id: `guidance-${index + 1}`,
+      path: guidancePath,
+    }));
+    stage = "deck";
+    deck = buildReviewDeck({
+      snapshot,
+      reviewGuidanceRefs: guidance,
+      sourceRangeRefs: ranges.sourceRangeRefs,
+      testRangeRefs: ranges.testRangeRefs,
+      omissions: ranges.omissions,
+    });
+    state = {
+      ...state,
+      deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
+      roleAssignments: Object.fromEntries(
+        Object.entries(policy.assignments).map(([role, assignment]) => [
+          role,
+          {
+            model: assignment.fqid,
+            provider: assignment.provider,
+            ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
+            pinned: assignment.pinned,
+          },
+        ]),
+      ),
+    };
+    assignments = Object.fromEntries(
       Object.entries(policy.assignments).map(([role, assignment]) => [
         role,
         {
           model: assignment.fqid,
-          provider: assignment.provider,
           ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
-          pinned: assignment.pinned,
         },
       ]),
-    ),
-  };
-  saveState(pi, state);
-  const assignments = Object.fromEntries(
-    Object.entries(policy.assignments).map(([role, assignment]) => [
-      role,
-      {
-        model: assignment.fqid,
-        ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
-      },
-    ]),
-  ) as any;
-  state = await runReviewDag({
-    pi,
-    ctx,
-    signal,
-    service: registration.service,
-    assignments,
-    deckPath: deck.path,
-    state,
-    save: (next) => saveState(pi, next),
-  });
+    );
+    saveState(pi, state);
+  } catch (cause) {
+    const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
+    state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
+    saveState(pi, state);
+    return reviewActionResult(state);
+  }
+
+  try {
+    state = await runReviewDag({
+      pi,
+      ctx,
+      signal,
+      service: registration.service,
+      assignments: assignments as any,
+      deckPath: deck.path,
+      state,
+      save: (next) => saveState(pi, next),
+    });
+  } catch {
+    return reviewActionResult(states.get(snapshot.id) ?? state);
+  }
   if (state.dag) {
     const updated = updateReviewDeckLaterRefs({
       snapshot,
@@ -397,17 +600,42 @@ async function startReview(
     };
     saveState(pi, state);
   }
-  return {
-    content: [txt(summarizeResult(state))],
-    details: {
-      reviewId: snapshot.id,
-      dagRunId: state.dag?.runId,
-      dagStatus: state.dag?.status,
-      verdict: state.result?.verdict,
-      findings: state.result?.findings ?? [],
-      rawResultReferences: state.dag?.rawResultReferences ?? [],
-    },
-  };
+  return reviewActionResult(state);
+}
+
+async function startReview(
+  pi: ExtensionAPI,
+  params: CreateReviewParams,
+  signal: AbortSignal | undefined,
+  ctx: ExtensionContext,
+  forceRerun = false,
+): Promise<ReviewActionResult> {
+  const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, signal);
+  if (!resolved.url)
+    return {
+      content: [txt(resolved.message ?? "Please provide a GitHub PR URL.")],
+      details: { status: "needs_url" },
+    };
+  const metadata = await resolveReviewMetadata(pi.exec.bind(pi), ctx.cwd, resolved.url, signal);
+  const parentSessionId = ctx.sessionManager.getSessionId();
+  const identityKey = reviewIdentityKey(parentSessionId, metadata);
+  if (!forceRerun) {
+    const existing = matchingReview(identityKey, parentSessionId);
+    if (existing) {
+      remember(existing);
+      return reviewActionResult(existing, true);
+    }
+    const active = createOperations.get(identityKey);
+    if (active) return active;
+  }
+  const operation = createReviewAttempt(pi, metadata, signal, ctx);
+  if (!forceRerun) createOperations.set(identityKey, operation);
+  try {
+    return await operation;
+  } finally {
+    if (!forceRerun && createOperations.get(identityKey) === operation)
+      createOperations.delete(identityKey);
+  }
 }
 
 async function getPullRequestContext(
@@ -469,19 +697,16 @@ async function executeReviewTool(
   try {
     return await executePrReview(pi, params, signal, ctx);
   } catch (cause) {
-    const state = latestState();
     const message = cause instanceof Error ? cause.message : String(cause);
     return {
-      content: [txt(`Review ${params.command} failed: ${message}`)],
+      content: [
+        txt(`Review ${params.command} failed before it created an owned review: ${message}`),
+      ],
       isError: true,
       details: {
         command: params.command,
         status: "failed" as const,
         error: message,
-        reviewId: state?.snapshot.id,
-        dagStatus: state?.dag?.status,
-        failedNodes: state?.dag?.failedNodes ?? [],
-        malformedNodes: state?.dag?.malformedNodes ?? [],
       },
     };
   }
@@ -495,6 +720,13 @@ function renderStatus(): string {
     `PR: ${s.snapshot.metadata.url}`,
     `Head: ${s.snapshot.metadata.headOid}`,
     `DAG: ${s.dag?.status ?? "not-started"}`,
+    s.preparation
+      ? `Preparation failure: ${s.preparation.stage}/${s.preparation.code} - ${s.preparation.message}`
+      : "",
+    s.preparation?.actual !== undefined && s.preparation.limit !== undefined
+      ? `Measured: ${s.preparation.actual}. Limit: ${s.preparation.limit}.`
+      : "",
+    s.preparation ? `Worktree cleaned: ${s.preparation.worktreeCleaned ? "yes" : "no"}` : "",
     `Plan: ${s.plan ? "submitted" : "pending"}`,
     s.dag?.failedNodes?.length ? `Failed nodes: ${s.dag.failedNodes.join(", ")}` : "",
     s.dag?.malformedNodes?.length ? `Malformed nodes: ${s.dag.malformedNodes.join(", ")}` : "",
@@ -845,29 +1077,40 @@ async function editPreface(
 function assertManagedPath(root: string, absolute: string): void {
   assertContainedResolved(root, absolute);
 }
-async function cleanup(pi: ExtensionAPI): Promise<string> {
-  const s = latestState();
-  if (!s || s.cleaned) return "Review cleanup complete.";
+function listReviews(): string {
+  const reviews = [...states.values()].sort((left, right) =>
+    right.snapshot.createdAt.localeCompare(left.snapshot.createdAt),
+  );
+  if (reviews.length === 0) return "No active PR reviews.";
+  return reviews
+    .map((state) => {
+      const status = state.preparation?.status ?? state.dag?.status ?? "prepared";
+      const active = state.snapshot.id === latestReviewId ? "*" : " ";
+      return `${active} ${state.snapshot.id} ${status} ${state.snapshot.metadata.url} ${state.snapshot.metadata.headOid}`;
+    })
+    .join("\n");
+}
+
+function openReview(reviewId: string): string {
+  const state = stateById(reviewId);
+  if (!state) return `Review not found: ${reviewId || "(missing review ID)"}.`;
+  latestReviewId = state.snapshot.id;
+  return renderStatus();
+}
+
+async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
+  const state = stateById(reviewId);
+  if (!state || state.cleaned) return "Review cleanup complete.";
+  const worktreeCleaned = await removeManagedWorktree(pi, state);
+  if (!worktreeCleaned) throw new Error("git worktree prune failed.");
   const root = join(getAgentDir(), "pr-review");
-  const repoDir = s.snapshot.cache?.repoDir;
-  const wt = s.snapshot.cache?.worktree ?? s.snapshot.worktree;
-  if (repoDir) {
-    assertManagedPath(root, repoDir);
-    assertManagedPath(root, wt);
-    const remove = await pi.exec("git", ["worktree", "remove", "--force", wt], {
-      cwd: repoDir,
-      timeout: 120000,
-    });
-    if (remove.code !== 0) throw new Error("git worktree remove failed.");
-    const prune = await pi.exec("git", ["worktree", "prune"], { cwd: repoDir, timeout: 120000 });
-    if (prune.code !== 0) throw new Error("git worktree prune failed.");
-  }
-  s.cleaned = true;
-  persistJson(statePath(s.snapshot.id), s);
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(s));
-  states.delete(s.snapshot.id);
-  if (latestReviewId === s.snapshot.id) latestReviewId = undefined;
-  return "Review cleanup complete.";
+  assertManagedPath(root, state.snapshot.artifactDir);
+  state.cleaned = true;
+  rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
+  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  states.delete(state.snapshot.id);
+  if (latestReviewId === state.snapshot.id) latestReviewId = [...states.keys()].at(-1);
+  return `Review cleanup complete: ${state.snapshot.id}.`;
 }
 
 const handlers: Partial<
@@ -888,6 +1131,8 @@ const handlers: Partial<
         ctx,
       )
     ).content[0]?.text ?? "No pull request context.",
+  list: () => listReviews(),
+  open: (_pi, rest) => openReview(rest[0] ?? ""),
   status: () => renderStatus(),
   findings: () => renderFindings(),
   select: (pi, rest) => selectFindings(pi, rest.join(" ")),
@@ -897,13 +1142,13 @@ const handlers: Partial<
     const s = latestState();
     if (!s) return "No active PR review.";
     return (
-      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx)).content[0]?.text ??
-      "Rerun started."
+      (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx, true)).content[0]
+        ?.text ?? "Rerun started."
     );
   },
   post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
   "draft-plan": (pi) => draftImplementationPlan(pi),
-  cleanup: (pi) => cleanup(pi),
+  cleanup: (pi, rest) => cleanup(pi, rest[0]),
 };
 async function command(
   pi: ExtensionAPI,
@@ -951,7 +1196,7 @@ export default function prReviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage PR reviews. Usage: /review create [url]|get [url]|status|findings|select|edit|preface|rerun|post|draft-plan|cleanup",
+      "Manage PR reviews. Usage: /review create [url]|get [url]|list|open <id>|status|findings|select|edit|preface|rerun|post|draft-plan|cleanup [id]",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {

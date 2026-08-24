@@ -60,6 +60,8 @@ export type PrReviewParams = Static<typeof PrReviewParamsSchema>;
 export const REVIEW_COMMANDS = [
   "create",
   "get",
+  "list",
+  "open",
   "status",
   "findings",
   "select",
@@ -278,6 +280,15 @@ export interface ReviewArtifactReference {
 }
 export interface ReviewState {
   snapshot: ReviewSnapshot;
+  preparation?: {
+    status: "failed";
+    stage: "snapshot" | "dag-service" | "settings" | "model-policy" | "range-selection" | "deck";
+    code: string;
+    message: string;
+    actual?: number;
+    limit?: number;
+    worktreeCleaned: boolean;
+  };
   deck?: { path: string; digest: string; bytes: number };
   roleAssignments?: Record<
     string,

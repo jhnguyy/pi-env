@@ -147,28 +147,17 @@ function removePathEffect(path: string): Effect.Effect<void> {
 function prepareSnapshotWorkflow(
   exec: Exec,
   cwd: string,
-  url: string,
+  resolvedMetadata: ReviewMetadata,
+  reviewId?: string,
 ): Effect.Effect<ReviewSnapshot, SnapshotError> {
-  const parsed = parsePrUrl(url);
+  const parsed = parsePrUrl(resolvedMetadata.url);
   const key = `${parsed.owner}/${parsed.repo}`;
   return snapshotSemaphore.withPermit(key)(
     Effect.gen(function* () {
+      const metadata = structuredClone(resolvedMetadata);
       const agentDir = getAgentDir();
       const repoDir = join(agentDir, "pr-review", "repos", parsed.owner, parsed.repo);
       yield* Effect.sync(() => mkdirSync(repoDir, { recursive: true }));
-      const metadataRaw = (yield* runEffect(
-        exec,
-        "gh",
-        [
-          "pr",
-          "view",
-          url,
-          "--json",
-          "url,title,body,baseRefName,baseRefOid,headRefName,headRefOid",
-        ],
-        { cwd },
-      )).stdout;
-      const metadata = parseGhJson(metadataRaw, parsed);
       if (!metadata.headOid) return yield* toSnapshotError("Could not resolve PR head commit.");
       if (!metadata.baseRef || !metadata.baseOid)
         return yield* toSnapshotError("Could not resolve PR base branch and commit.");
@@ -222,7 +211,7 @@ function prepareSnapshotWorkflow(
       )).stdout;
       metadata.changedFiles = parseNameStatusZ(manifestRaw);
       if (!metadata.changedFiles.length) metadata.changedFiles = parseChangedFilesFromDiff(diff);
-      const id = makeReviewId(metadata);
+      const id = reviewId ?? makeReviewId(metadata);
       const artifactDir = join(agentDir, "pr-review", "artifacts", id);
       const worktree = join(agentDir, "pr-review", "worktrees", id);
       const diffPath = join(artifactDir, "diff.patch");
@@ -264,12 +253,55 @@ function prepareSnapshotWorkflow(
   );
 }
 
-export function prepareSnapshotEffect(
+export async function resolveReviewMetadata(
   exec: Exec,
   cwd: string,
   url: string,
+  signal?: AbortSignal,
+): Promise<ReviewMetadata> {
+  const parsed = parsePrUrl(url);
+  const result = await run(
+    exec,
+    "gh",
+    ["pr", "view", url, "--json", "url,title,body,baseRefName,baseRefOid,headRefName,headRefOid"],
+    { cwd, signal },
+  );
+  return parseGhJson(result.stdout, parsed);
+}
+
+export function prepareSnapshotEffect(
+  exec: Exec,
+  cwd: string,
+  metadataOrUrl: ReviewMetadata | string,
 ): Effect.Effect<ReviewSnapshot, SnapshotError> {
-  return prepareSnapshotWorkflow(exec, cwd, url);
+  if (typeof metadataOrUrl !== "string") return prepareSnapshotWorkflow(exec, cwd, metadataOrUrl);
+  const parsed = parsePrUrl(metadataOrUrl);
+  return runEffect(
+    exec,
+    "gh",
+    [
+      "pr",
+      "view",
+      metadataOrUrl,
+      "--json",
+      "url,title,body,baseRefName,baseRefOid,headRefName,headRefOid",
+    ],
+    { cwd },
+  ).pipe(
+    Effect.map((result) => parseGhJson(result.stdout, parsed)),
+    Effect.flatMap((metadata) => prepareSnapshotWorkflow(exec, cwd, metadata)),
+  );
+}
+
+export async function prepareResolvedSnapshot(
+  exec: Exec,
+  cwd: string,
+  metadata: ReviewMetadata,
+  signal?: AbortSignal,
+  reviewId?: string,
+): Promise<ReviewSnapshot> {
+  const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId);
+  return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
 }
 
 export async function prepareSnapshot(
@@ -278,8 +310,8 @@ export async function prepareSnapshot(
   url: string,
   signal?: AbortSignal,
 ): Promise<ReviewSnapshot> {
-  const effect = prepareSnapshotEffect(exec, cwd, url);
-  return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
+  const metadata = await resolveReviewMetadata(exec, cwd, url, signal);
+  return prepareResolvedSnapshot(exec, cwd, metadata, signal);
 }
 
 export async function currentRemoteHead(

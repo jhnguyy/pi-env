@@ -8,7 +8,9 @@ The model-facing `pr_review` tool separates context retrieval from independent r
 
 Use `get` for existing pull request context or feedback work. The result includes the pull request description and GitHub feedback. Bounded pages report additional results or omissions. The shared total tool-output boundary applies without fixed limits on individual bodies.
 
-Use `create` for a new independent review. Each run uses a new child agent session with no parent conversation context. The `create` action does not post a GitHub review.
+Use `create` for a new independent review. Each run uses new child agent sessions with no parent conversation context. The `create` action does not post a GitHub review.
+
+Within one parent session, `create` is idempotent for the same pull request and pinned head. An identical call opens the existing review. Use the explicit rerun command to create another attempt.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
@@ -46,7 +48,9 @@ Extension-managed data lives below the pi agent directory:
 
 The preparation step records the base commit, head commit, diff hash, changed-file manifest, and pull request metadata. All later stages use the persisted diff. They must not replace it with a live diff.
 
-Repository cache operations use a per-repository lock. A review worktree remains available until explicit cleanup.
+The review deck stores one shared metadata reference, one shared pinned-diff reference, and one canonical file table. Compact file IDs connect selected ranges to the file table. The deck does not repeat shared artifact identity for each file.
+
+Repository cache operations use a per-repository lock. A successful review worktree remains available until explicit cleanup. If preparation fails before DAG submission, the extension removes the worktree and retains a bounded failed review record and artifacts for inspection.
 
 ## Fresh review agent
 
@@ -134,6 +138,8 @@ If a post result is uncertain, the extension searches existing review bodies for
 ## Command and tool surface
 
 The tool manager activates `pr_review` for pull request review and feedback requests. The `/review` command remains the human-facing interface for the managed review lifecycle.
+
+Use `/review list`, `/review open <review-id>`, and `/review cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
 
 ## Deferred UI
 

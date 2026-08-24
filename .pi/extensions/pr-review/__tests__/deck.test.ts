@@ -69,6 +69,53 @@ function makeSnapshot(overrides: Partial<ReviewSnapshot> = {}): ReviewSnapshot {
   };
 }
 
+function makeLargeSnapshot(): ReviewSnapshot {
+  const root = mkdtempSync(join(tmpdir(), "pi-pr-review-deck-large-"));
+  temps.push(root);
+  const artifactDir = join(root, "artifacts");
+  const worktree = join(root, "worktree");
+  const diffPath = join(artifactDir, "diff.patch");
+  mkdirSync(artifactDir, { recursive: true });
+  const changedFiles = Array.from({ length: 50 }, (_, index) => ({
+    path: `src/features/feature-${index.toString().padStart(2, "0")}.ts`,
+    added: 200 + index,
+    deleted: 120 + index,
+  }));
+  const chunk = "x".repeat(4207);
+  const parts: string[] = [];
+  for (const file of changedFiles) {
+    parts.push(
+      `diff --git a/${file.path} b/${file.path}`,
+      `--- a/${file.path}`,
+      `+++ b/${file.path}`,
+      `@@ -1,1 +1,321 @@`,
+      `+${chunk}`,
+    );
+  }
+  const diff = `${parts.join("\n")}PAD\n`;
+  writeFileSync(diffPath, diff);
+  expect(Buffer.byteLength(diff, "utf8")).toBe(218103);
+  return {
+    id: "snapshot-large",
+    artifactDir,
+    worktree,
+    diffPath,
+    diffHash: "diff-hash-large",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    metadata: {
+      owner: "acme",
+      repo: "widgets",
+      number: 70,
+      url: "https://github.com/acme/widgets/pull/70",
+      baseOid: "baseoid",
+      headOid: "headoid-large",
+      title: "Refactor feature set",
+      body: "Updates implementation and tests",
+      changedFiles,
+    },
+  };
+}
+
 describe("pr-review deck", () => {
   it("builds reproducibly apart from stable snapshot identity", () => {
     const a = makeSnapshot();
@@ -110,10 +157,7 @@ describe("pr-review deck", () => {
     expect(normalize(first.deck, a)).toEqual(normalize(second.deck, b));
     expect(first.deck.intent.inferred).toEqual(["bugfix", "security", "tests"]);
     expect(first.deck.risk.level).toBe("medium");
-    expect(first.deck.pinnedDiffRefs.map((ref) => ref.path)).toEqual([
-      "src/auth.ts",
-      "test/auth.test.ts",
-    ]);
+    expect(first.deck.files.map((file) => file.path)).toEqual(["src/auth.ts", "test/auth.test.ts"]);
     expect(statSync(first.path).mode & 0o777).toBe(0o600);
   });
 
@@ -129,6 +173,76 @@ describe("pr-review deck", () => {
     expect(raw).not.toContain("diff --git");
     expect(raw).not.toContain("@@ -");
     expect(raw).not.toContain("tokenCheck()");
+  });
+
+  it("normalizes shared metadata, diff, and file rows compactly", () => {
+    const snapshot = makeLargeSnapshot();
+    const built = buildReviewDeck({
+      snapshot,
+      sourceRangeRefs: snapshot.metadata.changedFiles
+        .filter((_file, index) => index % 2 === 0)
+        .map((file, index) => ({
+          kind: "source-range" as const,
+          id: `src-${index}`,
+          path: file.path,
+          startLine: 10,
+          endLine: 40,
+        })),
+      testRangeRefs: snapshot.metadata.changedFiles
+        .filter((_file, index) => index % 2 === 1)
+        .map((file, index) => ({
+          kind: "test-range" as const,
+          id: `test-${index}`,
+          path: file.path,
+          startLine: 3,
+          endLine: 15,
+        })),
+      reviewGuidanceRefs: [{ kind: "review-guidance", id: "g1", uri: "guide://1" }],
+      priorFindingRefs: [{ kind: "prior-finding", id: "p1", uri: "finding://1" }],
+      outOfDiffContractRefs: [{ kind: "out-of-diff-contract", id: "c1", uri: "contract://1" }],
+      omissions: [{ type: "explicit-omission", detail: "No logs." }],
+    });
+    expect(built.bytes).toBeLessThan(32768);
+    expect(new Set(built.deck.files.map((file) => file.path)).size).toBe(50);
+    expect(built.deck.files).toHaveLength(50);
+    expect(built.deck.files[0]?.id).toBe("0");
+    expect(built.deck.files[10]?.id).toBe("a");
+    expect(built.deck.files[0]?.source).toEqual({ startLine: 10, endLine: 40 });
+    expect(built.deck.files[1]?.test).toEqual({ startLine: 3, endLine: 15 });
+    expect(
+      built.deck.files.every((file) => Number(!!file.source) + Number(!!file.test) === 1),
+    ).toBe(true);
+    expect(built.deck.metadataArtifactRef.id).toBe("m");
+    expect(built.deck.pinnedDiffRef.id).toBe("d");
+    expect(built.deck.pinnedDiffRef.diffHash).toBe("diff-hash-large");
+    const raw = readFileSync(built.path, "utf8");
+    expect(raw.match(/"diffHash": "diff-hash-large"/g)?.length ?? 0).toBe(1);
+    expect(raw).not.toContain("x".repeat(80));
+    const updated = updateReviewDeckLaterRefs({
+      snapshot,
+      readingPlanRefs: [{ kind: "reading-plan", id: "rp1", uri: "plan://1", value: "small" }],
+      rawResultRefs: Array.from({ length: 6 }, (_, index) => ({
+        kind: "raw-result" as const,
+        id: `rr${index + 1}`,
+        uri: `result://${index + 1}`,
+      })),
+    });
+    expect(updated.bytes).toBeLessThan(32768);
+    expect(
+      readFileSync(updated.path, "utf8").match(/"diffHash": "diff-hash-large"/g)?.length ?? 0,
+    ).toBe(1);
+  });
+
+  it("rejects source/test refs for unchanged paths", () => {
+    const snapshot = makeSnapshot();
+    expect(() =>
+      buildReviewDeck({
+        snapshot,
+        sourceRangeRefs: [
+          { kind: "source-range", id: "bad", path: "src/other.ts", startLine: 1, endLine: 2 },
+        ],
+      }),
+    ).toThrow(/unchanged path/i);
   });
 
   it("fails closed on absolute bounds", () => {
