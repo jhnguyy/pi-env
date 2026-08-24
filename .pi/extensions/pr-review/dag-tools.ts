@@ -235,7 +235,11 @@ export function registerReviewDagTools(options: {
   const tools = [...base, deckTool, planTool, reviewerTool, referencesTool, synthesisTool];
   const registrations = registerAgentTools(
     options.pi,
-    tools.map((tool) => ({ tool, capabilities: [ToolCapability.Read] })),
+    tools.map((tool) => ({
+      tool,
+      capabilities: [ToolCapability.Read],
+      audience: "dag" as const,
+    })),
   );
   const names: ReviewGraphToolNames = {
     deck: deckName,

@@ -14,7 +14,7 @@ import {
   type DagSessionReconstruction,
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
-import { decodeAgentSettingsSnapshotEffect } from "../_shared/agent-settings";
+import { decodeGlobalAgentSettingsSnapshotEffect } from "../_shared/agent-settings";
 import { PiEvent } from "../_shared/agent-tools";
 import {
   listenForDagRuntimeService,
@@ -78,6 +78,7 @@ const reconcilingRunIds = new Set<string>();
 
 const states = new Map<string, ReviewState>();
 const createOperations = new Map<string, Promise<ReviewActionResult>>();
+const preparingReviewIds = new Set<string>();
 let latestReviewId: string | undefined;
 const postSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
 
@@ -204,11 +205,18 @@ function failedReconstructionState(current: ReviewState, cause: unknown): Review
 function isCurrentReconciliation(
   registration: DagRuntimeServiceRegistration,
   ctx: ExtensionContext,
+  reviewId: string,
+  runId: string,
+  expectedStateHash: string,
 ): boolean {
+  const current = states.get(reviewId);
   return (
     activeContext === ctx &&
     dagRegistration?.registrationId === registration.registrationId &&
-    dagRegistration.sessionGeneration === registration.sessionGeneration
+    dagRegistration.sessionGeneration === registration.sessionGeneration &&
+    current?.dag?.runId === runId &&
+    current.dag.status === "running" &&
+    sha256(JSON.stringify(current)) === expectedStateHash
   );
 }
 async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
@@ -222,6 +230,7 @@ async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionConte
     )
       continue;
     reconcilingRunIds.add(current.dag.runId);
+    const expectedStateHash = sha256(JSON.stringify(current));
     let projected = current;
     try {
       const reconstruction = await Effect.runPromise(
@@ -234,9 +243,26 @@ async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionConte
         state: projected,
         reconstruction,
       });
-      if (isCurrentReconciliation(registration, ctx)) saveState(pi, finalized);
+      if (
+        isCurrentReconciliation(
+          registration,
+          ctx,
+          current.snapshot.id,
+          current.dag.runId,
+          expectedStateHash,
+        )
+      )
+        saveState(pi, finalized);
     } catch (cause) {
-      if (isCurrentReconciliation(registration, ctx))
+      if (
+        isCurrentReconciliation(
+          registration,
+          ctx,
+          current.snapshot.id,
+          current.dag.runId,
+          expectedStateHash,
+        )
+      )
         saveState(pi, failedReconstructionState(projected, cause));
     } finally {
       reconcilingRunIds.delete(current.dag.runId);
@@ -250,6 +276,7 @@ export function clearInMemoryStateForTests(): void {
   activeContext = undefined;
   reconcilingRunIds.clear();
   createOperations.clear();
+  preparingReviewIds.clear();
 }
 function summarizeResult(s: ReviewState): string {
   const findings = s.result?.findings ?? [];
@@ -411,6 +438,36 @@ async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Prom
   return prune.code === 0;
 }
 
+async function reconcileInterruptedPreparations(pi: ExtensionAPI): Promise<void> {
+  for (const state of [...states.values()]) {
+    const reviewId = state.snapshot.id;
+    if (
+      state.dag ||
+      state.preparation ||
+      state.result ||
+      state.child ||
+      preparingReviewIds.has(reviewId)
+    )
+      continue;
+    preparingReviewIds.add(reviewId);
+    try {
+      const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
+      saveState(pi, {
+        ...state,
+        preparation: {
+          status: "failed",
+          stage: "process-loss",
+          code: "preparation_interrupted",
+          message: "Review preparation was interrupted before DAG submission.",
+          worktreeCleaned,
+        },
+      });
+    } finally {
+      preparingReviewIds.delete(reviewId);
+    }
+  }
+}
+
 function preparationFailure(
   stage: PreparationStage,
   cause: unknown,
@@ -443,6 +500,7 @@ async function createReviewAttempt(
   ctx: ExtensionContext,
 ): Promise<ReviewActionResult> {
   const reviewId = makeReviewId(metadata);
+  preparingReviewIds.add(reviewId);
   const agentDir = getAgentDir();
   let state: ReviewState = {
     snapshot: {
@@ -477,6 +535,7 @@ async function createReviewAttempt(
       ...state,
       preparation: preparationFailure("snapshot", cause, worktreeCleaned),
     };
+    preparingReviewIds.delete(reviewId);
     saveState(pi, state);
     return reviewActionResult(state);
   }
@@ -497,7 +556,7 @@ async function createReviewAttempt(
     const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
     const [agentSettings, reviewSettings] = await Effect.runPromise(
       Effect.all([
-        decodeAgentSettingsSnapshotEffect(settingsSnapshot),
+        decodeGlobalAgentSettingsSnapshotEffect(settingsSnapshot),
         decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
       ]),
     );
@@ -550,10 +609,12 @@ async function createReviewAttempt(
   } catch (cause) {
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
+    preparingReviewIds.delete(reviewId);
     saveState(pi, state);
     return reviewActionResult(state);
   }
 
+  preparingReviewIds.delete(reviewId);
   try {
     state = await runReviewDag({
       pi,
@@ -565,39 +626,60 @@ async function createReviewAttempt(
       state,
       save: (next) => saveState(pi, next),
     });
-  } catch {
-    return reviewActionResult(states.get(snapshot.id) ?? state);
+  } catch (cause) {
+    state = states.get(snapshot.id) ?? state;
+    if (state.dag?.submitted === false) {
+      const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
+      state = {
+        ...state,
+        preparation: preparationFailure("dag-submit", cause, worktreeCleaned),
+      };
+      saveState(pi, state);
+    }
+    return reviewActionResult(state);
   }
-  if (state.dag) {
-    const updated = updateReviewDeckLaterRefs({
-      snapshot,
-      readingPlanRefs: state.dag.readingPlanReference
-        ? [
-            {
-              kind: "reading-plan",
-              id: "reading-plan",
-              uri: state.dag.readingPlanReference.path,
-              digest: state.dag.readingPlanReference.digest,
-              bytes: state.dag.readingPlanReference.bytes,
-              producerNodeId: state.dag.readingPlanReference.producerNodeId,
-              outputName: state.dag.readingPlanReference.outputName,
-            },
-          ]
-        : [],
-      rawResultRefs: state.dag.rawResultReferences.map((reference, index) => ({
-        kind: "raw-result",
-        id: `raw-result-${index + 1}`,
-        uri: reference.path,
-        digest: reference.digest,
-        bytes: reference.bytes,
-        producerNodeId: reference.producerNodeId,
-        outputName: reference.outputName,
-      })),
-    });
-    state = {
-      ...state,
-      deck: { path: updated.path, digest: updated.digest, bytes: updated.bytes },
-    };
+  const terminalDag = state.dag;
+  if (terminalDag) {
+    try {
+      const updated = updateReviewDeckLaterRefs({
+        snapshot,
+        readingPlanRefs: terminalDag.readingPlanReference
+          ? [
+              {
+                kind: "reading-plan",
+                id: "reading-plan",
+                uri: terminalDag.readingPlanReference.path,
+                digest: terminalDag.readingPlanReference.digest,
+                bytes: terminalDag.readingPlanReference.bytes,
+                producerNodeId: terminalDag.readingPlanReference.producerNodeId,
+                outputName: terminalDag.readingPlanReference.outputName,
+              },
+            ]
+          : [],
+        rawResultRefs: terminalDag.rawResultReferences.map((reference, index) => ({
+          kind: "raw-result",
+          id: `raw-result-${index + 1}`,
+          uri: reference.path,
+          digest: reference.digest,
+          bytes: reference.bytes,
+          producerNodeId: reference.producerNodeId,
+          outputName: reference.outputName,
+        })),
+      });
+      state = {
+        ...state,
+        deck: { path: updated.path, digest: updated.digest, bytes: updated.bytes },
+      };
+    } catch (cause) {
+      state = {
+        ...state,
+        dag: {
+          ...terminalDag,
+          status: "degraded",
+          error: `Review result references were not added to the deck: ${cause instanceof Error ? cause.message : String(cause)}`,
+        },
+      };
+    }
     saveState(pi, state);
   }
   return reviewActionResult(state);
@@ -963,11 +1045,15 @@ function prefacePreview(s: ReviewState): string {
 async function postReviewCritical(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
+  reviewId: string,
   event: ReviewEventValue,
+  expectedContentHash: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const s = latestState();
-  if (!s) return "No active PR review.";
+  const s = states.get(reviewId);
+  if (!s) return `Review not found: ${reviewId}.`;
+  if (contentHashFor(s, event) !== expectedContentHash)
+    return "The review changed while posting was queued. Confirm the updated review again.";
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
   if (blocked) return blocked;
   const contentHash = contentHashFor(s, event);
@@ -1016,7 +1102,18 @@ export async function postReview(
       postSemaphore,
       key,
       1,
-    )(Effect.tryPromise((effectSignal) => postReviewCritical(pi, ctx, event, effectSignal))),
+    )(
+      Effect.tryPromise((effectSignal) =>
+        postReviewCritical(
+          pi,
+          ctx,
+          keyState.snapshot.id,
+          event,
+          contentHashFor(keyState, event),
+          effectSignal,
+        ),
+      ),
+    ),
     { signal },
   );
 }
@@ -1202,11 +1299,13 @@ export default function prReviewExtension(pi: ExtensionAPI) {
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
     activeContext = ctx;
     restore(ctx);
+    void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
   });
   pi.on("session_tree" as any, (_event: unknown, ctx: ExtensionContext) => {
     activeContext = ctx;
     restore(ctx);
+    void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
   });
 }

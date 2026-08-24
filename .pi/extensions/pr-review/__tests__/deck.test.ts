@@ -175,6 +175,15 @@ describe("pr-review deck", () => {
     expect(raw).not.toContain("tokenCheck()");
   });
 
+  it("does not reject patch-like text in untrusted reference metadata", () => {
+    const snapshot = makeSnapshot();
+    snapshot.metadata.title = "Handle diff --git text safely";
+    snapshot.metadata.body = "Document @@ - markers without embedding a patch.";
+    const built = buildReviewDeck({ snapshot });
+    expect(built.deck.intent.statement).toBe("Handle diff --git text safely");
+    expect(readFileSync(built.path, "utf8")).not.toContain("tokenCheck()");
+  });
+
   it("normalizes shared metadata, diff, and file rows compactly", () => {
     const snapshot = makeLargeSnapshot();
     const built = buildReviewDeck({
@@ -261,7 +270,7 @@ describe("pr-review deck", () => {
           { kind: "review-guidance", id: "oversized", note: "x".repeat(40_000) },
         ],
       }),
-    ).toThrow(/absolute byte ceiling/i);
+    ).toThrow(/reserved byte limit/i);
   });
 
   it("updates only later reading-plan/raw-result slots", () => {

@@ -301,7 +301,15 @@ export interface ReviewState {
   snapshot: ReviewSnapshot;
   preparation?: {
     status: "failed";
-    stage: "snapshot" | "dag-service" | "settings" | "model-policy" | "range-selection" | "deck";
+    stage:
+      | "snapshot"
+      | "dag-service"
+      | "settings"
+      | "model-policy"
+      | "range-selection"
+      | "deck"
+      | "dag-submit"
+      | "process-loss";
     code: string;
     message: string;
     actual?: number;
@@ -316,6 +324,7 @@ export interface ReviewState {
   dag?: {
     runId: string;
     startedAt?: string;
+    submitted?: boolean;
     status: "running" | "succeeded" | "degraded" | "failed" | "cancelled" | "interrupted";
     rawResultReferences: ReviewArtifactReference[];
     readingPlanReference?: ReviewArtifactReference;

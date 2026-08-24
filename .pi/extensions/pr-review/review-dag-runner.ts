@@ -57,6 +57,11 @@ function artifactRoot(ctx: ExtensionContext): string {
     ctx.sessionManager.getSessionId(),
   );
 }
+function nodeSucceeded(reconstruction: DagSessionReconstruction, nodeId: string): boolean {
+  return reconstruction.state.nodes.some(
+    (node) => node.nodeId === nodeId && node.status === DagNodeStatus.Succeeded,
+  );
+}
 async function outputForNode(
   root: string,
   reconstruction: DagSessionReconstruction,
@@ -68,6 +73,29 @@ async function outputForNode(
   if (outputs.length !== 1) throw new Error(`DAG node ${nodeId} did not publish one output.`);
   return readVerifiedReviewArtifact(root, outputs[0]);
 }
+async function admittedOutputForNode(
+  root: string,
+  reconstruction: DagSessionReconstruction,
+  nodeId: string,
+): Promise<NodeOutput | undefined> {
+  try {
+    return await outputForNode(root, reconstruction, nodeId);
+  } catch {
+    return undefined;
+  }
+}
+function findingKey(finding: FindingInput): string {
+  return JSON.stringify([
+    finding.severity,
+    finding.impact,
+    finding.file,
+    finding.side,
+    finding.line,
+    finding.problem,
+    finding.consequence,
+    finding.suggestedFix,
+  ]);
+}
 function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): ReviewResult {
   const grouped = new Map<
     string,
@@ -75,7 +103,7 @@ function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): Re
   >();
   for (const output of outputs) {
     for (const finding of output.findings) {
-      const key = JSON.stringify(finding);
+      const key = findingKey(finding);
       const existing = grouped.get(key);
       if (existing) existing.sources.add(output.role);
       else grouped.set(key, { finding, sources: new Set([output.role]) });
@@ -102,18 +130,7 @@ function findingInputFromSynthesis(finding: SynthesisReview["findings"][number])
   return input;
 }
 function sameFinding(left: FindingInput, right: FindingInput): boolean {
-  const key = (finding: FindingInput) =>
-    JSON.stringify([
-      finding.severity,
-      finding.impact,
-      finding.file,
-      finding.side,
-      finding.line,
-      finding.problem,
-      finding.consequence,
-      finding.suggestedFix,
-    ]);
-  return key(left) === key(right);
+  return findingKey(left) === findingKey(right);
 }
 function validSynthesisSources(
   synthesis: SynthesisReview,
@@ -175,14 +192,18 @@ async function collectOutputs(
   state: ReviewState,
 ): Promise<CollectedOutputs> {
   const malformedNodes: string[] = [];
-  const planOutput = await outputForNode(root, reconstruction, ReadingPlanNode.nodeId);
+  const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
   const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
-  if (planOutput && !plan) malformedNodes.push(ReadingPlanNode.nodeId);
+  if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
+    malformedNodes.push(ReadingPlanNode.nodeId);
   const reviewers: ReviewerOutput[] = [];
   const rawResultReferences: DagTextArtifactReference[] = [];
   for (const node of ReviewerNodes) {
-    const output = await outputForNode(root, reconstruction, node.nodeId);
-    if (!output) continue;
+    const output = await admittedOutputForNode(root, reconstruction, node.nodeId);
+    if (!output) {
+      if (nodeSucceeded(reconstruction, node.nodeId)) malformedNodes.push(node.nodeId);
+      continue;
+    }
     rawResultReferences.push(output.reference);
     const reviewer = decodeReviewer(output.text, node.role);
     if (reviewer) reviewers.push(reviewer);
@@ -247,9 +268,11 @@ async function awaitSubmittedGraph(
   service: ActiveDagRuntimeService,
   graph: ValidatedDagDefinition<unknown>,
   workspaceRoot: string,
+  onSubmitted: () => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
+  onSubmitted();
   try {
     await Effect.runPromise(handle.await, { signal });
   } catch (cause) {
@@ -276,6 +299,7 @@ function preserveAllFailedOutputs(
     dag: {
       runId,
       startedAt: state.dag?.startedAt,
+      submitted: state.dag?.submitted,
       status: noReviewerStatus(reconstruction),
       rawResultReferences: collected.rawResultReferences,
       ...(collected.readingPlanReference
@@ -306,11 +330,13 @@ async function finalizeReview(input: {
       collected,
       failedNodes,
     );
-  const synthesisOutput = await outputForNode(
+  const synthesisOutput = await admittedOutputForNode(
     input.root,
     input.reconstruction,
     SynthesisNode.nodeId,
   );
+  if (nodeSucceeded(input.reconstruction, SynthesisNode.nodeId) && !synthesisOutput)
+    collected.malformedNodes.push(SynthesisNode.nodeId);
   const diff = await import("node:fs/promises").then((fs) =>
     fs.readFile(input.state.snapshot.diffPath, "utf8"),
   );
@@ -353,6 +379,7 @@ async function finalizeReview(input: {
     dag: {
       runId: input.runId,
       startedAt: input.state.dag?.startedAt,
+      submitted: input.state.dag?.submitted,
       status: outcomeStatus(input.reconstruction, degraded),
       rawResultReferences: collected.rawResultReferences,
       ...(collected.readingPlanReference
@@ -463,12 +490,22 @@ export async function runReviewDag(options: {
       runId,
       startedAt: new Date(startedAt).toISOString(),
       status: "running",
+      submitted: false,
       rawResultReferences: [],
     },
   };
   options.save(state);
   try {
-    await awaitSubmittedGraph(options.service, graph, state.snapshot.worktree, options.signal);
+    await awaitSubmittedGraph(
+      options.service,
+      graph,
+      state.snapshot.worktree,
+      () => {
+        state = { ...state, dag: { ...state.dag!, submitted: true } };
+        options.save(state);
+      },
+      options.signal,
+    );
     const reconstruction = await Effect.runPromise(options.service.reconstruct(runId));
     state = await finalizeReview({
       root,

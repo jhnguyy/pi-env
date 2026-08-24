@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -444,6 +444,39 @@ describe("pr-review extension surface", () => {
     expect(notes.at(-1)).toContain("Selected: 0");
   });
 
+  it("marks an unfinished pre-DAG review interrupted and removes its worktree on restart", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("pre-dag", []),
+      plan: undefined,
+      result: undefined,
+    };
+    mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(state.snapshot.artifactDir, { recursive: true });
+    const pi = extensionPi();
+    pi.exec = async (_cmd: string, args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "remove")
+        rmSync(args[3], { recursive: true, force: true });
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    pi.handlers.session_start({}, {
+      sessionManager: {
+        getBranch: () => [custom(state)],
+        getSessionId: () => "parent",
+      },
+    } as any);
+    await vi.waitFor(() =>
+      expect(pi.appended.at(-1)?.[1].state.preparation).toMatchObject({
+        status: "failed",
+        stage: "process-loss",
+        code: "preparation_interrupted",
+        worktreeCleaned: true,
+      }),
+    );
+    expect(existsSync(state.snapshot.cache!.worktree)).toBe(false);
+  });
+
   it("reconstructs a running review as interrupted after process loss without a live handle", async () => {
     const root = tempRoot();
     const state = {
@@ -554,6 +587,8 @@ describe("pr-review extension surface", () => {
     const calls: any[] = [];
     pi.exec = async (cmd: string, args: string[], opts: any) => {
       calls.push({ cmd, args, cwd: opts.cwd });
+      if (args[0] === "worktree" && args[1] === "remove")
+        rmSync(args[3], { recursive: true, force: true });
       return { code: 0, stdout: "", stderr: "" };
     };
     await pi.command("cleanup", { ui: { notify() {} } } as any);
@@ -561,6 +596,8 @@ describe("pr-review extension surface", () => {
     expect(calls.filter((c) => c.args[0] === "worktree" && c.args[1] === "remove")).toHaveLength(1);
     expect(pi.appended.at(-1)?.[1].state.cleaned).toBe(true);
     expect(pi.appended.at(-1)?.[1].state.snapshot.cache.repoDir).toContain(root);
+    expect(existsSync(state.snapshot.cache!.worktree)).toBe(false);
+    expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
   it("creates an approval-required draft plan from selected findings", async () => {

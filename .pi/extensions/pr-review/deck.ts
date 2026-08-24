@@ -6,6 +6,8 @@ import type { ReviewSnapshot } from "./schema";
 const DECK_VERSION = 1;
 const DECK_FILE_NAME = "review-deck.json";
 const MAX_DECK_BYTES = 32_768;
+const MIN_LATER_REFS_RESERVE_BYTES = 8_192;
+const MAX_INITIAL_DECK_BYTES = MAX_DECK_BYTES - MIN_LATER_REFS_RESERVE_BYTES;
 const MAX_TITLE_BODY_REF_BYTES = 512;
 const MAX_MANIFEST_PATHS = 512;
 const MAX_GUIDANCE_REFS = 128;
@@ -299,13 +301,6 @@ function atomicWriteJson(path: string, value: unknown): { bytes: number; digest:
   }
 }
 
-function assertNoEmbeddedRawContent(deck: ReviewDeck): void {
-  const encoded = JSON.stringify(deck);
-  if (encoded.includes("diff --git ") || encoded.includes("@@ -") || encoded.includes("+++ ")) {
-    throw new Error("Deck must not embed raw diff content.");
-  }
-}
-
 function deckPath(snapshot: ReviewSnapshot): string {
   return join(snapshot.artifactDir, DECK_FILE_NAME);
 }
@@ -459,15 +454,14 @@ export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
     limitFailures: failures,
     laterRefs: { readingPlanRefs: [], rawResultRefs: [] },
   };
-  assertNoEmbeddedRawContent(deck);
   const bytes = jsonBytes(deck);
-  if (bytes > MAX_DECK_BYTES) {
+  if (bytes > MAX_INITIAL_DECK_BYTES) {
     const failure: DeckLimitFailure = {
       code: "deck_byte_limit_exceeded",
       field: "deck",
       actual: bytes,
-      limit: MAX_DECK_BYTES,
-      message: "Review deck exceeds absolute byte ceiling.",
+      limit: MAX_INITIAL_DECK_BYTES,
+      message: "Initial review deck exceeds its reserved byte limit.",
     };
     failures.push(failure);
     throw new ReviewDeckLimitError(failure);
@@ -504,7 +498,6 @@ export function updateReviewDeckLaterRefs(input: UpdateReviewDeckLaterRefsInput)
       rawResultRefs,
     },
   };
-  assertNoEmbeddedRawContent(next);
   const bytes = jsonBytes(next);
   if (bytes > MAX_DECK_BYTES)
     throw new ReviewDeckLimitError({

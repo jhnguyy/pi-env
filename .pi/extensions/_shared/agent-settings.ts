@@ -55,6 +55,22 @@ export function readOptionalAgentSettings(
   return Effect.runSync(readOptionalAgentSettingsEffect(env, cwd));
 }
 
+export function decodeGlobalAgentSettingsSnapshotEffect(
+  snapshot: SettingsSnapshot,
+): Effect.Effect<AgentSettings, SettingsDecodeError> {
+  return Schema.decodeUnknownEffect(AgentSettingsSchema)(snapshot.global).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SettingsDecodeError({
+          source: SettingsSource.Global,
+          path: snapshot.paths.global,
+          paths: snapshot.paths,
+          cause,
+        }),
+    ),
+  );
+}
+
 export function decodeAgentSettingsSnapshotEffect(
   snapshot: SettingsSnapshot,
 ): Effect.Effect<AgentSettings, SettingsDecodeError> {

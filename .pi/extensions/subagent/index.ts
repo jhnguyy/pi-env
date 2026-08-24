@@ -252,9 +252,12 @@ export default function (pi: ExtensionAPI) {
 
     const { agents } = discoverAgents(ctx.cwd, "user");
 
-    const extToolNames = [...registeredExtTools.keys()];
+    const publicExtTools = [...registeredExtTools].filter(
+      ([, registration]) => registration.audience !== "dag",
+    );
+    const extToolNames = publicExtTools.map(([name]) => name);
     const extToolCaps = new Map(
-      [...registeredExtTools].map(([name, registration]) => [name, registration.capabilities]),
+      publicExtTools.map(([name, registration]) => [name, registration.capabilities]),
     );
     const description = buildDynamicDescription(
       enabledModelIds,

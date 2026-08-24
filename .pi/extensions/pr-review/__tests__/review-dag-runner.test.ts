@@ -235,7 +235,7 @@ describe("DAG-backed PR review runner", () => {
       pi: piEvents(),
       ctx: f.ctx,
       service: serviceFor(f.artifactRoot, {
-        "review-maintainability": "not-json",
+        "review-maintainability": reviewer("security"),
         "review-security": "failed",
       }),
       assignments,
@@ -286,6 +286,45 @@ describe("DAG-backed PR review runner", () => {
     expect(result.result?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness"],
       agreement: 1,
+    });
+  });
+
+  it("deduplicates fallback findings by fields instead of JSON property order", async () => {
+    const f = fixture();
+    const reordered = JSON.stringify({
+      role: "intent",
+      verdict: "intent reviewed",
+      findings: [
+        {
+          suggestedFix: "Use the required value.",
+          consequence: "Callers receive the wrong value.",
+          problem: "The value is wrong.",
+          line: 1,
+          side: "RIGHT",
+          file: "a.ts",
+          impact: "high",
+          severity: "serious",
+        },
+      ],
+    });
+    const invented = JSON.parse(synthesis());
+    invented.findings[0].problem = "Force fallback.";
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service: serviceFor(f.artifactRoot, {
+        "review-intent": reordered,
+        synthesis: JSON.stringify(invented),
+      }),
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.result?.findings).toHaveLength(1);
+    expect(result.result?.findings[0]).toMatchObject({
+      sourceReviewers: ["correctness", "intent"],
+      agreement: 2,
     });
   });
 

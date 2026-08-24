@@ -115,6 +115,29 @@ describe("DAG shared subagent runtime adapter", () => {
     });
   });
 
+  it("materializes an explicitly assigned DAG-only extension tool", async () => {
+    const cwd = root();
+    const reviewTool = {
+      tool: {
+        name: "review_private",
+        description: "private review tool",
+        parameters: {},
+        execute: async () => ({ content: [] }),
+      },
+      capabilities: [ToolCapability.Read],
+      audience: "dag" as const,
+    } as any;
+    const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
+    await expect(
+      Effect.runPromise(
+        adapter(ctx, new Map([["review_private", reviewTool]])).run(
+          request(cwd, { tools: ["review_private"] }),
+        ),
+      ),
+    ).resolves.toBe("complete result");
+    expect(shared.calls.at(-1)?.run.toolNames).toEqual(["review_private"]);
+  });
+
   it("rejects unknown tools, access mismatches, and unavailable models before execution", async () => {
     const cwd = root();
     const readTool = {

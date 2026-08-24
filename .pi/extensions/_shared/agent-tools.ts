@@ -38,6 +38,7 @@ export interface AgentToolFactoryContext {
 export interface ExtToolRegistration {
   tool: AgentTool<any, any>;
   capabilities: ToolCapability[];
+  audience?: "public" | "dag";
   createTool?: (context: AgentToolFactoryContext) => AgentTool<any, any>;
   sessionGeneration?: string;
 }

@@ -104,6 +104,23 @@ describe("ToolRegistry active filtering", () => {
     expect(execute.mock.calls[0]).toHaveLength(4);
   });
 
+  it("does not expose DAG-only agent tools through PTC", async () => {
+    const harness = createHarness(["review_private"]);
+    const registry = new ToolRegistry(harness.api);
+    registerAgentTools(harness.createApi(), {
+      tool: {
+        name: "review_private",
+        label: "private review",
+        description: "private review",
+        parameters: Type.Object({}),
+        execute: async () => ({ content: [{ type: "text", text: "private" }], details: {} }),
+      },
+      capabilities: [ToolCapability.Read],
+      audience: "dag",
+    });
+    await expect(registry.dispatch("review_private", {}, process.cwd(), undefined)).rejects.toThrow("not available");
+  });
+
   it("dispatches real search_tools from a distinct extension API without agent-channel emission", async () => {
     const harness = createHarness(["search_tools"]);
     harness.tools.push(
