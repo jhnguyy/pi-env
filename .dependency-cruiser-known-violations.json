@@ -1,28 +1,6 @@
 [
   {
     "type": "dependency",
-    "from": ".pi/extensions/review/index.ts",
-    "to": ".pi/extensions/subagent/control.ts",
-    "unresolvedTo": "../subagent/control",
-    "dependencyTypes": ["local", "import"],
-    "rule": {
-      "severity": "error",
-      "name": "review-no-cross-extension-imports"
-    }
-  },
-  {
-    "type": "dependency",
-    "from": ".pi/extensions/review/index.ts",
-    "to": ".pi/extensions/subagent/execute.ts",
-    "unresolvedTo": "../subagent/execute",
-    "dependencyTypes": ["local", "import"],
-    "rule": {
-      "severity": "error",
-      "name": "review-no-cross-extension-imports"
-    }
-  },
-  {
-    "type": "dependency",
     "from": ".pi/extensions/skill-builder/index.ts",
     "to": ".pi/extensions/subagent/control.ts",
     "unresolvedTo": "../subagent/control",

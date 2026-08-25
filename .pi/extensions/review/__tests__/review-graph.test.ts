@@ -86,6 +86,9 @@ describe("fixed pull request review graph", () => {
       const payload = subagentPayload(reviewer);
       expect(payload.context.outputs).toEqual(["reading_plan", ...ReviewEvidenceOutputs]);
       expect(payload.maxTurns).toBe(1);
+      expect(payload.instructions).toContain(`\"role\":\"${reviewer.id.replace("review-", "")}\"`);
+      expect(payload.instructions).toContain("evidenceDigest");
+      expect(payload.instructions).toContain("low|medium|serious|blocking");
     }
     const synthesis = compiled.nodes.find((node) => node.id === "synthesis")!;
     expect(synthesis.dependencies).toHaveLength(ReviewFanoutNodes.length);

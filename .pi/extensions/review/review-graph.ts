@@ -92,7 +92,9 @@ function roleInstructions(role: ReviewRole): string {
     focus,
     "Return goal-relative, actionable findings only.",
     "Set evidenceDigest to the exact digest in evidence_coverage.",
-    "Return only one JSON object that matches the reviewer output schema. Do not call tools.",
+    `Return exactly one JSON object with this shape: {"role":"${role}","evidenceDigest":"<64 lowercase hex characters from evidence_coverage>","verdict":"<non-empty summary>","findings":[{"severity":"low|medium|serious|blocking","impact":"low|medium|high","file":"<optional changed path>","side":"<optional LEFT or RIGHT when line is present>","line":1,"problem":"<non-empty text>","consequence":"<non-empty text>","suggestedFix":"<non-empty text>"}]}.`,
+    "Omit file, side, and line together for an unanchored finding. If file is present without an anchor, omit side and line together.",
+    "Do not add fields. Do not wrap the JSON in Markdown. Do not call tools.",
   ].join("\n");
 }
 
