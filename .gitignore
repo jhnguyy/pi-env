@@ -16,6 +16,7 @@ models.json
 permissions.json
 permissions-audit.jsonl
 sessions/
+dag-artifacts/
 .pi/handoffs/
 
 # Machine/editor noise
