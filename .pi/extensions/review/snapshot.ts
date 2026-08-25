@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Exit, PartitionedSemaphore } from "effect";
@@ -157,7 +157,10 @@ function prepareSnapshotWorkflow(
       const metadata = structuredClone(resolvedMetadata);
       const agentDir = getAgentDir();
       const repoDir = join(agentDir, "pr-review", "repos", parsed.owner, parsed.repo);
-      yield* Effect.sync(() => mkdirSync(repoDir, { recursive: true }));
+      yield* Effect.sync(() => {
+        mkdirSync(repoDir, { recursive: true, mode: 0o700 });
+        chmodSync(repoDir, 0o700);
+      });
       if (!metadata.headOid) return yield* toSnapshotError("Could not resolve PR head commit.");
       if (!metadata.baseRef || !metadata.baseOid)
         return yield* toSnapshotError("Could not resolve PR base branch and commit.");
@@ -227,12 +230,13 @@ function prepareSnapshotWorkflow(
       const worktree = join(agentDir, "pr-review", "worktrees", id);
       const diffPath = join(artifactDir, "diff.patch");
       const snapshotEffect = Effect.gen(function* () {
-        yield* Effect.sync(() => mkdirSync(artifactDir, { recursive: true }));
-        yield* Effect.sync(() => writeFileSync(diffPath, diff));
+        yield* Effect.sync(() => mkdirSync(artifactDir, { recursive: true, mode: 0o700 }));
+        yield* Effect.sync(() => writeFileSync(diffPath, diff, { mode: 0o600 }));
         yield* runEffect(exec, "git", ["worktree", "add", "--detach", worktree, metadata.headOid], {
           cwd: repoDir,
           timeout: 180000,
         });
+        yield* Effect.sync(() => chmodSync(worktree, 0o700));
         const snapshot: ReviewSnapshot = {
           id,
           metadata,

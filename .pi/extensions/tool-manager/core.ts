@@ -48,6 +48,7 @@ export const GROUP_HINTS: Record<string, RegExp[]> = {
   sessions: [/\bsessions?\b/, /\bconversation history\b/],
   review: [
     /\breview\b.*(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+)/,
+    /(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+).*\breview\b/,
     /(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+).*\b(?:feedback|comments?|threads?)\b/,
     /\b(?:feedback|comments?|threads?)\b.*(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+)/,
   ],

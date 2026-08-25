@@ -30,8 +30,6 @@ import {
 } from "./evidence-resolver";
 import {
   PlanSchema,
-  ReviewerOutputSchema,
-  SynthesisReviewSchema,
   type Finding,
   type FindingInput,
   type ReviewerOutput,
@@ -39,6 +37,8 @@ import {
   type ReviewResult,
   type ReviewState,
   type SynthesisReview,
+  validateReviewerOutputShape,
+  validateSynthesisReviewShape,
 } from "./schema";
 import { findingKey, validSynthesisSources } from "./synthesis-provenance";
 
@@ -180,7 +180,7 @@ function decodeReviewer(
 ): ReviewerOutput | undefined {
   try {
     const decoded = parseJson(text);
-    return Check(ReviewerOutputSchema, decoded) &&
+    return validateReviewerOutputShape(decoded) &&
       decoded.role === expectedRole &&
       decoded.evidenceDigest === evidenceDigest
       ? decoded
@@ -293,7 +293,7 @@ function decodeSynthesis(
 ): ReviewResult | undefined {
   try {
     const decoded = parseJson(text);
-    if (!Check(SynthesisReviewSchema, decoded) || !validSynthesisSources(decoded, reviewers))
+    if (!validateSynthesisReviewShape(decoded) || !validSynthesisSources(decoded, reviewers))
       return undefined;
     const validated = validateFindingAnchors(
       { verdict: decoded.verdict, findings: decoded.findings as Finding[] },
@@ -508,6 +508,7 @@ function finalizedReviewState(
   const degraded =
     failedNodes.length > 0 ||
     collected.malformedNodes.length > 0 ||
+    (collected.evidenceCoverage?.omissions.length ?? 0) > 0 ||
     !collected.plan ||
     !synthesis.output;
   synthesis.result.coverage = {

@@ -52,6 +52,7 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "read previous session conversation" }, true)).toContain("sessions");
     expect(triggerGroups({ text: "Review this PR https://github.com/acme/widgets/pull/123" }, true)).toContain("review");
     expect(triggerGroups({ text: "Review this pull request" }, true)).toContain("review");
+    expect(triggerGroups({ text: "Perform a PR review" }, true)).toContain("review");
     expect(triggerGroups({ text: "Address feedback on this PR" }, true)).toContain("review");
     expect(triggerGroups({ text: "Get comments from https://github.com/acme/widgets/pull/123" }, true)).toContain("review");
     expect(triggerGroups({ text: "address this feedback" }, true)).not.toContain("review");

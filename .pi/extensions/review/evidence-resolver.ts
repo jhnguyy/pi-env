@@ -195,7 +195,12 @@ function diffSections(diff: string): ReadonlyMap<string, string> {
   for (const chunk of diff.split(/^diff --git /mu).filter(Boolean)) {
     const text = `diff --git ${chunk}`;
     const lines = text.split(/\r?\n/u);
-    const file = lines.map(parsePatchFilePath).find(Boolean) ?? parseDiffGitPath(lines[0] ?? "");
+    const destination = parsePatchFilePath(lines.find((line) => line.startsWith("+++ ")) ?? "");
+    const source = parsePatchFilePath(lines.find((line) => line.startsWith("--- ")) ?? "");
+    const file =
+      (destination && destination !== "/dev/null" ? destination : undefined) ??
+      (source && source !== "/dev/null" ? source : undefined) ??
+      parseDiffGitPath(lines[0] ?? "");
     if (!file) continue;
     const current = sections.get(file) ?? [];
     current.push(text);
@@ -217,8 +222,16 @@ async function readSourceRange(
   const candidate = path.join(root, reference.path);
   let canonical: string;
   try {
+    const directStats = await Fs.lstat(candidate);
+    if (directStats.isSymbolicLink())
+      throw new ReviewEvidenceResolutionFailure({
+        code: "symlink-escape",
+        message: `File evidence cannot dereference a symbolic link: ${reference.path}. Use diff evidence instead.`,
+        path: reference.path,
+      });
     canonical = await Fs.realpath(candidate);
   } catch (cause) {
+    if (cause instanceof ReviewEvidenceResolutionFailure) throw cause;
     throw new ReviewEvidenceResolutionFailure({
       code: "missing-file",
       message: `Evidence file does not exist: ${reference.path}.`,
@@ -248,6 +261,30 @@ async function readSourceRange(
       limit: MaxSourceFileBytes,
     });
   return selectLines(await Fs.readFile(canonical, "utf8"), reference);
+}
+
+function uncoveredDiffHunks(
+  plan: ReviewPlan,
+  sections: ReadonlyMap<string, string>,
+): string[] {
+  const diffReferences = plan.evidence.filter((reference) => reference.kind === "diff");
+  const omissions: string[] = [];
+  for (const [file, section] of sections) {
+    const lines = section.split(/\r?\n/u);
+    const sectionLineCount = lineSpans(section).length;
+    const starts = lines.flatMap((line, index) => (line.startsWith("@@ ") ? [index + 1] : []));
+    for (const [index, startLine] of starts.entries()) {
+      const endLine = (starts[index + 1] ?? sectionLineCount + 1) - 1;
+      const covered = diffReferences.some(
+        (reference) =>
+          reference.path === file &&
+          reference.startLine <= startLine &&
+          reference.endLine >= endLine,
+      );
+      if (!covered) omissions.push(`${file}:diff-lines ${startLine}-${endLine}`);
+    }
+  }
+  return omissions;
 }
 
 function byteChunks(text: string): string[] {
@@ -389,7 +426,10 @@ async function resolveEvidence(
     dossierBytes,
     chunks: chunks.length,
     chunkOutputs: Object.freeze(ReviewEvidenceChunkOutputs.slice(0, chunks.length)),
-    omissions: Object.freeze([...(plan.evidenceOmissions ?? [])]),
+    omissions: Object.freeze([
+      ...(plan.evidenceOmissions ?? []),
+      ...uncoveredDiffHunks(plan, sections),
+    ]),
     references: plan.evidence.length,
   } satisfies ReviewEvidenceCoverage);
   return { coverage, chunks: Object.freeze(padded) };

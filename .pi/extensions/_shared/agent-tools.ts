@@ -81,6 +81,21 @@ export function formatCapabilities(caps: ToolCapability[]): string {
   return caps.join(", ");
 }
 
+function unpublishAgentTools(
+  pi: AgentToolEvents,
+  registrations: readonly ExtToolRegistration[],
+): unknown | undefined {
+  let firstFailure: unknown;
+  for (const registration of [...registrations].reverse()) {
+    try {
+      agentToolChannel.unpublish(pi.events, registration);
+    } catch (cause) {
+      firstFailure ??= cause;
+    }
+  }
+  return firstFailure;
+}
+
 export function registerAgentTools(
   pi: AgentToolEvents,
   registrations: ExtToolRegistration | ExtToolRegistration[],
@@ -92,13 +107,12 @@ export function registerAgentTools(
   const published: ExtToolRegistration[] = [];
   try {
     for (const registration of active) {
-      agentToolChannel.publish(pi.events, registration);
       published.push(registration);
+      agentToolChannel.publish(pi.events, registration);
     }
     return active;
   } catch (cause) {
-    for (const registration of published.reverse())
-      agentToolChannel.unpublish(pi.events, registration);
+    unpublishAgentTools(pi, published);
     throw cause;
   }
 }
@@ -107,7 +121,8 @@ export function unregisterAgentTools(
   pi: AgentToolEvents,
   registrations: readonly ExtToolRegistration[],
 ): void {
-  for (const registration of registrations) agentToolChannel.unpublish(pi.events, registration);
+  const failure = unpublishAgentTools(pi, registrations);
+  if (failure) throw failure;
 }
 
 export function registerAgentToolsOnSessionStart(

@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +52,8 @@ function execFor(meta: any, mismatch = false) {
         stdout: "R100\0old name.ts\0new name.ts\0A\0space path.ts\0",
         stderr: "",
       } as any;
+    if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+      mkdirSync(args[3], { recursive: true });
     if (cmd === "git" && args[0] === "diff")
       return {
         code: 0,
@@ -94,6 +103,10 @@ describe("review pull request snapshot", () => {
       { path: "new name.ts" },
       { path: "space path.ts" },
     ]);
+    expect(statSync(snap.cache!.repoDir).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.artifactDir).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.worktree).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.diffPath).mode & 0o777).toBe(0o600);
     expect(
       calls.some(
         (c) =>

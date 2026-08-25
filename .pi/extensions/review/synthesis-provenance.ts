@@ -20,22 +20,39 @@ function findingInputFromSynthesis(
   return input;
 }
 
+function expectedSources(reviewers: readonly ReviewerOutput[]): Map<string, Set<ReviewerOutput["role"]>> {
+  const expected = new Map<string, Set<ReviewerOutput["role"]>>();
+  for (const reviewer of reviewers) {
+    for (const finding of reviewer.findings) {
+      const key = findingKey(finding);
+      const sources = expected.get(key) ?? new Set();
+      sources.add(reviewer.role);
+      expected.set(key, sources);
+    }
+  }
+  return expected;
+}
+
+function sameSources(
+  actual: readonly ReviewerOutput["role"][],
+  expected: ReadonlySet<ReviewerOutput["role"]>,
+): boolean {
+  return actual.length === expected.size && actual.every((role) => expected.has(role));
+}
+
 export function validSynthesisSources(
   synthesis: SynthesisReview,
   reviewers: readonly ReviewerOutput[],
 ): boolean {
-  const reviewerByRole = new Map(reviewers.map((reviewer) => [reviewer.role, reviewer]));
-  return synthesis.findings.every((finding) => {
-    const uniqueSources = new Set(finding.sourceReviewers);
-    const input = findingInputFromSynthesis(finding);
-    return (
-      finding.sourceReviewers.length === uniqueSources.size &&
-      finding.agreement === uniqueSources.size &&
-      finding.sourceReviewers.every((role) =>
-        reviewerByRole
-          .get(role)
-          ?.findings.some((candidate) => findingKey(candidate) === findingKey(input)),
-      )
-    );
-  });
+  const expected = expectedSources(reviewers);
+  const synthesizedKeys = new Set<string>();
+  for (const finding of synthesis.findings) {
+    const key = findingKey(findingInputFromSynthesis(finding));
+    const sources = expected.get(key);
+    if (!sources || synthesizedKeys.has(key)) return false;
+    if (finding.agreement !== sources.size || !sameSources(finding.sourceReviewers, sources))
+      return false;
+    synthesizedKeys.add(key);
+  }
+  return synthesizedKeys.size === expected.size;
 }

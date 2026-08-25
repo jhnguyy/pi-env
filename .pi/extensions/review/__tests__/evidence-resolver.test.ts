@@ -157,6 +157,28 @@ describe("pull request evidence resolver", () => {
     expect(JSON.parse(coverage.text).digest).toMatch(/^[0-9a-f]{64}$/u);
   });
 
+  it("records exact changed hunks that the evidence index does not cover", async () => {
+    const f = fixture();
+    const outputs = await execute({
+      fixture: f,
+      plan: plan([
+        { kind: "file", path: "a.ts", startLine: 1, endLine: 2, purpose: "source only" },
+      ]),
+    });
+    const coverage = await Effect.runPromise(
+      materializeDagTextArtifact(
+        f.dagArtifacts,
+        outputs[ReviewEvidenceCoverageOutput],
+        {
+          runId: "review-run",
+          producerNodeId: "evidence-resolver",
+          outputName: ReviewEvidenceCoverageOutput,
+        },
+      ),
+    );
+    expect(JSON.parse(coverage.text).omissions).toEqual(["a.ts:diff-lines 4-7"]);
+  });
+
   it.each([
     {
       name: "reversed range",
@@ -233,6 +255,23 @@ describe("pull request evidence resolver", () => {
   ])("rejects $name without returning evidence references", async ({ prepare }) => {
     const f = fixture();
     await expect(execute(prepare(f))).rejects.toBeDefined();
+  });
+
+  it("indexes a rename diff by its destination path", async () => {
+    const f = fixture();
+    f.diff =
+      "diff --git a/a.ts b/b.ts\nsimilarity index 80%\nrename from a.ts\nrename to b.ts\n--- a/a.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n";
+    writeFileSync(f.diffPath, f.diff);
+    await expect(
+      execute({
+        fixture: f,
+        changedPaths: ["b.ts"],
+        plan: plan(
+          [{ kind: "diff", path: "b.ts", startLine: 1, endLine: 9, purpose: "rename" }],
+          "b.ts",
+        ),
+      }),
+    ).resolves.toBeDefined();
   });
 
   it("rejects a changed worktree after snapshot preparation", async () => {

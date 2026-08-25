@@ -424,7 +424,7 @@ export interface ReviewState {
   cleaned?: boolean;
 }
 
-function coherentAnchor(f: FindingInput): boolean {
+export function coherentFindingAnchor(f: FindingInput): boolean {
   const hasFile = f.file !== undefined;
   const hasSide = f.side !== undefined;
   const hasLine = f.line !== undefined;
@@ -436,5 +436,11 @@ export function validatePlanShape(plan: unknown): plan is ReviewPlan {
   return Check(PlanSchema, plan);
 }
 export function validateReviewShape(result: unknown): result is ReviewResult {
-  return Check(ReviewSchema, result) && result.findings.every(coherentAnchor);
+  return Check(ReviewSchema, result) && result.findings.every(coherentFindingAnchor);
+}
+export function validateReviewerOutputShape(result: unknown): result is ReviewerOutput {
+  return Check(ReviewerOutputSchema, result) && result.findings.every(coherentFindingAnchor);
+}
+export function validateSynthesisReviewShape(result: unknown): result is SynthesisReview {
+  return Check(SynthesisReviewSchema, result) && result.findings.every(coherentFindingAnchor);
 }

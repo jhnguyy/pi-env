@@ -350,6 +350,6 @@ export function bound(text: string, max = 12000): string {
   return text.length > max ? `${text.slice(0, max)}\n[truncated ${text.length - max} chars]` : text;
 }
 export function persistJson(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }

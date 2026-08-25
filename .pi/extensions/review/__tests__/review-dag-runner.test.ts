@@ -433,6 +433,34 @@ describe("DAG-backed pull request review runner", () => {
     });
   });
 
+  it("rejects a reviewer with an incoherent partial anchor", async () => {
+    const f = fixture();
+    const partialAnchor = JSON.parse(reviewer("intent"));
+    partialAnchor.findings = [
+      {
+        severity: "serious",
+        impact: "high",
+        file: "a.ts",
+        side: "RIGHT",
+        problem: "The anchor is incomplete.",
+        consequence: "The finding cannot be located.",
+        suggestedFix: "Include a line or omit the side.",
+      },
+    ];
+    const result = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service: serviceFor(f.artifactRoot, {
+        "review-intent": JSON.stringify(partialAnchor),
+      }),
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    expect(result.dag?.malformedNodes).toContain("review-intent");
+  });
+
   it("rejects a reviewer that does not return the admitted evidence digest", async () => {
     const f = fixture();
     const wrongDigest = JSON.parse(reviewer("intent"));

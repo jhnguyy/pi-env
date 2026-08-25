@@ -70,7 +70,7 @@ A model is eligible only when `modelAnnotations` contains the exact `reviewer` a
 
 One approved model can fill every role. Optional `prReview.roleModels` entries can pin `reading-plan`, `correctness`, `intent`, `maintainability`, `tests`, `security`, `whole-change`, or `synthesis`. Each pinned model must have the exact annotation and must be available. The obsolete `prReview.model` setting has no effect.
 
-The runtime measures aggregate input, output, cache, cost, and turn usage across all review children and their nested model work. It reports this usage in live progress, persisted review metrics, and the final structured result. The runtime does not enforce token, cost, or turn limits.
+The runtime measures aggregate input, output, cache, cost, and turn usage across all review children and their nested model work. It reports this usage in live progress, persisted review metrics, and the final structured result. The runtime does not enforce aggregate token, cost, or turn budgets. Reviewer nodes set the node-local `maxTurns: 1` boundary.
 
 Each review child uses its durable child-session ID as the provider session ID. Providers can use this ID to reuse a streaming connection and send incremental context across the child’s turns.
 
@@ -95,7 +95,7 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
 
-The reading plan contains strict file and pinned-diff line-range references. The deterministic resolver validates snapshot identity, paths, ranges, containment, and admission limits. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+The reading plan contains strict file and pinned-diff line-range references. Diff references must cover every changed hunk. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
 
 Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 

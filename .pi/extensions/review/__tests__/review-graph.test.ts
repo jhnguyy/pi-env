@@ -6,7 +6,6 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   EvidenceResolverNode,
-  ReviewFanoutNodes,
   ReviewRoles,
   ReviewerNodes,
   compileReviewGraph,
@@ -63,11 +62,16 @@ function subagentPayload(node: ReturnType<typeof graph>["nodes"][number]) {
 describe("fixed pull request review graph", () => {
   it("orders reading plan, deterministic evidence resolution, reviewers, and synthesis", () => {
     const compiled = graph();
-    expect(compiled.concurrency).toBe(ReviewerNodes.length);
+    expect(compiled.concurrency).toBe(6);
     expect(compiled.nodes.map((node) => node.id)).toEqual([
       "reading-plan",
-      EvidenceResolverNode.nodeId,
-      ...ReviewerNodes.map((node) => node.nodeId),
+      "evidence-resolver",
+      "review-correctness",
+      "review-intent",
+      "review-maintainability",
+      "review-tests",
+      "review-security",
+      "review-whole-change",
       "synthesis",
     ]);
     const resolver = compiled.nodes.find((node) => node.id === EvidenceResolverNode.nodeId)!;
@@ -91,7 +95,15 @@ describe("fixed pull request review graph", () => {
       expect(payload.instructions).toContain("low|medium|serious|blocking");
     }
     const synthesis = compiled.nodes.find((node) => node.id === "synthesis")!;
-    expect(synthesis.dependencies).toHaveLength(ReviewFanoutNodes.length);
+    expect(synthesis.dependencies.map((dependency) => dependency.nodeId)).toEqual([
+      "reading-plan",
+      "review-correctness",
+      "review-intent",
+      "review-maintainability",
+      "review-tests",
+      "review-security",
+      "review-whole-change",
+    ]);
     expect(
       synthesis.dependencies.every((dependency) => dependency.mode === DagDependencyMode.Settled),
     ).toBe(true);

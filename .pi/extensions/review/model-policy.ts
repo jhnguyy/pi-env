@@ -52,7 +52,7 @@ function highestReasoning(model: ReviewModel): ThinkingLevel | undefined {
   return undefined;
 }
 function compare(left: ReviewModelCandidate, right: ReviewModelCandidate): number {
-  return left.fqid.localeCompare(right.fqid);
+  return left.fqid < right.fqid ? -1 : left.fqid > right.fqid ? 1 : 0;
 }
 function assignment(
   role: ReviewRole,

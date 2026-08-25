@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import { Check } from "typebox/value";
 import { Effect } from "effect";
 import {
   DagNodeStatus,
@@ -24,11 +23,12 @@ import { validatePlan } from "./core";
 import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
   PlanSchema,
-  ReviewerOutputSchema,
   SynthesisReviewSchema,
   type ReviewerOutput,
   type ReviewPlan,
   type SynthesisReview,
+  validateReviewerOutputShape,
+  validateSynthesisReviewShape,
 } from "./schema";
 import {
   EvidenceResolverNode,
@@ -235,14 +235,14 @@ export function registerReviewDagTools(options: {
         const reviewers = ReviewerNodes.flatMap((node) => {
           try {
             const decoded = JSON.parse(textByNode.get(node.nodeId) ?? "") as unknown;
-            return Check(ReviewerOutputSchema, decoded) && decoded.role === node.role
+            return validateReviewerOutputShape(decoded) && decoded.role === node.role
               ? [decoded]
               : [];
           } catch {
             return [];
           }
         });
-        if (!Check(SynthesisReviewSchema, raw) || !validSynthesisSources(raw, reviewers))
+        if (!validateSynthesisReviewShape(raw) || !validSynthesisSources(raw, reviewers))
           return {
             content: [
               txt(
