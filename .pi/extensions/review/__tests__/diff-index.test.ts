@@ -52,13 +52,18 @@ describe("canonical diff index", () => {
     expect([...index.keys()]).toEqual(["src/quoted name.ts", "dir with space/a.ts"]);
   });
 
-  it("falls back to the diff header when patch paths are absent", () => {
+  it("uses rename metadata when an unquoted source contains a b/ separator", () => {
     const diff = [
-      "diff --git a/src/old.ts b/src/new.ts",
+      "diff --git a/foo b/bar.ts b/new.ts",
       "similarity index 100%",
-      "rename from src/old.ts",
-      "rename to src/new.ts",
+      "rename from foo b/bar.ts",
+      "rename to new.ts",
     ].join("\n");
+    expect([...createDiffIndex(diff).keys()]).toEqual(["new.ts"]);
+  });
+
+  it("falls back to the diff header when patch and rename paths are absent", () => {
+    const diff = ["diff --git a/src/old.ts b/src/new.ts", "similarity index 100%"].join("\n");
     expect([...createDiffIndex(diff).keys()]).toEqual(["src/new.ts"]);
   });
 

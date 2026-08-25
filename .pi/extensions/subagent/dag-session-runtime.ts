@@ -11,6 +11,7 @@ import {
   reconstructDagSession,
   submitDagRun,
   type DagExecutorRegistry,
+  type DagExecutorRegistryService,
   type DagRunHandle,
   type DagRuntimeJournal,
   type DagRuntimeService,
@@ -38,6 +39,7 @@ interface DagSessionRuntimeDependencies {
   readonly supervisor: SubagentRunSupervisor;
   readonly telemetryRuntime: ToolingTelemetryRuntime;
   readonly ledger: SubagentUsageLedger;
+  readonly executorRegistry?: DagExecutorRegistryService;
 }
 
 export class DagSessionRuntime {
@@ -91,18 +93,20 @@ export class DagSessionRuntime {
     );
     const workspaceRoots = new Map<string, string>();
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
-    const registry = makeDagSubagentExecutorRegistry(
-      ctx,
-      registeredExtTools,
-      artifactRoot,
-      dependencies.sessionGeneration,
-      {
-      workspaceRootForRun: (runId) => workspaceRoots.get(runId),
-      ledger: dependencies.ledger,
-      supervisor: dependencies.supervisor,
-      telemetryRuntime: dependencies.telemetryRuntime,
-      },
-    );
+    const registry =
+      dependencies.executorRegistry ??
+      makeDagSubagentExecutorRegistry(
+        ctx,
+        registeredExtTools,
+        artifactRoot,
+        dependencies.sessionGeneration,
+        {
+          workspaceRootForRun: (runId) => workspaceRoots.get(runId),
+          ledger: dependencies.ledger,
+          supervisor: dependencies.supervisor,
+          telemetryRuntime: dependencies.telemetryRuntime,
+        },
+      );
     const scope = await Effect.runPromise(Scope.make());
     const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
       appendCustomEntry(customType: string, data?: unknown): string;

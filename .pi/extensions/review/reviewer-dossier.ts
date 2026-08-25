@@ -32,6 +32,26 @@ export interface ReviewerDossier {
   readonly malformed: readonly string[];
 }
 
+export function reviewerDossierContext(dossier: ReviewerDossier) {
+  return {
+    succeeded: dossier.admitted.map((item) => ({
+      nodeId: item.nodeId,
+      outputName: item.outputName,
+      reference: item.reference,
+      text: item.text,
+    })),
+    failed: dossier.failed,
+    malformed: dossier.malformed,
+  };
+}
+
+export function serializeReviewerDossierContext(dossier: ReviewerDossier): string {
+  const text = JSON.stringify(reviewerDossierContext(dossier));
+  if (Buffer.byteLength(text, "utf8") > MaxReviewerDossierBytes)
+    throw new Error("Reviewer result context exceeds the absolute byte limit.");
+  return text;
+}
+
 export async function readVerifiedReviewArtifact(
   artifactRoot: string,
   referenceValue: unknown,
@@ -81,7 +101,6 @@ export async function admitReviewerDossier(options: {
   const raw: VerifiedReviewerArtifact[] = [];
   const failed: string[] = [];
   const malformed: string[] = [];
-  let bytes = 0;
   const stateById = new Map(options.reconstruction.state.nodes.map((node) => [node.nodeId, node]));
 
   for (const topologyNode of reviewerTopologyOrder(options.reconstruction)) {
@@ -102,9 +121,6 @@ export async function admitReviewerDossier(options: {
           producerNodeId: topologyNode.nodeId,
           outputName,
         });
-        bytes += Buffer.byteLength(artifact.text, "utf8");
-        if (bytes > MaxReviewerDossierBytes)
-          throw new Error("Reviewer result context exceeds the absolute byte limit.");
         const item = { nodeId: topologyNode.nodeId, outputName, ...artifact };
         verified.push(item);
         raw.push(item);
@@ -125,10 +141,12 @@ export async function admitReviewerDossier(options: {
     admitted.push({ ...verified[0], reviewer });
   }
 
-  return Object.freeze({
+  const dossier = Object.freeze({
     admitted: Object.freeze(admitted),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),
   });
+  serializeReviewerDossierContext(dossier);
+  return dossier;
 }

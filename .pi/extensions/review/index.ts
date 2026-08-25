@@ -58,7 +58,11 @@ import {
   type DeckReference,
 } from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
-import { ReviewCoordinator, type ReviewActionResult } from "./review-coordinator";
+import {
+  ReviewCoordinator,
+  type ReviewActionResult,
+  type ReviewCoordinatorScope,
+} from "./review-coordinator";
 import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
@@ -136,10 +140,11 @@ function stateEntry(state: ReviewState) {
 function remember(state: ReviewState): void {
   coordinator.remember(state);
 }
-function saveState(pi: ExtensionAPI, state: ReviewState): void {
-  remember(state);
+function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
+  if (!coordinator.remember(state, scope)) return false;
   persistJson(statePath(state.snapshot.id), state);
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  return true;
 }
 function latestState(): ReviewState | undefined {
   return coordinator.latestState();
@@ -554,6 +559,7 @@ async function createReviewAttempt(
   metadata: ReviewMetadata,
   signal: AbortSignal | undefined,
   ctx: ExtensionContext,
+  coordinatorScope: ReviewCoordinatorScope,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ): Promise<ReviewActionResult> {
   const reviewId = makeReviewId(metadata);
@@ -576,7 +582,7 @@ async function createReviewAttempt(
     selectedFindingIds: [],
     posts: [],
   };
-  saveState(pi, state);
+  saveState(pi, state, coordinatorScope);
   try {
     const snapshot = await prepareResolvedSnapshot(
       pi.exec.bind(pi),
@@ -586,7 +592,7 @@ async function createReviewAttempt(
       reviewId,
     );
     state = { ...state, snapshot };
-    saveState(pi, state);
+    saveState(pi, state, coordinatorScope);
   } catch (cause) {
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = {
@@ -594,7 +600,7 @@ async function createReviewAttempt(
       preparation: preparationFailure("snapshot", cause, worktreeCleaned),
     };
     coordinator.finishPreparation(reviewId);
-    saveState(pi, state);
+    saveState(pi, state, coordinatorScope);
     return reviewActionResult(state);
   }
   const snapshot = state.snapshot;
@@ -665,12 +671,12 @@ async function createReviewAttempt(
         },
       ]),
     );
-    saveState(pi, state);
+    saveState(pi, state, coordinatorScope);
   } catch (cause) {
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
     coordinator.finishPreparation(reviewId);
-    saveState(pi, state);
+    saveState(pi, state, coordinatorScope);
     return reviewActionResult(state);
   }
 
@@ -684,7 +690,9 @@ async function createReviewAttempt(
       assignments: assignments as any,
       deckPath: deck.path,
       state,
-      save: (next) => saveState(pi, next),
+      save: (next) => {
+        saveState(pi, next, coordinatorScope);
+      },
       onProgress,
     });
   } catch (cause) {
@@ -695,7 +703,7 @@ async function createReviewAttempt(
         ...state,
         preparation: preparationFailure("dag-submit", cause, worktreeCleaned),
       };
-      saveState(pi, state);
+      saveState(pi, state, coordinatorScope);
     }
     return reviewActionResult(state);
   }
@@ -741,7 +749,7 @@ async function createReviewAttempt(
         },
       };
     }
-    saveState(pi, state);
+    saveState(pi, state, coordinatorScope);
   }
   return reviewActionResult(state);
 }
@@ -754,6 +762,8 @@ async function startReview(
   forceRerun = false,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ): Promise<ReviewActionResult> {
+  coordinator.activate(ctx);
+  const coordinatorScope = coordinator.captureScope();
   const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, signal);
   if (!resolved.url)
     return {
@@ -761,6 +771,8 @@ async function startReview(
       details: { status: "needs_url" },
     };
   const metadata = await resolveReviewMetadata(pi.exec.bind(pi), ctx.cwd, resolved.url, signal);
+  if (!coordinator.isScopeActive(coordinatorScope))
+    throw new Error("The review session changed before preparation started.");
   const parentSessionId = ctx.sessionManager.getSessionId();
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
   if (!forceRerun) {
@@ -772,7 +784,7 @@ async function startReview(
       return reviewActionResult(existing, true);
     }
   }
-  const operation = createReviewAttempt(pi, metadata, signal, ctx, onProgress);
+  const operation = createReviewAttempt(pi, metadata, signal, ctx, coordinatorScope, onProgress);
   if (!forceRerun) coordinator.trackCreateOperation(identityKey, operation);
   try {
     return await operation;

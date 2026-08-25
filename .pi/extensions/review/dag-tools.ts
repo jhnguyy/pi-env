@@ -33,8 +33,8 @@ import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph"
 import { validSynthesisSources } from "./synthesis-provenance";
 import {
   admitReviewerDossier,
-  MaxReviewerDossierBytes,
   readVerifiedReviewArtifact,
+  serializeReviewerDossierContext,
   type ReviewerDossier,
 } from "./reviewer-dossier";
 
@@ -42,7 +42,6 @@ export { readVerifiedReviewArtifact } from "./reviewer-dossier";
 
 const MAX_DECK_BYTES = 256_000;
 const MAX_SUBMISSION_BYTES = 262_144;
-const MAX_RESULT_CONTEXT_BYTES = MaxReviewerDossierBytes;
 const EmptySchema = Type.Object({}, { additionalProperties: false });
 
 function suffixFor(reviewId: string): string {
@@ -97,6 +96,7 @@ async function evidenceDigestFor(
 export interface ReviewDagTools {
   readonly names: ReviewGraphToolNames;
   readonly registrations: readonly ExtToolRegistration[];
+  readonly reviewerDossier: (signal?: AbortSignal) => Promise<ReviewerDossier>;
   unregister(): void;
 }
 
@@ -200,19 +200,7 @@ export function registerReviewDagTools(options: {
       async execute(_params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const dossier = await getReviewerDossier(context.signal);
-        const value = {
-          succeeded: dossier.admitted.map((item) => ({
-            nodeId: item.nodeId,
-            outputName: item.outputName,
-            reference: item.reference,
-            text: item.text,
-          })),
-          failed: dossier.failed,
-          malformed: dossier.malformed,
-        };
-        const text = JSON.stringify(value);
-        if (Buffer.byteLength(text, "utf8") > MAX_RESULT_CONTEXT_BYTES)
-          throw new Error("Reviewer result context exceeds the absolute byte limit.");
+        const text = serializeReviewerDossierContext(dossier);
         return {
           content: [txt(text)],
           details: {
@@ -273,6 +261,7 @@ export function registerReviewDagTools(options: {
   return {
     names,
     registrations,
+    reviewerDossier: getReviewerDossier,
     unregister: () => unregisterAgentTools(options.pi, registrations),
   };
 }

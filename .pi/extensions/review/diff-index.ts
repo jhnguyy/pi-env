@@ -1,4 +1,10 @@
-import { diffHunkRanges, parseDiffGitPath, parsePatchFilePath, type DiffHunkRange } from "./core";
+import {
+  diffHunkRanges,
+  parseDiffGitPath,
+  parseGitPathList,
+  parsePatchFilePath,
+  type DiffHunkRange,
+} from "./core";
 
 export interface DiffIndexEntry {
   readonly path: string;
@@ -56,6 +62,16 @@ interface IndexedSection {
   readonly hunks: readonly DiffHunkRange[];
 }
 
+function extendedDestinationPath(lines: readonly string[]): string | undefined {
+  for (const prefix of ["rename to ", "copy to "] as const) {
+    const line = lines.find((candidate) => candidate.startsWith(prefix));
+    if (!line) continue;
+    const value = line.slice(prefix.length);
+    return value.startsWith('"') ? parseGitPathList(value).at(0) : value;
+  }
+  return undefined;
+}
+
 function canonicalSectionPath(section: string): string | undefined {
   const lines = section.split(/\r?\n/u);
   const hunkStart = lines.findIndex((line) => line.startsWith("@@ "));
@@ -70,7 +86,7 @@ function canonicalSectionPath(section: string): string | undefined {
     const source = sourceLine ? parsePatchFilePath(sourceLine) : undefined;
     if (source) return source;
   }
-  return parseDiffGitPath(lines[0] ?? "");
+  return extendedDestinationPath(headerLines) ?? parseDiffGitPath(lines[0] ?? "");
 }
 
 function lineCount(text: string): number {

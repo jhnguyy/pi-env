@@ -8,7 +8,11 @@ import {
   publishDagSubagentTextResult,
   type DagSessionReconstruction,
 } from "../../../../src/dag/index.js";
-import { admitReviewerDossier } from "../reviewer-dossier";
+import {
+  admitReviewerDossier,
+  MaxReviewerDossierBytes,
+  serializeReviewerDossierContext,
+} from "../reviewer-dossier";
 import {
   ReviewRoles,
   ReviewerNodes,
@@ -184,6 +188,26 @@ describe("reviewer dossier admission contract", () => {
     expect(dossier.malformed.slice(0, 2)).toEqual(["review-correctness", "review-intent"]);
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-correctness");
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-intent");
+  });
+
+  it("applies the tool limit after JSON escaping", () => {
+    const text = '"'.repeat(Math.floor(MaxReviewerDossierBytes / 2));
+    expect(() =>
+      serializeReviewerDossierContext({
+        admitted: [
+          {
+            nodeId: "review-correctness",
+            outputName: "correctness_review",
+            reference: {} as any,
+            text,
+            reviewer: JSON.parse(output("correctness")),
+          },
+        ],
+        raw: [],
+        failed: [],
+        malformed: [],
+      }),
+    ).toThrow("Reviewer result context exceeds the absolute byte limit.");
   });
 
   it("classifies failed, missing, wrongly named, and multiple outputs deterministically", async () => {

@@ -33,6 +33,7 @@ describe("ReviewCoordinator", () => {
     const first = context("first");
 
     coordinator.activate(first);
+    const firstScope = coordinator.captureScope();
     coordinator.remember(state("review-1"));
     coordinator.beginPreparation("review-1");
     coordinator.activate(first);
@@ -46,6 +47,24 @@ describe("ReviewCoordinator", () => {
     expect(coordinator.latestState()).toBeUndefined();
     expect(coordinator.reviews()).toHaveLength(0);
     expect(coordinator.isPreparing("review-1")).toBe(false);
+    expect(coordinator.remember(state("stale-review"), firstScope)).toBe(false);
+    expect(coordinator.review("stale-review")).toBeUndefined();
+  });
+
+  it("rejects a write from an operation that completes after a session switch", async () => {
+    const coordinator = new ReviewCoordinator();
+    coordinator.activate(context("first"));
+    const scope = coordinator.captureScope();
+    let finish!: () => void;
+    const operation = new Promise<void>((resolve) => {
+      finish = resolve;
+    }).then(() => coordinator.remember(state("late"), scope));
+
+    coordinator.activate(context("second"));
+    finish();
+
+    expect(await operation).toBe(false);
+    expect(coordinator.review("late")).toBeUndefined();
   });
 
   it("owns evidence executor registration for the active runtime generation", () => {

@@ -15,6 +15,11 @@ import {
   ReviewEvidenceResolverKey,
 } from "./evidence-resolver";
 
+export interface ReviewCoordinatorScope {
+  readonly sessionId: string;
+  readonly generation: number;
+}
+
 export type ReviewActionResult = {
   content: Array<{ type: "text"; text: string }>;
   details: Record<string, unknown>;
@@ -35,6 +40,7 @@ export class ReviewCoordinator {
   private evidenceRegistration: DagExecutorRegistration | undefined;
   private selectedReviewId: string | undefined;
   private sessionId: string | undefined;
+  private generation = 0;
 
   get activeContext(): ExtensionContext | undefined {
     return this.context;
@@ -50,6 +56,15 @@ export class ReviewCoordinator {
 
   get postSemaphore() {
     return this.postingSemaphore;
+  }
+
+  captureScope(): ReviewCoordinatorScope {
+    if (!this.sessionId) throw new Error("The review coordinator has no active session.");
+    return Object.freeze({ sessionId: this.sessionId, generation: this.generation });
+  }
+
+  isScopeActive(scope: ReviewCoordinatorScope): boolean {
+    return scope.sessionId === this.sessionId && scope.generation === this.generation;
   }
 
   reviews(): readonly ReviewState[] {
@@ -119,6 +134,7 @@ export class ReviewCoordinator {
   }
 
   reset(): void {
+    this.generation += 1;
     this.states.clear();
     this.createOperations.clear();
     this.preparingReviewIds.clear();
@@ -148,9 +164,11 @@ export class ReviewCoordinator {
     this.selectedReviewId = undefined;
   }
 
-  remember(state: ReviewState): void {
+  remember(state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
+    if (scope && !this.isScopeActive(scope)) return false;
     this.states.set(state.snapshot.id, structuredClone(state));
     this.selectedReviewId = state.snapshot.id;
+    return true;
   }
 
   latestState(): ReviewState | undefined {

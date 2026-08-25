@@ -6,14 +6,26 @@ import path from "node:path";
 import { Data, Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  DagExecutorKind,
   DagNodeStatus,
   DagRunOutcome,
   materializeDagTextArtifact,
   publishDagSubagentTextResult,
+  type DagEffectExecutor,
   type DagSessionReconstruction,
   type ValidatedDagDefinition,
 } from "../../../../src/dag/index.js";
 import { reconstructReviewDagState, runReviewDag } from "../review-dag-runner";
+import { DagSessionRuntime } from "../../subagent/dag-session-runtime";
+import {
+  lookupRegisteredDagExecutor,
+  registerDagExecutor,
+  unregisterDagExecutor,
+} from "../../_shared/dag-executor-registration";
+import {
+  listenForDagRuntimeService,
+  resetDagRuntimeServiceRegistryForTests,
+} from "../../_shared/dag-runtime-service";
 import {
   EvidenceResolverNode,
   ReviewRoles,
@@ -23,6 +35,8 @@ import {
 import {
   makeReviewEvidenceResolverExecutor,
   ReviewEvidenceChunkOutputs,
+  ReviewEvidenceExecutorKind,
+  ReviewEvidenceResolverKey,
   ReviewEvidenceCoverageOutput,
 } from "../evidence-resolver";
 import { buildReviewDeck, updateReviewDeckLaterRefs } from "../deck";
@@ -50,6 +64,7 @@ function fixture(): {
   const artifacts = path.join(root, "review-artifacts");
   const sessionDir = path.join(root, "session");
   const artifactRoot = path.join(sessionDir, "dag-artifacts", "parent");
+  const entries: unknown[] = [];
   mkdirSync(worktree, { recursive: true });
   mkdirSync(artifacts, { recursive: true });
   mkdirSync(artifactRoot, { recursive: true });
@@ -92,6 +107,11 @@ function fixture(): {
       sessionManager: {
         getSessionDir: () => sessionDir,
         getSessionId: () => "parent",
+        getBranch: () => entries,
+        appendCustomEntry: (customType: string, data: unknown) => {
+          entries.push({ type: "custom", customType, data });
+          return String(entries.length);
+        },
       },
     },
   };
@@ -292,8 +312,9 @@ function piEvents(): any {
 }
 
 describe("DAG-backed pull request review runner", () => {
-  it("orchestrates preflight, real evidence, admission, fallback, persistence, and offline deck updates", async () => {
+  it("orchestrates the real session runtime, scheduler, evidence, tools, and fallback offline", async () => {
     const f = fixture();
+    resetDagRuntimeServiceRegistryForTests();
     execFileSync("git", ["init", "-q"], { cwd: f.state.snapshot.worktree });
     execFileSync("git", ["config", "user.email", "review@example.test"], {
       cwd: f.state.snapshot.worktree,
@@ -312,151 +333,178 @@ describe("DAG-backed pull request review runner", () => {
     f.state.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
     const deck = buildReviewDeck({ snapshot: f.state.snapshot });
     const pi = piEvents();
-    const saved: ReviewState[] = [];
-    let reconstruction: DagSessionReconstruction | undefined;
-    const service = {
-      submit: (graph: ValidatedDagDefinition<any>) =>
-        Effect.promise(async () => {
-          const planTool = [...pi.tools.values()].find((tool) =>
-            tool.name.startsWith("submit_review_plan_"),
+    const services: any[] = [];
+    let serviceDisposals = 0;
+    listenForDagRuntimeService(
+      pi,
+      (service) => services.push(service),
+      () => serviceDisposals++,
+    );
+    let registered = 0;
+    let unregistered = 0;
+    pi.events.on("agent-tools:register", () => registered++);
+    pi.events.on("agent-tools:unregister", () => unregistered++);
+    const generation = "review-scenario";
+    const evidenceRegistration = registerDagExecutor({
+      parentSessionId: "parent",
+      sessionGeneration: generation,
+      kind: ReviewEvidenceExecutorKind,
+      key: ReviewEvidenceResolverKey,
+      executor: makeReviewEvidenceResolverExecutor({ artifactRoot: f.artifactRoot }),
+    });
+    const findTool = (prefix: string) => {
+      const tool = [...pi.tools.values()].find((candidate) => candidate.name.startsWith(prefix));
+      if (!tool) throw new Error(`Missing run-scoped tool ${prefix}`);
+      return tool;
+    };
+    const scriptedSubagent: DagEffectExecutor = (request) =>
+      Effect.promise(async () => {
+        const output = (request.node.executor.payload as any).output;
+        if (request.node.id === "reading-plan") {
+          const submitted = await findTool("submit_review_plan_").execute(
+            "plan",
+            {
+              ...JSON.parse(plan()),
+              evidence: [
+                { kind: "diff", path: "a.ts", startLine: 1, endLine: 6, purpose: "patch" },
+              ],
+            },
+            undefined,
+            undefined,
           );
-          const submittedPlan = {
-            ...JSON.parse(plan()),
-            evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 6, purpose: "patch" }],
-          };
-          const preflight = await planTool.execute("plan", submittedPlan, undefined, undefined);
-          expect(preflight.isError).not.toBe(true);
-          const planNode = graph.nodes.find((node) => node.id === "reading-plan")!;
-          const planOutputs = await Effect.runPromise(
+          expect(submitted.isError).not.toBe(true);
+          return Effect.runPromise(
             publishDagSubagentTextResult(
               f.artifactRoot,
-              graph.runId,
-              planNode.id,
-              "plan-attempt",
-              "reading_plan",
-              preflight.content[0].text,
+              request.runId,
+              request.node.id,
+              request.attemptId,
+              output.name,
+              submitted.content[0].text,
             ),
           );
-          const graphState: any = {
-            runId: graph.runId,
-            nodes: [{ nodeId: planNode.id, status: DagNodeStatus.Succeeded, outputs: planOutputs }],
-          };
-          const evidenceNode = graph.nodes.find((node) => node.id === EvidenceResolverNode.nodeId)!;
-          const evidenceOutputs = await Effect.runPromise(
-            Effect.scoped(
-              makeReviewEvidenceResolverExecutor({ artifactRoot: f.artifactRoot })({
-                runId: graph.runId,
-                node: evidenceNode,
-                attemptId: "evidence-attempt",
-                attemptOrdinal: 1,
-                graphState,
-              }),
-            ),
-          );
+        }
+        if (request.node.id.startsWith("review-")) {
           const coverage = await Effect.runPromise(
             materializeDagTextArtifact(
               f.artifactRoot,
-              evidenceOutputs[ReviewEvidenceCoverageOutput],
+              (
+                request.graphState.nodes.find(
+                  (node) =>
+                    node.nodeId === EvidenceResolverNode.nodeId &&
+                    node.status === DagNodeStatus.Succeeded,
+                ) as any
+              ).outputs[ReviewEvidenceCoverageOutput],
               {
-                runId: graph.runId,
-                producerNodeId: evidenceNode.id,
+                runId: request.runId,
+                producerNodeId: EvidenceResolverNode.nodeId,
                 outputName: ReviewEvidenceCoverageOutput,
               },
             ),
           );
-          const digest = (JSON.parse(coverage.text) as { digest: string }).digest;
-          graphState.nodes.push({
-            nodeId: evidenceNode.id,
-            status: DagNodeStatus.Succeeded,
-            outputs: evidenceOutputs,
-          });
-          for (const node of graph.nodes.filter((node) => node.id.startsWith("review-"))) {
-            const role = node.id.slice("review-".length);
-            const output = JSON.parse(reviewer(role));
-            output.evidenceDigest = role === "intent" ? "0".repeat(64) : digest;
-            graphState.nodes.push({
-              nodeId: node.id,
-              status: DagNodeStatus.Succeeded,
-              outputs: await Effect.runPromise(
-                publishDagSubagentTextResult(
-                  f.artifactRoot,
-                  graph.runId,
-                  node.id,
-                  `${node.id}-attempt`,
-                  node.executor.payload.output.name,
-                  JSON.stringify(output),
-                ),
-              ),
-            });
-          }
-          const synthesisNode = graph.nodes.find((node) => node.id === "synthesis")!;
+          const role = request.node.id.slice("review-".length);
+          const value = JSON.parse(reviewer(role));
+          value.evidenceDigest =
+            role === "intent" ? "0".repeat(64) : JSON.parse(coverage.text).digest;
+          return Effect.runPromise(
+            publishDagSubagentTextResult(
+              f.artifactRoot,
+              request.runId,
+              request.node.id,
+              request.attemptId,
+              output.name,
+              JSON.stringify(value),
+            ),
+          );
+        }
+        if (request.node.id === "synthesis") {
+          const refs = await findTool("review_result_refs_").execute(
+            "refs",
+            {},
+            undefined,
+            undefined,
+          );
+          expect(refs.isError).not.toBe(true);
           const rejected = JSON.parse(synthesis());
           rejected.findings[0].problem = "Not present in an admitted reviewer result.";
-          graphState.nodes.push({
-            nodeId: synthesisNode.id,
-            status: DagNodeStatus.Succeeded,
-            outputs: await Effect.runPromise(
-              publishDagSubagentTextResult(
-                f.artifactRoot,
-                graph.runId,
-                synthesisNode.id,
-                "synthesis-attempt",
-                "synthesis",
-                JSON.stringify(rejected),
-              ),
+          const submitted = await findTool("submit_review_synthesis_").execute(
+            "synthesis",
+            rejected,
+            undefined,
+            undefined,
+          );
+          expect(submitted.isError).toBe(true);
+          return Effect.runPromise(
+            publishDagSubagentTextResult(
+              f.artifactRoot,
+              request.runId,
+              request.node.id,
+              request.attemptId,
+              output.name,
+              JSON.stringify(rejected),
             ),
-          });
-          reconstruction = {
-            graph,
-            graphId: "deterministic-test-graph",
-            state: graphState,
-            terminalOutcome: DagRunOutcome.Succeeded,
-            transitions: [],
-            attempts: [],
-            persistedEntryCount: 1,
-            recoveredFromProcessLoss: false,
-          };
-          const complete = Effect.succeed(reconstruction);
-          return {
-            accepted: Effect.void,
-            snapshot: complete,
-            await: complete,
-            cancel: Effect.void,
-          };
-        }),
-      reconstruct: () => Effect.succeed(reconstruction!),
+          );
+        }
+        throw new Error(`Unexpected scripted node ${request.node.id}`);
+      });
+    const registry = {
+      lookup: (kind: DagExecutorKind, key: string) =>
+        Effect.succeed(
+          kind === DagExecutorKind.Subagent && key === "pi/subagent-v1"
+            ? scriptedSubagent
+            : lookupRegisteredDagExecutor("parent", generation, kind, key),
+        ),
     };
-    const result = await runReviewDag({
-      pi,
-      ctx: f.ctx,
-      service: service as any,
-      assignments,
-      deckPath: deck.path,
-      state: f.state,
-      save: (state) => saved.push(structuredClone(state)),
+    const runtime = await DagSessionRuntime.create(pi, f.ctx, new Map(), {
+      sessionGeneration: generation,
+      supervisor: {
+        usage: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }),
+      } as any,
+      telemetryRuntime: {} as any,
+      ledger: {} as any,
+      executorRegistry: registry,
     });
-    expect(result.dag).toMatchObject({
-      status: "degraded",
-      malformedNodes: ["review-intent", "synthesis"],
-    });
-    expect(result.dag?.evidenceCoverage?.digest).toMatch(/^[0-9a-f]{64}$/u);
-    expect(result.result?.verdict).toContain("Reviewer synthesis failed");
-    expect(result.result?.coverage?.succeeded).not.toContain("intent");
-    expect(saved.some((state) => state.dag?.submitted)).toBe(true);
-    expect(saved.at(-1)?.dag?.status).toBe("degraded");
-    const updated = updateReviewDeckLaterRefs({
-      snapshot: f.state.snapshot,
-      readingPlanRefs: [
-        { kind: "reading-plan", id: "plan", uri: result.dag!.readingPlanReference!.path },
-      ],
-      rawResultRefs: result.dag!.rawResultReferences.map((reference, index) => ({
-        kind: "raw-result",
-        id: `result-${index}`,
-        uri: reference.path,
-      })),
-    });
-    expect(updated.deck.laterRefs.readingPlanRefs).toHaveLength(1);
-    expect(updated.deck.laterRefs.rawResultRefs).toHaveLength(6);
+    expect(services).toHaveLength(1);
+    const saved: ReviewState[] = [];
+    try {
+      const result = await runReviewDag({
+        pi,
+        ctx: f.ctx,
+        service: services[0].service,
+        assignments,
+        deckPath: deck.path,
+        state: f.state,
+        save: (state) => saved.push(structuredClone(state)),
+      });
+      expect(result.dag).toMatchObject({
+        status: "degraded",
+        malformedNodes: ["review-intent", "synthesis"],
+      });
+      expect(result.dag?.evidenceCoverage?.digest).toMatch(/^[0-9a-f]{64}$/u);
+      expect(result.result?.verdict).toContain("Reviewer synthesis failed");
+      expect(result.result?.coverage?.succeeded).not.toContain("intent");
+      expect(saved.some((state) => state.dag?.submitted)).toBe(true);
+      expect(saved.at(-1)?.dag?.status).toBe("degraded");
+      expect(unregistered).toBe(registered);
+      const updated = updateReviewDeckLaterRefs({
+        snapshot: f.state.snapshot,
+        readingPlanRefs: [
+          { kind: "reading-plan", id: "plan", uri: result.dag!.readingPlanReference!.path },
+        ],
+        rawResultRefs: result.dag!.rawResultReferences.map((reference, index) => ({
+          kind: "raw-result",
+          id: `result-${index}`,
+          uri: reference.path,
+        })),
+      });
+      expect(updated.deck.laterRefs.readingPlanRefs).toHaveLength(1);
+      expect(updated.deck.laterRefs.rawResultRefs).toHaveLength(6);
+    } finally {
+      await runtime.dispose();
+      unregisterDagExecutor(evidenceRegistration);
+      resetDagRuntimeServiceRegistryForTests();
+    }
+    expect(serviceDisposals).toBe(1);
   });
 
   it("unregisters run-scoped tools when the first state save fails", async () => {

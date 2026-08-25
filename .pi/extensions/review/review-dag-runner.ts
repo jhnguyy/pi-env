@@ -12,7 +12,11 @@ import {
 import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
 import { registerReviewDagTools } from "./dag-tools";
-import { admitReviewerDossier, readVerifiedReviewArtifact } from "./reviewer-dossier";
+import {
+  admitReviewerDossier,
+  readVerifiedReviewArtifact,
+  type ReviewerDossier,
+} from "./reviewer-dossier";
 import {
   EvidenceResolverNode,
   ReadingPlanNode,
@@ -223,15 +227,18 @@ async function collectOutputs(
   root: string,
   reconstruction: DagSessionReconstruction,
   state: ReviewState,
+  admittedDossier?: Promise<ReviewerDossier>,
 ): Promise<CollectedOutputs> {
   const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
   const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
   const evidence = await collectEvidence(root, reconstruction);
-  const dossier = await admitReviewerDossier({
-    artifactRoot: root,
-    reconstruction,
-    expectedEvidenceDigest: evidence.coverage?.digest,
-  });
+  const dossier = admittedDossier
+    ? await admittedDossier
+    : await admitReviewerDossier({
+        artifactRoot: root,
+        reconstruction,
+        expectedEvidenceDigest: evidence.coverage?.digest,
+      });
   const malformedNodes = [...dossier.malformed];
   if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
     malformedNodes.push(ReadingPlanNode.nodeId);
@@ -415,6 +422,7 @@ interface FinalizeReviewInput {
   readonly reconstruction: DagSessionReconstruction;
   readonly service: ActiveDagRuntimeService;
   readonly startedAt: number;
+  readonly reviewerDossier?: Promise<ReviewerDossier>;
 }
 async function resolveSynthesis(input: FinalizeReviewInput, collected: CollectedOutputs) {
   const output = await admittedOutputForNode(
@@ -509,7 +517,12 @@ function finalizedReviewState(
   };
 }
 async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> {
-  const collected = await collectOutputs(input.root, input.reconstruction, input.state);
+  const collected = await collectOutputs(
+    input.root,
+    input.reconstruction,
+    input.state,
+    input.reviewerDossier,
+  );
   const failedNodes = [
     ...new Set([...failedNodeIds(input.reconstruction), ...collected.failedReviewerNodes]),
   ].sort();
@@ -663,6 +676,7 @@ export async function runReviewDag(options: {
       reconstruction,
       service: options.service,
       startedAt,
+      reviewerDossier: tools.reviewerDossier(options.signal),
     });
     options.save(state);
     if (state.dag?.error) throw new Error(state.dag.error);
