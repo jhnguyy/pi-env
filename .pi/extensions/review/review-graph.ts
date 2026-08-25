@@ -68,7 +68,7 @@ function roleInstructions(role: ReviewRole): string {
       "Inspect the review deck and pinned snapshot with the supplied tools.",
       "Build the reading plan. Cover every changed path exactly once.",
       "Add at least one strict file or diff line-range evidence reference for every changed path.",
-      "Select complete diff hunk ranges. Prioritize the highest-risk hunks. Use file references only as supplemental implementation context.",
+      "The deck file table supplies exact diffHunks ranges. Select complete ranges from that table and prioritize the highest-risk hunks. Use review_diff only when patch content inspection is necessary. Use file references only as supplemental implementation context.",
       `Keep the combined exact evidence at or below ${ReviewEvidenceDossierMaxBytes} UTF-8 bytes. If all hunks cannot fit, record the context limit in evidenceOmissions. Do not select partial hunks or the same text as both file and diff evidence.`,
       "Call the structured plan submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");

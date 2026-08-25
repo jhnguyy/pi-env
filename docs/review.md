@@ -95,7 +95,7 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
 
-The reading plan contains strict file and pinned-diff line-range references. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
 
 Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 

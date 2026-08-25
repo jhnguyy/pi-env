@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { diffHunkRanges, parseDiffGitPath, parsePatchFilePath } from "./core";
 import type { ReviewSnapshot } from "./schema";
 
 const DECK_VERSION = 1;
@@ -102,6 +103,7 @@ export interface ReviewDeck {
     deleted?: number;
     source?: { startLine?: number; endLine?: number };
     test?: { startLine?: number; endLine?: number };
+    diffHunks?: Array<readonly [startLine: number, endLine: number]>;
   }>;
   reviewGuidanceRefs: DeckReference[];
   outOfDiffContractRefs: DeckReference[];
@@ -332,10 +334,29 @@ function invalidSourceTestRefFailure(
   };
 }
 
+function diffSections(diff: string): ReadonlyMap<string, string> {
+  const sections = new Map<string, string>();
+  const starts = [...diff.matchAll(/^diff --git /gmu)].map((match) => match.index);
+  for (const [index, start] of starts.entries()) {
+    const section = diff.slice(start, starts[index + 1] ?? diff.length);
+    const lines = section.split(/\r?\n/u);
+    const paths = new Set<string>();
+    const gitPath = parseDiffGitPath(lines[0] ?? "");
+    if (gitPath) paths.add(gitPath);
+    for (const line of lines) {
+      const patchPath = parsePatchFilePath(line);
+      if (patchPath) paths.add(patchPath);
+    }
+    for (const path of paths) sections.set(path, section);
+  }
+  return sections;
+}
+
 function buildFileTable(
   changedFiles: Array<{ path: string; added?: number; deleted?: number }>,
   sourceRangeRefs: DeckReference[],
   testRangeRefs: DeckReference[],
+  sections: ReadonlyMap<string, string>,
   failures: DeckLimitFailure[],
 ): ReviewDeck["files"] {
   const changedPaths = new Set(changedFiles.map((file) => file.path));
@@ -357,14 +378,23 @@ function buildFileTable(
     }
     testByPath.set(ref.path, { startLine: ref.startLine, endLine: ref.endLine });
   }
-  return changedFiles.map((file, index) => ({
-    id: compactFileId(index),
-    path: file.path,
-    added: file.added,
-    deleted: file.deleted,
-    ...(sourceByPath.has(file.path) ? { source: sourceByPath.get(file.path) } : {}),
-    ...(testByPath.has(file.path) ? { test: testByPath.get(file.path) } : {}),
-  }));
+  return changedFiles.map((file, index) => {
+    const section = sections.get(file.path);
+    const diffHunks = section
+      ? diffHunkRanges(section).map(
+          (hunk) => [hunk.startLine, hunk.endLine] as const,
+        )
+      : [];
+    return {
+      id: compactFileId(index),
+      path: file.path,
+      added: file.added,
+      deleted: file.deleted,
+      ...(diffHunks.length > 0 ? { diffHunks } : {}),
+      ...(sourceByPath.has(file.path) ? { source: sourceByPath.get(file.path) } : {}),
+      ...(testByPath.has(file.path) ? { test: testByPath.get(file.path) } : {}),
+    };
+  });
 }
 
 export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
@@ -420,7 +450,14 @@ export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
   );
   const metadataArtifactRef = makeMetadataArtifactRef(input.snapshot);
   const pinnedDiffRef = makePinnedDiffRef(input.snapshot, failures);
-  const files = buildFileTable(changedFiles, sourceRangeRefs, testRangeRefs, failures);
+  const diff = readFileSync(input.snapshot.diffPath, "utf8");
+  const files = buildFileTable(
+    changedFiles,
+    sourceRangeRefs,
+    testRangeRefs,
+    diffSections(diff),
+    failures,
+  );
   const diffBytes = statSync(input.snapshot.diffPath).size;
   const risk = computeRisk(
     changedFiles.map((file) => file.path),

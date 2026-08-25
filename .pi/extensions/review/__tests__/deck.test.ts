@@ -158,6 +158,7 @@ describe("review pull request deck", () => {
     expect(first.deck.intent.inferred).toEqual(["bugfix", "security", "tests"]);
     expect(first.deck.risk.level).toBe("medium");
     expect(first.deck.files.map((file) => file.path)).toEqual(["src/auth.ts", "test/auth.test.ts"]);
+    expect(first.deck.files.map((file) => file.diffHunks)).toEqual([[[4, 5]], [[4, 5]]]);
     expect(statSync(first.path).mode & 0o777).toBe(0o600);
   });
 
