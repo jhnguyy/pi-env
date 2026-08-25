@@ -139,9 +139,9 @@ importers:
 
   .pi/extensions/pi-update: {}
 
-  .pi/extensions/pr-review: {}
-
   .pi/extensions/ptc: {}
+
+  .pi/extensions/review: {}
 
   .pi/extensions/security: {}
 

@@ -7,14 +7,19 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runResolvedSubagentEffect } from "../execute";
 
-const captured = vi.hoisted(() => ({ prompts: undefined as any, context: undefined as any }));
+const captured = vi.hoisted(() => ({
+  prompts: undefined as any,
+  context: undefined as any,
+  config: undefined as any,
+}));
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
   const actual = await importOriginal<typeof AgentCore>();
   return {
     ...actual,
-    agentLoop: (prompts: unknown, context: unknown) => {
+    agentLoop: (prompts: unknown, context: unknown, config: unknown) => {
       captured.prompts = prompts;
       captured.context = context;
+      captured.config = config;
       return {
         async *[Symbol.asyncIterator]() {},
         async result() {
@@ -29,6 +34,7 @@ afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
   captured.prompts = undefined;
   captured.context = undefined;
+  captured.config = undefined;
 });
 
 describe("resolved subagent boundary", () => {
@@ -47,7 +53,7 @@ describe("resolved subagent boundary", () => {
       sessionManager,
       modelRegistry: { getApiKeyForProvider: () => undefined },
     };
-    await Effect.runPromise(
+    const result = await Effect.runPromise(
       runResolvedSubagentEffect(
         {
           name: "n",
@@ -65,5 +71,6 @@ describe("resolved subagent boundary", () => {
     expect(captured.prompts).toMatchObject([{ role: "user" }]);
     expect(captured.context.messages).toEqual([]);
     expect(captured.context.tools).toEqual([tool]);
+    expect(captured.config.sessionId).toBe(result.details.sessionId);
   });
 });

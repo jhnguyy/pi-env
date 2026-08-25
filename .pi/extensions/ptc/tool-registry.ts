@@ -35,14 +35,17 @@ type ExecuteFn = (
 export type DispatchContext = { cwd: string } | ExtensionContext;
 
 const BUILTIN_FACTORIES = Object.fromEntries(
-  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [name, contract.definitionFactory]),
-) as Record<string, (cwd: string) => ToolDefinition<any, any, any>>;  // eslint-disable-line @typescript-eslint/no-explicit-any
+  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
+    name,
+    contract.definitionFactory,
+  ]),
+) as Record<string, (cwd: string) => ToolDefinition<any, any, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
   private readonly pi: ExtensionAPI;
   private extensionTools = new Map<string, ExecuteFn>();
-  private builtinCache = new Map<string, ToolDefinition<any, any, any>>();  // eslint-disable-line @typescript-eslint/no-explicit-any
+  private builtinCache = new Map<string, ToolDefinition<any, any, any>>(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   constructor(pi: ExtensionAPI) {
     this.pi = pi;
@@ -56,12 +59,13 @@ export class ToolRegistry {
   }
 
   private installAgentToolsListener(pi: ExtensionAPI): void {
-    listenForAgentTools(pi, ({ tool }) =>
+    listenForAgentTools(pi, ({ tool, audience }) => {
+      if (audience === "dag") return;
       this.rememberTool({
         name: tool.name,
         execute: (id, params, signal) => tool.execute(id, params, signal, undefined),
-      }),
-    );
+      });
+    });
   }
 
   private installPtcToolsListener(pi: ExtensionAPI): void {
@@ -81,7 +85,9 @@ export class ToolRegistry {
       return false;
     });
     if (unavailable.length > 0) {
-      console.warn(`[ptc] The following tools are unavailable inside PTC: ${unavailable.join(", ")}.`);
+      console.warn(
+        `[ptc] The following tools are unavailable inside PTC: ${unavailable.join(", ")}.`,
+      );
     }
     return available;
   }
@@ -124,7 +130,9 @@ export class ToolRegistry {
   private assertActive(toolName: string): void {
     if (BLOCKED_TOOLS.has(toolName)) throw new Error(`[ptc] Tool "${toolName}" is blocked.`);
     if (!this.pi.getActiveTools().includes(toolName)) {
-      throw new Error(`[ptc] Tool "${toolName}" is inactive. Activate it before calling it through ptc.`);
+      throw new Error(
+        `[ptc] Tool "${toolName}" is inactive. Activate it before calling it through ptc.`,
+      );
     }
   }
 }

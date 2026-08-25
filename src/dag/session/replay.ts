@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import * as DagAttempt from "../attempt.js";
 import * as DagContracts from "../contracts.js";
 import * as DagKernel from "../kernel.js";
 import type * as DagValidation from "../validation.js";
@@ -50,12 +51,11 @@ function projectProcessLoss(
       const attemptUpdate = SessionCodec.computeTransitionAttemptUpdate(
         applied.transition,
         true,
-        {
-          nodeId: node.nodeId,
-          attemptId: `${graph.runId}:${node.nodeId}:1`,
-          ordinal: 1,
-          status: DagContracts.DagNodeStatus.Interrupted,
-        },
+        DagAttempt.dagAttemptStatus(
+          graph.runId,
+          node.nodeId,
+          DagContracts.DagNodeStatus.Interrupted,
+        ),
         attempts.get(node.nodeId),
         graph.runId,
       );
@@ -195,35 +195,36 @@ function finalizeReplayedSession(
   return { state, transitions, attempts, outcome: outcome.outcome, recoveredFromProcessLoss };
 }
 
-function getBranch(seam: SessionContracts.DagSessionManagerSeam): readonly unknown[] {
+function readEntries(store: SessionContracts.DagSessionStore): readonly unknown[] {
   try {
-    return seam.getBranch();
+    return store.read();
   } catch (cause) {
-    throw new SessionContracts.DagSessionSeamFailed({ operation: "getBranch", cause });
+    throw new SessionContracts.DagSessionSeamFailed({ operation: "read", cause });
   }
 }
 
 export function reconstructDagSession(
-  seam: SessionContracts.DagSessionManagerSeam,
+  store: SessionContracts.DagSessionStore,
   requestedRunId: string,
   options?: { readonly expectedGraphId?: string; readonly limits?: Partial<SessionContracts.DagSessionLimits> },
 ): Effect.Effect<SessionContracts.DagSessionReconstruction, SessionContracts.DagSessionFailure> {
   return Effect.try({
     try: () => {
       const limits = SessionCodec.validateLimits(options?.limits);
-      const matchingEntries = getBranch(seam).filter(
-        (entry) =>
-          SessionCodec.isRecord(entry) && entry.type === "custom" && entry.customType === SessionContracts.DagSessionEntryType,
+      const storedEntries = readEntries(store).filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          !Array.isArray(entry) &&
+          (entry as Record<string, unknown>).runId === requestedRunId,
       );
-      if (matchingEntries.length > limits.totalMatchingEntries)
+      if (storedEntries.length > limits.totalMatchingEntries)
         throw new SessionContracts.DagSessionLimitExceeded({
           limit: "totalMatchingEntries",
-          actual: matchingEntries.length,
+          actual: storedEntries.length,
           max: limits.totalMatchingEntries,
         });
-      const decoded = matchingEntries
-        .map((entry) => SessionCodec.decodeEntry(entry, limits))
-        .filter((entry): entry is SessionContracts.DagSessionEntry => entry !== undefined);
+      const decoded = storedEntries.map((entry) => SessionCodec.decodeEntry(entry, limits));
       const entries = selectRequestedEntries(decoded, requestedRunId, options);
       validateEntryOrder(entries);
       const graphEntry = selectGraphEntry(entries);

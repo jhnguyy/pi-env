@@ -297,8 +297,11 @@ export function resolveTools(
     });
   }
 
-  const names = collectToolNames(explicitNames, requestedCapabilities, registeredExtTools);
-  const catalog = buildToolCatalog(registeredExtTools);
+  const publicExtTools = new Map(
+    [...registeredExtTools].filter(([, registration]) => registration.audience !== "dag"),
+  );
+  const names = collectToolNames(explicitNames, requestedCapabilities, publicExtTools);
+  const catalog = buildToolCatalog(publicExtTools);
   return materializeToolResolution(
     names,
     explicitNames,

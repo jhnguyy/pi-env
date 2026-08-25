@@ -6,7 +6,6 @@ import {
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
-  DagSessionEntryType,
   DagTransitionType,
   computeDagSessionGraphId,
   createDagRunState,
@@ -16,7 +15,7 @@ import {
   type DagCompletionGuardKind,
   type DagDefinition,
   type DagSessionEntry,
-  type DagSessionManagerSeam,
+  type DagSessionStore,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
@@ -36,17 +35,6 @@ function node(
   };
 }
 
-function seam(entries: unknown[] = []): DagSessionManagerSeam & { readonly entries: unknown[] } {
-  return {
-    entries,
-    getBranch: () => [...entries],
-    appendCustomEntry: (customType, data) => {
-      entries.push({ type: "custom", customType, data });
-      return String(entries.length);
-    },
-  };
-}
-
 function valid(def: DagDefinition) {
   const result = validateDagDefinition(def);
   expect(result._tag).toBe("valid");
@@ -54,8 +42,8 @@ function valid(def: DagDefinition) {
   return result.graph;
 }
 
-function wrapper(data: DagSessionEntry) {
-  return { type: "custom", customType: DagSessionEntryType, data };
+function storedEntry(data: DagSessionEntry) {
+  return data;
 }
 
 function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
@@ -65,13 +53,15 @@ function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
 }
 
 describe("DAG session codec", () => {
-  it("wraps getBranch seam failures without classifying them as malformed", () => {
+  it("wraps store read failures without classifying them as malformed", () => {
     const def = Fixtures.definition([node("a")], 1);
-    const store: DagSessionManagerSeam = {
-      getBranch: () => {
+    const store: DagSessionStore = {
+      read: () => {
         throw new Error("storage unavailable");
       },
-      appendCustomEntry: () => "unreachable",
+      append: () => {
+        throw new Error("unreachable");
+      },
     };
 
     expect(failureTag(reconstructDagSession(store, def.runId))).toBe("seam-failed");
@@ -91,8 +81,8 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([
-            wrapper({
+          Fixtures.sessionStore([
+            storedEntry({
               ...graphEntry,
               event: {
                 _tag: "graph",
@@ -110,8 +100,8 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([
-            wrapper({
+          Fixtures.sessionStore([
+            storedEntry({
               ...graphEntry,
               event: {
                 _tag: "graph",
@@ -160,27 +150,27 @@ describe("DAG session codec", () => {
     }[] = [
       {
         name: "unsupported wire version",
-        entries: [wrapper({ ...graphEntry, v: 2 as never })],
+        entries: [storedEntry({ ...graphEntry, v: 2 as never })],
         expectedTag: "unsupported-version",
       },
       {
         name: "truncated first sequence",
-        entries: [wrapper({ ...graphEntry, seq: 1 })],
+        entries: [storedEntry({ ...graphEntry, seq: 1 })],
         expectedTag: "truncated",
       },
       {
         name: "duplicate sequence",
-        entries: [wrapper(graphEntry), wrapper({ ...graphEntry, seq: 0 })],
+        entries: [storedEntry(graphEntry), storedEntry({ ...graphEntry, seq: 0 })],
         expectedTag: "duplicate",
       },
       {
         name: "illegal reducer transition",
-        entries: [wrapper(graphEntry), wrapper(malformedTransition)],
+        entries: [storedEntry(graphEntry), storedEntry(malformedTransition)],
         expectedTag: "reducer-illegal",
       },
       {
         name: "graph byte limit",
-        entries: [wrapper(graphEntry)],
+        entries: [storedEntry(graphEntry)],
         expectedTag: "limit",
         limits: { graphBytes: 8 },
       },
@@ -189,7 +179,7 @@ describe("DAG session codec", () => {
     for (const testCase of cases) {
       expect(
         failureTag(
-          reconstructDagSession(seam([...testCase.entries]), def.runId, {
+          reconstructDagSession(Fixtures.sessionStore([...testCase.entries]), def.runId, {
             limits: testCase.limits,
           }),
         ),
@@ -199,7 +189,7 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([wrapper(graphEntry), wrapper({ ...graphEntry, v: 2 as never, seq: 1 })]),
+          Fixtures.sessionStore([storedEntry(graphEntry), storedEntry({ ...graphEntry, v: 2 as never, seq: 1 })]),
           def.runId,
           { limits: { totalMatchingEntries: 1 } },
         ),
@@ -251,13 +241,13 @@ describe("DAG session codec", () => {
     };
 
     expect(
-      failureTag(reconstructDagSession(seam([wrapper(graphEntry), wrapper(wrongRun)]), def.runId)),
+      failureTag(reconstructDagSession(Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(wrongRun)]), def.runId)),
     ).toBe("run-mismatch");
     expect(
       failureTag(
         reconstructDagSession(
-          seam([
-            wrapper({ ...graphEntry, event: { _tag: "final", outcome: "nonsense" as never } }),
+          Fixtures.sessionStore([
+            storedEntry({ ...graphEntry, event: { _tag: "final", outcome: "nonsense" as never } }),
           ]),
           def.runId,
         ),
@@ -266,9 +256,9 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([
-            wrapper(graphEntry),
-            wrapper({
+          Fixtures.sessionStore([
+            storedEntry(graphEntry),
+            storedEntry({
               ...start,
               event: {
                 _tag: "transition",
@@ -289,14 +279,14 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([wrapper(graphEntry), wrapper({ ...graphEntry, seq: 1 })]),
+          Fixtures.sessionStore([storedEntry(graphEntry), storedEntry({ ...graphEntry, seq: 1 })]),
           def.runId,
         ),
       ),
     ).toBe("ordering");
     expect(
       failureTag(
-        reconstructDagSession(seam([wrapper(graphEntry), wrapper(start)]), def.runId, {
+        reconstructDagSession(Fixtures.sessionStore([storedEntry(graphEntry), storedEntry(start)]), def.runId, {
           limits: { transitions: 1 },
         }),
       ),
@@ -304,9 +294,9 @@ describe("DAG session codec", () => {
     expect(
       failureTag(
         reconstructDagSession(
-          seam([
-            wrapper(graphEntry),
-            wrapper({
+          Fixtures.sessionStore([
+            storedEntry(graphEntry),
+            storedEntry({
               ...graphEntry,
               seq: 1,
               event: { _tag: "final", outcome: DagRunOutcome.Succeeded },

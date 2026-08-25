@@ -48,19 +48,41 @@ function readOptionalAgentSettingsEffect(
   );
 }
 
-export function readOptionalAgentSettings(env: AgentSettingsEnv = defaultSettingsEnv, cwd = process.cwd()): AgentSettings | null {
+export function readOptionalAgentSettings(
+  env: AgentSettingsEnv = defaultSettingsEnv,
+  cwd = process.cwd(),
+): AgentSettings | null {
   return Effect.runSync(readOptionalAgentSettingsEffect(env, cwd));
 }
 
-function decodeAgentSettingsSnapshotEffect(
+export function decodeGlobalAgentSettingsSnapshotEffect(
+  snapshot: SettingsSnapshot,
+): Effect.Effect<AgentSettings, SettingsDecodeError> {
+  return Schema.decodeUnknownEffect(AgentSettingsSchema)(snapshot.global).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SettingsDecodeError({
+          source: SettingsSource.Global,
+          path: snapshot.paths.global,
+          paths: snapshot.paths,
+          cause,
+        }),
+    ),
+  );
+}
+
+export function decodeAgentSettingsSnapshotEffect(
   snapshot: SettingsSnapshot,
 ): Effect.Effect<AgentSettings, SettingsDecodeError> {
   return Schema.decodeUnknownEffect(AgentSettingsSchema)(snapshot.merged).pipe(
-    Effect.mapError((cause) => new SettingsDecodeError({
-      source: SettingsSource.Overlay,
-      path: `${snapshot.paths.global} + ${snapshot.paths.project}`,
-      paths: snapshot.paths,
-      cause,
-    })),
+    Effect.mapError(
+      (cause) =>
+        new SettingsDecodeError({
+          source: SettingsSource.Overlay,
+          path: `${snapshot.paths.global} + ${snapshot.paths.project}`,
+          paths: snapshot.paths,
+          cause,
+        }),
+    ),
   );
 }

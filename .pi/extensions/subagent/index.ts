@@ -16,6 +16,7 @@ import {
 } from "./render";
 import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
 import { SubagentSessionRuntime } from "./session-runtime";
+import { toNestedToolUsage } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 export {
@@ -98,6 +99,22 @@ const SUBAGENT_JOB_PARAMETERS = Type.Object({
 type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
 type SubagentJobParams = Static<typeof SUBAGENT_JOB_PARAMETERS>;
 
+export function completedJobUsageOnce(
+  reportedJobUsage: Set<string>,
+  job: SubagentJob,
+) {
+  if (
+    job.status === SubagentJobStatus.Queued ||
+    job.status === SubagentJobStatus.Running ||
+    job.status === SubagentJobStatus.Cancelling ||
+    reportedJobUsage.has(job.id) ||
+    !job.latestDetails?.usage
+  )
+    return {};
+  reportedJobUsage.add(job.id);
+  return { usage: toNestedToolUsage(job.latestDetails.usage) };
+}
+
 function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
   const details = job.latestDetails;
   return {
@@ -129,6 +146,7 @@ export default function (pi: ExtensionAPI) {
   );
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
+  const reportedJobUsage = new Set<string>();
 
   const registerSubagentTool = (description: string) =>
     pi.registerTool({
@@ -136,7 +154,10 @@ export default function (pi: ExtensionAPI) {
       label: "Subagent",
       description,
       parameters: SUBAGENT_PARAMETERS,
-      execute: runtime.execute,
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        const result = await runtime.execute(toolCallId, params, signal, onUpdate, ctx);
+        return { ...result, usage: toNestedToolUsage(result.details.usage) };
+      },
       renderCall: renderSubagentCall,
       renderResult: renderSubagentResult,
     });
@@ -189,6 +210,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
+        ...completedJobUsageOnce(reportedJobUsage, waited.job),
       };
     }
     if (params.action === SubagentJobAction.Result) {
@@ -197,6 +219,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: formatJobResult(job) }],
         details: getJobRenderDetails(job),
+        ...completedJobUsageOnce(reportedJobUsage, job),
       };
     }
     const job =
@@ -252,9 +275,12 @@ export default function (pi: ExtensionAPI) {
 
     const { agents } = discoverAgents(ctx.cwd, "user");
 
-    const extToolNames = [...registeredExtTools.keys()];
+    const publicExtTools = [...registeredExtTools].filter(
+      ([, registration]) => registration.audience !== "dag",
+    );
+    const extToolNames = publicExtTools.map(([name]) => name);
     const extToolCaps = new Map(
-      [...registeredExtTools].map(([name, registration]) => [name, registration.capabilities]),
+      publicExtTools.map(([name, registration]) => [name, registration.capabilities]),
     );
     const description = buildDynamicDescription(
       enabledModelIds,

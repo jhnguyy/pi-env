@@ -1,4 +1,17 @@
 export {
+  DagAttemptOrdinal,
+  dagAttemptId,
+  dagAttemptStatus,
+  dagResultStatus,
+  isDagAttemptStatus,
+} from "./attempt.js";
+export type {
+  DagAttempt,
+  DagAttemptStatus,
+  DagAttemptStatusValue,
+  DagAttemptTerminalStatus,
+} from "./attempt.js";
+export {
   DagSubagentPayloadFailure,
   DagSubagentContextFailure,
   DagSubagentRuntimeFailure,
@@ -18,6 +31,7 @@ export {
 export type {
   DagSubagentFailure,
   DagSubagentPayloadV1,
+  DagSubagentReasoningLevel,
   DagSubagentPrompt,
   DagSubagentRuntime,
   DagSubagentRuntimeRequest,
@@ -48,6 +62,7 @@ export {
   DagTextArtifactMediaType,
   DagTextArtifactReferenceVersion,
   admitDagTextArtifacts,
+  materializeDagTextArtifact,
   materializeDagTextContext,
   parseDagTextArtifactReference,
   selectDagTextArtifactReferences,
@@ -55,6 +70,7 @@ export {
 export type {
   DagArtifactFailure,
   DagArtifactLimits,
+  DagExpectedTextArtifactIdentity,
   DagMaterializedTextArtifact,
   DagMaterializedTextContext,
   DagTextArtifactReference,
@@ -169,7 +185,7 @@ export type {
   DagSessionEvent,
   DagSessionFailure,
   DagSessionLimits,
-  DagSessionManagerSeam,
+  DagSessionStore,
   DagSessionReconstruction,
   DagSessionWriter,
 } from "./session.js";

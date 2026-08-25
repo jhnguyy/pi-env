@@ -1,10 +1,24 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
-import { prepareSnapshot, prepareSnapshotEffect, resolvePrUrl } from "../snapshot";
+import {
+  prepareResolvedSnapshot,
+  prepareSnapshot,
+  prepareSnapshotEffect,
+  resolvePrUrl,
+} from "../snapshot";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
@@ -45,6 +59,8 @@ function execFor(meta: any, mismatch = false) {
         stdout: "R100\0old name.ts\0new name.ts\0A\0space path.ts\0",
         stderr: "",
       } as any;
+    if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+      mkdirSync(args[3], { recursive: true });
     if (cmd === "git" && args[0] === "diff")
       return {
         code: 0,
@@ -56,7 +72,7 @@ function execFor(meta: any, mismatch = false) {
   return { exec, calls };
 }
 
-describe("pr-review snapshot", () => {
+describe("review pull request snapshot", () => {
   it("resolves missing URL through gh pr view or returns a clear needs-url message", async () => {
     const cwd = roots();
     const ok = await resolvePrUrl(
@@ -94,6 +110,10 @@ describe("pr-review snapshot", () => {
       { path: "new name.ts" },
       { path: "space path.ts" },
     ]);
+    expect(statSync(snap.cache!.repoDir).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.artifactDir).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.worktree).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.diffPath).mode & 0o777).toBe(0o600);
     expect(
       calls.some(
         (c) =>
@@ -104,10 +124,41 @@ describe("pr-review snapshot", () => {
     expect(
       calls.some(
         (c) =>
-          c.args[0] === "fetch" &&
-          c.args.at(-1)!.startsWith("+refs/heads/trunk:refs/pi-pr-review/base/7/"),
+          c.args[0] === "fetch" && c.args.at(-1)!.startsWith(`+${base}:refs/pi-pr-review/base/7/`),
       ),
     ).toBe(true);
+  });
+
+  it("repairs restrictive permissions on reused artifact paths", async () => {
+    const cwd = roots();
+    const reviewId = "acme-widgets-7-fixed";
+    const artifactDir = join(mocked.agentDir, "pr-review", "artifacts", reviewId);
+    const diffPath = join(artifactDir, "diff.patch");
+    mkdirSync(artifactDir, { recursive: true, mode: 0o777 });
+    chmodSync(artifactDir, 0o777);
+    writeFileSync(diffPath, "stale", { mode: 0o666 });
+    chmodSync(diffPath, 0o666);
+    const head = "abcdef1234567890";
+    const base = "0123456789abcdef";
+    const { exec } = execFor({ headRefOid: head, baseRefOid: base });
+    const snap = await prepareResolvedSnapshot(
+      exec as any,
+      cwd,
+      {
+        owner: "acme",
+        repo: "widgets",
+        number: 7,
+        url: "https://github.com/acme/widgets/pull/7",
+        baseRef: "trunk",
+        baseOid: base,
+        headOid: head,
+        changedFiles: [],
+      },
+      undefined,
+      reviewId,
+    );
+    expect(statSync(snap.artifactDir).mode & 0o777).toBe(0o700);
+    expect(statSync(snap.diffPath).mode & 0o777).toBe(0o600);
   });
 
   it("fails absent base name/OID and exact ref mismatches", async () => {

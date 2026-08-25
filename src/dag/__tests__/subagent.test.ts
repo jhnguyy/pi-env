@@ -74,6 +74,10 @@ describe("DAG subagent executor", () => {
     expect(() => parseDagSubagentPayload(payload(root, { model: "ambient" }))).toThrow(
       DagSubagentPayloadFailure,
     );
+    expect(parseDagSubagentPayload(payload(root, { reasoning: "max" })).reasoning).toBe("max");
+    expect(() => parseDagSubagentPayload(payload(root, { reasoning: "off" }))).toThrow(
+      DagSubagentPayloadFailure,
+    );
     expect(() => parseDagSubagentPayload(payload(root, { maxTurns: 65 }))).toThrow(
       DagSubagentPayloadFailure,
     );

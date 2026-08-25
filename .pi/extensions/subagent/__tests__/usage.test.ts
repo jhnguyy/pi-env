@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, zeroUsage } from "../usage";
+import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, toNestedToolUsage, zeroUsage } from "../usage";
 import type { SubagentDetails } from "../types";
 
 function details(name: string, input: number, output: number): SubagentDetails {
@@ -18,6 +18,24 @@ function details(name: string, input: number, output: number): SubagentDetails {
 }
 
 describe("subagent usage accumulation", () => {
+  it("converts nested work into parent-session tool usage", () => {
+    expect(toNestedToolUsage({
+      input: 2,
+      output: 3,
+      cacheRead: 5,
+      cacheWrite: 7,
+      cost: 1.25,
+      turns: 4,
+    })).toEqual({
+      input: 2,
+      output: 3,
+      cacheRead: 5,
+      cacheWrite: 7,
+      totalTokens: 17,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.25 },
+    });
+  });
+
   it("aggregates sync and async records exactly and idempotently", () => {
     const ledger = new SubagentUsageLedger();
     ledger.record("sync-1", "sync", details("scout", 2, 3));
@@ -74,9 +92,30 @@ describe("subagent usage accumulation", () => {
       } as any,
     });
 
+    accumulator.acceptEvent({
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "nested",
+        toolName: "subagent",
+        content: [],
+        details: {},
+        usage: {
+          input: 10,
+          output: 20,
+          cacheRead: 30,
+          cacheWrite: 40,
+          totalTokens: 100,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.5 },
+        },
+        isError: false,
+        timestamp: 2,
+      } as any,
+    });
+
     expect(accumulator.output()).toBe("answer");
     expect(accumulator.toolCallCount).toBe(1);
-    expect(accumulator.usage).toMatchObject({ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cost: 0.5, turns: 1 });
-    expect(accumulator.turnLimitExceeded).toBe(true);
+    expect(accumulator.usage).toMatchObject({ input: 11, output: 22, cacheRead: 33, cacheWrite: 44, cost: 2, turns: 1 });
+    expect(accumulator.turnLimitExceeded).toBe(false);
   });
 });

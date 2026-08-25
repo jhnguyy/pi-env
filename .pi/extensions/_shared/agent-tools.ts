@@ -38,6 +38,7 @@ export interface AgentToolFactoryContext {
 export interface ExtToolRegistration {
   tool: AgentTool<any, any>;
   capabilities: ToolCapability[];
+  audience?: "public" | "dag";
   createTool?: (context: AgentToolFactoryContext) => AgentTool<any, any>;
   sessionGeneration?: string;
 }
@@ -80,6 +81,21 @@ export function formatCapabilities(caps: ToolCapability[]): string {
   return caps.join(", ");
 }
 
+function unpublishAgentTools(
+  pi: AgentToolEvents,
+  registrations: readonly ExtToolRegistration[],
+): unknown | undefined {
+  let firstFailure: unknown;
+  for (const registration of [...registrations].reverse()) {
+    try {
+      agentToolChannel.unpublish(pi.events, registration);
+    } catch (cause) {
+      firstFailure ??= cause;
+    }
+  }
+  return firstFailure;
+}
+
 export function registerAgentTools(
   pi: AgentToolEvents,
   registrations: ExtToolRegistration | ExtToolRegistration[],
@@ -88,15 +104,25 @@ export function registerAgentTools(
   const active = (Array.isArray(registrations) ? registrations : [registrations]).map(
     (registration) => withFactory(registration, sessionGeneration),
   );
-  for (const registration of active) agentToolChannel.publish(pi.events, registration);
-  return active;
+  const published: ExtToolRegistration[] = [];
+  try {
+    for (const registration of active) {
+      published.push(registration);
+      agentToolChannel.publish(pi.events, registration);
+    }
+    return active;
+  } catch (cause) {
+    unpublishAgentTools(pi, published);
+    throw cause;
+  }
 }
 
 export function unregisterAgentTools(
   pi: AgentToolEvents,
   registrations: readonly ExtToolRegistration[],
 ): void {
-  for (const registration of registrations) agentToolChannel.unpublish(pi.events, registration);
+  const failure = unpublishAgentTools(pi, registrations);
+  if (failure) throw failure;
 }
 
 export function registerAgentToolsOnSessionStart(

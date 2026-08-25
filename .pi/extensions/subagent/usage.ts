@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 
 import type { SubagentDetails, UsageStats } from "./types";
 
@@ -28,6 +28,23 @@ export function addUsage(
 
 export function cloneUsage(usage: UsageStats): UsageStats {
   return { ...usage };
+}
+
+export function toNestedToolUsage(usage: UsageStats): Usage {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: usage.cost,
+    },
+  };
 }
 
 export function formatUsageCompact(usage: UsageStats): string {
@@ -79,7 +96,7 @@ export class SubagentRunAccumulator {
     if (event.type === "message_end") {
       const message = event.message;
       this.transcript.push(message);
-      this.acceptAssistantMessage(message);
+      this.acceptMessageUsage(message);
       return message;
     }
     if (event.type === "tool_execution_start") this.toolCallCount++;
@@ -129,7 +146,17 @@ export class SubagentRunAccumulator {
     };
   }
 
-  private acceptAssistantMessage(message: AgentMessage): void {
+  private acceptMessageUsage(message: AgentMessage): void {
+    if (message.role === "toolResult") {
+      addUsage(this.usage, {
+        input: message.usage?.input ?? 0,
+        output: message.usage?.output ?? 0,
+        cacheRead: message.usage?.cacheRead ?? 0,
+        cacheWrite: message.usage?.cacheWrite ?? 0,
+        cost: message.usage?.cost?.total ?? 0,
+      });
+      return;
+    }
     const msg = message as AssistantMessage;
     if (msg.role !== "assistant") return;
     addUsage(this.usage, {
@@ -143,7 +170,8 @@ export class SubagentRunAccumulator {
     this.lastModelId ??= msg.model;
     this.lastStopReason = msg.stopReason;
     this.lastErrorMessage = msg.errorMessage;
-    this.turnLimitExceeded = this.hasReachedLimit(this.usage.turns);
+    const completed = msg.stopReason === "stop";
+    this.turnLimitExceeded = this.hasReachedLimit(this.usage.turns) && !completed;
   }
 }
 

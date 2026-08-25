@@ -7,15 +7,12 @@ import {
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
-  DagSessionEntryType,
   DagTransitionType,
   computeDagSessionGraphId,
   makeDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
   type DagDefinition,
-  type DagSessionEntry,
-  type DagSessionManagerSeam,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
@@ -35,26 +32,11 @@ function node(
   };
 }
 
-function seam(entries: unknown[] = []): DagSessionManagerSeam & { readonly entries: unknown[] } {
-  return {
-    entries,
-    getBranch: () => [...entries],
-    appendCustomEntry: (customType, data) => {
-      entries.push({ type: "custom", customType, data });
-      return String(entries.length);
-    },
-  };
-}
-
 function valid(def: DagDefinition) {
   const result = validateDagDefinition(def);
   expect(result._tag).toBe("valid");
   if (result._tag !== "valid") throw new Error("invalid graph");
   return result.graph;
-}
-
-function wrapper(data: DagSessionEntry) {
-  return { type: "custom", customType: DagSessionEntryType, data };
 }
 
 function failureTag(effect: Effect.Effect<unknown, { readonly _tag: string }>) {
@@ -67,7 +49,7 @@ describe("DAG session replay", () => {
   it("replays a valid terminal history through public writer and reconstruction", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
-    const store = seam();
+    const store = Fixtures.sessionStore();
     const writer = makeDagSessionWriter(store, dag, def);
 
     Effect.runSync(writer.appendGraph(def));
@@ -89,8 +71,11 @@ describe("DAG session replay", () => {
       ),
     );
     Effect.runSync(writer.appendFinal(DagRunOutcome.Succeeded));
+    store.entries.push({ runId: "unrelated-run", malformed: true });
 
-    const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
+    const recovered = Effect.runSync(
+      reconstructDagSession(store, def.runId, { limits: { totalMatchingEntries: 4 } }),
+    );
     expect(recovered.graphId).toBe(computeDagSessionGraphId(def));
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Succeeded);
     expect(Fixtures.status(recovered.graph, recovered.state, "a")).toBe(DagNodeStatus.Succeeded);
@@ -105,7 +90,7 @@ describe("DAG session replay", () => {
   it("projects an open running prefix to interrupted without invoking work", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
-    const store = seam();
+    const store = Fixtures.sessionStore();
     const writer = makeDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     Effect.runSync(
@@ -135,7 +120,7 @@ describe("DAG session replay", () => {
       1,
     );
     const dag = valid(def);
-    const store = seam();
+    const store = Fixtures.sessionStore();
     const writer = makeDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     Effect.runSync(
@@ -162,20 +147,16 @@ describe("DAG session replay", () => {
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Failed);
   });
 
-  it("uses only getBranch, excludes sibling branch entries, and returns immutable data", () => {
+  it("excludes sibling run entries and returns immutable data", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
-    const store = seam([
+    const store = Fixtures.sessionStore([
       {
-        type: "custom",
-        customType: DagSessionEntryType,
-        data: {
-          v: 1,
-          runId: "sibling",
-          graphId: "x",
-          seq: 0,
-          event: { _tag: "graph", graph: { ...def, runId: "sibling" } },
-        },
+        v: 1,
+        runId: "sibling",
+        graphId: "x",
+        seq: 0,
+        event: { _tag: "graph", graph: { ...def, runId: "sibling" } },
       },
     ]);
     const writer = makeDagSessionWriter(store, dag, def);
@@ -209,7 +190,7 @@ describe("DAG session replay", () => {
       2,
     );
     const dag = valid(def);
-    const store = seam();
+    const store = Fixtures.sessionStore();
     const writer = makeDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     for (const id of ["review-a", "review-b"] as const) {
@@ -243,7 +224,9 @@ describe("DAG session replay", () => {
     }
 
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
-    expect(Fixtures.status(recovered.graph, recovered.state, "synthesize")).toBe(DagNodeStatus.Blocked);
+    expect(Fixtures.status(recovered.graph, recovered.state, "synthesize")).toBe(
+      DagNodeStatus.Blocked,
+    );
     expect(recovered.state.nodes[2]).toEqual({
       nodeId: "synthesize",
       status: DagNodeStatus.Blocked,

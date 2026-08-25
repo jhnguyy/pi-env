@@ -104,6 +104,22 @@ describe("agent tool registration", () => {
     expect(replayed).toEqual([]);
   });
 
+  it("attempts every revocation when one unregister event fails", () => {
+    const pi = createPi();
+    const registrations = registerAgentTools(pi, [
+      { tool: tool("first"), capabilities: [ToolCapability.Read] },
+      { tool: tool("second"), capabilities: [ToolCapability.Read] },
+    ]);
+    pi.events.on?.(AgentToolEvent.Unregister, () => {
+      throw new Error("unregister failed");
+    });
+
+    expect(() => unregisterAgentTools(pi, registrations)).toThrow("unregister failed");
+    const replayed: string[] = [];
+    listenForAgentTools(pi, (entry) => replayed.push(entry.tool.name));
+    expect(replayed).toEqual([]);
+  });
+
   it("creates session-bound factories and revokes them at shutdown", () => {
     const pi = createPi();
     const added: ExtToolRegistration[] = [];

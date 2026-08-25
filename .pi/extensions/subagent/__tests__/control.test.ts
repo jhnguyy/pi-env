@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "../config";
@@ -45,6 +46,24 @@ describe("shared subagent run supervisor", () => {
     await supervisor.shutdown();
   });
 
+  it("removes a pending admission when its Effect is interrupted", async () => {
+    const supervisor = new SubagentRunSupervisor(
+      "session",
+      config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
+    );
+    const active = await supervisor.acquire(request("/active"));
+    const controller = new AbortController();
+    const pending = Effect.runPromise(supervisor.acquireEffect(request("/pending")), {
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toBeDefined();
+    active.release();
+    const replacement = await supervisor.acquire(request("/replacement"));
+    replacement.release();
+    await supervisor.shutdown();
+  });
+
   it("allows shared reads and serializes writes by canonical workspace key", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "pi-subagent-supervisor-workspace-"));
     const child = join(workspace, "packages", "child");
@@ -68,6 +87,20 @@ describe("shared subagent run supervisor", () => {
     secondWriteLease.release();
     await supervisor.shutdown();
     rmSync(workspace, { recursive: true, force: true });
+  });
+
+  it("reports aggregate usage across sibling runs without enforcing a limit", async () => {
+    const supervisor = new SubagentRunSupervisor("session", config());
+    const first = await supervisor.acquire({ ...request("/first"), runId: "dag:first" });
+    const second = await supervisor.acquire({ ...request("/second"), runId: "dag:second" });
+    first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
+    second.updateUsage({ input: 41, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
+    expect(first.signal.aborted).toBe(false);
+    expect(second.signal.aborted).toBe(false);
+    expect(supervisor.usage("dag:")).toMatchObject({ input: 81, output: 20, cost: 4 });
+    first.release();
+    second.release();
+    await supervisor.shutdown();
   });
 
   it("aborts a run at its wall-time limit", async () => {

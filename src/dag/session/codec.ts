@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as DagAttempt from "../attempt.js";
 import * as DagContracts from "../contracts.js";
 import * as DagValidation from "../validation.js";
 import * as SessionContracts from "./contracts.js";
@@ -193,15 +194,6 @@ export function decodeTransition(
   }
 }
 
-export function isAttemptStatus(status: unknown): status is SessionContracts.DagSessionAttemptStatus["status"] {
-  return (
-    status === DagContracts.DagNodeStatus.Running ||
-    status === DagContracts.DagNodeStatus.Succeeded ||
-    status === DagContracts.DagNodeStatus.Failed ||
-    status === DagContracts.DagNodeStatus.Cancelled ||
-    status === DagContracts.DagNodeStatus.Interrupted
-  );
-}
 
 function decodeAttempt(
   raw: unknown,
@@ -210,15 +202,23 @@ function decodeAttempt(
 ): SessionContracts.DagSessionAttemptStatus {
   if (!isRecord(raw)) throw new SessionContracts.DagSessionMalformed({ message: "malformed attempt", entry });
   const nodeId = requireString(raw.nodeId, "attempt nodeId", entry);
-  const expectedAttemptId = `${expectedRunId}:${nodeId}:1`;
-  if (raw.attemptId !== expectedAttemptId || raw.ordinal !== 1)
+  const expectedAttemptId = DagAttempt.dagAttemptId(expectedRunId, nodeId);
+  if (
+    raw.attemptId !== expectedAttemptId ||
+    raw.ordinal !== DagAttempt.DagAttemptOrdinal
+  )
     throw new SessionContracts.DagSessionAttemptInconsistent({
       message: "attempt identity is not deterministic",
       nodeId,
     });
-  if (!isAttemptStatus(raw.status))
+  if (!DagAttempt.isDagAttemptStatus(raw.status))
     throw new SessionContracts.DagSessionMalformed({ message: "malformed attempt status", entry });
-  return { nodeId, attemptId: expectedAttemptId, ordinal: 1, status: raw.status };
+  return {
+    nodeId,
+    attemptId: expectedAttemptId,
+    ordinal: DagAttempt.DagAttemptOrdinal,
+    status: raw.status,
+  };
 }
 
 export function isDagRunOutcome(raw: unknown): raw is DagContracts.DagRunOutcome {
@@ -258,10 +258,10 @@ function decodeEvent(raw: unknown, runId: string, entry: unknown): SessionContra
   }
 }
 
-export function decodeEntry(raw: unknown, limits: SessionContracts.DagSessionLimits): SessionContracts.DagSessionEntry | undefined {
-  if (!isRecord(raw) || raw.type !== "custom" || raw.customType !== SessionContracts.DagSessionEntryType)
-    return undefined;
-  const data = raw.data;
+export function decodeEntry(
+  data: unknown,
+  limits: SessionContracts.DagSessionLimits,
+): SessionContracts.DagSessionEntry {
   const size = byteSize(data);
   const sizeLimit =
     isRecord(data) && isRecord(data.event) && data.event._tag === "graph"
@@ -271,7 +271,10 @@ export function decodeEntry(raw: unknown, limits: SessionContracts.DagSessionLim
   if (size > sizeLimit)
     throw new SessionContracts.DagSessionLimitExceeded({ limit: limitName, actual: size, max: sizeLimit });
   if (!isRecord(data))
-    throw new SessionContracts.DagSessionMalformed({ message: "malformed DAG session entry", entry: raw });
+    throw new SessionContracts.DagSessionMalformed({
+      message: "malformed DAG session entry",
+      entry: data,
+    });
   if (data.v !== SessionContracts.DagSessionWireVersion) throw new SessionContracts.DagSessionUnsupportedVersion({ version: data.v });
   const runId = requireString(data.runId, "runId", data);
   const graphId = requireString(data.graphId, "graphId", data);
@@ -335,7 +338,8 @@ function deriveTransitionAttemptStatus(
   if (transition.type === DagContracts.DagTransitionType.Start) return DagContracts.DagNodeStatus.Running;
   if (transition.type === DagContracts.DagTransitionType.Cancel)
     return wasRunning ? DagContracts.DagNodeStatus.Cancelled : undefined;
-  if (transition.type === DagContracts.DagTransitionType.Complete) return transition.result._tag;
+  if (transition.type === DagContracts.DagTransitionType.Complete)
+    return DagAttempt.dagResultStatus(transition.result);
   return undefined;
 }
 
@@ -346,9 +350,9 @@ function computeAttemptUpdate(
   runId: string,
 ): SessionContracts.DagSessionAttempt {
   if (
-    status.ordinal !== 1 ||
+    status.ordinal !== DagAttempt.DagAttemptOrdinal ||
     status.status !== expected ||
-    status.attemptId !== `${runId}:${status.nodeId}:1`
+    status.attemptId !== DagAttempt.dagAttemptId(runId, status.nodeId)
   )
     throw new SessionContracts.DagSessionAttemptInconsistent({
       message: "attempt status does not match transition",
@@ -383,7 +387,7 @@ function computeAttemptUpdate(
   return Object.freeze({
     nodeId: status.nodeId,
     attemptId: status.attemptId,
-    ordinal: 1,
+    ordinal: DagAttempt.DagAttemptOrdinal,
     statuses: Object.freeze(next),
   });
 }

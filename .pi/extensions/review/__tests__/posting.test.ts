@@ -49,6 +49,9 @@ function state(): ReviewState {
       riskReasons: [],
       cohorts: [{ label: "main", purpose: "review changed file", paths: ["a.ts"] }],
       files: [{ path: "a.ts", attention: "normal", role: "changed file" }],
+      evidence: [
+        { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
+      ],
     },
     result: {
       verdict: "v",
@@ -78,6 +81,12 @@ function state(): ReviewState {
         },
       ],
     },
+    dag: {
+      runId: "run",
+      status: "degraded",
+      submitted: true,
+      rawResultReferences: [],
+    },
     selectedFindingIds: ["F1", "F2"],
     posts: [],
   };
@@ -90,7 +99,7 @@ function custom(s: ReviewState) {
   };
 }
 
-describe("pr-review posting", () => {
+describe("review pull request posting", () => {
   it("uses GET pagination, persists pending before POST, and reuses uncertain attempt on retry", async () => {
     const s = state();
     restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
@@ -216,6 +225,66 @@ describe("pr-review posting", () => {
     expect(confirms[0].length).toBeLessThan(700);
   });
 
+  it("blocks incomplete reviews and revalidates content after confirmation", async () => {
+    const incomplete = { ...state(), result: undefined };
+    restore({ sessionManager: { getBranch: () => [custom(incomplete)] } } as any);
+    const pi = {
+      appendEntry() {},
+      exec: async () => ({ code: 0, stdout: "head\n", stderr: "" }),
+    } as any;
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } } as any;
+    await expect(postReview(pi, ctx, ReviewEvent.Approve)).resolves.toContain("not complete");
+
+    clearInMemoryStateForTests();
+    const changed = state();
+    restore({ sessionManager: { getBranch: () => [custom(changed)] } } as any);
+    let posts = 0;
+    pi.exec = async (_cmd: string, args: string[]) => {
+      if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+      if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+      posts += 1;
+      return { code: 0, stdout: "{}", stderr: "" };
+    };
+    ctx.ui.confirm = async () => {
+      restore({
+        sessionManager: {
+          getBranch: () => [custom({ ...changed, preface: "changed during confirmation" })],
+        },
+      } as any);
+      return true;
+    };
+    await expect(postReview(pi, ctx, ReviewEvent.Comment)).resolves.toContain(
+      "changed during confirmation",
+    );
+    expect(posts).toBe(0);
+  });
+
+  it("blocks posting before confirmation when the remote head is stale", async () => {
+    const s = state();
+    restore({ sessionManager: { getBranch: () => [custom(s)] } } as any);
+    let confirmed = false;
+    let posted = false;
+    const pi = {
+      appendEntry() {},
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "new-head\n", stderr: "" };
+        posted = true;
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    } as any;
+    const ctx = {
+      ui: {
+        confirm: async () => {
+          confirmed = true;
+          return true;
+        },
+      },
+    } as any;
+    await expect(postReview(pi, ctx, ReviewEvent.Comment)).resolves.toMatch(/stale/);
+    expect(confirmed).toBe(false);
+    expect(posted).toBe(false);
+  });
+
   it("rejects unknown post events through the command", async () => {
     restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
     const notes: string[] = [];
@@ -229,7 +298,7 @@ describe("pr-review posting", () => {
       },
     };
     (await import("../index")).default(pi);
-    await pi.command("post merge", {
+    await pi.command("pr post merge", {
       ui: { notify: (m: string) => notes.push(m), confirm: async () => true },
       cwd: "/tmp",
     } as any);

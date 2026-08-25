@@ -67,6 +67,28 @@ describe("subagent resolver", () => {
     expect(result.value.workspaceAccess).toBe(WorkspaceAccess.Read);
   });
 
+  it("does not expose DAG-only extension tools to generic subagents", () => {
+    const result = resolveTools(
+      { task: "x", tools: ["review_private"] },
+      undefined,
+      new Map([
+        [
+          "review_private",
+          {
+            tool: { ...readExtTool, name: "review_private" },
+            capabilities: [ToolCapability.Read],
+            audience: "dag" as const,
+          },
+        ],
+      ]),
+      "/tmp",
+    );
+    expect(result._tag).toBe(ResolutionResultTag.Error);
+    if (result._tag !== ResolutionResultTag.Error) return;
+    expect(result.error.reason).toBe(ResolutionErrorReason.InvalidTools);
+    expect(result.error.message).not.toContain("Available: review_private");
+  });
+
   it("creates extension tools for the child cwd and active session generation", () => {
     const calls: any[] = [];
     const registration = {

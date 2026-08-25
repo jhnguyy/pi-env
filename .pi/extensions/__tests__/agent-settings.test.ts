@@ -3,10 +3,12 @@ import { Effect, Result, Schema } from "effect";
 import { describe, expect, it as vitestIt } from "vitest";
 import {
   AgentSettingsSchema,
+  decodeGlobalAgentSettingsSnapshotEffect,
   readAgentSettingsEffect,
   readOptionalAgentSettings,
   type AgentSettingsEnv,
 } from "../_shared/agent-settings";
+import { loadSettingsSnapshotEffect } from "../_shared/settings";
 
 function envWith(files: Record<string, string>, onRead?: (path: string) => void): AgentSettingsEnv {
   return {
@@ -38,6 +40,18 @@ describe("agent settings", () => {
         workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         extensions: ["web-context"],
       });
+    }),
+  );
+
+  it.effect("decodes machine policy from global settings only", () =>
+    Effect.gen(function* () {
+      const env = envWith({
+        "/global/settings.json": JSON.stringify({ modelAnnotations: { "approved/model": ["reviewer"] } }),
+        "/repo/.pi/settings.json": JSON.stringify({ modelAnnotations: { "project/model": ["reviewer"] } }),
+      });
+      const snapshot = yield* loadSettingsSnapshotEffect("/repo", env);
+      const settings = yield* decodeGlobalAgentSettingsSnapshotEffect(snapshot);
+      expect(settings.modelAnnotations).toEqual({ "approved/model": ["reviewer"] });
     }),
   );
 

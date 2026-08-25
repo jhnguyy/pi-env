@@ -25,7 +25,7 @@ export type {
   DagSessionEvent,
   DagSessionFailure,
   DagSessionLimits,
-  DagSessionManagerSeam,
+  DagSessionStore,
   DagSessionReconstruction,
 } from "./session/contracts.js";
 export { computeDagSessionGraphId } from "./session/codec.js";

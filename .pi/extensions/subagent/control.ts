@@ -5,7 +5,7 @@ import { Data, Effect } from "effect";
 
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
-import { zeroUsage } from "./usage";
+import { addUsage, zeroUsage } from "./usage";
 
 export const WorkspaceAccess = {
   Read: "read",
@@ -50,6 +50,7 @@ interface ActiveRun {
   timeout?: ReturnType<typeof setTimeout>;
 }
 
+
 interface SupervisorRegistry {
   supervisors: Map<string, SubagentRunSupervisor>;
 }
@@ -89,11 +90,13 @@ function addUsageDelta(total: UsageStats, previous: UsageStats, next: UsageStats
   total.turns += Math.max(0, next.turns - previous.turns);
 }
 
+
 export class SubagentRunSupervisor {
   private readonly active = new Map<string, ActiveRun>();
   private readonly pending: PendingAdmission[] = [];
   private readonly activeWorkspaceWriters = new Set<string>();
   private readonly totalUsage = zeroUsage();
+  private readonly usageByRun = new Map<string, UsageStats>();
   private closed = false;
 
   constructor(
@@ -105,7 +108,13 @@ export class SubagentRunSupervisor {
     request: SubagentAdmissionRequest,
   ): Effect.Effect<SubagentRunLease, SubagentAdmissionError> {
     return Effect.tryPromise({
-      try: () => this.acquire(request),
+      try: (effectSignal) =>
+        this.acquire({
+          ...request,
+          signal: request.signal
+            ? AbortSignal.any([request.signal, effectSignal])
+            : effectSignal,
+        }),
       catch: (cause) =>
         cause instanceof SubagentAdmissionError
           ? cause
@@ -144,8 +153,12 @@ export class SubagentRunSupervisor {
     });
   }
 
-  usage(): UsageStats {
-    return cloneUsage(this.totalUsage);
+  usage(prefix?: string): UsageStats {
+    if (!prefix) return cloneUsage(this.totalUsage);
+    return [...this.usageByRun.entries()].reduce(
+      (total, [runId, usage]) => (runId.startsWith(prefix) ? addUsage(total, usage) : total),
+      zeroUsage(),
+    );
   }
 
   async shutdown(): Promise<void> {
@@ -260,6 +273,7 @@ export class SubagentRunSupervisor {
     if (!active || active.released) return;
     addUsageDelta(this.totalUsage, active.usage, usage);
     active.usage = cloneUsage(usage);
+    this.usageByRun.set(runId, cloneUsage(usage));
   }
 
   private release(runId: string, usage?: UsageStats): void {

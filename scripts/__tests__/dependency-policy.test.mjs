@@ -65,8 +65,6 @@ describe("dependency policy", () => {
     expect(
       violations.map(({ from, to, rule }) => `${rule.name}: ${from} -> ${to}`).sort(),
     ).toEqual([
-      "pr-review-no-cross-extension-imports: .pi/extensions/pr-review/index.ts -> .pi/extensions/subagent/control.ts",
-      "pr-review-no-cross-extension-imports: .pi/extensions/pr-review/index.ts -> .pi/extensions/subagent/execute.ts",
       "skill-builder-no-cross-extension-imports: .pi/extensions/skill-builder/index.ts -> .pi/extensions/subagent/control.ts",
       "skill-builder-no-cross-extension-imports: .pi/extensions/skill-builder/index.ts -> .pi/extensions/subagent/execute.ts",
     ]);

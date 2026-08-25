@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -37,7 +37,13 @@ vi.mock("../../../../src/telemetry/tooling", () => ({
 
 vi.mock("../dag-runtime", () => ({
   makeDagSubagentExecutorRegistry: vi.fn(
-    (ctx: unknown, tools: unknown, artifactRoot: string, options: Record<string, unknown>) => {
+    (
+      ctx: unknown,
+      tools: unknown,
+      artifactRoot: string,
+      _sessionGeneration: string,
+      options: Record<string, unknown>,
+    ) => {
       state.adapterCalls.push({ ctx, tools, artifactRoot, options });
       return {
         lookup: () => Effect.succeed(state.executor),
@@ -57,6 +63,7 @@ import {
   validateDagDefinition,
 } from "../../../../src/dag/index.js";
 import {
+  dagUsagePrefix,
   DagRuntimeServiceEvent,
   listenForDagRuntimeService,
   resetDagRuntimeServiceRegistryForTests,
@@ -135,6 +142,11 @@ afterEach(() => {
 });
 
 describe("session-owned DAG runtime composition", () => {
+  it("uses collision-resistant usage namespaces for nested run IDs", () => {
+    expect(dagUsagePrefix("a")).not.toBe(dagUsagePrefix("a:b"));
+    expect(dagUsagePrefix("a:b")).not.toMatch(new RegExp(`^${dagUsagePrefix("a")}`));
+  });
+
   it("reuses active authorities, persists one run in order, and reconstructs an immutable result", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-session-"));
     tempDirectories.push(cwd);
@@ -160,11 +172,21 @@ describe("session-owned DAG runtime composition", () => {
         ctx.sessionManager.getSessionId(),
       ),
     );
+    expect(statSync(adapter.artifactRoot).isDirectory()).toBe(true);
 
     const registration = registrations[0];
     const handle = await Effect.runPromise(registration.service.submit(graph("composed-run")));
+    await Effect.runPromise(handle.accepted);
     const completed = await Effect.runPromise(handle.await);
     expect(completed.state.nodes[0]).toMatchObject({ status: "succeeded" });
+    expect(registration.service.usage?.("composed-run")).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: 0,
+      turns: 0,
+    });
 
     const entries = ctx.sessionManager
       .getBranch()
@@ -239,10 +261,11 @@ describe("session-owned DAG runtime composition", () => {
     const handle = await Effect.runPromise(
       registration!.service.submit(graph("append-failure-run")),
     );
+    const acceptedExit = await Effect.runPromise(Effect.exit(handle.accepted));
     const awaitExit = await Effect.runPromise(Effect.exit(handle.await));
     const cancelExit = await Effect.runPromise(Effect.exit(handle.cancel));
 
-    for (const exit of [awaitExit, cancelExit]) {
+    for (const exit of [acceptedExit, awaitExit, cancelExit]) {
       expect(exit._tag).toBe("Failure");
       if (exit._tag !== "Failure") continue;
       const failure = Cause.findErrorOption(exit.cause);
@@ -257,6 +280,7 @@ describe("session-owned DAG runtime composition", () => {
     const retry = await Effect.runPromise(
       registration!.service.submit(graph("append-failure-run")),
     );
+    await Effect.runPromise(retry.accepted);
     const retried = await Effect.runPromise(retry.await);
     expect(retried.state.nodes[0]).toMatchObject({ status: "succeeded" });
     await runtime.shutdownSession();

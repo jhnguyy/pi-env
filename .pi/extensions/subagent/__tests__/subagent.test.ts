@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { Container, Text } from "@earendil-works/pi-tui";
-import initSubagent from "../index";
+import initSubagent, { completedJobUsageOnce } from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
 
@@ -107,6 +107,21 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(registeredTool.description.length).toBeGreaterThan(0);
     });
 
+    it("reports completed asynchronous usage exactly once", () => {
+      const reported = new Set<string>();
+      const job = {
+        id: "job-1",
+        status: "completed",
+        latestDetails: {
+          usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7, cost: 1, turns: 1 },
+        },
+      } as any;
+      expect(completedJobUsageOnce(reported, job)).toMatchObject({
+        usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7 },
+      });
+      expect(completedJobUsageOnce(reported, job)).toEqual({});
+    });
+
     it("supports compact usage reporting for the active session", async () => {
       const usageTool = registeredTools.get("subagent_job");
       const result = await usageTool.execute("usage-1", { action: "usage" }, undefined, undefined, mockCtx);
@@ -177,6 +192,14 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("No tools or capabilities specified");
       expect(result.details.stopReason).toBe("no_tools");
       expect(result.details.isError).toBe(true);
+      expect(result.usage).toEqual({
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      });
     });
 
     it("returns error when tools is empty array", async () => {
