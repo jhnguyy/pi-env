@@ -230,8 +230,14 @@ function prepareSnapshotWorkflow(
       const worktree = join(agentDir, "pr-review", "worktrees", id);
       const diffPath = join(artifactDir, "diff.patch");
       const snapshotEffect = Effect.gen(function* () {
-        yield* Effect.sync(() => mkdirSync(artifactDir, { recursive: true, mode: 0o700 }));
-        yield* Effect.sync(() => writeFileSync(diffPath, diff, { mode: 0o600 }));
+        yield* Effect.sync(() => {
+          mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
+          chmodSync(artifactDir, 0o700);
+        });
+        yield* Effect.sync(() => {
+          writeFileSync(diffPath, diff, { mode: 0o600 });
+          chmodSync(diffPath, 0o600);
+        });
         yield* runEffect(exec, "git", ["worktree", "add", "--detach", worktree, metadata.headOid], {
           cwd: repoDir,
           timeout: 180000,

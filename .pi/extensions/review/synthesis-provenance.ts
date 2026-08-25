@@ -37,7 +37,11 @@ function sameSources(
   actual: readonly ReviewerOutput["role"][],
   expected: ReadonlySet<ReviewerOutput["role"]>,
 ): boolean {
-  return actual.length === expected.size && actual.every((role) => expected.has(role));
+  return (
+    actual.length === expected.size &&
+    new Set(actual).size === actual.length &&
+    actual.every((role) => expected.has(role))
+  );
 }
 
 export function validSynthesisSources(

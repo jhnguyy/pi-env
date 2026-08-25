@@ -61,5 +61,19 @@ describe("synthesis provenance", () => {
         reviewers,
       ),
     ).toBe(false);
+    expect(
+      validSynthesisSources(
+        synthesis({
+          findings: [
+            {
+              ...finding,
+              sourceReviewers: ["correctness", "correctness"],
+              agreement: 2,
+            },
+          ],
+        }),
+        reviewers,
+      ),
+    ).toBe(false);
   });
 });
