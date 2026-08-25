@@ -95,7 +95,7 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
 
-The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+One immutable diff index owns canonical rename, deletion, repeated-section, and hunk-range semantics. The deck, diff reader, and evidence resolver consume this index. The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
 
 Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 
@@ -109,13 +109,13 @@ The reading-plan node submits the pull request goal, goal assessment, risk, conc
 
 Each reviewer returns its fixed role, evidence digest, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
 
-The synthesis node reads verified result references. It reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
+The synthesis node reads one admitted reviewer dossier. The dossier verifies artifact identity, output names, schema, roles, and evidence digests. It classifies failed and malformed reviewers once. Synthesis and terminal finalization consume the same admission result. Synthesis reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
 
 The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. High-impact, blocking, and serious findings start selected. Other findings start unselected.
 
 ## Parent session state
 
-The parent pi session stores review snapshots, agent run results, reviewer decisions, posting attempts, and cleanup state as custom entries. The extension reconstructs state from the active branch on `session_start` and `session_tree`.
+The parent pi session stores review snapshots, agent run results, reviewer decisions, posting attempts, and cleanup state as custom entries. A session-scoped review coordinator owns mutable workflow state, in-flight operations, lifecycle guards, posting serialization, and evidence-executor registration. The extension reconstructs state from the active branch on `session_start` and `session_tree`.
 
 The child session name includes the repository, pull request number, and reviewed head. The parent state records the child session file for inspection.
 

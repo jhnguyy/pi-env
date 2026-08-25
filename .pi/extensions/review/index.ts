@@ -18,11 +18,6 @@ import {
 import { decodeGlobalAgentSettingsSnapshotEffect } from "../_shared/agent-settings";
 import { PiEvent } from "../_shared/agent-tools";
 import {
-  registerDagExecutor,
-  unregisterDagExecutor,
-  type DagExecutorRegistration,
-} from "../_shared/dag-executor-registration";
-import {
   listenForDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../_shared/dag-runtime-service";
@@ -62,12 +57,8 @@ import {
   updateReviewDeckLaterRefs,
   type DeckReference,
 } from "./deck";
-import {
-  makeReviewEvidenceResolverExecutor,
-  ReviewEvidenceExecutorKind,
-  ReviewEvidenceResolverKey,
-} from "./evidence-resolver";
 import { resolvePrReviewModelPolicy } from "./model-policy";
+import { ReviewCoordinator, type ReviewActionResult } from "./review-coordinator";
 import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
@@ -83,57 +74,7 @@ const PrReviewSettingsSchema = Schema.Struct({
   roleModels: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
   reviewGuidance: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
 });
-let dagRegistration: DagRuntimeServiceRegistration | undefined;
-let evidenceExecutorRegistration: DagExecutorRegistration | undefined;
-let activeContext: ExtensionContext | undefined;
-const reconcilingRunIds = new Set<string>();
-
-const states = new Map<string, ReviewState>();
-const createOperations = new Map<string, Promise<ReviewActionResult>>();
-const preparingReviewIds = new Set<string>();
-let latestReviewId: string | undefined;
-const postSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
-
-function synchronizeEvidenceExecutor(): void {
-  const registration = dagRegistration;
-  const ctx = activeContext;
-  if (
-    evidenceExecutorRegistration &&
-    (!registration ||
-      evidenceExecutorRegistration.parentSessionId !== registration.parentSessionId ||
-      evidenceExecutorRegistration.sessionGeneration !== registration.sessionGeneration)
-  ) {
-    unregisterDagExecutor(evidenceExecutorRegistration);
-    evidenceExecutorRegistration = undefined;
-  }
-  if (
-    evidenceExecutorRegistration ||
-    !registration ||
-    !ctx ||
-    registration.parentSessionId !== ctx.sessionManager.getSessionId()
-  )
-    return;
-  evidenceExecutorRegistration = registerDagExecutor({
-    parentSessionId: registration.parentSessionId,
-    sessionGeneration: registration.sessionGeneration,
-    kind: ReviewEvidenceExecutorKind,
-    key: ReviewEvidenceResolverKey,
-    executor: makeReviewEvidenceResolverExecutor({
-      artifactRoot: join(
-        ctx.sessionManager.getSessionDir(),
-        "dag-artifacts",
-        ctx.sessionManager.getSessionId(),
-      ),
-    }),
-  });
-}
-
-type ReviewActionResult = {
-  content: Array<{ type: "text"; text: string }>;
-  details: Record<string, unknown>;
-  isError?: boolean;
-  usage?: Usage;
-};
+const coordinator = new ReviewCoordinator();
 
 function nestedReviewUsage(state: ReviewState): Usage | undefined {
   const usage = state.metrics?.usage;
@@ -170,13 +111,13 @@ function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): s
 }
 
 function matchingReview(identityKey: string, parentSessionId: string): ReviewState | undefined {
-  return [...states.values()].find(
+  return coordinator.findReview(
     (state) => reviewIdentityKey(parentSessionId, state.snapshot.metadata) === identityKey,
   );
 }
 
 function stateById(reviewId?: string): ReviewState | undefined {
-  return reviewId ? states.get(reviewId) : latestState();
+  return reviewId ? coordinator.review(reviewId) : latestState();
 }
 function statePath(id: string): string {
   return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
@@ -193,8 +134,7 @@ function stateEntry(state: ReviewState) {
   };
 }
 function remember(state: ReviewState): void {
-  states.set(state.snapshot.id, structuredClone(state));
-  latestReviewId = state.snapshot.id;
+  coordinator.remember(state);
 }
 function saveState(pi: ExtensionAPI, state: ReviewState): void {
   remember(state);
@@ -202,11 +142,10 @@ function saveState(pi: ExtensionAPI, state: ReviewState): void {
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
 }
 function latestState(): ReviewState | undefined {
-  return latestReviewId ? states.get(latestReviewId) : undefined;
+  return coordinator.latestState();
 }
 export function restore(ctx: ExtensionContext): void {
-  states.clear();
-  latestReviewId = undefined;
+  coordinator.resetReviews();
   const latestById = new Map<string, ReviewState>();
   const order: string[] = [];
   for (const entry of (ctx.sessionManager as any).getBranch?.() ?? []) {
@@ -284,11 +223,11 @@ function isCurrentReconciliation(
   runId: string,
   expectedStateHash: string,
 ): boolean {
-  const current = states.get(reviewId);
+  const current = coordinator.review(reviewId);
   return (
-    activeContext === ctx &&
-    dagRegistration?.registrationId === registration.registrationId &&
-    dagRegistration.sessionGeneration === registration.sessionGeneration &&
+    coordinator.activeContext === ctx &&
+    coordinator.dagRegistration?.registrationId === registration.registrationId &&
+    coordinator.dagRegistration.sessionGeneration === registration.sessionGeneration &&
     current?.dag?.runId === runId &&
     current.dag.status === "running" &&
     sha256(JSON.stringify(current)) === expectedStateHash
@@ -296,10 +235,7 @@ function isCurrentReconciliation(
 }
 function isDagSessionRunNotFound(cause: unknown): cause is { readonly _tag: "run-not-found" } {
   return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "_tag" in cause &&
-    cause._tag === "run-not-found"
+    typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "run-not-found"
   );
 }
 
@@ -313,30 +249,14 @@ async function saveReconciliationFailure(
   cause: unknown,
 ): Promise<void> {
   const runId = current.dag!.runId;
-  if (
-    !isCurrentReconciliation(
-      registration,
-      ctx,
-      current.snapshot.id,
-      runId,
-      expectedStateHash,
-    )
-  )
+  if (!isCurrentReconciliation(registration, ctx, current.snapshot.id, runId, expectedStateHash))
     return;
   if (current.dag!.submitted !== false || !isDagSessionRunNotFound(cause)) {
     saveState(pi, failedReconstructionState(projected, cause));
     return;
   }
   const worktreeCleaned = await removeManagedWorktree(pi, current).catch(() => false);
-  if (
-    isCurrentReconciliation(
-      registration,
-      ctx,
-      current.snapshot.id,
-      runId,
-      expectedStateHash,
-    )
-  )
+  if (isCurrentReconciliation(registration, ctx, current.snapshot.id, runId, expectedStateHash))
     saveState(pi, {
       ...current,
       preparation: {
@@ -350,16 +270,15 @@ async function saveReconciliationFailure(
 }
 
 async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-  const registration = dagRegistration;
+  const registration = coordinator.dagRegistration;
   if (!registration || registration.parentSessionId !== ctx.sessionManager.getSessionId()) return;
-  for (const current of [...states.values()]) {
+  for (const current of coordinator.reviews()) {
     if (
       !current.dag ||
       current.dag.status !== "running" ||
-      reconcilingRunIds.has(current.dag.runId)
+      !coordinator.beginReconciliation(current.dag.runId)
     )
       continue;
-    reconcilingRunIds.add(current.dag.runId);
     const expectedStateHash = sha256(JSON.stringify(current));
     let projected = current;
     try {
@@ -394,25 +313,17 @@ async function reconcilePersistedDagStates(pi: ExtensionAPI, ctx: ExtensionConte
         cause,
       );
     } finally {
-      reconcilingRunIds.delete(current.dag.runId);
+      coordinator.finishReconciliation(current.dag.runId);
       if (
-        states.get(current.snapshot.id)?.dag?.status === "running" &&
-        dagRegistration?.registrationId !== registration.registrationId
+        coordinator.review(current.snapshot.id)?.dag?.status === "running" &&
+        coordinator.dagRegistration?.registrationId !== registration.registrationId
       )
         queueMicrotask(() => void reconcilePersistedDagStates(pi, ctx));
     }
   }
 }
 export function clearInMemoryStateForTests(): void {
-  states.clear();
-  latestReviewId = undefined;
-  if (evidenceExecutorRegistration) unregisterDagExecutor(evidenceExecutorRegistration);
-  evidenceExecutorRegistration = undefined;
-  dagRegistration = undefined;
-  activeContext = undefined;
-  reconcilingRunIds.clear();
-  createOperations.clear();
-  preparingReviewIds.clear();
+  coordinator.reset();
 }
 function summarizeResult(s: ReviewState): string {
   const findings = s.result?.findings ?? [];
@@ -584,17 +495,17 @@ async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Prom
 }
 
 async function reconcileInterruptedPreparations(pi: ExtensionAPI): Promise<void> {
-  for (const state of [...states.values()]) {
+  for (const state of coordinator.reviews()) {
     const reviewId = state.snapshot.id;
     if (
       state.dag ||
       state.preparation ||
       state.result ||
       state.child ||
-      preparingReviewIds.has(reviewId)
+      coordinator.isPreparing(reviewId)
     )
       continue;
-    preparingReviewIds.add(reviewId);
+    coordinator.beginPreparation(reviewId);
     try {
       const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
       saveState(pi, {
@@ -608,7 +519,7 @@ async function reconcileInterruptedPreparations(pi: ExtensionAPI): Promise<void>
         },
       });
     } finally {
-      preparingReviewIds.delete(reviewId);
+      coordinator.finishPreparation(reviewId);
     }
   }
 }
@@ -646,7 +557,7 @@ async function createReviewAttempt(
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ): Promise<ReviewActionResult> {
   const reviewId = makeReviewId(metadata);
-  preparingReviewIds.add(reviewId);
+  coordinator.beginPreparation(reviewId);
   const agentDir = getAgentDir();
   let state: ReviewState = {
     snapshot: {
@@ -682,7 +593,7 @@ async function createReviewAttempt(
       ...state,
       preparation: preparationFailure("snapshot", cause, worktreeCleaned),
     };
-    preparingReviewIds.delete(reviewId);
+    coordinator.finishPreparation(reviewId);
     saveState(pi, state);
     return reviewActionResult(state);
   }
@@ -692,7 +603,7 @@ async function createReviewAttempt(
   let deck: ReturnType<typeof buildReviewDeck>;
   let assignments: Record<string, { model: string; reasoning?: string }>;
   try {
-    const currentRegistration = dagRegistration;
+    const currentRegistration = coordinator.dagRegistration;
     if (
       !currentRegistration ||
       currentRegistration.parentSessionId !== ctx.sessionManager.getSessionId()
@@ -758,12 +669,12 @@ async function createReviewAttempt(
   } catch (cause) {
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
-    preparingReviewIds.delete(reviewId);
+    coordinator.finishPreparation(reviewId);
     saveState(pi, state);
     return reviewActionResult(state);
   }
 
-  preparingReviewIds.delete(reviewId);
+  coordinator.finishPreparation(reviewId);
   try {
     state = await runReviewDag({
       pi,
@@ -777,7 +688,7 @@ async function createReviewAttempt(
       onProgress,
     });
   } catch (cause) {
-    state = states.get(snapshot.id) ?? state;
+    state = coordinator.review(snapshot.id) ?? state;
     if (state.dag?.submitted === false) {
       const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
       state = {
@@ -853,7 +764,7 @@ async function startReview(
   const parentSessionId = ctx.sessionManager.getSessionId();
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
   if (!forceRerun) {
-    const active = createOperations.get(identityKey);
+    const active = coordinator.createOperation(identityKey);
     if (active) return active.then(withoutNestedUsage);
     const existing = matchingReview(identityKey, parentSessionId);
     if (existing) {
@@ -862,12 +773,11 @@ async function startReview(
     }
   }
   const operation = createReviewAttempt(pi, metadata, signal, ctx, onProgress);
-  if (!forceRerun) createOperations.set(identityKey, operation);
+  if (!forceRerun) coordinator.trackCreateOperation(identityKey, operation);
   try {
     return await operation;
   } finally {
-    if (!forceRerun && createOperations.get(identityKey) === operation)
-      createOperations.delete(identityKey);
+    if (!forceRerun) coordinator.finishCreateOperation(identityKey, operation);
   }
 }
 
@@ -932,12 +842,12 @@ async function executeReviewTool(
   ctx: ExtensionContext,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ) {
-  const priorReviewIds = new Set(states.keys());
+  const priorReviewIds = new Set(coordinator.reviewIds());
   try {
     return await executePrReview(pi, params, signal, ctx, onProgress);
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
-    const owned = [...states.values()].find((state) => !priorReviewIds.has(state.snapshot.id));
+    const owned = coordinator.findReview((state) => !priorReviewIds.has(state.snapshot.id));
     if (owned) {
       const result = reviewActionResult(owned);
       return {
@@ -1214,7 +1124,8 @@ async function existingPostDisposition(
   );
   if (posted) return { result: `Review already posted (${posted.reviewId ?? posted.id}).` };
   const prior = attempt ? await reconcileAttempt(pi, ctx, state, attempt, signal) : undefined;
-  if (prior) return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
+  if (prior)
+    return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
   if (attempt?.status === "uncertain")
     return {
       result:
@@ -1231,7 +1142,7 @@ async function confirmedPostingState(
   contentHash: string,
   signal?: AbortSignal,
 ): Promise<{ state?: ReviewState; error?: string }> {
-  const state = states.get(reviewId);
+  const state = coordinator.review(reviewId);
   if (!state || contentHashFor(state, event) !== contentHash)
     return { error: "The review changed during confirmation. Confirm the updated review again." };
   const blocked = await postingPreflight(pi, ctx, state, event, signal);
@@ -1267,7 +1178,7 @@ async function postReviewCritical(
   expectedContentHash: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  let s = states.get(reviewId);
+  let s = coordinator.review(reviewId);
   if (!s) return `Review not found: ${reviewId}.`;
   if (contentHashFor(s, event) !== expectedContentHash)
     return "The review changed while posting was queued. Confirm the updated review again.";
@@ -1286,14 +1197,7 @@ async function postReviewCritical(
     ))
   )
     return "Posting cancelled.";
-  const confirmed = await confirmedPostingState(
-    pi,
-    ctx,
-    reviewId,
-    event,
-    contentHash,
-    signal,
-  );
+  const confirmed = await confirmedPostingState(pi, ctx, reviewId, event, contentHash, signal);
   if (confirmed.error) return confirmed.error;
   s = confirmed.state!;
   if (!attempt) {
@@ -1322,7 +1226,7 @@ export async function postReview(
   const key = `${keyState.snapshot.id}:${contentHashFor(keyState, event)}`;
   return Effect.runPromise(
     PartitionedSemaphore.withPermits(
-      postSemaphore,
+      coordinator.postSemaphore,
       key,
       1,
     )(
@@ -1398,14 +1302,14 @@ function assertManagedPath(root: string, absolute: string): void {
   assertContainedResolved(root, absolute);
 }
 function listReviews(): string {
-  const reviews = [...states.values()].sort((left, right) =>
+  const reviews = [...coordinator.reviews()].sort((left, right) =>
     right.snapshot.createdAt.localeCompare(left.snapshot.createdAt),
   );
   if (reviews.length === 0) return "No active PR reviews.";
   return reviews
     .map((state) => {
       const status = state.preparation?.status ?? state.dag?.status ?? "prepared";
-      const active = state.snapshot.id === latestReviewId ? "*" : " ";
+      const active = state.snapshot.id === coordinator.latestReviewId ? "*" : " ";
       return `${active} ${state.snapshot.id} ${status} ${state.snapshot.metadata.url} ${state.snapshot.metadata.headOid}`;
     })
     .join("\n");
@@ -1414,14 +1318,14 @@ function listReviews(): string {
 function openReview(reviewId: string): string {
   const state = stateById(reviewId);
   if (!state) return `Review not found: ${reviewId || "(missing review ID)"}.`;
-  latestReviewId = state.snapshot.id;
+  coordinator.select(state.snapshot.id);
   return renderStatus();
 }
 
 async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const state = stateById(reviewId);
   if (!state || state.cleaned) return "Review cleanup complete.";
-  if (preparingReviewIds.has(state.snapshot.id) || state.dag?.status === "running")
+  if (coordinator.isPreparing(state.snapshot.id) || state.dag?.status === "running")
     return `Review ${state.snapshot.id} is active. Cancel or wait for it before cleanup.`;
   const worktreeCleaned = await removeManagedWorktree(pi, state);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
@@ -1430,8 +1334,7 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
   const cleaned = { ...state, cleaned: true };
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(cleaned));
-  states.delete(state.snapshot.id);
-  if (latestReviewId === state.snapshot.id) latestReviewId = [...states.keys()].at(-1);
+  coordinator.deleteReview(state.snapshot.id);
   return `Review cleanup complete: ${state.snapshot.id}.`;
 }
 
@@ -1494,15 +1397,12 @@ export default function reviewExtension(pi: ExtensionAPI) {
     listenForDagRuntimeService(
       pi,
       (registration) => {
-        dagRegistration = registration;
-        synchronizeEvidenceExecutor();
-        if (activeContext) void reconcilePersistedDagStates(pi, activeContext);
+        coordinator.setDagRegistration(registration);
+        if (coordinator.activeContext)
+          void reconcilePersistedDagStates(pi, coordinator.activeContext);
       },
       (registration) => {
-        if (dagRegistration?.registrationId === registration.registrationId) {
-          dagRegistration = undefined;
-          synchronizeEvidenceExecutor();
-        }
+        coordinator.clearDagRegistration(registration.registrationId);
       },
     );
   pi.registerTool({
@@ -1537,22 +1437,18 @@ export default function reviewExtension(pi: ExtensionAPI) {
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
-    activeContext = ctx;
-    synchronizeEvidenceExecutor();
+    coordinator.activate(ctx);
     restore(ctx);
     void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
   });
   pi.on("session_tree" as any, (_event: unknown, ctx: ExtensionContext) => {
-    activeContext = ctx;
-    synchronizeEvidenceExecutor();
+    coordinator.activate(ctx);
     restore(ctx);
     void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
   });
   pi.on(PiEvent.SessionShutdown, () => {
-    if (evidenceExecutorRegistration) unregisterDagExecutor(evidenceExecutorRegistration);
-    evidenceExecutorRegistration = undefined;
-    activeContext = undefined;
+    coordinator.deactivate();
   });
 }

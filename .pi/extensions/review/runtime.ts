@@ -2,13 +2,8 @@ import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } fr
 import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
-import {
-  bound,
-  confined,
-  diffHunkRanges,
-  parseDiffGitPath,
-  parsePatchFilePath,
-} from "./core";
+import { bound, confined } from "./core";
+import { createDiffIndex, type DiffIndex } from "./diff-index";
 import {
   ChangedFilesParamSchema,
   DiffParamSchema,
@@ -99,17 +94,6 @@ function walk(root: string, dir = ".", out: string[] = [], signal?: AbortSignal)
   }
   return out;
 }
-function diffChunks(diff: string): Array<{ path?: string; text: string }> {
-  return diff
-    .split(/^diff --git /m)
-    .filter(Boolean)
-    .map((chunk) => {
-      const text = `diff --git ${chunk}`;
-      const lines = text.split(/\r?\n/);
-      const path = lines.map(parsePatchFilePath).find(Boolean) ?? parseDiffGitPath(lines[0] ?? "");
-      return { path, text };
-    });
-}
 export function boundedChangedFileContext(state: ReviewState): string {
   return bound(
     state.snapshot.metadata.changedFiles.map((f) => f.path).join("\n"),
@@ -121,21 +105,10 @@ export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolCo
   const root = store.state.snapshot.worktree;
   const diffPath = store.state.snapshot.diffPath;
   let diffText: string | undefined;
-  let diffChunkMap: Map<string, string[]> | undefined;
+  let diffIndex: DiffIndex | undefined;
   const fullDiff = () => (diffText ??= readFileSync(diffPath, "utf8"));
-  const indexedDiff = () => {
-    if (diffChunkMap) return diffChunkMap;
-    diffChunkMap = new Map();
-    for (const chunk of diffChunks(fullDiff())) {
-      if (!chunk.path) continue;
-      const list = diffChunkMap.get(chunk.path) ?? [];
-      list.push(chunk.text);
-      diffChunkMap.set(chunk.path, list);
-    }
-    return diffChunkMap;
-  };
-  const getDiff = (path?: string) =>
-    path ? (indexedDiff().get(path)?.join("\n") ?? "") : fullDiff();
+  const indexedDiff = () => (diffIndex ??= createDiffIndex(fullDiff()));
+  const getDiff = (path?: string) => (path ? (indexedDiff().get(path)?.text ?? "") : fullDiff());
   const manifest = store.state.snapshot.metadata.changedFiles.map((f) => f.path);
   return [
     {
@@ -253,7 +226,7 @@ export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolCo
         const text = params.path ? getDiff(params.path) : getDiff();
         const page = bytePage(text || "No diff for path.", params.offset, params.maxBytes);
         const value = params.path
-          ? { path: params.path, hunks: diffHunkRanges(text), ...page }
+          ? { path: params.path, hunks: indexedDiff().get(params.path)?.hunks ?? [], ...page }
           : { path: "*", ...page };
         return {
           content: [txt(JSON.stringify(value, null, 2))],

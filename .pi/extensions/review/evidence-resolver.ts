@@ -14,13 +14,8 @@ import {
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { isPathContained } from "../_shared/path-containment";
-import {
-  diffHunkRanges,
-  parseDiffGitPath,
-  parsePatchFilePath,
-  sha256,
-  validatePlan,
-} from "./core";
+import { sha256, validatePlan } from "./core";
+import { createDiffIndex, type DiffIndexEntry } from "./diff-index";
 import { PlanSchema, type EvidenceReference, type ReviewPlan } from "./schema";
 
 export const ReviewEvidenceResolverKey = "pr-review/evidence-resolver-v1" as const;
@@ -196,12 +191,10 @@ function selectLines(text: string, reference: EvidenceReference): string {
   const last = spans[reference.endLine - 1];
   return text.slice(first.start, last.contentEnd);
 }
-function assertCompleteDiffHunks(reference: EvidenceReference, section: string): void {
-  for (const hunk of diffHunkRanges(section)) {
-    const overlaps =
-      reference.startLine <= hunk.endLine && reference.endLine >= hunk.startLine;
-    const contains =
-      reference.startLine <= hunk.startLine && reference.endLine >= hunk.endLine;
+function assertCompleteDiffHunks(reference: EvidenceReference, section: DiffIndexEntry): void {
+  for (const hunk of section.hunks) {
+    const overlaps = reference.startLine <= hunk.endLine && reference.endLine >= hunk.startLine;
+    const contains = reference.startLine <= hunk.startLine && reference.endLine >= hunk.endLine;
     if (overlaps && !contains)
       throw new ReviewEvidenceResolutionFailure({
         code: "invalid-range",
@@ -211,29 +204,7 @@ function assertCompleteDiffHunks(reference: EvidenceReference, section: string):
   }
 }
 
-function diffSections(diff: string): ReadonlyMap<string, string> {
-  const sections = new Map<string, string[]>();
-  for (const chunk of diff.split(/^diff --git /mu).filter(Boolean)) {
-    const text = `diff --git ${chunk}`;
-    const lines = text.split(/\r?\n/u);
-    const destination = parsePatchFilePath(lines.find((line) => line.startsWith("+++ ")) ?? "");
-    const source = parsePatchFilePath(lines.find((line) => line.startsWith("--- ")) ?? "");
-    const file =
-      (destination && destination !== "/dev/null" ? destination : undefined) ??
-      (source && source !== "/dev/null" ? source : undefined) ??
-      parseDiffGitPath(lines[0] ?? "");
-    if (!file) continue;
-    const current = sections.get(file) ?? [];
-    current.push(text);
-    sections.set(file, current);
-  }
-  return new Map([...sections].map(([file, chunks]) => [file, chunks.join("\n")]));
-}
-
-async function readSourceRange(
-  root: string,
-  reference: EvidenceReference,
-): Promise<string> {
+async function readSourceRange(root: string, reference: EvidenceReference): Promise<string> {
   if (!validRelativePath(reference.path))
     throw new ReviewEvidenceResolutionFailure({
       code: "containment",
@@ -286,12 +257,12 @@ async function readSourceRange(
 
 function uncoveredDiffHunks(
   plan: ReviewPlan,
-  sections: ReadonlyMap<string, string>,
+  sections: ReadonlyMap<string, DiffIndexEntry>,
 ): string[] {
   const diffReferences = plan.evidence.filter((reference) => reference.kind === "diff");
   const omissions: string[] = [];
   for (const [file, section] of sections) {
-    for (const hunk of diffHunkRanges(section)) {
+    for (const hunk of section.hunks) {
       const covered = diffReferences.some(
         (reference) =>
           reference.path === file &&
@@ -380,7 +351,7 @@ export async function preflightReviewEvidence(
 ): Promise<{ coverage: ReviewEvidenceCoverage; chunks: readonly string[] }> {
   const snapshot = await verifySnapshot(payload, signal);
   const changed = new Set(payload.changedPaths);
-  const sections = diffSections(snapshot.diff);
+  const sections = createDiffIndex(snapshot.diff);
   const seen = new Map<string, string>();
   const blocks: string[] = [];
   let uniqueBytes = 0;
@@ -400,7 +371,8 @@ export async function preflightReviewEvidence(
     ]);
     let text = seen.get(identity);
     if (text === undefined) {
-      if (reference.kind === "file") text = await readSourceRange(snapshot.canonicalWorktree, reference);
+      if (reference.kind === "file")
+        text = await readSourceRange(snapshot.canonicalWorktree, reference);
       else {
         const section = sections.get(reference.path);
         if (section === undefined)
@@ -410,7 +382,7 @@ export async function preflightReviewEvidence(
             path: reference.path,
           });
         assertCompleteDiffHunks(reference, section);
-        text = selectLines(section, reference);
+        text = selectLines(section.text, reference);
       }
       seen.set(identity, text);
       uniqueBytes += Buffer.byteLength(text, "utf8");
@@ -527,7 +499,10 @@ export function makeReviewEvidenceResolverExecutor(options: {
       const content = {
         [ReviewEvidenceCoverageOutput]: JSON.stringify(resolved.coverage),
         ...Object.fromEntries(
-          ReviewEvidenceChunkOutputs.map((outputName, index) => [outputName, resolved.chunks[index]]),
+          ReviewEvidenceChunkOutputs.map((outputName, index) => [
+            outputName,
+            resolved.chunks[index],
+          ]),
         ),
       };
       for (const [outputName, text] of Object.entries(content)) {

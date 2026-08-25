@@ -3,12 +3,7 @@ import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { Effect } from "effect";
-import {
-  DagNodeStatus,
-  materializeDagTextArtifact,
-  type DagSessionReconstruction,
-  type DagTextArtifactReference,
-} from "../../../src/dag/index.js";
+import { DagNodeStatus, type DagSessionReconstruction } from "../../../src/dag/index.js";
 import {
   registerAgentTools,
   unregisterAgentTools,
@@ -22,6 +17,7 @@ import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { validatePlan } from "./core";
 import {
   preflightReviewEvidence,
+  ReviewEvidenceCoverageOutput,
   ReviewEvidenceResolutionFailure,
   type ReviewEvidenceResolverPayloadV1,
 } from "./evidence-resolver";
@@ -29,22 +25,24 @@ import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
   PlanSchema,
   SynthesisReviewSchema,
-  type ReviewerOutput,
   type ReviewPlan,
   type SynthesisReview,
-  validateReviewerOutputShape,
   validateSynthesisReviewShape,
 } from "./schema";
-import {
-  EvidenceResolverNode,
-  ReviewerNodes,
-  type ReviewGraphToolNames,
-} from "./review-graph";
+import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph";
 import { validSynthesisSources } from "./synthesis-provenance";
+import {
+  admitReviewerDossier,
+  MaxReviewerDossierBytes,
+  readVerifiedReviewArtifact,
+  type ReviewerDossier,
+} from "./reviewer-dossier";
+
+export { readVerifiedReviewArtifact } from "./reviewer-dossier";
 
 const MAX_DECK_BYTES = 256_000;
 const MAX_SUBMISSION_BYTES = 262_144;
-const MAX_RESULT_CONTEXT_BYTES = 1_750_000;
+const MAX_RESULT_CONTEXT_BYTES = MaxReviewerDossierBytes;
 const EmptySchema = Type.Object({}, { additionalProperties: false });
 
 function suffixFor(reviewId: string): string {
@@ -71,62 +69,29 @@ function boundedSubmission(value: unknown): string {
   return text;
 }
 
-export async function readVerifiedReviewArtifact(
-  artifactRoot: string,
-  referenceValue: unknown,
-  expected: {
-    readonly runId: string;
-    readonly producerNodeId: string;
-    readonly outputName: string;
-  },
-): Promise<{ reference: DagTextArtifactReference; text: string }> {
-  return Effect.runPromise(
-    materializeDagTextArtifact(artifactRoot, referenceValue, expected, MAX_RESULT_CONTEXT_BYTES),
-  );
-}
-
-export async function collectReviewResultArtifacts(
+async function evidenceDigestFor(
   artifactRoot: string,
   reconstruction: DagSessionReconstruction,
-): Promise<{
-  readonly succeeded: readonly {
-    readonly nodeId: string;
-    readonly outputName: string;
-    readonly reference: DagTextArtifactReference;
-    readonly text: string;
-  }[];
-  readonly failed: readonly string[];
-}> {
-  const succeeded: Array<{
-    nodeId: string;
-    outputName: string;
-    reference: DagTextArtifactReference;
-    text: string;
-  }> = [];
-  const failed: string[] = [];
-  let bytes = 0;
-  for (const node of reconstruction.state.nodes) {
-    if (node.nodeId === "synthesis" || node.nodeId === EvidenceResolverNode.nodeId) continue;
-    if (node.status !== DagNodeStatus.Succeeded) {
-      failed.push(node.nodeId);
-      continue;
-    }
-    for (const [outputName, referenceValue] of Object.entries(node.outputs)) {
-      const artifact = await readVerifiedReviewArtifact(artifactRoot, referenceValue, {
-        runId: reconstruction.graph.runId,
-        producerNodeId: node.nodeId,
-        outputName,
-      });
-      bytes += Buffer.byteLength(artifact.text, "utf8");
-      if (bytes > MAX_RESULT_CONTEXT_BYTES)
-        throw new Error("Reviewer result context exceeds the absolute byte limit.");
-      succeeded.push({ nodeId: node.nodeId, outputName, ...artifact });
-    }
+): Promise<string | undefined> {
+  const node = reconstruction.state.nodes.find(
+    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
+  );
+  if (node?.status !== DagNodeStatus.Succeeded) return undefined;
+  const reference = node.outputs[ReviewEvidenceCoverageOutput];
+  if (!reference) return undefined;
+  try {
+    const artifact = await readVerifiedReviewArtifact(artifactRoot, reference, {
+      runId: reconstruction.graph.runId,
+      producerNodeId: EvidenceResolverNode.nodeId,
+      outputName: ReviewEvidenceCoverageOutput,
+    });
+    const value = JSON.parse(artifact.text) as { digest?: unknown };
+    return typeof value.digest === "string" && /^[0-9a-f]{64}$/u.test(value.digest)
+      ? value.digest
+      : undefined;
+  } catch {
+    return undefined;
   }
-  return Object.freeze({
-    succeeded: Object.freeze(succeeded),
-    failed: Object.freeze(failed.sort()),
-  });
 }
 
 export interface ReviewDagTools {
@@ -153,6 +118,19 @@ export function registerReviewDagTools(options: {
   const planName = `submit_review_plan_${suffix}`;
   const referencesName = `review_result_refs_${suffix}`;
   const synthesisName = `submit_review_synthesis_${suffix}`;
+  let reviewerDossier: Promise<ReviewerDossier> | undefined;
+  const getReviewerDossier = (signal?: AbortSignal): Promise<ReviewerDossier> => {
+    reviewerDossier ??= Effect.runPromise(options.service.reconstruct(options.runId), {
+      signal,
+    }).then(async (reconstruction) =>
+      admitReviewerDossier({
+        artifactRoot: options.artifactRoot,
+        reconstruction,
+        expectedEvidenceDigest: await evidenceDigestFor(options.artifactRoot, reconstruction),
+      }),
+    );
+    return reviewerDossier;
+  };
   const deckTool = customTool(
     {
       name: deckName,
@@ -217,29 +195,31 @@ export function registerReviewDagTools(options: {
     {
       name: referencesName,
       label: "Review Result References",
-      description: "Read verified successful result artifacts and explicit failed node names.",
+      description: "Read admitted reviewer artifacts and explicit failed and malformed node names.",
       parameters: EmptySchema,
       async execute(_params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const reconstruction = await Effect.runPromise(options.service.reconstruct(options.runId), {
-          signal: context.signal,
-        });
-        const collected = await collectReviewResultArtifacts(options.artifactRoot, reconstruction);
+        const dossier = await getReviewerDossier(context.signal);
         const value = {
-          succeeded: collected.succeeded.map((item) => ({
+          succeeded: dossier.admitted.map((item) => ({
             nodeId: item.nodeId,
             outputName: item.outputName,
             reference: item.reference,
             text: item.text,
           })),
-          failed: collected.failed,
+          failed: dossier.failed,
+          malformed: dossier.malformed,
         };
         const text = JSON.stringify(value);
         if (Buffer.byteLength(text, "utf8") > MAX_RESULT_CONTEXT_BYTES)
           throw new Error("Reviewer result context exceeds the absolute byte limit.");
         return {
           content: [txt(text)],
-          details: { succeeded: collected.succeeded.length, failed: collected.failed.length },
+          details: {
+            succeeded: dossier.admitted.length,
+            failed: dossier.failed.length,
+            malformed: dossier.malformed.length,
+          },
         };
       },
     },
@@ -254,27 +234,8 @@ export function registerReviewDagTools(options: {
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
         const raw = params as SynthesisReview;
-        const reconstruction = await Effect.runPromise(
-          options.service.reconstruct(options.runId),
-          { signal: context.signal },
-        );
-        const artifacts = await collectReviewResultArtifacts(
-          options.artifactRoot,
-          reconstruction,
-        );
-        const textByNode = new Map(
-          artifacts.succeeded.map((artifact) => [artifact.nodeId, artifact.text]),
-        );
-        const reviewers = ReviewerNodes.flatMap((node) => {
-          try {
-            const decoded = JSON.parse(textByNode.get(node.nodeId) ?? "") as unknown;
-            return validateReviewerOutputShape(decoded) && decoded.role === node.role
-              ? [decoded]
-              : [];
-          } catch {
-            return [];
-          }
-        });
+        const dossier = await getReviewerDossier(context.signal);
+        const reviewers = dossier.admitted.map((artifact) => artifact.reviewer);
         if (!validateSynthesisReviewShape(raw) || !validSynthesisSources(raw, reviewers))
           return {
             content: [

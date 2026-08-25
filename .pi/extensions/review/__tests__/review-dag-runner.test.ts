@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DagNodeStatus,
   DagRunOutcome,
+  materializeDagTextArtifact,
   publishDagSubagentTextResult,
   type DagSessionReconstruction,
   type ValidatedDagDefinition,
@@ -18,9 +21,11 @@ import {
   type ReviewRoleAssignments,
 } from "../review-graph";
 import {
+  makeReviewEvidenceResolverExecutor,
   ReviewEvidenceChunkOutputs,
   ReviewEvidenceCoverageOutput,
 } from "../evidence-resolver";
+import { buildReviewDeck, updateReviewDeckLaterRefs } from "../deck";
 import type { ReviewState } from "../schema";
 
 class TestAppendFailure extends Data.TaggedError("TestAppendFailure")<{
@@ -111,9 +116,7 @@ function plan(): string {
     riskReasons: [],
     cohorts: [{ label: "code", purpose: "implementation", paths: ["a.ts"] }],
     files: [{ path: "a.ts", attention: "normal", role: "implementation" }],
-    evidence: [
-      { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "implementation" },
-    ],
+    evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "implementation" }],
   });
 }
 const EvidenceDigest = "d".repeat(64);
@@ -269,9 +272,13 @@ function serviceFor(
 
 function piEvents(): any {
   const handlers = new Map<string, Set<(data: unknown) => void>>();
+  const tools = new Map<string, any>();
   return {
+    tools,
     events: {
-      emit(event: string, data: unknown) {
+      emit(event: string, data: any) {
+        if (event === "agent-tools:register") tools.set(data.tool.name, data.tool);
+        if (event === "agent-tools:unregister") tools.delete(data.tool.name);
         for (const handler of handlers.get(event) ?? []) handler(data);
       },
       on(event: string, handler: (data: unknown) => void) {
@@ -285,6 +292,173 @@ function piEvents(): any {
 }
 
 describe("DAG-backed pull request review runner", () => {
+  it("orchestrates preflight, real evidence, admission, fallback, persistence, and offline deck updates", async () => {
+    const f = fixture();
+    execFileSync("git", ["init", "-q"], { cwd: f.state.snapshot.worktree });
+    execFileSync("git", ["config", "user.email", "review@example.test"], {
+      cwd: f.state.snapshot.worktree,
+    });
+    execFileSync("git", ["config", "user.name", "Review Test"], { cwd: f.state.snapshot.worktree });
+    execFileSync("git", ["add", "a.ts"], { cwd: f.state.snapshot.worktree });
+    execFileSync("git", ["commit", "-qm", "snapshot"], { cwd: f.state.snapshot.worktree });
+    const headOid = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: f.state.snapshot.worktree,
+      encoding: "utf8",
+    }).trim();
+    const diff =
+      "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-export const value = 0;\n+export const value = 1;\n";
+    writeFileSync(f.state.snapshot.diffPath, diff);
+    f.state.snapshot.metadata.headOid = headOid;
+    f.state.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
+    const deck = buildReviewDeck({ snapshot: f.state.snapshot });
+    const pi = piEvents();
+    const saved: ReviewState[] = [];
+    let reconstruction: DagSessionReconstruction | undefined;
+    const service = {
+      submit: (graph: ValidatedDagDefinition<any>) =>
+        Effect.promise(async () => {
+          const planTool = [...pi.tools.values()].find((tool) =>
+            tool.name.startsWith("submit_review_plan_"),
+          );
+          const submittedPlan = {
+            ...JSON.parse(plan()),
+            evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 6, purpose: "patch" }],
+          };
+          const preflight = await planTool.execute("plan", submittedPlan, undefined, undefined);
+          expect(preflight.isError).not.toBe(true);
+          const planNode = graph.nodes.find((node) => node.id === "reading-plan")!;
+          const planOutputs = await Effect.runPromise(
+            publishDagSubagentTextResult(
+              f.artifactRoot,
+              graph.runId,
+              planNode.id,
+              "plan-attempt",
+              "reading_plan",
+              preflight.content[0].text,
+            ),
+          );
+          const graphState: any = {
+            runId: graph.runId,
+            nodes: [{ nodeId: planNode.id, status: DagNodeStatus.Succeeded, outputs: planOutputs }],
+          };
+          const evidenceNode = graph.nodes.find((node) => node.id === EvidenceResolverNode.nodeId)!;
+          const evidenceOutputs = await Effect.runPromise(
+            Effect.scoped(
+              makeReviewEvidenceResolverExecutor({ artifactRoot: f.artifactRoot })({
+                runId: graph.runId,
+                node: evidenceNode,
+                attemptId: "evidence-attempt",
+                attemptOrdinal: 1,
+                graphState,
+              }),
+            ),
+          );
+          const coverage = await Effect.runPromise(
+            materializeDagTextArtifact(
+              f.artifactRoot,
+              evidenceOutputs[ReviewEvidenceCoverageOutput],
+              {
+                runId: graph.runId,
+                producerNodeId: evidenceNode.id,
+                outputName: ReviewEvidenceCoverageOutput,
+              },
+            ),
+          );
+          const digest = (JSON.parse(coverage.text) as { digest: string }).digest;
+          graphState.nodes.push({
+            nodeId: evidenceNode.id,
+            status: DagNodeStatus.Succeeded,
+            outputs: evidenceOutputs,
+          });
+          for (const node of graph.nodes.filter((node) => node.id.startsWith("review-"))) {
+            const role = node.id.slice("review-".length);
+            const output = JSON.parse(reviewer(role));
+            output.evidenceDigest = role === "intent" ? "0".repeat(64) : digest;
+            graphState.nodes.push({
+              nodeId: node.id,
+              status: DagNodeStatus.Succeeded,
+              outputs: await Effect.runPromise(
+                publishDagSubagentTextResult(
+                  f.artifactRoot,
+                  graph.runId,
+                  node.id,
+                  `${node.id}-attempt`,
+                  node.executor.payload.output.name,
+                  JSON.stringify(output),
+                ),
+              ),
+            });
+          }
+          const synthesisNode = graph.nodes.find((node) => node.id === "synthesis")!;
+          const rejected = JSON.parse(synthesis());
+          rejected.findings[0].problem = "Not present in an admitted reviewer result.";
+          graphState.nodes.push({
+            nodeId: synthesisNode.id,
+            status: DagNodeStatus.Succeeded,
+            outputs: await Effect.runPromise(
+              publishDagSubagentTextResult(
+                f.artifactRoot,
+                graph.runId,
+                synthesisNode.id,
+                "synthesis-attempt",
+                "synthesis",
+                JSON.stringify(rejected),
+              ),
+            ),
+          });
+          reconstruction = {
+            graph,
+            graphId: "deterministic-test-graph",
+            state: graphState,
+            terminalOutcome: DagRunOutcome.Succeeded,
+            transitions: [],
+            attempts: [],
+            persistedEntryCount: 1,
+            recoveredFromProcessLoss: false,
+          };
+          const complete = Effect.succeed(reconstruction);
+          return {
+            accepted: Effect.void,
+            snapshot: complete,
+            await: complete,
+            cancel: Effect.void,
+          };
+        }),
+      reconstruct: () => Effect.succeed(reconstruction!),
+    };
+    const result = await runReviewDag({
+      pi,
+      ctx: f.ctx,
+      service: service as any,
+      assignments,
+      deckPath: deck.path,
+      state: f.state,
+      save: (state) => saved.push(structuredClone(state)),
+    });
+    expect(result.dag).toMatchObject({
+      status: "degraded",
+      malformedNodes: ["review-intent", "synthesis"],
+    });
+    expect(result.dag?.evidenceCoverage?.digest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(result.result?.verdict).toContain("Reviewer synthesis failed");
+    expect(result.result?.coverage?.succeeded).not.toContain("intent");
+    expect(saved.some((state) => state.dag?.submitted)).toBe(true);
+    expect(saved.at(-1)?.dag?.status).toBe("degraded");
+    const updated = updateReviewDeckLaterRefs({
+      snapshot: f.state.snapshot,
+      readingPlanRefs: [
+        { kind: "reading-plan", id: "plan", uri: result.dag!.readingPlanReference!.path },
+      ],
+      rawResultRefs: result.dag!.rawResultReferences.map((reference, index) => ({
+        kind: "raw-result",
+        id: `result-${index}`,
+        uri: reference.path,
+      })),
+    });
+    expect(updated.deck.laterRefs.readingPlanRefs).toHaveLength(1);
+    expect(updated.deck.laterRefs.rawResultRefs).toHaveLength(6);
+  });
+
   it("unregisters run-scoped tools when the first state save fails", async () => {
     const f = fixture();
     const pi = piEvents();
@@ -388,9 +562,7 @@ describe("DAG-backed pull request review runner", () => {
       save: () => {},
     });
     expect(result.dag?.status).toBe("degraded");
-    expect(result.dag?.malformedNodes).toEqual(
-      expect.arrayContaining(["review-correctness"]),
-    );
+    expect(result.dag?.malformedNodes).toEqual(expect.arrayContaining(["review-correctness"]));
   });
 
   it("reports a failed synthesis node while preserving reviewer findings", async () => {

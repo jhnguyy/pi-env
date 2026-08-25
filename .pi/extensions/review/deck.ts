@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { diffHunkRanges, parseDiffGitPath, parsePatchFilePath } from "./core";
+import { createDiffIndex, type DiffIndex } from "./diff-index";
 import type { ReviewSnapshot } from "./schema";
 
 const DECK_VERSION = 1;
@@ -334,29 +334,11 @@ function invalidSourceTestRefFailure(
   };
 }
 
-function diffSections(diff: string): ReadonlyMap<string, string> {
-  const sections = new Map<string, string>();
-  const starts = [...diff.matchAll(/^diff --git /gmu)].map((match) => match.index);
-  for (const [index, start] of starts.entries()) {
-    const section = diff.slice(start, starts[index + 1] ?? diff.length);
-    const lines = section.split(/\r?\n/u);
-    const paths = new Set<string>();
-    const gitPath = parseDiffGitPath(lines[0] ?? "");
-    if (gitPath) paths.add(gitPath);
-    for (const line of lines) {
-      const patchPath = parsePatchFilePath(line);
-      if (patchPath) paths.add(patchPath);
-    }
-    for (const path of paths) sections.set(path, section);
-  }
-  return sections;
-}
-
 function buildFileTable(
   changedFiles: Array<{ path: string; added?: number; deleted?: number }>,
   sourceRangeRefs: DeckReference[],
   testRangeRefs: DeckReference[],
-  sections: ReadonlyMap<string, string>,
+  sections: DiffIndex,
   failures: DeckLimitFailure[],
 ): ReviewDeck["files"] {
   const changedPaths = new Set(changedFiles.map((file) => file.path));
@@ -381,9 +363,7 @@ function buildFileTable(
   return changedFiles.map((file, index) => {
     const section = sections.get(file.path);
     const diffHunks = section
-      ? diffHunkRanges(section).map(
-          (hunk) => [hunk.startLine, hunk.endLine] as const,
-        )
+      ? section.hunks.map((hunk) => [hunk.startLine, hunk.endLine] as const)
       : [];
     return {
       id: compactFileId(index),
@@ -455,7 +435,7 @@ export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
     changedFiles,
     sourceRangeRefs,
     testRangeRefs,
-    diffSections(diff),
+    createDiffIndex(diff),
     failures,
   );
   const diffBytes = statSync(input.snapshot.diffPath).size;

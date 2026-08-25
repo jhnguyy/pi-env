@@ -9,12 +9,10 @@ import {
   type DagTextArtifactReference,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
-import type {
-  ActiveDagRuntimeService,
-  DagRuntimeUsage,
-} from "../_shared/dag-runtime-service";
+import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
-import { readVerifiedReviewArtifact, registerReviewDagTools } from "./dag-tools";
+import { registerReviewDagTools } from "./dag-tools";
+import { admitReviewerDossier, readVerifiedReviewArtifact } from "./reviewer-dossier";
 import {
   EvidenceResolverNode,
   ReadingPlanNode,
@@ -37,7 +35,6 @@ import {
   type ReviewResult,
   type ReviewState,
   type SynthesisReview,
-  validateReviewerOutputShape,
   validateSynthesisReviewShape,
 } from "./schema";
 import { findingKey, validSynthesisSources } from "./synthesis-provenance";
@@ -56,6 +53,7 @@ interface CollectedOutputs {
   readonly evidenceReferences: DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
   readonly rawResultReferences: DagTextArtifactReference[];
+  readonly failedReviewerNodes: string[];
   readonly malformedNodes: string[];
 }
 
@@ -108,7 +106,8 @@ async function admittedOutputForNodeOutput(
   outputName: string,
 ): Promise<NodeOutput | undefined> {
   const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
-  if (!node || node.status !== DagNodeStatus.Succeeded || !node.outputs[outputName]) return undefined;
+  if (!node || node.status !== DagNodeStatus.Succeeded || !node.outputs[outputName])
+    return undefined;
   try {
     return await readVerifiedReviewArtifact(root, node.outputs[outputName], {
       runId: reconstruction.graph.runId,
@@ -173,22 +172,6 @@ function decodePlan(text: string, state: ReviewState): ReviewPlan | undefined {
     return undefined;
   }
 }
-function decodeReviewer(
-  text: string,
-  expectedRole: ReviewerRole,
-  evidenceDigest: string | undefined,
-): ReviewerOutput | undefined {
-  try {
-    const decoded = parseJson(text);
-    return validateReviewerOutputShape(decoded) &&
-      decoded.role === expectedRole &&
-      decoded.evidenceDigest === evidenceDigest
-      ? decoded
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
 function decodeEvidenceCoverage(text: string): ReviewEvidenceCoverage | undefined {
   try {
     const decoded = parseJson(text) as Partial<ReviewEvidenceCoverage>;
@@ -216,8 +199,7 @@ async function collectEvidence(
   const node = reconstruction.state.nodes.find(
     (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
   );
-  if (node?.status !== DagNodeStatus.Succeeded)
-    return { references: [], malformed: false };
+  if (node?.status !== DagNodeStatus.Succeeded) return { references: [], malformed: false };
   const references: DagTextArtifactReference[] = [];
   let coverage: ReviewEvidenceCoverage | undefined;
   for (const outputName of ReviewEvidenceOutputs) {
@@ -229,39 +211,13 @@ async function collectEvidence(
     );
     if (!output) continue;
     references.push(output.reference);
-    if (outputName === ReviewEvidenceCoverageOutput)
-      coverage = decodeEvidenceCoverage(output.text);
+    if (outputName === ReviewEvidenceCoverageOutput) coverage = decodeEvidenceCoverage(output.text);
   }
   return {
     ...(coverage ? { coverage } : {}),
     references,
     malformed: references.length !== ReviewEvidenceOutputs.length || !coverage,
   };
-}
-async function collectReviewers(
-  root: string,
-  reconstruction: DagSessionReconstruction,
-  evidenceDigest: string | undefined,
-): Promise<{
-  reviewers: ReviewerOutput[];
-  references: DagTextArtifactReference[];
-  malformedNodes: string[];
-}> {
-  const reviewers: ReviewerOutput[] = [];
-  const references: DagTextArtifactReference[] = [];
-  const malformedNodes: string[] = [];
-  for (const node of ReviewerNodes) {
-    const output = await admittedOutputForNode(root, reconstruction, node.nodeId);
-    if (!output) {
-      if (nodeSucceeded(reconstruction, node.nodeId)) malformedNodes.push(node.nodeId);
-      continue;
-    }
-    references.push(output.reference);
-    const reviewer = decodeReviewer(output.text, node.role, evidenceDigest);
-    if (reviewer) reviewers.push(reviewer);
-    else malformedNodes.push(node.nodeId);
-  }
-  return { reviewers, references, malformedNodes };
 }
 async function collectOutputs(
   root: string,
@@ -271,8 +227,12 @@ async function collectOutputs(
   const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
   const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
   const evidence = await collectEvidence(root, reconstruction);
-  const reviewerOutputs = await collectReviewers(root, reconstruction, evidence.coverage?.digest);
-  const malformedNodes = [...reviewerOutputs.malformedNodes];
+  const dossier = await admitReviewerDossier({
+    artifactRoot: root,
+    reconstruction,
+    expectedEvidenceDigest: evidence.coverage?.digest,
+  });
+  const malformedNodes = [...dossier.malformed];
   if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
     malformedNodes.push(ReadingPlanNode.nodeId);
   if (evidence.malformed) malformedNodes.push(EvidenceResolverNode.nodeId);
@@ -281,8 +241,9 @@ async function collectOutputs(
     ...(planOutput ? { readingPlanReference: planOutput.reference } : {}),
     ...(evidence.coverage ? { evidenceCoverage: evidence.coverage } : {}),
     evidenceReferences: evidence.references,
-    reviewers: reviewerOutputs.reviewers,
-    rawResultReferences: reviewerOutputs.references,
+    reviewers: dossier.admitted.map((artifact) => artifact.reviewer),
+    rawResultReferences: dossier.raw.map((artifact) => artifact.reference),
+    failedReviewerNodes: [...dossier.failed],
     malformedNodes,
   };
 }
@@ -371,9 +332,7 @@ async function awaitSubmittedGraph(
       const snapshot = await Effect.runPromise(handle.snapshot);
       onProgress({
         runId: graph.runId,
-        nodes: Object.fromEntries(
-          snapshot.state.nodes.map((node) => [node.nodeId, node.status]),
-        ),
+        nodes: Object.fromEntries(snapshot.state.nodes.map((node) => [node.nodeId, node.status])),
         ...(service.usage ? { usage: service.usage(graph.runId) } : {}),
       });
     } finally {
@@ -426,10 +385,7 @@ function preserveAllFailedOutputs(
   collected: CollectedOutputs,
   failedNodes: string[],
 ): ReviewState {
-  const evidenceFailure = failureMessageForNode(
-    reconstruction,
-    EvidenceResolverNode.nodeId,
-  );
+  const evidenceFailure = failureMessageForNode(reconstruction, EvidenceResolverNode.nodeId);
   return {
     ...state,
     dag: {
@@ -471,9 +427,7 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
   const diff = await import("node:fs/promises").then((fs) =>
     fs.readFile(input.state.snapshot.diffPath, "utf8"),
   );
-  const synthesized = output
-    ? decodeSynthesis(output.text, collected.reviewers, diff)
-    : undefined;
+  const synthesized = output ? decodeSynthesis(output.text, collected.reviewers, diff) : undefined;
   if (output && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
   return { output, result: synthesized ?? fallbackSynthesis(collected.reviewers, diff) };
 }
@@ -555,8 +509,10 @@ function finalizedReviewState(
   };
 }
 async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> {
-  const failedNodes = failedNodeIds(input.reconstruction);
   const collected = await collectOutputs(input.root, input.reconstruction, input.state);
+  const failedNodes = [
+    ...new Set([...failedNodeIds(input.reconstruction), ...collected.failedReviewerNodes]),
+  ].sort();
   if (collected.reviewers.length === 0)
     return preserveAllFailedOutputs(
       input.state,
