@@ -212,7 +212,7 @@ describe("review pull request deck", () => {
       outOfDiffContractRefs: [{ kind: "out-of-diff-contract", id: "c1", uri: "contract://1" }],
       omissions: [{ type: "explicit-omission", detail: "No logs." }],
     });
-    expect(built.bytes).toBeLessThan(32768);
+    expect(built.bytes).toBeLessThan(49152);
     expect(new Set(built.deck.files.map((file) => file.path)).size).toBe(50);
     expect(built.deck.files).toHaveLength(50);
     expect(built.deck.files[0]?.id).toBe("0");
@@ -237,7 +237,7 @@ describe("review pull request deck", () => {
         uri: `result://${index + 1}`,
       })),
     });
-    expect(updated.bytes).toBeLessThan(32768);
+    expect(updated.bytes).toBeLessThan(49152);
     expect(
       readFileSync(updated.path, "utf8").match(/"diffHash": "diff-hash-large"/g)?.length ?? 0,
     ).toBe(1);

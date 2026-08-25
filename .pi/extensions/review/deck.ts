@@ -6,7 +6,7 @@ import type { ReviewSnapshot } from "./schema";
 
 const DECK_VERSION = 1;
 const DECK_FILE_NAME = "review-deck.json";
-const MAX_DECK_BYTES = 32_768;
+const MAX_DECK_BYTES = 49_152;
 const MIN_LATER_REFS_RESERVE_BYTES = 8_192;
 const MAX_INITIAL_DECK_BYTES = MAX_DECK_BYTES - MIN_LATER_REFS_RESERVE_BYTES;
 const MAX_TITLE_BODY_REF_BYTES = 512;
