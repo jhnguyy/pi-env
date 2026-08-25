@@ -78,6 +78,20 @@ describe("resolvePrReviewModelPolicy", () => {
       "google/gemini-2.5",
       "openai/gpt-5",
     ]);
+    expect(
+      Object.fromEntries(
+        Object.entries(result.assignments).map(([role, assignment]) => [role, assignment.fqid]),
+      ),
+    ).toEqual({
+      "reading-plan": "anthropic/claude-4",
+      correctness: "anthropic/claude-4",
+      intent: "google/gemini-2.5",
+      maintainability: "openai/gpt-5",
+      tests: "anthropic/claude-4",
+      security: "google/gemini-2.5",
+      "whole-change": "openai/gpt-5",
+      synthesis: "openai/gpt-5",
+    });
     expect(resolvePrReviewModelPolicy(approved, [...available].reverse()).assignments).toEqual(
       result.assignments,
     );

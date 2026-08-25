@@ -121,9 +121,9 @@ export function resolvePrReviewModelPolicy(
   FocusedReviewRoles.forEach((role, index) => {
     assignments[role] = choose(role, index);
   });
-  assignments["whole-change"] = choose("whole-change", 1);
+  assignments["whole-change"] = choose("whole-change", FocusedReviewRoles.length);
   assignments.synthesis = pins.synthesis
-    ? choose("synthesis", 1)
+    ? choose("synthesis", FocusedReviewRoles.length + 1)
     : assignment("synthesis", assignments["whole-change"], false);
   return Object.freeze({
     ok: true,
