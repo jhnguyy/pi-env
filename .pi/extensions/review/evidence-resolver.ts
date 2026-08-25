@@ -37,7 +37,7 @@ export const ReviewEvidenceOutputs = Object.freeze([
   ...ReviewEvidenceChunkOutputs,
 ]);
 const ChunkMaxBytes = 220_000;
-const MaxRangeLines = 1_000;
+const MaxRangeLines = 10_000;
 const MaxSourceFileBytes = 8_000_000;
 const ReviewerPromptFixedReserveBytes = 24_000;
 const execFileAsync = promisify(execFile);
@@ -373,7 +373,7 @@ async function verifySnapshot(payload: ReviewEvidenceResolverPayloadV1, signal: 
   return { canonicalWorktree, diff };
 }
 
-async function resolveEvidence(
+export async function preflightReviewEvidence(
   payload: ReviewEvidenceResolverPayloadV1,
   plan: ReviewPlan,
   signal: AbortSignal,
@@ -497,7 +497,7 @@ export function makeReviewEvidenceResolverExecutor(options: {
               }),
       });
       const resolved = yield* Effect.tryPromise({
-        try: (signal) => resolveEvidence(payload, plan, signal),
+        try: (signal) => preflightReviewEvidence(payload, plan, signal),
         catch: (cause) =>
           cause instanceof ReviewEvidenceResolutionFailure
             ? cause

@@ -20,6 +20,11 @@ import type { ActiveDagRuntimeService } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { validatePlan } from "./core";
+import {
+  preflightReviewEvidence,
+  ReviewEvidenceResolutionFailure,
+  type ReviewEvidenceResolverPayloadV1,
+} from "./evidence-resolver";
 import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
   PlanSchema,
@@ -138,6 +143,7 @@ export function registerReviewDagTools(options: {
   readonly artifactRoot: string;
   readonly store: ReviewRunStore;
   readonly service: ActiveDagRuntimeService;
+  readonly evidence: ReviewEvidenceResolverPayloadV1;
 }): ReviewDagTools {
   const suffix = suffixFor(options.reviewId);
   const base = makeReviewReadToolContracts(options.store).map((contract) =>
@@ -175,7 +181,34 @@ export function registerReviewDagTools(options: {
         const validation = validatePlan(plan, options.store.state.snapshot.metadata.changedFiles);
         if (!validation.ok)
           return { content: [txt(validation.message)], isError: true, details: validation };
-        return { content: [txt(boundedSubmission(plan))], details: validation };
+        try {
+          const resolved = await preflightReviewEvidence(
+            options.evidence,
+            plan,
+            context.signal ?? new AbortController().signal,
+          );
+          return {
+            content: [txt(boundedSubmission(plan))],
+            details: {
+              ...validation,
+              dossierBytes: resolved.coverage.dossierBytes,
+              omissions: resolved.coverage.omissions.length,
+            },
+          };
+        } catch (cause) {
+          if (!(cause instanceof ReviewEvidenceResolutionFailure)) throw cause;
+          return {
+            content: [txt(`${cause.code}: ${cause.message}`)],
+            isError: true,
+            details: {
+              code: cause.code,
+              message: cause.message,
+              actual: cause.actual,
+              limit: cause.limit,
+              path: cause.path,
+            },
+          };
+        }
       },
     },
     options.store.state.snapshot.worktree,

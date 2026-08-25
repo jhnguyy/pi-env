@@ -646,6 +646,19 @@ export async function runReviewDag(options: {
     },
   };
   const root = artifactRoot(options.ctx);
+  const evidence = {
+    v: 1 as const,
+    snapshotId: state.snapshot.id,
+    headOid: state.snapshot.metadata.headOid,
+    diffHash: state.snapshot.diffHash,
+    worktree: state.snapshot.worktree,
+    diffPath: state.snapshot.diffPath,
+    changedPaths: state.snapshot.metadata.changedFiles.map((file) => file.path),
+    planOutputName: ReadingPlanNode.outputName,
+    reviewerContextWindow: Math.min(
+      ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
+    ),
+  };
   const tools = registerReviewDagTools({
     pi: options.pi,
     reviewId: state.snapshot.id,
@@ -654,6 +667,7 @@ export async function runReviewDag(options: {
     artifactRoot: root,
     store,
     service: options.service,
+    evidence,
   });
   try {
     const graph = compileReviewGraph({
@@ -661,19 +675,7 @@ export async function runReviewDag(options: {
       cwd: state.snapshot.worktree,
       assignments: options.assignments,
       tools: tools.names,
-      evidence: {
-        v: 1,
-        snapshotId: state.snapshot.id,
-        headOid: state.snapshot.metadata.headOid,
-        diffHash: state.snapshot.diffHash,
-        worktree: state.snapshot.worktree,
-        diffPath: state.snapshot.diffPath,
-        changedPaths: state.snapshot.metadata.changedFiles.map((file) => file.path),
-        planOutputName: ReadingPlanNode.outputName,
-        reviewerContextWindow: Math.min(
-          ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
-        ),
-      },
+      evidence,
     });
     state = {
       ...state,
