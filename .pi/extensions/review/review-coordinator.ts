@@ -18,6 +18,7 @@ import {
 export interface ReviewCoordinatorScope {
   readonly sessionId: string;
   readonly generation: number;
+  readonly signal: AbortSignal;
 }
 
 export type ReviewActionResult = {
@@ -41,6 +42,7 @@ export class ReviewCoordinator {
   private selectedReviewId: string | undefined;
   private sessionId: string | undefined;
   private generation = 0;
+  private sessionAbortController = new AbortController();
 
   get activeContext(): ExtensionContext | undefined {
     return this.context;
@@ -60,7 +62,17 @@ export class ReviewCoordinator {
 
   captureScope(): ReviewCoordinatorScope {
     if (!this.sessionId) throw new Error("The review coordinator has no active session.");
-    return Object.freeze({ sessionId: this.sessionId, generation: this.generation });
+    return Object.freeze({
+      sessionId: this.sessionId,
+      generation: this.generation,
+      signal: this.sessionAbortController.signal,
+    });
+  }
+
+  operationSignal(scope: ReviewCoordinatorScope, external?: AbortSignal): AbortSignal {
+    if (!this.isScopeActive(scope))
+      throw new Error("The review session changed during the operation.");
+    return external ? AbortSignal.any([scope.signal, external]) : scope.signal;
   }
 
   isScopeActive(scope: ReviewCoordinatorScope): boolean {
@@ -134,6 +146,8 @@ export class ReviewCoordinator {
   }
 
   reset(): void {
+    this.sessionAbortController.abort(new Error("The review session changed."));
+    this.sessionAbortController = new AbortController();
     this.generation += 1;
     this.states.clear();
     this.createOperations.clear();

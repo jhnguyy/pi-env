@@ -149,6 +149,10 @@ function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinat
 function latestState(): ReviewState | undefined {
   return coordinator.latestState();
 }
+function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
+  if (!coordinator.isScopeActive(scope))
+    throw new Error("The review session changed during the operation.");
+}
 export function restore(ctx: ExtensionContext): void {
   coordinator.resetReviews();
   const latestById = new Map<string, ReviewState>();
@@ -591,9 +595,11 @@ async function createReviewAttempt(
       signal,
       reviewId,
     );
+    assertActiveCoordinatorScope(coordinatorScope);
     state = { ...state, snapshot };
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
+    assertActiveCoordinatorScope(coordinatorScope);
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = {
       ...state,
@@ -624,6 +630,7 @@ async function createReviewAttempt(
         decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
       ]),
     );
+    assertActiveCoordinatorScope(coordinatorScope);
     stage = "model-policy";
     const policy = resolvePrReviewModelPolicy(
       agentSettings,
@@ -673,6 +680,7 @@ async function createReviewAttempt(
     );
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
+    assertActiveCoordinatorScope(coordinatorScope);
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
     coordinator.finishPreparation(reviewId);
@@ -681,6 +689,7 @@ async function createReviewAttempt(
   }
 
   coordinator.finishPreparation(reviewId);
+  assertActiveCoordinatorScope(coordinatorScope);
   try {
     state = await runReviewDag({
       pi,
@@ -695,7 +704,9 @@ async function createReviewAttempt(
       },
       onProgress,
     });
+    assertActiveCoordinatorScope(coordinatorScope);
   } catch (cause) {
+    assertActiveCoordinatorScope(coordinatorScope);
     state = coordinator.review(snapshot.id) ?? state;
     if (state.dag?.submitted === false) {
       const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
@@ -709,6 +720,7 @@ async function createReviewAttempt(
   }
   const terminalDag = state.dag;
   if (terminalDag) {
+    assertActiveCoordinatorScope(coordinatorScope);
     try {
       const updated = updateReviewDeckLaterRefs({
         snapshot,
@@ -764,15 +776,20 @@ async function startReview(
 ): Promise<ReviewActionResult> {
   coordinator.activate(ctx);
   const coordinatorScope = coordinator.captureScope();
-  const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, signal);
+  const operationSignal = coordinator.operationSignal(coordinatorScope, signal);
+  const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, operationSignal);
   if (!resolved.url)
     return {
       content: [txt(resolved.message ?? "Please provide a GitHub PR URL.")],
       details: { status: "needs_url" },
     };
-  const metadata = await resolveReviewMetadata(pi.exec.bind(pi), ctx.cwd, resolved.url, signal);
-  if (!coordinator.isScopeActive(coordinatorScope))
-    throw new Error("The review session changed before preparation started.");
+  const metadata = await resolveReviewMetadata(
+    pi.exec.bind(pi),
+    ctx.cwd,
+    resolved.url,
+    operationSignal,
+  );
+  assertActiveCoordinatorScope(coordinatorScope);
   const parentSessionId = ctx.sessionManager.getSessionId();
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
   if (!forceRerun) {
@@ -784,7 +801,14 @@ async function startReview(
       return reviewActionResult(existing, true);
     }
   }
-  const operation = createReviewAttempt(pi, metadata, signal, ctx, coordinatorScope, onProgress);
+  const operation = createReviewAttempt(
+    pi,
+    metadata,
+    operationSignal,
+    ctx,
+    coordinatorScope,
+    onProgress,
+  );
   if (!forceRerun) coordinator.trackCreateOperation(identityKey, operation);
   try {
     return await operation;

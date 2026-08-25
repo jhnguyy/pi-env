@@ -45,8 +45,12 @@ export function reviewerDossierContext(dossier: ReviewerDossier) {
   };
 }
 
+function serializedReviewerDossierContext(dossier: ReviewerDossier): string {
+  return JSON.stringify(reviewerDossierContext(dossier));
+}
+
 export function serializeReviewerDossierContext(dossier: ReviewerDossier): string {
-  const text = JSON.stringify(reviewerDossierContext(dossier));
+  const text = serializedReviewerDossierContext(dossier);
   if (Buffer.byteLength(text, "utf8") > MaxReviewerDossierBytes)
     throw new Error("Reviewer result context exceeds the absolute byte limit.");
   return text;
@@ -141,12 +145,28 @@ export async function admitReviewerDossier(options: {
     admitted.push({ ...verified[0], reviewer });
   }
 
-  const dossier = Object.freeze({
+  while (
+    admitted.length > 0 &&
+    Buffer.byteLength(
+      serializedReviewerDossierContext({ admitted, raw, failed, malformed }),
+      "utf8",
+    ) > MaxReviewerDossierBytes
+  ) {
+    const removed = admitted.pop();
+    if (removed) malformed.push(removed.nodeId);
+  }
+  const topologyIndex = new Map<string, number>(
+    ReviewerNodes.map((node, index) => [node.nodeId, index]),
+  );
+  malformed.sort(
+    (left, right) =>
+      (topologyIndex.get(left) ?? Number.MAX_SAFE_INTEGER) -
+      (topologyIndex.get(right) ?? Number.MAX_SAFE_INTEGER),
+  );
+  return Object.freeze({
     admitted: Object.freeze(admitted),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),
   });
-  serializeReviewerDossierContext(dossier);
-  return dossier;
 }

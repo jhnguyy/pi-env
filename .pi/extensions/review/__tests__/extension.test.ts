@@ -73,9 +73,7 @@ function sampleState(id: string, selected: string[]): ReviewState {
       riskReasons: [],
       cohorts: [{ label: "main", purpose: "review changed file", paths: ["a.ts"] }],
       files: [{ path: "a.ts", attention: "normal", role: "changed file" }],
-      evidence: [
-        { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
-      ],
+      evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" }],
     },
     result: {
       verdict: "v",
@@ -798,6 +796,104 @@ describe("review extension pull request surface", () => {
     expect(notes.at(-1)).toContain("failed during dag-service");
     expect(notes.at(-1)).not.toContain(`Review ${result.details.reviewId} failed`);
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
+  });
+
+  it("cancels an in-flight create without leaking state when the session switches", async () => {
+    const root = tempRoot();
+    const pi = extensionPi();
+    const submit = vi.fn(() => Effect.die("stale DAG submit must not run"));
+    const sessionA: any = {
+      cwd: root,
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => "session-a",
+        getSessionDir: () => root,
+      },
+      modelRegistry: { getAvailable: () => [] },
+    };
+    const sessionB: any = {
+      ...sessionA,
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => "session-b",
+        getSessionDir: () => root,
+      },
+    };
+    pi.handlers.session_start({}, sessionA);
+    registerDagRuntimeService(pi, {
+      parentSessionId: "session-a",
+      sessionGeneration: "generation-a",
+      service: {
+        submit,
+        reconstruct: () => Effect.die("reconstruction must not run"),
+      },
+    });
+
+    let releaseSnapshot!: () => void;
+    let markSnapshotStarted!: () => void;
+    const snapshotStarted = new Promise<void>((resolve) => {
+      markSnapshotStarted = resolve;
+    });
+    let markAbortObserved!: () => void;
+    const abortObserved = new Promise<void>((resolve) => {
+      markAbortObserved = resolve;
+    });
+    pi.exec = async (cmd: string, args: string[], options: any) => {
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/o/r/pull/1",
+            baseRefName: "trunk",
+            baseRefOid: "b",
+            headRefOid: "h",
+          }),
+          stderr: "",
+        };
+      if (cmd === "git" && args[0] === "init") {
+        markSnapshotStarted();
+        return new Promise((resolve, reject) => {
+          options.signal.addEventListener("abort", markAbortObserved, { once: true });
+          releaseSnapshot = () => {
+            if (options.signal.aborted)
+              reject(options.signal.reason ?? new Error("snapshot preparation aborted"));
+            else resolve({ code: 0, stdout: "", stderr: "" });
+          };
+        });
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+
+    const create = pi.tools[0].execute(
+      "create-a",
+      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+      undefined,
+      undefined,
+      sessionA,
+    );
+    await snapshotStarted;
+    const appendCountAtSwitch = pi.appended.length;
+    expect(appendCountAtSwitch).toBe(1);
+
+    pi.handlers.session_tree({}, sessionB);
+    await abortObserved;
+    releaseSnapshot();
+
+    await expect(create).resolves.toMatchObject({
+      isError: true,
+      details: {
+        status: "failed",
+        error: "The review session changed during the operation.",
+      },
+    });
+    expect(submit).not.toHaveBeenCalled();
+    expect(pi.appended).toHaveLength(appendCountAtSwitch);
+    const notes: string[] = [];
+    await pi.command("pr list", {
+      ...sessionB,
+      ui: { notify: (message: string) => notes.push(message) },
+    });
+    expect(notes.at(-1)).toBe("No active PR reviews.");
   });
 
   it("coalesces concurrent creates for the same session, pull request, and head", async () => {

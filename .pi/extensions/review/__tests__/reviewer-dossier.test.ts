@@ -190,6 +190,31 @@ describe("reviewer dossier admission contract", () => {
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-intent");
   });
 
+  it("degrades excess valid reviewers instead of failing aggregate admission", async () => {
+    const long = `x${"\n".repeat(19_998)}`;
+    const findings = Array.from({ length: 2 }, () => ({
+      severity: "medium",
+      impact: "medium",
+      problem: long,
+      consequence: long,
+      suggestedFix: long,
+    }));
+    const f = await fixture(
+      Object.fromEntries(
+        ReviewerNodes.map((node) => [node.nodeId, { text: output(node.role, { findings }) }]),
+      ),
+    );
+    const dossier = await admitReviewerDossier({
+      artifactRoot: f.root,
+      reconstruction: f.reconstruction,
+      expectedEvidenceDigest: Digest,
+    });
+    expect(dossier.admitted.length).toBeGreaterThan(0);
+    expect(dossier.admitted.length).toBeLessThan(ReviewerNodes.length);
+    expect(dossier.malformed).toHaveLength(ReviewerNodes.length - dossier.admitted.length);
+    expect(() => serializeReviewerDossierContext(dossier)).not.toThrow();
+  });
+
   it("applies the tool limit after JSON escaping", () => {
     const text = '"'.repeat(Math.floor(MaxReviewerDossierBytes / 2));
     expect(() =>
