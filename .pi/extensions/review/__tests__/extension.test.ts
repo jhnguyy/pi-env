@@ -874,6 +874,8 @@ describe("review extension pull request surface", () => {
     await snapshotStarted;
     const appendCountAtSwitch = pi.appended.length;
     expect(appendCountAtSwitch).toBe(1);
+    const staleArtifactDir = pi.appended[0][1].state.snapshot.artifactDir as string;
+    expect(existsSync(staleArtifactDir)).toBe(true);
 
     pi.handlers.session_tree({}, sessionB);
     await abortObserved;
@@ -888,6 +890,7 @@ describe("review extension pull request surface", () => {
     });
     expect(submit).not.toHaveBeenCalled();
     expect(pi.appended).toHaveLength(appendCountAtSwitch);
+    expect(existsSync(staleArtifactDir)).toBe(false);
     const notes: string[] = [];
     await pi.command("pr list", {
       ...sessionB,

@@ -503,6 +503,18 @@ async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Prom
   return prune.code === 0;
 }
 
+async function assertActivePreparationScope(
+  pi: ExtensionAPI,
+  state: ReviewState,
+  scope: ReviewCoordinatorScope,
+): Promise<void> {
+  if (coordinator.isScopeActive(scope)) return;
+  if (existsSync(state.snapshot.worktree))
+    await removeManagedWorktree(pi, state).catch(() => false);
+  rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
+  throw new Error("The review session changed during the operation.");
+}
+
 async function reconcileInterruptedPreparations(pi: ExtensionAPI): Promise<void> {
   for (const state of coordinator.reviews()) {
     const reviewId = state.snapshot.id;
@@ -595,11 +607,11 @@ async function createReviewAttempt(
       signal,
       reviewId,
     );
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     state = { ...state, snapshot };
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = {
       ...state,
@@ -630,7 +642,7 @@ async function createReviewAttempt(
         decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
       ]),
     );
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     stage = "model-policy";
     const policy = resolvePrReviewModelPolicy(
       agentSettings,
@@ -680,7 +692,7 @@ async function createReviewAttempt(
     );
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
     state = { ...state, preparation: preparationFailure(stage, cause, worktreeCleaned) };
     coordinator.finishPreparation(reviewId);
@@ -689,7 +701,7 @@ async function createReviewAttempt(
   }
 
   coordinator.finishPreparation(reviewId);
-  assertActiveCoordinatorScope(coordinatorScope);
+  await assertActivePreparationScope(pi, state, coordinatorScope);
   try {
     state = await runReviewDag({
       pi,
@@ -704,9 +716,9 @@ async function createReviewAttempt(
       },
       onProgress,
     });
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
   } catch (cause) {
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     state = coordinator.review(snapshot.id) ?? state;
     if (state.dag?.submitted === false) {
       const worktreeCleaned = await removeManagedWorktree(pi, state).catch(() => false);
@@ -720,7 +732,7 @@ async function createReviewAttempt(
   }
   const terminalDag = state.dag;
   if (terminalDag) {
-    assertActiveCoordinatorScope(coordinatorScope);
+    await assertActivePreparationScope(pi, state, coordinatorScope);
     try {
       const updated = updateReviewDeckLaterRefs({
         snapshot,
