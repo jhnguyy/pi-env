@@ -2,7 +2,13 @@ import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } fr
 import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
-import { bound, confined, parseDiffGitPath, parsePatchFilePath } from "./core";
+import {
+  bound,
+  confined,
+  diffHunkRanges,
+  parseDiffGitPath,
+  parsePatchFilePath,
+} from "./core";
 import {
   ChangedFilesParamSchema,
   DiffParamSchema,
@@ -240,15 +246,18 @@ export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolCo
       name: "review_diff",
       label: "Review Diff",
       description:
-        "Read a bounded byte page of the pinned PR diff. Use nextOffset to continue through a full diff or file section.",
+        "Read a bounded byte page of the pinned PR diff. A file response includes exact hunk startLine and endLine values for evidence references. Use nextOffset to continue through the text page.",
       parameters: DiffParamSchema,
       async execute(params, context) {
         check(context.signal);
         const text = params.path ? getDiff(params.path) : getDiff();
         const page = bytePage(text || "No diff for path.", params.offset, params.maxBytes);
+        const value = params.path
+          ? { path: params.path, hunks: diffHunkRanges(text), ...page }
+          : { path: "*", ...page };
         return {
-          content: [txt(page.text)],
-          details: { path: params.path ?? "*", ...page },
+          content: [txt(JSON.stringify(value, null, 2))],
+          details: value,
         };
       },
     },

@@ -230,6 +230,22 @@ export function parsePatchFilePath(line: string): string | undefined {
   const path = match[2].startsWith('"') ? parseGitPathList(match[2]).at(0) : match[2];
   return stripGitPrefix(path ?? "", match[1] === "---" ? "a" : "b");
 }
+export interface DiffHunkRange {
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly header: string;
+}
+export function diffHunkRanges(section: string): DiffHunkRange[] {
+  const lines = section.split(/\r?\n/u);
+  if (lines.at(-1) === "") lines.pop();
+  const starts = lines.flatMap((line, index) =>
+    line.startsWith("@@ ") ? [{ startLine: index + 1, header: line }] : [],
+  );
+  return starts.map((hunk, index) => ({
+    ...hunk,
+    endLine: (starts[index + 1]?.startLine ?? lines.length + 1) - 1,
+  }));
+}
 function ensureAnchorFile(
   anchors: Map<string, { LEFT: Set<number>; RIGHT: Set<number> }>,
   file: string,

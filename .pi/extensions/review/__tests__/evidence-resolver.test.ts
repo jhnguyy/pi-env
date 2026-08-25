@@ -190,6 +190,15 @@ describe("pull request evidence resolver", () => {
       }),
     },
     {
+      name: "partial diff hunk",
+      prepare: (f: ReturnType<typeof fixture>) => ({
+        fixture: f,
+        plan: plan([
+          { kind: "diff" as const, path: "a.ts", startLine: 1, endLine: 5, purpose: "partial" },
+        ]),
+      }),
+    },
+    {
       name: "missing file",
       prepare: (f: ReturnType<typeof fixture>) => ({
         fixture: f,

@@ -68,8 +68,8 @@ function roleInstructions(role: ReviewRole): string {
       "Inspect the review deck and pinned snapshot with the supplied tools.",
       "Build the reading plan. Cover every changed path exactly once.",
       "Add at least one strict file or diff line-range evidence reference for every changed path.",
-      "Fully cover every changed diff hunk with a diff reference. Use file references only as supplemental implementation context.",
-      `Keep the combined exact evidence at or below ${ReviewEvidenceDossierMaxBytes} UTF-8 bytes. Select the smallest ranges that preserve review meaning. Do not select the same text as both file and diff evidence.`,
+      "Select complete diff hunk ranges. Prioritize the highest-risk hunks. Use file references only as supplemental implementation context.",
+      `Keep the combined exact evidence at or below ${ReviewEvidenceDossierMaxBytes} UTF-8 bytes. If all hunks cannot fit, record the context limit in evidenceOmissions. Do not select partial hunks or the same text as both file and diff evidence.`,
       "Call the structured plan submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");
   }
@@ -92,6 +92,7 @@ function roleInstructions(role: ReviewRole): string {
     "Use the supplied validated reading plan and resolved evidence dossier. Do not rebuild the plan or explore the filesystem.",
     focus,
     "Return goal-relative, actionable findings only.",
+    "Do not report evidence omissions or degraded coverage as code findings. The harness reports coverage separately. Review the admitted evidence that is present.",
     "Set evidenceDigest to the exact digest in evidence_coverage.",
     `Return exactly one JSON object with this shape: {"role":"${role}","evidenceDigest":"<64 lowercase hex characters from evidence_coverage>","verdict":"<non-empty summary>","findings":[{"severity":"low|medium|serious|blocking","impact":"low|medium|high","file":"<optional changed path>","side":"<optional LEFT or RIGHT when line is present>","line":1,"problem":"<non-empty text>","consequence":"<non-empty text>","suggestedFix":"<non-empty text>"}]}.`,
     "Omit file, side, and line together for an unanchored finding. If file is present without an anchor, omit side and line together.",

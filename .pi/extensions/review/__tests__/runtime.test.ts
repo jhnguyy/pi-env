@@ -91,7 +91,7 @@ describe("review pull request run-scoped tools", () => {
           undefined as any,
         )) as any
       ).content[0].text,
-    ).toBe("No diff for path.");
+    ).toContain("No diff for path.");
     expect(
       (
         (await tools.review_diff.execute(
@@ -171,6 +171,9 @@ describe("review pull request run-scoped tools", () => {
       undefined,
       undefined as any,
     )) as any;
+    expect(diffFirst.details.hunks).toEqual([
+      { startLine: 4, endLine: 304, header: "@@ -1,1 +1,300 @@" },
+    ]);
     expect(diffFirst.details.nextOffset).toBeTypeOf("number");
     expect(diffSecond.details.offset).toBe(diffFirst.details.nextOffset);
     expect(diffSecond.content[0].text).not.toBe(diffFirst.content[0].text);

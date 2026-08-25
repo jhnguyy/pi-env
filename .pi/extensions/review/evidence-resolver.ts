@@ -14,7 +14,13 @@ import {
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { isPathContained } from "../_shared/path-containment";
-import { parseDiffGitPath, parsePatchFilePath, sha256, validatePlan } from "./core";
+import {
+  diffHunkRanges,
+  parseDiffGitPath,
+  parsePatchFilePath,
+  sha256,
+  validatePlan,
+} from "./core";
 import { PlanSchema, type EvidenceReference, type ReviewPlan } from "./schema";
 
 export const ReviewEvidenceResolverKey = "pr-review/evidence-resolver-v1" as const;
@@ -190,6 +196,21 @@ function selectLines(text: string, reference: EvidenceReference): string {
   const last = spans[reference.endLine - 1];
   return text.slice(first.start, last.contentEnd);
 }
+function assertCompleteDiffHunks(reference: EvidenceReference, section: string): void {
+  for (const hunk of diffHunkRanges(section)) {
+    const overlaps =
+      reference.startLine <= hunk.endLine && reference.endLine >= hunk.startLine;
+    const contains =
+      reference.startLine <= hunk.startLine && reference.endLine >= hunk.endLine;
+    if (overlaps && !contains)
+      throw new ReviewEvidenceResolutionFailure({
+        code: "invalid-range",
+        message: `Diff evidence must contain the complete hunk ${hunk.startLine}-${hunk.endLine} for ${reference.path}.`,
+        path: reference.path,
+      });
+  }
+}
+
 function diffSections(diff: string): ReadonlyMap<string, string> {
   const sections = new Map<string, string[]>();
   for (const chunk of diff.split(/^diff --git /mu).filter(Boolean)) {
@@ -270,18 +291,14 @@ function uncoveredDiffHunks(
   const diffReferences = plan.evidence.filter((reference) => reference.kind === "diff");
   const omissions: string[] = [];
   for (const [file, section] of sections) {
-    const lines = section.split(/\r?\n/u);
-    const sectionLineCount = lineSpans(section).length;
-    const starts = lines.flatMap((line, index) => (line.startsWith("@@ ") ? [index + 1] : []));
-    for (const [index, startLine] of starts.entries()) {
-      const endLine = (starts[index + 1] ?? sectionLineCount + 1) - 1;
+    for (const hunk of diffHunkRanges(section)) {
       const covered = diffReferences.some(
         (reference) =>
           reference.path === file &&
-          reference.startLine <= startLine &&
-          reference.endLine >= endLine,
+          reference.startLine <= hunk.startLine &&
+          reference.endLine >= hunk.endLine,
       );
-      if (!covered) omissions.push(`${file}:diff-lines ${startLine}-${endLine}`);
+      if (!covered) omissions.push(`${file}:diff-lines ${hunk.startLine}-${hunk.endLine}`);
     }
   }
   return omissions;
@@ -392,6 +409,7 @@ async function resolveEvidence(
             message: `Pinned diff has no section for ${reference.path}.`,
             path: reference.path,
           });
+        assertCompleteDiffHunks(reference, section);
         text = selectLines(section, reference);
       }
       seen.set(identity, text);
