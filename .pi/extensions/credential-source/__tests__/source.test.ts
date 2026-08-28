@@ -69,5 +69,4 @@ describe("credential source scoped use", () => {
     ).rejects.toMatchObject({ code: CredentialErrorCode.AccessDenied });
     expect(provider.resolve).not.toHaveBeenCalled();
   });
-
 });
