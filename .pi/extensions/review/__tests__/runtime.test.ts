@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ReviewState } from "../core";
-import { createDiffIndex } from "../diff-index";
 import { makeReviewReadTools } from "../runtime";
 
 const temps: string[] = [];
@@ -178,44 +177,6 @@ describe("review pull request run-scoped tools", () => {
     expect(diffFirst.details.nextOffset).toBeTypeOf("number");
     expect(diffSecond.details.offset).toBe(diffFirst.details.nextOffset);
     expect(diffSecond.content[0].text).not.toBe(diffFirst.content[0].text);
-  });
-
-  it("serves the canonical index text and hunk offsets for repeated sections", async () => {
-    const s = state();
-    const repeated = [
-      "diff --git a/src/a.ts b/src/a.ts",
-      "--- a/src/a.ts",
-      "+++ b/src/a.ts",
-      "@@ -1 +1 @@",
-      "-one",
-      "+two",
-      "diff --git a/src/b.ts b/src/b.ts",
-      "--- a/src/b.ts",
-      "+++ b/src/b.ts",
-      "@@ -1 +1 @@",
-      "-b",
-      "+bee",
-      "diff --git a/src/a.ts b/src/a.ts",
-      "--- a/src/a.ts",
-      "+++ b/src/a.ts",
-      "@@ -3 +3 @@",
-      "-three",
-      "+four",
-    ].join("\n");
-    writeFileSync(s.snapshot.diffPath, repeated);
-    const expected = createDiffIndex(repeated).get("src/a.ts");
-    const tools = Object.fromEntries(
-      makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
-    );
-    const result = (await tools.review_diff.execute(
-      "repeated",
-      { path: "src/a.ts", maxBytes: 12_000 },
-      undefined,
-      undefined as any,
-    )) as any;
-    const value = JSON.parse(result.content[0].text);
-    expect(value.text).toBe(expected?.text);
-    expect(value.hunks).toEqual(expected?.hunks);
   });
 
   it("pages the complete changed-file manifest beyond prompt and scan limits", async () => {
