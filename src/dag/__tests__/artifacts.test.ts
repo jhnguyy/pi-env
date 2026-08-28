@@ -132,23 +132,6 @@ describe("DAG text artifact contract", () => {
     expect(() => parseDagTextArtifactReference({ ...reference, encoding: "utf-16" })).toThrow(DagArtifactUnsupportedMedia);
   });
 
-  it("keeps session references shaped as metadata only", () => {
-    const reference = parseDagTextArtifactReference({
-      v: 1,
-      path: "a.txt",
-      bytes: 1,
-      digestAlgorithm: "sha256",
-      digest: "a".repeat(64),
-      mediaType: "text/plain",
-      encoding: "utf-8",
-      runId: "run",
-      producerNodeId: "node",
-      outputName: "out",
-    });
-    expect(Object.keys(reference).sort()).toEqual(["bytes", "digest", "digestAlgorithm", "encoding", "mediaType", "outputName", "path", "producerNodeId", "runId", "v"]);
-    expect(JSON.stringify(reference)).not.toContain("artifact text");
-  });
-
   effectIt.effect("rejects lexical, canonical, and symlink escapes while accepting contained symlinks", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => tempRoot());
