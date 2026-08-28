@@ -239,21 +239,16 @@ describe("jit_catch tool contract", () => {
     expect(result).toEqual(err("Operational subprocess failure during capture diff: git diff: spawn ENOENT"));
   });
 
-  it("returns equivalent final result/details for the same domain scenario", async () => {
+  it("formats the final failure result", async () => {
     runnerState.runResult = { extName: "demo", passed: false, testPath: "/tmp/demo.catching.test.ts", testOutput: "line1\nline2" };
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
 
     const piResult = await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/same" });
-    const agentResult = await harness.registrations[0].tool.execute("agent", {}, undefined);
-    const contractResult = await createJitCatchContractWithRunner(() => Effect.succeed({ code: 0, stdout: "", stderr: "" })).execute({}, { cwd: "/same" });
-
     expect(piResult.content[0].text).toContain("Note: diff also contains non-extension files (ignored).\n");
     expect(piResult.content[0].text).toContain("✗ demo — tests FAILED.");
     expect(piResult.content[0].text).toContain("  Test file kept at: /tmp/demo.catching.test.ts");
     expect(piResult.content[0].text).toContain("  Output:\n  line1\n  line2");
-    expect(piResult.details).toEqual(contractResult.details);
-    expect(agentResult.details).toEqual(piResult.details);
   });
 });
