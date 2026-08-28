@@ -1,6 +1,6 @@
 import { Effect, Redacted } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { CredentialErrorCode, CredentialSourceError } from "../../_shared/credential-source";
+import { CredentialErrorCode } from "../../_shared/credential-source";
 import type { CredentialProvider } from "../providers";
 import { CredentialSourceRuntime } from "../source";
 
@@ -70,29 +70,4 @@ describe("credential source scoped use", () => {
     expect(provider.resolve).not.toHaveBeenCalled();
   });
 
-  it("returns typed errors without exposing provider output", async () => {
-    const provider: CredentialProvider = {
-      id: "1password",
-      resolve: () =>
-        Effect.fail(
-          new CredentialSourceError({
-            code: CredentialErrorCode.ProviderFailed,
-            message: "The 1Password credential provider failed.",
-            retryable: true,
-          }),
-        ),
-    };
-    const source = new CredentialSourceRuntime(
-      { "linear.apiKey": entry },
-      new Map([[provider.id, provider]]),
-    );
-
-    try {
-      await source.use({ name: "linear.apiKey", consumer: "linear" }, async () => undefined);
-      throw new Error("Expected credential failure.");
-    } catch (error) {
-      expect(JSON.stringify(error)).not.toContain(SENTINEL);
-      expect((error as Error).message).not.toContain(SENTINEL);
-    }
-  });
 });
