@@ -28,6 +28,12 @@ Before changing a repository:
 2. Read its `CONTRIBUTING.md` for development workflow and validation requirements when the file exists.
 3. Follow repository instructions and links that apply to the changed area.
 
+## Testing
+
+> Tautological tests considered harmful.
+
+Derive expected behavior from a public requirement, a known regression, or a safety invariant. Do not derive the expected result by repeating the production implementation. When practical, use red/green evidence or a negative control to confirm that the test detects the defect.
+
 ## Code comments and documentation
 
 Make code self-descriptive through names, types, decomposition, and tests. Leave self-descriptive code uncommented.
