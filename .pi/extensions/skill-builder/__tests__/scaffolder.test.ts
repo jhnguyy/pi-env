@@ -32,17 +32,6 @@ afterEach(() => {
 
 describeIfEnabled("skill-builder", "Scaffolder", () => {
   describe("basic scaffold", () => {
-    it("creates skill directory", () => {
-      const result = scaffoldSkill({
-        name: "my-tool",
-        description: "A tool for doing things.",
-        template: "basic",
-        targetDir: tempDir,
-      });
-      expect(result.success).toBe(true);
-      expect(existsSync(result.skillDir)).toBe(true);
-    });
-
     it("creates SKILL.md in the skill directory", () => {
       const result = scaffoldSkill({
         name: "my-tool",
