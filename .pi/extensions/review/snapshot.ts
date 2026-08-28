@@ -4,6 +4,11 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { Data, Effect, Exit, PartitionedSemaphore } from "effect";
 import { execEffect } from "../_shared/exec";
 import {
+  ProcessFailure,
+  ProcessFailureKind,
+  runProcess,
+} from "../../../src/process/platform.js";
+import {
   makeReviewId,
   parseChangedFilesFromDiff,
   parsePrUrl,
@@ -16,16 +21,82 @@ import {
 
 type Exec = ExtensionAPI["exec"];
 
+export type SnapshotFailureCode =
+  | "fetch_failed"
+  | "fetch_timeout"
+  | "fetched_ref_mismatch"
+  | "fetched_ref_missing"
+  | "merge_base_missing_ancestry"
+  | "shallow_repair_failed"
+  | "snapshot_failed";
+
 export class SnapshotError extends Data.TaggedError("SnapshotError")<{
   readonly message: string;
+  readonly code: SnapshotFailureCode;
+  readonly command?: string;
+  readonly stdout?: string;
+  readonly stderr?: string;
   readonly cause?: unknown;
 }> {}
 
 const snapshotSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
 
 function toSnapshotError(message: string, cause?: unknown): SnapshotError {
-  return new SnapshotError({ message, cause });
+  return new SnapshotError({ message, code: "snapshot_failed", cause });
 }
+
+function boundedOutput(value?: string): string | undefined {
+  if (!value) return undefined;
+  return value.length <= 8_000 ? value : value.slice(-8_000);
+}
+
+function commandOutput(error: SnapshotError): { stdout?: string; stderr?: string } {
+  const cause = error.cause;
+  if (cause instanceof ProcessFailure)
+    return { stdout: boundedOutput(cause.stdout), stderr: boundedOutput(cause.stderr) };
+  return { stdout: boundedOutput(error.stdout), stderr: boundedOutput(error.stderr) };
+}
+
+function fetchError(error: SnapshotError, command: string): SnapshotError {
+  const timedOut =
+    (error.cause instanceof ProcessFailure && error.cause.kind === ProcessFailureKind.Timeout) ||
+    /timed?\s*out|timeout/i.test(error.message);
+  return new SnapshotError({
+    code: timedOut ? "fetch_timeout" : "fetch_failed",
+    message: timedOut
+      ? `Git fetch timed out: ${command}`
+      : `Git fetch failed: ${command}`,
+    command,
+    ...commandOutput(error),
+    cause: error,
+  });
+}
+
+/** Run Git in an owned process group so interruption and timeout remove all descendants. */
+export const managedGitExec: Exec = async (command, args, options = {}) => {
+  const effect = runProcess(command, args, {
+    cwd: options.cwd,
+    timeoutMs: options.timeout,
+  });
+  const result = options.signal
+    ? await Effect.runPromise(effect, { signal: options.signal })
+    : await Effect.runPromise(effect);
+  return {
+    code: result.exitCode,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    killed: false,
+  };
+};
+
+let managedGitExecOverride: Exec | undefined;
+
+export function setManagedGitExecForTests(exec?: Exec): void {
+  managedGitExecOverride = exec;
+}
+
+export const reviewGitExec: Exec = (command, args, options) =>
+  (managedGitExecOverride ?? managedGitExec)(command, args, options);
 
 function runEffect(
   exec: Exec,
@@ -103,6 +174,42 @@ function privateRef(
   return `refs/pi-pr-review/${prefix}/${parsed.number}/${oidOrName.replace(/[^a-zA-Z0-9_.-]/g, "-")}`;
 }
 
+function filteredFetchEffect(
+  exec: Exec,
+  repoDir: string,
+  args: string[],
+): Effect.Effect<void, SnapshotError> {
+  const command = ["git", ...args].join(" ");
+  return runEffect(exec, "git", args, {
+    cwd: repoDir,
+    timeout: 180000,
+    failOnNonZero: false,
+  }).pipe(
+    Effect.flatMap((result) => {
+      if (result.code === 0) return Effect.void;
+      const missingRef = /couldn't find remote ref|not our ref|remote ref does not exist/i.test(
+        `${result.stderr}\n${result.stdout}`,
+      );
+      return Effect.fail(
+        new SnapshotError({
+          code: missingRef ? "fetched_ref_missing" : "fetch_failed",
+          message: missingRef
+            ? `Git could not find the requested remote ref: ${command}`
+            : `Git fetch exited ${result.code}: ${command}`,
+          command,
+          stdout: boundedOutput(result.stdout),
+          stderr: boundedOutput(result.stderr),
+        }),
+      );
+    }),
+    Effect.mapError((error) =>
+      error.code === "fetch_failed" || error.code === "fetched_ref_missing"
+        ? error
+        : fetchError(error, command),
+    ),
+  );
+}
+
 function fetchAndVerifyEffect(
   exec: Exec,
   repoDir: string,
@@ -111,15 +218,97 @@ function fetchAndVerifyEffect(
   expectedOid: string,
 ): Effect.Effect<void, SnapshotError> {
   return Effect.gen(function* () {
-    yield* runEffect(exec, "git", ["fetch", "--no-tags", "origin", `+${remoteSpec}:${localRef}`], {
+    yield* filteredFetchEffect(exec, repoDir, [
+      "fetch",
+      "--no-tags",
+      "--filter=blob:none",
+      "origin",
+      `+${remoteSpec}:${localRef}`,
+    ]);
+    const resolved = yield* runEffect(exec, "git", ["rev-parse", `${localRef}^{commit}`], {
       cwd: repoDir,
-      timeout: 180000,
+      failOnNonZero: false,
     });
-    const actual = (yield* runEffect(exec, "git", ["rev-parse", `${localRef}^{commit}`], {
-      cwd: repoDir,
-    })).stdout.trim();
+    if (resolved.code !== 0)
+      return yield* new SnapshotError({
+        code: "fetched_ref_missing",
+        message: `Git fetch completed but the fetched ref is missing: ${localRef}`,
+        command: `git rev-parse ${localRef}^{commit}`,
+        stdout: resolved.stdout,
+        stderr: resolved.stderr,
+      });
+    const actual = resolved.stdout.trim();
     if (actual !== expectedOid)
-      return yield* toSnapshotError("Fetched ref did not match pull request metadata.");
+      return yield* new SnapshotError({
+        code: "fetched_ref_mismatch",
+        message: `Fetched ref did not match pull request metadata: ${localRef}`,
+        command: `git rev-parse ${localRef}^{commit}`,
+        stdout: resolved.stdout,
+        stderr: resolved.stderr,
+      });
+  });
+}
+
+function mergeBaseEffect(
+  exec: Exec,
+  repoDir: string,
+  metadata: ReviewMetadata,
+  headRemoteSpec: string,
+  headRef: string,
+  baseRef: string,
+): Effect.Effect<string, SnapshotError> {
+  return Effect.gen(function* () {
+    const mergeBaseArgs = ["merge-base", metadata.baseOid, metadata.headOid];
+    let result = yield* runEffect(exec, "git", mergeBaseArgs, {
+      cwd: repoDir,
+      failOnNonZero: false,
+    });
+    if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
+
+    const shallow = yield* runEffect(exec, "git", ["rev-parse", "--is-shallow-repository"], {
+      cwd: repoDir,
+      failOnNonZero: false,
+    });
+    if (shallow.code === 0 && shallow.stdout.trim() === "true") {
+      const repairArgs = [
+        "fetch",
+        "--no-tags",
+        "--filter=blob:none",
+        "--unshallow",
+        "origin",
+        `+${headRemoteSpec}:${headRef}`,
+        `+${metadata.baseOid}:${baseRef}`,
+      ];
+      yield* filteredFetchEffect(exec, repoDir, repairArgs).pipe(
+        Effect.catch((error) =>
+          error.code === "fetch_timeout"
+            ? Effect.fail(error)
+            : Effect.fail(
+                new SnapshotError({
+                  code: "shallow_repair_failed",
+                  message: "Git could not restore ancestry in the shallow repository cache.",
+                  command: error.command,
+                  stdout: error.stdout,
+                  stderr: error.stderr,
+                  cause: error,
+                }),
+              ),
+        ),
+      );
+      result = yield* runEffect(exec, "git", mergeBaseArgs, {
+        cwd: repoDir,
+        failOnNonZero: false,
+      });
+      if (result.code === 0 && result.stdout.trim()) return result.stdout.trim();
+    }
+
+    return yield* new SnapshotError({
+      code: "merge_base_missing_ancestry",
+      message: "Git could not find common ancestry for the verified pull request refs.",
+      command: `git ${mergeBaseArgs.join(" ")}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    });
   });
 }
 
@@ -144,11 +333,37 @@ function removePathEffect(path: string): Effect.Effect<void> {
   return Effect.sync(() => rmSync(path, { recursive: true, force: true }));
 }
 
+function cleanupFailedSnapshotEffect(
+  exec: Exec,
+  repoDir: string,
+  worktree: string,
+  artifactDir: string,
+): Effect.Effect<void> {
+  return runEffect(exec, "git", ["worktree", "remove", "--force", worktree], {
+    cwd: repoDir,
+    timeout: 120000,
+    failOnNonZero: false,
+  }).pipe(
+    Effect.andThen(
+      runEffect(exec, "git", ["worktree", "prune"], {
+        cwd: repoDir,
+        timeout: 120000,
+        failOnNonZero: false,
+      }),
+    ),
+    Effect.ignore,
+    Effect.andThen(removePathEffect(worktree)),
+    Effect.andThen(removePathEffect(artifactDir)),
+    Effect.uninterruptible,
+  );
+}
+
 function prepareSnapshotWorkflow(
   exec: Exec,
   cwd: string,
   resolvedMetadata: ReviewMetadata,
   reviewId?: string,
+  gitExec: Exec = exec,
 ): Effect.Effect<ReviewSnapshot, SnapshotError> {
   const parsed = parsePrUrl(resolvedMetadata.url);
   const key = `${parsed.owner}/${parsed.repo}`;
@@ -164,38 +379,39 @@ function prepareSnapshotWorkflow(
       if (!metadata.headOid) return yield* toSnapshotError("Could not resolve PR head commit.");
       if (!metadata.baseRef || !metadata.baseOid)
         return yield* toSnapshotError("Could not resolve PR base branch and commit.");
-      yield* runEffect(exec, "git", ["init"], { cwd: repoDir });
+      yield* runEffect(gitExec, "git", ["init"], { cwd: repoDir });
       const remote = `https://github.com/${parsed.owner}/${parsed.repo}.git`;
-      const getUrl = yield* runEffect(exec, "git", ["remote", "get-url", "origin"], {
+      const getUrl = yield* runEffect(gitExec, "git", ["remote", "get-url", "origin"], {
         cwd: repoDir,
         failOnNonZero: false,
         failureDetail: "git remote get-url origin failed.",
       });
       if (getUrl.code !== 0)
-        yield* runEffect(exec, "git", ["remote", "add", "origin", remote], { cwd: repoDir });
-      yield* runEffect(exec, "git", ["remote", "set-url", "origin", remote], { cwd: repoDir });
+        yield* runEffect(gitExec, "git", ["remote", "add", "origin", remote], { cwd: repoDir });
+      yield* runEffect(gitExec, "git", ["remote", "set-url", "origin", remote], { cwd: repoDir });
 
       const headRef = privateRef("head", parsed, metadata.headOid);
       const baseRef = privateRef("base", parsed, metadata.baseRef);
+      const headRemoteSpec = `refs/pull/${parsed.number}/head`;
       yield* fetchAndVerifyEffect(
-        exec,
+        gitExec,
         repoDir,
-        `refs/pull/${parsed.number}/head`,
+        headRemoteSpec,
         headRef,
         metadata.headOid,
       );
-      yield* fetchAndVerifyEffect(exec, repoDir, metadata.baseOid, baseRef, metadata.baseOid);
+      yield* fetchAndVerifyEffect(gitExec, repoDir, metadata.baseOid, baseRef, metadata.baseOid);
 
-      const mergeBase = (yield* runEffect(
-        exec,
-        "git",
-        ["merge-base", metadata.baseOid, metadata.headOid],
-        {
-          cwd: repoDir,
-        },
-      )).stdout.trim();
+      const mergeBase = yield* mergeBaseEffect(
+        gitExec,
+        repoDir,
+        metadata,
+        headRemoteSpec,
+        headRef,
+        baseRef,
+      );
       const diff = (yield* runEffect(
-        exec,
+        gitExec,
         "git",
         [
           "diff",
@@ -209,7 +425,7 @@ function prepareSnapshotWorkflow(
         { cwd: repoDir, timeout: 180000 },
       )).stdout;
       const manifestRaw = (yield* runEffect(
-        exec,
+        gitExec,
         "git",
         [
           "diff",
@@ -238,7 +454,7 @@ function prepareSnapshotWorkflow(
           writeFileSync(diffPath, diff, { mode: 0o600 });
           chmodSync(diffPath, 0o600);
         });
-        yield* runEffect(exec, "git", ["worktree", "add", "--detach", worktree, metadata.headOid], {
+        yield* runEffect(gitExec, "git", ["worktree", "add", "--detach", worktree, metadata.headOid], {
           cwd: repoDir,
           timeout: 180000,
         });
@@ -260,13 +476,11 @@ function prepareSnapshotWorkflow(
         Effect.onExit((exit) =>
           Exit.isSuccess(exit)
             ? Effect.void
-            : removePathEffect(worktree).pipe(
-                Effect.andThen(removePathEffect(artifactDir)),
+            : cleanupFailedSnapshotEffect(gitExec, repoDir, worktree, artifactDir).pipe(
                 Effect.ignoreCause({
                   log: "Warn",
                   message: "PR review cleanup failed after snapshot preparation failed.",
                 }),
-                Effect.uninterruptible,
               ),
         ),
       );
@@ -320,8 +534,9 @@ export async function prepareResolvedSnapshot(
   metadata: ReviewMetadata,
   signal?: AbortSignal,
   reviewId?: string,
+  gitExec?: Exec,
 ): Promise<ReviewSnapshot> {
-  const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId);
+  const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId, gitExec);
   return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
 }
 
