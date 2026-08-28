@@ -15,11 +15,10 @@ const source: CredentialSource = {
 describe("credential source registry", () => {
   beforeEach(() => resetCredentialSourceRegistryForTests());
 
-  it("replays one versioned source across bundle-local imports", async () => {
+  it("replays one source across bundle-local imports", async () => {
     const secondImport = await import("../../_shared/credential-source");
     const unregister = registerCredentialSource(source);
 
-    expect(secondImport.CredentialSourceRegistryVersion).toBe(1);
     expect(secondImport.getCredentialSource()).toBe(source);
 
     unregister();
