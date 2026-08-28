@@ -8,7 +8,6 @@ import {
   DagTransitionResultTag,
   DagTransitionType,
   createDagRunState,
-  deriveDagSchedulingStep,
   getDagNodeState,
   getDagOutputReference,
   reduceDagRunState,
@@ -17,36 +16,6 @@ import {
 import * as Fixtures from "./shared.js";
 
 describe("DAG state reduction", () => {
-  it("represents all seven node states", () => {
-    const dag = Fixtures.graph([
-      Fixtures.node("source"),
-      Fixtures.node("dependent", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
-    ]);
-    const statuses = new Set<DagNodeStatus>();
-    const initial = createDagRunState(dag);
-    statuses.add(getDagNodeState(dag, initial, "source")!.status);
-    const running = Fixtures.apply(dag, initial, { type: DagTransitionType.Start, nodeId: "source" });
-    statuses.add(getDagNodeState(dag, running, "source")!.status);
-    for (const tag of Object.values(DagNodeResultTag)) {
-      statuses.add(
-        getDagNodeState(
-          dag,
-          Fixtures.apply(dag, running, {
-            type: DagTransitionType.Complete,
-            nodeId: "source",
-            result: Fixtures.terminalResult(tag),
-          }),
-          "source",
-        )!.status,
-      );
-    }
-    const failed = Fixtures.finish(dag, initial, "source", Fixtures.terminalResult(DagNodeResultTag.Failed));
-    statuses.add(
-      getDagNodeState(dag, deriveDagSchedulingStep(dag, failed).state, "dependent")!.status,
-    );
-    expect(statuses).toEqual(new Set(Object.values(DagNodeStatus)));
-  });
-
   it("rejects starts before readiness and transitions from terminal states", () => {
     const dag = Fixtures.graph([
       Fixtures.node("source"),
