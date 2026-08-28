@@ -19,6 +19,7 @@ const PiPackage = Object.freeze({
   Name: '@earendil-works/pi-coding-agent',
   Entry: 'dist/cli.js',
 });
+const SessionResumeExtension = '.pi/extensions/session-resume/dist/index.js';
 
 const InstallStrategy = Object.freeze({
   NubManaged: 'nub-managed',
@@ -96,6 +97,7 @@ if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package
   PI_PACKAGE_DIR="$REQUESTED_PI_PACKAGE_DIR"
 fi
 PI_ENTRY="$PI_PACKAGE_DIR/${PiPackage.Entry}"
+SESSION_RESUME_EXTENSION='${shSingleQuote(join(repo, SessionResumeExtension))}'
 NODE_BIN='${shSingleQuote(setupNodeBin)}'
 # Sidecars cannot reliably reuse process.execPath when Node is launched through
 # a Nix dynamic-loader wrapper. Preserve setup's Nub-backed runtime selection.
@@ -109,6 +111,33 @@ if [ ! -f "$PI_PACKAGE_DIR/package.json" ] || [ ! -f "$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at $PI_PACKAGE_DIR" >&2
   echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
+fi
+unset PI_ENV_SESSION_RESUME PI_ENV_SESSION_RESUME_CWD PI_ENV_SESSION_RESUME_FILE
+if [ "$#" -eq 1 ] && { [ "$1" = "-r" ] || [ "$1" = "--resume" ]; }; then
+  if [ ! -f "$SESSION_RESUME_EXTENSION" ]; then
+    echo "pi-env: missing session resume extension at $SESSION_RESUME_EXTENSION" >&2
+    echo "pi-env: rerun setup.sh to rebuild extensions." >&2
+    exit 127
+  fi
+  ORIGINAL_CWD=$(pwd -P)
+  SELECTION_FILE=$(mktemp "\${TMPDIR:-/tmp}/pi-env-session-resume.XXXXXX")
+  trap 'rm -f "$SELECTION_FILE"' 0 1 2 15
+  cd /
+  set +e
+  PI_ENV_SESSION_RESUME=1 PI_ENV_SESSION_RESUME_CWD="$ORIGINAL_CWD" PI_ENV_SESSION_RESUME_FILE="$SELECTION_FILE" PI_NODE_ARGV0=pi "$NODE_BIN" "$PI_ENTRY" --no-session --no-extensions --extension "$SESSION_RESUME_EXTENSION"
+  PICKER_STATUS=$?
+  set -e
+  if [ "$PICKER_STATUS" -ne 0 ]; then
+    exit "$PICKER_STATUS"
+  fi
+  if [ ! -s "$SELECTION_FILE" ]; then
+    exit 0
+  fi
+  SESSION_PATH=$(cat "$SELECTION_FILE")
+  rm -f "$SELECTION_FILE"
+  trap - 0 1 2 15
+  cd "$ORIGINAL_CWD"
+  PI_NODE_ARGV0=pi exec "$NODE_BIN" "$PI_ENTRY" --session "$SESSION_PATH"
 fi
 PI_NODE_ARGV0=pi exec "$NODE_BIN" "$PI_ENTRY" "$@"
 `;

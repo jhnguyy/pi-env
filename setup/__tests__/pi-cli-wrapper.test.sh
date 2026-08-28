@@ -20,7 +20,8 @@ run_pi_cli_setup() {
 create_stub_repo() {
   REPO="$1/repo"
   PI_BIN_DIR="$1/bin"
-  mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/dist" "$PI_BIN_DIR"
+  mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/dist" "$REPO/.pi/extensions/session-resume/dist" "$PI_BIN_DIR"
+  : > "$REPO/.pi/extensions/session-resume/dist/index.js"
   cat > "$REPO/package.json" <<'JSON'
 {
   "devDependencies": {
@@ -92,6 +93,81 @@ SH
   rm -rf "$tmp"
 }
 
+test_pi_cli_wrapper_intercepts_exact_resume_flags() {
+  local tmp fake_node work_dir selected_path calls
+  tmp="$(with_temp_dir)"
+  fake_node="$tmp/node"
+  work_dir="$tmp/work dir"
+  selected_path="$tmp/session dir/selected session.jsonl"
+  calls="$tmp/calls"
+
+  create_stub_repo "$tmp"
+  mkdir -p "$work_dir" "$(dirname "$selected_path")"
+  : > "$selected_path"
+  cat > "$fake_node" <<'SH'
+#!/usr/bin/env sh
+{
+  echo "call"
+  echo "pwd=$PWD"
+  echo "resume=${PI_ENV_SESSION_RESUME:-}"
+  index=1
+  for arg in "$@"; do
+    echo "arg${index}=$arg"
+    index=$((index + 1))
+  done
+} >> "$PI_ENV_TEST_CALLS"
+if [ "${PI_ENV_SESSION_RESUME:-}" = "1" ] && [ -n "${PI_ENV_TEST_SELECTED_SESSION:-}" ]; then
+  printf '%s' "$PI_ENV_TEST_SELECTED_SESSION" > "$PI_ENV_SESSION_RESUME_FILE"
+fi
+exit "${PI_ENV_TEST_EXIT:-0}"
+SH
+  chmod +x "$fake_node"
+
+  PI_ENV_NODE_BIN="$fake_node"
+  run_pi_cli_setup
+
+  (
+    cd "$work_dir"
+    PI_ENV_TEST_CALLS="$calls" PI_ENV_TEST_SELECTED_SESSION="$selected_path" "$PI_BIN_DIR/pi" -r
+  )
+  assert_file_count "$calls" 'call' 2
+  assert_file_contains "$calls" 'pwd=/'
+  assert_file_contains "$calls" 'resume=1'
+  assert_file_contains "$calls" 'arg2=--no-session'
+  assert_file_contains "$calls" 'arg3=--no-extensions'
+  assert_file_contains "$calls" 'arg4=--extension'
+  assert_file_contains "$calls" "arg5=$REPO/.pi/extensions/session-resume/dist/index.js"
+  assert_file_contains "$calls" "pwd=$work_dir"
+  assert_file_contains "$calls" 'arg2=--session'
+  assert_file_contains "$calls" "arg3=$selected_path"
+
+  : > "$calls"
+  PI_ENV_SESSION_RESUME=1 PI_ENV_SESSION_RESUME_CWD=stale PI_ENV_SESSION_RESUME_FILE=stale \
+    PI_ENV_TEST_CALLS="$calls" "$PI_BIN_DIR/pi" -r extra
+  assert_file_count "$calls" 'call' 1
+  assert_file_contains "$calls" 'resume='
+  assert_file_contains "$calls" 'arg2=-r'
+  assert_file_contains "$calls" 'arg3=extra'
+
+  : > "$calls"
+  PI_ENV_TEST_CALLS="$calls" "$PI_BIN_DIR/pi" --resume
+  assert_file_count "$calls" 'call' 1
+  assert_file_contains "$calls" 'arg2=--no-session'
+
+  : > "$calls"
+  local failure_status
+  if PI_ENV_TEST_CALLS="$calls" PI_ENV_TEST_EXIT=23 "$PI_BIN_DIR/pi" -r; then
+    fail "resume picker failure should propagate"
+  else
+    failure_status=$?
+  fi
+  [ "$failure_status" -eq 23 ] || fail "resume picker failure should exit 23, got $failure_status"
+  assert_file_count "$calls" 'call' 1
+
+  unset PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
 test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   local tmp
   tmp="$(with_temp_dir)"
@@ -137,6 +213,7 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
 
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_pins_configured_node
+test_pi_cli_wrapper_intercepts_exact_resume_flags
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
 test_pi_cli_wrapper_adds_path_profile_when_portable
 
