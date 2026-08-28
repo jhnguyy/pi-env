@@ -324,18 +324,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(details.stopReason).toBe("no_model");
     });
 
-    it("bare model name (no slash) uses getAvailable() for lookup", () => {
-      // Verify that our mock registry supports getAvailable() — the lookup mechanism
-      // for bare model names. The execute() path that reaches agentLoop can't be
-      // tested without real API keys, but we can verify the lookup table is correct.
-      const available = mockCtx.modelRegistry.getAvailable();
-      const found = available.find(
-        (m: any) => m.id === "claude-haiku-4-5" || m.id.includes("claude-haiku-4-5"),
-      );
-      expect(found).toBeDefined();
-      expect(found?.id).toBe("claude-haiku-4-5");
-    });
-
     it("bare model name not found returns model_not_found", async () => {
       const result = await registeredTool.execute(
         "call-11",

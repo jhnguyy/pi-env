@@ -60,7 +60,7 @@ describeIfEnabled("linear", "Linear read tools", () => {
     ]);
   });
 
-  it("bounds list details and excludes credentials from model-facing results", async () => {
+  it("bounds list details", async () => {
     const fakeGateway = gateway();
     const result = await findTool(fakeGateway, "linear_list_issues").execute(
       "tool-call",

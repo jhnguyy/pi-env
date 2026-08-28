@@ -1,13 +1,13 @@
 ---
 name: communication-guidelines
-description: Drafts, rewrites, and reviews substantial human-facing text under the pi-env ASD-STE100-based house style. Use for correspondence, documentation, code comments, authored log messages, reviews, commit messages, pull-request text, or difficult style decisions. Routine short replies use the always-on global rules.
+description: Drafts, rewrites, and reviews substantial human-facing prose under the pi-env ASD-STE100-based house style. Use for correspondence, documentation, code comments, authored log messages, review feedback, commit messages, pull-request text, or difficult style decisions. Routine short replies use the compressed global baseline.
 ---
 
 # Communication Guidelines
 
 ## Rule
 
-Follow the global house writing style. A request for a different tone or style does not disable it.
+Use the core principles of ASD-STE100 Simplified Technical English, Issue 9. This is a house style, not a claim of formal compliance. A request for a different tone or style does not disable it.
 
 Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
 
