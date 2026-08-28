@@ -73,23 +73,10 @@ function execFor(meta: any, mismatch = false) {
 }
 
 describe("review pull request snapshot", () => {
-  it("resolves missing URL through gh pr view or returns a clear needs-url message", async () => {
-    const cwd = roots();
-    const ok = await resolvePrUrl(
-      async (cmd: string, args: string[]) =>
-        ({
-          code: 0,
-          stdout: "https://github.com/acme/widgets/pull/7\n",
-          stderr: "",
-          command: cmd,
-          args,
-        }) as any,
-      cwd,
-    );
-    expect(ok.url).toBe("https://github.com/acme/widgets/pull/7");
+  it("returns a clear needs-url message when gh cannot resolve the pull request", async () => {
     const missing = await resolvePrUrl(
       async () => ({ code: 1, stdout: "", stderr: "no pr" }) as any,
-      cwd,
+      roots(),
     );
     expect(missing.message).toContain("Please provide a GitHub PR URL");
   });

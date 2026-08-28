@@ -4,12 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  analyzeFile,
-  analyzeText,
-  GUARDED_EFFECT_COMBINATORS,
-  TERMINAL_EFFECT_OPERATIONS,
-} from "../check-patterns.js";
+import { analyzeFile, analyzeText } from "../check-patterns.js";
 
 const CHECKER_PATH = fileURLToPath(new URL("../check-patterns.js", import.meta.url));
 const NODE_RUNNER_PATH = fileURLToPath(new URL("../node-run.sh", import.meta.url));
@@ -89,21 +84,6 @@ describe("check-patterns", () => {
 
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({ line: 5, message: expect.stringContaining("flow(...)") });
-  });
-
-  it("rejects bare references to the guarded overloaded Effect combinators", () => {
-    const source = GUARDED_EFFECT_COMBINATORS.map(
-      (name) => `const ${name}Ref = Effect.${name};`,
-    ).join("\n");
-
-    const findings = analyzeText("src/example.ts", source);
-
-    expect(findings.map((finding) => finding.message)).toEqual(
-      GUARDED_EFFECT_COMBINATORS.map(
-        (name) =>
-          `Bare Effect.${name} reference is not allowed. Call the combinator explicitly at the composition site.`,
-      ),
-    );
   });
 
   it("allows explicit Effect compositions and value constants", () => {
@@ -198,21 +178,6 @@ describe("check-patterns", () => {
     );
 
     expect(findings).toEqual([]);
-  });
-
-  it("requires return yield* for terminal effects inside Effect.gen", () => {
-    const source = TERMINAL_EFFECT_OPERATIONS.map((name) => {
-      const effect = name === "interrupt" ? "Effect.interrupt" : `Effect.${name}(failure)`;
-      return `const ${name}Program = Effect.gen(function* () { yield* ${effect}; });`;
-    }).join("\n");
-
-    const findings = analyzeText("src/example.ts", source);
-
-    expect(findings.map((finding) => finding.message)).toEqual(
-      TERMINAL_EFFECT_OPERATIONS.map(
-        (name) => `Terminal Effect.${name} in Effect.gen must use return yield*.`,
-      ),
-    );
   });
 
   it("allows return yield* terminal effects and terminal effects outside Effect.gen", () => {

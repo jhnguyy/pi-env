@@ -11,6 +11,7 @@ This reference distills the core ideas of ASD-STE100 Simplified Technical Englis
 - Use one technical term for each item or concept. Do not introduce synonyms for variation.
 - When you introduce a long official term, write it in full. Define a clear short form before you use the short form.
 - Keep an ordinary multi-word noun to three words when practical. Rewrite a longer noun phrase to show how its parts relate.
+- Avoid contractions when they can reduce clarity.
 - Use American English spelling unless another authority requires a different spelling.
 
 A summary cannot validate words against the ASD-STE100 dictionary. Do not claim formal vocabulary compliance from this reference.
@@ -67,9 +68,16 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 - Use neutral and inclusive terms.
 - Use a possessive form only when ownership or association is clear.
 
+## Documentation and code explanation
+
+- Make names, types, decomposition, and tests explain normal behavior.
+- Leave self-descriptive code uncommented.
+- Use comments for constraints, alternatives, domain meaning, compatibility history, and safety rationale.
+- Write documentation for external, operator, or agent contracts, durable decisions, and necessary navigation.
+- Link to the source authority instead of repeating content that can drift.
+
 ## Comments and log messages
 
-- Use comments for constraints, alternatives, domain meaning, compatibility history, or safety rationale. Do not narrate code that names and structure already explain.
 - Write a comment as concise descriptive text. Keep one topic in each sentence.
 - Write an authored log message as a short statement of the event, state, action, or result.
 - Name the affected component when context does not make it clear.
