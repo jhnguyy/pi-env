@@ -42,7 +42,7 @@ assert_managed_content() {
   ' "$agents_file" "$ROOT/setup/templates/AGENTS.md" "$START_MARKER" "$END_MARKER"
 }
 
-test_agent_guidelines_are_created_from_the_global_template() {
+test_agent_guidelines_are_created_with_only_global_writing_guidance() {
   local tmp home agents_file
   tmp="$(with_temp_dir)"
   home="$tmp/home"
@@ -52,12 +52,17 @@ test_agent_guidelines_are_created_from_the_global_template() {
   assert_file_count "$agents_file" "$START_MARKER" 1
   assert_file_count "$agents_file" "$END_MARKER" 1
   assert_managed_content "$agents_file"
-  assert_file_contains "$agents_file" 'Before changing a repository:'
-  assert_file_contains "$agents_file" 'Leave self-descriptive code uncommented.'
-  assert_file_contains "$agents_file" 'Use comments to record constraints, alternatives, domain meaning, compatibility history, and safety rationale.'
-  if grep -qF 'Use the repo docs as the navigation path' "$agents_file"; then
-    fail 'global AGENTS.md must not contain pi-env project instructions'
-  fi
+  assert_file_contains "$agents_file" 'for all human-readable prose'
+  assert_file_contains "$agents_file" 'Do not use semicolons.'
+  for scoped_rule in \
+    'Before changing a repository:' \
+    'Derive expected behavior' \
+    'Leave self-descriptive code uncommented.' \
+    'Use the repo docs as the navigation path'; do
+    if grep -qF "$scoped_rule" "$agents_file"; then
+      fail "global AGENTS.md must not contain scoped guidance: $scoped_rule"
+    fi
+  done
 
   rm -rf "$tmp"
 }
@@ -99,7 +104,7 @@ test_agent_guidelines_are_reconciled_idempotently() {
   rm -rf "$tmp"
 }
 
-test_agent_guidelines_are_created_from_the_global_template
+test_agent_guidelines_are_created_with_only_global_writing_guidance
 test_agent_guidelines_are_reconciled_idempotently
 
 echo "agent guideline tests passed"

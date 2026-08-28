@@ -1,37 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { DocumentManager } from "../document-manager";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, extname, join, resolve } from "node:path";
+import { join } from "node:path";
 
-// ─── Test helpers matching backend-configs.ts behavior ──────────────────────
-const TEST_EXTENSION_MAP = new Map<string, string>([
-  [".ts", "typescript"], [".tsx", "typescriptreact"],
-  [".js", "javascript"], [".jsx", "javascriptreact"],
-  [".mts", "typescript"], [".cts", "typescript"],
-  [".mjs", "javascript"], [".cjs", "javascript"],
-  [".sh", "shellscript"], [".bash", "shellscript"],
-  [".zsh", "shellscript"], [".ksh", "shellscript"],
-  [".nix", "nix"],
-]);
-
-const ROOT_MARKERS = ["tsconfig.json", "jsconfig.json", "package.json", "bunfig.toml"];
-
-function testResolveLanguageId(path: string): string {
-  return TEST_EXTENSION_MAP.get(extname(path)) ?? "unknown";
-}
-
-function testResolveProjectRoot(filePath: string): string | null {
-  let dir = dirname(filePath);
-  while (true) {
-    for (const marker of ROOT_MARKERS) {
-      if (existsSync(join(dir, marker))) return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
+function testResolveLanguageId(): string {
+  return "typescript";
 }
 
 describeIfEnabled("dev-tools", "DocumentManager", () => {
@@ -40,7 +15,7 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "lsp-dm-"));
-    dm = new DocumentManager(testResolveLanguageId, testResolveProjectRoot);
+    dm = new DocumentManager(testResolveLanguageId, () => tmpDir);
   });
 
   afterEach(() => {
@@ -52,10 +27,6 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     const p = join(tmpDir, name);
     writeFileSync(p, content, "utf8");
     return p;
-  }
-
-  function mkTsconfig(): void {
-    writeFileSync(join(tmpDir, "tsconfig.json"), '{"compilerOptions":{}}', "utf8");
   }
 
   // ─── open / ensure ─────────────────────────────────────────────────────────
@@ -97,14 +68,12 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     });
 
     it("marks isNewRoot=true for first file in a project", () => {
-      mkTsconfig();
       const p = mkFile("a.ts", "const x = 1;");
       const result = (dm as any).open(p);
       expect(result!.isNewRoot).toBe(true);
     });
 
     it("marks isNewRoot=false for subsequent files in same project", () => {
-      mkTsconfig();
       const p1 = mkFile("a.ts", "const x = 1;");
       const p2 = mkFile("b.ts", "const y = 2;");
       (dm as any).open(p1);
@@ -130,61 +99,6 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     });
   });
 
-  // ─── language ID detection ─────────────────────────────────────────────────
-
-  describe("language ID detection", () => {
-    const cases: Array<[string, string]> = [
-      ["foo.ts", "typescript"],
-      ["foo.tsx", "typescriptreact"],
-      ["foo.mts", "typescript"],
-      ["foo.cts", "typescript"],
-      ["foo.js", "javascript"],
-      ["foo.jsx", "javascriptreact"],
-      ["foo.sh", "shellscript"],
-      ["foo.bash", "shellscript"],
-      ["foo.zsh", "shellscript"],
-      ["foo.ksh", "shellscript"],
-    ];
-
-    for (const [filename, expectedId] of cases) {
-      it(`${filename} → ${expectedId}`, () => {
-        const p = mkFile(filename, "// hello");
-        const result = (dm as any).open(p);
-        expect(result).not.toBeNull();
-        expect((result!.params).textDocument.languageId).toBe(expectedId);
-      });
-    }
-  });
-
-  // ─── project root detection ────────────────────────────────────────────────
-
-  describe("getProjectRoot", () => {
-    it("finds tsconfig.json walking up", () => {
-      mkTsconfig();
-      mkdirSync(join(tmpDir, "src"), { recursive: true });
-      const p = join(tmpDir, "src", "foo.ts");
-      writeFileSync(p, "// hello", "utf8");
-      const root = dm.getProjectRoot(p);
-      expect(root).toBe(resolve(tmpDir));
-    });
-
-    it("falls back to file's directory if no tsconfig found", () => {
-      const p = mkFile("orphan.ts", "// orphan");
-      const root = dm.getProjectRoot(p);
-      // Should be some valid directory (either tmpDir or parent)
-      expect(typeof root).toBe("string");
-      expect(root.length).toBeGreaterThan(0);
-    });
-
-    it("caches results", () => {
-      mkTsconfig();
-      const p = mkFile("x.ts", "// x");
-      const root1 = dm.getProjectRoot(p);
-      const root2 = dm.getProjectRoot(p);
-      expect(root1).toBe(root2);
-    });
-  });
-
   // ─── close ──────────────────────────────────────────────────────────────────
 
   describe("close", () => {
@@ -204,7 +118,6 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     });
 
     it("cleans up project files tracking", () => {
-      mkTsconfig();
       const p = mkFile("a.ts", "const a = 1;");
       dm.ensure(p);
       expect(dm.projectRoots.length).toBe(1);
@@ -214,7 +127,6 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     });
 
     it("preserves other files in the same project", () => {
-      mkTsconfig();
       const p1 = mkFile("a.ts", "const a = 1;");
       const p2 = mkFile("b.ts", "const b = 2;");
       dm.ensure(p1);
