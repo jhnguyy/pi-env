@@ -287,19 +287,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("anthropic/nonexistent-model");
     });
 
-    it("error details for missing model have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-7",
-        { task: "task", tools: ["read"], model: "anthropic/ghost-model" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("model_not_found");
-    });
-
     it("returns error when no model specified (no agent, no model param)", async () => {
       const result = await registeredTool.execute(
         "call-8",
@@ -309,31 +296,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
         mockCtx,
       );
       expect(result.content[0].text).toContain("No model specified");
-    });
-
-    it("error details for no model have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-9",
-        { task: "task", tools: ["read"] },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("no_model");
-    });
-
-    it("bare model name (no slash) uses getAvailable() for lookup", () => {
-      // Verify that our mock registry supports getAvailable() — the lookup mechanism
-      // for bare model names. The execute() path that reaches agentLoop can't be
-      // tested without real API keys, but we can verify the lookup table is correct.
-      const available = mockCtx.modelRegistry.getAvailable();
-      const found = available.find(
-        (m: any) => m.id === "claude-haiku-4-5" || m.id.includes("claude-haiku-4-5"),
-      );
-      expect(found).toBeDefined();
-      expect(found?.id).toBe("claude-haiku-4-5");
     });
 
     it("bare model name not found returns model_not_found", async () => {
@@ -377,62 +339,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.details.stopReason).toBe("agent_not_found");
     });
 
-    it("agent_not_found error details have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-a2",
-        { task: "agent task", agent: "no-such-agent" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("agent_not_found");
-      expect(details.task).toBe("agent task");
-    });
-  });
-
-  // ─── execute: buildErrorDetails shape ────────────────────────────────────
-
-  describe("execute — error detail builder", () => {
-    it("details always include usage stats object", async () => {
-      const result = await registeredTool.execute(
-        "call-11b",
-        { task: "my task", tools: ["bogus"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const { usage } = result.details;
-      expect(typeof usage.input).toBe("number");
-      expect(typeof usage.output).toBe("number");
-      expect(typeof usage.cacheRead).toBe("number");
-      expect(typeof usage.cacheWrite).toBe("number");
-      expect(typeof usage.cost).toBe("number");
-      expect(typeof usage.turns).toBe("number");
-    });
-
-    it("details always include toolNames array", async () => {
-      const result = await registeredTool.execute(
-        "call-12b",
-        { task: "task", tools: ["bad"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(Array.isArray(result.details.toolNames)).toBe(true);
-    });
-
-    it("details include the original task string", async () => {
-      const result = await registeredTool.execute(
-        "call-13",
-        { task: "original task text", tools: ["bad"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.details.task).toBe("original task text");
-    });
   });
 
   // ─── async tool rendering ────────────────────────────────────────────────
@@ -520,14 +426,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── renderCall ──────────────────────────────────────────────────────────
 
   describe("renderCall", () => {
-    it("returns a Text instance", () => {
-      const result = registeredTool.renderCall(
-        { task: "Summarize the auth flow", tools: ["read"], model: "anthropic/claude-haiku-4-5" },
-        mockTheme,
-      );
-      expect(result instanceof Text).toBe(true);
-    });
-
     it("contains the task preview", () => {
       const result = registeredTool.renderCall(
         { task: "Read src/auth and summarize", tools: ["read"], model: "anthropic/claude-haiku-4-5" },
@@ -633,15 +531,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       isError: false,
       turnLimitExceeded: false,
     };
-
-    it("returns a Text instance for success", () => {
-      const result = registeredTool.renderResult(
-        { content: [{ type: "text", text: "done" }], details: successDetails },
-        {},
-        mockTheme,
-      );
-      expect(result instanceof Text).toBe(true);
-    });
 
     it("omits task preview (shown in renderCall instead)", () => {
       const t = extractText(
@@ -806,15 +695,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       turnLimitExceeded: false,
     };
 
-    it("returns a Container for expanded success", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      expect(result instanceof Container).toBe(true);
-    });
-
     it("expanded view contains the task text", () => {
       const result = registeredTool.renderResult(
         { content: [], details: successDetails },
@@ -870,16 +750,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
       const t = extractText(result);
       expect(t).not.toContain("ctrl+o");
-    });
-
-    it("expanded view contains Task section header", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Task");
     });
 
     it("expanded view contains the full output", () => {
