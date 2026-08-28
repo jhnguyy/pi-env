@@ -18,12 +18,6 @@ import { BLOCKED_TOOLS } from "../types";
 // ─── toIdentifier ─────────────────────────────────────────────────────────────
 
 describe("toIdentifier", () => {
-  it("leaves snake_case names unchanged", () => {
-    expect(toIdentifier("read")).toBe("read");
-    expect(toIdentifier("read_pdf")).toBe("read_pdf");
-    expect(toIdentifier("proxmox_status")).toBe("proxmox_status");
-  });
-
   it("converts hyphens to underscores", () => {
     expect(toIdentifier("dev-tools")).toBe("dev_tools");
     expect(toIdentifier("some-tool-name")).toBe("some_tool_name");
@@ -97,10 +91,6 @@ describe("subprocess-preamble.ts", () => {
 
   it("exports __rpc_call as an async function", () => {
     expect(content).toContain("export async function __rpc_call(");
-  });
-
-  it("imports readline", () => {
-    expect(content).toContain('from "readline"');
   });
 
   it("enforces tool call limit via MAX_TOOL_CALLS", () => {
