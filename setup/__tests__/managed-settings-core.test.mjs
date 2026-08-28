@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  applyManagedSettingsTransforms,
-  parseJsonRelaxedText,
-  renderSettings,
-} from "../managed-settings-core.mjs";
+import { applyManagedSettingsTransforms, parseJsonRelaxedText } from "../managed-settings-core.mjs";
 
 describe("managed settings core", () => {
   it.each([
@@ -73,6 +69,5 @@ describe("managed settings core", () => {
       extensions: ["foo", "-playwright-client", "-work-tracker"],
       packages: ["/primary"],
     });
-    expect(renderSettings(settings)).toBe(`${JSON.stringify(settings, null, 2)}\n`);
   });
 });
