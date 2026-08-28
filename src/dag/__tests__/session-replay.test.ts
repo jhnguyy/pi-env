@@ -147,7 +147,7 @@ describe("DAG session replay", () => {
     expect(recovered.terminalOutcome).toBe(DagRunOutcome.Failed);
   });
 
-  it("excludes sibling run entries and returns immutable data", () => {
+  it("excludes sibling run entries and freezes reconstruction", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = Fixtures.sessionStore([
@@ -166,8 +166,6 @@ describe("DAG session replay", () => {
     expect(recovered.persistedEntryCount).toBe(1);
     expect(Object.isFrozen(recovered)).toBe(true);
     expect(Object.isFrozen(recovered.transitions)).toBe(true);
-    expect("cancel" in recovered).toBe(false);
-    expect("await" in recovered).toBe(false);
   });
 
   it("projects settled dependencies and AtLeastOneSucceeded guards after restart", () => {

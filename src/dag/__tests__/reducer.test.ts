@@ -4,12 +4,13 @@ import {
   DagDependencyMode,
   DagNodeResultTag,
   DagNodeStatus,
+  DagRunOutcome,
+  DagRunOutcomeResultTag,
   DagTransitionErrorTag,
   DagTransitionResultTag,
   DagTransitionType,
   createDagRunState,
-  getDagNodeState,
-  getDagOutputReference,
+  deriveDagRunOutcome,
   reduceDagRunState,
   type DagTransition,
 } from "../index.js";
@@ -110,14 +111,41 @@ describe("DAG state reduction", () => {
     });
   });
 
-  it("stores generic outputs by node and output name", () => {
-    const dag = Fixtures.graph([Fixtures.node("producer")]);
-    const artifact = { kind: "managed-file", relativePath: "outputs/report.json" };
-    const succeeded = Fixtures.finish(dag, createDagRunState(dag), "producer", {
-      _tag: DagNodeResultTag.Succeeded,
-      outputs: { report: artifact },
+  it("derives terminal outcome by fixed precedence instead of completion order", () => {
+    const dag = Fixtures.graph([Fixtures.node("first"), Fixtures.node("second")]);
+    const initial = createDagRunState(dag);
+    expect(deriveDagRunOutcome(dag, initial)).toEqual({
+      _tag: DagRunOutcomeResultTag.NonTerminal,
+      nodeIds: ["first", "second"],
     });
-    expect(getDagOutputReference(dag, succeeded, "producer", "report")).toBe(artifact);
-    expect(getDagOutputReference(dag, succeeded, "producer", "missing")).toBeUndefined();
+    const failedThenCancelled = Fixtures.finish(
+      dag,
+      Fixtures.finish(
+        dag,
+        initial,
+        "first",
+        Fixtures.terminalResult(DagNodeResultTag.Failed),
+      ),
+      "second",
+      Fixtures.terminalResult(DagNodeResultTag.Cancelled),
+    );
+    const cancelledThenFailed = Fixtures.finish(
+      dag,
+      Fixtures.finish(
+        dag,
+        initial,
+        "second",
+        Fixtures.terminalResult(DagNodeResultTag.Cancelled),
+      ),
+      "first",
+      Fixtures.terminalResult(DagNodeResultTag.Failed),
+    );
+    expect(deriveDagRunOutcome(dag, failedThenCancelled)).toEqual({
+      _tag: DagRunOutcomeResultTag.Terminal,
+      outcome: DagRunOutcome.Failed,
+    });
+    expect(deriveDagRunOutcome(dag, cancelledThenFailed)).toEqual(
+      deriveDagRunOutcome(dag, failedThenCancelled),
+    );
   });
 });
