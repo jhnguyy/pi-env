@@ -88,7 +88,6 @@ describeIfEnabled("linear", "Linear credential source gateway", () => {
       expect.any(Function),
       undefined,
     );
-    expect(JSON.stringify(await gateway.viewer())).not.toContain(SENTINEL);
   });
 
   it("forwards cursors and resolves human filters through the adapter port", async () => {

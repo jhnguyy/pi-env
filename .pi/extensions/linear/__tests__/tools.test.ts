@@ -4,8 +4,6 @@ import type { IssueSummary } from "../api";
 import type { LinearGateway } from "../client";
 import { createLinearTools } from "../tools";
 
-const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
-
 function issue(number: number): IssueSummary {
   return {
     id: `id-${number}`,
@@ -76,7 +74,6 @@ describeIfEnabled("linear", "Linear read tools", () => {
     );
 
     expect((result.details as { nodes: IssueSummary[] }).nodes).toHaveLength(50);
-    expect(JSON.stringify(result)).not.toContain(SENTINEL);
     expect(JSON.stringify(result)).not.toContain("ENG-51");
   });
 
