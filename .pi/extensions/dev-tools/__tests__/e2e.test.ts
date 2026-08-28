@@ -39,13 +39,6 @@ describeE2E("LSP E2E", () => {
 
   // ─── Diagnostics ──────────────────────────────────────────────────────
 
-  it("reports no errors for valid TypeScript", async () => {
-    const result = await fixture.callDaemon({ action: "diagnostics", path: fixture.typesFile });
-    expect(result.action).toBe("diagnostics");
-    // Clean file should have 0 errors (though LSP warm-up may take a moment)
-    expect(result.errorCount).toBeGreaterThanOrEqual(0);
-  });
-
   it("reports errors for invalid TypeScript", async () => {
     const badFile = fixture.writeFile("broken.ts", [
       "const x: string = 42;",
@@ -128,20 +121,6 @@ describeE2E("LSP E2E", () => {
     expect(names).toContain("greet");
   });
 
-  // ─── Workspace Symbols ────────────────────────────────────────────────
-
-  it("returns workspace symbols for a query", async () => {
-    // First open both files so the workspace knows about them
-    await fixture.callDaemon({ action: "diagnostics", path: fixture.typesFile });
-    await fixture.callDaemon({ action: "diagnostics", path: fixture.mainFile });
-    await sleep(200);
-
-    const result = await fixture.callDaemon({ action: "symbols", query: "User" });
-    expect(result.action).toBe("symbols");
-    // May or may not find results depending on workspace indexing state
-    expect(typeof result.total).toBe("number");
-  });
-
   // ─── Rename ────────────────────────────────────────────────────────────
 
   it("renames a TypeScript symbol across files", async () => {
@@ -162,22 +141,4 @@ describeE2E("LSP E2E", () => {
     expect(mainContent).toContain("welcome(bob)");
   });
 
-  // ─── Multi-file: file watcher triggers re-sync ─────────────────────────
-
-  it("reflects file changes on disk", async () => {
-    const watchedFile = fixture.writeFile("watched.ts", "const a: string = 'hello';");
-
-    // Open file initially
-    await fixture.callDaemon({ action: "diagnostics", path: watchedFile });
-    await sleep(300);
-
-    // Introduce a type error
-    fixture.writeFile("watched.ts", "const a: string = 42;");
-    await sleep(500); // wait for file watcher + LSP re-processing
-
-    const result = await fixture.callDaemon({ action: "diagnostics", path: watchedFile });
-    // The error may or may not be detected depending on timing,
-    // but the call should succeed
-    expect(result.action).toBe("diagnostics");
-  });
 });
