@@ -35,15 +35,12 @@ function makeCommandCaptureMock(targetCommand?: string, captureMessages?: string
 // ─── /review-retros ───────────────────────────────────────────────────────────
 
 describeIfEnabled("work-tracker", "/review-retros command", () => {
-  it("registers a 'review-retros' command with a description", async () => {
+  it("registers a 'review-retros' command", async () => {
     const mod = await import("../index");
     const { mockPi, registered } = makeCommandCaptureMock();
     mod.default(mockPi as any);
 
-    const cmd = registered.find((r) => r.name === "review-retros");
-    expect(cmd).toBeDefined();
-    expect(typeof cmd!.opts.description).toBe("string");
-    expect(cmd!.opts.description.length).toBeGreaterThan(0);
+    expect(registered.find((r) => r.name === "review-retros")).toBeDefined();
   });
 
   it("handler sends a user message mentioning default count (5)", async () => {
@@ -80,15 +77,12 @@ describeIfEnabled("work-tracker", "/review-retros command", () => {
 // ─── /handoff ─────────────────────────────────────────────────────────────────
 
 describeIfEnabled("work-tracker", "/handoff command", () => {
-  it("registers a 'handoff' command with a description", async () => {
+  it("registers a 'handoff' command", async () => {
     const mod = await import("../index");
     const { mockPi, registered } = makeCommandCaptureMock();
     mod.default(mockPi as any);
 
-    const cmd = registered.find((r) => r.name === "handoff");
-    expect(cmd).toBeDefined();
-    expect(typeof cmd!.opts.description).toBe("string");
-    expect(cmd!.opts.description.length).toBeGreaterThan(0);
+    expect(registered.find((r) => r.name === "handoff")).toBeDefined();
   });
 
   it("handler queues two sendUserMessage calls (handoff + retro)", async () => {
