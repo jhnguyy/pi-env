@@ -101,6 +101,50 @@ function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+function sourceKey(source) {
+  return `${source.name}\n${source.version}`;
+}
+
+function artifactsAreValid(source, manifestPath, errors) {
+  if (!Array.isArray(source.artifacts) || source.artifacts.length === 0) {
+    errors.push(`${source.name}@${source.version}: source artifacts are missing`);
+    return false;
+  }
+  let valid = true;
+  for (const artifact of source.artifacts) {
+    const path = safeArtifactPath(manifestPath, artifact);
+    if (!path || !existsSync(path)) {
+      errors.push(
+        `${source.name}: Debian source artifact is missing: ${artifact?.file ?? "unknown"}`,
+      );
+      valid = false;
+    } else if (!/^[0-9a-f]{64}$/.test(artifact.sha256) || sha256(path) !== artifact.sha256) {
+      errors.push(
+        `${source.name}: Debian source artifact checksum does not match: ${artifact.file}`,
+      );
+      valid = false;
+    }
+  }
+  return valid;
+}
+
+function packageCoverageMatches(source, expected) {
+  if (!Array.isArray(source.packages) || source.packages.length !== expected.packages.length) {
+    return false;
+  }
+  const actual = new Set(source.packages.map((pkg) => `${pkg.name}\n${pkg.version}`));
+  return expected.packages.every((pkg) => actual.has(`${pkg.name}\n${pkg.version}`));
+}
+
+function validateSource(source, expected, manifestPath, errors) {
+  const artifactsValid = artifactsAreValid(source, manifestPath, errors);
+  const packagesValid = packageCoverageMatches(source, expected);
+  if (!packagesValid) {
+    errors.push(`${source.name}@${source.version}: binary package coverage does not match`);
+  }
+  return artifactsValid && packagesValid;
+}
+
 export function validateDebianSourceManifest(packages, manifestPath) {
   const required = planDebianSources(packages);
   if (!manifestPath || !existsSync(manifestPath)) {
@@ -112,9 +156,7 @@ export function validateDebianSourceManifest(packages, manifestPath) {
   }
   const errors = [];
   const sources = [];
-  const requiredByKey = new Map(
-    required.map((source) => [`${source.name}\n${source.version}`, source]),
-  );
+  const requiredByKey = new Map(required.map((source) => [sourceKey(source), source]));
   const seen = new Set();
   if (manifest.debianSources.length !== required.length) {
     errors.push(
@@ -122,7 +164,7 @@ export function validateDebianSourceManifest(packages, manifestPath) {
     );
   }
   for (const source of manifest.debianSources) {
-    const key = `${source.name}\n${source.version}`;
+    const key = sourceKey(source);
     if (seen.has(key)) {
       errors.push(`Debian source manifest contains a duplicate source unit: ${source.name}`);
       continue;
@@ -133,45 +175,11 @@ export function validateDebianSourceManifest(packages, manifestPath) {
       errors.push(`${source.name}@${source.version}: source unit is not expected`);
       continue;
     }
-    if (!Array.isArray(source.artifacts) || source.artifacts.length === 0) {
-      errors.push(`${source.name}@${source.version}: source artifacts are missing`);
-      continue;
-    }
-    let valid = true;
-    for (const artifact of source.artifacts) {
-      const path = safeArtifactPath(manifestPath, artifact);
-      if (!path || !existsSync(path)) {
-        errors.push(
-          `${source.name}: Debian source artifact is missing: ${artifact?.file ?? "unknown"}`,
-        );
-        valid = false;
-      } else if (!/^[0-9a-f]{64}$/.test(artifact.sha256) || sha256(path) !== artifact.sha256) {
-        errors.push(
-          `${source.name}: Debian source artifact checksum does not match: ${artifact.file}`,
-        );
-        valid = false;
-      }
-    }
-    const packageMatches =
-      Array.isArray(source.packages) &&
-      source.packages.length === expected.packages.length &&
-      expected.packages.every((pkg) =>
-        source.packages.some(
-          (candidate) => candidate.name === pkg.name && candidate.version === pkg.version,
-        ),
-      );
-    if (!packageMatches) {
-      errors.push(`${source.name}@${source.version}: binary package coverage does not match`);
-      valid = false;
-    }
-    if (valid) sources.push(source);
+    if (validateSource(source, expected, manifestPath, errors)) sources.push(source);
   }
+  const validKeys = new Set(sources.map(sourceKey));
   for (const source of required) {
-    if (
-      !sources.some(
-        (candidate) => candidate.name === source.name && candidate.version === source.version,
-      )
-    ) {
+    if (!validKeys.has(sourceKey(source))) {
       errors.push(`${source.name}@${source.version}: exact Debian source is missing`);
     }
   }

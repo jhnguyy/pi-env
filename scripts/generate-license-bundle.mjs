@@ -638,6 +638,26 @@ export function generateLicenseBundle({
   return manifest;
 }
 
+const PATH_OPTION_FIELDS = new Map([
+  ["--repo-root", "repoRoot"],
+  ["--node-modules", "nodeModulesPath"],
+  ["--output", "outputPath"],
+  ["--policy", "policyPath"],
+  ["--debian-policy", "debianPolicyPath"],
+  ["--dpkg-query", "dpkgQueryPath"],
+  ["--debian-source-manifest", "debianSourceManifestPath"],
+  ["--debian-copyright-root", "debianCopyrightRoot"],
+]);
+
+function parseSystemLicense(specification) {
+  const separator = specification.indexOf("=");
+  if (separator <= 0) throw new Error(`Invalid system license: ${specification}`);
+  return {
+    name: specification.slice(0, separator),
+    path: resolve(specification.slice(separator + 1)),
+  };
+}
+
 function parseArgs(args) {
   const options = {
     repoRoot: defaultRepoRoot,
@@ -647,31 +667,20 @@ function parseArgs(args) {
   };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    const value = () => {
-      index += 1;
-      if (index >= args.length) throw new Error(`Missing value for ${arg}`);
-      return args[index];
-    };
-    if (arg === "--check") options.check = true;
-    else if (arg === "--repo-root") options.repoRoot = resolve(value());
-    else if (arg === "--node-modules") options.nodeModulesPath = resolve(value());
-    else if (arg === "--package-root") options.packageRoots.push(resolve(value()));
-    else if (arg === "--output") options.outputPath = resolve(value());
-    else if (arg === "--policy") options.policyPath = resolve(value());
-    else if (arg === "--debian-policy") options.debianPolicyPath = resolve(value());
-    else if (arg === "--dpkg-query") options.dpkgQueryPath = resolve(value());
-    else if (arg === "--debian-source-manifest")
-      options.debianSourceManifestPath = resolve(value());
-    else if (arg === "--debian-copyright-root") options.debianCopyrightRoot = resolve(value());
-    else if (arg === "--system-license") {
-      const specification = value();
-      const separator = specification.indexOf("=");
-      if (separator <= 0) throw new Error(`Invalid system license: ${specification}`);
-      options.systemLicenses.push({
-        name: specification.slice(0, separator),
-        path: resolve(specification.slice(separator + 1)),
-      });
-    } else throw new Error(`Unknown argument: ${arg}`);
+    if (arg === "--check") {
+      options.check = true;
+      continue;
+    }
+    index += 1;
+    if (index >= args.length) throw new Error(`Missing value for ${arg}`);
+    const value = args[index];
+    if (arg === "--package-root") options.packageRoots.push(resolve(value));
+    else if (arg === "--system-license") options.systemLicenses.push(parseSystemLicense(value));
+    else {
+      const field = PATH_OPTION_FIELDS.get(arg);
+      if (!field) throw new Error(`Unknown argument: ${arg}`);
+      options[field] = resolve(value);
+    }
   }
   options.nodeModulesPath ??= join(options.repoRoot, "node_modules");
   options.policyPath ??= join(options.repoRoot, "compliance", "license-policy.json");
