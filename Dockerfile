@@ -10,7 +10,7 @@
 # The image is a reusable CI/toolchain artifact with prebuilt extension bundles. It
 # is not the only supported build path and does not run setup.sh or hydrate any
 # machine-local identity/state.
-FROM ghcr.io/nubjs/nub:0.2.10-alpine@sha256:f3efdc86d557acfcdd18e25e1b4fb3dd1c6433e1a56cdb277b791df438e738aa AS pi-env
+FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS pi-env
 
 LABEL org.opencontainers.image.title="pi-env" \
   org.opencontainers.image.description="pi-env CI/toolchain image artifact with locked Nub dependencies and prebuilt extension bundles" \
@@ -24,40 +24,41 @@ ENV PI_ENV_HOME=/opt/pi-env \
   NPM_CONFIG_UPDATE_NOTIFIER=false
 
 USER root
-RUN apk upgrade --no-cache \
-  && apk add --no-cache \
-    bash \
+RUN sed -i \
+    -e 's/^Types: deb$/Types: deb deb-src/' \
+    -e 's|URIs: http://deb.debian.org/debian$|URIs: https://snapshot.debian.org/archive/debian/20260824T000000Z|' \
+    -e 's|URIs: http://deb.debian.org/debian-security$|URIs: https://snapshot.debian.org/archive/debian-security/20260824T000000Z|' \
+    /etc/apt/sources.list.d/debian.sources \
+  && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99snapshot \
+  && apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
-    git
-
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
-  && node --version \
-  && nub --version
+    git \
+    tini \
+  && npm install --global --omit=dev @nubjs/nub@0.2.10 \
+  && nub --version \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  && node --version
 
 WORKDIR ${PI_ENV_HOME}
 COPY --chown=node:node . .
-RUN chown -R node:node ${PI_ENV_HOME}
-
-# Embed exact corresponding source for source-required Alpine packages.
-RUN cp /lib/apk/db/installed /tmp/pi-env-apk-installed \
-  && apk add --no-cache --virtual .pi-env-source-tools abuild \
-  && node scripts/generate-alpine-source-bundle.mjs \
-    --apk-db /tmp/pi-env-apk-installed \
-    --output ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/alpine \
-  && apk del .pi-env-source-tools \
-  && rm -f /tmp/pi-env-apk-installed \
-  && rm -rf /var/cache/distfiles
+RUN chown -R node:node ${PI_ENV_HOME} \
+  && dpkg-query -W -f='${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
+    > /tmp/pi-env-dpkg-query \
+  && node scripts/generate-debian-source-bundle.mjs \
+    --dpkg-query /tmp/pi-env-dpkg-query \
+    --output ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/debian
 
 USER node
 
 # Local equivalent: nub install --frozen-lockfile
 RUN nub install --frozen-lockfile
 
-# Preserve package notices and source references in the final artifact.
+# Preserve package notices, Debian copyright files, and exact source artifacts.
 RUN nub run licenses:generate \
   --package-root /usr/local/lib/node_modules \
-  --apk-db /lib/apk/db/installed \
-  --alpine-source-manifest ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/alpine/manifest.json \
+  --dpkg-query /tmp/pi-env-dpkg-query \
+  --debian-source-manifest ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/debian/manifest.json \
   --system-license node-LICENSE.txt=/usr/local/LICENSE
 
 # Local equivalent: nub run build
@@ -70,7 +71,8 @@ USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
   && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
   && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
-  && rm -rf ${PI_ENV_HOME}/.git
+  && rm -rf /var/lib/apt/lists/* /tmp/pi-env-dpkg-query ${PI_ENV_HOME}/.git
 
 USER node
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["nub", "run", "verify:install"]

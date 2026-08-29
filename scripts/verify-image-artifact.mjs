@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -8,10 +9,10 @@ const REQUIRED_FILES = [
   "THIRD_PARTY_LICENSES/manifest.json",
   "THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES.md",
   "THIRD_PARTY_LICENSES/SOURCE_CODE.md",
-  "THIRD_PARTY_LICENSES/ALPINE_PACKAGES.md",
-  "THIRD_PARTY_LICENSES/ALPINE_SOURCE_CODE.md",
+  "THIRD_PARTY_LICENSES/DEBIAN_PACKAGES.md",
+  "THIRD_PARTY_LICENSES/DEBIAN_SOURCE_CODE.md",
   "THIRD_PARTY_LICENSES/system/node-LICENSE.txt",
-  "THIRD_PARTY_SOURCES/alpine/manifest.json",
+  "THIRD_PARTY_SOURCES/debian/manifest.json",
 ];
 
 const REQUIRED_DIRECTORIES = [".pi/extensions/dev-tools/dist"];
@@ -38,7 +39,7 @@ function requiredOutputIssues(root) {
 }
 
 function sourceArchiveIssues(root) {
-  const manifestPath = join(root, "THIRD_PARTY_SOURCES", "alpine", "manifest.json");
+  const manifestPath = join(root, "THIRD_PARTY_SOURCES", "debian", "manifest.json");
   if (!existsSync(manifestPath)) return [];
 
   let manifest;
@@ -46,26 +47,32 @@ function sourceArchiveIssues(root) {
     manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch (cause) {
     return [
-      `Alpine source manifest is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
+      `Debian source manifest is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
     ];
   }
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.sources)) {
-    return ["Alpine source manifest has an unsupported schema"];
+  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.debianSources)) {
+    return ["Debian source manifest has an unsupported schema"];
   }
-  if (manifest.sources.length === 0) {
-    return ["Alpine source manifest contains no source archives"];
+  if (manifest.debianSources.length === 0) {
+    return ["Debian source manifest contains no source artifacts"];
   }
-  return manifest.sources.flatMap((source) => {
-    const archivePath = safeArchivePath(manifestPath, source.archive);
-    const validArchive =
-      archivePath &&
-      existsSync(archivePath) &&
-      statSync(archivePath).isFile() &&
-      statSync(archivePath).size > 0;
-    return validArchive
-      ? []
-      : [`${source.origin ?? "unknown origin"}: source archive is missing or empty`];
-  });
+  return manifest.debianSources.flatMap((source) =>
+    Array.isArray(source.artifacts) && source.artifacts.length > 0
+      ? source.artifacts.flatMap((artifact) => {
+          const artifactPath = safeArchivePath(manifestPath, artifact.file);
+          const valid =
+            artifactPath &&
+            existsSync(artifactPath) &&
+            statSync(artifactPath).isFile() &&
+            statSync(artifactPath).size > 0 &&
+            createHash("sha256").update(readFileSync(artifactPath)).digest("hex") ===
+              artifact.sha256;
+          return valid
+            ? []
+            : [`${source.name ?? "unknown source"}: source artifact is missing, empty, or invalid`];
+        })
+      : [`${source.name ?? "unknown source"}: source artifacts are missing`],
+  );
 }
 
 export function imageArtifactIssues(root) {
@@ -87,16 +94,24 @@ export function verifyImageArtifact(root) {
   run("node", ["--version"], "Node.js check");
   run("nub", ["--version"], "Nub check");
   run(
+    "sh",
+    [
+      "-c",
+      "dpkg-query -W -f='${binary:Package}\\t${Version}\\t${source:Package}\\t${source:Version}\\n' > /tmp/pi-env-dpkg-query",
+    ],
+    "Debian package inventory",
+  );
+  run(
     process.execPath,
     [
       join(root, "scripts", "generate-license-bundle.mjs"),
       "--check",
       "--package-root",
       "/usr/local/lib/node_modules",
-      "--apk-db",
-      "/lib/apk/db/installed",
-      "--alpine-source-manifest",
-      join(root, "THIRD_PARTY_SOURCES", "alpine", "manifest.json"),
+      "--dpkg-query",
+      "/tmp/pi-env-dpkg-query",
+      "--debian-source-manifest",
+      join(root, "THIRD_PARTY_SOURCES", "debian", "manifest.json"),
       "--system-license",
       "node-LICENSE.txt=/usr/local/LICENSE",
     ],

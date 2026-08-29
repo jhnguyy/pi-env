@@ -21,8 +21,10 @@ docker run --rm IMAGE nub run verify:image-artifact
 The workflow does not sign or deploy.
 
 The image stores generated dependency notices and license texts in `/opt/pi-env/THIRD_PARTY_LICENSES`.
-It stores Alpine corresponding-source archives in `/opt/pi-env/THIRD_PARTY_SOURCES`.
+It stores complete exact Debian source artifacts in `/opt/pi-env/THIRD_PARTY_SOURCES`.
 See [licensing](licensing.md) for the artifact contract and package review policy.
+
+The artifact uses the pinned Debian slim Node.js base. It installs `ca-certificates`, Git, and Tini with apt, then installs Nub 0.2.10 with the base npm and removes npm and npx.
 
 The artifact includes Git for HTTPS workflows but not an SSH client. Downstream agent images that require SSH transport or SSH signing must add a client and own its security update policy.
 

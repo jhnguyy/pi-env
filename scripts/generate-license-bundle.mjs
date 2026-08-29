@@ -16,13 +16,13 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep as pathSeparator } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { licenseIdentifiers } from "./license-compliance-core.mjs";
 import {
-  licenseIdentifiers,
-  loadAlpinePolicy,
-  parseApkInstalled,
-  validateAlpinePackages,
-  validateAlpineSourceManifest,
-} from "./license-compliance-core.mjs";
+  loadDebianPolicy,
+  parseDpkgQuery,
+  validateDebianPackages,
+  validateDebianSourceManifest,
+} from "./debian-compliance-core.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = dirname(dirname(scriptPath));
@@ -423,22 +423,19 @@ function renderSourceCode(records, policy) {
   return `${lines.join("\n")}\n`;
 }
 
-function renderAlpineSourceCode(sources) {
+function renderDebianSourceCode(sources) {
   const lines = [
-    "# Alpine corresponding source",
+    "# Debian corresponding source",
     "",
-    "The image contains complete corresponding-source archives for source-required Alpine packages.",
-    "Each archive comes from the exact Alpine build commit and contains the APKBUILD, local patches, and fetched upstream source files.",
+    "The image contains complete exact source artifacts for every installed Debian source package.",
+    "Each file was downloaded through the configured apt source indexes and is covered by a SHA-256 digest.",
     "",
   ];
   for (const source of sources) {
     lines.push(
-      `## ${source.origin}`,
+      `## ${source.name}@${source.version}`,
       "",
-      `- Build commit: ${source.buildCommit}`,
-      `- Aports path: ${source.recipePath}`,
-      `- Archive: /opt/pi-env/THIRD_PARTY_SOURCES/alpine/${source.archive}`,
-      `- SHA-256: ${source.sha256}`,
+      `- Artifacts: ${source.artifacts.map((artifact) => `/opt/pi-env/THIRD_PARTY_SOURCES/debian/${artifact.file}`).join(", ")}`,
       `- Packages: ${source.packages.map((pkg) => `${pkg.name}@${pkg.version}`).join(", ")}`,
       "",
     );
@@ -446,30 +443,39 @@ function renderAlpineSourceCode(sources) {
   return `${lines.join("\n")}\n`;
 }
 
-function writeApkManifest(outputPath, apkPackages, alpineSources) {
-  if (apkPackages.length === 0) return;
-  writeJson(join(outputPath, "alpine-packages.json"), apkPackages);
+function writeDebianManifest(outputPath, packages, sources, copyrightRoot) {
+  if (packages.length === 0) return;
+  const records = packages.map((pkg) => ({
+    ...pkg,
+    copyright: `debian-copyright/${pkg.name}/copyright`,
+  }));
+  writeJson(join(outputPath, "debian-packages.json"), records);
+  const copyrightOutput = join(outputPath, "debian-copyright");
+  for (const pkg of packages) {
+    const source = join(copyrightRoot, pkg.name, "copyright");
+    if (!existsSync(source))
+      throw new Error(`${pkg.name}@${pkg.version}: Debian copyright file is missing`);
+    const destination = join(copyrightOutput, pkg.name);
+    mkdirSync(destination, { recursive: true });
+    copyFileSync(source, join(destination, "copyright"));
+  }
   const lines = [
-    "# Alpine package source and license manifest",
+    "# Debian package manifest",
     "",
-    "The image contains the following Alpine packages.",
-    "The installed package database supplies each exact version, license expression, source origin, and build commit.",
-    "Source-required packages are covered by archives in /opt/pi-env/THIRD_PARTY_SOURCES/alpine.",
+    "The image contains the following Debian binary packages and their installed copyright files.",
+    "Every source package is covered by exact artifacts in /opt/pi-env/THIRD_PARTY_SOURCES/debian.",
     "",
-    "| Package | Version | License | Origin | Build recipe | Upstream |",
-    "| --- | --- | --- | --- | --- | --- |",
-    ...apkPackages.map(
+    "| Package | Version | Source package | Source version | Copyright |",
+    "| --- | --- | --- | --- | --- |",
+    ...records.map(
       (pkg) =>
-        `| ${markdownCell(pkg.name)} | ${markdownCell(pkg.version)} | ${markdownCell(pkg.license)} | ${markdownCell(pkg.origin)} | ${markdownCell(pkg.buildRecipe)} | ${markdownCell(pkg.homepage)} |`,
+        `| ${markdownCell(pkg.name)} | ${markdownCell(pkg.version)} | ${markdownCell(pkg.source)} | ${markdownCell(pkg.sourceVersion)} | ${markdownCell(pkg.copyright)} |`,
     ),
     "",
-    "Alpine build recipes: https://gitlab.alpinelinux.org/alpine/aports",
-    "",
   ];
-  writeFileSync(join(outputPath, "ALPINE_PACKAGES.md"), `${lines.join("\n")}\n`);
-  if (alpineSources.length > 0) {
-    writeFileSync(join(outputPath, "ALPINE_SOURCE_CODE.md"), renderAlpineSourceCode(alpineSources));
-  }
+  writeFileSync(join(outputPath, "DEBIAN_PACKAGES.md"), `${lines.join("\n")}\n`);
+  writeFileSync(join(outputPath, "DEBIAN_SOURCE_CODE.md"), renderDebianSourceCode(sources));
+  return records;
 }
 
 function validateRepositoryLicense(repoRoot) {
@@ -564,18 +570,16 @@ export function generateLicenseBundle({
   packageRoots = [],
   outputPath = join(repoRoot, "THIRD_PARTY_LICENSES"),
   policyPath = join(repoRoot, "compliance", "license-policy.json"),
-  alpinePolicyPath = join(repoRoot, "compliance", "alpine-policy.json"),
-  apkDbPath,
-  alpineSourceManifestPath,
+  debianPolicyPath = join(repoRoot, "compliance", "debian-policy.json"),
+  dpkgQueryPath,
+  debianSourceManifestPath,
+  debianCopyrightRoot = "/usr/share/doc",
   systemLicenses = [],
   validateRepository = false,
 } = {}) {
   const policy = loadPolicy(policyPath);
-  const apkPackages = apkDbPath ? parseApkInstalled(apkDbPath) : [];
-  const alpinePolicy =
-    apkPackages.length > 0 || existsSync(alpinePolicyPath)
-      ? loadAlpinePolicy(alpinePolicyPath)
-      : null;
+  const debianPackages = dpkgQueryPath ? parseDpkgQuery(dpkgQueryPath) : [];
+  const debianPolicy = debianPackages.length > 0 ? loadDebianPolicy(debianPolicyPath) : null;
   const discoveredRoots = [
     ...discoverNubPackages(nodeModulesPath),
     ...workspaceNodeModulesPaths(repoRoot).flatMap((path) => discoverStandardPackages(path)),
@@ -583,16 +587,21 @@ export function generateLicenseBundle({
   ];
   const packages = loadPackages(discoveredRoots);
   const errors = validateRepository ? validateRepositoryLicense(repoRoot) : [];
-  if (apkPackages.length > 0 && alpinePolicy)
-    errors.push(...validateAlpinePackages(apkPackages, alpinePolicy));
+  if (debianPackages.length > 0 && debianPolicy)
+    errors.push(...validateDebianPackages(debianPackages, debianPolicy));
   validatePackages(packages, policy, errors);
   const resolved = resolvePackageLicenses(packages, policy, repoRoot, errors);
 
-  const alpineSourceValidation =
-    apkPackages.length > 0 && alpinePolicy
-      ? validateAlpineSourceManifest(apkPackages, alpinePolicy, alpineSourceManifestPath)
+  const debianSourceValidation =
+    debianPackages.length > 0
+      ? validateDebianSourceManifest(debianPackages, debianSourceManifestPath)
       : { errors: [], sources: [] };
-  errors.push(...alpineSourceValidation.errors);
+  errors.push(...debianSourceValidation.errors);
+  for (const pkg of debianPackages) {
+    if (!existsSync(join(debianCopyrightRoot, pkg.name, "copyright"))) {
+      errors.push(`${pkg.name}@${pkg.version}: Debian copyright file is missing`);
+    }
+  }
 
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
@@ -603,15 +612,21 @@ export function generateLicenseBundle({
 
   const { records, missingOriginalLicenseText } = writePackageRecords(resolved, packageOutputPath);
 
-  writeApkManifest(outputPath, apkPackages, alpineSourceValidation.sources);
+  const debianPackageRecords =
+    writeDebianManifest(
+      outputPath,
+      debianPackages,
+      debianSourceValidation.sources,
+      debianCopyrightRoot,
+    ) ?? [];
 
   copySystemLicenses(outputPath, systemLicenses);
 
   const manifest = {
     schemaVersion: 1,
     javascriptPackages: records,
-    alpinePackages: apkPackages,
-    alpineSources: alpineSourceValidation.sources,
+    debianPackages: debianPackageRecords,
+    debianSources: debianSourceValidation.sources,
     systemLicenses: systemLicenses.map((entry) => entry.name).sort(),
   };
   writeJson(join(outputPath, "manifest.json"), manifest);
@@ -643,10 +658,11 @@ function parseArgs(args) {
     else if (arg === "--package-root") options.packageRoots.push(resolve(value()));
     else if (arg === "--output") options.outputPath = resolve(value());
     else if (arg === "--policy") options.policyPath = resolve(value());
-    else if (arg === "--alpine-policy") options.alpinePolicyPath = resolve(value());
-    else if (arg === "--apk-db") options.apkDbPath = resolve(value());
-    else if (arg === "--alpine-source-manifest")
-      options.alpineSourceManifestPath = resolve(value());
+    else if (arg === "--debian-policy") options.debianPolicyPath = resolve(value());
+    else if (arg === "--dpkg-query") options.dpkgQueryPath = resolve(value());
+    else if (arg === "--debian-source-manifest")
+      options.debianSourceManifestPath = resolve(value());
+    else if (arg === "--debian-copyright-root") options.debianCopyrightRoot = resolve(value());
     else if (arg === "--system-license") {
       const specification = value();
       const separator = specification.indexOf("=");
@@ -659,7 +675,7 @@ function parseArgs(args) {
   }
   options.nodeModulesPath ??= join(options.repoRoot, "node_modules");
   options.policyPath ??= join(options.repoRoot, "compliance", "license-policy.json");
-  options.alpinePolicyPath ??= join(options.repoRoot, "compliance", "alpine-policy.json");
+  options.debianPolicyPath ??= join(options.repoRoot, "compliance", "debian-policy.json");
   options.outputPath ??= join(options.repoRoot, "THIRD_PARTY_LICENSES");
   return options;
 }
@@ -675,7 +691,7 @@ function main() {
     const manifest = generateLicenseBundle({ ...options, validateRepository: true });
     const action = options.check ? "License compliance check passed" : "Generated license bundle";
     console.log(
-      `${action} for ${manifest.javascriptPackages.length} JavaScript packages and ${manifest.alpinePackages.length} Alpine packages.`,
+      `${action} for ${manifest.javascriptPackages.length} JavaScript packages and ${manifest.debianPackages.length} Debian packages.`,
     );
   } finally {
     if (checkDirectory) rmSync(checkDirectory, { recursive: true, force: true });

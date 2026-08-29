@@ -30,11 +30,11 @@ A dependency update must fail the check when it:
 
 Review and update the policy only after you verify the new upstream terms and notice text. Source references use immutable revisions.
 
-## Alpine package policy
+## Debian package policy
 
-[`compliance/alpine-policy.json`](../compliance/alpine-policy.json) approves the installed Alpine package names, origins, and license expressions. It does not pin package versions.
+[`compliance/debian-policy.json`](../compliance/debian-policy.json) approves every installed Debian binary package and its source package. It does not pin package versions.
 
-The image runs `apk upgrade` to install current security updates. The image build fails if an update changes the package set, source origin, or license expression. Review the changed package before you update the policy.
+The image build fails if the pinned base or an apt transaction changes the binary package set or source package mapping. Review each changed package before you update the policy. Every installed package must also provide `/usr/share/doc/PACKAGE/copyright`.
 
 ## Container artifact
 
@@ -46,13 +46,14 @@ The bundle contains:
 - The license and notice files from installed JavaScript packages.
 - Reviewed fallback notices for packages that omit license files.
 - Immutable corresponding-source references for MPL-covered JavaScript packages.
-- The Alpine package database summary and source build commits.
-- Complete corresponding-source archives for source-required Alpine packages.
+- The exact Debian binary and source package versions.
+- The installed copyright file for every Debian binary package.
+- Complete exact source artifacts for every installed Debian source package.
 - The Node.js license from the pinned base image.
 
-The Alpine package manifest identifies each package version, license expression, source origin, and build commit. The build generates each source archive with Alpine `abuild srcpkg` from the exact aports commit. Each archive contains the APKBUILD, local patches, install scripts, and checksum-verified upstream source files.
+The Debian package manifest uses `debianPackages` and `debianSources` as separate keys. The build enables apt source indexes and downloads each installed source package at its exact source version. Apt validates repository metadata and the `.dsc` file validates its complete artifact set. The bundle also records and verifies a SHA-256 digest for every downloaded file.
 
-The image stores these archives in `/opt/pi-env/THIRD_PARTY_SOURCES/alpine`. The source archives accompany every image copy. Alpine package versions can change without a policy update when the package name, origin, and license expression stay approved.
+The image stores these artifacts in `/opt/pi-env/THIRD_PARTY_SOURCES/debian`. They accompany every image copy. Debian package versions can change without a policy update only when the approved binary and source package mapping remains unchanged.
 
 An SBOM does not replace these license and source artifacts.
 
