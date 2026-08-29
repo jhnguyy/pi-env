@@ -54,7 +54,6 @@ USER node
 # Local equivalent: nub install --frozen-lockfile
 RUN nub install --frozen-lockfile
 
-# Preserve package notices, Debian copyright files, and exact source artifacts.
 RUN nub run licenses:generate \
   --package-root /usr/local/lib/node_modules \
   --dpkg-query /tmp/pi-env-dpkg-query \

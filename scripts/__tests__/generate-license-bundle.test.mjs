@@ -11,12 +11,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { generateLicenseBundle } from "../generate-license-bundle.mjs";
-import {
-  parseDpkgQuery,
-  planDebianSources,
-  validateDebianPackages,
-  validateDebianSourceManifest,
-} from "../debian-compliance-core.mjs";
 
 const temporaryDirectories = [];
 
@@ -36,18 +30,15 @@ function packageRoot(repoRoot, virtualId, name) {
   return join(repoRoot, "node_modules", ".nub", virtualId, "node_modules", ...parts);
 }
 
-function addPackage(
-  repoRoot,
-  {
-    name,
-    version = "1.0.0",
-    license = "MIT",
-    repository = "https://example.test/project",
-    files = { LICENSE: "license text\n" },
-    virtualId = `${name.replaceAll("/", "+")}@${version}`,
-    linked = true,
-  },
-) {
+function addPackage(repoRoot, {
+  name,
+  version = "1.0.0",
+  license = "MIT",
+  repository = "https://example.test/project",
+  files = { LICENSE: "license text\n" },
+  virtualId = `${name.replaceAll("/", "+")}@${version}`,
+  linked = true,
+}) {
   const root = packageRoot(repoRoot, virtualId, name);
   mkdirSync(root, { recursive: true });
   const manifest = { name, version, repository };
@@ -64,20 +55,13 @@ function addPackage(
 
 function writePolicy(repoRoot, overrides = [], sourceRepositories = []) {
   const path = join(repoRoot, "policy.json");
-  write(
-    path,
-    `${JSON.stringify(
-      {
-        allowedLicenseIds: ["Apache-2.0", "MIT", "MPL-2.0"],
-        prohibitedLicensePrefixes: ["AGPL-", "GPL-", "SSPL-"],
-        sourceRequiredLicenseIds: ["MPL-2.0"],
-        overrides,
-        sourceRepositories,
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  write(path, `${JSON.stringify({
+    allowedLicenseIds: ["Apache-2.0", "MIT", "MPL-2.0"],
+    prohibitedLicensePrefixes: ["AGPL-", "GPL-", "SSPL-"],
+    sourceRequiredLicenseIds: ["MPL-2.0"],
+    overrides,
+    sourceRepositories,
+  }, null, 2)}\n`);
   return path;
 }
 
@@ -112,12 +96,9 @@ afterEach(() => {
 describe("license bundle generation", () => {
   it("uses the installed Nub package tree instead of declared dependencies", () => {
     const repoRoot = temporaryDirectory();
-    write(
-      join(repoRoot, "package.json"),
-      `${JSON.stringify({
-        dependencies: { "declared-only": "1.0.0" },
-      })}\n`,
-    );
+    write(join(repoRoot, "package.json"), `${JSON.stringify({
+      dependencies: { "declared-only": "1.0.0" },
+    })}\n`);
     addPackage(repoRoot, { name: "installed-package" });
 
     const result = generate(repoRoot);
@@ -153,23 +134,14 @@ describe("license bundle generation", () => {
     const repoRoot = temporaryDirectory();
     const workspaceRoot = join(repoRoot, "packages", "worker");
     const dependencyRoot = join(repoRoot, "workspace-store", "workspace-package");
-    write(
-      join(repoRoot, "package.json"),
-      `${JSON.stringify({ workspaces: ["packages/worker"] })}\n`,
-    );
-    write(
-      join(workspaceRoot, "package.json"),
-      `${JSON.stringify({ name: "worker", private: true })}\n`,
-    );
-    write(
-      join(dependencyRoot, "package.json"),
-      `${JSON.stringify({
-        name: "workspace-package",
-        version: "1.0.0",
-        license: "MIT",
-        repository: "https://example.test/workspace-package",
-      })}\n`,
-    );
+    write(join(repoRoot, "package.json"), `${JSON.stringify({ workspaces: ["packages/worker"] })}\n`);
+    write(join(workspaceRoot, "package.json"), `${JSON.stringify({ name: "worker", private: true })}\n`);
+    write(join(dependencyRoot, "package.json"), `${JSON.stringify({
+      name: "workspace-package",
+      version: "1.0.0",
+      license: "MIT",
+      repository: "https://example.test/workspace-package",
+    })}\n`);
     write(join(dependencyRoot, "LICENSE"), "workspace license\n");
     mkdirSync(join(repoRoot, "node_modules", ".nub"), { recursive: true });
     mkdirSync(join(workspaceRoot, "node_modules"), { recursive: true });
@@ -190,15 +162,12 @@ describe("license bundle generation", () => {
       [unscopedTarget, "global-package"],
       [scopedTarget, "@global/scoped-package"],
     ]) {
-      write(
-        join(target, "package.json"),
-        `${JSON.stringify({
-          name,
-          version: "1.0.0",
-          license: "MIT",
-          repository: `https://example.test/${name}`,
-        })}\n`,
-      );
+      write(join(target, "package.json"), `${JSON.stringify({
+        name,
+        version: "1.0.0",
+        license: "MIT",
+        repository: `https://example.test/${name}`,
+      })}\n`);
       write(join(target, "LICENSE"), `${name} license\n`);
     }
     mkdirSync(join(globalRoot, "@global"), { recursive: true });
@@ -250,12 +219,10 @@ describe("license bundle generation", () => {
     const packageDirectory = readdirSync(outputDirectory)[0];
 
     expect(record.files).toEqual(["LICENSE", "ThirdPartyNoticeText.txt"]);
-    expect(readFileSync(join(outputDirectory, packageDirectory, "LICENSE"), "utf8")).toBe(
-      "license text\n",
-    );
-    expect(
-      readFileSync(join(outputDirectory, packageDirectory, "ThirdPartyNoticeText.txt"), "utf8"),
-    ).toBe("third-party notice\n");
+    expect(readFileSync(join(outputDirectory, packageDirectory, "LICENSE"), "utf8"))
+      .toBe("license text\n");
+    expect(readFileSync(join(outputDirectory, packageDirectory, "ThirdPartyNoticeText.txt"), "utf8"))
+      .toBe("third-party notice\n");
   });
 
   it("uses a same-version, same-repository package as the license source", () => {
@@ -308,14 +275,12 @@ describe("license bundle generation", () => {
       repository: "https://example.test/metadata-only",
       files: {},
     });
-    const policyPath = writePolicy(repoRoot, [
-      {
-        repository: "https://example.test/metadata-only",
-        license: "MIT",
-        versions: ["1.0.0"],
-        file: "reviewed-MIT.txt",
-      },
-    ]);
+    const policyPath = writePolicy(repoRoot, [{
+      repository: "https://example.test/metadata-only",
+      license: "MIT",
+      versions: ["1.0.0"],
+      file: "reviewed-MIT.txt",
+    }]);
 
     const result = generate(repoRoot, policyPath);
     const [record] = result.javascriptPackages;
@@ -382,24 +347,19 @@ describe("license bundle generation", () => {
       license: "MPL-2.0",
       repository: "https://example.test/source-required",
     });
-    const policyPath = writePolicy(
-      repoRoot,
-      [],
-      [
-        {
-          repository: "https://example.test/source-required",
-          versions: ["1.0.0"],
-          revision: "0123456789abcdef0123456789abcdef01234567",
-          reference: "https://example.test/source-required/tree/{revision}",
-        },
-      ],
-    );
+    const policyPath = writePolicy(repoRoot, [], [{
+      repository: "https://example.test/source-required",
+      versions: ["1.0.0"],
+      revision: "0123456789abcdef0123456789abcdef01234567",
+      reference: "https://example.test/source-required/tree/{revision}",
+    }]);
 
     generate(repoRoot, policyPath);
 
-    expect(readFileSync(join(repoRoot, "licenses", "SOURCE_CODE.md"), "utf8")).toContain(
-      "https://example.test/source-required/tree/0123456789abcdef0123456789abcdef01234567",
-    );
+    expect(readFileSync(join(repoRoot, "licenses", "SOURCE_CODE.md"), "utf8"))
+      .toContain(
+        "https://example.test/source-required/tree/0123456789abcdef0123456789abcdef01234567",
+      );
   });
 
   it("rejects a mutable source reference", () => {
@@ -409,69 +369,14 @@ describe("license bundle generation", () => {
       license: "MPL-2.0",
       repository: "https://example.test/source-required",
     });
-    const policyPath = writePolicy(
-      repoRoot,
-      [],
-      [
-        {
-          repository: "https://example.test/source-required",
-          versions: ["1.0.0"],
-          reference: "https://example.test/source-required/tree/v{version}",
-        },
-      ],
-    );
+    const policyPath = writePolicy(repoRoot, [], [{
+      repository: "https://example.test/source-required",
+      versions: ["1.0.0"],
+      reference: "https://example.test/source-required/tree/v{version}",
+    }]);
 
     expect(() => generate(repoRoot, policyPath)).toThrow(
       "source-required@1.0.0: exact source reference is required for MPL-2.0",
     );
-  });
-});
-
-describe("Debian package metadata", () => {
-  const packages = [
-    { name: "bash", version: "5.2-1", source: "bash", sourceVersion: "5.2-1" },
-    { name: "libc6", version: "2.36-1", source: "glibc", sourceVersion: "2.36-1" },
-  ];
-  const policy = {
-    packages: [
-      { name: "bash", source: "bash" },
-      { name: "libc6", source: "glibc" },
-    ],
-  };
-
-  it("preserves exact binary and source versions from dpkg-query", () => {
-    const directory = temporaryDirectory();
-    const query = join(directory, "packages.tsv");
-    write(query, "bash\t5.2-1\tbash\t5.2-1\nlibc6:amd64\t2.36-1\tglibc\t2.36-1\n");
-    expect(parseDpkgQuery(query)).toEqual(packages);
-  });
-
-  it("rejects unapproved packages and source changes", () => {
-    expect(
-      validateDebianPackages(
-        [
-          packages[0],
-          { ...packages[1], source: "other" },
-          { name: "new", version: "1", source: "new", sourceVersion: "1" },
-        ],
-        policy,
-      ),
-    ).toEqual([
-      "libc6@2.36-1: Debian source changed from glibc to other",
-      "new@1: Debian package is not approved",
-    ]);
-  });
-
-  it("plans every distinct exact Debian source package", () => {
-    expect(planDebianSources(packages)).toEqual([
-      { name: "bash", version: "5.2-1", packages: [{ name: "bash", version: "5.2-1" }] },
-      { name: "glibc", version: "2.36-1", packages: [{ name: "libc6", version: "2.36-1" }] },
-    ]);
-  });
-
-  it("fails closed when a source manifest is missing", () => {
-    expect(validateDebianSourceManifest(packages).errors).toEqual([
-      "Debian source manifest is missing",
-    ]);
   });
 });

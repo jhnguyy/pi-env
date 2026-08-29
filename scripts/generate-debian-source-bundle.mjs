@@ -127,17 +127,6 @@ export async function generateDebianSourceBundle({
     }
     const manifest = { schemaVersion: 1, debianSources };
     writeFileSync(join(outputPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    writeFileSync(
-      join(outputPath, "README.md"),
-      [
-        "# Debian corresponding source",
-        "",
-        "This directory accompanies the pi-env container image.",
-        "It contains the complete exact source artifacts for every installed Debian source package.",
-        "The manifest records a SHA-256 digest for every file downloaded through the configured apt source indexes.",
-        "",
-      ].join("\n"),
-    );
     return manifest;
   } finally {
     rmSync(workPath, { recursive: true, force: true });

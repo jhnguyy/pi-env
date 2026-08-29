@@ -32,9 +32,7 @@ Review and update the policy only after you verify the new upstream terms and no
 
 ## Debian package policy
 
-[`compliance/debian-policy.json`](../compliance/debian-policy.json) approves every installed Debian binary package and its source package. It does not pin package versions.
-
-The image build fails if the pinned base or an apt transaction changes the binary package set or source package mapping. Review each changed package before you update the policy. Every installed package must also provide `/usr/share/doc/PACKAGE/copyright`.
+[`compliance/debian-policy.json`](../compliance/debian-policy.json) approves each installed Debian package and its source package. The image build rejects unapproved package or source mappings.
 
 ## Container artifact
 
@@ -51,9 +49,7 @@ The bundle contains:
 - Complete exact source artifacts for every installed Debian source package.
 - The Node.js license from the pinned base image.
 
-The Debian package manifest uses `debianPackages` and `debianSources` as separate keys. The build enables apt source indexes and downloads each installed source package at its exact source version. Apt validates repository metadata and the `.dsc` file validates its complete artifact set. The bundle also records and verifies a SHA-256 digest for every downloaded file.
-
-The image stores these artifacts in `/opt/pi-env/THIRD_PARTY_SOURCES/debian`. They accompany every image copy. Debian package versions can change without a policy update only when the approved binary and source package mapping remains unchanged.
+The image stores Debian source artifacts in `/opt/pi-env/THIRD_PARTY_SOURCES/debian`.
 
 An SBOM does not replace these license and source artifacts.
 
