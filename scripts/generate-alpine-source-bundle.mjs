@@ -42,9 +42,9 @@ function run(command, args, { cwd, quiet = false, allowFailure = false, env = {}
   return result;
 }
 
-function runWithRetries(command, args, options, attempts = 3) {
+export function runWithRetries(command, args, options = {}, attempts = 3, runCommand = run) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = run(command, args, { ...options, allowFailure: true });
+    const result = runCommand(command, args, { ...options, allowFailure: true });
     if (result.status === 0) return;
     if (attempt < attempts) {
       console.error(`${command} failed. Retrying source fetch (${attempt + 1}/${attempts}).`);
@@ -130,7 +130,7 @@ export async function generateAlpineSourceBundle({
         throw new Error(`${group.origin}: exact Alpine build commit is missing`);
       }
       console.log(`Collecting Alpine source for ${group.origin}@${group.buildCommit}`);
-      run("git", [
+      runWithRetries("git", [
         "-C",
         repositoryPath,
         "-c",
