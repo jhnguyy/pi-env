@@ -1,15 +1,20 @@
-import type { SessionInfo } from "@earendil-works/pi-coding-agent";
+export interface ResumeSession {
+  readonly path: string;
+  readonly parentPath?: string;
+  readonly cwd: string;
+  readonly title: string;
+  readonly searchText: string;
+  readonly modifiedAt: number;
+}
 
 export interface SessionTreeNode {
-  readonly session: SessionInfo;
-  readonly path: string;
+  readonly session: ResumeSession;
   readonly children: SessionTreeNode[];
   latestActivity: number;
 }
 
 export interface VisibleSession {
-  readonly session: SessionInfo;
-  readonly path: string;
+  readonly session: ResumeSession;
   readonly parentPath?: string;
   readonly depth: number;
   readonly isLast: boolean;
@@ -18,52 +23,55 @@ export interface VisibleSession {
   readonly isExpanded: boolean;
 }
 
-function wouldCreateCycle(
+function hasParentCycle(
   sessionPath: string,
   parentPath: string,
-  sessions: ReadonlyMap<string, SessionInfo>,
+  sessionsByPath: ReadonlyMap<string, ResumeSession>,
 ): boolean {
-  const seen = new Set<string>([sessionPath]);
-  let currentPath: string | undefined = parentPath;
-  while (currentPath) {
-    if (seen.has(currentPath)) return true;
-    seen.add(currentPath);
-    currentPath = sessions.get(currentPath)?.parentSessionPath;
+  const seen = new Set([sessionPath]);
+  let path: string | undefined = parentPath;
+  while (path) {
+    if (seen.has(path)) return true;
+    seen.add(path);
+    path = sessionsByPath.get(path)?.parentPath;
   }
   return false;
 }
 
-export function buildSessionTree(sessions: readonly SessionInfo[]): SessionTreeNode[] {
+export function buildSessionTree(sessions: readonly ResumeSession[]): SessionTreeNode[] {
   const sessionsByPath = new Map(sessions.map((session) => [session.path, session]));
   const nodesByPath = new Map<string, SessionTreeNode>();
   for (const session of sessions) {
     nodesByPath.set(session.path, {
       session,
-      path: session.path,
       children: [],
-      latestActivity: session.modified.getTime(),
+      latestActivity: session.modifiedAt,
     });
   }
 
   const roots: SessionTreeNode[] = [];
   for (const node of nodesByPath.values()) {
-    const parentPath = node.session.parentSessionPath;
+    const parentPath = node.session.parentPath;
     const parent = parentPath ? nodesByPath.get(parentPath) : undefined;
-    if (!parent || wouldCreateCycle(node.path, parent.path, sessionsByPath)) roots.push(node);
-    else parent.children.push(node);
+    if (parent && !hasParentCycle(node.session.path, parent.session.path, sessionsByPath)) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
   }
 
   const updateLatestActivity = (node: SessionTreeNode): number => {
     node.latestActivity = node.children.reduce(
       (latest, child) => Math.max(latest, updateLatestActivity(child)),
-      node.session.modified.getTime(),
+      node.session.modifiedAt,
     );
     return node.latestActivity;
   };
   const sortNodes = (nodes: SessionTreeNode[]): void => {
     nodes.sort(
       (left, right) =>
-        right.latestActivity - left.latestActivity || left.path.localeCompare(right.path),
+        right.latestActivity - left.latestActivity ||
+        left.session.path.localeCompare(right.session.path),
     );
     for (const node of nodes) sortNodes(node.children);
   };
@@ -84,10 +92,9 @@ export function flattenVisibleSessions(
     ancestorContinues: readonly boolean[],
     isLast: boolean,
   ): void => {
-    const isExpanded = expandedPaths.has(node.path);
+    const isExpanded = expandedPaths.has(node.session.path);
     visible.push({
       session: node.session,
-      path: node.path,
       parentPath,
       depth,
       isLast,
@@ -100,7 +107,7 @@ export function flattenVisibleSessions(
     node.children.forEach((child, index) => {
       walk(
         child,
-        node.path,
+        node.session.path,
         depth + 1,
         [...ancestorContinues, depth > 0 && !isLast],
         index === node.children.length - 1,
@@ -112,23 +119,18 @@ export function flattenVisibleSessions(
   return visible;
 }
 
-export function searchSessions(sessions: readonly SessionInfo[], query: string): VisibleSession[] {
+export function searchSessions(
+  sessions: readonly ResumeSession[],
+  query: string,
+): VisibleSession[] {
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   return sessions
-    .filter((session) => {
-      const text = [session.name, session.firstMessage, session.cwd, session.path]
-        .filter((value): value is string => Boolean(value))
-        .join("\n")
-        .toLocaleLowerCase();
-      return terms.every((term) => text.includes(term));
-    })
+    .filter((session) => terms.every((term) => session.searchText.includes(term)))
     .sort(
-      (left, right) =>
-        right.modified.getTime() - left.modified.getTime() || left.path.localeCompare(right.path),
+      (left, right) => right.modifiedAt - left.modifiedAt || left.path.localeCompare(right.path),
     )
     .map((session) => ({
       session,
-      path: session.path,
       depth: 0,
       isLast: true,
       ancestorContinues: [],

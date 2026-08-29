@@ -2,10 +2,10 @@ import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import {
   SessionManager,
   type ExtensionAPI,
-  type ExtensionCommandContext,
   type ExtensionContext,
   type SessionInfo,
 } from "@earendil-works/pi-coding-agent";
+import type { ResumeSession } from "./model";
 import { SessionResumePicker } from "./picker";
 
 const StartupResumeEnvironment = Object.freeze({
@@ -39,46 +39,25 @@ function canonicalPath(path: string | undefined): string | undefined {
   }
 }
 
-function canonicalSessions(sessions: readonly SessionInfo[]): SessionInfo[] {
-  return sessions.map((session) => ({
-    ...session,
-    path: canonicalPath(session.path) ?? session.path,
-    parentSessionPath: canonicalPath(session.parentSessionPath),
-  }));
-}
-
-export async function loadSessionScopes(
-  ctx: ExtensionContext,
-  cwd: string,
-  forceDefaultStorage: boolean,
-): Promise<{ current: SessionInfo[]; all: SessionInfo[] }> {
-  const defaultCurrent = await SessionManager.list(cwd);
-  const currentFile = canonicalPath(ctx.sessionManager.getSessionFile());
-  const usesDefaultStorage =
-    forceDefaultStorage ||
-    (currentFile !== undefined &&
-      defaultCurrent.some((session) => canonicalPath(session.path) === currentFile));
-  if (usesDefaultStorage) {
-    return { current: defaultCurrent, all: await SessionManager.listAll() };
-  }
-
-  const sessionDir = ctx.sessionManager.getSessionDir();
+function toResumeSession(session: SessionInfo): ResumeSession {
+  const path = canonicalPath(session.path) ?? session.path;
+  const title = session.name ?? session.firstMessage;
   return {
-    current: await SessionManager.list(cwd, sessionDir),
-    all: await SessionManager.listAll(sessionDir),
+    path,
+    parentPath: canonicalPath(session.parentSessionPath),
+    cwd: session.cwd,
+    title,
+    searchText: [title, session.cwd, path].join("\n").toLocaleLowerCase(),
+    modifiedAt: session.modified.getTime(),
   };
 }
 
-async function pickSession(
-  ctx: ExtensionContext,
-  cwd: string,
-  forceDefaultStorage = false,
-): Promise<string | undefined> {
+async function pickSession(ctx: ExtensionContext, cwd: string): Promise<string | undefined> {
   if (ctx.mode !== "tui") return undefined;
-  const sessions = await loadSessionScopes(ctx, cwd, forceDefaultStorage);
+  const [current, all] = await Promise.all([SessionManager.list(cwd), SessionManager.listAll()]);
   return ctx.ui.custom<string | undefined>((tui, theme, keybindings, done) => {
     const picker = new SessionResumePicker(
-      { current: canonicalSessions(sessions.current), all: canonicalSessions(sessions.all) },
+      { current: current.map(toResumeSession), all: all.map(toResumeSession) },
       theme,
       keybindings,
       done,
@@ -100,26 +79,13 @@ async function pickSession(
   });
 }
 
-async function resumeFromCommand(ctx: ExtensionCommandContext): Promise<void> {
-  const selectedPath = await pickSession(ctx, ctx.cwd);
-  if (!selectedPath) return;
-  const result = await ctx.switchSession(selectedPath);
-  if (result.cancelled) ctx.ui.notify("Session switch cancelled", "info");
-}
-
 export default function sessionResume(pi: ExtensionAPI): void {
   const startupRequest = consumeStartupResumeRequest();
-
-  pi.registerCommand("resume-tree", {
-    description: "Resume a session from a foldable parent-first tree",
-    handler: async (_args, ctx) => resumeFromCommand(ctx),
-  });
-
   if (!startupRequest) return;
   pi.on("session_start", async (_event, ctx) => {
     try {
       if (!existsSync(startupRequest.selectionFile)) return;
-      const selectedPath = await pickSession(ctx, startupRequest.cwd, true);
+      const selectedPath = await pickSession(ctx, startupRequest.cwd);
       if (selectedPath)
         writeFileSync(startupRequest.selectionFile, selectedPath, {
           encoding: "utf8",

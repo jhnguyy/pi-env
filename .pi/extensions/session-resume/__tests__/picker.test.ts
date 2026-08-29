@@ -1,31 +1,27 @@
-import type { SessionInfo, Theme } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
-import { SessionResumePicker } from "../picker";
+import type { ResumeSession } from "../model";
+import { SessionResumePicker, type PickerTheme } from "../picker";
 
 const keybindings = new KeybindingsManager({
   ...TUI_KEYBINDINGS,
   "app.tree.foldOrUp": { defaultKeys: "ctrl+left", description: "Fold or select parent" },
   "app.tree.unfoldOrDown": { defaultKeys: "ctrl+right", description: "Unfold or select child" },
 });
-const theme = {
+const theme: PickerTheme = {
   fg: (_color: string, text: string) => text,
   bg: (_color: string, text: string) => text,
   bold: (text: string) => text,
-} as unknown as Theme;
+};
 
-function session(id: string, parentSessionPath?: string): SessionInfo {
+function session(id: string, parentPath?: string): ResumeSession {
   return {
-    id,
     path: `/sessions/${id}.jsonl`,
-    parentSessionPath,
+    parentPath,
     cwd: "/project",
-    name: id,
-    created: new Date(0),
-    modified: new Date(0),
-    messageCount: 1,
-    firstMessage: id,
-    allMessagesText: id,
+    title: id,
+    searchText: `${id}\n/project\n/sessions/${id}.jsonl`,
+    modifiedAt: 0,
   };
 }
 

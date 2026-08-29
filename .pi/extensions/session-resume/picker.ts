@@ -1,4 +1,3 @@
-import type { SessionInfo, Theme } from "@earendil-works/pi-coding-agent";
 import {
   Input,
   truncateToWidth,
@@ -12,17 +11,24 @@ import {
   flattenVisibleSessions,
   searchSessions,
   type VisibleSession,
-} from "./tree";
+  type ResumeSession,
+} from "./model";
+
+export interface PickerTheme {
+  fg(color: string, text: string): string;
+  bg(color: string, text: string): string;
+  bold(text: string): string;
+}
 
 interface PickerSessions {
-  readonly current: readonly SessionInfo[];
-  readonly all: readonly SessionInfo[];
+  readonly current: readonly ResumeSession[];
+  readonly all: readonly ResumeSession[];
 }
 
 type PickerScope = keyof PickerSessions;
 
-function sessionLabel(session: SessionInfo): string {
-  return (session.name ?? session.firstMessage).replace(/[\x00-\x1f\x7f]/g, " ").trim();
+function cleanText(value: string): string {
+  return value.replace(/[\x00-\x1f\x7f]/g, " ").trim();
 }
 
 function treePrefix(node: VisibleSession): string {
@@ -41,7 +47,7 @@ function keyLabel(
 
 export class SessionResumePicker implements Component, Focusable {
   readonly #sessions: PickerSessions;
-  readonly #theme: Theme;
+  readonly #theme: PickerTheme;
   readonly #keybindings: KeybindingsManager;
   readonly #done: (path: string | undefined) => void;
   readonly #search = new Input();
@@ -53,7 +59,7 @@ export class SessionResumePicker implements Component, Focusable {
 
   constructor(
     sessions: PickerSessions,
-    theme: Theme,
+    theme: PickerTheme,
     keybindings: KeybindingsManager,
     done: (path: string | undefined) => void,
   ) {
@@ -74,18 +80,20 @@ export class SessionResumePicker implements Component, Focusable {
     this.#search.focused = value;
   }
 
-  #activeSessions(): readonly SessionInfo[] {
+  #activeSessions(): readonly ResumeSession[] {
     return this.#sessions[this.#scope];
   }
 
-  #rebuild(): void {
-    const selectedPath = this.#visible[this.#selectedIndex]?.path;
+  #rebuild(preserveSelection = true): void {
+    const selectedPath = preserveSelection
+      ? this.#visible[this.#selectedIndex]?.session.path
+      : undefined;
     const query = this.#search.getValue();
     this.#visible = query.trim()
       ? searchSessions(this.#activeSessions(), query)
       : flattenVisibleSessions(buildSessionTree(this.#activeSessions()), this.#expandedPaths);
     const preservedIndex = selectedPath
-      ? this.#visible.findIndex((node) => node.path === selectedPath)
+      ? this.#visible.findIndex((node) => node.session.path === selectedPath)
       : -1;
     this.#selectedIndex =
       preservedIndex >= 0
@@ -102,12 +110,14 @@ export class SessionResumePicker implements Component, Focusable {
     const selected = this.#visible[this.#selectedIndex];
     if (!selected) return;
     if (selected.isExpanded) {
-      this.#expandedPaths.delete(selected.path);
+      this.#expandedPaths.delete(selected.session.path);
       this.#rebuild();
       return;
     }
     if (!selected.parentPath) return;
-    const parentIndex = this.#visible.findIndex((node) => node.path === selected.parentPath);
+    const parentIndex = this.#visible.findIndex(
+      (node) => node.session.path === selected.parentPath,
+    );
     if (parentIndex >= 0) this.#selectedIndex = parentIndex;
   }
 
@@ -115,7 +125,7 @@ export class SessionResumePicker implements Component, Focusable {
     const selected = this.#visible[this.#selectedIndex];
     if (!selected?.hasChildren) return;
     if (!selected.isExpanded) {
-      this.#expandedPaths.add(selected.path);
+      this.#expandedPaths.add(selected.session.path);
       this.#rebuild();
       return;
     }
@@ -130,7 +140,7 @@ export class SessionResumePicker implements Component, Focusable {
     if (this.#keybindings.matches(data, "tui.input.tab")) {
       this.#scope = this.#scope === "current" ? "all" : "current";
       this.#selectedIndex = 0;
-      this.#rebuild();
+      this.#rebuild(false);
       return;
     }
     if (!this.#search.getValue().trim() && this.#keybindings.matches(data, "app.tree.foldOrUp")) {
@@ -189,7 +199,7 @@ export class SessionResumePicker implements Component, Focusable {
       "",
     ];
     if (this.#visible.length === 0) {
-      lines.push(this.#theme.fg("muted", "  No sessions found"));
+      lines.push(truncateToWidth(this.#theme.fg("muted", "  No sessions found"), width));
       return lines;
     }
 
@@ -204,12 +214,13 @@ export class SessionResumePicker implements Component, Focusable {
       const selected = index === this.#selectedIndex;
       const cursor = selected ? this.#theme.fg("accent", "› ") : "  ";
       const prefix = this.#theme.fg("dim", treePrefix(node));
-      const cwd = this.#scope === "all" && node.session.cwd ? `  ${node.session.cwd}` : "";
+      const cwd =
+        this.#scope === "all" && node.session.cwd ? `  ${cleanText(node.session.cwd)}` : "";
       const available = Math.max(
         10,
         width - visibleWidth(cursor) - visibleWidth(prefix) - visibleWidth(cwd),
       );
-      const label = truncateToWidth(sessionLabel(node.session), available, "…");
+      const label = truncateToWidth(cleanText(node.session.title), available, "…");
       let line = truncateToWidth(
         `${cursor}${prefix}${selected ? this.#theme.bold(label) : label}${this.#theme.fg("dim", cwd)}`,
         width,
@@ -218,7 +229,12 @@ export class SessionResumePicker implements Component, Focusable {
       lines.push(line);
     }
     if (start > 0 || end < this.#visible.length) {
-      lines.push(this.#theme.fg("muted", `  (${this.#selectedIndex + 1}/${this.#visible.length})`));
+      lines.push(
+        truncateToWidth(
+          this.#theme.fg("muted", `  (${this.#selectedIndex + 1}/${this.#visible.length})`),
+          width,
+        ),
+      );
     }
     return lines;
   }
