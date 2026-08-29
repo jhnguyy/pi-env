@@ -16,19 +16,20 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep as pathSeparator } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { licenseIdentifiers } from "./license-compliance-core.mjs";
-import {
-  loadDebianPolicy,
-  parseDpkgQuery,
-  validateDebianPackages,
-  validateDebianSourceManifest,
-} from "./debian-compliance-core.mjs";
 
+const SPDX_OPERATOR = new Set(["AND", "OR", "WITH"]);
 const scriptPath = fileURLToPath(import.meta.url);
 const defaultRepoRoot = dirname(dirname(scriptPath));
 const LEGAL_FILE_PATTERN = /^(?:(?:licen[cs]e|copying|notice)(?:$|[._ -])|third[-_ ]?party)/i;
 const LICENSE_FILE_PATTERN = /^(?:licen[cs]e|copying)(?:$|[._ -])/i;
 const NOTICE_FILE_PATTERN = /^(?:notice(?:$|[._ -])|third[-_ ]?party)/i;
+
+function licenseIdentifiers(expression) {
+  return expression
+    .replaceAll(/[()]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token !== "" && !SPDX_OPERATOR.has(token));
+}
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -423,61 +424,6 @@ function renderSourceCode(records, policy) {
   return `${lines.join("\n")}\n`;
 }
 
-function renderDebianSourceCode(sources) {
-  const lines = [
-    "# Debian corresponding source",
-    "",
-    "The image contains complete exact source artifacts for every installed Debian source package.",
-    "Each file was downloaded through the configured apt source indexes and is covered by a SHA-256 digest.",
-    "",
-  ];
-  for (const source of sources) {
-    lines.push(
-      `## ${source.name}@${source.version}`,
-      "",
-      `- Artifacts: ${source.artifacts.map((artifact) => `/opt/pi-env/THIRD_PARTY_SOURCES/debian/${artifact.file}`).join(", ")}`,
-      `- Packages: ${source.packages.map((pkg) => `${pkg.name}@${pkg.version}`).join(", ")}`,
-      "",
-    );
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function writeDebianManifest(outputPath, packages, sources, copyrightRoot) {
-  if (packages.length === 0) return;
-  const records = packages.map((pkg) => ({
-    ...pkg,
-    copyright: `debian-copyright/${pkg.name}/copyright`,
-  }));
-  writeJson(join(outputPath, "debian-packages.json"), records);
-  const copyrightOutput = join(outputPath, "debian-copyright");
-  for (const pkg of packages) {
-    const source = join(copyrightRoot, pkg.name, "copyright");
-    if (!existsSync(source))
-      throw new Error(`${pkg.name}@${pkg.version}: Debian copyright file is missing`);
-    const destination = join(copyrightOutput, pkg.name);
-    mkdirSync(destination, { recursive: true });
-    copyFileSync(source, join(destination, "copyright"));
-  }
-  const lines = [
-    "# Debian package manifest",
-    "",
-    "The image contains the following Debian binary packages and their installed copyright files.",
-    "Every source package is covered by exact artifacts in /opt/pi-env/THIRD_PARTY_SOURCES/debian.",
-    "",
-    "| Package | Version | Source package | Source version | Copyright |",
-    "| --- | --- | --- | --- | --- |",
-    ...records.map(
-      (pkg) =>
-        `| ${markdownCell(pkg.name)} | ${markdownCell(pkg.version)} | ${markdownCell(pkg.source)} | ${markdownCell(pkg.sourceVersion)} | ${markdownCell(pkg.copyright)} |`,
-    ),
-    "",
-  ];
-  writeFileSync(join(outputPath, "DEBIAN_PACKAGES.md"), `${lines.join("\n")}\n`);
-  writeFileSync(join(outputPath, "DEBIAN_SOURCE_CODE.md"), renderDebianSourceCode(sources));
-  return records;
-}
-
 function validateRepositoryLicense(repoRoot) {
   const errors = [];
   for (const required of ["LICENSE", "THIRD_PARTY_NOTICES.md"]) {
@@ -570,16 +516,10 @@ export function generateLicenseBundle({
   packageRoots = [],
   outputPath = join(repoRoot, "THIRD_PARTY_LICENSES"),
   policyPath = join(repoRoot, "compliance", "license-policy.json"),
-  debianPolicyPath = join(repoRoot, "compliance", "debian-policy.json"),
-  dpkgQueryPath,
-  debianSourceManifestPath,
-  debianCopyrightRoot = "/usr/share/doc",
   systemLicenses = [],
   validateRepository = false,
 } = {}) {
   const policy = loadPolicy(policyPath);
-  const debianPackages = dpkgQueryPath ? parseDpkgQuery(dpkgQueryPath) : [];
-  const debianPolicy = debianPackages.length > 0 ? loadDebianPolicy(debianPolicyPath) : null;
   const discoveredRoots = [
     ...discoverNubPackages(nodeModulesPath),
     ...workspaceNodeModulesPaths(repoRoot).flatMap((path) => discoverStandardPackages(path)),
@@ -587,22 +527,8 @@ export function generateLicenseBundle({
   ];
   const packages = loadPackages(discoveredRoots);
   const errors = validateRepository ? validateRepositoryLicense(repoRoot) : [];
-  if (debianPackages.length > 0 && debianPolicy)
-    errors.push(...validateDebianPackages(debianPackages, debianPolicy));
   validatePackages(packages, policy, errors);
   const resolved = resolvePackageLicenses(packages, policy, repoRoot, errors);
-
-  const debianSourceValidation =
-    debianPackages.length > 0
-      ? validateDebianSourceManifest(debianPackages, debianSourceManifestPath)
-      : { errors: [], sources: [] };
-  errors.push(...debianSourceValidation.errors);
-  for (const pkg of debianPackages) {
-    if (!existsSync(join(debianCopyrightRoot, pkg.name, "copyright"))) {
-      errors.push(`${pkg.name}@${pkg.version}: Debian copyright file is missing`);
-    }
-  }
-
   if (errors.length > 0) throw new Error(errors.join("\n"));
 
   rmSync(outputPath, { recursive: true, force: true });
@@ -611,22 +537,11 @@ export function generateLicenseBundle({
   mkdirSync(packageOutputPath, { recursive: true });
 
   const { records, missingOriginalLicenseText } = writePackageRecords(resolved, packageOutputPath);
-
-  const debianPackageRecords =
-    writeDebianManifest(
-      outputPath,
-      debianPackages,
-      debianSourceValidation.sources,
-      debianCopyrightRoot,
-    ) ?? [];
-
   copySystemLicenses(outputPath, systemLicenses);
 
   const manifest = {
     schemaVersion: 1,
     javascriptPackages: records,
-    debianPackages: debianPackageRecords,
-    debianSources: debianSourceValidation.sources,
     systemLicenses: systemLicenses.map((entry) => entry.name).sort(),
   };
   writeJson(join(outputPath, "manifest.json"), manifest);
@@ -643,10 +558,6 @@ const PATH_OPTION_FIELDS = new Map([
   ["--node-modules", "nodeModulesPath"],
   ["--output", "outputPath"],
   ["--policy", "policyPath"],
-  ["--debian-policy", "debianPolicyPath"],
-  ["--dpkg-query", "dpkgQueryPath"],
-  ["--debian-source-manifest", "debianSourceManifestPath"],
-  ["--debian-copyright-root", "debianCopyrightRoot"],
 ]);
 
 function parseSystemLicense(specification) {
@@ -684,7 +595,6 @@ function parseArgs(args) {
   }
   options.nodeModulesPath ??= join(options.repoRoot, "node_modules");
   options.policyPath ??= join(options.repoRoot, "compliance", "license-policy.json");
-  options.debianPolicyPath ??= join(options.repoRoot, "compliance", "debian-policy.json");
   options.outputPath ??= join(options.repoRoot, "THIRD_PARTY_LICENSES");
   return options;
 }
@@ -699,9 +609,7 @@ function main() {
   try {
     const manifest = generateLicenseBundle({ ...options, validateRepository: true });
     const action = options.check ? "License compliance check passed" : "Generated license bundle";
-    console.log(
-      `${action} for ${manifest.javascriptPackages.length} JavaScript packages and ${manifest.debianPackages.length} Debian packages.`,
-    );
+    console.log(`${action} for ${manifest.javascriptPackages.length} JavaScript packages.`);
   } finally {
     if (checkDirectory) rmSync(checkDirectory, { recursive: true, force: true });
   }

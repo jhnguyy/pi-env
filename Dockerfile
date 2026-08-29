@@ -24,13 +24,7 @@ ENV PI_ENV_HOME=/opt/pi-env \
   NPM_CONFIG_UPDATE_NOTIFIER=false
 
 USER root
-RUN sed -i \
-    -e 's/^Types: deb$/Types: deb deb-src/' \
-    -e 's|URIs: http://deb.debian.org/debian$|URIs: http://snapshot.debian.org/archive/debian/20260824T000000Z|' \
-    -e 's|URIs: http://deb.debian.org/debian-security$|URIs: http://snapshot.debian.org/archive/debian-security/20260824T000000Z|' \
-    /etc/apt/sources.list.d/debian.sources \
-  && printf 'Acquire::Check-Valid-Until "false";\n' > /etc/apt/apt.conf.d/99snapshot \
-  && apt-get update \
+RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
@@ -38,16 +32,12 @@ RUN sed -i \
   && npm install --global --omit=dev @nubjs/nub@0.2.10 \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  && rm -rf /var/lib/apt/lists/* \
   && node --version
 
 WORKDIR ${PI_ENV_HOME}
 COPY --chown=node:node . .
-RUN chown -R node:node ${PI_ENV_HOME} \
-  && dpkg-query -W -f='${binary:Package}\t${Version}\t${source:Package}\t${source:Version}\n' \
-    > /tmp/pi-env-dpkg-query \
-  && node scripts/generate-debian-source-bundle.mjs \
-    --dpkg-query /tmp/pi-env-dpkg-query \
-    --output ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/debian
+RUN chown -R node:node ${PI_ENV_HOME}
 
 USER node
 
@@ -56,8 +46,6 @@ RUN nub install --frozen-lockfile
 
 RUN nub run licenses:generate \
   --package-root /usr/local/lib/node_modules \
-  --dpkg-query /tmp/pi-env-dpkg-query \
-  --debian-source-manifest ${PI_ENV_HOME}/THIRD_PARTY_SOURCES/debian/manifest.json \
   --system-license node-LICENSE.txt=/usr/local/LICENSE
 
 # Local equivalent: nub run build
@@ -70,7 +58,7 @@ USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
   && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
   && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
-  && rm -rf /var/lib/apt/lists/* /tmp/pi-env-dpkg-query ${PI_ENV_HOME}/.git
+  && rm -rf ${PI_ENV_HOME}/.git
 
 USER node
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]

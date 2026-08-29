@@ -30,28 +30,9 @@ A dependency update must fail the check when it:
 
 Review and update the policy only after you verify the new upstream terms and notice text. Source references use immutable revisions.
 
-## Debian package policy
-
-[`compliance/debian-policy.json`](../compliance/debian-policy.json) approves each installed Debian package and its source package. The image build rejects unapproved package or source mappings.
-
 ## Container artifact
 
-The container build runs `nub run licenses:generate`. The command writes the artifact license bundle to `/opt/pi-env/THIRD_PARTY_LICENSES`.
-
-The bundle contains:
-
-- A deterministic JavaScript package manifest.
-- The license and notice files from installed JavaScript packages.
-- Reviewed fallback notices for packages that omit license files.
-- Immutable corresponding-source references for MPL-covered JavaScript packages.
-- The exact Debian binary and source package versions.
-- The installed copyright file for every Debian binary package.
-- Complete exact source artifacts for every installed Debian source package.
-- The Node.js license from the pinned base image.
-
-The image stores Debian source artifacts in `/opt/pi-env/THIRD_PARTY_SOURCES/debian`.
-
-An SBOM does not replace these license and source artifacts.
+The image stores JavaScript notices, required source references, and the Node.js license in `/opt/pi-env/THIRD_PARTY_LICENSES`.
 
 ## Nix outputs
 

@@ -1,30 +1,17 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const REQUIRED_FILES = [
   "THIRD_PARTY_LICENSES/manifest.json",
   "THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES.md",
   "THIRD_PARTY_LICENSES/SOURCE_CODE.md",
-  "THIRD_PARTY_LICENSES/DEBIAN_PACKAGES.md",
-  "THIRD_PARTY_LICENSES/DEBIAN_SOURCE_CODE.md",
   "THIRD_PARTY_LICENSES/system/node-LICENSE.txt",
-  "THIRD_PARTY_SOURCES/debian/manifest.json",
 ];
 
 const REQUIRED_DIRECTORIES = [".pi/extensions/dev-tools/dist"];
-
-function safeArchivePath(manifestPath, archive) {
-  if (typeof archive !== "string" || archive === "" || isAbsolute(archive)) return null;
-  const base = dirname(manifestPath);
-  const archivePath = resolve(base, archive);
-  const fromBase = relative(base, archivePath);
-  if (fromBase === ".." || fromBase.startsWith("../")) return null;
-  return archivePath;
-}
 
 function requiredOutputIssues(root) {
   const missingFiles = REQUIRED_FILES.filter((path) => {
@@ -38,45 +25,8 @@ function requiredOutputIssues(root) {
   return [...missingFiles, ...missingDirectories];
 }
 
-function sourceArchiveIssues(root) {
-  const manifestPath = join(root, "THIRD_PARTY_SOURCES", "debian", "manifest.json");
-  if (!existsSync(manifestPath)) return [];
-
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  } catch (cause) {
-    return [
-      `Debian source manifest is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
-    ];
-  }
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.debianSources)) {
-    return ["Debian source manifest has an unsupported schema"];
-  }
-  if (manifest.debianSources.length === 0) {
-    return ["Debian source manifest contains no source artifacts"];
-  }
-  return manifest.debianSources.flatMap((source) =>
-    Array.isArray(source.artifacts) && source.artifacts.length > 0
-      ? source.artifacts.flatMap((artifact) => {
-          const artifactPath = safeArchivePath(manifestPath, artifact.file);
-          const valid =
-            artifactPath &&
-            existsSync(artifactPath) &&
-            statSync(artifactPath).isFile() &&
-            statSync(artifactPath).size > 0 &&
-            createHash("sha256").update(readFileSync(artifactPath)).digest("hex") ===
-              artifact.sha256;
-          return valid
-            ? []
-            : [`${source.name ?? "unknown source"}: source artifact is missing, empty, or invalid`];
-        })
-      : [`${source.name ?? "unknown source"}: source artifacts are missing`],
-  );
-}
-
 export function imageArtifactIssues(root) {
-  return [...requiredOutputIssues(root), ...sourceArchiveIssues(root)];
+  return requiredOutputIssues(root);
 }
 
 function run(command, args, label) {
@@ -94,24 +44,12 @@ export function verifyImageArtifact(root) {
   run("node", ["--version"], "Node.js check");
   run("nub", ["--version"], "Nub check");
   run(
-    "sh",
-    [
-      "-c",
-      "dpkg-query -W -f='${binary:Package}\\t${Version}\\t${source:Package}\\t${source:Version}\\n' > /tmp/pi-env-dpkg-query",
-    ],
-    "Debian package inventory",
-  );
-  run(
     process.execPath,
     [
       join(root, "scripts", "generate-license-bundle.mjs"),
       "--check",
       "--package-root",
       "/usr/local/lib/node_modules",
-      "--dpkg-query",
-      "/tmp/pi-env-dpkg-query",
-      "--debian-source-manifest",
-      join(root, "THIRD_PARTY_SOURCES", "debian", "manifest.json"),
       "--system-license",
       "node-LICENSE.txt=/usr/local/LICENSE",
     ],
