@@ -22,6 +22,7 @@
     ".pi/extensions/review",
     ".pi/extensions/ptc",
     ".pi/extensions/security",
+    ".pi/extensions/session-resume",
     ".pi/extensions/skill-builder",
     ".pi/extensions/subagent",
     ".pi/extensions/tool-manager"
@@ -39,6 +40,7 @@
       ".pi/extensions/review",
       ".pi/extensions/ptc",
       ".pi/extensions/security",
+      ".pi/extensions/session-resume",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
       ".pi/extensions/tool-manager"

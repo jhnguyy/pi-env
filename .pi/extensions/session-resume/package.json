@@ -1,0 +1,14 @@
+{
+  "name": "@pi-env/session-resume",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}
