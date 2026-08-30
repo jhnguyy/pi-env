@@ -64,7 +64,7 @@ describeIfEnabled("linear", "Linear architecture contracts", () => {
 
     expect(pkg.dependencies).toMatchObject({
       "@linear/sdk": "89.0.0",
-      effect: "4.0.0-beta.97",
+      effect: "4.0.0-rc.108",
     });
     expect(pkg.peerDependencies).toMatchObject({
       "@earendil-works/pi-ai": "*",
