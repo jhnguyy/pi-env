@@ -1,14 +1,9 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import {
-  defineTool,
-  truncateHead,
-  type ExtensionContext,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import { defineTool, truncateHead, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { CursorPage, IssueSummary, LinearResourceSummary } from "./api";
 import type { LinearGateway } from "./client";
-import { LinearErrorCode, asLinearError, linearError, throwToolError } from "./domain";
+import { asLinearError, throwToolError } from "./domain";
 
 const MAX_RESULTS = 50;
 const DEFAULT_RESULTS = 20;
@@ -59,29 +54,6 @@ async function executeTool<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-async function confirmCredentialUse(
-  ctx: ExtensionContext,
-  title: string,
-  message: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (!ctx.hasUI) {
-    throw linearError(
-      LinearErrorCode.CredentialConfirmationRequired,
-      "Linear credential use requires interactive confirmation.",
-      {
-        recovery: "Run the operation from TUI or an RPC client that handles confirmation prompts.",
-      },
-    );
-  }
-  if (await ctx.ui.confirm(title, message, { signal })) return;
-  throw linearError(
-    LinearErrorCode.CredentialConfirmationRequired,
-    "Linear credential use was not confirmed.",
-    { retryable: true },
-  );
-}
-
 export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
   return [
     defineTool({
@@ -89,14 +61,8 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       label: "Linear Viewer",
       description: "Get the Linear user and workspace for the configured API key.",
       parameters: Type.Object({}),
-      async execute(_id, _params, signal, _onUpdate, ctx) {
+      async execute(_id, _params, signal) {
         return executeTool(async () => {
-          await confirmCredentialUse(
-            ctx,
-            "Access Linear workspace?",
-            "Use the configured Linear credential to identify the current workspace and user.",
-            signal,
-          );
           const viewer = await gateway.viewer(signal);
           return toolResult(resultText(viewer), viewer);
         });
@@ -115,14 +81,8 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_RESULTS })),
         cursor: Type.Optional(Type.String({ description: "endCursor from the previous page." })),
       }),
-      async execute(_id, params, signal, _onUpdate, ctx) {
+      async execute(_id, params, signal) {
         return executeTool(async () => {
-          await confirmCredentialUse(
-            ctx,
-            "List Linear resources?",
-            `Use the configured Linear credential to list ${params.type}.`,
-            signal,
-          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const resources = boundedPage(
             await gateway.listResources(
@@ -147,14 +107,8 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         assignee: Type.Optional(Type.String({ description: "Assignee name, email, or UUID." })),
         includeArchived: Type.Optional(Type.Boolean()),
       }),
-      async execute(_id, params, signal, _onUpdate, ctx) {
+      async execute(_id, params, signal) {
         return executeTool(async () => {
-          await confirmCredentialUse(
-            ctx,
-            "List Linear issues?",
-            "Use the configured Linear credential to list issues.",
-            signal,
-          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const issues = boundedPage(
             await gateway.listIssues(
@@ -186,14 +140,8 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
         assignee: Type.Optional(Type.String({ description: "Assignee name, email, or UUID." })),
         includeArchived: Type.Optional(Type.Boolean()),
       }),
-      async execute(_id, params, signal, _onUpdate, ctx) {
+      async execute(_id, params, signal) {
         return executeTool(async () => {
-          await confirmCredentialUse(
-            ctx,
-            "Search Linear issues?",
-            "Use the configured Linear credential to search issues.",
-            signal,
-          );
           const limit = params.limit ?? DEFAULT_RESULTS;
           const issues = boundedPage(
             await gateway.searchIssues(
@@ -221,14 +169,8 @@ export function createLinearTools(gateway: LinearGateway): ToolDefinition[] {
       parameters: Type.Object({
         issueId: Type.String({ description: "Issue UUID or identifier such as ENG-123." }),
       }),
-      async execute(_id, params, signal, _onUpdate, ctx) {
+      async execute(_id, params, signal) {
         return executeTool(async () => {
-          await confirmCredentialUse(
-            ctx,
-            "Read Linear issue?",
-            `Use the configured Linear credential to read ${params.issueId}.`,
-            signal,
-          );
           const issue = await gateway.issue(params.issueId, signal);
           return toolResult(resultText(issue), issue);
         });

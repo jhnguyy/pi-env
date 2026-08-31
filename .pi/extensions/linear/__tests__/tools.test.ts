@@ -67,48 +67,38 @@ describeIfEnabled("linear", "Linear read tools", () => {
       { limit: 50 },
       undefined,
       undefined,
-      {
-        hasUI: true,
-        ui: { confirm: vi.fn(async () => true) },
-      } as any,
+      {} as any,
     );
 
     expect((result.details as { nodes: IssueSummary[] }).nodes).toHaveLength(50);
     expect(JSON.stringify(result)).not.toContain("ENG-51");
   });
 
-  it("confirms the exact operation before credential-backed gateway use", async () => {
+  it("executes every read tool without asking for credential confirmation", async () => {
     const fakeGateway = gateway();
-    const ctx = {
-      hasUI: true,
-      ui: { confirm: vi.fn(async () => false) },
-    } as any;
+    const confirm = vi.fn(async () => {
+      throw new Error("Linear read tools must not prompt for credential use.");
+    });
+    const ctx = { hasUI: true, ui: { confirm } } as any;
+    const calls = [
+      ["linear_viewer", {}],
+      ["linear_list_resources", { type: "teams" }],
+      ["linear_list_issues", { limit: 1 }],
+      ["linear_search_issues", { query: "Issue" }],
+      ["linear_get_issue", { issueId: "ENG-1" }],
+    ] as const;
 
-    await expect(
-      findTool(fakeGateway, "linear_get_issue").execute(
-        "tool-call",
-        { issueId: "ENG-1" },
-        undefined,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow("credential_confirmation_required");
-    expect(ctx.ui.confirm).toHaveBeenCalledWith(
-      "Read Linear issue?",
-      "Use the configured Linear credential to read ENG-1.",
-      { signal: undefined },
-    );
-    expect(fakeGateway.issue).not.toHaveBeenCalled();
-  });
+    for (const [name, params] of calls) {
+      await expect(
+        findTool(fakeGateway, name).execute("tool-call", params, undefined, undefined, ctx),
+      ).resolves.toBeDefined();
+    }
 
-  it("fails closed without an interactive confirmation surface", async () => {
-    const fakeGateway = gateway();
-
-    await expect(
-      findTool(fakeGateway, "linear_viewer").execute("tool-call", {}, undefined, undefined, {
-        hasUI: false,
-      } as any),
-    ).rejects.toThrow("credential_confirmation_required");
-    expect(fakeGateway.viewer).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fakeGateway.viewer).toHaveBeenCalledOnce();
+    expect(fakeGateway.listResources).toHaveBeenCalledOnce();
+    expect(fakeGateway.listIssues).toHaveBeenCalledOnce();
+    expect(fakeGateway.searchIssues).toHaveBeenCalledOnce();
+    expect(fakeGateway.issue).toHaveBeenCalledOnce();
   });
 });
