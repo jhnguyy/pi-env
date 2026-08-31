@@ -91,6 +91,8 @@ importers:
 
   .pi/extensions/analyze: {}
 
+  .pi/extensions/general: {}
+
   .pi/extensions/credential-source:
     dependencies:
       '@earendil-works/pi-coding-agent':

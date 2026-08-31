@@ -12,6 +12,7 @@
   },
   "workspaces": [
     ".pi/extensions/analyze",
+    ".pi/extensions/general",
     ".pi/extensions/credential-source",
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
@@ -29,6 +30,7 @@
   "pi": {
     "extensions": [
       ".pi/extensions/analyze",
+      ".pi/extensions/general",
       ".pi/extensions/credential-source",
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",

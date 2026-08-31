@@ -13,6 +13,7 @@ export const PiEvent = {
   Context: "context",
   ToolResult: "tool_result",
   AgentEnd: "agent_end",
+  AgentSettled: "agent_settled",
 } as const;
 export type PiEvent = (typeof PiEvent)[keyof typeof PiEvent];
 
