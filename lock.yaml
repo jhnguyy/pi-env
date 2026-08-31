@@ -91,7 +91,7 @@ importers:
 
   .pi/extensions/analyze: {}
 
-  .pi/extensions/agent-notification: {}
+  .pi/extensions/general: {}
 
   .pi/extensions/credential-source:
     dependencies:
