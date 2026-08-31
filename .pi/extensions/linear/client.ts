@@ -1,4 +1,8 @@
-import type { CredentialSource } from "../_shared/credential-source";
+import {
+  CredentialErrorCode,
+  CredentialSourceError,
+  type CredentialSource,
+} from "../_shared/credential-source";
 import type {
   CursorPage,
   IssueSummary,
@@ -171,11 +175,21 @@ export class LinearGateway {
     return this.#withApi(signal, (api) => api.issue(issueId));
   }
 
-  #withApi<T>(
+  async #withApi<T>(
     signal: AbortSignal | undefined,
     operation: (api: LinearApi) => Promise<T>,
   ): Promise<T> {
-    return this.#credentials().use(
+    const credentials = this.#credentials();
+    if (!credentials.has("linear.apiKey")) {
+      throw new CredentialSourceError({
+        code: CredentialErrorCode.NotConfigured,
+        message: "Credential linear.apiKey is not configured.",
+        retryable: false,
+        name: "linear.apiKey",
+        recovery: "Configure linear.apiKey in the global credentialSource settings and reload Pi.",
+      });
+    }
+    return await credentials.use(
       { name: "linear.apiKey", consumer: "linear" },
       (apiKey) => operation(this.#createApi(apiKey, signal)),
       signal,

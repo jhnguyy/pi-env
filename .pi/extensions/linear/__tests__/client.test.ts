@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import type { CredentialSource } from "../../_shared/credential-source";
+import { CredentialErrorCode, type CredentialSource } from "../../_shared/credential-source";
 import type {
   CreateCommentApiInput,
   CreateIssueApiInput,
@@ -21,7 +21,10 @@ const identity: LinearIdentity = {
   viewer: { id: "user-1", name: "Agent", displayName: "agent", email: "agent@example.com" },
 };
 
-function credentials(): CredentialSource & { use: ReturnType<typeof vi.fn> } {
+function credentials(): CredentialSource & {
+  has: ReturnType<typeof vi.fn>;
+  use: ReturnType<typeof vi.fn>;
+} {
   return {
     has: vi.fn(() => true),
     use: vi.fn(async (_request, consume) => consume(SENTINEL)),
@@ -83,11 +86,27 @@ describeIfEnabled("linear", "Linear credential source gateway", () => {
     const gateway = new LinearGateway(() => source, createApi);
 
     await expect(gateway.viewer()).resolves.toEqual(identity);
+    expect(source.has).toHaveBeenCalledWith("linear.apiKey");
     expect(source.use).toHaveBeenCalledWith(
       { name: "linear.apiKey", consumer: "linear" },
       expect.any(Function),
       undefined,
     );
+  });
+
+  it("rejects an absent Linear credential before credential retrieval or API access", async () => {
+    const source = credentials();
+    source.has.mockReturnValue(false);
+    const createApi = vi.fn(() => api());
+    const gateway = new LinearGateway(() => source, createApi);
+
+    await expect(gateway.viewer()).rejects.toMatchObject({
+      code: CredentialErrorCode.NotConfigured,
+      name: "linear.apiKey",
+    });
+    expect(source.has).toHaveBeenCalledWith("linear.apiKey");
+    expect(source.use).not.toHaveBeenCalled();
+    expect(createApi).not.toHaveBeenCalled();
   });
 
   it("forwards cursors and resolves human filters through the adapter port", async () => {

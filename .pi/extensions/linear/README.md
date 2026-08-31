@@ -4,11 +4,11 @@ The Linear extension adds focused read-only Linear tools to Pi. The extension us
 
 Configure the credential in the global Pi settings. See [`../credential-source/README.md`](../credential-source/README.md). Linear does not know whether 1Password or Bitwarden supplies the credential.
 
-## Credential confirmation
+## Credential use
 
-In an interactive Pi session, each Linear tool shows an operation-specific confirmation before it retrieves the credential. A declined operation does not contact the credential provider or Linear.
+Linear tools do not ask for per-operation confirmation. Before credential retrieval, the gateway checks that `linear.apiKey` exists in the credential source. If it does not exist, the operation fails before it initializes the SDK or contacts Linear.
 
-Headless modes cannot show this Pi confirmation. Linear tools fail closed in these modes.
+The adapter passes this credential to the Linear SDK as `apiKey`. It does not pass it as an OAuth `accessToken` or add a `Bearer` prefix.
 
 ## Tools
 

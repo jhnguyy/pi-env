@@ -192,8 +192,8 @@ function resourcePage<T>(
 export class LinearSdkApi implements LinearApi {
   readonly #client: LinearClient;
 
-  constructor(accessToken: string, signal?: AbortSignal) {
-    this.#client = new LinearClient({ accessToken, signal });
+  constructor(apiKey: string, signal?: AbortSignal) {
+    this.#client = new LinearClient({ apiKey, signal });
   }
 
   identity(): Promise<LinearIdentity> {
@@ -359,5 +359,5 @@ export class LinearSdkApi implements LinearApi {
   }
 }
 
-export const createLinearSdkApi: LinearApiFactory = (accessToken, signal) =>
-  new LinearSdkApi(accessToken, signal);
+export const createLinearSdkApi: LinearApiFactory = (apiKey, signal) =>
+  new LinearSdkApi(apiKey, signal);
