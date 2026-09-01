@@ -1,6 +1,6 @@
 # Portable Note Architecture
 
-Use this architecture for durable notes unless the current workspace defines a necessary override. The configured notes provider selects the store. The architecture defines how to classify and maintain information inside that store.
+Use this architecture to classify and maintain durable notes. The configured notes provider selects the store.
 
 ## Ownership
 
@@ -77,16 +77,3 @@ Write specific titles. Put current conclusions near the top. Include names, alia
 ## Metadata
 
 Add metadata only when a workflow consumes it. Useful fields can include project status, verification date, aliases, and cross-subject retrieval terms. Do not add metadata that only repeats the path, title, collection, or date.
-
-## Local Overrides
-
-Use a local override only when the workspace cannot use a portable default. Typical overrides include:
-
-- read-only or prohibited locations
-- privacy and data-handling boundaries
-- canonical task or publication systems
-- required organization metadata
-- retention rules
-- provider capabilities that change safe update behavior
-
-Do not create a local override only to name the environment or repeat this architecture.
