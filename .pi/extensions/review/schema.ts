@@ -348,6 +348,9 @@ export interface ReviewState {
     message: string;
     actual?: number;
     limit?: number;
+    command?: string;
+    stdout?: string;
+    stderr?: string;
     worktreeCleaned: boolean;
   };
   deck?: { path: string; digest: string; bytes: number };

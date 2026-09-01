@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
+import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
 import {
   prepareResolvedSnapshot,
   prepareSnapshot,
@@ -105,6 +106,7 @@ describe("review pull request snapshot", () => {
       calls.some(
         (c) =>
           c.args[0] === "fetch" &&
+          c.args.includes("--filter=blob:none") &&
           c.args.at(-1)!.startsWith("+refs/pull/7/head:refs/pi-pr-review/head/7/"),
       ),
     ).toBe(true);
@@ -175,6 +177,88 @@ describe("review pull request snapshot", () => {
     ).rejects.toThrow(/did not match/);
   });
 
+  it("reports a fetch timeout without replacing it with a missing-ref error", async () => {
+    const cwd = roots();
+    const { exec } = execFor({ headRefOid: "h", baseRefOid: "b" });
+    const timedExec = async (cmd: string, args: string[], opts: any) => {
+      if (cmd === "git" && args[0] === "fetch")
+        throw new ProcessFailure({
+          kind: ProcessFailureKind.Timeout,
+          command: "git fetch",
+          message: "Process timed out after 180000ms: git",
+          stderr: "fetch was still receiving objects",
+        });
+      return exec(cmd, args, opts);
+    };
+    await expect(
+      prepareResolvedSnapshot(timedExec as any, cwd, {
+        owner: "acme",
+        repo: "widgets",
+        number: 7,
+        url: "https://github.com/acme/widgets/pull/7",
+        baseRef: "trunk",
+        baseOid: "b",
+        headOid: "h",
+        changedFiles: [],
+      }),
+    ).rejects.toMatchObject({
+      code: "fetch_timeout",
+      stderr: "fetch was still receiving objects",
+    });
+  });
+
+  it("reports a missing remote ref separately from a fetch timeout", async () => {
+    const cwd = roots();
+    const { exec } = execFor({ headRefOid: "h", baseRefOid: "b" });
+    const missingRefExec = async (cmd: string, args: string[], opts: any) => {
+      if (cmd === "git" && args[0] === "fetch")
+        return { code: 128, stdout: "", stderr: "fatal: couldn't find remote ref" } as any;
+      return exec(cmd, args, opts);
+    };
+    await expect(
+      prepareResolvedSnapshot(missingRefExec as any, cwd, {
+        owner: "acme",
+        repo: "widgets",
+        number: 7,
+        url: "https://github.com/acme/widgets/pull/7",
+        baseRef: "trunk",
+        baseOid: "b",
+        headOid: "h",
+        changedFiles: [],
+      }),
+    ).rejects.toMatchObject({
+      code: "fetched_ref_missing",
+      stderr: "fatal: couldn't find remote ref",
+    });
+  });
+
+  it("reports missing ancestry after verified refs in a complete cache", async () => {
+    const cwd = roots();
+    const { exec } = execFor({ headRefOid: "h", baseRefOid: "b" });
+    const unrelatedExec = async (cmd: string, args: string[], opts: any) => {
+      if (cmd === "git" && args[0] === "merge-base")
+        return { code: 1, stdout: "", stderr: "no merge base" } as any;
+      if (cmd === "git" && args[0] === "rev-parse" && args[1] === "--is-shallow-repository")
+        return { code: 0, stdout: "false\n", stderr: "" } as any;
+      return exec(cmd, args, opts);
+    };
+    await expect(
+      prepareResolvedSnapshot(unrelatedExec as any, cwd, {
+        owner: "acme",
+        repo: "widgets",
+        number: 7,
+        url: "https://github.com/acme/widgets/pull/7",
+        baseRef: "trunk",
+        baseOid: "b",
+        headOid: "h",
+        changedFiles: [],
+      }),
+    ).rejects.toMatchObject({
+      code: "merge_base_missing_ancestry",
+      stderr: "no merge base",
+    });
+  });
+
   it("serializes preparations for the same repository", async () => {
     const cwd = roots();
     let active = 0;
@@ -220,16 +304,16 @@ describe("review pull request snapshot", () => {
     expect(overlap).toBe(false);
   });
 
-  it("cleans artifact and worktree on failure", async () => {
+  it("cleans artifact and Git worktree registration on failure", async () => {
     const cwd = roots();
-    const { exec } = execFor({
+    const { exec, calls } = execFor({
       url: "https://github.com/acme/widgets/pull/7",
       baseRefName: "trunk",
       baseRefOid: "b",
       headRefOid: "h",
     });
     const failingExec = async (cmd: string, args: string[], opts: any) => {
-      if (cmd === "git" && args[0] === "worktree")
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
         return { code: 1, stdout: "", stderr: "no" } as any;
       return exec(cmd, args, opts);
     };
@@ -240,5 +324,9 @@ describe("review pull request snapshot", () => {
     ).rejects.toThrow(/worktree/);
     expect(readdirSync(join(mocked.agentDir, "pr-review", "artifacts"))).toEqual([]);
     expect(existsSync(join(mocked.agentDir, "pr-review", "worktrees"))).toBe(false);
+    expect(calls.some((call) => call.args.slice(0, 3).join(" ") === "worktree remove --force")).toBe(
+      true,
+    );
+    expect(calls.some((call) => call.args.join(" ") === "worktree prune")).toBe(true);
   });
 });
