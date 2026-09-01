@@ -1,22 +1,26 @@
 ---
 name: agentic-notes
-description: Creates, updates, reviews, and transforms notes for agentic workflows. Use when capturing decisions, writing durable notes, summarizing work, preparing handoffs, or creating HTML/Markdown artifacts for human-agent collaboration while respecting workspace-specific note storage policies.
+description: Creates, updates, reviews, and transforms notes with a portable behavior-first architecture. Use when capturing decisions, maintaining knowledge, summarizing work, preparing handoffs, or creating HTML/Markdown artifacts for human-agent collaboration.
 ---
 
 # Agentic Notes
 
-Portable note practice for pi environments. This skill defines what makes a useful agent-facing note. The current workspace defines where notes live and what may be touched. The **local adapter** is the workspace-specific note policy, tool contract, or convention source that supplies those storage and boundary rules.
+Portable note practice for pi environments. This skill defines a default architecture for classifying, retrieving, and maintaining notes. It also defines what makes a useful agent-facing note.
 
-## First: Find the Local Adapter
+The local pi environment selects storage through its configured extensions and available tools. Local instructions supply only necessary access, privacy, retention, or organization-specific overrides.
 
-Before reading or writing notes, discover local rules from the current environment:
+## First: Discover the Active Store
 
-1. Project/user instructions (`AGENTS.md`, `CONTRIBUTING.md`, README, injected context)
-2. Workspace note policy files (`.agents/notes.md`, `.pi/notes.md`, `docs/notes.md`, `docs/knowledge-base.md`)
-3. Available note tools, note indexes, or existing nearby notes
-4. The user's explicit request
+Before reading or writing notes:
 
-If sources conflict, follow the most explicit user instruction unless it violates a higher-priority system/developer/project boundary. Then prefer the most local workspace policy over general practice. If storage, permission, or privacy boundaries are still unclear, ask before writing.
+1. Read project and user instructions such as `AGENTS.md`, `CONTRIBUTING.md`, and the README.
+2. Identify the available notes tool or documented filesystem access path.
+3. Read existing notes, indexes, and applicable local overrides before editing.
+4. Apply the user's explicit request.
+
+Treat the configured tool as the active store boundary. Do not ask the user to select a context that the environment already selected. If no supported access path exists, stop and ask instead of inventing a store or bypassing its provider.
+
+Use the portable architecture when no local override applies. If sources conflict, follow the most explicit user instruction unless it violates a higher-priority boundary. Then prefer the most local applicable override.
 
 ## Choose the Output
 
@@ -28,11 +32,12 @@ Keep a short Markdown summary for any HTML artifact that should be useful in fut
 
 ## Core Workflow
 
-1. Read the local adapter and any existing note before changing it.
-2. Decide whether the task needs capture, rewrite, review, distillation, or an HTML artifact.
-3. Prefer coherent rewrites over append-only updates when revising an existing note.
-4. Preserve local metadata, links, boundaries, and naming conventions.
-5. Keep the final note simple: clear title, concise context, decisions/facts, evidence, open questions, and next actions when relevant.
+1. Discover the active store and read any existing note before changing it.
+2. Classify durable information with the portable architecture.
+3. Decide whether the task needs capture, rewrite, review, distillation, or an HTML artifact.
+4. Prefer coherent rewrites over append-only updates when revising current knowledge.
+5. Preserve applicable metadata, links, boundaries, and naming conventions.
+6. Keep the final note simple: clear title, concise context, decisions or facts, evidence, open questions, and next actions when relevant.
 
 ## Reference Index
 
@@ -40,14 +45,15 @@ Load only the reference needed for the task.
 
 | File | Use when |
 |---|---|
+| [portable-note-architecture.md](references/portable-note-architecture.md) | Classifying durable information or deciding its canonical owner and lifecycle |
 | [note-quality.md](references/note-quality.md) | Creating, rewriting, reviewing, or distilling durable notes |
 | [html-artifacts.md](references/html-artifacts.md) | Deciding whether to create Markdown, HTML sidecars, or interactive HTML |
-| [workspace-adapter-contract.md](references/workspace-adapter-contract.md) | Writing or reviewing local note boundary rules for a workspace |
+| [local-overrides.md](references/local-overrides.md) | Defining necessary workspace exceptions to the portable defaults |
 | [templates.md](references/templates.md) | Need a minimal starting structure |
 
 ## Boundaries
 
 - Never store secrets, credentials, private keys, or raw sensitive dumps in notes.
-- Do not invent note locations or storage conventions.
+- Do not bypass the configured provider or invent store locations.
 - Do not let formatting complexity obscure the information.
 - Prefer fewer, coherent sections over exhaustive templates.
