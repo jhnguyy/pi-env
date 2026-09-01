@@ -14,18 +14,7 @@ export type ToolManagerSettings = typeof ToolManagerSettingsSchema.Type;
 export const SEARCH_TOOL_NAME = "search_tools";
 export const CUSTOM_TYPE = "tool-manager:state";
 
-const LINEAR_READ_TOOLS = [
-  "linear_viewer",
-  "linear_list_resources",
-  "linear_list_issues",
-  "linear_search_issues",
-  "linear_get_issue",
-];
-const LINEAR_WRITE_TOOLS = [
-  "linear_create_issue",
-  "linear_update_issue",
-  "linear_create_comment",
-];
+const LINEAR_TOOLS = ["linear"];
 
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   analysis: ["analyze"],
@@ -35,9 +24,8 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   sessions: ["list_sessions", "read_session"],
   review: ["review"],
   web: ["web_fetch"],
-  "linear-read": LINEAR_READ_TOOLS,
-  "linear-write": LINEAR_WRITE_TOOLS,
-  linear: [...LINEAR_READ_TOOLS, ...LINEAR_WRITE_TOOLS],
+  "linear-read": LINEAR_TOOLS,
+  linear: LINEAR_TOOLS,
 };
 
 export const GROUP_HINTS: Record<string, RegExp[]> = {
@@ -57,7 +45,7 @@ export const GROUP_HINTS: Record<string, RegExp[]> = {
   linear: [/\blinear\b/],
 };
 
-export const DEFAULT_MANUAL_ONLY = new Set(LINEAR_WRITE_TOOLS);
+export const DEFAULT_MANUAL_ONLY = new Set<string>();
 
 export const CORE_PROFILE = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME];
 export const DEFAULT_PROFILES: Record<string, string[]> = {

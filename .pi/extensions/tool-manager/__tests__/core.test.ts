@@ -11,7 +11,7 @@ import {
   triggerGroups,
 } from "../core";
 
-const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "jit_catch", "review", "web_fetch", "notes", "linear_viewer", "linear_list_resources", "linear_list_issues", "linear_search_issues", "linear_get_issue", "linear_create_issue", "linear_update_issue", "linear_create_comment"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
+const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "jit_catch", "review", "web_fetch", "notes", "linear"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
 
 describe("tool manager core", () => {
   it("uses the core profile after all tools are known and rejects an invalid configured default", () => {
@@ -33,14 +33,7 @@ describe("tool manager core", () => {
     expect(searchTools("notes", ["read"], resolveConfig(), tools).loaded).toEqual(["notes"]);
     expect(searchTools("forgejo", ["read"], resolveConfig(), tools).loaded).toEqual([]);
     expect(searchTools("notes", ["read"], manual, tools).loaded).toEqual([]);
-    expect(searchTools("linear issue", ["read"], resolveConfig(), tools).loaded).toEqual([
-      "linear_get_issue",
-      "linear_list_issues",
-      "linear_list_resources",
-      "linear_search_issues",
-      "linear_viewer",
-    ]);
-    expect(searchTools("linear issue", ["read"], resolveConfig(), tools).loaded).not.toContain("linear_create_issue");
+    expect(searchTools("linear issue", ["read"], resolveConfig(), tools).loaded).toEqual(["linear"]);
   });
 
   it("trigger matrix auto-activates analysis for coding sessions with code entities", () => {
@@ -63,14 +56,11 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "find the Linear issue for this work" }, true)).toContain("linear-read");
   });
 
-  it("keeps Linear write tools manual-only by default", () => {
+  it("does not advertise unavailable Linear write tools", () => {
     const config = resolveConfig();
-    expect(config.manualOnly).toEqual(new Set([
-      "linear_create_issue",
-      "linear_update_issue",
-      "linear_create_comment",
-    ]));
-    expect(profileTools("full", config, tools)).toContain("linear_create_issue");
+    expect(config.groups).not.toHaveProperty("linear-write");
+    expect(config.manualOnly).toEqual(new Set());
+    expect(profileTools("full", config, tools).filter((name) => name.startsWith("linear"))).toEqual(["linear"]);
   });
 
   it("restores latest branch entry and filters missing tools", () => {

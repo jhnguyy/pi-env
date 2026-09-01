@@ -57,13 +57,13 @@ function selectResource(
       LinearErrorCode.AmbiguousReference,
       `Linear ${type} reference is ambiguous: ${reference}.`,
       {
-        recovery: "Use an exact UUID or a unique name, key, or email from linear_list_resources.",
+        recovery: "Use the Linear list-resources action to find an exact UUID or unique name, key, or email.",
         details: { type, candidates: matches.slice(0, 20) },
       },
     );
   }
   throw linearError(LinearErrorCode.NotFound, `Linear ${type} resource not found: ${reference}.`, {
-    recovery: "Use linear_list_resources to find a valid reference.",
+    recovery: "Use the Linear list-resources action to find a valid reference.",
     details: { type, reference },
   });
 }
