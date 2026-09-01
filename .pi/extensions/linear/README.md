@@ -10,17 +10,19 @@ Linear tools do not ask for per-operation confirmation. Before credential retrie
 
 The adapter passes this credential to the Linear SDK as `apiKey`. It does not pass it as an OAuth `accessToken` or add a `Bearer` prefix.
 
-## Tools
+## Tool
 
-- `linear_viewer`
-- `linear_list_resources`
-- `linear_list_issues`
-- `linear_search_issues`
-- `linear_get_issue`
+The `linear` tool routes read operations through its `action` parameter:
 
-`linear_list_resources` discovers teams, users, workflow states, projects, and labels. Tools accept unique human names where practical. Ambiguous names return candidate data instead of selecting the first match.
+- `viewer`
+- `list-resources`
+- `list-issues`
+- `search-issues`
+- `get-issue`
 
-List tools return at most 50 items and include `endCursor` when another page exists.
+The `list-resources` action discovers teams, users, workflow states, projects, and labels. Actions accept unique human names where practical. Ambiguous names return candidate data instead of selecting the first match.
+
+List actions return at most 50 items and include `endCursor` when another page exists.
 
 Pi marks a tool result as failed only when the tool throws. The extension therefore throws `LinearToolError` with a typed envelope. Credential failures map to `auth_required` with a sanitized credential error code in `details`.
 
