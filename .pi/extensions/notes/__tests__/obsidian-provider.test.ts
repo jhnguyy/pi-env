@@ -1,11 +1,9 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-
 import { NotesProviderError } from "../domain";
-import { createObsidianProviderEffect } from "../obsidian-provider";
+import { createObsidianProvider } from "../obsidian-provider";
 
 const roots: string[] = [];
 
@@ -18,41 +16,62 @@ async function fixture() {
   roots.push(root);
   const vault = path.join(root, "vault");
   await mkdir(vault);
-  const provider = await Effect.runPromise(createObsidianProviderEffect(vault));
+  const provider = await createObsidianProvider(vault);
   return { root, vault, provider };
 }
 
 describe("Obsidian notes provider", () => {
-  it("lists and searches Markdown notes deterministically without Obsidian metadata", async () => {
+  it("filters list and search through canonical areas", async () => {
     const { vault, provider } = await fixture();
-    await mkdir(path.join(vault, "projects"));
+    await mkdir(path.join(vault, "wiki"));
+    await mkdir(path.join(vault, "records", "worklog"), { recursive: true });
     await mkdir(path.join(vault, ".obsidian"));
-    await writeFile(path.join(vault, "z.md"), "# Zed\nportable knowledge");
-    await writeFile(path.join(vault, "projects", "a.md"), "# Alpha\nsearch target");
+    await writeFile(path.join(vault, "wiki", "topic.md"), "# Topic\nsearch target");
+    await writeFile(path.join(vault, "records", "worklog", "day.md"), "# Day\nsearch target");
     await writeFile(path.join(vault, ".obsidian", "workspace.md"), "search target");
     await writeFile(path.join(vault, "ignored.txt"), "search target");
 
-    const notes = await Effect.runPromise(provider.list());
-    const results = await Effect.runPromise(provider.search("search target"));
-    const index = await Effect.runPromise(provider.index());
+    const wiki = await provider.list({ area: "wiki" });
+    const results = await provider.search({ query: "search target", areas: ["worklog"] });
 
-    expect(notes.map((note) => note.path)).toEqual(["projects/a.md", "z.md"]);
-    expect(results.map((result) => result.path)).toEqual(["projects/a.md"]);
-    expect(index).toContain("provider:obsidian|count:2");
-    expect(index).not.toContain(".obsidian");
+    expect(wiki.map((note) => note.path)).toEqual(["wiki/topic.md"]);
+    expect(results.map((result) => result.path)).toEqual(["records/worklog/day.md"]);
   });
 
-  it("writes and reads a note through a new contained directory", async () => {
+  it("creates a note only with an absent precondition and returns a readable revision", async () => {
     const { vault, provider } = await fixture();
+    const created = await provider.write({
+      path: "wiki/topic.md",
+      content: "# Topic\nCurrent understanding.",
+      expectedRevision: null,
+    });
+    const note = await provider.read("wiki/topic.md");
 
-    await Effect.runPromise(provider.write("wiki/topic.md", "# Topic\nCurrent understanding."));
-
-    await expect(Effect.runPromise(provider.read("wiki/topic.md"))).resolves.toBe(
-      "# Topic\nCurrent understanding.",
-    );
+    expect(note.content).toBe("# Topic\nCurrent understanding.");
+    expect(note.revision).toBe(created.revision);
     await expect(readFile(path.join(vault, "wiki", "topic.md"), "utf8")).resolves.toBe(
-      "# Topic\nCurrent understanding.",
+      note.content,
     );
+    await expect(
+      provider.write({ path: "wiki/topic.md", content: "overwrite", expectedRevision: null }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects stale writes and preserves the current note", async () => {
+    const { vault, provider } = await fixture();
+    const notePath = path.join(vault, "note.md");
+    await writeFile(notePath, "first");
+    const first = await provider.read("note.md");
+    await writeFile(notePath, "external change");
+
+    await expect(
+      provider.write({
+        path: "note.md",
+        content: "stale overwrite",
+        expectedRevision: first.revision,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(readFile(notePath, "utf8")).resolves.toBe("external change");
   });
 
   it("rejects traversal and symlink escapes", async () => {
@@ -62,73 +81,68 @@ describe("Obsidian notes provider", () => {
     await writeFile(path.join(outside, "secret.md"), "secret");
     await symlink(outside, path.join(vault, "escape"));
 
-    const traversal = Effect.runPromise(provider.read("../outside/secret.md"));
-    const escapedRead = Effect.runPromise(provider.read("escape/secret.md"));
-    const escapedWrite = Effect.runPromise(provider.write("escape/new.md", "unsafe"));
-
-    await expect(traversal).rejects.toMatchObject({
+    await expect(provider.read("../outside/secret.md")).rejects.toMatchObject({
       _tag: "NotesProviderError",
       code: "path-escape",
     });
-    await expect(escapedRead).rejects.toMatchObject({
+    await expect(provider.read("escape/secret.md")).rejects.toMatchObject({
       _tag: "NotesProviderError",
       code: "path-escape",
     });
-    await expect(escapedWrite).rejects.toMatchObject({
-      _tag: "NotesProviderError",
-      code: "path-escape",
-    });
+    await expect(
+      provider.write({ path: "escape/new.md", content: "unsafe", expectedRevision: null }),
+    ).rejects.toMatchObject({ _tag: "NotesProviderError", code: "path-escape" });
   });
 
-  it("applies unique exact edits and leaves ambiguous or missing edits unchanged", async () => {
+  it("resolves the Obsidian daily note and canonical dated records", async () => {
     const { vault, provider } = await fixture();
-    const notePath = path.join(vault, "note.md");
-    await writeFile(notePath, "alpha beta beta");
-
-    await expect(
-      Effect.runPromise(provider.edit("note.md", [{ oldText: "beta", newText: "gamma" }])),
-    ).rejects.toMatchObject({
-      _tag: "NotesProviderError",
-      code: "ambiguous-edit",
-    });
-    await expect(readFile(notePath, "utf8")).resolves.toBe("alpha beta beta");
-
-    await expect(
-      Effect.runPromise(provider.edit("note.md", [{ oldText: "missing", newText: "gamma" }])),
-    ).rejects.toMatchObject({
-      _tag: "NotesProviderError",
-      code: "missing-edit",
-    });
-    await expect(readFile(notePath, "utf8")).resolves.toBe("alpha beta beta");
-
-    await Effect.runPromise(
-      provider.edit("note.md", [{ oldText: "alpha", newText: "delta" }], "\nappended"),
+    const now = new Date();
+    const year = String(now.getFullYear()).padStart(4, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const day = String(now.getDate()).padStart(2, "0");
+    await mkdir(path.join(vault, ".obsidian"));
+    await mkdir(path.join(vault, "inbox", "daily"), { recursive: true });
+    await mkdir(path.join(vault, "records", "worklog", year, month), { recursive: true });
+    await writeFile(
+      path.join(vault, ".obsidian", "daily-notes.json"),
+      JSON.stringify({ folder: "inbox/daily", format: "YYYY/MM/DD" }),
     );
-    await expect(readFile(notePath, "utf8")).resolves.toBe("delta beta beta\nappended");
+    await mkdir(path.join(vault, "inbox", "daily", year, month), { recursive: true });
+    await writeFile(path.join(vault, "inbox", "daily", year, month, `${day}.md`), "daily");
+    await writeFile(path.join(vault, "records", "worklog", year, month, `${day}.md`), "worklog");
+
+    await expect(provider.resolve("daily/today")).resolves.toMatchObject({ content: "daily" });
+    await expect(provider.resolve("worklog/today")).resolves.toMatchObject({ content: "worklog" });
+    await expect(provider.resolve("other/today")).rejects.toMatchObject({
+      code: "unsupported-reference",
+    });
   });
 
-  it("deletes note files without accepting directories", async () => {
+  it("deletes only when the current revision matches", async () => {
     const { vault, provider } = await fixture();
     await writeFile(path.join(vault, "delete.md"), "remove me");
     await mkdir(path.join(vault, "directory.md"));
+    const note = await provider.read("delete.md");
 
-    await Effect.runPromise(provider.delete("delete.md"));
-
-    await expect(Effect.runPromise(provider.read("delete.md"))).rejects.toMatchObject({
-      code: "not-found",
-    });
-    await expect(Effect.runPromise(provider.delete("directory.md"))).rejects.toBeInstanceOf(
-      NotesProviderError,
-    );
+    await expect(
+      provider.delete({ path: "delete.md", expectedRevision: "stale" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await provider.delete({ path: "delete.md", expectedRevision: note.revision });
+    await expect(provider.read("delete.md")).rejects.toMatchObject({ code: "not-found" });
+    await expect(
+      provider.delete({ path: "directory.md", expectedRevision: "revision" }),
+    ).rejects.toBeInstanceOf(NotesProviderError);
   });
 
   it("does not create a file when cancellation is already requested", async () => {
     const { vault, provider } = await fixture();
     const controller = new AbortController();
     controller.abort();
-
     await expect(
-      Effect.runPromise(provider.write("cancelled.md", "content"), { signal: controller.signal }),
+      provider.write(
+        { path: "cancelled.md", content: "content", expectedRevision: null },
+        controller.signal,
+      ),
     ).rejects.toBeDefined();
     await expect(readFile(path.join(vault, "cancelled.md"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",

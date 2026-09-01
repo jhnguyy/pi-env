@@ -54,15 +54,21 @@ describe("notes settings", () => {
     }),
   );
 
-  it.effect("rejects unsupported providers and relative vault paths", () =>
+  it.effect("accepts external provider selection without provider-specific settings", () =>
+    Effect.gen(function* () {
+      expect(
+        yield* loadNotesSettingsEffect(
+          "/repo",
+          settingsEnv({ notes: { provider: "notes-assistant" } }),
+        ),
+      ).toEqual({ provider: "notes-assistant" });
+    }),
+  );
+
+  it.effect("rejects empty provider IDs and relative Obsidian vault paths", () =>
     Effect.gen(function* () {
       const provider = yield* Effect.result(
-        loadNotesSettingsEffect(
-          "/repo",
-          settingsEnv({
-            notes: { provider: "other", vaultPath: "/vault" },
-          }),
-        ),
+        loadNotesSettingsEffect("/repo", settingsEnv({ notes: { provider: "" } })),
       );
       const path = yield* Effect.result(
         loadNotesSettingsEffect(

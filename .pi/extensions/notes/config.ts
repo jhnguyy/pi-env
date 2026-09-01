@@ -12,8 +12,8 @@ export const NOTES_SETTINGS_KEY = "notes";
 const AbsolutePathSchema = Schema.String.check(Schema.isPattern(/^(?:\/|[A-Za-z]:[\\/]).+/));
 
 export const NotesSettingsSchema = Schema.Struct({
-  provider: Schema.Literal("obsidian"),
-  vaultPath: AbsolutePathSchema,
+  provider: Schema.String.check(Schema.isMinLength(1)),
+  vaultPath: Schema.optionalKey(AbsolutePathSchema),
 });
 
 export type NotesSettings = typeof NotesSettingsSchema.Type;

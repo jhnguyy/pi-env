@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -12,24 +12,27 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { Effect } from "effect";
-
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import {
+  NOTES_AREA_PREFIXES,
   NotesProviderError,
-  type ExactEdit,
+  type NoteDocument,
   type NoteEntry,
   type NoteSearchResult,
+  type NotesDeleteRequest,
+  type NotesListRequest,
+  type NotesMutationResult,
   type NotesProvider,
+  type NotesSearchRequest,
+  type NotesWriteRequest,
 } from "./domain";
 
 const MARKDOWN_EXTENSION = ".md";
-const INDEX_ENTRY_NAMES = new Set(["_index.md", "overview.md"]);
 const MAX_SEARCH_RESULTS = 100;
+const DAILY_NOTES_SETTINGS_PATH = ".obsidian/daily-notes.json";
 
-export function createObsidianProviderEffect(
-  vaultPath: string,
-): Effect.Effect<NotesProvider, NotesProviderError> {
-  return ioEffect(async () => {
+export async function createObsidianProvider(vaultPath: string): Promise<NotesProvider> {
+  try {
     const root = await realpath(vaultPath);
     const rootStat = await stat(root);
     if (!rootStat.isDirectory()) {
@@ -39,118 +42,194 @@ export function createObsidianProviderEffect(
       });
     }
     return new ObsidianProvider(root);
-  }, `Cannot open Obsidian vault: ${vaultPath}`);
+  } catch (cause) {
+    throw providerError(cause, `Cannot open Obsidian vault: ${vaultPath}`);
+  }
 }
 
 class ObsidianProvider implements NotesProvider {
-  readonly id = "obsidian" as const;
+  readonly id = "obsidian";
 
-  constructor(readonly root: string) {}
+  constructor(private readonly root: string) {}
 
-  index(): Effect.Effect<string, NotesProviderError> {
-    return Effect.map(this.list(), (notes) => formatIndex(notes));
-  }
-
-  list(prefix?: string): Effect.Effect<readonly NoteEntry[], NotesProviderError> {
-    return ioEffect(async (signal) => {
-      const normalizedPrefix = prefix === undefined ? undefined : normalizePrefix(prefix);
+  async list(request: NotesListRequest, signal?: AbortSignal): Promise<readonly NoteEntry[]> {
+    try {
+      signal?.throwIfAborted();
+      const areaPrefix = request.area === undefined ? undefined : NOTES_AREA_PREFIXES[request.area];
+      const explicitPrefix =
+        request.prefix === undefined ? undefined : normalizePrefix(request.prefix);
       const paths = await walkMarkdownFiles(this.root, this.root, signal);
-      const matching = normalizedPrefix
-        ? paths.filter((notePath) => notePath.startsWith(normalizedPrefix))
-        : paths;
       const entries: NoteEntry[] = [];
-      for (const notePath of matching) {
-        signal.throwIfAborted();
+      for (const notePath of paths) {
+        signal?.throwIfAborted();
+        if (areaPrefix && !notePath.startsWith(areaPrefix)) continue;
+        if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
         const metadata = await stat(path.join(this.root, ...notePath.split("/")));
-        entries.push({
-          path: notePath,
-          size: metadata.size,
-          modifiedAt: metadata.mtimeMs,
-        });
+        entries.push({ path: notePath, size: metadata.size, modifiedAt: metadata.mtimeMs });
       }
       return entries.sort((left, right) => left.path.localeCompare(right.path));
-    }, "Cannot list Obsidian notes");
-  }
-
-  read(notePath: string): Effect.Effect<string, NotesProviderError> {
-    return ioEffect(async (signal) => {
-      const target = await this.resolveExistingNote(notePath);
-      return readFile(target.canonical, { encoding: "utf8", signal });
-    }, `Cannot read note: ${notePath}`);
-  }
-
-  search(query: string): Effect.Effect<readonly NoteSearchResult[], NotesProviderError> {
-    if (query.trim().length === 0) {
-      return Effect.fail(
-        new NotesProviderError({
-          code: "invalid-path",
-          message: "Notes search requires a non-empty query.",
-        }),
-      );
+    } catch (cause) {
+      throw providerError(cause, "Cannot list Obsidian notes");
     }
+  }
 
-    return Effect.flatMap(this.list(), (notes) =>
-      ioEffect(async (signal) => {
-        const needle = query.toLocaleLowerCase();
-        const results: NoteSearchResult[] = [];
-        for (const note of notes) {
-          signal.throwIfAborted();
-          const target = await this.resolveExistingNote(note.path);
-          const content = await readFile(target.canonical, { encoding: "utf8", signal });
-          const pathMatch = note.path.toLocaleLowerCase().includes(needle);
-          const contentMatch = content.toLocaleLowerCase().includes(needle);
-          if (!pathMatch && !contentMatch) continue;
-          results.push({
-            path: note.path,
-            title: markdownTitle(content),
-            snippet: matchingSnippet(content, needle),
-          });
-          if (results.length >= MAX_SEARCH_RESULTS) break;
+  async read(notePath: string, signal?: AbortSignal): Promise<NoteDocument> {
+    try {
+      signal?.throwIfAborted();
+      const target = await this.resolveExistingNote(notePath);
+      return await readDocument(target.canonical, normalizeNotePath(notePath), signal);
+    } catch (cause) {
+      throw providerError(cause, `Cannot read note: ${notePath}`);
+    }
+  }
+
+  async search(
+    request: NotesSearchRequest,
+    signal?: AbortSignal,
+  ): Promise<readonly NoteSearchResult[]> {
+    if (request.query.trim().length === 0) {
+      throw new NotesProviderError({
+        code: "invalid-path",
+        message: "Notes search requires a non-empty query.",
+      });
+    }
+    try {
+      const selectedAreas = request.areas ?? [];
+      const notes = await this.list({}, signal);
+      const needle = request.query.toLocaleLowerCase();
+      const limit = Math.min(request.limit ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+      const results: NoteSearchResult[] = [];
+      for (const note of notes) {
+        signal?.throwIfAborted();
+        if (
+          selectedAreas.length > 0 &&
+          !selectedAreas.some((area) => note.path.startsWith(NOTES_AREA_PREFIXES[area]))
+        ) {
+          continue;
         }
-        return results;
-      }, `Cannot search notes for: ${query}`),
-    );
-  }
-
-  write(notePath: string, content: string): Effect.Effect<void, NotesProviderError> {
-    return ioEffect(async (signal) => {
-      const target = await this.resolveWritableNote(notePath);
-      await atomicWrite(target, content, signal);
-    }, `Cannot write note: ${notePath}`);
-  }
-
-  edit(
-    notePath: string,
-    edits: readonly ExactEdit[],
-    append?: string,
-  ): Effect.Effect<void, NotesProviderError> {
-    return ioEffect(async (signal) => {
-      const target = await this.resolveExistingNote(notePath);
-      const original = await readFile(target.canonical, { encoding: "utf8", signal });
-      const next = applyExactEdits(original, edits, append);
-      await atomicWrite(target.canonical, next, signal);
-    }, `Cannot edit note: ${notePath}`);
-  }
-
-  delete(notePath: string): Effect.Effect<void, NotesProviderError> {
-    return ioEffect(async (signal) => {
-      signal.throwIfAborted();
-      const target = await this.resolveExistingNote(notePath);
-      const metadata = await lstat(target.lexical);
-      if (!metadata.isFile() && !metadata.isSymbolicLink()) {
-        throw new NotesProviderError({
-          code: "not-a-note",
-          message: `Not a note file: ${notePath}`,
+        const document = await this.read(note.path, signal);
+        const pathMatch = note.path.toLocaleLowerCase().includes(needle);
+        const contentMatch = document.content.toLocaleLowerCase().includes(needle);
+        if (!pathMatch && !contentMatch) continue;
+        results.push({
+          path: note.path,
+          revision: document.revision,
+          size: document.size,
+          modifiedAt: document.modifiedAt,
+          title: markdownTitle(document.content),
+          snippet: matchingSnippet(document.content, needle),
         });
+        if (results.length >= limit) break;
       }
-      signal.throwIfAborted();
-      await unlink(target.lexical);
-    }, `Cannot delete note: ${notePath}`);
+      return results;
+    } catch (cause) {
+      throw providerError(cause, `Cannot search notes for: ${request.query}`);
+    }
   }
 
-  queuePath(notePath: string): string {
-    const normalized = normalizeNotePath(notePath);
-    return path.resolve(this.root, ...normalized.split("/"));
+  async resolve(reference: string, signal?: AbortSignal): Promise<NoteDocument> {
+    switch (reference) {
+      case "daily/today":
+        return this.read(await this.resolveDailyNotePath(signal), signal);
+      case "worklog/today":
+        return this.read(datedRecordPath(NOTES_AREA_PREFIXES.worklog), signal);
+      case "decisions/today":
+        return this.read(datedRecordPath(NOTES_AREA_PREFIXES.decisions), signal);
+      default:
+        throw new NotesProviderError({
+          code: "unsupported-reference",
+          message: `Unsupported note reference: ${reference}`,
+        });
+    }
+  }
+
+  async write(request: NotesWriteRequest, signal?: AbortSignal): Promise<NotesMutationResult> {
+    const normalized = normalizeNotePath(request.path);
+    const queuePath = path.resolve(this.root, ...normalized.split("/"));
+    return withFileMutationQueue(queuePath, async () => {
+      try {
+        signal?.throwIfAborted();
+        let target: string;
+        if (request.expectedRevision === null) {
+          try {
+            await this.resolveExistingNote(normalized);
+            throw conflict(normalized);
+          } catch (cause) {
+            if (!(cause instanceof NotesProviderError) || cause.code !== "not-found") throw cause;
+          }
+          target = await this.resolveWritableNote(normalized);
+        } else {
+          const existing = await this.resolveExistingNote(normalized);
+          const current = await readDocument(existing.canonical, normalized, signal);
+          if (current.revision !== request.expectedRevision) throw conflict(normalized);
+          target = existing.canonical;
+        }
+        await atomicWrite(target, request.content, signal);
+        const written = await readDocument(target, normalized, signal);
+        return { path: normalized, revision: written.revision };
+      } catch (cause) {
+        throw providerError(cause, `Cannot write note: ${request.path}`);
+      }
+    });
+  }
+
+  async delete(request: NotesDeleteRequest, signal?: AbortSignal): Promise<NotesMutationResult> {
+    const normalized = normalizeNotePath(request.path);
+    const queuePath = path.resolve(this.root, ...normalized.split("/"));
+    return withFileMutationQueue(queuePath, async () => {
+      try {
+        signal?.throwIfAborted();
+        const target = await this.resolveExistingNote(normalized);
+        const current = await readDocument(target.canonical, normalized, signal);
+        if (current.revision !== request.expectedRevision) throw conflict(normalized);
+        const metadata = await lstat(target.lexical);
+        if (!metadata.isFile() && !metadata.isSymbolicLink()) {
+          throw new NotesProviderError({
+            code: "not-a-note",
+            message: `Not a note file: ${request.path}`,
+          });
+        }
+        signal?.throwIfAborted();
+        await unlink(target.lexical);
+        return { path: normalized };
+      } catch (cause) {
+        throw providerError(cause, `Cannot delete note: ${request.path}`);
+      }
+    });
+  }
+
+  private async resolveDailyNotePath(signal?: AbortSignal): Promise<string> {
+    try {
+      const settingsPath = path.join(this.root, DAILY_NOTES_SETTINGS_PATH);
+      const settings = JSON.parse(await readFile(settingsPath, { encoding: "utf8", signal })) as {
+        folder?: unknown;
+        format?: unknown;
+      };
+      const folder =
+        typeof settings.folder === "string" ? settings.folder.replace(/^\/+|\/+$/g, "") : "";
+      const format =
+        typeof settings.format === "string" && settings.format.length > 0
+          ? settings.format
+          : "YYYY-MM-DD";
+      if (folder.includes("..") || folder.startsWith(".")) {
+        throw new Error("Daily Notes settings contain an invalid folder");
+      }
+      if (!/^[YMD/_.-]+$/.test(format)) {
+        throw new Error(`Unsupported Daily Notes format: ${format}`);
+      }
+      const date = new Date();
+      const year = String(date.getFullYear()).padStart(4, "0");
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const filename = format
+        .replaceAll("YYYY", year)
+        .replaceAll("MM", month)
+        .replaceAll("DD", day);
+      if (/[YMD]/.test(filename)) throw new Error(`Unsupported Daily Notes format: ${format}`);
+      return `${folder ? `${folder}/` : ""}${filename}.md`;
+    } catch (cause) {
+      throw providerError(cause, "Cannot resolve Daily Notes settings");
+    }
   }
 
   private async resolveExistingNote(
@@ -181,14 +260,6 @@ class ObsidianProvider implements NotesProvider {
     const normalized = normalizeNotePath(notePath);
     const lexical = path.resolve(this.root, ...normalized.split("/"));
     assertLexicallyContained(this.root, lexical, notePath);
-
-    try {
-      const existing = await this.resolveExistingNote(normalized);
-      return existing.canonical;
-    } catch (error) {
-      if (!(error instanceof NotesProviderError) || error.code !== "not-found") throw error;
-    }
-
     const parent = path.dirname(lexical);
     const existingParent = await nearestExistingParent(parent);
     const canonicalParent = await realpath(existingParent);
@@ -200,49 +271,36 @@ class ObsidianProvider implements NotesProvider {
   }
 }
 
-export function applyExactEdits(
-  original: string,
-  edits: readonly ExactEdit[],
-  append?: string,
-): string {
-  let next = original;
-  for (const edit of edits) {
-    if (edit.oldText.length === 0) {
-      throw new NotesProviderError({
-        code: "missing-edit",
-        message: "Exact edit text must not be empty.",
-      });
-    }
-    const first = next.indexOf(edit.oldText);
-    if (first < 0) {
-      throw new NotesProviderError({
-        code: "missing-edit",
-        message: "Exact edit text was not found.",
-      });
-    }
-    const second = next.indexOf(edit.oldText, first + edit.oldText.length);
-    if (second >= 0) {
-      throw new NotesProviderError({
-        code: "ambiguous-edit",
-        message: "Exact edit text matched more than once.",
-      });
-    }
-    next = `${next.slice(0, first)}${edit.newText}${next.slice(first + edit.oldText.length)}`;
-  }
-  return append ? next + append : next;
+async function readDocument(
+  target: string,
+  notePath: string,
+  signal?: AbortSignal,
+): Promise<NoteDocument> {
+  const content = await readFile(target, { encoding: "utf8", signal });
+  const metadata = await stat(target);
+  return {
+    path: notePath,
+    content,
+    revision: revisionOf(content),
+    size: metadata.size,
+    modifiedAt: metadata.mtimeMs,
+  };
 }
 
-function ioEffect<A>(
-  operation: (signal: AbortSignal) => Promise<A>,
-  message: string,
-): Effect.Effect<A, NotesProviderError> {
-  return Effect.tryPromise({
-    try: operation,
-    catch: (cause) =>
-      cause instanceof NotesProviderError
-        ? cause
-        : new NotesProviderError({ code: "io", message, cause }),
+function revisionOf(content: string): string {
+  return createHash("sha256").update(content).digest("base64url");
+}
+
+function conflict(notePath: string): NotesProviderError {
+  return new NotesProviderError({
+    code: "conflict",
+    message: `Note changed since it was read: ${notePath}`,
   });
+}
+
+function providerError(cause: unknown, message: string): unknown {
+  if (cause instanceof NotesProviderError || isAbortError(cause)) return cause;
+  return new NotesProviderError({ code: "io", message, cause });
 }
 
 function normalizeNotePath(input: string): string {
@@ -340,28 +398,29 @@ async function nearestExistingParent(candidate: string): Promise<string> {
 async function walkMarkdownFiles(
   root: string,
   directory: string,
-  signal: AbortSignal,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  signal.throwIfAborted();
+  signal?.throwIfAborted();
   const entries = await readdir(directory, { withFileTypes: true });
   const paths: string[] = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     if (entry.name.startsWith(".")) continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       paths.push(...(await walkMarkdownFiles(root, absolute, signal)));
       continue;
     }
-    if (!entry.isFile() || path.extname(entry.name).toLocaleLowerCase() !== MARKDOWN_EXTENSION)
+    if (!entry.isFile() || path.extname(entry.name).toLocaleLowerCase() !== MARKDOWN_EXTENSION) {
       continue;
+    }
     paths.push(path.relative(root, absolute).split(path.sep).join("/"));
   }
   return paths;
 }
 
-async function atomicWrite(target: string, content: string, signal: AbortSignal): Promise<void> {
-  signal.throwIfAborted();
+async function atomicWrite(target: string, content: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
   let mode: number | undefined;
   try {
@@ -369,11 +428,10 @@ async function atomicWrite(target: string, content: string, signal: AbortSignal)
   } catch (cause) {
     if (!isMissingFileError(cause)) throw cause;
   }
-
   try {
     await writeFile(temp, content, { encoding: "utf8", flag: "wx", signal });
     if (mode !== undefined) await chmod(temp, mode);
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     await rename(temp, target);
   } catch (cause) {
     await unlink(temp).catch(() => undefined);
@@ -381,25 +439,11 @@ async function atomicWrite(target: string, content: string, signal: AbortSignal)
   }
 }
 
-function formatIndex(notes: readonly NoteEntry[]): string {
-  const folderCounts = new Map<string, number>();
-  const entries: string[] = [];
-  for (const note of notes) {
-    const [first, ...rest] = note.path.split("/");
-    const folder = rest.length === 0 ? "(root)" : `${first}/`;
-    folderCounts.set(folder, (folderCounts.get(folder) ?? 0) + 1);
-    if (INDEX_ENTRY_NAMES.has(path.posix.basename(note.path).toLocaleLowerCase()))
-      entries.push(note.path);
-  }
-  const lines = [`[Notes Index]|provider:obsidian|count:${notes.length}`];
-  for (const [folder, count] of [...folderCounts].sort(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    lines.push(`|${folder}: ${count}`);
-  }
-  if (entries.length > 0)
-    lines.push("|entry-notes:", ...entries.sort().map((entry) => `|- ${entry}`));
-  return lines.join("\n");
+function datedRecordPath(prefix: string, date = new Date()): string {
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${prefix}${year}/${month}/${day}.md`;
 }
 
 function markdownTitle(content: string): string | undefined {
@@ -417,4 +461,10 @@ function matchingSnippet(content: string, needle: string): string | undefined {
 
 function isMissingFileError(cause: unknown): boolean {
   return typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT";
+}
+
+function isAbortError(cause: unknown): boolean {
+  return (
+    typeof cause === "object" && cause !== null && "name" in cause && cause.name === "AbortError"
+  );
 }
