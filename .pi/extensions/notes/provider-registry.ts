@@ -3,19 +3,22 @@ import { NotesProviderError, type NotesProvider } from "./domain";
 const REGISTRY_KEY = Symbol.for("@pi-env/notes-providers");
 
 type Registry = Map<string, NotesProvider>;
-type RegistryGlobal = typeof globalThis & { [REGISTRY_KEY]?: Registry };
+type RegistryGlobal = typeof globalThis & { [key: symbol]: unknown };
 
 function registry(): Registry {
   const root = globalThis as RegistryGlobal;
-  return (root[REGISTRY_KEY] ??= new Map());
+  const existing = root[REGISTRY_KEY];
+  if (existing instanceof Map) return existing as Registry;
+  const created: Registry = new Map();
+  root[REGISTRY_KEY] = created;
+  return created;
 }
 
 /** Register one provider process-wide so separate extension bundles can supply it. */
 export function registerNotesProvider(provider: NotesProvider): () => void {
   validateProvider(provider);
   const providers = registry();
-  const existing = providers.get(provider.id);
-  if (existing !== undefined && existing !== provider) {
+  if (providers.has(provider.id)) {
     throw new NotesProviderError({
       code: "duplicate-provider",
       message: `Notes provider is already registered: ${provider.id}`,

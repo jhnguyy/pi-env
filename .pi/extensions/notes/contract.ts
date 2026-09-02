@@ -8,6 +8,9 @@ import {
 import { Type, type Static } from "typebox";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
 import {
+  MAX_NOTE_BYTES,
+  MAX_SEARCH_QUERY_LENGTH,
+  MAX_SEARCH_RESULTS,
   NOTES_AREAS,
   NOTES_AREA_PREFIXES,
   NotesProviderError,
@@ -32,7 +35,9 @@ export const NOTES_ACTIONS = [
 
 export const NOTES_PARAMETERS = Type.Object({
   action: StringEnum(NOTES_ACTIONS, { description: "Notes operation to perform" }),
-  path: Type.Optional(Type.String({ description: "Store-relative Markdown path" })),
+  path: Type.Optional(
+    Type.String({ maxLength: 1_024, description: "Store-relative Markdown path" }),
+  ),
   area: Type.Optional(
     StringEnum(NOTES_AREAS, {
       description: "Canonical area for list: wiki, worklog, or decisions",
@@ -40,16 +45,27 @@ export const NOTES_PARAMETERS = Type.Object({
   ),
   areas: Type.Optional(
     Type.Array(StringEnum(NOTES_AREAS), {
+      maxItems: NOTES_AREAS.length,
+      uniqueItems: true,
       description: "Canonical areas for search: wiki, worklog, or decisions",
     }),
   ),
-  prefix: Type.Optional(Type.String({ description: "Optional path prefix for list" })),
-  query: Type.Optional(Type.String({ description: "Text or path query for search" })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
-  reference: Type.Optional(
-    Type.String({ description: "Provider-owned reference, such as daily/today" }),
+  prefix: Type.Optional(
+    Type.String({ maxLength: 1_024, description: "Optional path prefix for list" }),
   ),
-  content: Type.Optional(Type.String({ description: "Markdown content for write" })),
+  query: Type.Optional(
+    Type.String({
+      maxLength: MAX_SEARCH_QUERY_LENGTH,
+      description: "Text or path query for search",
+    }),
+  ),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_SEARCH_RESULTS })),
+  reference: Type.Optional(
+    Type.String({ maxLength: 256, description: "Provider-owned reference, such as daily/today" }),
+  ),
+  content: Type.Optional(
+    Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown content for write" }),
+  ),
   revision: Type.Optional(
     Type.Union([Type.String(), Type.Null()], {
       description:
@@ -59,13 +75,18 @@ export const NOTES_PARAMETERS = Type.Object({
   edits: Type.Optional(
     Type.Array(
       Type.Object({
-        oldText: Type.String({ description: "Exact text that must occur once" }),
-        newText: Type.String({ description: "Replacement text" }),
+        oldText: Type.String({
+          maxLength: MAX_NOTE_BYTES,
+          description: "Exact text that must occur once",
+        }),
+        newText: Type.String({ maxLength: MAX_NOTE_BYTES, description: "Replacement text" }),
       }),
-      { description: "Exact replacements for edit" },
+      { maxItems: 100, description: "Exact replacements for edit" },
     ),
   ),
-  append: Type.Optional(Type.String({ description: "Markdown text to append during edit" })),
+  append: Type.Optional(
+    Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown text to append during edit" }),
+  ),
 });
 
 export type NotesParams = Static<typeof NOTES_PARAMETERS>;
@@ -86,6 +107,7 @@ export const NOTES_DESCRIPTION = [
   "Use list with an area or prefix for complete inventory.",
   "Use read or search before editing an existing note.",
   "Mutations require a revision precondition. Use null only when creating a note.",
+  "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
   "Write, edit, and delete mutate notes.",
 ].join(" ");
 
@@ -302,18 +324,24 @@ function boundDetails(details: NotesToolDetails): NotesToolDetails {
 }
 
 function formatIndex(notes: readonly NoteEntry[]): string {
-  const lines = [`[Notes Index]|count:${notes.length}`];
-  for (const area of NOTES_AREAS) {
-    const prefix = NOTES_AREA_PREFIXES[area];
-    const count = notes.filter((note) => note.path.startsWith(prefix)).length;
-    lines.push(`|${area}[${count}]:${prefix}`);
+  const counts = new Map<NotesArea, number>(NOTES_AREAS.map((area) => [area, 0]));
+  for (const note of notes) {
+    const area = NOTES_AREAS.find((candidate) =>
+      note.path.startsWith(NOTES_AREA_PREFIXES[candidate]),
+    );
+    if (area) counts.set(area, (counts.get(area) ?? 0) + 1);
   }
-  return lines.join("\n");
+  return [
+    `[Notes Index]|count:${notes.length}`,
+    ...NOTES_AREAS.map((area) => `|${area}[${counts.get(area) ?? 0}]:${NOTES_AREA_PREFIXES[area]}`),
+  ].join("\n");
 }
 
 function formatList(notes: readonly NoteEntry[], area?: NotesArea, prefix?: string): string {
-  const scope = area ? ` in ${area}` : prefix ? ` under ${prefix}` : "";
-  const header = `Found ${notes.length} note(s)${scope}:`;
+  const scope = [area ? `in ${area}` : undefined, prefix ? `under ${prefix}` : undefined]
+    .filter((part) => part !== undefined)
+    .join(" and ");
+  const header = `Found ${notes.length} note(s)${scope ? ` ${scope}` : ""}:`;
   return [
     header,
     ...notes.map((note) => `- ${note.path}${note.size === undefined ? "" : ` (${note.size}B)`}`),

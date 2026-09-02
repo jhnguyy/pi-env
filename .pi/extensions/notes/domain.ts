@@ -1,6 +1,10 @@
 import { Data } from "effect";
 
 export const NOTES_AREAS = ["wiki", "worklog", "decisions"] as const;
+export const MAX_NOTE_BYTES = 1_048_576;
+export const MAX_NOTE_COUNT = 10_000;
+export const MAX_SEARCH_QUERY_LENGTH = 1_000;
+export const MAX_SEARCH_RESULTS = 100;
 export type NotesArea = (typeof NOTES_AREAS)[number];
 
 export const NOTES_AREA_PREFIXES: Readonly<Record<NotesArea, string>> = {
@@ -84,6 +88,7 @@ export class NotesProviderError extends Data.TaggedError("NotesProviderError")<{
     | "invalid-provider"
     | "duplicate-provider"
     | "provider-unavailable"
+    | "resource-limit"
     | "io";
   readonly message: string;
   readonly cause?: unknown;

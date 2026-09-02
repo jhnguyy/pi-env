@@ -120,6 +120,9 @@ describe("notes extension", () => {
 
     expect(testHarness.tools).toHaveLength(1);
     expect(testHarness.tools[0].name).toBe("notes");
+    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
+      expect.stringContaining("secrets"),
+    );
     expect(testHarness.registrations).toHaveLength(1);
     expect(testHarness.registrations[0].tool.parameters).toBe(testHarness.tools[0].parameters);
     expect(testHarness.registrations[0].capabilities).toEqual([

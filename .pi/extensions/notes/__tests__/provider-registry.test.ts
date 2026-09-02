@@ -30,7 +30,9 @@ describe("notes provider registry", () => {
   });
 
   it("rejects duplicate and incomplete providers", () => {
-    registerNotesProvider(provider("same"));
+    const same = provider("same");
+    registerNotesProvider(same);
+    expect(() => registerNotesProvider(same)).toThrow("already registered");
     expect(() => registerNotesProvider(provider("same"))).toThrow("already registered");
     expect(() => registerNotesProvider({ id: "incomplete" } as unknown as NotesProvider)).toThrow(
       "baseline interface",

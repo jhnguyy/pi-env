@@ -39,12 +39,14 @@ The tool owns three canonical areas:
 
 Providers receive these areas as list and search filters. The tool owns their names, paths, guidance, validation, formatting, exact-edit behavior, and output limits.
 
-The baseline provider operations are list, read, search, resolve, guarded write, and guarded delete. Reads return a revision. Creating a note requires a null revision precondition. Replacing, editing, or deleting a note requires the revision returned by read. A mismatch fails with a conflict instead of overwriting newer content.
+The baseline provider operations are list, read, search, resolve, guarded write, and guarded delete. Reads return a revision. Creating a note requires a null revision precondition. Replacing, editing, or deleting a note requires the revision returned by read. Providers must check this precondition at their commit boundary and return a conflict when they detect a mismatch.
 
 ## Obsidian provider
 
-The Obsidian provider exposes Markdown files only. It excludes hidden directories such as `.obsidian/` and `.trash/`. All tool paths are vault-relative. The provider rejects traversal and symlink escapes.
+The Obsidian provider exposes Markdown files only. It excludes hidden directories such as `.obsidian/` and `.trash/`. All tool paths are vault-relative. The provider rejects traversal, symbolic-link notes, and canonical targets in hidden metadata or non-Markdown files.
 
-The vault must be on a trusted local filesystem. The provider does not defend against a privileged process that replaces verified directories during an operation. Cancellation prevents work before the atomic rename or delete commit point. A mutation can complete after cancellation reaches that commit point.
+The vault must be on a trusted local filesystem. Mutations serialize on the canonical target. The provider checks file identity and content immediately before replace or delete. Creation uses an atomic hard link and cannot replace an existing path. Standard filesystem APIs cannot make revision comparison plus replacement atomic against an independent writer. An external writer can still change a path after the final check. Cancellation prevents work before the rename, link, or delete commit point. A mutation can complete after cancellation reaches that commit point.
 
-Mutations use atomic replacement and per-path serialization. The tool applies exact edits before a revision-guarded write. Exact edits fail without changing the note when text is absent or occurs more than once.
+Replacement preserves POSIX mode bits. It does not promise to preserve ACLs or extended attributes. The provider limits note size, query size, result count, and vault inventory to bound local work.
+
+The tool applies exact edits before a revision-guarded write. Exact edits fail without changing the note when text is absent or occurs more than once. The portable `agentic-notes` skill retains note-quality, rewrite, artifact, and privacy guidance that does not belong in the storage contract.

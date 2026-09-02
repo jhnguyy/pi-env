@@ -10,7 +10,7 @@ Core design rule:
 
 > Method and storage are separate.
 
-Portable components define reusable practice. Configured extensions select providers, storage, credentials, paths, and access boundaries. Add a skill only when reusable method is not part of the tool contract.
+Portable components define reusable practice. Local adapters define storage, credentials, paths, indexes, privacy boundaries, and machine-specific defaults. Reusable skills should discover local policy before reading or writing durable state.
 
 ## Setup choices
 

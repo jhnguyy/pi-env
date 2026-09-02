@@ -45,7 +45,10 @@ export async function activateNotesExtension(
     capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: {
       promptSnippet: "Search, read, and maintain notes in the configured store",
-      promptGuidelines: ["Use notes for durable note operations when the notes tool is available."],
+      promptGuidelines: [
+        "Use notes for durable note operations when the notes tool is available.",
+        "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
+      ],
       renderCall(args, theme) {
         let text = theme.fg("toolTitle", theme.bold("notes"));
         text += ` ${theme.fg("accent", String(args.action))}`;

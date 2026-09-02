@@ -30,6 +30,7 @@ describe("notes tool contract", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
     expect(contract.description).toBe(NOTES_DESCRIPTION);
+    expect(contract.description).toContain("Never store secrets");
     expect(contract.parameters).toBe(NOTES_PARAMETERS);
     for (const action of NOTES_ACTIONS) expect(Check(contract.parameters, { action })).toBe(true);
     expect(Check(contract.parameters, {})).toBe(false);
@@ -38,13 +39,17 @@ describe("notes tool contract", () => {
       true,
     );
     expect(Check(contract.parameters, { action: "list", area: "projects" })).toBe(false);
+    expect(Check(contract.parameters, { action: "search", query: "x", limit: 101 })).toBe(false);
   });
 
   it("routes canonical areas and references through the provider", async () => {
     const fake = provider();
     const contract = createNotesContract(fake);
     await contract.execute({ action: "index" }, { cwd: "/repo" });
-    await contract.execute({ action: "list", area: "wiki", prefix: "wiki/ai" }, { cwd: "/repo" });
+    const listed = await contract.execute(
+      { action: "list", area: "wiki", prefix: "wiki/ai" },
+      { cwd: "/repo" },
+    );
     await contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" });
     await contract.execute(
       { action: "search", query: "topic", areas: ["wiki", "decisions"], limit: 12 },
@@ -54,6 +59,10 @@ describe("notes tool contract", () => {
       { action: "resolve", reference: "worklog/today" },
       { cwd: "/repo" },
     );
+    expect(listed.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining("in wiki and under wiki/ai"),
+    });
     expect(fake.list).toHaveBeenNthCalledWith(1, {}, undefined);
     expect(fake.list).toHaveBeenNthCalledWith(2, { area: "wiki", prefix: "wiki/ai" }, undefined);
     expect(fake.read).toHaveBeenCalledWith("wiki/note.md", undefined);
