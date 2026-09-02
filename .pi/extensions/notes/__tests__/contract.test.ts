@@ -8,7 +8,13 @@ import {
   NOTES_DESCRIPTION,
   NOTES_PARAMETERS,
 } from "../contract";
-import { MAX_EDIT_ITEMS, MAX_NOTE_BYTES, MAX_REVISION_LENGTH, type NotesProvider } from "../domain";
+import {
+  MAX_EDIT_ITEMS,
+  MAX_NOTE_BYTES,
+  MAX_REVISION_LENGTH,
+  type NoteSearchResult,
+  type NotesProvider,
+} from "../domain";
 
 function provider(): NotesProvider {
   return {
@@ -190,13 +196,23 @@ describe("notes tool contract", () => {
 
   it("validates and limits external provider results", async () => {
     const fake = provider();
-    vi.mocked(fake.search).mockResolvedValue([{ path: "wiki/one.md" }, { path: "wiki/two.md" }]);
+    vi.mocked(fake.list).mockResolvedValue([
+      { path: "wiki/oversized.md", size: MAX_NOTE_BYTES + 1 },
+    ]);
     const contract = createNotesContract(fake);
+    await expect(contract.execute({ action: "list" }, { cwd: "/repo" })).resolves.toMatchObject({
+      details: { notes: [{ path: "wiki/oversized.md", size: MAX_NOTE_BYTES + 1 }] },
+    });
+
+    vi.mocked(fake.search).mockResolvedValue([
+      { path: "wiki/one.md", extra: "must not escape" },
+      { path: "wiki/two.md" },
+    ] as unknown as readonly NoteSearchResult[]);
     const search = await contract.execute(
       { action: "search", query: "topic", limit: 1 },
       { cwd: "/repo" },
     );
-    expect(search.details.results).toHaveLength(1);
+    expect(search.details.results).toEqual([{ path: "wiki/one.md" }]);
 
     vi.mocked(fake.read).mockResolvedValue({
       path: "../outside.md",

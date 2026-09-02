@@ -414,8 +414,8 @@ function validateDocument(note: NoteDocument): NoteDocument {
   const path = normalizeStorePath(note.path, true);
   validateRevision(note.revision);
   assertNoteSize(note.content);
-  validateOptionalMetadata(note);
-  return { ...note, path };
+  const metadata = validateOptionalMetadata(note);
+  return { path, content: note.content, revision: note.revision, ...metadata };
 }
 
 function validateEntries(entries: readonly NoteEntry[]): readonly NoteEntry[] {
@@ -433,8 +433,12 @@ function validateEntries(entries: readonly NoteEntry[]): readonly NoteEntry[] {
       }
       validateRevision(entry.revision);
     }
-    validateOptionalMetadata(entry);
-    return { ...entry, path };
+    const metadata = validateOptionalMetadata(entry);
+    return {
+      path,
+      ...(entry.revision === undefined ? {} : { revision: entry.revision }),
+      ...metadata,
+    };
   });
 }
 
@@ -442,38 +446,59 @@ function validateSearchResults(results: readonly NoteSearchResult[]): readonly N
   if (!Array.isArray(results) || results.length > MAX_SEARCH_RESULTS) {
     throw providerContractError("Notes provider returned too many search results.");
   }
-  return results.map((searchResult) => {
-    if (!isRecord(searchResult) || typeof searchResult.path !== "string") {
-      throw providerContractError("Notes provider returned an invalid search result.");
-    }
-    const path = normalizeStorePath(searchResult.path, true);
-    if (searchResult.revision !== undefined) {
-      if (typeof searchResult.revision !== "string") {
-        throw providerContractError("Notes provider returned an invalid revision.");
-      }
-      validateRevision(searchResult.revision);
-    }
-    validateOptionalMetadata(searchResult);
-    if (
-      searchResult.title !== undefined &&
-      (typeof searchResult.title !== "string" || searchResult.title.length > 256)
-    ) {
-      throw providerContractError("Notes provider returned an oversized search title.");
-    }
-    if (
-      searchResult.snippet !== undefined &&
-      (typeof searchResult.snippet !== "string" || Buffer.byteLength(searchResult.snippet) > 2_048)
-    ) {
-      throw providerContractError("Notes provider returned an oversized search snippet.");
-    }
-    if (
-      searchResult.score !== undefined &&
-      (typeof searchResult.score !== "number" || !Number.isFinite(searchResult.score))
-    ) {
-      throw providerContractError("Notes provider returned an invalid search score.");
-    }
-    return { ...searchResult, path };
-  });
+  return results.map(validateSearchResult);
+}
+
+function validateSearchResult(searchResult: NoteSearchResult): NoteSearchResult {
+  if (!isRecord(searchResult) || typeof searchResult.path !== "string") {
+    throw providerContractError("Notes provider returned an invalid search result.");
+  }
+  const path = normalizeStorePath(searchResult.path, true);
+  const revision = validateOptionalRevision(searchResult.revision);
+  const metadata = validateOptionalMetadata(searchResult);
+  const title = validateOptionalText(searchResult.title, 256, "search title");
+  const snippet = validateOptionalText(searchResult.snippet, 2_048, "search snippet", true);
+  const score = validateOptionalScore(searchResult.score);
+  return {
+    path,
+    ...(revision === undefined ? {} : { revision }),
+    ...metadata,
+    ...(title === undefined ? {} : { title }),
+    ...(snippet === undefined ? {} : { snippet }),
+    ...(score === undefined ? {} : { score }),
+  };
+}
+
+function validateOptionalRevision(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw providerContractError("Notes provider returned an invalid revision.");
+  }
+  validateRevision(value);
+  return value;
+}
+
+function validateOptionalText(
+  value: unknown,
+  limit: number,
+  label: string,
+  byteLimit = false,
+): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw providerContractError(`Notes provider returned an invalid ${label}.`);
+  }
+  const length = byteLimit ? Buffer.byteLength(value) : value.length;
+  if (length > limit) throw providerContractError(`Notes provider returned an oversized ${label}.`);
+  return value;
+}
+
+function validateOptionalScore(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw providerContractError("Notes provider returned an invalid search score.");
+  }
+  return value;
 }
 
 function validateMutation(mutation: NotesMutationResult): NotesMutationResult {
@@ -487,16 +512,18 @@ function validateMutation(mutation: NotesMutationResult): NotesMutationResult {
     }
     validateRevision(mutation.revision);
   }
-  return { ...mutation, path };
+  return {
+    path,
+    ...(mutation.revision === undefined ? {} : { revision: mutation.revision }),
+  };
 }
 
-function validateOptionalMetadata(entry: Record<string, unknown>): void {
+function validateOptionalMetadata(
+  entry: Record<string, unknown>,
+): Pick<NoteEntry, "size" | "modifiedAt"> {
   if (
     entry.size !== undefined &&
-    (typeof entry.size !== "number" ||
-      !Number.isSafeInteger(entry.size) ||
-      entry.size < 0 ||
-      entry.size > MAX_NOTE_BYTES)
+    (typeof entry.size !== "number" || !Number.isSafeInteger(entry.size) || entry.size < 0)
   ) {
     throw providerContractError("Notes provider returned an invalid note size.");
   }
@@ -506,6 +533,10 @@ function validateOptionalMetadata(entry: Record<string, unknown>): void {
   ) {
     throw providerContractError("Notes provider returned an invalid modification time.");
   }
+  return {
+    ...(entry.size === undefined ? {} : { size: entry.size }),
+    ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
+  };
 }
 
 function validateRevision(revision: string): void {

@@ -55,6 +55,23 @@ If local notes render Markdown with sanitized HTML, inline HTML can be useful fo
 
 Avoid making HTML the primary content inside a durable Markdown note unless local policy says it is searchable and maintainable.
 
+## Security
+
+Make generated HTML self-contained and offline by default. Do not load remote scripts, styles, fonts, images, frames, or data unless the user approves the specific dependency and network access.
+
+Treat repository text, note content, source snippets, and imported data as untrusted. Escape text before placing it in HTML. Prefer `textContent` and DOM construction to `innerHTML`. When data must enter a script, use safe JSON serialization and escape `<` so the data cannot close the script element.
+
+Add a restrictive Content Security Policy. A static sidecar can use:
+
+```html
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+/>
+```
+
+A self-contained interactive sidecar can add `script-src 'unsafe-inline'`. Do not add `connect-src`, remote origins, or broad wildcards without explicit approval.
+
 ## Avoid
 
 - script-heavy artifacts without user approval

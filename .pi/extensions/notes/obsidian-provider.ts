@@ -359,6 +359,12 @@ class ObsidianProvider implements NotesProvider {
         message: `Symbolic-link notes are not allowed: ${notePath}`,
       });
     }
+    if (lexicalMetadata.nlink !== 1) {
+      throw new NotesProviderError({
+        code: "path-escape",
+        message: `Hard-linked notes are not allowed: ${notePath}`,
+      });
+    }
     let canonical: string;
     try {
       canonical = await realpath(lexical);

@@ -1,5 +1,6 @@
 import {
   chmod,
+  link,
   lstat,
   mkdtemp,
   mkdir,
@@ -120,6 +121,15 @@ describe("Obsidian notes provider", () => {
       }),
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(readFile(notePath, "utf8")).resolves.toBe("external change");
+  });
+
+  it("rejects hard-linked notes that bypass canonical containment", async () => {
+    const { root, vault, provider } = await fixture();
+    const outside = path.join(root, "outside.md");
+    await writeFile(outside, "outside");
+    await link(outside, path.join(vault, "linked.md"));
+
+    await expect(provider.read("linked.md")).rejects.toMatchObject({ code: "path-escape" });
   });
 
   it("rejects traversal, symbolic-link notes, and canonical hidden targets", async () => {
