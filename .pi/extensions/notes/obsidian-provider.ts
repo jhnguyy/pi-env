@@ -43,6 +43,8 @@ type MutationOperation = "create" | "replace" | "delete";
 
 export interface ObsidianProviderOptions {
   readonly now?: () => Date;
+  /** Test and integration hook that runs after a read resolves its target. */
+  readonly afterReadTargetResolved?: (notePath: string, target: string) => Promise<void>;
   /** Test and integration hook that runs after a mutation resolves its initial target. */
   readonly afterTargetResolved?: (
     notePath: string,
@@ -114,8 +116,10 @@ class ObsidianProvider implements NotesProvider {
   async read(notePath: string, signal?: AbortSignal): Promise<NoteDocument> {
     try {
       signal?.throwIfAborted();
-      const target = await this.resolveExistingNote(notePath);
-      return await readDocument(target.canonical, normalizeNotePath(notePath), signal);
+      const normalized = normalizeNotePath(notePath);
+      const target = await this.resolveExistingNote(normalized);
+      await this.options.afterReadTargetResolved?.(normalized, target.canonical);
+      return await readDocument(target.canonical, normalized, signal, target);
     } catch (cause) {
       throw providerError(cause, `Cannot read note: ${notePath}`);
     }
@@ -204,18 +208,24 @@ class ObsidianProvider implements NotesProvider {
       return await withFileMutationQueue(initial.canonical, async () => {
         const current = await this.resolveExistingNote(normalized);
         if (!sameTarget(current, initial)) throw conflict(normalized);
-        const document = await readDocument(current.canonical, normalized, signal);
+        const document = await readDocument(current.canonical, normalized, signal, current);
         if (document.revision !== expectedRevision) throw conflict(normalized);
         const mode = (await stat(current.canonical)).mode;
         await atomicReplace(current.canonical, request.content, mode, signal, async () => {
           await this.options.beforeCommit?.(current.canonical, "replace");
           await this.verifyCurrent(normalized, current, expectedRevision);
         });
-        const written = await readDocument(current.canonical, normalized, signal);
+        const writtenTarget = await this.resolveExistingNote(normalized);
+        const written = await readDocument(
+          writtenTarget.canonical,
+          normalized,
+          signal,
+          writtenTarget,
+        );
         return { path: normalized, revision: written.revision };
       });
     } catch (cause) {
-      throw providerError(cause, `Cannot write note: ${request.path}`);
+      throw mutationError(cause, request.path, `Cannot write note: ${request.path}`);
     }
   }
 
@@ -229,7 +239,7 @@ class ObsidianProvider implements NotesProvider {
         signal?.throwIfAborted();
         const current = await this.resolveExistingNote(normalized);
         if (!sameTarget(current, initial)) throw conflict(normalized);
-        const document = await readDocument(current.canonical, normalized, signal);
+        const document = await readDocument(current.canonical, normalized, signal, current);
         if (document.revision !== request.expectedRevision) throw conflict(normalized);
         await this.options.beforeCommit?.(current.canonical, "delete");
         await this.verifyCurrent(normalized, current, request.expectedRevision);
@@ -239,7 +249,7 @@ class ObsidianProvider implements NotesProvider {
         return { path: normalized };
       });
     } catch (cause) {
-      throw providerError(cause, `Cannot delete note: ${request.path}`);
+      throw mutationError(cause, request.path, `Cannot delete note: ${request.path}`);
     }
   }
 
@@ -260,7 +270,13 @@ class ObsidianProvider implements NotesProvider {
         await atomicCreate(target, content, signal, async () => {
           await this.options.beforeCommit?.(target, "create");
         });
-        const written = await readDocument(target, normalized, signal);
+        const writtenTarget = await this.resolveExistingNote(normalized);
+        const written = await readDocument(
+          writtenTarget.canonical,
+          normalized,
+          signal,
+          writtenTarget,
+        );
         return { path: normalized, revision: written.revision };
       } catch (cause) {
         if (isAlreadyExistsError(cause)) throw conflict(normalized);
@@ -286,7 +302,7 @@ class ObsidianProvider implements NotesProvider {
   ): Promise<void> {
     const current = await this.resolveExistingNote(notePath);
     if (!sameTarget(current, expectedTarget)) throw conflict(notePath);
-    const document = await readDocument(current.canonical, notePath);
+    const document = await readDocument(current.canonical, notePath, undefined, current);
     if (document.revision !== expectedRevision) throw conflict(notePath);
   }
 
@@ -320,18 +336,7 @@ class ObsidianProvider implements NotesProvider {
       if (folder.includes("..") || folder.startsWith(".")) {
         throw new Error("Daily Notes settings contain an invalid folder");
       }
-      if (!/^[YMD/_.-]+$/.test(format)) {
-        throw new Error(`Unsupported Daily Notes format: ${format}`);
-      }
-      const year = String(date.getFullYear()).padStart(4, "0");
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      const filename = format
-        .replaceAll("YYYY", year)
-        .replaceAll("MM", month)
-        .replaceAll("DD", day);
-      if (/[YMD]/.test(filename)) throw new Error(`Unsupported Daily Notes format: ${format}`);
-      return `${folder ? `${folder}/` : ""}${filename}.md`;
+      return `${folder ? `${folder}/` : ""}${formatDailyFilename(format, date)}.md`;
     } catch (cause) {
       throw providerError(cause, "Cannot resolve Daily Notes settings");
     }
@@ -395,13 +400,17 @@ async function readDocument(
   target: string,
   notePath: string,
   signal?: AbortSignal,
+  expectedTarget?: ResolvedNote,
 ): Promise<NoteDocument> {
-  const { content, size, modifiedAt } = await readBoundedText(
+  const { content, size, modifiedAt, device, inode } = await readBoundedText(
     target,
     MAX_NOTE_BYTES,
     `Note ${notePath}`,
     signal,
   );
+  if (expectedTarget && (device !== expectedTarget.device || inode !== expectedTarget.inode)) {
+    throw conflict(notePath);
+  }
   return {
     path: notePath,
     content,
@@ -416,7 +425,13 @@ async function readBoundedText(
   maxBytes: number,
   label: string,
   signal?: AbortSignal,
-): Promise<{ content: string; size: number; modifiedAt: number }> {
+): Promise<{
+  content: string;
+  size: number;
+  modifiedAt: number;
+  device: number;
+  inode: number;
+}> {
   const handle = await open(target, "r");
   try {
     const initial = await handle.stat();
@@ -435,6 +450,8 @@ async function readBoundedText(
       content: buffer.subarray(0, total).toString("utf8"),
       size: total,
       modifiedAt: metadata.mtimeMs,
+      device: metadata.dev,
+      inode: metadata.ino,
     };
   } finally {
     await handle.close();
@@ -476,6 +493,13 @@ function resourceLimit(message: string): NotesProviderError {
   return new NotesProviderError({ code: "resource-limit", message });
 }
 
+function mutationError(cause: unknown, notePath: string, message: string): unknown {
+  if (cause instanceof NotesProviderError && cause.code === "not-found") {
+    return conflict(notePath);
+  }
+  return providerError(cause, message);
+}
+
 function providerError(cause: unknown, message: string): unknown {
   if (cause instanceof NotesProviderError || isAbortError(cause)) return cause;
   return new NotesProviderError({ code: "io", message, cause });
@@ -488,6 +512,7 @@ function normalizeNotePath(input: string): string {
     stripped.length > 1_024 ||
     path.posix.isAbsolute(stripped) ||
     /^[A-Za-z]:\//.test(stripped) ||
+    stripped.includes(":") ||
     stripped.includes("\0")
   ) {
     throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${input}` });
@@ -517,7 +542,12 @@ function normalizeNotePath(input: string): string {
 function normalizePrefix(input: string): string {
   const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
   if (stripped === "") return "";
-  if (stripped.length > 1_024 || path.posix.isAbsolute(stripped) || stripped.includes("\0")) {
+  if (
+    stripped.length > 1_024 ||
+    path.posix.isAbsolute(stripped) ||
+    stripped.includes(":") ||
+    stripped.includes("\0")
+  ) {
     throw new NotesProviderError({
       code: "invalid-path",
       message: `Invalid note prefix: ${input}`,
@@ -688,6 +718,36 @@ async function atomicReplace(
 
 function temporaryPath(target: string): string {
   return path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
+}
+
+function formatDailyFilename(format: string, date: Date): string {
+  const counts = { YYYY: 0, MM: 0, DD: 0 };
+  for (let offset = 0; offset < format.length;) {
+    const token = (["YYYY", "MM", "DD"] as const).find((candidate) =>
+      format.startsWith(candidate, offset),
+    );
+    if (token) {
+      counts[token] += 1;
+      offset += token.length;
+      continue;
+    }
+    if (!"/_.-".includes(format[offset] ?? "")) throw unsupportedDailyFormat(format);
+    offset += 1;
+  }
+  if (counts.YYYY !== 1 || counts.MM !== 1 || counts.DD !== 1) {
+    throw unsupportedDailyFormat(format);
+  }
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return format.replace("YYYY", year).replace("MM", month).replace("DD", day);
+}
+
+function unsupportedDailyFormat(format: string): NotesProviderError {
+  return new NotesProviderError({
+    code: "invalid-path",
+    message: `Unsupported Daily Notes format: ${format}`,
+  });
 }
 
 function datedRecordPath(prefix: string, date: Date): string {

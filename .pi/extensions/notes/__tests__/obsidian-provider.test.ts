@@ -4,6 +4,7 @@ import {
   mkdtemp,
   mkdir,
   readFile,
+  rename,
   rm,
   stat,
   symlink,
@@ -79,6 +80,31 @@ describe("Obsidian notes provider", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("rejects a read when the resolved file identity changes before open", async () => {
+    let vault = "";
+    const fixtureState = await fixture({
+      afterReadTargetResolved: async (_notePath, target) => {
+        const replacement = path.join(vault, "replacement.md");
+        await writeFile(replacement, "replacement");
+        await rename(replacement, target);
+      },
+    });
+    vault = fixtureState.vault;
+    await writeFile(path.join(vault, "note.md"), "original");
+
+    await expect(fixtureState.provider.read("note.md")).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("treats missing guarded mutation targets as conflicts", async () => {
+    const { provider } = await fixture();
+    await expect(
+      provider.write({ path: "missing.md", content: "content", expectedRevision: "revision" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      provider.delete({ path: "missing.md", expectedRevision: "revision" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("rejects stale writes and preserves the current note", async () => {
     const { vault, provider } = await fixture();
     const notePath = path.join(vault, "note.md");
@@ -126,6 +152,17 @@ describe("Obsidian notes provider", () => {
     await expect(lstat(path.join(vault, ".obsidian", "new"))).rejects.toMatchObject({
       code: "ENOENT",
     });
+  });
+
+  it("rejects ambiguous and unsupported Daily Notes tokens", async () => {
+    const { vault, provider } = await fixture({ now: () => new Date(2026, 8, 1, 12) });
+    await mkdir(path.join(vault, ".obsidian"));
+    await writeFile(
+      path.join(vault, ".obsidian", "daily-notes.json"),
+      JSON.stringify({ folder: "inbox", format: "MMMM/DD/YYYY" }),
+    );
+
+    await expect(provider.resolve("daily/today")).rejects.toThrow("Unsupported Daily Notes format");
   });
 
   it("resolves the Obsidian daily note and canonical dated records", async () => {
@@ -307,6 +344,13 @@ describe("Obsidian notes provider", () => {
     await expect(
       provider.delete({ path: "directory.md", expectedRevision: "revision" }),
     ).rejects.toBeInstanceOf(NotesProviderError);
+  });
+
+  it("rejects portable paths that can address Windows alternate streams", async () => {
+    const { provider } = await fixture();
+    await expect(
+      provider.write({ path: "visible.txt:private.md", content: "unsafe", expectedRevision: null }),
+    ).rejects.toMatchObject({ code: "invalid-path" });
   });
 
   it("does not create a file when cancellation is already requested", async () => {

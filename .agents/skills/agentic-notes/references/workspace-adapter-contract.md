@@ -68,4 +68,4 @@ Useful adapters usually specify:
 
 ## Adapter Discovery
 
-Agents should look for adapter instructions in project/user context first. If multiple policies conflict, follow the most local and most explicit policy, then ask if still ambiguous.
+Agents should look for adapter instructions in designated project and user context first. Preserve system, developer, user, and project instruction priority when policies conflict. Within the same instruction level, prefer the most local and explicit designated note policy. Ask if the boundary remains ambiguous.

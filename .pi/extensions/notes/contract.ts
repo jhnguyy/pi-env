@@ -8,7 +8,12 @@ import {
 import { Type, type Static } from "typebox";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
 import {
+  MAX_APPEND_LENGTH,
+  MAX_EDIT_ITEMS,
+  MAX_EDIT_TEXT_LENGTH,
   MAX_NOTE_BYTES,
+  MAX_NOTE_COUNT,
+  MAX_REVISION_LENGTH,
   MAX_SEARCH_QUERY_LENGTH,
   MAX_SEARCH_RESULTS,
   NOTES_AREAS,
@@ -19,6 +24,7 @@ import {
   type NoteEntry,
   type NoteSearchResult,
   type NotesArea,
+  type NotesMutationResult,
   type NotesProvider,
 } from "./domain";
 
@@ -68,7 +74,7 @@ export const NOTES_PARAMETERS = Type.Object({
     Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown content for write" }),
   ),
   revision: Type.Optional(
-    Type.Union([Type.String(), Type.Null()], {
+    Type.Union([Type.String({ maxLength: MAX_REVISION_LENGTH }), Type.Null()], {
       description:
         "Mutation precondition. Use null to require creation or the revision returned by read.",
     }),
@@ -77,16 +83,22 @@ export const NOTES_PARAMETERS = Type.Object({
     Type.Array(
       Type.Object({
         oldText: Type.String({
-          maxLength: MAX_NOTE_BYTES,
+          maxLength: MAX_EDIT_TEXT_LENGTH,
           description: "Exact text that must occur once",
         }),
-        newText: Type.String({ maxLength: MAX_NOTE_BYTES, description: "Replacement text" }),
+        newText: Type.String({
+          maxLength: MAX_EDIT_TEXT_LENGTH,
+          description: "Replacement text",
+        }),
       }),
-      { maxItems: 100, description: "Exact replacements for edit" },
+      { maxItems: MAX_EDIT_ITEMS, description: "Exact replacements for edit" },
     ),
   ),
   append: Type.Optional(
-    Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown text to append during edit" }),
+    Type.String({
+      maxLength: MAX_APPEND_LENGTH,
+      description: "Markdown text to append during edit",
+    }),
   ),
 });
 
@@ -151,13 +163,13 @@ async function executeNotesAction(
 }
 
 async function indexAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const notes = await provider.list({}, signal);
+  const notes = validateEntries(await provider.list({}, signal));
   return result(formatIndex(notes), { action: params.action, notes });
 }
 
 async function listAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const prefix = params.prefix === undefined ? undefined : normalizePrefix(params.prefix);
-  const notes = await provider.list({ area: params.area, prefix }, signal);
+  const notes = validateEntries(await provider.list({ area: params.area, prefix }, signal));
   return result(formatList(notes, params.area, prefix), { action: params.action, notes });
 }
 
@@ -168,10 +180,10 @@ async function readAction(provider: NotesProvider, params: NotesParams, signal?:
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const query = requireSearchQuery(params);
-  const results = await provider.search(
-    { query, areas: params.areas, limit: params.limit },
-    signal,
-  );
+  const limit = params.limit ?? MAX_SEARCH_RESULTS;
+  const results = validateSearchResults(
+    await provider.search({ query, areas: params.areas, limit }, signal),
+  ).slice(0, limit);
   return result(formatSearch(results), { action: params.action, results });
 }
 
@@ -180,7 +192,8 @@ async function resolveAction(provider: NotesProvider, params: NotesParams, signa
   return documentResult(params, note);
 }
 
-function documentResult(params: NotesParams, note: NoteDocument) {
+function documentResult(params: NotesParams, candidate: NoteDocument) {
+  const note = validateDocument(candidate);
   return result(formatDocument(note.path, note.revision, note.content), {
     action: params.action,
     path: note.path,
@@ -192,13 +205,15 @@ async function writeAction(provider: NotesProvider, params: NotesParams, signal?
   const notePath = requirePath(params);
   if (params.content === undefined) throw new Error("notes write requires content");
   assertNoteSize(params.content);
-  const mutation = await provider.write(
-    {
-      path: notePath,
-      content: params.content,
-      expectedRevision: requireWriteRevision(params),
-    },
-    signal,
+  const mutation = validateMutation(
+    await provider.write(
+      {
+        path: notePath,
+        content: params.content,
+        expectedRevision: requireWriteRevision(params),
+      },
+      signal,
+    ),
   );
   return result(`Wrote ${mutation.path}`, {
     action: params.action,
@@ -213,15 +228,17 @@ async function editAction(provider: NotesProvider, params: NotesParams, signal?:
     throw new Error("notes edit requires edits or append");
   }
   const revision = requireExistingRevision(params);
-  const note = await provider.read(notePath, signal);
+  const note = validateDocument(await provider.read(notePath, signal));
   if (note.revision !== revision) throw conflict(notePath);
-  const mutation = await provider.write(
-    {
-      path: notePath,
-      content: applyExactEdits(note.content, params.edits ?? [], params.append),
-      expectedRevision: revision,
-    },
-    signal,
+  const mutation = validateMutation(
+    await provider.write(
+      {
+        path: notePath,
+        content: applyExactEdits(note.content, params.edits ?? [], params.append),
+        expectedRevision: revision,
+      },
+      signal,
+    ),
   );
   return result(`Edited ${mutation.path}`, {
     action: params.action,
@@ -231,9 +248,11 @@ async function editAction(provider: NotesProvider, params: NotesParams, signal?:
 }
 
 async function deleteAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const mutation = await provider.delete(
-    { path: requirePath(params), expectedRevision: requireExistingRevision(params) },
-    signal,
+  const mutation = validateMutation(
+    await provider.delete(
+      { path: requirePath(params), expectedRevision: requireExistingRevision(params) },
+      signal,
+    ),
   );
   return result(`Deleted ${mutation.path}`, { action: params.action, path: mutation.path });
 }
@@ -244,6 +263,11 @@ export function applyExactEdits(
   append?: string,
 ): string {
   assertNoteSize(original);
+  const payloadBytes = edits.reduce(
+    (total, edit) => total + Buffer.byteLength(edit.oldText) + Buffer.byteLength(edit.newText),
+    Buffer.byteLength(append ?? ""),
+  );
+  if (payloadBytes > MAX_NOTE_BYTES) throw noteSizeError("Exact-edit payload");
   let next = original;
   let nextBytes = Buffer.byteLength(original);
   for (const edit of edits) {
@@ -260,7 +284,7 @@ export function applyExactEdits(
         message: "Exact edit text was not found.",
       });
     }
-    const second = next.indexOf(edit.oldText, first + edit.oldText.length);
+    const second = next.indexOf(edit.oldText, first + 1);
     if (second >= 0) {
       throw new NotesProviderError({
         code: "ambiguous-edit",
@@ -269,12 +293,12 @@ export function applyExactEdits(
     }
     const replacementBytes =
       nextBytes - Buffer.byteLength(edit.oldText) + Buffer.byteLength(edit.newText);
-    if (replacementBytes > MAX_NOTE_BYTES) throw noteSizeError();
+    if (replacementBytes > MAX_NOTE_BYTES) throw noteSizeError("Edited note");
     next = `${next.slice(0, first)}${edit.newText}${next.slice(first + edit.oldText.length)}`;
     nextBytes = replacementBytes;
   }
   if (append === undefined) return next;
-  if (nextBytes + Buffer.byteLength(append) > MAX_NOTE_BYTES) throw noteSizeError();
+  if (nextBytes + Buffer.byteLength(append) > MAX_NOTE_BYTES) throw noteSizeError("Edited note");
   return next + append;
 }
 
@@ -289,35 +313,47 @@ function normalizePrefix(prefix: string): string {
 
 function normalizeStorePath(input: string, requireMarkdown: boolean): string {
   const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
-  if (
-    stripped.length === 0 ||
-    stripped.length > 1_024 ||
-    pathIsAbsolute(stripped) ||
-    stripped.includes("\0") ||
-    /[\x00-\x1f\x7f]/.test(stripped)
-  ) {
+  if (isInvalidStorePath(stripped)) {
     throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${input}` });
   }
   const rawSegments = stripped.split("/");
   const normalized = normalizePosixPath(stripped);
-  if (
-    rawSegments.includes("..") ||
-    normalized === ".." ||
-    normalized.startsWith("../") ||
-    normalized.split("/").some((segment) => segment.startsWith("."))
-  ) {
+  if (escapesStore(rawSegments, normalized)) {
     throw new NotesProviderError({
       code: "path-escape",
       message: `Note path escapes the store: ${input}`,
     });
   }
-  if (requireMarkdown && !normalized.toLocaleLowerCase().endsWith(".md")) {
+  if (requireMarkdown && !isMarkdownPath(stripped, normalized)) {
     throw new NotesProviderError({
       code: "not-a-note",
       message: `Note path must end in .md: ${input}`,
     });
   }
   return stripped.endsWith("/") && !normalized.endsWith("/") ? `${normalized}/` : normalized;
+}
+
+function isInvalidStorePath(input: string): boolean {
+  return (
+    input.length === 0 ||
+    input.length > 1_024 ||
+    pathIsAbsolute(input) ||
+    input.includes(":") ||
+    /[\x00-\x1f\x7f]/.test(input)
+  );
+}
+
+function escapesStore(rawSegments: readonly string[], normalized: string): boolean {
+  return (
+    rawSegments.includes("..") ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.split("/").some((segment) => segment.startsWith("."))
+  );
+}
+
+function isMarkdownPath(input: string, normalized: string): boolean {
+  return !input.endsWith("/") && normalized.toLocaleLowerCase().endsWith(".md");
 }
 
 function pathIsAbsolute(input: string): boolean {
@@ -356,20 +392,145 @@ function requireReference(params: NotesParams): string {
 }
 
 function assertNoteSize(content: string): void {
-  if (Buffer.byteLength(content) > MAX_NOTE_BYTES) throw noteSizeError();
+  if (Buffer.byteLength(content) > MAX_NOTE_BYTES) throw noteSizeError("Note content");
 }
 
-function noteSizeError(): NotesProviderError {
+function noteSizeError(subject: string): NotesProviderError {
   return new NotesProviderError({
     code: "resource-limit",
-    message: `Note content exceeds ${MAX_NOTE_BYTES} bytes.`,
+    message: `${subject} exceeds ${MAX_NOTE_BYTES} bytes.`,
   });
+}
+
+function validateDocument(note: NoteDocument): NoteDocument {
+  if (
+    !isRecord(note) ||
+    typeof note.path !== "string" ||
+    typeof note.content !== "string" ||
+    typeof note.revision !== "string"
+  ) {
+    throw providerContractError("Notes provider returned an invalid document.");
+  }
+  const path = normalizeStorePath(note.path, true);
+  validateRevision(note.revision);
+  assertNoteSize(note.content);
+  validateOptionalMetadata(note);
+  return { ...note, path };
+}
+
+function validateEntries(entries: readonly NoteEntry[]): readonly NoteEntry[] {
+  if (!Array.isArray(entries) || entries.length > MAX_NOTE_COUNT) {
+    throw providerContractError("Notes provider returned too many entries.");
+  }
+  return entries.map((entry) => {
+    if (!isRecord(entry) || typeof entry.path !== "string") {
+      throw providerContractError("Notes provider returned an invalid note entry.");
+    }
+    const path = normalizeStorePath(entry.path, true);
+    if (entry.revision !== undefined) {
+      if (typeof entry.revision !== "string") {
+        throw providerContractError("Notes provider returned an invalid revision.");
+      }
+      validateRevision(entry.revision);
+    }
+    validateOptionalMetadata(entry);
+    return { ...entry, path };
+  });
+}
+
+function validateSearchResults(results: readonly NoteSearchResult[]): readonly NoteSearchResult[] {
+  if (!Array.isArray(results) || results.length > MAX_SEARCH_RESULTS) {
+    throw providerContractError("Notes provider returned too many search results.");
+  }
+  return results.map((searchResult) => {
+    if (!isRecord(searchResult) || typeof searchResult.path !== "string") {
+      throw providerContractError("Notes provider returned an invalid search result.");
+    }
+    const path = normalizeStorePath(searchResult.path, true);
+    if (searchResult.revision !== undefined) {
+      if (typeof searchResult.revision !== "string") {
+        throw providerContractError("Notes provider returned an invalid revision.");
+      }
+      validateRevision(searchResult.revision);
+    }
+    validateOptionalMetadata(searchResult);
+    if (
+      searchResult.title !== undefined &&
+      (typeof searchResult.title !== "string" || searchResult.title.length > 256)
+    ) {
+      throw providerContractError("Notes provider returned an oversized search title.");
+    }
+    if (
+      searchResult.snippet !== undefined &&
+      (typeof searchResult.snippet !== "string" || Buffer.byteLength(searchResult.snippet) > 2_048)
+    ) {
+      throw providerContractError("Notes provider returned an oversized search snippet.");
+    }
+    if (
+      searchResult.score !== undefined &&
+      (typeof searchResult.score !== "number" || !Number.isFinite(searchResult.score))
+    ) {
+      throw providerContractError("Notes provider returned an invalid search score.");
+    }
+    return { ...searchResult, path };
+  });
+}
+
+function validateMutation(mutation: NotesMutationResult): NotesMutationResult {
+  if (!isRecord(mutation) || typeof mutation.path !== "string") {
+    throw providerContractError("Notes provider returned an invalid mutation result.");
+  }
+  const path = normalizeStorePath(mutation.path, true);
+  if (mutation.revision !== undefined) {
+    if (typeof mutation.revision !== "string") {
+      throw providerContractError("Notes provider returned an invalid revision.");
+    }
+    validateRevision(mutation.revision);
+  }
+  return { ...mutation, path };
+}
+
+function validateOptionalMetadata(entry: Record<string, unknown>): void {
+  if (
+    entry.size !== undefined &&
+    (typeof entry.size !== "number" ||
+      !Number.isSafeInteger(entry.size) ||
+      entry.size < 0 ||
+      entry.size > MAX_NOTE_BYTES)
+  ) {
+    throw providerContractError("Notes provider returned an invalid note size.");
+  }
+  if (
+    entry.modifiedAt !== undefined &&
+    (typeof entry.modifiedAt !== "number" || !Number.isFinite(entry.modifiedAt))
+  ) {
+    throw providerContractError("Notes provider returned an invalid modification time.");
+  }
+}
+
+function validateRevision(revision: string): void {
+  if (
+    revision.length === 0 ||
+    revision.length > MAX_REVISION_LENGTH ||
+    /[\x00-\x1f\x7f]/.test(revision)
+  ) {
+    throw providerContractError("Invalid note revision.");
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function providerContractError(message: string): NotesProviderError {
+  return new NotesProviderError({ code: "invalid-provider", message });
 }
 
 function requireWriteRevision(params: NotesParams): string | null {
   if (params.revision === undefined) {
     throw new Error("notes write requires revision; use null only when creating a note");
   }
+  if (params.revision !== null) validateRevision(params.revision);
   return params.revision;
 }
 
@@ -377,6 +538,7 @@ function requireExistingRevision(params: NotesParams): string {
   if (typeof params.revision !== "string" || params.revision.length === 0) {
     throw new Error(`notes ${params.action} requires the revision returned by read`);
   }
+  validateRevision(params.revision);
   return params.revision;
 }
 

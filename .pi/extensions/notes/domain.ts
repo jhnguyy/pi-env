@@ -5,6 +5,10 @@ export const MAX_NOTE_BYTES = 1_048_576;
 export const MAX_NOTE_COUNT = 10_000;
 export const MAX_SEARCH_QUERY_LENGTH = 1_000;
 export const MAX_SEARCH_RESULTS = 100;
+export const MAX_REVISION_LENGTH = 256;
+export const MAX_EDIT_ITEMS = 8;
+export const MAX_EDIT_TEXT_LENGTH = 8_192;
+export const MAX_APPEND_LENGTH = 131_072;
 export type NotesArea = (typeof NOTES_AREAS)[number];
 
 export const NOTES_AREA_PREFIXES: Readonly<Record<NotesArea, string>> = {

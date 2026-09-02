@@ -8,7 +8,7 @@ import {
   NOTES_DESCRIPTION,
   NOTES_PARAMETERS,
 } from "../contract";
-import { MAX_NOTE_BYTES, type NotesProvider } from "../domain";
+import { MAX_EDIT_ITEMS, MAX_NOTE_BYTES, MAX_REVISION_LENGTH, type NotesProvider } from "../domain";
 
 function provider(): NotesProvider {
   return {
@@ -41,6 +41,18 @@ describe("notes tool contract", () => {
     );
     expect(Check(contract.parameters, { action: "list", area: "projects" })).toBe(false);
     expect(Check(contract.parameters, { action: "search", query: "x", limit: 101 })).toBe(false);
+    expect(
+      Check(contract.parameters, {
+        action: "edit",
+        edits: Array.from({ length: MAX_EDIT_ITEMS + 1 }, () => ({ oldText: "a", newText: "b" })),
+      }),
+    ).toBe(false);
+    expect(
+      Check(contract.parameters, {
+        action: "delete",
+        revision: "r".repeat(MAX_REVISION_LENGTH + 1),
+      }),
+    ).toBe(false);
   });
 
   it("routes canonical areas and references through the provider", async () => {
@@ -146,6 +158,12 @@ describe("notes tool contract", () => {
       contract.execute({ action: "read", path: "../secret.md" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "path-escape" });
     await expect(
+      contract.execute({ action: "read", path: "wiki/note.md/" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "not-a-note" });
+    await expect(
+      contract.execute({ action: "read", path: "visible.txt:private.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-path" });
+    await expect(
       contract.execute({ action: "list", prefix: "/absolute" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "invalid-path" });
     await expect(
@@ -162,9 +180,32 @@ describe("notes tool contract", () => {
     expect(() =>
       applyExactEdits("x", [{ oldText: "x", newText: "é".repeat(MAX_NOTE_BYTES) }]),
     ).toThrow("exceeds");
+    expect(() => applyExactEdits("aaa", [{ oldText: "aa", newText: "b" }])).toThrow(
+      "more than once",
+    );
     expect(fake.read).not.toHaveBeenCalled();
     expect(fake.list).not.toHaveBeenCalled();
     expect(fake.write).not.toHaveBeenCalled();
+  });
+
+  it("validates and limits external provider results", async () => {
+    const fake = provider();
+    vi.mocked(fake.search).mockResolvedValue([{ path: "wiki/one.md" }, { path: "wiki/two.md" }]);
+    const contract = createNotesContract(fake);
+    const search = await contract.execute(
+      { action: "search", query: "topic", limit: 1 },
+      { cwd: "/repo" },
+    );
+    expect(search.details.results).toHaveLength(1);
+
+    vi.mocked(fake.read).mockResolvedValue({
+      path: "../outside.md",
+      content: "unsafe",
+      revision: "revision",
+    });
+    await expect(
+      contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "path-escape" });
   });
 
   it("requires explicit revision preconditions before mutation IO", async () => {

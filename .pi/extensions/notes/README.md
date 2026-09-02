@@ -27,7 +27,7 @@ Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project
 
 ## Shared contract
 
-Every provider implements the complete Promise-based interface in `domain.ts`. The public entry point exports provider types, registration, and canonical provider errors. The interface has no filesystem root, mutation queue, Effect type, capability negotiation, or provider-specific configuration.
+Every provider implements the complete Promise-based interface in `domain.ts`. The public entry point exports provider types, registration, canonical areas and path mappings, and canonical provider errors. The interface has no filesystem root, mutation queue, Effect type, capability negotiation, or provider-specific configuration.
 
 `provider-registry.ts` owns the process-wide provider registry. It uses `Symbol.for("@pi-env/notes-providers")` so separate extension bundles share registrations regardless of load order. The selected provider is resolved when each tool call starts. Registration validates the complete baseline interface and rejects duplicate IDs.
 
