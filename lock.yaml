@@ -139,6 +139,27 @@ importers:
         specifier: '*'
         version: 1.3.3
 
+  .pi/extensions/notes:
+    dependencies:
+      '@earendil-works/pi-agent-core':
+        specifier: '*'
+        version: 0.84.1
+      '@earendil-works/pi-ai':
+        specifier: '*'
+        version: 0.84.1
+      '@earendil-works/pi-coding-agent':
+        specifier: '*'
+        version: 0.84.1
+      '@earendil-works/pi-tui':
+        specifier: '*'
+        version: 0.84.1
+      effect:
+        specifier: 4.0.0-beta.97
+        version: 4.0.0-beta.97
+      typebox:
+        specifier: '*'
+        version: 1.3.3
+
   .pi/extensions/pi-update: {}
 
   .pi/extensions/ptc: {}
