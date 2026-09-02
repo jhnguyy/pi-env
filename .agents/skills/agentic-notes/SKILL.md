@@ -20,19 +20,19 @@ If sources conflict, follow the most explicit user instruction unless it violate
 
 ## Choose the Lifecycle and Output
 
-- **Unclassified capture**: preserve the source in the workspace inbox. Do not require capture to match a destination schema.
+- **Unclassified capture**: preserve the source in the adapter-designated capture location. Do not require capture to match a destination schema.
 - **Markdown note**: durable source of truth for knowledge with a known owner and retrieval path.
 - **HTML sidecar**: dense visual explanation, comparison, report, diagram, plan, or review artifact.
 - **Interactive HTML**: temporary editor for prioritizing, tuning, annotating, or transforming data. Must include an export path such as copy-as-Markdown, copy-as-JSON, or copy-diff.
 
-Keep a short Markdown summary for any durable HTML artifact. Do not promote unclassified capture merely because Markdown is available.
+Keep a short Markdown summary for any durable HTML artifact.
 
 ## Core Workflow
 
 1. Read the local adapter and any existing destination note before changing durable state.
 2. Determine whether the request is unclassified capture, a known-destination update, or inbox processing.
-3. For unclassified capture, preserve the local capture unit and use the workspace inbox policy.
-4. For inbox processing, propose classification and destination mutations before applying them. Validate transformed output against destination rules, not the capture format.
+3. For unclassified capture, preserve the local capture unit and use the adapter's capture policy.
+4. For inbox processing, propose classification and destination mutations. Obtain approval before applying durable changes unless the request already specifies the destination and change. Validate transformed output against destination rules, not the capture format.
 5. For a known destination, prefer a coherent rewrite over an append-only update when revising an existing note.
 6. Preserve local metadata, links, boundaries, naming conventions, and the human's meaning.
 7. Keep durable output simple: clear title, concise context, decisions or facts, evidence, open questions, and next actions when relevant.
