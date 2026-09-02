@@ -174,8 +174,9 @@ async function listAction(provider: NotesProvider, params: NotesParams, signal?:
 }
 
 async function readAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const note = await provider.read(requirePath(params), signal);
-  return documentResult(params, note);
+  const requestedPath = requirePath(params);
+  const note = await provider.read(requestedPath, signal);
+  return documentResult(params, note, requestedPath);
 }
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
@@ -192,8 +193,8 @@ async function resolveAction(provider: NotesProvider, params: NotesParams, signa
   return documentResult(params, note);
 }
 
-function documentResult(params: NotesParams, candidate: NoteDocument) {
-  const note = validateDocument(candidate);
+function documentResult(params: NotesParams, candidate: NoteDocument, expectedPath?: string) {
+  const note = validateDocument(candidate, expectedPath);
   return result(formatDocument(note.path, note.revision, note.content), {
     action: params.action,
     path: note.path,
@@ -228,7 +229,7 @@ async function editAction(provider: NotesProvider, params: NotesParams, signal?:
     throw new Error("notes edit requires edits or append");
   }
   const revision = requireExistingRevision(params);
-  const note = validateDocument(await provider.read(notePath, signal));
+  const note = validateDocument(await provider.read(notePath, signal), notePath);
   if (note.revision !== revision) throw conflict(notePath);
   const mutation = validateMutation(
     await provider.write(
@@ -308,6 +309,8 @@ function requirePath(params: NotesParams): string {
 }
 
 function normalizePrefix(prefix: string): string {
+  const stripped = prefix.replace(/^@/, "").replaceAll("\\", "/");
+  if (stripped === "" || stripped === "." || stripped === "./") return "";
   return normalizeStorePath(prefix, false);
 }
 
@@ -402,7 +405,7 @@ function noteSizeError(subject: string): NotesProviderError {
   });
 }
 
-function validateDocument(note: NoteDocument): NoteDocument {
+function validateDocument(note: NoteDocument, expectedPath?: string): NoteDocument {
   if (
     !isRecord(note) ||
     typeof note.path !== "string" ||
@@ -412,6 +415,9 @@ function validateDocument(note: NoteDocument): NoteDocument {
     throw providerContractError("Notes provider returned an invalid document.");
   }
   const path = normalizeStorePath(note.path, true);
+  if (expectedPath !== undefined && path !== expectedPath) {
+    throw providerContractError("Notes provider returned a document for the wrong path.");
+  }
   validateRevision(note.revision);
   assertNoteSize(note.content);
   const metadata = validateOptionalMetadata(note);
@@ -539,13 +545,16 @@ function validateOptionalMetadata(
   };
 }
 
-function validateRevision(revision: string): void {
+function validateRevision(revision: string, source: "provider" | "request" = "provider"): void {
   if (
     revision.length === 0 ||
     revision.length > MAX_REVISION_LENGTH ||
     /[\x00-\x1f\x7f]/.test(revision)
   ) {
-    throw providerContractError("Invalid note revision.");
+    throw new NotesProviderError({
+      code: source === "provider" ? "invalid-provider" : "invalid-revision",
+      message: "Invalid note revision.",
+    });
   }
 }
 
@@ -561,15 +570,15 @@ function requireWriteRevision(params: NotesParams): string | null {
   if (params.revision === undefined) {
     throw new Error("notes write requires revision; use null only when creating a note");
   }
-  if (params.revision !== null) validateRevision(params.revision);
+  if (params.revision !== null) validateRevision(params.revision, "request");
   return params.revision;
 }
 
 function requireExistingRevision(params: NotesParams): string {
-  if (typeof params.revision !== "string" || params.revision.length === 0) {
+  if (typeof params.revision !== "string") {
     throw new Error(`notes ${params.action} requires the revision returned by read`);
   }
-  validateRevision(params.revision);
+  validateRevision(params.revision, "request");
   return params.revision;
 }
 

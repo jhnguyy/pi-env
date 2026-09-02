@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
+  chown,
   link,
   lstat,
   mkdir,
@@ -45,12 +46,6 @@ export interface ObsidianProviderOptions {
   readonly now?: () => Date;
   /** Test and integration hook that runs after a read resolves its target. */
   readonly afterReadTargetResolved?: (notePath: string, target: string) => Promise<void>;
-  /** Test and integration hook that runs after a mutation resolves its initial target. */
-  readonly afterTargetResolved?: (
-    notePath: string,
-    target: string,
-    operation: MutationOperation,
-  ) => Promise<void>;
   /** Test and integration hook that runs immediately before the final precondition check. */
   readonly beforeCommit?: (target: string, operation: MutationOperation) => Promise<void>;
 }
@@ -104,7 +99,8 @@ class ObsidianProvider implements NotesProvider {
         signal?.throwIfAborted();
         if (areaPrefix && !notePath.startsWith(areaPrefix)) continue;
         if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
-        const metadata = await stat(path.join(this.root, ...notePath.split("/")));
+        const metadata = await lstat(path.join(this.root, ...notePath.split("/")));
+        if (!metadata.isFile() || metadata.nlink !== 1) continue;
         entries.push({ path: notePath, size: metadata.size, modifiedAt: metadata.mtimeMs });
       }
       return entries.sort((left, right) => left.path.localeCompare(right.path));
@@ -204,14 +200,13 @@ class ObsidianProvider implements NotesProvider {
       }
       const expectedRevision = request.expectedRevision;
       const initial = await this.resolveExistingNote(normalized);
-      await this.options.afterTargetResolved?.(normalized, initial.canonical, "replace");
       return await withFileMutationQueue(initial.canonical, async () => {
         const current = await this.resolveExistingNote(normalized);
         if (!sameTarget(current, initial)) throw conflict(normalized);
         const document = await readDocument(current.canonical, normalized, signal, current);
         if (document.revision !== expectedRevision) throw conflict(normalized);
-        const mode = (await stat(current.canonical)).mode;
-        await atomicReplace(current.canonical, request.content, mode, signal, async () => {
+        const metadata = await stat(current.canonical);
+        await atomicReplace(current.canonical, request.content, metadata, signal, async () => {
           await this.options.beforeCommit?.(current.canonical, "replace");
           await this.verifyCurrent(normalized, current, expectedRevision);
         });
@@ -234,7 +229,6 @@ class ObsidianProvider implements NotesProvider {
       signal?.throwIfAborted();
       const normalized = normalizeNotePath(request.path);
       const initial = await this.resolveExistingNote(normalized);
-      await this.options.afterTargetResolved?.(normalized, initial.canonical, "delete");
       return await withFileMutationQueue(initial.canonical, async () => {
         signal?.throwIfAborted();
         const current = await this.resolveExistingNote(normalized);
@@ -309,11 +303,18 @@ class ObsidianProvider implements NotesProvider {
   private async resolveDailyNotePath(date: Date, signal?: AbortSignal): Promise<string> {
     try {
       const lexical = path.join(this.root, DAILY_NOTES_SETTINGS_PATH);
+      await assertNoSymlinkPath(this.root, lexical, DAILY_NOTES_SETTINGS_PATH, false);
       const lexicalMetadata = await lstat(lexical);
       if (lexicalMetadata.isSymbolicLink()) {
         throw new NotesProviderError({
           code: "path-escape",
           message: "Daily Notes settings must not be a symbolic link.",
+        });
+      }
+      if (lexicalMetadata.nlink !== 1) {
+        throw new NotesProviderError({
+          code: "path-escape",
+          message: "Daily Notes settings must not be a hard link.",
         });
       }
       const canonical = await realpath(lexical);
@@ -325,6 +326,8 @@ class ObsidianProvider implements NotesProvider {
         MAX_SETTINGS_BYTES,
         "Daily Notes settings",
         signal,
+        { lexical, canonical, device: metadata.dev, inode: metadata.ino },
+        DAILY_NOTES_SETTINGS_PATH,
       );
       const settings = JSON.parse(raw) as { folder?: unknown; format?: unknown };
       const folder =
@@ -348,6 +351,7 @@ class ObsidianProvider implements NotesProvider {
     assertLexicallyContained(this.root, lexical, notePath);
     let lexicalMetadata;
     try {
+      await assertNoSymlinkPath(this.root, lexical, notePath, false);
       lexicalMetadata = await lstat(lexical);
     } catch (cause) {
       if (isMissingFileError(cause)) throw notFound(notePath, cause);
@@ -390,10 +394,12 @@ class ObsidianProvider implements NotesProvider {
     const lexical = path.resolve(this.root, ...normalized.split("/"));
     assertLexicallyContained(this.root, lexical, notePath);
     const parent = path.dirname(lexical);
+    await assertNoSymlinkPath(this.root, parent, notePath, true);
     const existingParent = await nearestExistingParent(parent);
     const canonicalParent = await realpath(existingParent);
     assertCanonicalParentAllowed(this.root, canonicalParent, notePath);
     await mkdir(parent, { recursive: true });
+    await assertNoSymlinkPath(this.root, parent, notePath, false);
     const verifiedParent = await realpath(parent);
     assertCanonicalParentAllowed(this.root, verifiedParent, notePath);
     const target = path.join(verifiedParent, path.basename(lexical));
@@ -408,19 +414,18 @@ async function readDocument(
   signal?: AbortSignal,
   expectedTarget?: ResolvedNote,
 ): Promise<NoteDocument> {
-  const { content, size, modifiedAt, device, inode } = await readBoundedText(
+  const { content, contentDigest, size, modifiedAt, device, inode } = await readBoundedText(
     target,
     MAX_NOTE_BYTES,
     `Note ${notePath}`,
     signal,
+    expectedTarget,
+    notePath,
   );
-  if (expectedTarget && (device !== expectedTarget.device || inode !== expectedTarget.inode)) {
-    throw conflict(notePath);
-  }
   return {
     path: notePath,
     content,
-    revision: revisionOf(content),
+    revision: revisionOf(contentDigest, notePath, device, inode),
     size,
     modifiedAt,
   };
@@ -431,8 +436,11 @@ async function readBoundedText(
   maxBytes: number,
   label: string,
   signal?: AbortSignal,
+  expectedTarget?: ResolvedNote,
+  identityPath = label,
 ): Promise<{
   content: string;
+  contentDigest: string;
   size: number;
   modifiedAt: number;
   device: number;
@@ -441,6 +449,12 @@ async function readBoundedText(
   const handle = await open(target, "r");
   try {
     const initial = await handle.stat();
+    if (
+      expectedTarget &&
+      (initial.dev !== expectedTarget.device || initial.ino !== expectedTarget.inode)
+    ) {
+      throw conflict(identityPath);
+    }
     if (initial.size > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
     const buffer = Buffer.allocUnsafe(maxBytes + 1);
     let total = 0;
@@ -452,8 +466,10 @@ async function readBoundedText(
     }
     if (total > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
     const metadata = await handle.stat();
+    const bytes = buffer.subarray(0, total);
     return {
-      content: buffer.subarray(0, total).toString("utf8"),
+      content: bytes.toString("utf8"),
+      contentDigest: createHash("sha256").update(bytes).digest("base64url"),
       size: total,
       modifiedAt: metadata.mtimeMs,
       device: metadata.dev,
@@ -470,8 +486,15 @@ function assertContentSize(content: string): void {
   }
 }
 
-function revisionOf(content: string): string {
-  return createHash("sha256").update(content).digest("base64url");
+function revisionOf(
+  contentDigest: string,
+  notePath: string,
+  device: number,
+  inode: number,
+): string {
+  return createHash("sha256")
+    .update(`${notePath}\0${device}\0${inode}\0${contentDigest}`)
+    .digest("base64url");
 }
 
 function sameTarget(left: ResolvedNote, right: ResolvedNote): boolean {
@@ -623,6 +646,32 @@ function assertLexicallyContained(
   }
 }
 
+async function assertNoSymlinkPath(
+  root: string,
+  candidate: string,
+  source: string,
+  allowMissing: boolean,
+): Promise<void> {
+  const relative = path.relative(root, candidate);
+  let current = root;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    let metadata;
+    try {
+      metadata = await lstat(current);
+    } catch (cause) {
+      if (allowMissing && isMissingFileError(cause)) return;
+      throw cause;
+    }
+    if (metadata.isSymbolicLink()) {
+      throw new NotesProviderError({
+        code: "path-escape",
+        message: `Symbolic-link path segments are not allowed: ${source}`,
+      });
+    }
+  }
+}
+
 async function nearestExistingParent(candidate: string): Promise<string> {
   let current = candidate;
   while (true) {
@@ -674,12 +723,22 @@ async function walkMarkdownFiles(
     if (!entry.isFile() || path.extname(entry.name).toLocaleLowerCase() !== MARKDOWN_EXTENSION) {
       continue;
     }
-    state.paths.push(path.relative(root, absolute).split(path.sep).join("/"));
+    const notePath = path.relative(root, absolute).split(path.sep).join("/");
+    if (!isPortableNotePath(notePath)) continue;
+    state.paths.push(notePath);
     if (state.paths.length > MAX_NOTE_COUNT) {
       throw resourceLimit(`Vault contains more than ${MAX_NOTE_COUNT} Markdown notes.`);
     }
   }
   return state.paths;
+}
+
+function isPortableNotePath(notePath: string): boolean {
+  try {
+    return normalizeNotePath(notePath) === notePath;
+  } catch {
+    return false;
+  }
 }
 
 async function atomicCreate(
@@ -703,7 +762,7 @@ async function atomicCreate(
 async function atomicReplace(
   target: string,
   content: string,
-  mode: number,
+  metadata: { mode: number; uid: number; gid: number },
   signal: AbortSignal | undefined,
   beforeCommit: () => Promise<void>,
 ): Promise<void> {
@@ -711,7 +770,8 @@ async function atomicReplace(
   const temp = temporaryPath(target);
   try {
     await writeFile(temp, content, { encoding: "utf8", flag: "wx", mode: 0o600, signal });
-    await chmod(temp, mode & 0o777);
+    await chown(temp, metadata.uid, metadata.gid);
+    await chmod(temp, metadata.mode & 0o7777);
     await beforeCommit();
     signal?.throwIfAborted();
     // Standard rename cannot combine the revision check and commit against independent writers.

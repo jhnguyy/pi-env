@@ -43,10 +43,10 @@ The baseline provider operations are list, read, search, resolve, guarded write,
 
 ## Obsidian provider
 
-The Obsidian provider exposes Markdown files only. It excludes hidden directories such as `.obsidian/` and `.trash/`. All tool paths are vault-relative. The provider rejects traversal, symbolic-link notes, and canonical targets in hidden metadata or non-Markdown files.
+The Obsidian provider exposes Markdown files only. It excludes hidden directories such as `.obsidian/` and `.trash/`. All tool paths are vault-relative. The provider rejects traversal, symbolic-link path segments, and canonical targets in hidden metadata or non-Markdown files.
 
 The vault must be on a trusted local filesystem. Mutations serialize on the canonical target. The provider checks file identity and content immediately before replace or delete. Creation uses an atomic hard link and cannot replace an existing path. Standard filesystem APIs cannot make revision comparison plus replacement atomic against an independent writer. An external writer can still change a path after the final check. Cancellation prevents work before the rename, link, or delete commit point. A mutation can complete after cancellation reaches that commit point.
 
-Replacement preserves POSIX owner, group, and other permission bits. It does not promise to preserve ACLs or extended attributes. The provider limits note size, query size, result count, and vault inventory to bound local work.
+Replacement preserves the POSIX owner, group, permission bits, and special mode bits. It does not promise to preserve ACLs or extended attributes. The provider limits note size, query size, result count, and vault inventory to bound local work.
 
 The tool applies exact edits before a revision-guarded write. Exact edits fail without changing the note when text is absent or occurs more than once. The portable `agentic-notes` skill retains note-quality, rewrite, artifact, and privacy guidance that does not belong in the storage contract.

@@ -100,6 +100,13 @@ describe("notes tool contract", () => {
     });
   });
 
+  it("normalizes explicit empty inventory prefixes", async () => {
+    const fake = provider();
+    const contract = createNotesContract(fake);
+    await contract.execute({ action: "list", prefix: "./" }, { cwd: "/repo" });
+    expect(fake.list).toHaveBeenCalledWith({ area: undefined, prefix: "" }, undefined);
+  });
+
   it("applies exact edits in the shell and writes with the read revision", async () => {
     const fake = provider();
     vi.mocked(fake.read).mockResolvedValue({
@@ -222,6 +229,15 @@ describe("notes tool contract", () => {
     await expect(
       contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "path-escape" });
+
+    vi.mocked(fake.read).mockResolvedValue({
+      path: "wiki/other.md",
+      content: "wrong note",
+      revision: "revision",
+    });
+    await expect(
+      contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-provider" });
   });
 
   it("requires explicit revision preconditions before mutation IO", async () => {
@@ -239,6 +255,9 @@ describe("notes tool contract", () => {
     await expect(
       contract.execute({ action: "delete", path: "note.md", revision: null }, { cwd: "/repo" }),
     ).rejects.toThrow("requires the revision");
+    await expect(
+      contract.execute({ action: "delete", path: "note.md", revision: "" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-revision" });
     expect(fake.write).not.toHaveBeenCalled();
     expect(fake.delete).not.toHaveBeenCalled();
   });

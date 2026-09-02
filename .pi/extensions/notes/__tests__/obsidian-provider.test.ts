@@ -9,7 +9,6 @@ import {
   rm,
   stat,
   symlink,
-  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -51,6 +50,17 @@ describe("Obsidian notes provider", () => {
     expect(results.map((result) => result.path)).toEqual(["records/worklog/day.md"]);
   });
 
+  it("omits filesystem names that cannot round-trip through portable paths", async () => {
+    const { vault, provider } = await fixture();
+    await writeFile(path.join(vault, "wiki\\victim.md"), "unsafe name");
+    await writeFile(path.join(vault, "@note.md"), "unsafe name");
+    await writeFile(path.join(vault, "normal.md"), "normal");
+
+    await expect(provider.list({})).resolves.toEqual([
+      expect.objectContaining({ path: "normal.md" }),
+    ]);
+  });
+
   it("bounds vault traversal depth", async () => {
     const { vault, provider } = await fixture();
     let directory = vault;
@@ -60,6 +70,19 @@ describe("Obsidian notes provider", () => {
     }
 
     await expect(provider.list({})).rejects.toMatchObject({ code: "resource-limit" });
+  });
+
+  it("scopes revisions to note path and file identity", async () => {
+    const { vault, provider } = await fixture();
+    await writeFile(path.join(vault, "one.md"), "same content");
+    await writeFile(path.join(vault, "two.md"), "same content");
+
+    const one = await provider.read("one.md");
+    const two = await provider.read("two.md");
+    expect(one.revision).not.toBe(two.revision);
+    await expect(
+      provider.write({ path: "two.md", content: "unsafe", expectedRevision: one.revision }),
+    ).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("creates a note only with an absent precondition and returns a readable revision", async () => {
@@ -130,6 +153,7 @@ describe("Obsidian notes provider", () => {
     await link(outside, path.join(vault, "linked.md"));
 
     await expect(provider.read("linked.md")).rejects.toMatchObject({ code: "path-escape" });
+    await expect(provider.list({})).resolves.toEqual([]);
   });
 
   it("rejects traversal, symbolic-link notes, and canonical hidden targets", async () => {
@@ -215,70 +239,20 @@ describe("Obsidian notes provider", () => {
 
     await expect(
       provider.write({ path: "loop/note.md", content: "unsafe", expectedRevision: null }),
-    ).rejects.toMatchObject({ code: "io" });
+    ).rejects.toMatchObject({ code: "path-escape" });
     expect((await lstat(path.join(vault, "loop"))).isSymbolicLink()).toBe(true);
   });
 
-  it("serializes directory aliases on the canonical target", async () => {
-    let release!: () => void;
-    let started!: () => void;
-    const blocked = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const entered = new Promise<void>((resolve) => {
-      started = resolve;
-    });
-    let continueAlias!: () => void;
-    let aliasResolved!: () => void;
-    const aliasGate = new Promise<void>((resolve) => {
-      continueAlias = resolve;
-    });
-    const aliasEntered = new Promise<void>((resolve) => {
-      aliasResolved = resolve;
-    });
-    let commits = 0;
-    const { vault, provider } = await fixture({
-      afterTargetResolved: async (notePath) => {
-        if (notePath !== "alias/note.md") return;
-        aliasResolved();
-        await aliasGate;
-      },
-      beforeCommit: async (_target, operation) => {
-        if (operation !== "replace") return;
-        commits += 1;
-        started();
-        await blocked;
-      },
-    });
+  it("rejects directory aliases even when they stay inside the vault", async () => {
+    const { vault, provider } = await fixture();
     await mkdir(path.join(vault, "real"));
-    await mkdir(path.join(vault, "other"));
     await writeFile(path.join(vault, "real", "note.md"), "first");
-    await writeFile(path.join(vault, "other", "note.md"), "first");
     await symlink(path.join(vault, "real"), path.join(vault, "alias"));
-    const note = await provider.read("real/note.md");
 
-    const first = provider.write({
-      path: "real/note.md",
-      content: "first writer",
-      expectedRevision: note.revision,
-    });
-    await entered;
-    const second = provider.write({
-      path: "alias/note.md",
-      content: "second writer",
-      expectedRevision: note.revision,
-    });
-    const secondResult = expect(second).rejects.toMatchObject({ code: "conflict" });
-    await aliasEntered;
-    await unlink(path.join(vault, "alias"));
-    await symlink(path.join(vault, "other"), path.join(vault, "alias"));
-    continueAlias();
-    release();
-
-    await expect(first).resolves.toMatchObject({ path: "real/note.md" });
-    await secondResult;
-    await expect(readFile(path.join(vault, "other", "note.md"), "utf8")).resolves.toBe("first");
-    expect(commits).toBe(1);
+    await expect(provider.read("alias/note.md")).rejects.toMatchObject({ code: "path-escape" });
+    await expect(
+      provider.write({ path: "alias/new.md", content: "unsafe", expectedRevision: null }),
+    ).rejects.toMatchObject({ code: "path-escape" });
   });
 
   it("rechecks replace and delete revisions at the commit boundary", async () => {
@@ -326,11 +300,15 @@ describe("Obsidian notes provider", () => {
   it("bounds note content and preserves mode bits on replacement", async () => {
     const { vault, provider } = await fixture();
     const notePath = path.join(vault, "note.md");
-    await writeFile(notePath, "first", { mode: 0o640 });
-    await chmod(notePath, 0o640);
+    await writeFile(notePath, "first", { mode: 0o1640 });
+    await chmod(notePath, 0o1640);
+    const initialMetadata = await stat(notePath);
     const note = await provider.read("note.md");
     await provider.write({ path: "note.md", content: "second", expectedRevision: note.revision });
-    expect((await stat(notePath)).mode & 0o777).toBe(0o640);
+    const finalMetadata = await stat(notePath);
+    expect(finalMetadata.mode & 0o7777).toBe(0o1640);
+    expect(finalMetadata.uid).toBe(initialMetadata.uid);
+    expect(finalMetadata.gid).toBe(initialMetadata.gid);
 
     const oversized = "x".repeat(MAX_NOTE_BYTES + 1);
     await expect(

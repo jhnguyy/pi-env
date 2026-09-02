@@ -81,6 +81,7 @@ export interface NotesProvider {
 
 export type NotesProviderErrorCode =
   | "invalid-path"
+  | "invalid-revision"
   | "not-found"
   | "not-a-note"
   | "path-escape"
