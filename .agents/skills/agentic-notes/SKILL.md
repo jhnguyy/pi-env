@@ -18,21 +18,24 @@ Before reading or writing notes, discover local rules from the current environme
 
 If sources conflict, follow the most explicit user instruction unless it violates a higher-priority system/developer/project boundary. Then prefer the most local workspace policy over general practice. If storage, permission, or privacy boundaries are still unclear, ask before writing.
 
-## Choose the Output
+## Choose the Lifecycle and Output
 
-- **Markdown note**: durable source of truth, default for knowledge that should be searched and maintained.
+- **Unclassified capture**: preserve the source in the workspace inbox. Do not require capture to match a destination schema.
+- **Markdown note**: durable source of truth for knowledge with a known owner and retrieval path.
 - **HTML sidecar**: dense visual explanation, comparison, report, diagram, plan, or review artifact.
 - **Interactive HTML**: temporary editor for prioritizing, tuning, annotating, or transforming data. Must include an export path such as copy-as-Markdown, copy-as-JSON, or copy-diff.
 
-Keep a short Markdown summary for any HTML artifact that should be useful in future sessions.
+Keep a short Markdown summary for any durable HTML artifact. Do not promote unclassified capture merely because Markdown is available.
 
 ## Core Workflow
 
-1. Read the local adapter and any existing note before changing it.
-2. Decide whether the task needs capture, rewrite, review, distillation, or an HTML artifact.
-3. Prefer coherent rewrites over append-only updates when revising an existing note.
-4. Preserve local metadata, links, boundaries, and naming conventions.
-5. Keep the final note simple: clear title, concise context, decisions/facts, evidence, open questions, and next actions when relevant.
+1. Read the local adapter and any existing destination note before changing durable state.
+2. Determine whether the request is unclassified capture, a known-destination update, or inbox processing.
+3. For unclassified capture, preserve the local capture unit and use the workspace inbox policy.
+4. For inbox processing, propose classification and destination mutations before applying them. Validate transformed output against destination rules, not the capture format.
+5. For a known destination, prefer a coherent rewrite over an append-only update when revising an existing note.
+6. Preserve local metadata, links, boundaries, naming conventions, and the human's meaning.
+7. Keep durable output simple: clear title, concise context, decisions or facts, evidence, open questions, and next actions when relevant.
 
 ## Reference Index
 
@@ -49,5 +52,6 @@ Load only the reference needed for the task.
 
 - Never store secrets, credentials, private keys, or raw sensitive dumps in notes.
 - Do not invent note locations or storage conventions.
+- Do not silently classify or promote unclassified capture into canonical knowledge.
 - Do not let formatting complexity obscure the information.
 - Prefer fewer, coherent sections over exhaustive templates.
