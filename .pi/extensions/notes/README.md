@@ -27,7 +27,7 @@ Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project
 
 ## Shared contract
 
-Every provider implements the complete Promise-based interface in `domain.ts`. The interface has no filesystem root, mutation queue, Effect type, capability negotiation, or provider-specific configuration.
+Every provider implements the complete Promise-based interface in `domain.ts`. The public entry point exports provider types, registration, and canonical provider errors. The interface has no filesystem root, mutation queue, Effect type, capability negotiation, or provider-specific configuration.
 
 `provider-registry.ts` owns the process-wide provider registry. It uses `Symbol.for("@pi-env/notes-providers")` so separate extension bundles share registrations regardless of load order. The selected provider is resolved when each tool call starts. Registration validates the complete baseline interface and rejects duplicate IDs.
 
@@ -37,7 +37,7 @@ The tool owns three canonical areas:
 - `worklog` maps to `records/worklog/` and contains dated events.
 - `decisions` maps to `records/decisions/` and contains rationale.
 
-Providers receive these areas as list and search filters. The tool owns their names, paths, guidance, validation, formatting, exact-edit behavior, and output limits.
+Providers receive these areas as list and search filters. The tool owns their names, portable path validation, guidance, formatting, exact-edit behavior, and output limits. Read and resolve text includes the path and revision before the Markdown content so agents can perform guarded mutations.
 
 The baseline provider operations are list, read, search, resolve, guarded write, and guarded delete. Reads return a revision. Creating a note requires a null revision precondition. Replacing, editing, or deleting a note requires the revision returned by read. Providers must check this precondition at their commit boundary and return a conflict when they detect a mismatch.
 

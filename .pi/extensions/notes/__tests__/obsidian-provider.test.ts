@@ -1,4 +1,15 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +47,17 @@ describe("Obsidian notes provider", () => {
 
     expect(wiki.map((note) => note.path)).toEqual(["wiki/topic.md"]);
     expect(results.map((result) => result.path)).toEqual(["records/worklog/day.md"]);
+  });
+
+  it("bounds vault traversal depth", async () => {
+    const { vault, provider } = await fixture();
+    let directory = vault;
+    for (let depth = 0; depth < 66; depth += 1) {
+      directory = path.join(directory, "d");
+      await mkdir(directory);
+    }
+
+    await expect(provider.list({})).rejects.toMatchObject({ code: "resource-limit" });
   });
 
   it("creates a note only with an absent precondition and returns a readable revision", async () => {
@@ -82,6 +104,7 @@ describe("Obsidian notes provider", () => {
     await mkdir(path.join(vault, ".obsidian", "plugins"), { recursive: true });
     await writeFile(path.join(vault, ".obsidian", "plugins", "main.js"), "secret");
     await symlink(outside, path.join(vault, "escape"));
+    await symlink(path.join(vault, ".obsidian"), path.join(vault, "metadata"));
     await symlink(path.join(vault, ".obsidian", "plugins", "main.js"), path.join(vault, "safe.md"));
 
     await expect(provider.read("../outside/secret.md")).rejects.toMatchObject({
@@ -96,6 +119,13 @@ describe("Obsidian notes provider", () => {
     await expect(
       provider.write({ path: "escape/new.md", content: "unsafe", expectedRevision: null }),
     ).rejects.toMatchObject({ _tag: "NotesProviderError", code: "path-escape" });
+    await expect(
+      provider.write({ path: "metadata/new/note.md", content: "unsafe", expectedRevision: null }),
+    ).rejects.toMatchObject({ code: "path-escape" });
+    await expect(lstat(path.join(outside, "new.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(vault, ".obsidian", "new"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("resolves the Obsidian daily note and canonical dated records", async () => {
@@ -138,7 +168,8 @@ describe("Obsidian notes provider", () => {
 
     await expect(
       provider.write({ path: "loop/note.md", content: "unsafe", expectedRevision: null }),
-    ).rejects.not.toMatchObject({ code: "not-found" });
+    ).rejects.toMatchObject({ code: "io" });
+    expect((await lstat(path.join(vault, "loop"))).isSymbolicLink()).toBe(true);
   });
 
   it("serializes directory aliases on the canonical target", async () => {
@@ -150,8 +181,21 @@ describe("Obsidian notes provider", () => {
     const entered = new Promise<void>((resolve) => {
       started = resolve;
     });
+    let continueAlias!: () => void;
+    let aliasResolved!: () => void;
+    const aliasGate = new Promise<void>((resolve) => {
+      continueAlias = resolve;
+    });
+    const aliasEntered = new Promise<void>((resolve) => {
+      aliasResolved = resolve;
+    });
     let commits = 0;
     const { vault, provider } = await fixture({
+      afterTargetResolved: async (notePath) => {
+        if (notePath !== "alias/note.md") return;
+        aliasResolved();
+        await aliasGate;
+      },
       beforeCommit: async (_target, operation) => {
         if (operation !== "replace") return;
         commits += 1;
@@ -160,7 +204,9 @@ describe("Obsidian notes provider", () => {
       },
     });
     await mkdir(path.join(vault, "real"));
+    await mkdir(path.join(vault, "other"));
     await writeFile(path.join(vault, "real", "note.md"), "first");
+    await writeFile(path.join(vault, "other", "note.md"), "first");
     await symlink(path.join(vault, "real"), path.join(vault, "alias"));
     const note = await provider.read("real/note.md");
 
@@ -175,10 +221,16 @@ describe("Obsidian notes provider", () => {
       content: "second writer",
       expectedRevision: note.revision,
     });
+    const secondResult = expect(second).rejects.toMatchObject({ code: "conflict" });
+    await aliasEntered;
+    await unlink(path.join(vault, "alias"));
+    await symlink(path.join(vault, "other"), path.join(vault, "alias"));
+    continueAlias();
     release();
 
     await expect(first).resolves.toMatchObject({ path: "real/note.md" });
-    await expect(second).rejects.toMatchObject({ code: "conflict" });
+    await secondResult;
+    await expect(readFile(path.join(vault, "other", "note.md"), "utf8")).resolves.toBe("first");
     expect(commits).toBe(1);
   });
 

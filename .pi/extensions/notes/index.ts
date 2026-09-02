@@ -10,6 +10,7 @@ import { resolveNotesProvider } from "./provider-registry";
 import { PiEvent, ToolCapability } from "../_shared/agent-tools";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 
+export { NotesProviderError } from "./domain";
 export { registerNotesProvider } from "./provider-registry";
 export type {
   NoteDocument,
@@ -20,6 +21,7 @@ export type {
   NotesListRequest,
   NotesMutationResult,
   NotesProvider,
+  NotesProviderErrorCode,
   NotesSearchRequest,
   NotesWriteRequest,
 } from "./domain";

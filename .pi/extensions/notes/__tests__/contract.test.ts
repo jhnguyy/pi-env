@@ -1,13 +1,14 @@
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyExactEdits,
   createNotesContract,
   MAX_DETAIL_ITEMS,
   NOTES_ACTIONS,
   NOTES_DESCRIPTION,
   NOTES_PARAMETERS,
 } from "../contract";
-import type { NotesProvider } from "../domain";
+import { MAX_NOTE_BYTES, type NotesProvider } from "../domain";
 
 function provider(): NotesProvider {
   return {
@@ -50,7 +51,7 @@ describe("notes tool contract", () => {
       { action: "list", area: "wiki", prefix: "wiki/ai" },
       { cwd: "/repo" },
     );
-    await contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" });
+    const read = await contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" });
     await contract.execute(
       { action: "search", query: "topic", areas: ["wiki", "decisions"], limit: 12 },
       { cwd: "/repo" },
@@ -59,6 +60,10 @@ describe("notes tool contract", () => {
       { action: "resolve", reference: "worklog/today" },
       { cwd: "/repo" },
     );
+    expect(read.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining('revision="rev-1"'),
+    });
     expect(listed.content).toContainEqual({
       type: "text",
       text: expect.stringContaining("in wiki and under wiki/ai"),
@@ -132,6 +137,34 @@ describe("notes tool contract", () => {
     const output = await contract.execute({ action: "list" }, { cwd: "/repo" });
     expect(output.details.notes).toHaveLength(MAX_DETAIL_ITEMS);
     expect(output.details.truncated).toBe(true);
+  });
+
+  it("rejects unsafe paths and oversized UTF-8 content before provider IO", async () => {
+    const fake = provider();
+    const contract = createNotesContract(fake);
+    await expect(
+      contract.execute({ action: "read", path: "../secret.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "path-escape" });
+    await expect(
+      contract.execute({ action: "list", prefix: "/absolute" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-path" });
+    await expect(
+      contract.execute(
+        {
+          action: "write",
+          path: "wiki/large.md",
+          content: "é".repeat(MAX_NOTE_BYTES),
+          revision: null,
+        },
+        { cwd: "/repo" },
+      ),
+    ).rejects.toMatchObject({ code: "resource-limit" });
+    expect(() =>
+      applyExactEdits("x", [{ oldText: "x", newText: "é".repeat(MAX_NOTE_BYTES) }]),
+    ).toThrow("exceeds");
+    expect(fake.read).not.toHaveBeenCalled();
+    expect(fake.list).not.toHaveBeenCalled();
+    expect(fake.write).not.toHaveBeenCalled();
   });
 
   it("requires explicit revision preconditions before mutation IO", async () => {

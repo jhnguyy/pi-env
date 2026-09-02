@@ -4,8 +4,8 @@ import {
   link,
   lstat,
   mkdir,
-  readFile,
-  readdir,
+  open,
+  opendir,
   realpath,
   rename,
   stat,
@@ -36,11 +36,19 @@ const MARKDOWN_EXTENSION = ".md";
 const DAILY_NOTES_SETTINGS_PATH = ".obsidian/daily-notes.json";
 const MAX_SETTINGS_BYTES = 64 * 1024;
 const MAX_SEARCH_SCAN_BYTES = 64 * 1024 * 1024;
+const MAX_VAULT_ENTRIES = 50_000;
+const MAX_DIRECTORY_DEPTH = 64;
 
 type MutationOperation = "create" | "replace" | "delete";
 
 export interface ObsidianProviderOptions {
   readonly now?: () => Date;
+  /** Test and integration hook that runs after a mutation resolves its initial target. */
+  readonly afterTargetResolved?: (
+    notePath: string,
+    target: string,
+    operation: MutationOperation,
+  ) => Promise<void>;
   /** Test and integration hook that runs immediately before the final precondition check. */
   readonly beforeCommit?: (target: string, operation: MutationOperation) => Promise<void>;
 }
@@ -184,6 +192,7 @@ class ObsidianProvider implements NotesProvider {
 
   async write(request: NotesWriteRequest, signal?: AbortSignal): Promise<NotesMutationResult> {
     try {
+      signal?.throwIfAborted();
       assertContentSize(request.content);
       const normalized = normalizeNotePath(request.path);
       if (request.expectedRevision === null) {
@@ -191,8 +200,10 @@ class ObsidianProvider implements NotesProvider {
       }
       const expectedRevision = request.expectedRevision;
       const initial = await this.resolveExistingNote(normalized);
+      await this.options.afterTargetResolved?.(normalized, initial.canonical, "replace");
       return await withFileMutationQueue(initial.canonical, async () => {
         const current = await this.resolveExistingNote(normalized);
+        if (!sameTarget(current, initial)) throw conflict(normalized);
         const document = await readDocument(current.canonical, normalized, signal);
         if (document.revision !== expectedRevision) throw conflict(normalized);
         const mode = (await stat(current.canonical)).mode;
@@ -210,18 +221,21 @@ class ObsidianProvider implements NotesProvider {
 
   async delete(request: NotesDeleteRequest, signal?: AbortSignal): Promise<NotesMutationResult> {
     try {
+      signal?.throwIfAborted();
       const normalized = normalizeNotePath(request.path);
       const initial = await this.resolveExistingNote(normalized);
+      await this.options.afterTargetResolved?.(normalized, initial.canonical, "delete");
       return await withFileMutationQueue(initial.canonical, async () => {
         signal?.throwIfAborted();
         const current = await this.resolveExistingNote(normalized);
+        if (!sameTarget(current, initial)) throw conflict(normalized);
         const document = await readDocument(current.canonical, normalized, signal);
         if (document.revision !== request.expectedRevision) throw conflict(normalized);
         await this.options.beforeCommit?.(current.canonical, "delete");
         await this.verifyCurrent(normalized, current, request.expectedRevision);
         signal?.throwIfAborted();
         // Standard unlink cannot combine the revision check and commit against independent writers.
-        await unlink(current.lexical);
+        await unlink(current.canonical);
         return { path: normalized };
       });
     } catch (cause) {
@@ -234,6 +248,7 @@ class ObsidianProvider implements NotesProvider {
     content: string,
     signal?: AbortSignal,
   ): Promise<NotesMutationResult> {
+    signal?.throwIfAborted();
     await this.requireMissing(normalized);
     const initialTarget = await this.resolveWritableNote(normalized);
     return withFileMutationQueue(initialTarget, async () => {
@@ -289,13 +304,12 @@ class ObsidianProvider implements NotesProvider {
       assertLexicallyContained(this.root, canonical, DAILY_NOTES_SETTINGS_PATH);
       const metadata = await stat(canonical);
       if (!metadata.isFile()) throw new Error("Daily Notes settings are not a regular file");
-      if (metadata.size > MAX_SETTINGS_BYTES) {
-        throw resourceLimit(`Daily Notes settings exceed ${MAX_SETTINGS_BYTES} bytes.`);
-      }
-      const raw = await readFile(canonical, { encoding: "utf8", signal });
-      if (Buffer.byteLength(raw) > MAX_SETTINGS_BYTES) {
-        throw resourceLimit(`Daily Notes settings exceed ${MAX_SETTINGS_BYTES} bytes.`);
-      }
+      const { content: raw } = await readBoundedText(
+        canonical,
+        MAX_SETTINGS_BYTES,
+        "Daily Notes settings",
+        signal,
+      );
       const settings = JSON.parse(raw) as { folder?: unknown; format?: unknown };
       const folder =
         typeof settings.folder === "string" ? settings.folder.replace(/^\/+|\/+$/g, "") : "";
@@ -367,10 +381,10 @@ class ObsidianProvider implements NotesProvider {
     const parent = path.dirname(lexical);
     const existingParent = await nearestExistingParent(parent);
     const canonicalParent = await realpath(existingParent);
-    assertLexicallyContained(this.root, canonicalParent, notePath, true);
+    assertCanonicalParentAllowed(this.root, canonicalParent, notePath);
     await mkdir(parent, { recursive: true });
     const verifiedParent = await realpath(parent);
-    assertLexicallyContained(this.root, verifiedParent, notePath, true);
+    assertCanonicalParentAllowed(this.root, verifiedParent, notePath);
     const target = path.join(verifiedParent, path.basename(lexical));
     assertCanonicalNote(this.root, target, notePath);
     return target;
@@ -382,22 +396,49 @@ async function readDocument(
   notePath: string,
   signal?: AbortSignal,
 ): Promise<NoteDocument> {
-  const before = await stat(target);
-  if (before.size > MAX_NOTE_BYTES) {
-    throw resourceLimit(`Note exceeds ${MAX_NOTE_BYTES} bytes: ${notePath}`);
-  }
-  const content = await readFile(target, { encoding: "utf8", signal });
-  if (Buffer.byteLength(content) > MAX_NOTE_BYTES) {
-    throw resourceLimit(`Note exceeds ${MAX_NOTE_BYTES} bytes: ${notePath}`);
-  }
-  const metadata = await stat(target);
+  const { content, size, modifiedAt } = await readBoundedText(
+    target,
+    MAX_NOTE_BYTES,
+    `Note ${notePath}`,
+    signal,
+  );
   return {
     path: notePath,
     content,
     revision: revisionOf(content),
-    size: metadata.size,
-    modifiedAt: metadata.mtimeMs,
+    size,
+    modifiedAt,
   };
+}
+
+async function readBoundedText(
+  target: string,
+  maxBytes: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<{ content: string; size: number; modifiedAt: number }> {
+  const handle = await open(target, "r");
+  try {
+    const initial = await handle.stat();
+    if (initial.size > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(buffer, total, buffer.length - total, null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
+    const metadata = await handle.stat();
+    return {
+      content: buffer.subarray(0, total).toString("utf8"),
+      size: total,
+      modifiedAt: metadata.mtimeMs,
+    };
+  } finally {
+    await handle.close();
+  }
 }
 
 function assertContentSize(content: string): void {
@@ -498,6 +539,17 @@ function normalizePrefix(input: string): string {
   return normalized;
 }
 
+function assertCanonicalParentAllowed(root: string, candidate: string, source: string): void {
+  assertLexicallyContained(root, candidate, source, true);
+  const relative = path.relative(root, candidate).split(path.sep).join("/");
+  if (relative && relative.split("/").some((segment) => segment.startsWith("."))) {
+    throw new NotesProviderError({
+      code: "path-escape",
+      message: `Note parent resolves into hidden vault metadata: ${source}`,
+    });
+  }
+}
+
 function assertCanonicalNote(root: string, candidate: string, source: string): void {
   assertLexicallyContained(root, candidate, source);
   const relative = path.relative(root, candidate).split(path.sep).join("/");
@@ -550,31 +602,48 @@ async function nearestExistingParent(candidate: string): Promise<string> {
   }
 }
 
+interface WalkState {
+  readonly paths: string[];
+  entries: number;
+}
+
 async function walkMarkdownFiles(
   root: string,
   directory: string,
   signal?: AbortSignal,
-  paths: string[] = [],
+  state: WalkState = { paths: [], entries: 0 },
+  depth = 0,
 ): Promise<string[]> {
   signal?.throwIfAborted();
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+  if (depth > MAX_DIRECTORY_DEPTH) {
+    throw resourceLimit(`Vault directory depth exceeds ${MAX_DIRECTORY_DEPTH}.`);
+  }
+  const entries = [];
+  for await (const entry of await opendir(directory)) {
     signal?.throwIfAborted();
+    state.entries += 1;
+    if (state.entries > MAX_VAULT_ENTRIES) {
+      throw resourceLimit(`Vault contains more than ${MAX_VAULT_ENTRIES} entries.`);
+    }
+    entries.push(entry);
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
     if (entry.name.startsWith(".")) continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      await walkMarkdownFiles(root, absolute, signal, paths);
+      await walkMarkdownFiles(root, absolute, signal, state, depth + 1);
       continue;
     }
     if (!entry.isFile() || path.extname(entry.name).toLocaleLowerCase() !== MARKDOWN_EXTENSION) {
       continue;
     }
-    paths.push(path.relative(root, absolute).split(path.sep).join("/"));
-    if (paths.length > MAX_NOTE_COUNT) {
+    state.paths.push(path.relative(root, absolute).split(path.sep).join("/"));
+    if (state.paths.length > MAX_NOTE_COUNT) {
       throw resourceLimit(`Vault contains more than ${MAX_NOTE_COUNT} Markdown notes.`);
     }
   }
-  return paths;
+  return state.paths;
 }
 
 async function atomicCreate(

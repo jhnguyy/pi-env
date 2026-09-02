@@ -75,21 +75,23 @@ export interface NotesProvider {
   delete(request: NotesDeleteRequest, signal?: AbortSignal): Promise<NotesMutationResult>;
 }
 
+export type NotesProviderErrorCode =
+  | "invalid-path"
+  | "not-found"
+  | "not-a-note"
+  | "path-escape"
+  | "ambiguous-edit"
+  | "missing-edit"
+  | "conflict"
+  | "unsupported-reference"
+  | "invalid-provider"
+  | "duplicate-provider"
+  | "provider-unavailable"
+  | "resource-limit"
+  | "io";
+
 export class NotesProviderError extends Data.TaggedError("NotesProviderError")<{
-  readonly code:
-    | "invalid-path"
-    | "not-found"
-    | "not-a-note"
-    | "path-escape"
-    | "ambiguous-edit"
-    | "missing-edit"
-    | "conflict"
-    | "unsupported-reference"
-    | "invalid-provider"
-    | "duplicate-provider"
-    | "provider-unavailable"
-    | "resource-limit"
-    | "io";
+  readonly code: NotesProviderErrorCode;
   readonly message: string;
   readonly cause?: unknown;
 }> {}

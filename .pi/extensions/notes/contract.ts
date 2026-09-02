@@ -15,6 +15,7 @@ import {
   NOTES_AREA_PREFIXES,
   NotesProviderError,
   type ExactEdit,
+  type NoteDocument,
   type NoteEntry,
   type NoteSearchResult,
   type NotesArea,
@@ -105,7 +106,7 @@ export const NOTES_DESCRIPTION = [
   "Use wiki for current knowledge, worklog for dated events, and decisions for rationale.",
   "Use index before the first store interaction in a task.",
   "Use list with an area or prefix for complete inventory.",
-  "Use read or search before editing an existing note.",
+  "Always read an existing note before editing so the tool returns its current revision.",
   "Mutations require a revision precondition. Use null only when creating a note.",
   "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
   "Write, edit, and delete mutate notes.",
@@ -155,32 +156,32 @@ async function indexAction(provider: NotesProvider, params: NotesParams, signal?
 }
 
 async function listAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const notes = await provider.list({ area: params.area, prefix: params.prefix }, signal);
-  return result(formatList(notes, params.area, params.prefix), { action: params.action, notes });
+  const prefix = params.prefix === undefined ? undefined : normalizePrefix(params.prefix);
+  const notes = await provider.list({ area: params.area, prefix }, signal);
+  return result(formatList(notes, params.area, prefix), { action: params.action, notes });
 }
 
 async function readAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const note = await provider.read(requirePath(params), signal);
-  return result(note.content, {
-    action: params.action,
-    path: note.path,
-    revision: note.revision,
-  });
+  return documentResult(params, note);
 }
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  if (!params.query) throw new Error("notes search requires query");
+  const query = requireSearchQuery(params);
   const results = await provider.search(
-    { query: params.query, areas: params.areas, limit: params.limit },
+    { query, areas: params.areas, limit: params.limit },
     signal,
   );
   return result(formatSearch(results), { action: params.action, results });
 }
 
 async function resolveAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  if (!params.reference) throw new Error("notes resolve requires reference");
-  const note = await provider.resolve(params.reference, signal);
-  return result(note.content, {
+  const note = await provider.resolve(requireReference(params), signal);
+  return documentResult(params, note);
+}
+
+function documentResult(params: NotesParams, note: NoteDocument) {
+  return result(formatDocument(note.path, note.revision, note.content), {
     action: params.action,
     path: note.path,
     revision: note.revision,
@@ -190,6 +191,7 @@ async function resolveAction(provider: NotesProvider, params: NotesParams, signa
 async function writeAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const notePath = requirePath(params);
   if (params.content === undefined) throw new Error("notes write requires content");
+  assertNoteSize(params.content);
   const mutation = await provider.write(
     {
       path: notePath,
@@ -241,7 +243,9 @@ export function applyExactEdits(
   edits: readonly ExactEdit[],
   append?: string,
 ): string {
+  assertNoteSize(original);
   let next = original;
+  let nextBytes = Buffer.byteLength(original);
   for (const edit of edits) {
     if (edit.oldText.length === 0) {
       throw new NotesProviderError({
@@ -263,14 +267,103 @@ export function applyExactEdits(
         message: "Exact edit text matched more than once.",
       });
     }
+    const replacementBytes =
+      nextBytes - Buffer.byteLength(edit.oldText) + Buffer.byteLength(edit.newText);
+    if (replacementBytes > MAX_NOTE_BYTES) throw noteSizeError();
     next = `${next.slice(0, first)}${edit.newText}${next.slice(first + edit.oldText.length)}`;
+    nextBytes = replacementBytes;
   }
-  return append === undefined ? next : next + append;
+  if (append === undefined) return next;
+  if (nextBytes + Buffer.byteLength(append) > MAX_NOTE_BYTES) throw noteSizeError();
+  return next + append;
 }
 
 function requirePath(params: NotesParams): string {
   if (!params.path) throw new Error(`notes ${params.action} requires path`);
-  return params.path.replace(/^@/, "");
+  return normalizeStorePath(params.path, true);
+}
+
+function normalizePrefix(prefix: string): string {
+  return normalizeStorePath(prefix, false);
+}
+
+function normalizeStorePath(input: string, requireMarkdown: boolean): string {
+  const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
+  if (
+    stripped.length === 0 ||
+    stripped.length > 1_024 ||
+    pathIsAbsolute(stripped) ||
+    stripped.includes("\0") ||
+    /[\x00-\x1f\x7f]/.test(stripped)
+  ) {
+    throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${input}` });
+  }
+  const rawSegments = stripped.split("/");
+  const normalized = normalizePosixPath(stripped);
+  if (
+    rawSegments.includes("..") ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    normalized.split("/").some((segment) => segment.startsWith("."))
+  ) {
+    throw new NotesProviderError({
+      code: "path-escape",
+      message: `Note path escapes the store: ${input}`,
+    });
+  }
+  if (requireMarkdown && !normalized.toLocaleLowerCase().endsWith(".md")) {
+    throw new NotesProviderError({
+      code: "not-a-note",
+      message: `Note path must end in .md: ${input}`,
+    });
+  }
+  return stripped.endsWith("/") && !normalized.endsWith("/") ? `${normalized}/` : normalized;
+}
+
+function pathIsAbsolute(input: string): boolean {
+  return input.startsWith("/") || /^[A-Za-z]:\//.test(input);
+}
+
+function normalizePosixPath(input: string): string {
+  const output: string[] = [];
+  for (const segment of input.split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") output.pop();
+    else output.push(segment);
+  }
+  return output.join("/");
+}
+
+function requireSearchQuery(params: NotesParams): string {
+  if (!params.query || params.query.trim().length === 0) {
+    throw new Error("notes search requires query");
+  }
+  if (params.query.length > MAX_SEARCH_QUERY_LENGTH) {
+    throw new NotesProviderError({
+      code: "resource-limit",
+      message: `Notes search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters.`,
+    });
+  }
+  return params.query;
+}
+
+function requireReference(params: NotesParams): string {
+  if (!params.reference) throw new Error("notes resolve requires reference");
+  if (params.reference.length > 256 || /[\x00-\x1f\x7f]/.test(params.reference)) {
+    throw new NotesProviderError({ code: "invalid-path", message: "Invalid note reference." });
+  }
+  return params.reference;
+}
+
+function assertNoteSize(content: string): void {
+  if (Buffer.byteLength(content) > MAX_NOTE_BYTES) throw noteSizeError();
+}
+
+function noteSizeError(): NotesProviderError {
+  return new NotesProviderError({
+    code: "resource-limit",
+    message: `Note content exceeds ${MAX_NOTE_BYTES} bytes.`,
+  });
 }
 
 function requireWriteRevision(params: NotesParams): string | null {
@@ -321,6 +414,10 @@ function boundDetails(details: NotesToolDetails): NotesToolDetails {
     ...(results === undefined ? {} : { results }),
     ...(truncated ? { truncated: true } : {}),
   };
+}
+
+function formatDocument(path: string, revision: string, content: string): string {
+  return `[Note path=${JSON.stringify(path)} revision=${JSON.stringify(revision)}]\n${content}`;
 }
 
 function formatIndex(notes: readonly NoteEntry[]): string {
