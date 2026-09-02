@@ -60,6 +60,8 @@ export async function activateNotesExtension(
         "Use notes read before changing an existing note. Pass its revision to edit, write, or delete so concurrent changes fail safely.",
         "Use notes edit for small exact changes. Use notes write for a coherent rewrite when the note structure or meaning changes.",
         "Create durable notes only when future retrieval is expected and the destination is clear from the store index or nearby notes.",
+        "Preserve unclassified capture in the store-designated capture location. Do not require it to match a destination schema or silently promote it to canonical knowledge.",
+        "When routing capture to destinations the user did not specify, show the proposed mutations and obtain approval before applying them.",
         "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
       ],
       renderCall(args, theme) {

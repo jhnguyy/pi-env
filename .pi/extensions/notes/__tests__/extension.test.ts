@@ -209,6 +209,12 @@ describe("notes extension", () => {
       expect.stringContaining("coherent rewrite"),
     );
     expect(testHarness.tools[0].promptGuidelines).toContainEqual(
+      expect.stringContaining("unclassified capture"),
+    );
+    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
+      expect.stringContaining("obtain approval"),
+    );
+    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
       expect.stringContaining("secrets"),
     );
     expect(testHarness.registrations).toHaveLength(1);

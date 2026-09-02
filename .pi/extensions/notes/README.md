@@ -27,7 +27,7 @@ Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project
 
 ## Progressive guidance
 
-The active tool contributes model guidance through `promptGuidelines`. The guidance tells agents to orient with `index`, use `list` for authoritative inventory, read before mutation, choose exact edits or coherent rewrites deliberately, create durable notes only with a clear retrieval path, and keep secrets out of notes.
+The active tool contributes model guidance through `promptGuidelines`. The guidance tells agents to orient with `index`, use `list` for authoritative inventory, read before mutation, choose exact edits or coherent rewrites deliberately, preserve unclassified capture, obtain approval before semantic routing, create durable notes only with a clear retrieval path, and keep secrets out of notes.
 
 Each provider owns its bounded `index` response. The response explains store-specific organization and retrieval conventions only when an agent first needs them. The shared tool does not hard-code a vault taxonomy. Paths do not assign an information category. The selected store can keep that category in each note.
 
