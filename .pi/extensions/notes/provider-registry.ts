@@ -44,13 +44,14 @@ export function resolveNotesProvider(id: string): NotesProvider {
 
 function validateProvider(provider: NotesProvider): void {
   const candidate = provider as unknown as Record<string, unknown>;
-  const methods = ["list", "read", "search", "resolve", "write", "delete"] as const;
+  const methods = ["index", "list", "read", "search", "write", "delete"] as const;
   if (
     typeof candidate !== "object" ||
     candidate === null ||
     typeof candidate.id !== "string" ||
     candidate.id.length === 0 ||
-    methods.some((method) => typeof candidate[method] !== "function")
+    methods.some((method) => typeof candidate[method] !== "function") ||
+    (candidate.resolve !== undefined && typeof candidate.resolve !== "function")
   ) {
     throw new NotesProviderError({
       code: "invalid-provider",

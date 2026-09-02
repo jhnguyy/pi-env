@@ -11,19 +11,19 @@ import {
   MAX_APPEND_LENGTH,
   MAX_EDIT_ITEMS,
   MAX_EDIT_TEXT_LENGTH,
+  MAX_INDEX_BYTES,
+  MAX_INDEX_ENTRIES,
   MAX_NOTE_BYTES,
   MAX_NOTE_COUNT,
   MAX_REVISION_LENGTH,
   MAX_SEARCH_QUERY_LENGTH,
   MAX_SEARCH_RESULTS,
-  NOTES_AREAS,
-  NOTES_AREA_PREFIXES,
   NotesProviderError,
   type ExactEdit,
   type NoteDocument,
   type NoteEntry,
   type NoteSearchResult,
-  type NotesArea,
+  type NotesIndex,
   type NotesMutationResult,
   type NotesProvider,
 } from "./domain";
@@ -40,67 +40,67 @@ export const NOTES_ACTIONS = [
   "delete",
 ] as const;
 
-export const NOTES_PARAMETERS = Type.Object({
-  action: StringEnum(NOTES_ACTIONS, { description: "Notes operation to perform" }),
-  path: Type.Optional(
-    Type.String({ maxLength: 1_024, description: "Store-relative Markdown path" }),
-  ),
-  area: Type.Optional(
-    StringEnum(NOTES_AREAS, {
-      description: "Canonical area for list: wiki, worklog, or decisions",
-    }),
-  ),
-  areas: Type.Optional(
-    Type.Array(StringEnum(NOTES_AREAS), {
-      maxItems: NOTES_AREAS.length,
-      uniqueItems: true,
-      description: "Canonical areas for search: wiki, worklog, or decisions",
-    }),
-  ),
-  prefix: Type.Optional(
-    Type.String({ maxLength: 1_024, description: "Optional path prefix for list" }),
-  ),
-  query: Type.Optional(
-    Type.String({
-      maxLength: MAX_SEARCH_QUERY_LENGTH,
-      description: "Text or path query for search",
-    }),
-  ),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_SEARCH_RESULTS })),
-  reference: Type.Optional(
-    Type.String({ maxLength: 256, description: "Provider-owned reference, such as daily/today" }),
-  ),
-  content: Type.Optional(
-    Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown content for write" }),
-  ),
-  revision: Type.Optional(
-    Type.Union([Type.String({ maxLength: MAX_REVISION_LENGTH }), Type.Null()], {
-      description:
-        "Mutation precondition. Use null to require creation or the revision returned by read.",
-    }),
-  ),
-  edits: Type.Optional(
-    Type.Array(
-      Type.Object({
-        oldText: Type.String({
-          maxLength: MAX_EDIT_TEXT_LENGTH,
-          description: "Exact text that must occur once",
-        }),
-        newText: Type.String({
-          maxLength: MAX_EDIT_TEXT_LENGTH,
-          description: "Replacement text",
-        }),
-      }),
-      { maxItems: MAX_EDIT_ITEMS, description: "Exact replacements for edit" },
+export const NOTES_PARAMETERS = Type.Object(
+  {
+    action: StringEnum(NOTES_ACTIONS, { description: "Notes operation to perform" }),
+    path: Type.Optional(
+      Type.String({ maxLength: 1_024, description: "Store-relative Markdown path" }),
     ),
-  ),
-  append: Type.Optional(
-    Type.String({
-      maxLength: MAX_APPEND_LENGTH,
-      description: "Markdown text to append during edit",
-    }),
-  ),
-});
+    prefix: Type.Optional(
+      Type.String({
+        maxLength: 1_024,
+        description: "Optional store-relative path prefix for list",
+      }),
+    ),
+    query: Type.Optional(
+      Type.String({
+        maxLength: MAX_SEARCH_QUERY_LENGTH,
+        description: "Text or path query for search",
+      }),
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: MAX_NOTE_COUNT,
+        description: `Maximum results. Search is capped at ${MAX_SEARCH_RESULTS}.`,
+      }),
+    ),
+    reference: Type.Optional(
+      Type.String({ maxLength: 256, description: "Provider-owned reference, such as daily/today" }),
+    ),
+    content: Type.Optional(
+      Type.String({ maxLength: MAX_NOTE_BYTES, description: "Markdown content for write" }),
+    ),
+    revision: Type.Optional(
+      Type.Union([Type.String({ maxLength: MAX_REVISION_LENGTH }), Type.Null()], {
+        description:
+          "Mutation precondition. Use null to require creation or the revision returned by read.",
+      }),
+    ),
+    edits: Type.Optional(
+      Type.Array(
+        Type.Object({
+          oldText: Type.String({
+            maxLength: MAX_EDIT_TEXT_LENGTH,
+            description: "Exact text that must occur once",
+          }),
+          newText: Type.String({
+            maxLength: MAX_EDIT_TEXT_LENGTH,
+            description: "Replacement text",
+          }),
+        }),
+        { maxItems: MAX_EDIT_ITEMS, description: "Exact replacements for edit" },
+      ),
+    ),
+    append: Type.Optional(
+      Type.String({
+        maxLength: MAX_APPEND_LENGTH,
+        description: "Markdown text to append during edit",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
 export type NotesParams = Static<typeof NOTES_PARAMETERS>;
 
@@ -114,14 +114,9 @@ export interface NotesToolDetails {
 }
 
 export const NOTES_DESCRIPTION = [
-  "Manage Markdown notes through the provider configured in Pi settings.",
-  "Use wiki for current knowledge, worklog for dated events, and decisions for rationale.",
-  "Use index before the first store interaction in a task.",
-  "Use list with an area or prefix for complete inventory.",
-  "Always read an existing note before editing so the tool returns its current revision.",
-  "Mutations require a revision precondition. Use null only when creating a note.",
-  "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
-  "Write, edit, and delete mutate notes.",
+  "Read and mutate Markdown notes through the configured provider.",
+  "Actions: index or list for discovery, read or search for retrieval, optional provider references through resolve, and guarded write, edit, or delete for mutation.",
+  "Mutations require a revision precondition. Use null only to create a note.",
 ].join(" ");
 
 export function createNotesContract(
@@ -160,17 +155,24 @@ async function executeNotesAction(
     case "delete":
       return deleteAction(provider, params, context.signal);
   }
+  throw new Error(`Unsupported notes action: ${String(params.action)}`);
 }
 
 async function indexAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const notes = validateEntries(await provider.list({}, signal));
-  return result(formatIndex(notes), { action: params.action, notes });
+  const index = validateIndex(await provider.index(signal));
+  return result(index.text, { action: params.action, notes: index.entries });
 }
 
 async function listAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const prefix = params.prefix === undefined ? undefined : normalizePrefix(params.prefix);
-  const notes = validateEntries(await provider.list({ area: params.area, prefix }, signal));
-  return result(formatList(notes, params.area, prefix), { action: params.action, notes });
+  const limit = params.limit ?? MAX_NOTE_COUNT;
+  const entries = validateEntries(await provider.list({ prefix, limit }, signal));
+  const notes = entries.slice(0, limit);
+  return result(formatList(notes, prefix), {
+    action: params.action,
+    notes,
+    ...(entries.length > limit ? { truncated: true } : {}),
+  });
 }
 
 async function readAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
@@ -181,14 +183,23 @@ async function readAction(provider: NotesProvider, params: NotesParams, signal?:
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const query = requireSearchQuery(params);
-  const limit = params.limit ?? MAX_SEARCH_RESULTS;
-  const results = validateSearchResults(
-    await provider.search({ query, areas: params.areas, limit }, signal),
-  ).slice(0, limit);
-  return result(formatSearch(results), { action: params.action, results });
+  const limit = Math.min(params.limit ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
+  const candidates = validateSearchResults(await provider.search({ query, limit }, signal));
+  const results = candidates.slice(0, limit);
+  return result(formatSearch(results), {
+    action: params.action,
+    results,
+    ...(candidates.length > limit ? { truncated: true } : {}),
+  });
 }
 
 async function resolveAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
+  if (provider.resolve === undefined) {
+    throw new NotesProviderError({
+      code: "unsupported-reference",
+      message: "The configured notes provider does not support references.",
+    });
+  }
   const note = await provider.resolve(requireReference(params), signal);
   return documentResult(params, note);
 }
@@ -438,6 +449,23 @@ function validateDocument(note: NoteDocument, expectedPath?: string): NoteDocume
   return { path, content: note.content, revision: note.revision, ...metadata };
 }
 
+function validateIndex(index: NotesIndex): NotesIndex {
+  if (!isRecord(index) || typeof index.text !== "string") {
+    throw providerContractError("Notes provider returned an invalid index.");
+  }
+  if (Buffer.byteLength(index.text) > MAX_INDEX_BYTES) {
+    throw providerContractError("Notes provider returned an oversized index.");
+  }
+  if (
+    index.entries !== undefined &&
+    (!Array.isArray(index.entries) || index.entries.length > MAX_INDEX_ENTRIES)
+  ) {
+    throw providerContractError("Notes provider returned too many index entries.");
+  }
+  const entries = index.entries === undefined ? undefined : validateEntries(index.entries);
+  return { text: index.text, ...(entries === undefined ? {} : { entries }) };
+}
+
 function validateEntries(entries: readonly NoteEntry[]): readonly NoteEntry[] {
   if (!Array.isArray(entries) || entries.length > MAX_NOTE_COUNT) {
     throw providerContractError("Notes provider returned too many entries.");
@@ -642,25 +670,8 @@ function formatDocument(path: string, revision: string, content: string): string
   return `[Note path=${JSON.stringify(path)} revision=${JSON.stringify(revision)}]\n${content}`;
 }
 
-function formatIndex(notes: readonly NoteEntry[]): string {
-  const counts = new Map<NotesArea, number>(NOTES_AREAS.map((area) => [area, 0]));
-  for (const note of notes) {
-    const area = NOTES_AREAS.find((candidate) =>
-      note.path.startsWith(NOTES_AREA_PREFIXES[candidate]),
-    );
-    if (area) counts.set(area, (counts.get(area) ?? 0) + 1);
-  }
-  return [
-    `[Notes Index]|count:${notes.length}`,
-    ...NOTES_AREAS.map((area) => `|${area}[${counts.get(area) ?? 0}]:${NOTES_AREA_PREFIXES[area]}`),
-  ].join("\n");
-}
-
-function formatList(notes: readonly NoteEntry[], area?: NotesArea, prefix?: string): string {
-  const scope = [area ? `in ${area}` : undefined, prefix ? `under ${prefix}` : undefined]
-    .filter((part) => part !== undefined)
-    .join(" and ");
-  const header = `Found ${notes.length} note(s)${scope ? ` ${scope}` : ""}:`;
+function formatList(notes: readonly NoteEntry[], prefix?: string): string {
+  const header = `Found ${notes.length} note(s)${prefix ? ` under ${prefix}` : ""}:`;
   return [
     header,
     ...notes.map((note) => `- ${note.path}${note.size === undefined ? "" : ` (${note.size}B)`}`),

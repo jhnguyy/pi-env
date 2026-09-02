@@ -1,27 +1,27 @@
 import { Data } from "effect";
 
-export const NOTES_AREAS = ["wiki", "worklog", "decisions"] as const;
 export const MAX_NOTE_BYTES = 1_048_576;
 export const MAX_NOTE_COUNT = 10_000;
+export const MAX_INDEX_BYTES = 16_384;
+export const MAX_INDEX_ENTRIES = 200;
 export const MAX_SEARCH_QUERY_LENGTH = 1_000;
 export const MAX_SEARCH_RESULTS = 100;
 export const MAX_REVISION_LENGTH = 256;
 export const MAX_EDIT_ITEMS = 8;
 export const MAX_EDIT_TEXT_LENGTH = 8_192;
 export const MAX_APPEND_LENGTH = 131_072;
-export type NotesArea = (typeof NOTES_AREAS)[number];
-
-export const NOTES_AREA_PREFIXES: Readonly<Record<NotesArea, string>> = {
-  wiki: "wiki/",
-  worklog: "records/worklog/",
-  decisions: "records/decisions/",
-};
 
 export interface NoteEntry {
   readonly path: string;
   readonly revision?: string;
   readonly size?: number;
   readonly modifiedAt?: number;
+}
+
+export interface NotesIndex {
+  /** Bounded provider-owned orientation and store conventions. */
+  readonly text: string;
+  readonly entries?: readonly NoteEntry[];
 }
 
 export interface NoteDocument extends NoteEntry {
@@ -41,13 +41,12 @@ export interface ExactEdit {
 }
 
 export interface NotesListRequest {
-  readonly area?: NotesArea;
   readonly prefix?: string;
+  readonly limit?: number;
 }
 
 export interface NotesSearchRequest {
   readonly query: string;
-  readonly areas?: readonly NotesArea[];
   readonly limit?: number;
 }
 
@@ -68,13 +67,14 @@ export interface NotesMutationResult {
   readonly revision?: string;
 }
 
-/** Every registered provider implements this complete baseline contract. */
+/** Every registered provider implements this storage-neutral baseline contract. */
 export interface NotesProvider {
   readonly id: string;
+  index(signal?: AbortSignal): Promise<NotesIndex>;
   list(request: NotesListRequest, signal?: AbortSignal): Promise<readonly NoteEntry[]>;
   read(path: string, signal?: AbortSignal): Promise<NoteDocument>;
   search(request: NotesSearchRequest, signal?: AbortSignal): Promise<readonly NoteSearchResult[]>;
-  resolve(reference: string, signal?: AbortSignal): Promise<NoteDocument>;
+  resolve?(reference: string, signal?: AbortSignal): Promise<NoteDocument>;
   write(request: NotesWriteRequest, signal?: AbortSignal): Promise<NotesMutationResult>;
   delete(request: NotesDeleteRequest, signal?: AbortSignal): Promise<NotesMutationResult>;
 }

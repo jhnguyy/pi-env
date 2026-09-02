@@ -16,11 +16,11 @@ import {
 import path from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import {
+  MAX_INDEX_ENTRIES,
   MAX_NOTE_BYTES,
   MAX_NOTE_COUNT,
   MAX_SEARCH_QUERY_LENGTH,
   MAX_SEARCH_RESULTS,
-  NOTES_AREA_PREFIXES,
   NotesProviderError,
   type NoteDocument,
   type NoteEntry,
@@ -34,8 +34,6 @@ import {
 } from "./domain";
 
 const MARKDOWN_EXTENSION = ".md";
-const DAILY_NOTES_SETTINGS_PATH = ".obsidian/daily-notes.json";
-const MAX_SETTINGS_BYTES = 64 * 1024;
 const MAX_SEARCH_SCAN_BYTES = 64 * 1024 * 1024;
 const MAX_VAULT_ENTRIES = 50_000;
 const MAX_DIRECTORY_DEPTH = 64;
@@ -43,7 +41,6 @@ const MAX_DIRECTORY_DEPTH = 64;
 type MutationOperation = "create" | "replace" | "delete";
 
 export interface ObsidianProviderOptions {
-  readonly now?: () => Date;
   /** Test and integration hook that runs after a read resolves its target. */
   readonly afterReadTargetResolved?: (notePath: string, target: string) => Promise<void>;
   /** Test and integration hook that runs immediately before the final precondition check. */
@@ -78,32 +75,36 @@ export async function createObsidianProvider(
 
 class ObsidianProvider implements NotesProvider {
   readonly id = "obsidian";
-  private readonly now: () => Date;
 
   constructor(
     private readonly root: string,
     private readonly options: ObsidianProviderOptions,
-  ) {
-    this.now = options.now ?? (() => new Date());
+  ) {}
+
+  async index(signal?: AbortSignal) {
+    const notes = await this.list({}, signal);
+    return {
+      text: formatObsidianIndex(notes),
+      entries: notes.slice(0, MAX_INDEX_ENTRIES),
+    };
   }
 
   async list(request: NotesListRequest, signal?: AbortSignal): Promise<readonly NoteEntry[]> {
     try {
       signal?.throwIfAborted();
-      const areaPrefix = request.area === undefined ? undefined : NOTES_AREA_PREFIXES[request.area];
       const explicitPrefix =
         request.prefix === undefined ? undefined : normalizePrefix(request.prefix);
+      const limit = Math.min(request.limit ?? MAX_NOTE_COUNT, MAX_NOTE_COUNT);
       const paths = await walkMarkdownFiles(this.root, this.root, signal);
       const entries: NoteEntry[] = [];
       for (const notePath of paths) {
         signal?.throwIfAborted();
-        if (areaPrefix && !notePath.startsWith(areaPrefix)) continue;
         if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
         const metadata = await lstat(path.join(this.root, ...notePath.split("/")));
         if (!metadata.isFile() || metadata.nlink !== 1) continue;
         entries.push({ path: notePath, size: metadata.size, modifiedAt: metadata.mtimeMs });
       }
-      return entries.sort((left, right) => left.path.localeCompare(right.path));
+      return entries.sort((left, right) => left.path.localeCompare(right.path)).slice(0, limit);
     } catch (cause) {
       throw providerError(cause, "Cannot list Obsidian notes");
     }
@@ -135,7 +136,6 @@ class ObsidianProvider implements NotesProvider {
       throw resourceLimit(`Notes search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters.`);
     }
     try {
-      const selectedAreas = request.areas ?? [];
       const notes = await this.list({}, signal);
       const needle = request.query.toLocaleLowerCase();
       const limit = Math.min(request.limit ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
@@ -143,12 +143,6 @@ class ObsidianProvider implements NotesProvider {
       let scannedBytes = 0;
       for (const note of notes) {
         signal?.throwIfAborted();
-        if (
-          selectedAreas.length > 0 &&
-          !selectedAreas.some((area) => note.path.startsWith(NOTES_AREA_PREFIXES[area]))
-        ) {
-          continue;
-        }
         const estimatedBytes = note.size ?? MAX_NOTE_BYTES;
         if (scannedBytes + estimatedBytes > MAX_SEARCH_SCAN_BYTES) {
           throw resourceLimit(`Notes search scan exceeds ${MAX_SEARCH_SCAN_BYTES} bytes.`);
@@ -174,23 +168,6 @@ class ObsidianProvider implements NotesProvider {
       return results;
     } catch (cause) {
       throw providerError(cause, `Cannot search notes for: ${request.query}`);
-    }
-  }
-
-  async resolve(reference: string, signal?: AbortSignal): Promise<NoteDocument> {
-    const date = this.now();
-    switch (reference) {
-      case "daily/today":
-        return this.read(await this.resolveDailyNotePath(date, signal), signal);
-      case "worklog/today":
-        return this.read(datedRecordPath(NOTES_AREA_PREFIXES.worklog, date), signal);
-      case "decisions/today":
-        return this.read(datedRecordPath(NOTES_AREA_PREFIXES.decisions, date), signal);
-      default:
-        throw new NotesProviderError({
-          code: "unsupported-reference",
-          message: `Unsupported note reference: ${reference}`,
-        });
     }
   }
 
@@ -302,51 +279,6 @@ class ObsidianProvider implements NotesProvider {
     if (!sameTarget(current, expectedTarget)) throw conflict(notePath);
     const document = await readDocument(current.canonical, notePath, undefined, current);
     if (document.revision !== expectedRevision) throw conflict(notePath);
-  }
-
-  private async resolveDailyNotePath(date: Date, signal?: AbortSignal): Promise<string> {
-    try {
-      const lexical = path.join(this.root, DAILY_NOTES_SETTINGS_PATH);
-      await assertNoSymlinkPath(this.root, lexical, DAILY_NOTES_SETTINGS_PATH, false);
-      const lexicalMetadata = await lstat(lexical);
-      if (lexicalMetadata.isSymbolicLink()) {
-        throw new NotesProviderError({
-          code: "path-escape",
-          message: "Daily Notes settings must not be a symbolic link.",
-        });
-      }
-      if (lexicalMetadata.nlink !== 1) {
-        throw new NotesProviderError({
-          code: "path-escape",
-          message: "Daily Notes settings must not be a hard link.",
-        });
-      }
-      const canonical = await realpath(lexical);
-      assertLexicallyContained(this.root, canonical, DAILY_NOTES_SETTINGS_PATH);
-      const metadata = await stat(canonical);
-      if (!metadata.isFile()) throw new Error("Daily Notes settings are not a regular file");
-      const { content: raw } = await readBoundedText(
-        canonical,
-        MAX_SETTINGS_BYTES,
-        "Daily Notes settings",
-        signal,
-        { lexical, canonical, device: metadata.dev, inode: metadata.ino },
-        DAILY_NOTES_SETTINGS_PATH,
-      );
-      const settings = JSON.parse(raw) as { folder?: unknown; format?: unknown };
-      const folder =
-        typeof settings.folder === "string" ? settings.folder.replace(/^\/+|\/+$/g, "") : "";
-      const format =
-        typeof settings.format === "string" && settings.format.length > 0
-          ? settings.format
-          : "YYYY-MM-DD";
-      if (folder.includes("..") || folder.startsWith(".")) {
-        throw new Error("Daily Notes settings contain an invalid folder");
-      }
-      return `${folder ? `${folder}/` : ""}${formatDailyFilename(format, date)}.md`;
-    } catch (cause) {
-      throw providerError(cause, "Cannot resolve Daily Notes settings");
-    }
   }
 
   private async resolveExistingNote(notePath: string): Promise<ResolvedNote> {
@@ -827,41 +759,23 @@ function temporaryPath(target: string): string {
   return path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
 }
 
-function formatDailyFilename(format: string, date: Date): string {
-  const counts = { YYYY: 0, MM: 0, DD: 0 };
-  for (let offset = 0; offset < format.length;) {
-    const token = (["YYYY", "MM", "DD"] as const).find((candidate) =>
-      format.startsWith(candidate, offset),
-    );
-    if (token) {
-      counts[token] += 1;
-      offset += token.length;
-      continue;
-    }
-    if (!"/_.-".includes(format[offset] ?? "")) throw unsupportedDailyFormat(format);
-    offset += 1;
+function formatObsidianIndex(notes: readonly NoteEntry[]): string {
+  const rootCounts = new Map<string, number>();
+  for (const note of notes) {
+    const root = note.path.includes("/") ? (note.path.split("/", 1)[0] ?? "(root)") : "(root)";
+    rootCounts.set(root, (rootCounts.get(root) ?? 0) + 1);
   }
-  if (counts.YYYY !== 1 || counts.MM !== 1 || counts.DD !== 1) {
-    throw unsupportedDailyFormat(format);
-  }
-  const year = String(date.getFullYear()).padStart(4, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return format.replace("YYYY", year).replace("MM", month).replace("DD", day);
-}
-
-function unsupportedDailyFormat(format: string): NotesProviderError {
-  return new NotesProviderError({
-    code: "invalid-path",
-    message: `Unsupported Daily Notes format: ${format}`,
-  });
-}
-
-function datedRecordPath(prefix: string, date: Date): string {
-  const year = String(date.getFullYear()).padStart(4, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${prefix}${year}/${month}/${day}.md`;
+  const roots = [...rootCounts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(0, 100)
+    .map(([root, count]) => `${root.slice(0, 64)}(${count})`)
+    .join(",");
+  return [
+    `[Notes Index]|provider:obsidian|count:${notes.length}`,
+    "|Markdown files only. Hidden directories and Obsidian metadata are excluded.",
+    "|Use list with a prefix for authoritative inventory. Read nearby notes before choosing a destination.",
+    `|roots:${roots || "(empty)"}`,
+  ].join("\n");
 }
 
 function markdownTitle(content: string): string | undefined {

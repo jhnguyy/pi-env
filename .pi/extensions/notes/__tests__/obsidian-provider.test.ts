@@ -33,21 +33,25 @@ async function fixture(options: ObsidianProviderOptions = {}) {
 }
 
 describe("Obsidian notes provider", () => {
-  it("filters list and search through canonical areas", async () => {
+  it("provides bounded store orientation and provider-neutral inventory", async () => {
     const { vault, provider } = await fixture();
-    await mkdir(path.join(vault, "wiki"));
-    await mkdir(path.join(vault, "records", "worklog"), { recursive: true });
+    await mkdir(path.join(vault, "projects"));
+    await mkdir(path.join(vault, "knowledge"));
     await mkdir(path.join(vault, ".obsidian"));
-    await writeFile(path.join(vault, "wiki", "topic.md"), "# Topic\nsearch target");
-    await writeFile(path.join(vault, "records", "worklog", "day.md"), "# Day\nsearch target");
+    await writeFile(path.join(vault, "projects", "topic.md"), "# Topic\nsearch target");
+    await writeFile(path.join(vault, "knowledge", "day.md"), "# Day\nsearch target");
     await writeFile(path.join(vault, ".obsidian", "workspace.md"), "search target");
     await writeFile(path.join(vault, "ignored.txt"), "search target");
 
-    const wiki = await provider.list({ area: "wiki" });
-    const results = await provider.search({ query: "search target", areas: ["worklog"] });
+    const index = await provider.index();
+    const projects = await provider.list({ prefix: "projects", limit: 1 });
+    const results = await provider.search({ query: "search target", limit: 1 });
 
-    expect(wiki.map((note) => note.path)).toEqual(["wiki/topic.md"]);
-    expect(results.map((result) => result.path)).toEqual(["records/worklog/day.md"]);
+    expect(index.text).toContain("projects(1)");
+    expect(index.text).toContain("knowledge(1)");
+    expect(index.text).not.toContain(".obsidian");
+    expect(projects.map((note) => note.path)).toEqual(["projects/topic.md"]);
+    expect(results).toHaveLength(1);
   });
 
   it("omits filesystem names that cannot round-trip through portable paths", async () => {
@@ -187,51 +191,6 @@ describe("Obsidian notes provider", () => {
     await expect(lstat(path.join(vault, ".obsidian", "new"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-  });
-
-  it("rejects ambiguous and unsupported Daily Notes tokens", async () => {
-    const { vault, provider } = await fixture({ now: () => new Date(2026, 8, 1, 12) });
-    await mkdir(path.join(vault, ".obsidian"));
-    await writeFile(
-      path.join(vault, ".obsidian", "daily-notes.json"),
-      JSON.stringify({ folder: "inbox", format: "MMMM/DD/YYYY" }),
-    );
-
-    await expect(provider.resolve("daily/today")).rejects.toThrow("Unsupported Daily Notes format");
-  });
-
-  it("resolves the Obsidian daily note and canonical dated records", async () => {
-    const now = new Date(2026, 8, 1, 12);
-    const { vault, provider } = await fixture({ now: () => now });
-    const year = String(now.getFullYear()).padStart(4, "0");
-    const month = String(now.getMonth() + 1).padStart(2, "0");
-    const day = String(now.getDate()).padStart(2, "0");
-    await mkdir(path.join(vault, ".obsidian"));
-    await mkdir(path.join(vault, "inbox", "daily"), { recursive: true });
-    await mkdir(path.join(vault, "records", "worklog", year, month), { recursive: true });
-    await writeFile(
-      path.join(vault, ".obsidian", "daily-notes.json"),
-      JSON.stringify({ folder: "inbox/daily", format: "YYYY/MM/DD" }),
-    );
-    await mkdir(path.join(vault, "inbox", "daily", year, month), { recursive: true });
-    await writeFile(path.join(vault, "inbox", "daily", year, month, `${day}.md`), "daily");
-    await writeFile(path.join(vault, "records", "worklog", year, month, `${day}.md`), "worklog");
-
-    await expect(provider.resolve("daily/today")).resolves.toMatchObject({ content: "daily" });
-    await expect(provider.resolve("worklog/today")).resolves.toMatchObject({ content: "worklog" });
-    await expect(provider.resolve("other/today")).rejects.toMatchObject({
-      code: "unsupported-reference",
-    });
-  });
-
-  it("rejects Daily Notes settings that link outside the vault", async () => {
-    const { root, vault, provider } = await fixture({ now: () => new Date(2026, 8, 1, 12) });
-    const outside = path.join(root, "daily-notes.json");
-    await writeFile(outside, JSON.stringify({ folder: "inbox" }));
-    await mkdir(path.join(vault, ".obsidian"));
-    await symlink(outside, path.join(vault, ".obsidian", "daily-notes.json"));
-
-    await expect(provider.resolve("daily/today")).rejects.toMatchObject({ code: "path-escape" });
   });
 
   it("does not treat non-missing path failures as permission to create", async () => {

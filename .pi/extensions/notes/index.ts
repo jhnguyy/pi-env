@@ -6,18 +6,21 @@ import { loadNotesSettingsEffect } from "./config";
 import type { SettingsEnv } from "../_shared/settings";
 import { createNotesContract, type NotesToolDetails } from "./contract";
 import { registerConfiguredBuiltinProvider } from "./provider";
+import { registerNotesProviderEventBridge } from "./provider-events";
 import { resolveNotesProvider } from "./provider-registry";
 import { PiEvent, ToolCapability } from "../_shared/agent-tools";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 
-export { NOTES_AREAS, NOTES_AREA_PREFIXES, NotesProviderError } from "./domain";
+export { NotesProviderError } from "./domain";
+export { NotesProviderEvent } from "./provider-events";
+export type { NotesProviderRegistration } from "./provider-events";
 export { registerNotesProvider } from "./provider-registry";
 export type {
   NoteDocument,
   NoteEntry,
   NoteSearchResult,
-  NotesArea,
   NotesDeleteRequest,
+  NotesIndex,
   NotesListRequest,
   NotesMutationResult,
   NotesProvider,
@@ -38,17 +41,25 @@ export async function activateNotesExtension(
   const settings = await Effect.runPromise(loadNotesSettingsEffect(cwd, settingsEnv));
   if (settings === null) return;
 
+  const unregisterExternal = registerNotesProviderEventBridge(pi);
   const unregisterBuiltin = await registerConfiguredBuiltinProvider(settings);
-  pi.on(PiEvent.SessionShutdown, unregisterBuiltin);
+  pi.on(PiEvent.SessionShutdown, () => {
+    unregisterBuiltin();
+    unregisterExternal();
+  });
   const contract = createNotesContract(() => resolveNotesProvider(settings.provider));
 
   registerCrossHostTool(pi, {
     contract,
     capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: {
-      promptSnippet: "Search, read, and maintain notes in the configured store",
+      promptSnippet: "Discover, read, and maintain Markdown notes in the configured store",
       promptGuidelines: [
-        "Use notes for durable note operations when the notes tool is available.",
+        "Use notes index before the first store interaction in a task. Follow the provider-owned conventions that it returns.",
+        "Use notes list with a prefix for authoritative inventory. Do not invent note paths or storage conventions.",
+        "Use notes read before changing an existing note. Pass its revision to edit, write, or delete so concurrent changes fail safely.",
+        "Use notes edit for small exact changes. Use notes write for a coherent rewrite when the note structure or meaning changes.",
+        "Create durable notes only when future retrieval is expected and the destination is clear from the store index or nearby notes.",
         "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
       ],
       renderCall(args, theme) {

@@ -10,7 +10,9 @@ import {
 } from "../contract";
 import {
   MAX_EDIT_ITEMS,
+  MAX_INDEX_BYTES,
   MAX_NOTE_BYTES,
+  MAX_NOTE_COUNT,
   MAX_REVISION_LENGTH,
   type NoteSearchResult,
   type NotesProvider,
@@ -19,7 +21,11 @@ import {
 function provider(): NotesProvider {
   return {
     id: "test",
-    list: vi.fn(async () => [{ path: "wiki/note.md" }]),
+    index: vi.fn(async () => ({
+      text: "[Notes Index]|provider:test",
+      entries: [{ path: "anywhere/note.md" }],
+    })),
+    list: vi.fn(async () => [{ path: "anywhere/note.md" }]),
     read: vi.fn(async (path: string) => ({ path, content: "content", revision: "rev-1" })),
     search: vi.fn(async () => [{ path: "wiki/note.md", title: "Note" }]),
     resolve: vi.fn(async () => ({
@@ -33,20 +39,18 @@ function provider(): NotesProvider {
 }
 
 describe("notes tool contract", () => {
-  it("exposes one stable schema with canonical note areas", () => {
+  it("exposes one stable provider-neutral schema", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
     expect(contract.description).toBe(NOTES_DESCRIPTION);
-    expect(contract.description).toContain("Never store secrets");
+    expect(contract.description).toContain("guarded write, edit, or delete");
     expect(contract.parameters).toBe(NOTES_PARAMETERS);
     for (const action of NOTES_ACTIONS) expect(Check(contract.parameters, { action })).toBe(true);
     expect(Check(contract.parameters, {})).toBe(false);
-    expect(Check(contract.parameters, { action: "list", area: "wiki" })).toBe(true);
-    expect(Check(contract.parameters, { action: "search", areas: ["worklog", "decisions"] })).toBe(
-      true,
-    );
-    expect(Check(contract.parameters, { action: "list", area: "projects" })).toBe(false);
-    expect(Check(contract.parameters, { action: "search", query: "x", limit: 101 })).toBe(false);
+    expect(Check(contract.parameters, { action: "list", prefix: "any/provider/path" })).toBe(true);
+    expect(Check(contract.parameters, { action: "list", area: "wiki" })).toBe(false);
+    expect(Check(contract.parameters, { action: "search", areas: ["worklog"] })).toBe(false);
+    expect(Check(contract.parameters, { action: "list", limit: MAX_NOTE_COUNT + 1 })).toBe(false);
     expect(
       Check(contract.parameters, {
         action: "edit",
@@ -61,19 +65,16 @@ describe("notes tool contract", () => {
     ).toBe(false);
   });
 
-  it("routes canonical areas and references through the provider", async () => {
+  it("uses provider-owned orientation and routes provider-neutral operations", async () => {
     const fake = provider();
     const contract = createNotesContract(fake);
     await contract.execute({ action: "index" }, { cwd: "/repo" });
     const listed = await contract.execute(
-      { action: "list", area: "wiki", prefix: "wiki/ai" },
+      { action: "list", prefix: "projects/notes", limit: 12 },
       { cwd: "/repo" },
     );
     const read = await contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" });
-    await contract.execute(
-      { action: "search", query: "topic", areas: ["wiki", "decisions"], limit: 12 },
-      { cwd: "/repo" },
-    );
+    await contract.execute({ action: "search", query: "topic", limit: 12 }, { cwd: "/repo" });
     const resolved = await contract.execute(
       { action: "resolve", reference: "worklog/today" },
       { cwd: "/repo" },
@@ -84,15 +85,12 @@ describe("notes tool contract", () => {
     });
     expect(listed.content).toContainEqual({
       type: "text",
-      text: expect.stringContaining("in wiki and under wiki/ai"),
+      text: expect.stringContaining("under projects/notes"),
     });
-    expect(fake.list).toHaveBeenNthCalledWith(1, {}, undefined);
-    expect(fake.list).toHaveBeenNthCalledWith(2, { area: "wiki", prefix: "wiki/ai" }, undefined);
+    expect(fake.index).toHaveBeenCalledWith(undefined);
+    expect(fake.list).toHaveBeenCalledWith({ prefix: "projects/notes", limit: 12 }, undefined);
     expect(fake.read).toHaveBeenCalledWith("wiki/note.md", undefined);
-    expect(fake.search).toHaveBeenCalledWith(
-      { query: "topic", areas: ["wiki", "decisions"], limit: 12 },
-      undefined,
-    );
+    expect(fake.search).toHaveBeenCalledWith({ query: "topic", limit: 12 }, undefined);
     expect(fake.resolve).toHaveBeenCalledWith("worklog/today", undefined);
     expect(resolved.details).toMatchObject({
       path: "records/worklog/2026/09/01.md",
@@ -100,11 +98,19 @@ describe("notes tool contract", () => {
     });
   });
 
+  it("reports unsupported references without requiring every provider to implement resolve", async () => {
+    const fake = provider();
+    delete fake.resolve;
+    const contract = createNotesContract(fake);
+    await expect(
+      contract.execute({ action: "resolve", reference: "daily/today" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "unsupported-reference" });
+  });
   it("normalizes explicit empty inventory prefixes", async () => {
     const fake = provider();
     const contract = createNotesContract(fake);
     await contract.execute({ action: "list", prefix: "./" }, { cwd: "/repo" });
-    expect(fake.list).toHaveBeenCalledWith({ area: undefined, prefix: "" }, undefined);
+    expect(fake.list).toHaveBeenCalledWith({ prefix: "", limit: MAX_NOTE_COUNT }, undefined);
   });
 
   it("applies exact edits in the shell and writes with the read revision", async () => {
@@ -153,6 +159,15 @@ describe("notes tool contract", () => {
     expect(fake.write).not.toHaveBeenCalled();
   });
 
+  it("rejects oversized provider orientation before exposing it", async () => {
+    const fake = provider();
+    vi.mocked(fake.index).mockResolvedValue({ text: "x".repeat(MAX_INDEX_BYTES + 1) });
+    const contract = createNotesContract(fake);
+    await expect(contract.execute({ action: "index" }, { cwd: "/repo" })).rejects.toMatchObject({
+      code: "invalid-provider",
+    });
+    expect(fake.list).not.toHaveBeenCalled();
+  });
   it("bounds structured list details", async () => {
     const fake = provider();
     vi.mocked(fake.list).mockResolvedValue(

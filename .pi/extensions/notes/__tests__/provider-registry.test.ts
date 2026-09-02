@@ -9,6 +9,7 @@ import {
 function provider(id: string): NotesProvider {
   return {
     id,
+    index: async () => ({ text: "Store conventions" }),
     list: async () => [],
     read: async (path) => ({ path, content: "", revision: "revision" }),
     search: async () => [],
