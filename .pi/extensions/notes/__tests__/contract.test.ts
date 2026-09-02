@@ -27,9 +27,9 @@ function provider(): NotesProvider {
     })),
     list: vi.fn(async () => [{ path: "anywhere/note.md" }]),
     read: vi.fn(async (path: string) => ({ path, content: "content", revision: "rev-1" })),
-    search: vi.fn(async () => [{ path: "wiki/note.md", title: "Note" }]),
+    search: vi.fn(async () => [{ path: "records/2026/09/01.md", title: "Record" }]),
     resolve: vi.fn(async () => ({
-      path: "records/worklog/2026/09/01.md",
+      path: "records/2026/09/01.md",
       content: "today",
       revision: "rev-today",
     })),
@@ -73,10 +73,13 @@ describe("notes tool contract", () => {
       { action: "list", prefix: "projects/notes", limit: 12 },
       { cwd: "/repo" },
     );
-    const read = await contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" });
+    const read = await contract.execute(
+      { action: "read", path: "records/2026/09/01.md" },
+      { cwd: "/repo" },
+    );
     await contract.execute({ action: "search", query: "topic", limit: 12 }, { cwd: "/repo" });
     const resolved = await contract.execute(
-      { action: "resolve", reference: "worklog/today" },
+      { action: "resolve", reference: "record/by-date" },
       { cwd: "/repo" },
     );
     expect(read.content).toContainEqual({
@@ -89,11 +92,11 @@ describe("notes tool contract", () => {
     });
     expect(fake.index).toHaveBeenCalledWith(undefined);
     expect(fake.list).toHaveBeenCalledWith({ prefix: "projects/notes", limit: 12 }, undefined);
-    expect(fake.read).toHaveBeenCalledWith("wiki/note.md", undefined);
+    expect(fake.read).toHaveBeenCalledWith("records/2026/09/01.md", undefined);
     expect(fake.search).toHaveBeenCalledWith({ query: "topic", limit: 12 }, undefined);
-    expect(fake.resolve).toHaveBeenCalledWith("worklog/today", undefined);
+    expect(fake.resolve).toHaveBeenCalledWith("record/by-date", undefined);
     expect(resolved.details).toMatchObject({
-      path: "records/worklog/2026/09/01.md",
+      path: "records/2026/09/01.md",
       revision: "rev-today",
     });
   });
