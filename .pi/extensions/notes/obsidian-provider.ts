@@ -149,11 +149,15 @@ class ObsidianProvider implements NotesProvider {
         ) {
           continue;
         }
-        scannedBytes += note.size ?? MAX_NOTE_BYTES;
-        if (scannedBytes > MAX_SEARCH_SCAN_BYTES) {
+        const estimatedBytes = note.size ?? MAX_NOTE_BYTES;
+        if (scannedBytes + estimatedBytes > MAX_SEARCH_SCAN_BYTES) {
           throw resourceLimit(`Notes search scan exceeds ${MAX_SEARCH_SCAN_BYTES} bytes.`);
         }
         const document = await this.read(note.path, signal);
+        scannedBytes += document.size ?? Buffer.byteLength(document.content);
+        if (scannedBytes > MAX_SEARCH_SCAN_BYTES) {
+          throw resourceLimit(`Notes search scan exceeds ${MAX_SEARCH_SCAN_BYTES} bytes.`);
+        }
         const pathMatch = note.path.toLocaleLowerCase().includes(needle);
         const contentMatch = document.content.toLocaleLowerCase().includes(needle);
         if (!pathMatch && !contentMatch) continue;
@@ -414,18 +418,28 @@ async function readDocument(
   signal?: AbortSignal,
   expectedTarget?: ResolvedNote,
 ): Promise<NoteDocument> {
-  const { content, contentDigest, size, modifiedAt, device, inode } = await readBoundedText(
-    target,
-    MAX_NOTE_BYTES,
-    `Note ${notePath}`,
-    signal,
-    expectedTarget,
-    notePath,
-  );
+  const { content, contentDigest, size, modifiedAt, changedAt, device, inode, mode, owner, group } =
+    await readBoundedText(
+      target,
+      MAX_NOTE_BYTES,
+      `Note ${notePath}`,
+      signal,
+      expectedTarget,
+      notePath,
+    );
   return {
     path: notePath,
     content,
-    revision: revisionOf(contentDigest, notePath, device, inode),
+    revision: revisionOf({
+      contentDigest,
+      notePath,
+      device,
+      inode,
+      mode,
+      owner,
+      group,
+      changedAt,
+    }),
     size,
     modifiedAt,
   };
@@ -445,6 +459,10 @@ async function readBoundedText(
   modifiedAt: number;
   device: number;
   inode: number;
+  mode: number;
+  owner: number;
+  group: number;
+  changedAt: number;
 }> {
   const handle = await open(target, "r");
   try {
@@ -456,7 +474,7 @@ async function readBoundedText(
       throw conflict(identityPath);
     }
     if (initial.size > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
-    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    const buffer = Buffer.allocUnsafe(Math.min(maxBytes + 1, initial.size + 1));
     let total = 0;
     while (total < buffer.length) {
       signal?.throwIfAborted();
@@ -464,16 +482,29 @@ async function readBoundedText(
       if (bytesRead === 0) break;
       total += bytesRead;
     }
-    if (total > maxBytes) throw resourceLimit(`${label} exceeds ${maxBytes} bytes.`);
+    if (total > initial.size) throw conflict(identityPath);
     const metadata = await handle.stat();
+    if (
+      metadata.dev !== initial.dev ||
+      metadata.ino !== initial.ino ||
+      metadata.size !== initial.size ||
+      metadata.mtimeMs !== initial.mtimeMs ||
+      metadata.ctimeMs !== initial.ctimeMs
+    ) {
+      throw conflict(identityPath);
+    }
     const bytes = buffer.subarray(0, total);
     return {
       content: bytes.toString("utf8"),
       contentDigest: createHash("sha256").update(bytes).digest("base64url"),
       size: total,
       modifiedAt: metadata.mtimeMs,
+      changedAt: metadata.ctimeMs,
       device: metadata.dev,
       inode: metadata.ino,
+      mode: metadata.mode,
+      owner: metadata.uid,
+      group: metadata.gid,
     };
   } finally {
     await handle.close();
@@ -486,14 +517,20 @@ function assertContentSize(content: string): void {
   }
 }
 
-function revisionOf(
-  contentDigest: string,
-  notePath: string,
-  device: number,
-  inode: number,
-): string {
+function revisionOf(input: {
+  contentDigest: string;
+  notePath: string;
+  device: number;
+  inode: number;
+  mode: number;
+  owner: number;
+  group: number;
+  changedAt: number;
+}): string {
   return createHash("sha256")
-    .update(`${notePath}\0${device}\0${inode}\0${contentDigest}`)
+    .update(
+      `${input.notePath}\0${input.device}\0${input.inode}\0${input.mode}\0${input.owner}\0${input.group}\0${input.changedAt}\0${input.contentDigest}`,
+    )
     .digest("base64url");
 }
 
@@ -535,14 +572,15 @@ function providerError(cause: unknown, message: string): unknown {
 }
 
 function normalizeNotePath(input: string): string {
-  const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
+  const stripped = input.replaceAll("\\", "/");
   if (
     stripped.length === 0 ||
     stripped.length > 1_024 ||
     path.posix.isAbsolute(stripped) ||
     /^[A-Za-z]:\//.test(stripped) ||
+    stripped.startsWith("@") ||
     stripped.includes(":") ||
-    stripped.includes("\0")
+    /[\x00-\x1f\x7f]/.test(stripped)
   ) {
     throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${input}` });
   }
@@ -569,13 +607,14 @@ function normalizeNotePath(input: string): string {
 }
 
 function normalizePrefix(input: string): string {
-  const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
+  const stripped = input.replaceAll("\\", "/");
   if (stripped === "") return "";
   if (
     stripped.length > 1_024 ||
     path.posix.isAbsolute(stripped) ||
+    stripped.startsWith("@") ||
     stripped.includes(":") ||
-    stripped.includes("\0")
+    /[\x00-\x1f\x7f]/.test(stripped)
   ) {
     throw new NotesProviderError({
       code: "invalid-path",
@@ -770,8 +809,10 @@ async function atomicReplace(
   const temp = temporaryPath(target);
   try {
     await writeFile(temp, content, { encoding: "utf8", flag: "wx", mode: 0o600, signal });
-    await chown(temp, metadata.uid, metadata.gid);
-    await chmod(temp, metadata.mode & 0o7777);
+    if (process.platform !== "win32") {
+      await chown(temp, metadata.uid, metadata.gid);
+      await chmod(temp, metadata.mode & 0o7777);
+    }
     await beforeCommit();
     signal?.throwIfAborted();
     // Standard rename cannot combine the revision check and commit against independent writers.

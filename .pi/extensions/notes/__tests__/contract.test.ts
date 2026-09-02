@@ -174,6 +174,9 @@ describe("notes tool contract", () => {
       contract.execute({ action: "read", path: "wiki/note.md/" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "not-a-note" });
     await expect(
+      contract.execute({ action: "read", path: "@@note.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-path" });
+    await expect(
       contract.execute({ action: "read", path: "visible.txt:private.md" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "invalid-path" });
     await expect(
@@ -237,6 +240,14 @@ describe("notes tool contract", () => {
     });
     await expect(
       contract.execute({ action: "read", path: "wiki/note.md" }, { cwd: "/repo" }),
+    ).rejects.toMatchObject({ code: "invalid-provider" });
+
+    vi.mocked(fake.write).mockResolvedValue({ path: "wiki/other.md", revision: "next" });
+    await expect(
+      contract.execute(
+        { action: "write", path: "wiki/note.md", content: "content", revision: null },
+        { cwd: "/repo" },
+      ),
     ).rejects.toMatchObject({ code: "invalid-provider" });
   });
 

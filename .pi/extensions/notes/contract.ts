@@ -215,6 +215,7 @@ async function writeAction(provider: NotesProvider, params: NotesParams, signal?
       },
       signal,
     ),
+    notePath,
   );
   return result(`Wrote ${mutation.path}`, {
     action: params.action,
@@ -240,6 +241,7 @@ async function editAction(provider: NotesProvider, params: NotesParams, signal?:
       },
       signal,
     ),
+    notePath,
   );
   return result(`Edited ${mutation.path}`, {
     action: params.action,
@@ -249,11 +251,13 @@ async function editAction(provider: NotesProvider, params: NotesParams, signal?:
 }
 
 async function deleteAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
+  const notePath = requirePath(params);
   const mutation = validateMutation(
     await provider.delete(
-      { path: requirePath(params), expectedRevision: requireExistingRevision(params) },
+      { path: notePath, expectedRevision: requireExistingRevision(params) },
       signal,
     ),
+    notePath,
   );
   return result(`Deleted ${mutation.path}`, { action: params.action, path: mutation.path });
 }
@@ -305,17 +309,26 @@ export function applyExactEdits(
 
 function requirePath(params: NotesParams): string {
   if (!params.path) throw new Error(`notes ${params.action} requires path`);
-  return normalizeStorePath(params.path, true);
+  return normalizeStorePath(params.path, true, true);
 }
 
 function normalizePrefix(prefix: string): string {
-  const stripped = prefix.replace(/^@/, "").replaceAll("\\", "/");
+  const stripped = (prefix.startsWith("@") ? prefix.slice(1) : prefix).replaceAll("\\", "/");
+  if (stripped.startsWith("@")) {
+    throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${prefix}` });
+  }
   if (stripped === "" || stripped === "." || stripped === "./") return "";
-  return normalizeStorePath(prefix, false);
+  return normalizeStorePath(prefix, false, true);
 }
 
-function normalizeStorePath(input: string, requireMarkdown: boolean): string {
-  const stripped = input.replace(/^@/, "").replaceAll("\\", "/");
+function normalizeStorePath(
+  input: string,
+  requireMarkdown: boolean,
+  allowReferencePrefix = false,
+): string {
+  const stripped = (
+    allowReferencePrefix && input.startsWith("@") ? input.slice(1) : input
+  ).replaceAll("\\", "/");
   if (isInvalidStorePath(stripped)) {
     throw new NotesProviderError({ code: "invalid-path", message: `Invalid note path: ${input}` });
   }
@@ -341,6 +354,7 @@ function isInvalidStorePath(input: string): boolean {
     input.length === 0 ||
     input.length > 1_024 ||
     pathIsAbsolute(input) ||
+    input.startsWith("@") ||
     input.includes(":") ||
     /[\x00-\x1f\x7f]/.test(input)
   );
@@ -507,11 +521,17 @@ function validateOptionalScore(value: unknown): number | undefined {
   return value;
 }
 
-function validateMutation(mutation: NotesMutationResult): NotesMutationResult {
+function validateMutation(
+  mutation: NotesMutationResult,
+  expectedPath: string,
+): NotesMutationResult {
   if (!isRecord(mutation) || typeof mutation.path !== "string") {
     throw providerContractError("Notes provider returned an invalid mutation result.");
   }
   const path = normalizeStorePath(mutation.path, true);
+  if (path !== expectedPath) {
+    throw providerContractError("Notes provider returned a mutation for the wrong path.");
+  }
   if (mutation.revision !== undefined) {
     if (typeof mutation.revision !== "string") {
       throw providerContractError("Notes provider returned an invalid revision.");

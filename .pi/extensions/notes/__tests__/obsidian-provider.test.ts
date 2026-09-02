@@ -54,6 +54,7 @@ describe("Obsidian notes provider", () => {
     const { vault, provider } = await fixture();
     await writeFile(path.join(vault, "wiki\\victim.md"), "unsafe name");
     await writeFile(path.join(vault, "@note.md"), "unsafe name");
+    await writeFile(path.join(vault, "line\nbreak.md"), "unsafe name");
     await writeFile(path.join(vault, "normal.md"), "normal");
 
     await expect(provider.list({})).resolves.toEqual([
@@ -303,6 +304,12 @@ describe("Obsidian notes provider", () => {
     await writeFile(notePath, "first", { mode: 0o1640 });
     await chmod(notePath, 0o1640);
     const initialMetadata = await stat(notePath);
+    const stale = await provider.read("note.md");
+    await chmod(notePath, 0o1644);
+    await expect(
+      provider.write({ path: "note.md", content: "stale", expectedRevision: stale.revision }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await chmod(notePath, 0o1640);
     const note = await provider.read("note.md");
     await provider.write({ path: "note.md", content: "second", expectedRevision: note.revision });
     const finalMetadata = await stat(notePath);
