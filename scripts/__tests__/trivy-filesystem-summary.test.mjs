@@ -100,4 +100,19 @@ describe("filesystem Trivy reporting", () => {
     expect(packageVersions).toEqual(["8.9.0"]);
     expect(new Set(consumerVersions)).toEqual(new Set(["8.9.0"]));
   });
+
+  it("locks every toml consumer to the fixed release", () => {
+    const manifest = JSON.parse(readFileSync(PACKAGE_PATH, "utf8"));
+    const lockfile = readFileSync(LOCK_PATH, "utf8");
+    const packageVersions = [...lockfile.matchAll(/^  toml@([^:]+):$/gm)].map(
+      ([, version]) => version,
+    );
+    const consumerVersions = [...lockfile.matchAll(/^\s+toml: (\S+)$/gm)].map(
+      ([, version]) => version,
+    );
+
+    expect(manifest.overrides.toml).toBe("4.2.0");
+    expect(packageVersions).toEqual(["4.2.0"]);
+    expect(new Set(consumerVersions)).toEqual(new Set(["4.2.0"]));
+  });
 });

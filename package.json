@@ -126,6 +126,7 @@
     "nanoid": "3.3.18",
     "postcss": "8.5.25",
     "protobufjs": "8.6.6",
+    "toml": "4.2.0",
     "undici": "8.9.0"
   },
   "packageManager": "nub@0.2.10",
