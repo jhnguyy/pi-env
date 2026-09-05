@@ -1,11 +1,13 @@
 Supplemental MIT notices for installed packages that omit a license file
 ============================================================================
 
-@earendil-works/pi-agent-core, @earendil-works/pi-ai,
-@earendil-works/pi-client, @earendil-works/pi-coding-agent,
-@earendil-works/pi-protocol, @earendil-works/pi-telemetry,
-and @earendil-works/pi-tui:
+@earendil-works/chord, @earendil-works/pi-agent-core,
+@earendil-works/pi-ai, @earendil-works/pi-coding-agent,
+@earendil-works/pi-telemetry, and @earendil-works/pi-tui:
 Copyright (c) 2025 Mario Zechner
+
+standardwebhooks:
+Copyright (c) 2023 Svix (https://www.svix.com)
 
 @mariozechner/clipboard and its platform packages:
 Copyright (c) Mario Zechner

@@ -18,9 +18,11 @@ run_pi_cli_setup() {
 }
 
 create_stub_repo() {
+  local pi_entry
+  pi_entry="${2:-dist/cli.js}"
   REPO="$1/repo"
   PI_BIN_DIR="$1/bin"
-  mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/dist" "$PI_BIN_DIR"
+  mkdir -p "$REPO/node_modules/@earendil-works/pi-coding-agent/$(dirname "$pi_entry")" "$PI_BIN_DIR"
   cat > "$REPO/package.json" <<'JSON'
 {
   "devDependencies": {
@@ -28,13 +30,16 @@ create_stub_repo() {
   }
 }
 JSON
-  cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/package.json" <<'JSON'
+  cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/package.json" <<JSON
 {
   "name": "@earendil-works/pi-coding-agent",
-  "version": "1.2.3"
+  "version": "1.2.3",
+  "bin": {
+    "pi": "$pi_entry"
+  }
 }
 JSON
-  cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" <<'JS'
+  cat > "$REPO/node_modules/@earendil-works/pi-coding-agent/$pi_entry" <<'JS'
 console.log('stub pi')
 JS
 }
@@ -58,6 +63,24 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
   PI_PACKAGE_DIR="$tmp/missing/@earendil-works/pi-coding-agent" "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "wrapper should ignore stale invalid PI_PACKAGE_DIR and use repo package"
 
   PATH="$old_path"
+  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
+test_pi_cli_wrapper_uses_declared_package_entry() {
+  local tmp
+  tmp="$(with_temp_dir)"
+
+  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  PI_ENV_NODE_BIN=$(node_bin)
+  create_stub_repo "$tmp" "dist/bundle/cli.js"
+
+  run_pi_cli_setup
+
+  [ -x "$PI_BIN_DIR/pi" ] || fail "pi wrapper should be executable"
+  [ ! -e "$REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" ] || fail "fixture should not contain the legacy entrypoint"
+  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "pi wrapper should execute the package-declared entrypoint"
+
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
   rm -rf "$tmp"
 }
@@ -136,6 +159,7 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
 }
 
 test_pi_cli_wrapper_uses_repo_locked_package
+test_pi_cli_wrapper_uses_declared_package_entry
 test_pi_cli_wrapper_pins_configured_node
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
 test_pi_cli_wrapper_adds_path_profile_when_portable

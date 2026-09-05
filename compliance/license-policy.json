@@ -7,7 +7,8 @@
     "BlueOak-1.0.0",
     "ISC",
     "MIT",
-    "MPL-2.0"
+    "MPL-2.0",
+    "Unlicense"
   ],
   "prohibitedLicensePrefixes": [
     "AGPL-",
@@ -27,7 +28,13 @@
     {
       "repository": "https://github.com/earendil-works/pi",
       "license": "MIT",
-      "versions": ["0.84.1"],
+      "versions": ["0.85.1"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/standard-webhooks/standard-webhooks",
+      "license": "MIT",
+      "versions": ["1.1.1"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {

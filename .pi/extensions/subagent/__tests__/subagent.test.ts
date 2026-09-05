@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container, type Text } from "@earendil-works/pi-tui";
 import initSubagent, { completedJobUsageOnce } from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
