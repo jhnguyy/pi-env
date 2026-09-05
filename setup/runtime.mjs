@@ -17,7 +17,7 @@ import { deriveSetupPolicy } from './policy.mjs';
 
 const PiPackage = Object.freeze({
   Name: '@earendil-works/pi-coding-agent',
-  Entry: 'dist/cli.js',
+  Bin: 'pi',
 });
 
 const InstallStrategy = Object.freeze({
@@ -85,17 +85,28 @@ function shSingleQuote(value) {
   return String(value).replaceAll("'", "'\\''");
 }
 
-function writePiWrapper(piPackageDir) {
+function readPiPackageEntry(piPackageDir) {
+  const packageJsonPath = join(piPackageDir, 'package.json');
+  const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  const entry = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[PiPackage.Bin];
+  if (typeof entry !== 'string' || entry.length === 0) {
+    fail(`  ✗  ${PiPackage.Name} does not declare a ${PiPackage.Bin} executable in ${packageJsonPath}`);
+  }
+  return entry.replace(/^\.\//, '');
+}
+
+function writePiWrapper(piPackageDir, piPackageEntry) {
   mkdirSync(piBinDir, { recursive: true });
   const wrapper = `#!/usr/bin/env sh
 set -eu
 DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
+PI_PACKAGE_ENTRY='${shSingleQuote(piPackageEntry)}'
 REQUESTED_PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-}"
 PI_PACKAGE_DIR="$DEFAULT_PI_PACKAGE_DIR"
-if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/${PiPackage.Entry}" ]; then
+if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/$PI_PACKAGE_ENTRY" ]; then
   PI_PACKAGE_DIR="$REQUESTED_PI_PACKAGE_DIR"
 fi
-PI_ENTRY="$PI_PACKAGE_DIR/${PiPackage.Entry}"
+PI_ENTRY="$PI_PACKAGE_DIR/$PI_PACKAGE_ENTRY"
 NODE_BIN='${shSingleQuote(setupNodeBin)}'
 # Sidecars cannot reliably reuse process.execPath when Node is launched through
 # a Nix dynamic-loader wrapper. Preserve setup's Nub-backed runtime selection.
@@ -156,10 +167,11 @@ function installPiCli(policy) {
   section('Pi CLI');
   const version = readPiVersion();
   const piPackageDir = join(repo, 'node_modules', ...PiPackage.Name.split('/'));
-  const piEntry = join(piPackageDir, PiPackage.Entry);
   if (!existsSync(join(piPackageDir, 'package.json'))) {
     fail(`  ✗  missing pi package after install: ${piPackageDir}`);
   }
+  const piPackageEntry = readPiPackageEntry(piPackageDir);
+  const piEntry = join(piPackageDir, piPackageEntry);
   if (!existsSync(piEntry)) {
     fail(`  ✗  missing pi entrypoint after install: ${piEntry}`);
   }
@@ -167,7 +179,7 @@ function installPiCli(policy) {
     ok(`pi ${version} package installed (CLI wrapper managed externally)`);
     return;
   }
-  writePiWrapper(piPackageDir);
+  writePiWrapper(piPackageDir, piPackageEntry);
   ok(`pi ${version} → ${join(piBinDir, 'pi')}`);
   if (!policy.path.updateShellProfiles) {
     skip('shell profile PATH edits (managed externally)');

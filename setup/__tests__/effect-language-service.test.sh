@@ -25,7 +25,7 @@ run_strategy() {
   }
 }
 JSON
-  printf '{}\n' > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/package.json"
+  printf '{"bin":{"pi":"dist/cli.js"}}\n' > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/package.json"
   : > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   : > "$tmp/repo/node_modules/@effect/language-service/cli.js"
   cat > "$tmp/repo/scripts/restart-lsp-daemon.sh" <<'SH'
