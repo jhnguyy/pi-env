@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createPtcToolCatalog } from "../catalog";
 import { PtcExecutor } from "../executor";
 import { PtcExecutionError, PtcExecutionPhase } from "../node-runtime";
@@ -67,7 +67,7 @@ function makeExecutor(
     }),
     dispatch,
   } as unknown as ToolRegistry;
-  return new PtcExecutor({} as ExtensionAPI, registry, preamblePath, timeoutMs);
+  return new PtcExecutor(registry, preamblePath, timeoutMs);
 }
 
 async function rejectedExecution(executor: PtcExecutor, code: string): Promise<PtcExecutionError> {
@@ -128,26 +128,19 @@ describe("PTC live transport", () => {
     );
   });
 
-  it("provides canonical namespace keys, exact-name aliases, and global compatibility aliases", async () => {
+  it("maps canonical and exact namespace keys to original tool names", async () => {
     const dispatch = vi.fn(async (name: string) => `${name}:text`);
-    const executor = makeExecutor(["read", "dev-tools", "2fa-tool"], dispatch);
+    const executor = makeExecutor(["dev-tools"], dispatch);
     const code = [
       "const namespaced = await tools.dev_tools({});",
       'const exact = await tools["dev-tools"]({});',
-      'const digit = await tools["2fa-tool"]({});',
-      "const compatible = await dev_tools({});",
-      "return [namespaced, exact, digit, compatible].join('|');",
+      "return [namespaced, exact].join('|');",
     ].join("\n");
 
     await expect(executor.execute(code, process.cwd())).resolves.toBe(
-      "dev-tools:text|dev-tools:text|2fa-tool:text|dev-tools:text",
+      "dev-tools:text|dev-tools:text",
     );
-    expect(dispatch.mock.calls.map(([name]) => name)).toEqual([
-      "dev-tools",
-      "dev-tools",
-      "2fa-tool",
-      "dev-tools",
-    ]);
+    expect(dispatch.mock.calls.map(([name]) => name)).toEqual(["dev-tools", "dev-tools"]);
   });
 
   it("does not present the tools namespace as a thenable or JSON serializer", async () => {

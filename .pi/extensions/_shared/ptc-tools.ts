@@ -42,12 +42,8 @@ export function registerPtcTools(
   }
 }
 
-export function listenForPtcTools(
-  pi: PtcToolEvents,
-  handler: PtcToolHandler,
-  removalHandler?: PtcToolHandler,
-): void {
-  ptcToolChannel.subscribe(pi.events, handler, removalHandler);
+export function listenForPtcTools(pi: PtcToolEvents, handler: PtcToolHandler): void {
+  ptcToolChannel.subscribe(pi.events, handler);
 }
 
 export function resetPtcToolRegistryForTests(): void {

@@ -81,16 +81,14 @@ export class ToolRegistry {
   }
 
   private installPtcToolsListener(pi: ExtensionAPI): void {
-    listenForPtcTools(
-      pi,
-      (registration) => this.rememberTool(registration, registration.tool),
-      (registration) => this.forgetTool(registration, registration.tool.name),
+    listenForPtcTools(pi, (registration) =>
+      this.rememberTool(registration, registration.tool),
     );
   }
 
-  getRuntimeSnapshot(pi: ExtensionAPI = this.pi): PtcRuntimeSnapshot {
-    const activeNames = new Set(pi.getActiveTools());
-    const activeTools = pi.getAllTools().filter((tool) => activeNames.has(tool.name));
+  getRuntimeSnapshot(): PtcRuntimeSnapshot {
+    const activeNames = new Set(this.pi.getActiveTools());
+    const activeTools = this.pi.getAllTools().filter((tool) => activeNames.has(tool.name));
     const availableTools: ToolInfo[] = [];
     const unavailableNames: string[] = [];
 
@@ -109,8 +107,8 @@ export class ToolRegistry {
     };
   }
 
-  getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
-    return [...this.getRuntimeSnapshot(pi).availableTools];
+  getAvailableTools(): ToolInfo[] {
+    return [...this.getRuntimeSnapshot().availableTools];
   }
 
   async dispatch(

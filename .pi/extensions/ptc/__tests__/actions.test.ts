@@ -1,6 +1,6 @@
 import { transformSync } from "esbuild";
 import { describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createPtcToolCatalog } from "../catalog";
 import { executePtcAction } from "../index";
 import { PtcAction } from "../types";
@@ -30,8 +30,6 @@ function registrySnapshot(callable: string[], unavailable: string[] = []): ToolR
   } as unknown as ToolRegistry;
 }
 
-const pi = {} as ExtensionAPI;
-
 describe("PTC actions", () => {
   it("keeps run as the default and accepts an explicit run action", async () => {
     const execute = vi.fn(async (code: string) => `ran:${code}`);
@@ -39,14 +37,13 @@ describe("PTC actions", () => {
     const registry = registrySnapshot([]);
 
     await expect(
-      executePtcAction({ code: 'return "ok";' }, runtime, registry, pi, "/cwd"),
+      executePtcAction({ code: 'return "ok";' }, runtime, registry, "/cwd"),
     ).resolves.toEqual({ output: 'ran:return "ok";', details: {} });
     await expect(
       executePtcAction(
         { action: PtcAction.Run, code: 'return "ok";' },
         runtime,
         registry,
-        pi,
         "/cwd",
       ),
     ).resolves.toEqual({ output: 'ran:return "ok";', details: {} });
@@ -61,7 +58,6 @@ describe("PTC actions", () => {
       { action: PtcAction.Inspect },
       { execute },
       registry,
-      pi,
       "/cwd",
     );
 
@@ -87,7 +83,7 @@ describe("PTC actions", () => {
 
   it("requires code only for the run action", async () => {
     await expect(
-      executePtcAction({}, { execute: vi.fn() }, registrySnapshot([]), pi, "/cwd"),
+      executePtcAction({}, { execute: vi.fn() }, registrySnapshot([]), "/cwd"),
     ).rejects.toThrow('action="run" requires code');
   });
 });
