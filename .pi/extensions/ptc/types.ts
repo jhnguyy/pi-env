@@ -53,6 +53,39 @@ export function buildSubprocessEnv(): Record<string, string | undefined> {
  */
 export type DispatchFn = (tool: string, params: Record<string, unknown>) => Promise<string>;
 
+export const PtcAction = {
+  Inspect: "inspect",
+  Run: "run",
+} as const;
+export type PtcAction = (typeof PtcAction)[keyof typeof PtcAction];
+
+export const PtcToolFailureClass = {
+  Blocked: "blocked-tool",
+  Unavailable: "unavailable-tool",
+  Inactive: "inactive-tool",
+  Unknown: "unknown-tool",
+  Nested: "nested-tool",
+  UserScript: "user-script",
+} as const;
+export type PtcToolFailureClass =
+  (typeof PtcToolFailureClass)[keyof typeof PtcToolFailureClass];
+
+export interface PtcToolFailure {
+  readonly class: PtcToolFailureClass;
+  readonly tool?: string;
+  readonly message: string;
+}
+
+export class PtcToolDispatchError extends Error {
+  readonly failure: PtcToolFailure;
+
+  constructor(failure: PtcToolFailure) {
+    super(failure.message);
+    this.name = "PtcToolDispatchError";
+    this.failure = failure;
+  }
+}
+
 // ─── Blocklist ────────────────────────────────────────────────────────────────
 
 /**
@@ -81,4 +114,4 @@ export type RpcOutbound =
 /** Messages written to subprocess stdin by the parent RpcBridge. */
 export type RpcInbound =
   | { type: "tool_result"; id: string; result: string }
-  | { type: "tool_error"; id: string; error: string };
+  | { type: "tool_error"; id: string; failure: PtcToolFailure };
