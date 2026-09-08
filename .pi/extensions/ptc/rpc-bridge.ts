@@ -10,10 +10,16 @@ import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { Schema } from "effect";
 import { formatParamsPreview } from "../_shared/code-frame";
 import { formatError } from "../_shared/errors";
-import { PtcProtocolError } from "./node-runtime";
+import {
+  PtcCancellationError,
+  PtcProtocolError,
+  PtcSubprocessError,
+} from "./node-runtime";
+import { PtcExecutionTracker } from "./execution-details";
 import {
   MAX_STDERR_BYTES,
   MAX_OUTPUT_BYTES,
+  MAX_TOOL_CALLS,
   PtcToolDispatchError,
   PtcToolFailureClass,
   type DispatchFn,
@@ -35,11 +41,26 @@ const RpcOutboundSchema = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("complete"),
     output: Schema.String,
+    outputTruncated: Schema.optionalKey(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("error"),
     message: Schema.String,
     stack: Schema.optionalKey(Schema.String),
+    failure: Schema.optionalKey(
+      Schema.Struct({
+        class: Schema.Union([
+          Schema.Literal(PtcToolFailureClass.Blocked),
+          Schema.Literal(PtcToolFailureClass.Unavailable),
+          Schema.Literal(PtcToolFailureClass.Inactive),
+          Schema.Literal(PtcToolFailureClass.Unknown),
+          Schema.Literal(PtcToolFailureClass.Nested),
+          Schema.Literal(PtcToolFailureClass.UserScript),
+        ]),
+        tool: Schema.optionalKey(Schema.String),
+        message: Schema.String,
+      }),
+    ),
   }),
 ]);
 const decodeRpcOutbound = Schema.decodeUnknownSync(RpcOutboundSchema, {
@@ -127,7 +148,7 @@ export class RpcBridge {
   };
   private readonly onError = (err: Error): void =>
     this.reject(new Error(`PTC spawn error: ${err.message}`));
-  private readonly onAbort = (): void => this.reject(new Error("PTC execution cancelled"));
+  private readonly onAbort = (): void => this.reject(new PtcCancellationError());
 
   readonly completion: Promise<string>;
 
@@ -136,6 +157,7 @@ export class RpcBridge {
     private dispatch: DispatchFn,
     signal?: AbortSignal,
     private onUpdate?: AgentToolUpdateCallback<unknown>,
+    private readonly tracker = new PtcExecutionTracker(),
   ) {
     this.completion = new Promise<string>((resolve, reject) => {
       this.completionResolve = resolve;
@@ -157,8 +179,8 @@ export class RpcBridge {
     else signal?.addEventListener("abort", this.onAbort, { once: true });
   }
 
-  getToolCallCount(): number {
-    return this.toolCallCount;
+  getCompletedToolCallCount(): number {
+    return this.tracker.completedNestedCallCount();
   }
   getLastToolCallLabel(): string {
     return this.lastToolCallLabel;
@@ -205,6 +227,7 @@ export class RpcBridge {
     const appended = appendBounded(this.userOutput, chunk, MAX_OUTPUT_BYTES, OUTPUT_TRUNCATED);
     this.userOutput = appended.value;
     this.outputCapReached = appended.truncated;
+    if (appended.truncated) this.tracker.markOutputTruncated();
   }
 
   private collectStderr(chunk: Buffer): void {
@@ -216,13 +239,19 @@ export class RpcBridge {
     if (this.settled || !this.stdoutClosed) return;
 
     if (this.terminal?.type === "complete") {
+      if (this.terminal.outputTruncated) this.tracker.markOutputTruncated();
       this.resolve(combineOutput(this.userOutput, this.terminal.output));
       return;
     }
     if (this.terminal?.type === "error") {
-      const error = new Error(this.terminal.message);
-      if (this.terminal.stack) error.stack = this.terminal.stack;
-      this.reject(error);
+      this.reject(
+        new PtcSubprocessError({
+          message: this.terminal.message,
+          stack: this.terminal.stack,
+          failure: this.terminal.failure,
+          partialOutput: this.userOutput.toString("utf8"),
+        }),
+      );
       return;
     }
 
@@ -289,15 +318,27 @@ export class RpcBridge {
     params: Record<string, unknown>;
   }): Promise<void> {
     if (this.settled || this.terminal) return;
+    if (this.toolCallCount >= MAX_TOOL_CALLS) {
+      this.reject(new PtcProtocolError({ reason: `exceeded ${MAX_TOOL_CALLS} tool call limit` }));
+      return;
+    }
     this.toolCallCount++;
+    const trackedCall = this.tracker.startNestedCall(msg.tool);
     const label = formatCallLabel(msg.tool, msg.params, this.toolCallCount);
     this.lastToolCallLabel = label;
-    this.onUpdate?.({ content: [{ type: "text", text: label }], details: undefined });
+    try {
+      this.onUpdate?.({ content: [{ type: "text", text: label }], details: undefined });
+    } catch (cause: unknown) {
+      this.reject(new Error(`PTC update callback failed: ${formatError(cause, "ptc")}`));
+      return;
+    }
 
     try {
       const result = await this.dispatch(msg.tool, msg.params);
+      this.tracker.completeNestedCall(trackedCall, false);
       if (!this.settled && !this.terminal) this.send({ type: "tool_result", id: msg.id, result });
     } catch (err: unknown) {
+      this.tracker.completeNestedCall(trackedCall, true);
       if (this.settled || this.terminal) return;
       this.send({
         type: "tool_error",
@@ -309,8 +350,18 @@ export class RpcBridge {
 
   private send(msg: RpcInbound): void {
     if (this.settled) return;
-    if (this.proc.stdin && !this.proc.stdin.destroyed)
-      this.proc.stdin.write(JSON.stringify(msg) + "\n");
+    const stdin = this.proc.stdin;
+    if (!stdin || stdin.destroyed) {
+      this.reject(new Error("PTC RPC input closed before a nested call completed"));
+      return;
+    }
+    try {
+      stdin.write(JSON.stringify(msg) + "\n", (error) => {
+        if (error) this.reject(new Error(`PTC RPC write failed: ${error.message}`));
+      });
+    } catch (cause: unknown) {
+      this.reject(new Error(`PTC RPC write failed: ${formatError(cause, "ptc")}`));
+    }
   }
 }
 
@@ -333,9 +384,11 @@ function nestedToolFailure(
 }
 
 function formatCallLabel(tool: string, params: Record<string, unknown>, n: number): string {
+  const MAX_TOOL = 80;
   const MAX_VAL = 45;
+  const shownTool = tool.length > MAX_TOOL ? `${tool.slice(0, MAX_TOOL - 1)}…` : tool;
   const entries = Object.entries(params);
-  if (entries.length === 0) return `→ ${tool} #${n}`;
+  if (entries.length === 0) return `→ ${shownTool} #${n}`;
   const shown = entries.slice(0, 2).map(([k, v]) => {
     let val: string;
     if (typeof v === "string") val = `"${v.length > MAX_VAL ? v.substring(0, MAX_VAL) + "…" : v}"`;
@@ -346,5 +399,5 @@ function formatCallLabel(tool: string, params: Record<string, unknown>, n: numbe
     return `${k}=${val}`;
   });
   const overflow = entries.length > 2 ? `  +${entries.length - 2}` : "";
-  return `→ ${tool}(${shown.join(", ")})${overflow} #${n}`;
+  return `→ ${shownTool}(${shown.join(", ")})${overflow} #${n}`;
 }

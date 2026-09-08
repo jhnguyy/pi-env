@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createPtcToolCatalog } from "../catalog";
 import { executePtcAction } from "../index";
+import { PtcCompletion, PtcExecutionTracker } from "../execution-details";
 import { PtcAction } from "../types";
 import type { ToolRegistry } from "../tool-registry";
 
@@ -32,13 +33,19 @@ function registrySnapshot(callable: string[], unavailable: string[] = []): ToolR
 
 describe("PTC actions", () => {
   it("keeps run as the default and accepts an explicit run action", async () => {
-    const execute = vi.fn(async (code: string) => `ran:${code}`);
+    const execute = vi.fn(async (code: string) => ({
+      output: `ran:${code}`,
+      details: new PtcExecutionTracker(() => 0).details(PtcCompletion.Success),
+    }));
     const runtime = { execute };
     const registry = registrySnapshot([]);
 
     await expect(
       executePtcAction({ code: 'return "ok";' }, runtime, registry, "/cwd"),
-    ).resolves.toEqual({ output: 'ran:return "ok";', details: {} });
+    ).resolves.toMatchObject({
+      output: 'ran:return "ok";',
+      details: { action: PtcAction.Run, completion: PtcCompletion.Success },
+    });
     await expect(
       executePtcAction(
         { action: PtcAction.Run, code: 'return "ok";' },
@@ -46,12 +53,18 @@ describe("PTC actions", () => {
         registry,
         "/cwd",
       ),
-    ).resolves.toEqual({ output: 'ran:return "ok";', details: {} });
+    ).resolves.toMatchObject({
+      output: 'ran:return "ok";',
+      details: { action: PtcAction.Run, completion: PtcCompletion.Success },
+    });
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it("returns the current catalog without starting the execution runtime", async () => {
-    const execute = vi.fn(async () => "not used");
+    const execute = vi.fn(async () => ({
+      output: "not used",
+      details: new PtcExecutionTracker(() => 0).details(PtcCompletion.Success),
+    }));
     const registry = registrySnapshot(["read", "dev-tools"], ["direct_only"]);
 
     const result = await executePtcAction(

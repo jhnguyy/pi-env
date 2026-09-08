@@ -19,12 +19,21 @@ import type { ToolRegistry } from "./tool-registry";
 import { scopedChildProcess } from "../../../src/process/platform.js";
 import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv } from "./types";
 import {
+  PtcCompletion,
+  PtcExecutionTracker,
+  PtcFailureClass,
+  type PtcRunDetails,
+} from "./execution-details";
+import {
   createTempScript,
   cleanupTempScript,
   resolvePtcNodeCommand,
+  PtcCancellationError,
   PtcExecutionError,
   PtcExecutionPhase,
   PtcProtocolError,
+  PtcSubprocessError,
+  PtcTimeoutError,
 } from "./node-runtime";
 
 const PREAMBLE_PATH = fileURLToPath(new URL("./subprocess-preamble.js", import.meta.url));
@@ -34,6 +43,11 @@ interface SubprocessSource {
   readonly code: string;
   readonly userCode: string;
   readonly userStartLine: number;
+}
+
+export interface PtcExecutionResult {
+  readonly output: string;
+  readonly details: PtcRunDetails;
 }
 
 export class PtcExecutor {
@@ -49,28 +63,48 @@ export class PtcExecutor {
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
-  ): Promise<string> {
-    const snapshot = this.registry.getRuntimeSnapshot();
-    const bindings = generateRuntimeBindings(snapshot);
-    const source = buildSubprocessCode(this.preamblePath, bindings, userCode);
-
-    return Effect.runPromise(
-      transformSubprocessCode(source).pipe(
-        Effect.flatMap((runnableCode) =>
-          Effect.acquireUseRelease(
-            createTempScript(runnableCode),
-            (tmpPath) => this.runSubprocessEffect(tmpPath, source, cwd, signal, onUpdate, ctx),
-            (tmpPath) => cleanupTempScript(tmpPath),
+  ): Promise<PtcExecutionResult> {
+    const tracker = new PtcExecutionTracker();
+    try {
+      const snapshot = this.registry.getRuntimeSnapshot();
+      const bindings = generateRuntimeBindings(snapshot);
+      const source = buildSubprocessCode(this.preamblePath, bindings, userCode);
+      const output = await Effect.runPromise(
+        transformSubprocessCode(source).pipe(
+          Effect.flatMap((runnableCode) =>
+            Effect.acquireUseRelease(
+              createTempScript(runnableCode),
+              (tmpPath) =>
+                this.runSubprocessEffect(tmpPath, source, cwd, tracker, signal, onUpdate, ctx),
+              (tmpPath) => cleanupTempScript(tmpPath),
+            ),
           ),
         ),
-      ),
-    );
+      );
+      return { output, details: tracker.details(PtcCompletion.Success) };
+    } catch (cause: unknown) {
+      const error =
+        cause instanceof PtcExecutionError
+          ? cause
+          : new PtcExecutionError({
+              phase: PtcExecutionPhase.Prepare,
+              failureClass: PtcFailureClass.Preparation,
+              cause,
+            });
+      throw new PtcExecutionError({
+        phase: error.phase,
+        failureClass: error.failureClass,
+        cause: error.cause,
+        details: tracker.details(PtcCompletion.Failure, error.failureClass),
+      });
+    }
   }
 
   private runSubprocessEffect(
     scriptPath: string,
     source: SubprocessSource,
     cwd: string,
+    tracker: PtcExecutionTracker,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
@@ -83,9 +117,16 @@ export class PtcExecutor {
         timeoutMs: this.timeoutMs,
         killGraceMs: 5_000,
       }).pipe(
-        Effect.mapError((cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause })),
+        Effect.mapError(
+          (cause) =>
+            new PtcExecutionError({
+              phase: PtcExecutionPhase.Run,
+              failureClass: PtcFailureClass.Infrastructure,
+              cause,
+            }),
+        ),
         Effect.flatMap((proc) =>
-          this.awaitSubprocessEffect(proc, source, cwd, signal, onUpdate, ctx),
+          this.awaitSubprocessEffect(proc, source, cwd, tracker, signal, onUpdate, ctx),
         ),
       ),
     );
@@ -95,6 +136,7 @@ export class PtcExecutor {
     proc: ChildProcess,
     source: SubprocessSource,
     cwd: string,
+    tracker: PtcExecutionTracker,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
@@ -109,22 +151,32 @@ export class PtcExecutor {
     let bridge: RpcBridge | undefined;
     return Effect.tryPromise({
       try: async () => {
-        bridge = new RpcBridge(proc, dispatch, nestedController.signal, onUpdate);
-        return truncateOutput(await bridge.completion);
+        bridge = new RpcBridge(proc, dispatch, nestedController.signal, onUpdate, tracker);
+        const truncated = truncateOutput(await bridge.completion);
+        if (truncated.truncated) tracker.markOutputTruncated();
+        return truncated.output;
       },
-      catch: (cause) =>
-        new PtcExecutionError({
+      catch: (cause) => {
+        const failureClass = classifyRunFailure(cause);
+        const enhanced = cause instanceof PtcProtocolError ? cause : enhancePtcError(cause, source);
+        return new PtcExecutionError({
           phase:
             cause instanceof PtcProtocolError ? PtcExecutionPhase.Protocol : PtcExecutionPhase.Run,
-          cause: cause instanceof PtcProtocolError ? cause : enhancePtcError(cause, source),
-        }),
+          failureClass,
+          cause: appendPartialOutput(enhanced, cause),
+        });
+      },
     }).pipe(
       Effect.timeout(this.timeoutMs),
       Effect.catchIf(Cause.isTimeoutError, () =>
         Effect.fail(
           new PtcExecutionError({
             phase: PtcExecutionPhase.Run,
-            cause: enhancePtcError(new Error(formatTimeoutDetail(bridge, this.timeoutMs)), source),
+            failureClass: PtcFailureClass.Timeout,
+            cause: enhancePtcError(
+              new PtcTimeoutError(formatTimeoutDetail(bridge, this.timeoutMs)),
+              source,
+            ),
           }),
         ),
       ),
@@ -158,20 +210,33 @@ function buildSubprocessCode(
     "}",
     "",
     "// --- execution harness ---",
+    "function __bound_return_output(output) {",
+    "  const totalBytes = Buffer.byteLength(output);",
+    `  if (totalBytes <= ${MAX_OUTPUT_BYTES}) return { output, truncated: false };`,
+    `  const marker = '\\n\\n[PTC output truncated — showing first ${MAX_OUTPUT_BYTES} bytes of ' + totalBytes + ']';`,
+    `  const contentBytes = Math.max(0, ${MAX_OUTPUT_BYTES} - Buffer.byteLength(marker));`,
+    "  let content = Buffer.from(output).subarray(0, contentBytes).toString('utf8');",
+    "  while (Buffer.byteLength(content) > contentBytes) content = content.slice(0, -1);",
+    "  return { output: content + marker, truncated: true };",
+    "}",
+    "",
     "__user_main()",
     "  .then(async (result) => {",
-    "    const out = result !== undefined && result !== null ? String(result) : '';",
+    "    const rawOutput = result !== undefined && result !== null ? String(result) : '';",
+    "    const bounded = __bound_return_output(rawOutput);",
     "    await new Promise((resolve) => process.stdout.write('', resolve));",
     "    const { writeFileSync } = await import('node:fs');",
-    "    writeFileSync(3, JSON.stringify({ type: 'complete', output: out }) + '\\n');",
+    "    writeFileSync(3, JSON.stringify({ type: 'complete', output: bounded.output, outputTruncated: bounded.truncated }) + '\\n');",
     "    process.exit(0);",
     "  })",
     "  .catch(async (e) => {",
     "    const msg = e instanceof Error ? e.message : String(e);",
     "    const stack = e instanceof Error ? e.stack : undefined;",
+    "    const rawFailure = e instanceof Error && e.name === 'PtcToolCallError' ? e.failure : undefined;",
+    "    const failure = rawFailure && typeof rawFailure.class === 'string' && typeof rawFailure.message === 'string' && (rawFailure.tool === undefined || typeof rawFailure.tool === 'string') ? { class: rawFailure.class, message: rawFailure.message, ...(rawFailure.tool ? { tool: rawFailure.tool } : {}) } : undefined;",
     "    await new Promise((resolve) => process.stdout.write('', resolve));",
     "    const { writeFileSync } = await import('node:fs');",
-    "    writeFileSync(3, JSON.stringify({ type: 'error', message: msg, stack }) + '\\n');",
+    "    writeFileSync(3, JSON.stringify({ type: 'error', message: msg, stack, ...(failure ? { failure } : {}) }) + '\\n');",
     "    process.exit(1);",
     "  });",
   ].join("\n");
@@ -199,6 +264,7 @@ function transformSubprocessCode(
     catch: (cause) =>
       new PtcExecutionError({
         phase: PtcExecutionPhase.Transform,
+        failureClass: PtcFailureClass.Transformation,
         cause: enhanceTransformError(cause, source),
       }),
   });
@@ -237,7 +303,7 @@ function isTransformMessage(value: unknown): value is Message {
 }
 
 function formatTimeoutDetail(bridge: RpcBridge | undefined, timeoutMs: number): string {
-  const calls = bridge?.getToolCallCount() ?? 0;
+  const calls = bridge?.getCompletedToolCallCount() ?? 0;
   const lastCall = bridge?.getLastToolCallLabel();
   const duration = timeoutMs < 1_000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1_000)}s`;
   return [
@@ -247,16 +313,36 @@ function formatTimeoutDetail(bridge: RpcBridge | undefined, timeoutMs: number): 
   ].join("\n");
 }
 
-function truncateOutput(output: string): string {
+function truncateOutput(output: string): { output: string; truncated: boolean } {
   const result = truncateHead(output, {
     maxLines: DEFAULT_MAX_LINES,
     maxBytes: MAX_OUTPUT_BYTES,
   });
-  if (!result.truncated) return result.content;
-  return (
-    result.content +
-    `\n\n[PTC output truncated — showing first ${MAX_OUTPUT_BYTES} bytes of ${result.totalBytes}]`
-  );
+  if (!result.truncated) return { output: result.content, truncated: false };
+  return {
+    output:
+      result.content +
+      `\n\n[PTC output truncated — showing first ${MAX_OUTPUT_BYTES} bytes of ${result.totalBytes}]`,
+    truncated: true,
+  };
+}
+
+function classifyRunFailure(cause: unknown): PtcFailureClass {
+  if (cause instanceof PtcCancellationError) return PtcFailureClass.Cancellation;
+  if (cause instanceof PtcSubprocessError) {
+    return cause.failure ? PtcFailureClass.NestedTool : PtcFailureClass.UserScript;
+  }
+  return PtcFailureClass.Infrastructure;
+}
+
+function appendPartialOutput(enhanced: unknown, cause: unknown): unknown {
+  if (!(cause instanceof PtcSubprocessError) || !cause.partialOutput.trim()) return enhanced;
+  const partial = truncateHead(cause.partialOutput, { maxLines: 40, maxBytes: 2_000 });
+  const suffix = partial.truncated ? "\n[partial output truncated]" : "";
+  const message = enhanced instanceof Error ? enhanced.message : String(enhanced);
+  const error = new Error(`${message}\n\nPartial output:\n${partial.content}${suffix}`);
+  if (enhanced instanceof Error && enhanced.stack) error.stack = enhanced.stack;
+  return error;
 }
 
 function enhancePtcError(err: unknown, source: SubprocessSource): Error {

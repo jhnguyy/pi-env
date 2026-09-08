@@ -14,9 +14,10 @@ import { Text } from "@earendil-works/pi-tui";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
-import { PtcExecutor } from "./executor";
+import { PtcExecutor, type PtcExecutionResult } from "./executor";
 import { formatPtcInspection, type PtcToolCatalog } from "./catalog";
 import { BLOCKED_TOOLS, PtcAction } from "./types";
+import { decodePtcRunDetails, type PtcRunDetails } from "./execution-details";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { toolExpandHint, toolExpandKeyHint } from "../_shared/tool-render";
 
@@ -60,7 +61,7 @@ interface PtcExecutionRuntime {
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
-  ): Promise<string>;
+  ): Promise<PtcExecutionResult>;
 }
 
 interface PtcActionResult {
@@ -88,10 +89,7 @@ export async function executePtcAction(
     }
     case PtcAction.Run:
       if (input.code === undefined) throw new Error('PTC action="run" requires code.');
-      return {
-        output: await runtime.execute(input.code, cwd, signal, onUpdate, ctx),
-        details: {},
-      };
+      return runtime.execute(input.code, cwd, signal, onUpdate, ctx);
   }
 }
 
@@ -169,9 +167,10 @@ export default function ptcExtension(pi: ExtensionAPI) {
 
       if (ctx.isError) return renderPtcError(text, opts.expanded, theme);
       if (opts.isPartial) return renderPtcPartial(text, ctx, theme);
+      const details = decodePtcRunDetails(result.details);
       return opts.expanded
-        ? renderPtcExpandedFinal(text, ctx, theme)
-        : renderPtcCollapsedFinal(text, ctx, theme);
+        ? renderPtcExpandedFinal(text, details, ctx, theme)
+        : renderPtcCollapsedFinal(text, details, ctx, theme);
     },
   });
 
@@ -234,18 +233,37 @@ function renderPtcPartial(text: string, ctx: PtcRenderContext, theme: PtcRenderT
   return new Text(theme.fg("muted", chain.length > 0 ? chain.join("\n") : "running…"), 0, 0);
 }
 
-function finalResultMetadata(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme) {
+function finalResultMetadata(
+  text: string,
+  details: PtcRunDetails | undefined,
+  theme: PtcRenderTheme,
+) {
   const outputLines = text.split("\n").filter((line) => line.trim().length > 0);
   const lineCount = outputLines.length;
   const countLabel = `${lineCount} line${lineCount !== 1 ? "s" : ""}`;
-  const callCount = (ctx.state.callChain as string[] | undefined)?.length ?? 0;
+  const callCount = details?.nestedCallCount ?? 0;
   const callSuffix =
     callCount > 0 ? theme.fg("dim", ` · ${callCount} call${callCount !== 1 ? "s" : ""}`) : "";
-  return { outputLines, countLabel, callSuffix };
+  const failedSuffix = details?.failedNestedCallCount
+    ? theme.fg("warning", ` · ${details.failedNestedCallCount} failed`)
+    : "";
+  const truncatedSuffix = details?.outputTruncated
+    ? theme.fg("warning", " · [truncated]")
+    : "";
+  return { outputLines, countLabel, callSuffix, failedSuffix, truncatedSuffix };
 }
 
-function renderPtcExpandedFinal(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
-  const { countLabel, callSuffix } = finalResultMetadata(text, ctx, theme);
+function renderPtcExpandedFinal(
+  text: string,
+  details: PtcRunDetails | undefined,
+  ctx: PtcRenderContext,
+  theme: PtcRenderTheme,
+): Text {
+  const { countLabel, callSuffix, failedSuffix, truncatedSuffix } = finalResultMetadata(
+    text,
+    details,
+    theme,
+  );
   const code = ctx.args?.code ?? "";
   const codeBlock = code.trim()
     ? `${theme.fg("muted", "─── script ───")}
@@ -256,6 +274,8 @@ ${theme.fg("muted", "─── output ───")}`
     theme.fg("success", "✓ ") +
       theme.fg("muted", countLabel) +
       callSuffix +
+      failedSuffix +
+      truncatedSuffix +
       (codeBlock ? "\n" + codeBlock : "") +
       "\n" +
       (text || "(no output)"),
@@ -264,14 +284,22 @@ ${theme.fg("muted", "─── output ───")}`
   );
 }
 
-function renderPtcCollapsedFinal(text: string, ctx: PtcRenderContext, theme: PtcRenderTheme): Text {
-  const { outputLines, countLabel, callSuffix } = finalResultMetadata(text, ctx, theme);
+function renderPtcCollapsedFinal(
+  text: string,
+  details: PtcRunDetails | undefined,
+  _ctx: PtcRenderContext,
+  theme: PtcRenderTheme,
+): Text {
+  const { outputLines, countLabel, callSuffix, failedSuffix, truncatedSuffix } =
+    finalResultMetadata(text, details, theme);
   const firstLine = outputLines[0]?.substring(0, 72) ?? "";
   const hiddenOutputLines = Math.max(0, outputLines.length - (firstLine ? 1 : 0));
   let collapsed =
     theme.fg("success", "✓ ") +
     theme.fg("muted", countLabel) +
     callSuffix +
+    failedSuffix +
+    truncatedSuffix +
     (firstLine ? "  " + theme.fg("text", firstLine) : "");
 
   if (hiddenOutputLines > 0) {

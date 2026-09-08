@@ -10,7 +10,12 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { RpcBridge } from "../rpc-bridge";
-import { MAX_OUTPUT_BYTES, MAX_STDERR_BYTES, PtcToolDispatchError } from "../types";
+import {
+  MAX_OUTPUT_BYTES,
+  MAX_STDERR_BYTES,
+  MAX_TOOL_CALLS,
+  PtcToolDispatchError,
+} from "../types";
 
 interface MockProc {
   proc: ChildProcess;
@@ -184,6 +189,20 @@ describe("multiple tool calls", () => {
     m.send({ type: "complete", output: "done" });
     m.exit(0);
     expect(await bridge.completion).toBe("done");
+  });
+
+  it("rejects tool calls that bypass the child-side call limit", async () => {
+    const m = makeMock();
+    const bridge = new RpcBridge(m.proc, noDispatch);
+    bridge.completion.catch(() => undefined);
+
+    for (let index = 0; index <= MAX_TOOL_CALLS; index++) {
+      m.send({ type: "tool_call", id: `c_${index}`, tool: "read", params: {} });
+    }
+
+    await expect(bridge.completion).rejects.toThrow(
+      `exceeded ${MAX_TOOL_CALLS} tool call limit`,
+    );
   });
 });
 

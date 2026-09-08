@@ -7,9 +7,16 @@ import { fileURLToPath } from "node:url";
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createPtcToolCatalog } from "../catalog";
 import { PtcExecutor } from "../executor";
+import {
+  PtcCompletion,
+  PtcFailureClass,
+  PtcNestedCallStatus,
+  PtcRunDetailsSchema,
+} from "../execution-details";
 import { PtcExecutionError, PtcExecutionPhase } from "../node-runtime";
 import type { ToolRegistry } from "../tool-registry";
-import { BLOCKED_TOOLS } from "../types";
+import { BLOCKED_TOOLS, MAX_OUTPUT_BYTES } from "../types";
+import { Schema } from "effect";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let fixtureDirectory: string;
@@ -70,6 +77,10 @@ function makeExecutor(
   return new PtcExecutor(registry, preamblePath, timeoutMs);
 }
 
+async function executionOutput(executor: PtcExecutor, code: string): Promise<string> {
+  return (await executor.execute(code, process.cwd())).output;
+}
+
 async function rejectedExecution(executor: PtcExecutor, code: string): Promise<PtcExecutionError> {
   const error = await executor.execute(code, process.cwd()).catch((cause: unknown) => cause);
   expect(error).toBeInstanceOf(PtcExecutionError);
@@ -91,7 +102,7 @@ describe("PTC live transport", () => {
     ];
     const code = `${lines.map((line) => `console.log(${JSON.stringify(line)});`).join("\n")}\nreturn "real";`;
 
-    await expect(executor.execute(code, process.cwd())).resolves.toBe(lines.join("\n") + "\nreal");
+    await expect(executionOutput(executor, code)).resolves.toBe(lines.join("\n") + "\nreal");
   });
 
   it("mixes stdout with normalized fd 3 calls and returns each result through stdin", async () => {
@@ -107,7 +118,7 @@ describe("PTC live transport", () => {
       "return second;",
     ].join("\n");
 
-    await expect(executor.execute(code, process.cwd())).resolves.toBe(
+    await expect(executionOutput(executor, code)).resolves.toBe(
       "before\necho-tool:a\n2fa-tool:b",
     );
     expect(dispatch).toHaveBeenNthCalledWith(
@@ -137,7 +148,7 @@ describe("PTC live transport", () => {
       "return [namespaced, exact].join('|');",
     ].join("\n");
 
-    await expect(executor.execute(code, process.cwd())).resolves.toBe(
+    await expect(executionOutput(executor, code)).resolves.toBe(
       "dev-tools:text|dev-tools:text",
     );
     expect(dispatch.mock.calls.map(([name]) => name)).toEqual(["dev-tools", "dev-tools"]);
@@ -150,7 +161,7 @@ describe("PTC live transport", () => {
       "return JSON.stringify([resolved === tools, JSON.stringify(tools)]);",
     ].join("\n");
 
-    await expect(executor.execute(code, process.cwd())).resolves.toBe('[true,"{}"]');
+    await expect(executionOutput(executor, code)).resolves.toBe('[true,"{}"]');
   });
 
   it("classifies blocked, unavailable, and unknown namespace calls", async () => {
@@ -164,7 +175,7 @@ describe("PTC live transport", () => {
       "return JSON.stringify(failures.map((result) => result.ok ? null : result.error));",
     ].join("\n");
 
-    const output = await executor.execute(code, process.cwd());
+    const output = await executionOutput(executor, code);
     expect(JSON.parse(output)).toEqual([
       expect.objectContaining({ class: "blocked-tool", tool: "ptc" }),
       expect.objectContaining({ class: "unavailable-tool", tool: "direct_only" }),
@@ -187,7 +198,7 @@ describe("PTC live transport", () => {
       "return JSON.stringify(results);",
     ].join("\n");
 
-    const output = await executor.execute(code, process.cwd());
+    const output = await executionOutput(executor, code);
     expect(JSON.parse(output)).toEqual([
       { ok: true, value: "kept" },
       {
@@ -202,6 +213,89 @@ describe("PTC live transport", () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
   });
 
+  it("returns schema-valid bounded details for successful settled batches", async () => {
+    const dispatch = vi.fn(async (name: string) => {
+      if (name === "fail-tool") throw new Error("credential-shaped-secret");
+      return "raw nested output";
+    });
+    const executor = makeExecutor(["read", "fail-tool"], dispatch);
+    const code = [
+      'await tools.read({ path: "/private/first" });',
+      'await tools.read({ path: "/private/second" });',
+      'await settle(tools.fail_tool({ token: "credential-shaped-secret" }));',
+      'return "selected output";',
+    ].join("\n");
+
+    const result = await executor.execute(code, process.cwd());
+    const details = Schema.decodeUnknownSync(PtcRunDetailsSchema)(result.details);
+
+    expect(result.output).toBe("selected output");
+    expect(details).toMatchObject({
+      schemaVersion: 1,
+      action: "run",
+      completion: PtcCompletion.Success,
+      nestedCallCount: 3,
+      completedNestedCallCount: 3,
+      failedNestedCallCount: 1,
+      toolCallCounts: [
+        { tool: "read", count: 2 },
+        { tool: "fail-tool", count: 1 },
+      ],
+      outputTruncated: false,
+      lastNestedCall: {
+        tool: "fail-tool",
+        ordinal: 3,
+        status: PtcNestedCallStatus.Failed,
+      },
+    });
+    expect(details.durationMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(details)).not.toMatch(
+      /private|credential-shaped-secret|raw nested output|selected output/,
+    );
+  });
+
+  it("retains bounded partial output and content-free details for nested failures", async () => {
+    const dispatch = vi.fn(async () => {
+      throw new Error("nested boom");
+    });
+    const error = await rejectedExecution(
+      makeExecutor(["fail-tool"], dispatch),
+      [
+        'console.log("kept partial output");',
+        'await tools.fail_tool({ path: "/private/secret-path" });',
+      ].join("\n"),
+    );
+
+    expect(error.message).toContain("kept partial output");
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.NestedTool,
+      nestedCallCount: 1,
+      completedNestedCallCount: 1,
+      failedNestedCallCount: 1,
+      lastNestedCall: {
+        tool: "fail-tool",
+        ordinal: 1,
+        status: PtcNestedCallStatus.Failed,
+      },
+    });
+    expect(JSON.stringify(error.details)).not.toMatch(/private|secret-path|nested boom|partial output/);
+  });
+
+  it("marks output truncation without storing output content in details", async () => {
+    const result = await makeExecutor().execute(
+      `return "x".repeat(${MAX_OUTPUT_BYTES + 1_000});`,
+      process.cwd(),
+    );
+
+    expect(result.output).toContain(
+      `[PTC output truncated — showing first ${MAX_OUTPUT_BYTES} bytes of ${MAX_OUTPUT_BYTES + 1_000}]`,
+    );
+    expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
+    expect(result.details.outputTruncated).toBe(true);
+    expect(JSON.stringify(result.details)).not.toContain("xxxxx");
+  });
+
   it("keeps the subprocess tool-call limit on the fd 3 path", async () => {
     const dispatch = vi.fn(async () => "ok");
     const error = await rejectedExecution(
@@ -211,6 +305,12 @@ describe("PTC live transport", () => {
 
     expect(error.phase).toBe(PtcExecutionPhase.Run);
     expect(error.message).toContain("exceeded 100 tool call limit");
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.UserScript,
+      nestedCallCount: 100,
+      completedNestedCallCount: 100,
+    });
     expect(dispatch).toHaveBeenCalledTimes(100);
   });
 
@@ -231,6 +331,10 @@ describe("PTC live transport", () => {
       );
 
       expect(error.phase).toBe(PtcExecutionPhase.Protocol);
+      expect(error.details).toMatchObject({
+        completion: PtcCompletion.Failure,
+        failureClass: PtcFailureClass.Infrastructure,
+      });
       expect(error.message).toContain(reason);
     }
   });
@@ -258,7 +362,17 @@ describe("PTC live transport", () => {
     await started;
     controller.abort(new Error("stop"));
 
-    await expect(execution).rejects.toThrow("PTC execution cancelled");
+    const outcome = await execution.catch((cause: unknown) => cause);
+    expect(outcome).toBeInstanceOf(PtcExecutionError);
+    if (!(outcome instanceof PtcExecutionError)) throw new Error("Expected PTC cancellation");
+    const error = outcome;
+    expect(error.message).toContain("PTC execution cancelled");
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.Cancellation,
+      nestedCallCount: 1,
+      lastNestedCall: { tool: "wait", status: PtcNestedCallStatus.Failed },
+    });
     expect(nestedSignal?.aborted).toBe(true);
   });
 
@@ -271,6 +385,35 @@ describe("PTC live transport", () => {
     expect(error.phase).toBe(PtcExecutionPhase.Run);
     expect(error.message).toContain("PTC timed out after 25ms");
     expect(error.message).toContain("Completed nested tool calls: 0");
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.Timeout,
+      nestedCallCount: 0,
+      completedNestedCallCount: 0,
+    });
+  });
+
+  it("records the last pending nested call when execution times out", async () => {
+    const dispatch: ExecutorDispatch = async () => new Promise<string>(() => undefined);
+    const error = await rejectedExecution(
+      makeExecutor(["slow-tool"], dispatch, 200),
+      'return await tools.slow_tool({ path: "/private/slow" });',
+    );
+
+    expect(error.message).toContain("Completed nested tool calls: 0");
+    expect(error.message).toContain("Last call: → slow-tool");
+    expect(error.details).toMatchObject({
+      failureClass: PtcFailureClass.Timeout,
+      nestedCallCount: 1,
+      completedNestedCallCount: 0,
+      failedNestedCallCount: 0,
+      lastNestedCall: {
+        tool: "slow-tool",
+        ordinal: 1,
+        status: PtcNestedCallStatus.Pending,
+      },
+    });
+    expect(JSON.stringify(error.details)).not.toContain("/private/slow");
   });
 
   it("does not create global compatibility aliases for blocked tools", async () => {
@@ -293,7 +436,7 @@ describe("PTC live transport", () => {
     ].join(", ");
 
     await expect(
-      makeExecutor(blocked).execute(`return [${code}].join(",");`, process.cwd()),
+      executionOutput(makeExecutor(blocked), `return [${code}].join(",");`),
     ).resolves.toBe("undefined,undefined,undefined,undefined,undefined,undefined");
   });
 });
@@ -310,6 +453,10 @@ describe("PTC source diagnostics", () => {
     );
 
     expect(error.phase).toBe(PtcExecutionPhase.Run);
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.UserScript,
+    });
     expect(error.message).toMatch(/PTC script error at line 2:\d+/);
     expect(error.message).toContain("Reason: runtime boom");
     expect(error.message).toContain('1 | const marker = "before";');
@@ -324,6 +471,10 @@ describe("PTC source diagnostics", () => {
     );
 
     expect(error.phase).toBe(PtcExecutionPhase.Transform);
+    expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
+      failureClass: PtcFailureClass.Transformation,
+    });
     expect(error.message).toContain("PTC transform error at line 2:7");
     expect(error.message).toContain('Reason: Expected identifier but found "="');
     expect(error.message).toContain("1 | const before = 1;");

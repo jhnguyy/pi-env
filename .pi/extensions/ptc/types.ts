@@ -108,8 +108,8 @@ export const BLOCKED_TOOLS = new Set<string>([
 /** Messages written to fd 3 by the subprocess (read by parent RpcBridge). */
 export type RpcOutbound =
   | { type: "tool_call"; id: string; tool: string; params: Record<string, unknown> }
-  | { type: "complete"; output: string }
-  | { type: "error"; message: string; stack?: string };
+  | { type: "complete"; output: string; outputTruncated?: boolean }
+  | { type: "error"; message: string; stack?: string; failure?: PtcToolFailure };
 
 /** Messages written to subprocess stdin by the parent RpcBridge. */
 export type RpcInbound =
