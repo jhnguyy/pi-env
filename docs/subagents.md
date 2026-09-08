@@ -27,6 +27,8 @@ Set `agent_scope` to `project` to use a project agent. Pi must trust the project
 
 One supervisor controls admission for blocking jobs, asynchronous jobs, and direct child-runtime callers. The supervisor controls concurrency, pending runs, workspace writers, and run time.
 
+Public `subagent` and `subagent_start` runs do not have a turn-count limit. The configured run-time limit still applies.
+
 Configure limits in the `subagent` settings block:
 
 ```json
