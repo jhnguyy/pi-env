@@ -17,6 +17,8 @@ Use `subagent_start` to start a session-scoped job and continue parent work. The
 
 Use the child session file when you need the complete transcript. Live job handles do not survive a restart. The extension does not retry interrupted work automatically.
 
+Collapsed TUI views omit the full delegated task and child output. Expanded views show the task and available child output. Tool call summaries never show an inline system prompt. Job summaries keep status, usage, truncation, and child-session references.
+
 ## Agent definitions and trust
 
 The default `agent_scope` is `user`. This scope includes user agents and agents from installed packages.
