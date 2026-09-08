@@ -8,14 +8,12 @@ description: Designs and reviews software tests from public requirements, known 
 > Tautological tests considered harmful.
 
 1. Read the repository test policy, public contract, and nearby tests.
-2. State the requirement, regression, or safety invariant that the test protects.
-3. Test observable behavior at the narrowest stable public boundary.
-4. Do not derive the expected result by repeating the production implementation.
-5. Give each permanent test one clear claim that remains meaningful when run alone.
-6. For a regression, show that the test fails without the fix and passes with the fix.
-7. For a new requirement, use a practical negative control to confirm that the test detects the behavior.
-8. Preserve interaction and safety evidence for concurrency, cancellation, cleanup, persistence, authority, credentials, security, and resource bounds.
-9. Use repository-owned commands and verification portfolios.
+2. For risk-triggered work, map each risk to its owning boundary and existing or missing evidence. Fix expected scenarios in a separate clean-base session before the builder sees the implementation diff.
+3. Give each permanent test one standalone requirement, regression, or safety claim at the narrowest stable public boundary. Do not mirror the implementation.
+4. Show red and green for regressions. Use a practical negative control for new requirements.
+5. Use a separate adversarial pass for high-risk boundaries identified by the repository policy.
+6. Before merge, remove repeated evidence only when the repository policy permits it. Preserve interaction and safety evidence.
+7. Use repository-owned commands and verification portfolios.
 
 Do not use test count, assertion count, or implementation coverage as substitutes for durable behavioral evidence.
 
