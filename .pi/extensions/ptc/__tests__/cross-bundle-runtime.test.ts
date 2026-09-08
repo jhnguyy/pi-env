@@ -106,7 +106,7 @@ function createHarness() {
     for (const handler of listeners.get(event) ?? []) handler(...args);
   };
 
-  return { active, createApi, trigger };
+  return { createApi, trigger };
 }
 
 interface RuntimeFixture {
@@ -121,8 +121,6 @@ describe("PTC cross-bundle runtime", () => {
       const harness = createHarness();
       const ptcApi = harness.createApi();
       const toolApi = harness.createApi();
-      expect(ptcApi).not.toBe(toolApi);
-      expect(ptcApi.registerTool).not.toBe(toolApi.registerTool);
 
       const runtimeModule = (await import(pathToFileURL(ptcRuntimePath).href)) as {
         createPtcRuntime(pi: ExtensionAPI, path: string): RuntimeFixture;

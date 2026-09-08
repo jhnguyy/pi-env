@@ -72,7 +72,6 @@ export async function executePtcAction(
   input: PtcInput,
   runtime: PtcExecutionRuntime,
   registry: ToolRegistry,
-  pi: ExtensionAPI,
   cwd: string,
   signal?: AbortSignal,
   onUpdate?: AgentToolUpdateCallback<unknown>,
@@ -81,7 +80,7 @@ export async function executePtcAction(
   const action = input.action ?? PtcAction.Run;
   switch (action) {
     case PtcAction.Inspect: {
-      const catalog: PtcToolCatalog = registry.getRuntimeSnapshot(pi).catalog;
+      const catalog: PtcToolCatalog = registry.getRuntimeSnapshot().catalog;
       return {
         output: formatPtcInspection(catalog),
         details: { action: PtcAction.Inspect, catalog },
@@ -98,7 +97,7 @@ export async function executePtcAction(
 
 export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
-  const executor = new PtcExecutor(pi, registry);
+  const executor = new PtcExecutor(registry);
 
   pi.registerTool({
     name: "ptc",
@@ -120,7 +119,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
           input,
           executor,
           registry,
-          pi,
           ctx.cwd,
           signal,
           onUpdate,
@@ -188,7 +186,6 @@ export default function ptcExtension(pi: ExtensionAPI) {
           input as PtcInput,
           executor,
           registry,
-          pi,
           cwd,
           signal,
           onUpdate,

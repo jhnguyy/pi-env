@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import { transformSync, type Message } from "esbuild";
 import { Cause, Effect } from "effect";
 import type {
-  ExtensionAPI,
   ExtensionContext,
   AgentToolUpdateCallback,
 } from "@earendil-works/pi-coding-agent";
@@ -39,7 +38,6 @@ interface SubprocessSource {
 
 export class PtcExecutor {
   constructor(
-    private pi: ExtensionAPI,
     private registry: ToolRegistry,
     private preamblePath = PREAMBLE_PATH,
     private timeoutMs = MAX_TIMEOUT_MS,
@@ -52,7 +50,7 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
   ): Promise<string> {
-    const snapshot = this.registry.getRuntimeSnapshot(this.pi);
+    const snapshot = this.registry.getRuntimeSnapshot();
     const bindings = generateRuntimeBindings(snapshot);
     const source = buildSubprocessCode(this.preamblePath, bindings, userCode);
 
