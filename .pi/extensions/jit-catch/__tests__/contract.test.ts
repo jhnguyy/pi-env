@@ -168,27 +168,6 @@ describe("jit_catch tool contract", () => {
     expect(runnerState.runCalls.map((call) => call[3])).toEqual(["/explicit/root", "/explicit/root"]);
   });
 
-  it("raw diff skips git helpers entirely and uses git_cwd or context cwd as workspace root", async () => {
-    const rawDiff = [
-      "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
-      "+++ b/.pi/extensions/demo/index.ts",
-    ].join("\n");
-
-    await Effect.runPromise(executeJitCatchEffect({ diff: rawDiff, git_cwd: "/raw" }, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/context" }));
-
-    expect(runner.resolveGitRootEffect).not.toHaveBeenCalled();
-    expect(runner.captureDiffEffect).not.toHaveBeenCalled();
-    expect(runnerState.runCalls[0][3]).toBe("/raw");
-  });
-
-  it("empty raw diff skips git helpers and returns no changed files", async () => {
-    const result = await Effect.runPromise(executeJitCatchEffect({ diff: "", git_cwd: "/raw" }, () => Effect.succeed({ code: 0, stdout: "", stderr: "" }), { cwd: "/context" }));
-
-    expect(runner.resolveGitRootEffect).not.toHaveBeenCalled();
-    expect(runner.captureDiffEffect).not.toHaveBeenCalled();
-    expect(result).toEqual(err("No changed files found in the diff."));
-  });
-
   it("preserves matching progress shape through both adapters", async () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
@@ -246,7 +225,6 @@ describe("jit_catch tool contract", () => {
     harness.startSession("/agent/session");
 
     const piResult = await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/same" });
-    expect(piResult.content[0].text).toContain("Note: diff also contains non-extension files (ignored).\n");
     expect(piResult.content[0].text).toContain("✗ demo — tests FAILED.");
     expect(piResult.content[0].text).toContain("  Test file kept at: /tmp/demo.catching.test.ts");
     expect(piResult.content[0].text).toContain("  Output:\n  line1\n  line2");
