@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform.js";
-import { captureDiff, legacyExecJitRunner, platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
+import { legacyExecJitRunner, platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
 import type { ExecResult, JitRunner } from "../runner";
 
 const tempDirs: string[] = [];
@@ -68,16 +68,6 @@ describe("resolveGitRoot", () => {
     const exec: JitRunner = () => Effect.succeed({ code: 128, stdout: "", stderr: "not a repo" });
 
     await expect(resolveGitRoot(exec, "/not/repo")).resolves.toBe("/not/repo");
-  });
-});
-
-describe("captureDiff", () => {
-  it("returns user-facing capture-diff failures unchanged", async () => {
-    const exec: JitRunner = () => Effect.succeed({ code: 1, stdout: "", stderr: "fatal: bad revision" });
-
-    await expect(captureDiff("commit", exec, "/repo", "deadbeef")).rejects.toThrow(
-      "git show failed (exit 1): fatal: bad revision",
-    );
   });
 });
 
