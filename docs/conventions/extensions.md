@@ -9,7 +9,8 @@ Each active extension should have:
 1. `.pi/extensions/<name>/index.ts` with the default export
 2. `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
 3. `.pi/extensions/<name>` in both `package.json#workspaces` and `package.json#pi.extensions`
-4. at least one `__tests__/*.test.ts` file
+
+Add permanent tests only when they protect a capability, regression, or safety invariant. Do not require a test file only to satisfy an extension layout rule.
 
 ## Lifecycle contract
 
