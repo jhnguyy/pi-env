@@ -10,9 +10,11 @@
 
 - **Class:** <!-- requirement | regression | safety invariant | integration/e2e | existing coverage only -->
 - **Protected capability/regression:**
-- **Independent design origin:** <!-- base-worktree session/agent, or why separation was not triggered -->
-- **Red/green, mutation, or negative-control evidence:**
-- **Added, reused, or removed portfolio evidence:**
+- **Evidence map and owning boundary:** <!-- requirement or risk → existing evidence → new evidence -->
+- **Independent design origin:** <!-- clean-base session/agent, or why separation was not triggered -->
+- **Counterfactual evidence:** <!-- red/green, mutation, or negative control -->
+- **Adversarial pass:** <!-- high-risk mutation or injected failure, or why not triggered -->
+- **Portfolio evidence:** <!-- added, reused, removed, and any retained cross-layer repetition -->
 - **Runtime impact:**
 
 ## Validation
