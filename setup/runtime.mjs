@@ -50,8 +50,8 @@ function installWithRetry(args) {
 }
 
 function patchEffectTypeScript() {
-  const cli = join(repo, 'node_modules', '@effect', 'language-service', 'cli.js');
-  runChecked(setupNodeBin, [cli, 'patch'], { cwd: repo });
+  const script = join(repo, 'scripts', 'patch-effect-language-service.mjs');
+  runChecked(setupNodeBin, [script, setupNodeBin], { cwd: repo });
 }
 
 function installDependencies() {
