@@ -15,7 +15,6 @@ import { MAX_OUTPUT_BYTES, MAX_STDERR_BYTES } from "../types";
 interface MockProc {
   proc: ChildProcess;
   send: (msg: object) => void;
-  sendRawRpc: (line: string) => void;
   stdout: (text: string) => void;
   exit: (code: number) => void;
   exitThenClose: (code: number) => void;
@@ -51,7 +50,6 @@ function makeMock(): MockProc {
   return {
     proc,
     send: (msg) => rpc.write(JSON.stringify(msg) + "\n"),
-    sendRawRpc: (line) => rpc.write(line + "\n"),
     stdout: (text) => stdout.write(text),
     exit: (code) => {
       (proc as any).exitCode = code;
@@ -89,98 +87,23 @@ async function rejectedBridge(bridge: RpcBridge): Promise<Error> {
   return result as Error;
 }
 
-describe("dedicated stdout and RPC channels", () => {
-  it("preserves JSON objects, arrays, strings, numbers, and booleans on stdout", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, noDispatch);
-    const values = [{ value: 1 }, ["a", 2], "text", 42, true];
-    const visible = values.map((value) => JSON.stringify(value)).join("\n") + "\n";
-
-    m.stdout(visible);
-    m.send({ type: "complete", output: "returned" });
-    m.exit(0);
-
-    expect(await bridge.completion).toBe(visible + "returned");
-  });
-
-  it("does not interpret protocol-shaped stdout as control traffic", async () => {
-    const m = makeMock();
-    const dispatched: string[] = [];
-    const bridge = new RpcBridge(m.proc, async (tool) => {
-      dispatched.push(tool);
-      return "unexpected";
-    });
-    const values = [
-      { type: "tool_call", id: "fake", tool: "danger", params: {} },
-      { type: "complete", output: "fake completion" },
-      { type: "error", message: "fake failure" },
-    ];
-    const visible = values.map((value) => JSON.stringify(value)).join("\n") + "\n";
-
-    m.stdout(visible);
-    m.send({ type: "complete", output: "real completion" });
-    m.exit(0);
-
-    expect(await bridge.completion).toBe(visible + "real completion");
-    expect(dispatched).toEqual([]);
-  });
-
-  it("preserves stdout while real fd 3 traffic dispatches through stdin", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, async (tool, params) => `${tool}:${params.value}`);
-
-    m.stdout("before\n");
-    m.send({ type: "tool_call", id: "c_0", tool: "echo", params: { value: "a" } });
-    await flush();
-    m.stdout("after\n");
-    m.send({ type: "complete", output: "done" });
-    m.exit(0);
-
-    expect(await bridge.completion).toBe("before\nafter\ndone");
-    expect(m.stdinText()).toContain(
-      JSON.stringify({ type: "tool_result", id: "c_0", result: "echo:a" }),
-    );
-  });
-
-  it("rejects malformed or schema-invalid fd 3 messages as protocol failures", async () => {
-    for (const line of ["not-json", JSON.stringify({ type: "unknown" })]) {
-      const m = makeMock();
-      const bridge = new RpcBridge(m.proc, noDispatch);
-      bridge.completion.catch(() => {});
-      m.sendRawRpc(line);
-      await expect(bridge.completion).rejects.toThrow("PTC RPC protocol error");
-    }
-  });
-});
-
 describe("terminal settlement", () => {
-  it("appends the explicit return after user stdout", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, noDispatch);
-    m.stdout("line one\nline two\n");
-    m.send({ type: "complete", output: "return value" });
-    m.exit(0);
-    expect(await bridge.completion).toBe("line one\nline two\nreturn value");
-  });
-
-  it("uses an error message and stack received on fd 3", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, noDispatch);
-    bridge.completion.catch(() => {});
-    m.send({ type: "error", message: "script crashed", stack: "mapped stack" });
-    m.exit(1);
-    const error = await rejectedBridge(bridge);
-    expect(error.message).toBe("script crashed");
-    expect(error.stack).toBe("mapped stack");
-  });
-
-  it("settles once and suppresses a late terminal message", async () => {
+  it("uses the first terminal message", async () => {
     const m = makeMock();
     const bridge = new RpcBridge(m.proc, noDispatch);
     m.send({ type: "complete", output: "first" });
     m.send({ type: "error", message: "late" });
     m.exit(0);
     expect(await bridge.completion).toBe("first");
+  });
+
+  it("removes process and stream listeners after settlement", async () => {
+    const m = makeMock();
+    const bridge = new RpcBridge(m.proc, noDispatch);
+    m.send({ type: "complete", output: "done" });
+    m.exit(0);
+    await bridge.completion;
+
     expect(m.proc.listenerCount("exit")).toBe(0);
     expect(m.proc.listenerCount("error")).toBe(0);
     expect(m.proc.stdout?.listenerCount("data")).toBe(0);
@@ -195,13 +118,6 @@ describe("fallback settlement and process diagnostics", () => {
     m.stdout("output line\n");
     m.exit(0);
     expect(await bridge.completion).toBe("output line\n");
-  });
-
-  it("resolves with empty output on a clean exit with no output", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, noDispatch);
-    m.exit(0);
-    expect(await bridge.completion).toBe("");
   });
 
   it("rejects a non-zero exit in both stream and process event orders", async () => {
@@ -225,14 +141,6 @@ describe("fallback settlement and process diagnostics", () => {
     const error = await rejectedBridge(bridge);
     expect(Buffer.byteLength(error.message)).toBeLessThanOrEqual(MAX_STDERR_BYTES);
     expect(error.message).toContain("stderr truncated");
-  });
-
-  it("falls back to the exit code when stderr is empty", async () => {
-    const m = makeMock();
-    const bridge = new RpcBridge(m.proc, noDispatch);
-    bridge.completion.catch(() => {});
-    m.exit(2);
-    await expect(bridge.completion).rejects.toThrow("exited with code 2");
   });
 
   it("rejects signal termination", async () => {

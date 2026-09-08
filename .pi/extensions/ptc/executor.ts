@@ -42,6 +42,7 @@ export class PtcExecutor {
     private pi: ExtensionAPI,
     private registry: ToolRegistry,
     private preamblePath = PREAMBLE_PATH,
+    private timeoutMs = MAX_TIMEOUT_MS,
   ) {}
 
   async execute(
@@ -81,7 +82,7 @@ export class PtcExecutor {
         cwd,
         stdio: ["pipe", "pipe", "pipe", "pipe"],
         env: buildSubprocessEnv(),
-        timeoutMs: MAX_TIMEOUT_MS,
+        timeoutMs: this.timeoutMs,
         killGraceMs: 5_000,
       }).pipe(
         Effect.mapError((cause) => new PtcExecutionError({ phase: PtcExecutionPhase.Run, cause })),
@@ -120,12 +121,12 @@ export class PtcExecutor {
           cause: cause instanceof PtcProtocolError ? cause : enhancePtcError(cause, source),
         }),
     }).pipe(
-      Effect.timeout(MAX_TIMEOUT_MS),
+      Effect.timeout(this.timeoutMs),
       Effect.catchIf(Cause.isTimeoutError, () =>
         Effect.fail(
           new PtcExecutionError({
             phase: PtcExecutionPhase.Run,
-            cause: enhancePtcError(new Error(formatTimeoutDetail(bridge)), source),
+            cause: enhancePtcError(new Error(formatTimeoutDetail(bridge, this.timeoutMs)), source),
           }),
         ),
       ),
@@ -237,11 +238,12 @@ function isTransformMessage(value: unknown): value is Message {
   return typeof value === "object" && value !== null && "text" in value;
 }
 
-function formatTimeoutDetail(bridge: RpcBridge | undefined): string {
+function formatTimeoutDetail(bridge: RpcBridge | undefined, timeoutMs: number): string {
   const calls = bridge?.getToolCallCount() ?? 0;
   const lastCall = bridge?.getLastToolCallLabel();
+  const duration = timeoutMs < 1_000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1_000)}s`;
   return [
-    `PTC timed out after ${Math.round(MAX_TIMEOUT_MS / 1000)}s`,
+    `PTC timed out after ${duration}`,
     `Completed nested tool calls: ${calls}`,
     ...(lastCall ? [`Last call: ${lastCall}`] : []),
   ].join("\n");

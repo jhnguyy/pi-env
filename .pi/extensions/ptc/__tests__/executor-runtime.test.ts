@@ -8,6 +8,7 @@ import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { PtcExecutor } from "../executor";
 import { PtcExecutionError, PtcExecutionPhase } from "../node-runtime";
 import type { ToolRegistry } from "../tool-registry";
+import { BLOCKED_TOOLS } from "../types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let fixtureDirectory: string;
@@ -44,15 +45,23 @@ function tool(name: string): ToolInfo {
   } as ToolInfo;
 }
 
+type ExecutorDispatch = (
+  toolName: string,
+  params: Record<string, unknown>,
+  cwd: string,
+  signal: AbortSignal | undefined,
+) => Promise<string>;
+
 function makeExecutor(
   toolNames: string[] = [],
-  dispatch: (toolName: string, params: Record<string, unknown>) => Promise<string> = async () => "",
+  dispatch: ExecutorDispatch = async () => "",
+  timeoutMs?: number,
 ): PtcExecutor {
   const registry = {
     getAvailableTools: () => toolNames.map(tool),
     dispatch,
   } as unknown as ToolRegistry;
-  return new PtcExecutor({} as ExtensionAPI, registry, preamblePath);
+  return new PtcExecutor({} as ExtensionAPI, registry, preamblePath, timeoutMs);
 }
 
 async function rejectedExecution(executor: PtcExecutor, code: string): Promise<PtcExecutionError> {
@@ -79,23 +88,25 @@ describe("PTC live transport", () => {
     await expect(executor.execute(code, process.cwd())).resolves.toBe(lines.join("\n") + "\nreal");
   });
 
-  it("mixes stdout with multiple fd 3 calls and returns each result through stdin", async () => {
+  it("mixes stdout with normalized fd 3 calls and returns each result through stdin", async () => {
     const dispatch = vi.fn(
       async (name: string, params: Record<string, unknown>) => `${name}:${String(params.value)}`,
     );
-    const executor = makeExecutor(["echo"], dispatch);
+    const executor = makeExecutor(["echo-tool", "2fa-tool"], dispatch);
     const code = [
       'console.log("before");',
-      'const first = await echo({ value: "a" });',
-      'const second = await echo({ value: "b" });',
+      'const first = await echo_tool({ value: "a" });',
+      'const second = await _2fa_tool({ value: "b" });',
       "console.log(first);",
       "return second;",
     ].join("\n");
 
-    await expect(executor.execute(code, process.cwd())).resolves.toBe("before\necho:a\necho:b");
+    await expect(executor.execute(code, process.cwd())).resolves.toBe(
+      "before\necho-tool:a\n2fa-tool:b",
+    );
     expect(dispatch).toHaveBeenNthCalledWith(
       1,
-      "echo",
+      "echo-tool",
       { value: "a" },
       process.cwd(),
       expect.any(AbortSignal),
@@ -103,7 +114,7 @@ describe("PTC live transport", () => {
     );
     expect(dispatch).toHaveBeenNthCalledWith(
       2,
-      "echo",
+      "2fa-tool",
       { value: "b" },
       process.cwd(),
       expect.any(AbortSignal),
@@ -123,18 +134,87 @@ describe("PTC live transport", () => {
     expect(dispatch).toHaveBeenCalledTimes(100);
   });
 
-  it("classifies malformed fd 3 messages as protocol failures", async () => {
-    const error = await rejectedExecution(
-      makeExecutor(),
-      [
-        'const { writeFileSync } = await import("node:fs");',
-        'writeFileSync(3, "not-json\\n");',
-        'return "unreachable";',
-      ].join("\n"),
+  it("classifies malformed and schema-invalid fd 3 messages as protocol failures", async () => {
+    const cases = [
+      ["not-json", "fd 3 emitted malformed JSON"],
+      [JSON.stringify({ type: "unknown" }), "fd 3 emitted an invalid RPC message"],
+    ] as const;
+
+    for (const [line, reason] of cases) {
+      const error = await rejectedExecution(
+        makeExecutor(),
+        [
+          'const { writeFileSync } = await import("node:fs");',
+          `writeFileSync(3, ${JSON.stringify(`${line}\n`)});`,
+          'return "unreachable";',
+        ].join("\n"),
+      );
+
+      expect(error.phase).toBe(PtcExecutionPhase.Protocol);
+      expect(error.message).toContain(reason);
+    }
+  });
+
+  it("propagates caller cancellation to nested calls and closes the execution scope", async () => {
+    const controller = new AbortController();
+    let nestedSignal: AbortSignal | undefined;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const dispatch: ExecutorDispatch = async (_name, _params, _cwd, signal) => {
+      nestedSignal = signal;
+      markStarted();
+      return new Promise<string>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const execution = makeExecutor(["wait"], dispatch).execute(
+      "return await wait({});",
+      process.cwd(),
+      controller.signal,
     );
 
-    expect(error.phase).toBe(PtcExecutionPhase.Protocol);
-    expect(error.message).toContain("fd 3 emitted malformed JSON");
+    await started;
+    controller.abort(new Error("stop"));
+
+    await expect(execution).rejects.toThrow("PTC execution cancelled");
+    expect(nestedSignal?.aborted).toBe(true);
+  });
+
+  it("classifies timeout and closes the execution scope", async () => {
+    const error = await rejectedExecution(
+      makeExecutor([], async () => "", 25),
+      "await new Promise((resolve) => setTimeout(resolve, 60_000));",
+    );
+
+    expect(error.phase).toBe(PtcExecutionPhase.Run);
+    expect(error.message).toContain("PTC timed out after 25ms");
+    expect(error.message).toContain("Completed nested tool calls: 0");
+  });
+
+  it("does not expose blocked recursive tools as subprocess wrappers", async () => {
+    const blocked = [
+      "ptc",
+      "subagent",
+      "subagent_start",
+      "subagent_job",
+      "jit_catch",
+      "skill_build",
+    ];
+    expect([...BLOCKED_TOOLS]).toEqual(blocked);
+    const code = [
+      "typeof ptc",
+      "typeof subagent",
+      "typeof subagent_start",
+      "typeof subagent_job",
+      "typeof jit_catch",
+      "typeof skill_build",
+    ].join(", ");
+
+    await expect(
+      makeExecutor(blocked).execute(`return [${code}].join(",");`, process.cwd()),
+    ).resolves.toBe("undefined,undefined,undefined,undefined,undefined,undefined");
   });
 });
 
