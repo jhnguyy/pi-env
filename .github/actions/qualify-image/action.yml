@@ -1,0 +1,108 @@
+name: Qualify pi-env container image
+description: Build, verify, and scan one local pi-env image candidate.
+
+inputs:
+  image-tag:
+    description: Local tag for the candidate image.
+    required: false
+    default: pi-env:ci
+
+outputs:
+  image-id:
+    description: Docker image ID of the qualified candidate.
+    value: ${{ steps.record-image.outputs.image-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build container image candidate
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        if ! DOCKER_BUILDKIT=1 docker build \
+          --file ./Dockerfile \
+          --tag "$IMAGE_TAG" \
+          .; then
+          echo "::error title=Container image build failed::Docker could not build the image candidate."
+          exit 1
+        fi
+
+    - name: Verify container artifact contract
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        if ! docker run --rm "$IMAGE_TAG" nub run verify:image-artifact; then
+          echo "::error title=Container artifact verification failed::The image candidate does not satisfy the artifact contract."
+          exit 1
+        fi
+
+    - name: Scan container image security policy
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        image_tar="$RUNNER_TEMP/pi-env-image.tar"
+        results_dir="$RUNNER_TEMP/trivy-results"
+        results="$results_dir/trivy-image-results.json"
+        cache_dir="$RUNNER_TEMP/trivy-cache"
+        ignore_file="$GITHUB_WORKSPACE/.trivyignore.yaml"
+        docker save "$IMAGE_TAG" --output "$image_tar"
+        chmod 0644 "$image_tar"
+        mkdir -p "$cache_dir" "$results_dir"
+        if ! docker run --rm \
+          --cap-drop=ALL \
+          --security-opt=no-new-privileges \
+          --read-only \
+          --tmpfs /tmp:rw,noexec,nosuid,nodev \
+          --user "$(id -u):$(id -g)" \
+          -e HOME=/tmp \
+          -e TRIVY_CACHE_DIR=/cache \
+          -v "$image_tar:/image/pi-env-image.tar:ro" \
+          -v "$cache_dir:/cache:rw" \
+          -v "$results_dir:/results:rw" \
+          -v "$ignore_file:/etc/trivy/.trivyignore.yaml:ro" \
+          aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
+          image \
+          --input /image/pi-env-image.tar \
+          --scanners vuln,secret,misconfig \
+          --file-patterns pnpm:lock.yaml \
+          --severity HIGH,CRITICAL \
+          --ignorefile /etc/trivy/.trivyignore.yaml \
+          --format json \
+          --output /results/trivy-image-results.json \
+          --exit-code 0 \
+          --skip-version-check; then
+          echo "::error title=Container image scanner failed::The scanner could not evaluate the image candidate."
+          exit 1
+        fi
+        set +e
+        node scripts/trivy-image-summary.mjs "$results"
+        summary_status="$?"
+        set -e
+        if [[ "$summary_status" -eq 1 ]]; then
+          echo "::error title=Container image security policy failed::The image candidate has actionable security findings."
+          exit 1
+        fi
+        if [[ "$summary_status" -ne 0 ]]; then
+          echo "::error title=Container image scanner failed::The scanner returned an invalid image report."
+          exit "$summary_status"
+        fi
+
+    - name: Record qualified image identity
+      id: record-image
+      shell: bash
+      env:
+        IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")"
+        echo "image-id=$image_id" >> "$GITHUB_OUTPUT"
+        echo "Qualified image ID: $image_id"

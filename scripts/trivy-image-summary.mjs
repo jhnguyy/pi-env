@@ -7,7 +7,19 @@ if (!jsonPath) {
   process.exit(2);
 }
 
-const report = JSON.parse(readFileSync(jsonPath, 'utf8'));
+let report;
+try {
+  report = JSON.parse(readFileSync(jsonPath, 'utf8'));
+} catch {
+  console.error('Trivy image scan returned invalid JSON.');
+  process.exit(2);
+}
+
+if (!Array.isArray(report?.Results) || report.Results.length === 0) {
+  console.error('Trivy image scan did not report any targets.');
+  process.exit(2);
+}
+
 const severityOrder = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 const severityCounts = Object.fromEntries(severityOrder.map((severity) => [severity, 0]));
 const policyFindings = [];
