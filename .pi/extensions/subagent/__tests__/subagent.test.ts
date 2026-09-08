@@ -92,6 +92,15 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
     });
 
+    it("does not expose a caller-selected turn limit", () => {
+      for (const name of ["subagent", "subagent_start"]) {
+        const tool = registeredTools.get(name);
+        expect(tool.parameters.properties).not.toHaveProperty("max_turns");
+        expect(tool.parameters.properties).not.toHaveProperty("maxTurns");
+        expect(tool.description).not.toContain("max_turns");
+      }
+    });
+
     it("reports completed asynchronous usage exactly once", () => {
       const reported = new Set<string>();
       const job = {

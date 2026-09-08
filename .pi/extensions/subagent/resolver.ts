@@ -21,7 +21,6 @@ export interface SubagentParams {
   tools?: string[];
   model?: string;
   system_prompt?: string;
-  max_turns?: number;
   /** Optional absolute working directory for child discovery, tools, and execution. */
   cwd?: string;
   /** Project agents require both explicit project scope and a trusted project. */

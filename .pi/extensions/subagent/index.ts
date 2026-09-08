@@ -54,13 +54,6 @@ const SUBAGENT_PARAMETERS = Type.Object({
         "System prompt override. Optional — agent files provide this, or a minimal default is used.",
     }),
   ),
-  max_turns: Type.Optional(
-    Type.Integer({
-      minimum: 1,
-      description:
-        "Optional maximum completed assistant turns. Omit to run without a turn-count limit.",
-    }),
-  ),
   cwd: Type.Optional(
     Type.String({
       description:

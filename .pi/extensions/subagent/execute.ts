@@ -102,7 +102,6 @@ export function buildErrorDetails(
     agent: params.agent,
     toolNames,
     modelOverride,
-    maxTurns: params.max_turns,
     cwd: params.cwd,
     finalOutput: "",
     toolCallCount: 0,
@@ -137,6 +136,7 @@ export interface ResolvedSubagentRun {
   modelOverride?: string;
   systemPrompt: string;
   cwd: string;
+  /** Internal resolved-run control. Public tool paths must leave this value undefined. */
   maxTurns?: number;
   reasoning?: ThinkingLevel;
   workspaceAccess?: WorkspaceAccessValue;
@@ -375,7 +375,6 @@ function runSubagentWorkflow(
         modelOverride: params.model,
         systemPrompt: plan.value.systemPrompt,
         cwd: plan.value.effectiveCwd,
-        maxTurns: params.max_turns,
         workspaceAccess: plan.value.workspaceAccess,
       },
       ctx,
