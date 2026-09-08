@@ -1,6 +1,15 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -12,6 +21,29 @@ import registerSkillBuilder, {
 } from "../index";
 
 const roots: string[] = [];
+
+const templateCases = [
+  {
+    template: "basic",
+    name: "concise-skill",
+    description: "Performs one focused task.",
+    files: ["SKILL.md"],
+  },
+  {
+    template: "with-scripts",
+    name: "scripted-skill",
+    description: "Runs a focused helper script.",
+    files: ["SKILL.md", "scripts/run.sh"],
+    auxiliaryDirectory: "scripts",
+  },
+  {
+    template: "with-index",
+    name: "indexed-skill",
+    description: "Retrieves focused supporting references.",
+    files: ["SKILL.md", "references/overview.md"],
+    auxiliaryDirectory: "references",
+  },
+] as const;
 
 afterEach(() => {
   resetSkillEvaluationRunnerForTests();
@@ -48,6 +80,24 @@ function context(root: string): any {
     cwd: root,
     model: current,
     modelRegistry: { getAvailable: () => [current] },
+  };
+}
+
+function registeredSkillBuild(root: string, exec = vi.fn()) {
+  const tools = new Map<string, any>();
+  const pi = {
+    exec,
+    on: vi.fn(),
+    registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
+  };
+  registerSkillBuilder(pi as any);
+
+  return {
+    exec,
+    execute: (params: Record<string, unknown>) =>
+      tools
+        .get("skill_build")
+        .execute("call-id", params, undefined, undefined, context(root)),
   };
 }
 
@@ -96,32 +146,64 @@ it("adapts Pi per-million-token model rates without changing their units", () =>
   });
 });
 
-it("does not evaluate placeholder scaffolds in create mode", async () => {
-  const root = tempRoot();
-  const tools = new Map<string, any>();
-  const exec = vi.fn();
-  const pi = {
-    exec,
-    on: vi.fn(),
-    registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
-  };
+it.each(templateCases)(
+  "$template: creates a valid skill through the registered tool",
+  async ({ template, name, description, files, ...templateCase }) => {
+    const root = tempRoot();
+    const tool = registeredSkillBuild(root);
+    const skillDir = join(root, "skills", name);
 
-  registerSkillBuilder(pi as any);
-  const result = await tools.get("skill_build").execute(
-    "call-id",
-    {
-      name: "concise-skill",
-      description: "Performs one focused task.",
-      template: "basic",
+    const created = await tool.execute({
+      name,
+      description,
+      template,
       targetDir: "skills",
-    },
-    undefined,
-    undefined,
-    context(root),
-  );
+    });
 
-  expect(result.content[0].text).toContain("then validate the skill by path");
-  expect(exec).not.toHaveBeenCalled();
+    expect(created.content[0].text).toContain(`Template: ${template}  Files: ${files.join(", ")}`);
+    expect(created.details).toMatchObject({
+      skillDir,
+      validation: { valid: true, issues: [], name },
+    });
+    if ("auxiliaryDirectory" in templateCase) {
+      expect(existsSync(join(skillDir, templateCase.auxiliaryDirectory))).toBe(true);
+    }
+    const skillContent = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
+    expect(parseFrontmatter(skillContent).frontmatter).toMatchObject({ name, description });
+    expect(Buffer.byteLength(skillContent, "utf-8")).toBeLessThan(8192);
+
+    const validated = await tool.execute({ path: join("skills", name) });
+
+    expect(validated.content[0].text).toContain("✓ Validate: passed");
+    expect(validated.details).toMatchObject({
+      skillDir,
+      validation: { valid: true, issues: [], name },
+    });
+    expect(tool.exec).not.toHaveBeenCalled();
+  },
+);
+
+it("does not change an existing skill when registered create mode collides", async () => {
+  const root = tempRoot();
+  const skillDir = join(root, "skills", "existing-skill");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), "original content");
+  writeFileSync(join(skillDir, "notes.md"), "original notes");
+  const originalFiles = readdirSync(skillDir).sort();
+  const tool = registeredSkillBuild(root);
+
+  const result = await tool.execute({
+    name: "existing-skill",
+    description: "Should not overwrite.",
+    template: "basic",
+    targetDir: "skills",
+  });
+
+  expect(result.content[0].text).toContain("✗ Scaffold failed");
+  expect(result.content[0].text).toMatch(/already exists/i);
+  expect(readdirSync(skillDir).sort()).toEqual(originalFiles);
+  expect(readFileSync(join(skillDir, "SKILL.md"), "utf-8")).toBe("original content");
+  expect(readFileSync(join(skillDir, "notes.md"), "utf-8")).toBe("original notes");
 });
 
 it("defaults an existing path to deterministic validation", async () => {
@@ -159,22 +241,22 @@ it("requires a user goal for advisory evaluation", async () => {
   expect(runner).not.toHaveBeenCalled();
 });
 
-it("does not evaluate after deterministic validation errors", async () => {
+it("blocks advisory evaluation after registered deterministic validation fails", async () => {
   const root = tempRoot();
   writeSkill(root, "---\ndescription: Missing name.\n---\n\n# Invalid\n");
-  const exec = vi.fn();
   const runner = vi.fn();
   setSkillEvaluationRunnerForTests(runner as any);
+  const tool = registeredSkillBuild(root);
 
-  const result = await runSkillBuild(
-    { exec } as any,
-    { path: "review-skill", action: "evaluate", goal: "Reduce recurring context." },
-    { cwd: root, ctx: context(root), env: {} },
-  );
+  const result = await tool.execute({
+    path: "review-skill",
+    action: "evaluate",
+    goal: "Reduce recurring context.",
+  });
 
   expect(result.content[0]?.text).toContain("✗ Validate:");
   expect(result.content[0]?.text).not.toContain("Advisory evaluation");
-  expect(exec).not.toHaveBeenCalled();
+  expect(tool.exec).not.toHaveBeenCalled();
   expect(runner).not.toHaveBeenCalled();
 });
 
