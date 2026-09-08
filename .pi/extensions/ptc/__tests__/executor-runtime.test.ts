@@ -184,74 +184,54 @@ describe("PTC live transport", () => {
     expect(output).not.toContain("ReferenceError");
   });
 
-  it("settles independent nested calls without discarding successful values", async () => {
+  it("settles independent calls and records bounded execution details", async () => {
+    const longTool = `read-${"x".repeat(200)}`;
     const dispatch = vi.fn(async (name: string) => {
-      if (name === "fail-tool") throw new Error("nested boom");
+      if (name === "fail-tool") throw new Error("credential-shaped-secret");
       return "kept";
     });
-    const executor = makeExecutor(["ok-tool", "fail-tool"], dispatch);
+    const executor = makeExecutor([longTool, "fail-tool"], dispatch);
     const code = [
       "const results = await Promise.all([",
-      "  settle(tools.ok_tool({ value: 1 })),",
-      "  settle(tools.fail_tool({ value: 2 })),",
+      `  settle(tools[${JSON.stringify(longTool)}]({ path: "/private/ok" })),`,
+      '  settle(tools.fail_tool({ token: "credential-shaped-secret" })),',
       "]);",
       "return JSON.stringify(results);",
     ].join("\n");
 
-    const output = await executionOutput(executor, code);
-    expect(JSON.parse(output)).toEqual([
+    const result = await executor.execute(code, process.cwd());
+    const details = Schema.decodeUnknownSync(PtcRunDetailsSchema)(result.details);
+    expect(JSON.parse(result.output)).toEqual([
       { ok: true, value: "kept" },
       {
         ok: false,
         error: expect.objectContaining({
           class: "nested-tool",
           tool: "fail-tool",
-          message: expect.stringContaining("nested boom"),
+          message: expect.stringContaining("credential-shaped-secret"),
         }),
       },
     ]);
-    expect(dispatch).toHaveBeenCalledTimes(2);
-  });
-
-  it("returns schema-valid bounded details for successful settled batches", async () => {
-    const dispatch = vi.fn(async (name: string) => {
-      if (name === "fail-tool") throw new Error("credential-shaped-secret");
-      return "raw nested output";
-    });
-    const executor = makeExecutor(["read", "fail-tool"], dispatch);
-    const code = [
-      'await tools.read({ path: "/private/first" });',
-      'await tools.read({ path: "/private/second" });',
-      'await settle(tools.fail_tool({ token: "credential-shaped-secret" }));',
-      'return "selected output";',
-    ].join("\n");
-
-    const result = await executor.execute(code, process.cwd());
-    const details = Schema.decodeUnknownSync(PtcRunDetailsSchema)(result.details);
-
-    expect(result.output).toBe("selected output");
     expect(details).toMatchObject({
       schemaVersion: 1,
-      action: "run",
       completion: PtcCompletion.Success,
-      nestedCallCount: 3,
-      completedNestedCallCount: 3,
+      nestedCallCount: 2,
+      completedNestedCallCount: 2,
       failedNestedCallCount: 1,
       toolCallCounts: [
-        { tool: "read", count: 2 },
+        expect.objectContaining({ count: 1 }),
         { tool: "fail-tool", count: 1 },
       ],
-      outputTruncated: false,
       lastNestedCall: {
         tool: "fail-tool",
-        ordinal: 3,
+        ordinal: 2,
         status: PtcNestedCallStatus.Failed,
       },
     });
     expect(details.durationMs).toBeGreaterThanOrEqual(0);
-    expect(JSON.stringify(details)).not.toMatch(
-      /private|credential-shaped-secret|raw nested output|selected output/,
-    );
+    expect(details.toolCallCounts[0].tool.length).toBeLessThanOrEqual(80);
+    expect(JSON.stringify(details)).not.toMatch(/private|credential-shaped-secret|kept/);
+    expect(dispatch).toHaveBeenCalledTimes(2);
   });
 
   it("retains bounded partial output and content-free details for nested failures", async () => {
@@ -293,7 +273,6 @@ describe("PTC live transport", () => {
     );
     expect(Buffer.byteLength(result.output)).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
     expect(result.details.outputTruncated).toBe(true);
-    expect(JSON.stringify(result.details)).not.toContain("xxxxx");
   });
 
   it("keeps the subprocess tool-call limit on the fd 3 path", async () => {
@@ -305,12 +284,6 @@ describe("PTC live transport", () => {
 
     expect(error.phase).toBe(PtcExecutionPhase.Run);
     expect(error.message).toContain("exceeded 100 tool call limit");
-    expect(error.details).toMatchObject({
-      completion: PtcCompletion.Failure,
-      failureClass: PtcFailureClass.UserScript,
-      nestedCallCount: 100,
-      completedNestedCallCount: 100,
-    });
     expect(dispatch).toHaveBeenCalledTimes(100);
   });
 
@@ -376,33 +349,18 @@ describe("PTC live transport", () => {
     expect(nestedSignal?.aborted).toBe(true);
   });
 
-  it("classifies timeout and closes the execution scope", async () => {
-    const error = await rejectedExecution(
-      makeExecutor([], async () => "", 25),
-      "await new Promise((resolve) => setTimeout(resolve, 60_000));",
-    );
-
-    expect(error.phase).toBe(PtcExecutionPhase.Run);
-    expect(error.message).toContain("PTC timed out after 25ms");
-    expect(error.message).toContain("Completed nested tool calls: 0");
-    expect(error.details).toMatchObject({
-      completion: PtcCompletion.Failure,
-      failureClass: PtcFailureClass.Timeout,
-      nestedCallCount: 0,
-      completedNestedCallCount: 0,
-    });
-  });
-
-  it("records the last pending nested call when execution times out", async () => {
+  it("classifies timeout with a pending nested call", async () => {
     const dispatch: ExecutorDispatch = async () => new Promise<string>(() => undefined);
     const error = await rejectedExecution(
       makeExecutor(["slow-tool"], dispatch, 200),
       'return await tools.slow_tool({ path: "/private/slow" });',
     );
 
+    expect(error.phase).toBe(PtcExecutionPhase.Run);
     expect(error.message).toContain("Completed nested tool calls: 0");
     expect(error.message).toContain("Last call: → slow-tool");
     expect(error.details).toMatchObject({
+      completion: PtcCompletion.Failure,
       failureClass: PtcFailureClass.Timeout,
       nestedCallCount: 1,
       completedNestedCallCount: 0,

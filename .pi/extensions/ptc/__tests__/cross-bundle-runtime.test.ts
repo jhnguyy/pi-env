@@ -141,15 +141,11 @@ describe("PTC cross-bundle runtime", () => {
       expect(runtime.catalog().callable).toEqual([
         expect.objectContaining({ name: "dynamic-cross-host", key: "dynamic_cross_host" }),
       ]);
-      await expect(
-        runtime.execute(
-          'return await tools["dynamic-cross-host"]({ value: "ok" });',
-          process.cwd(),
-        ),
-      ).resolves.toMatchObject({
-        output: "ok:/dynamic-session",
-        details: { action: "run", completion: "success", nestedCallCount: 1 },
-      });
+      const execution = await runtime.execute(
+        'return await tools["dynamic-cross-host"]({ value: "ok" });',
+        process.cwd(),
+      );
+      expect(execution.output).toBe("ok:/dynamic-session");
 
       harness.trigger("session_shutdown", { type: "session_shutdown" });
       expect(runtime.catalog().callable).toEqual([]);

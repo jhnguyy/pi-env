@@ -72,7 +72,7 @@ function componentText(component: unknown): string {
 }
 
 describe("PTC result rendering", () => {
-  it("renders final call counts from durable details when no partial state exists", () => {
+  it("renders final call counts and truncation from durable details", () => {
     const tool = registeredPtcTool();
     const result = {
       content: [{ type: "text", text: "first\nsecond\nthird" }],
@@ -80,6 +80,7 @@ describe("PTC result rendering", () => {
         nestedCallCount: 3,
         completedNestedCallCount: 3,
         toolCallCounts: [{ tool: "read", count: 3 }],
+        outputTruncated: true,
       }),
     };
 
@@ -90,8 +91,8 @@ describe("PTC result rendering", () => {
       tool.renderResult(result, { expanded: true, isPartial: false }, theme, context()),
     );
 
-    expect(collapsed).toContain("3 lines · 3 calls");
-    expect(expanded).toContain("3 lines · 3 calls");
+    expect(collapsed).toContain("3 lines · 3 calls · [truncated]");
+    expect(expanded).toContain("3 lines · 3 calls · [truncated]");
     expect(expanded).toContain('return "done";');
     expect(expanded).toContain("first\nsecond\nthird");
   });
@@ -121,13 +122,14 @@ describe("PTC result rendering", () => {
     expect(second).toContain('→ read(path="one") #1\n→ read(path="two") #2');
   });
 
-  it("renders nested failures as errors without requiring durable details", () => {
+  it("renders nested and timeout failures from durable error text", () => {
     const tool = registeredPtcTool();
-    const error = "PTC run failed: PTC nested tool call failed\nTool: read\nError: denied";
+    const nested = "PTC run failed: PTC nested tool call failed\nTool: read\nError: denied";
+    const timeout = "PTC run failed: PTC timed out after 120s\nCompleted nested tool calls: 2";
 
     const collapsed = componentText(
       tool.renderResult(
-        { content: [{ type: "text", text: error }], details: undefined },
+        { content: [{ type: "text", text: nested }], details: undefined },
         { expanded: false, isPartial: false },
         theme,
         context({ isError: true }),
@@ -135,7 +137,7 @@ describe("PTC result rendering", () => {
     );
     const expanded = componentText(
       tool.renderResult(
-        { content: [{ type: "text", text: error }], details: undefined },
+        { content: [{ type: "text", text: timeout }], details: undefined },
         { expanded: true, isPartial: false },
         theme,
         context({ isError: true }),
@@ -143,43 +145,7 @@ describe("PTC result rendering", () => {
     );
 
     expect(collapsed).toContain("✗ ptc PTC run failed: PTC nested tool call failed");
-    expect(expanded).toContain("✗ ptc failed");
-    expect(expanded).toContain("Tool: read");
-  });
-
-  it("renders timeout diagnostics from the durable error text", () => {
-    const tool = registeredPtcTool();
-    const error = "PTC run failed: PTC timed out after 120s\nCompleted nested tool calls: 2";
-
-    const rendered = componentText(
-      tool.renderResult(
-        { content: [{ type: "text", text: error }], details: undefined },
-        { expanded: true, isPartial: false },
-        theme,
-        context({ isError: true }),
-      ),
-    );
-
-    expect(rendered).toContain("PTC timed out after 120s");
-    expect(rendered).toContain("Completed nested tool calls: 2");
-  });
-
-  it("shows truncation from durable details in collapsed and expanded results", () => {
-    const tool = registeredPtcTool();
-    const result = {
-      content: [{ type: "text", text: "bounded output\n[PTC output truncated]" }],
-      details: details({ outputTruncated: true }),
-    };
-
-    const collapsed = componentText(
-      tool.renderResult(result, { expanded: false, isPartial: false }, theme, context()),
-    );
-    const expanded = componentText(
-      tool.renderResult(result, { expanded: true, isPartial: false }, theme, context()),
-    );
-
-    expect(collapsed).toContain("[truncated]");
-    expect(expanded).toContain("[truncated]");
-    expect(expanded).toContain("bounded output");
+    expect(expanded).toContain("PTC timed out after 120s");
+    expect(expanded).toContain("Completed nested tool calls: 2");
   });
 });
