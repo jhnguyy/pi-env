@@ -72,7 +72,7 @@ export const BLOCKED_TOOLS = new Set<string>([
 
 // ─── RPC message types ────────────────────────────────────────────────────────
 
-/** Messages written to stdout by the subprocess (read by parent RpcBridge). */
+/** Messages written to fd 3 by the subprocess (read by parent RpcBridge). */
 export type RpcOutbound =
   | { type: "tool_call"; id: string; tool: string; params: Record<string, unknown> }
   | { type: "complete"; output: string }

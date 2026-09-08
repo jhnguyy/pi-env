@@ -38,11 +38,31 @@ describe("toIdentifier", () => {
 // ─── generateWrappers ─────────────────────────────────────────────────────────
 
 const SAMPLE_TOOLS = [
-  { name: "read",      description: "Read file contents", parameters: {} as any, sourceInfo: {} as any },
-  { name: "bash",      description: "Execute bash commands", parameters: {} as any, sourceInfo: {} as any },
-  { name: "dev-tools", description: "LSP diagnostics", parameters: {} as any, sourceInfo: {} as any },
-  { name: "ptc",       description: "Programmatic tool calling (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
-  { name: "subagent",  description: "Subagent (should be blocked)", parameters: {} as any, sourceInfo: {} as any },
+  { name: "read", description: "Read file contents", parameters: {} as any, sourceInfo: {} as any },
+  {
+    name: "bash",
+    description: "Execute bash commands",
+    parameters: {} as any,
+    sourceInfo: {} as any,
+  },
+  {
+    name: "dev-tools",
+    description: "LSP diagnostics",
+    parameters: {} as any,
+    sourceInfo: {} as any,
+  },
+  {
+    name: "ptc",
+    description: "Programmatic tool calling (should be blocked)",
+    parameters: {} as any,
+    sourceInfo: {} as any,
+  },
+  {
+    name: "subagent",
+    description: "Subagent (should be blocked)",
+    parameters: {} as any,
+    sourceInfo: {} as any,
+  },
 ];
 
 describe("generateWrappers", () => {
@@ -69,9 +89,7 @@ describe("generateWrappers", () => {
   });
 
   it("returns empty string when all tools are blocked", () => {
-    const code = generateWrappers(
-      SAMPLE_TOOLS.filter((t) => BLOCKED_TOOLS.has(t.name)),
-    );
+    const code = generateWrappers(SAMPLE_TOOLS.filter((t) => BLOCKED_TOOLS.has(t.name)));
     expect(code.trim()).toBe("");
   });
 
@@ -87,7 +105,10 @@ describe("generateWrappers", () => {
 // to catch accidental protocol or API breakage.
 
 describe("subprocess-preamble.ts", () => {
-  const content = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../subprocess-preamble.ts"), "utf-8");
+  const content = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../subprocess-preamble.ts"),
+    "utf-8",
+  );
 
   it("exports __rpc_call as an async function", () => {
     expect(content).toContain("export async function __rpc_call(");
@@ -97,8 +118,9 @@ describe("subprocess-preamble.ts", () => {
     expect(content).toContain("MAX_TOOL_CALLS");
   });
 
-  it("writes tool_call messages to process.stdout", () => {
-    expect(content).toContain("process.stdout.write");
+  it("writes tool_call messages to dedicated fd 3 instead of stdout", () => {
+    expect(content).toContain("writeFileSync(3, line)");
+    expect(content).not.toContain("process.stdout.write");
     expect(content).toContain('"tool_call"');
   });
 
