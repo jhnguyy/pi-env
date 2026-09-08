@@ -15,7 +15,7 @@ import type {
 import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { buildCodeFrame, mapGeneratedStackToUserLine } from "../_shared/code-frame";
 import { RpcBridge } from "./rpc-bridge";
-import { generateWrappers } from "./wrapper-gen";
+import { generateRuntimeBindings } from "./wrapper-gen";
 import type { ToolRegistry } from "./tool-registry";
 import { scopedChildProcess } from "../../../src/process/platform.js";
 import { MAX_TIMEOUT_MS, MAX_OUTPUT_BYTES, buildSubprocessEnv } from "./types";
@@ -52,9 +52,9 @@ export class PtcExecutor {
     onUpdate?: AgentToolUpdateCallback<unknown>,
     ctx?: ExtensionContext,
   ): Promise<string> {
-    const tools = this.registry.getAvailableTools(this.pi);
-    const wrappers = generateWrappers(tools);
-    const source = buildSubprocessCode(this.preamblePath, wrappers, userCode);
+    const snapshot = this.registry.getRuntimeSnapshot(this.pi);
+    const bindings = generateRuntimeBindings(snapshot);
+    const source = buildSubprocessCode(this.preamblePath, bindings, userCode);
 
     return Effect.runPromise(
       transformSubprocessCode(source).pipe(
@@ -143,14 +143,14 @@ export class PtcExecutor {
 
 function buildSubprocessCode(
   preamblePath: string,
-  wrappers: string,
+  bindings: string,
   userCode: string,
 ): SubprocessSource {
   const prefix = [
-    `import { __rpc_call } from ${JSON.stringify(preamblePath)};`,
+    `import { __create_tools, settle } from ${JSON.stringify(preamblePath)};`,
     "",
-    "// --- tool wrappers ---",
-    wrappers,
+    "// --- tool bindings ---",
+    bindings,
     "",
     "// --- user code ---",
     "async function __user_main() {",

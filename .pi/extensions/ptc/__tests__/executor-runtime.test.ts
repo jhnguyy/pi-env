@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import { createPtcToolCatalog } from "../catalog";
 import { PtcExecutor } from "../executor";
 import { PtcExecutionError, PtcExecutionPhase } from "../node-runtime";
 import type { ToolRegistry } from "../tool-registry";
@@ -56,9 +57,14 @@ function makeExecutor(
   toolNames: string[] = [],
   dispatch: ExecutorDispatch = async () => "",
   timeoutMs?: number,
+  unavailableNames: string[] = [],
 ): PtcExecutor {
+  const availableTools = toolNames.map(tool);
   const registry = {
-    getAvailableTools: () => toolNames.map(tool),
+    getRuntimeSnapshot: () => ({
+      availableTools,
+      catalog: createPtcToolCatalog(availableTools, unavailableNames),
+    }),
     dispatch,
   } as unknown as ToolRegistry;
   return new PtcExecutor({} as ExtensionAPI, registry, preamblePath, timeoutMs);
@@ -120,6 +126,87 @@ describe("PTC live transport", () => {
       expect.any(AbortSignal),
       undefined,
     );
+  });
+
+  it("provides canonical namespace keys, exact-name aliases, and global compatibility aliases", async () => {
+    const dispatch = vi.fn(async (name: string) => `${name}:text`);
+    const executor = makeExecutor(["read", "dev-tools", "2fa-tool"], dispatch);
+    const code = [
+      "const namespaced = await tools.dev_tools({});",
+      'const exact = await tools["dev-tools"]({});',
+      'const digit = await tools["2fa-tool"]({});',
+      "const compatible = await dev_tools({});",
+      "return [namespaced, exact, digit, compatible].join('|');",
+    ].join("\n");
+
+    await expect(executor.execute(code, process.cwd())).resolves.toBe(
+      "dev-tools:text|dev-tools:text|2fa-tool:text|dev-tools:text",
+    );
+    expect(dispatch.mock.calls.map(([name]) => name)).toEqual([
+      "dev-tools",
+      "dev-tools",
+      "2fa-tool",
+      "dev-tools",
+    ]);
+  });
+
+  it("does not present the tools namespace as a thenable or JSON serializer", async () => {
+    const executor = makeExecutor(["read"]);
+    const code = [
+      "const resolved = await Promise.resolve(tools);",
+      "return JSON.stringify([resolved === tools, JSON.stringify(tools)]);",
+    ].join("\n");
+
+    await expect(executor.execute(code, process.cwd())).resolves.toBe('[true,"{}"]');
+  });
+
+  it("classifies blocked, unavailable, and unknown namespace calls", async () => {
+    const executor = makeExecutor([], async () => "", undefined, ["direct_only"]);
+    const code = [
+      "const failures = await Promise.all([",
+      "  settle(tools.ptc({})),",
+      "  settle(tools.direct_only({})),",
+      "  settle(tools.missing_tool({})),",
+      "]);",
+      "return JSON.stringify(failures.map((result) => result.ok ? null : result.error));",
+    ].join("\n");
+
+    const output = await executor.execute(code, process.cwd());
+    expect(JSON.parse(output)).toEqual([
+      expect.objectContaining({ class: "blocked-tool", tool: "ptc" }),
+      expect.objectContaining({ class: "unavailable-tool", tool: "direct_only" }),
+      expect.objectContaining({ class: "unknown-tool", tool: "missing_tool" }),
+    ]);
+    expect(output).not.toContain("ReferenceError");
+  });
+
+  it("settles independent nested calls without discarding successful values", async () => {
+    const dispatch = vi.fn(async (name: string) => {
+      if (name === "fail-tool") throw new Error("nested boom");
+      return "kept";
+    });
+    const executor = makeExecutor(["ok-tool", "fail-tool"], dispatch);
+    const code = [
+      "const results = await Promise.all([",
+      "  settle(tools.ok_tool({ value: 1 })),",
+      "  settle(tools.fail_tool({ value: 2 })),",
+      "]);",
+      "return JSON.stringify(results);",
+    ].join("\n");
+
+    const output = await executor.execute(code, process.cwd());
+    expect(JSON.parse(output)).toEqual([
+      { ok: true, value: "kept" },
+      {
+        ok: false,
+        error: expect.objectContaining({
+          class: "nested-tool",
+          tool: "fail-tool",
+          message: expect.stringContaining("nested boom"),
+        }),
+      },
+    ]);
+    expect(dispatch).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the subprocess tool-call limit on the fd 3 path", async () => {
@@ -193,7 +280,7 @@ describe("PTC live transport", () => {
     expect(error.message).toContain("Completed nested tool calls: 0");
   });
 
-  it("does not expose blocked recursive tools as subprocess wrappers", async () => {
+  it("does not create global compatibility aliases for blocked tools", async () => {
     const blocked = [
       "ptc",
       "subagent",

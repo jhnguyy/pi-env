@@ -11,8 +11,16 @@ import { Schema } from "effect";
 import { formatParamsPreview } from "../_shared/code-frame";
 import { formatError } from "../_shared/errors";
 import { PtcProtocolError } from "./node-runtime";
-import { MAX_STDERR_BYTES, MAX_OUTPUT_BYTES } from "./types";
-import type { DispatchFn, RpcOutbound, RpcInbound } from "./types";
+import {
+  MAX_STDERR_BYTES,
+  MAX_OUTPUT_BYTES,
+  PtcToolDispatchError,
+  PtcToolFailureClass,
+  type DispatchFn,
+  type PtcToolFailure,
+  type RpcOutbound,
+  type RpcInbound,
+} from "./types";
 
 const OUTPUT_TRUNCATED = Buffer.from("\n[output truncated]");
 const STDERR_TRUNCATED = Buffer.from("\n[stderr truncated]");
@@ -291,13 +299,11 @@ export class RpcBridge {
       if (!this.settled && !this.terminal) this.send({ type: "tool_result", id: msg.id, result });
     } catch (err: unknown) {
       if (this.settled || this.terminal) return;
-      const pretty = [
-        "PTC nested tool call failed",
-        `Tool: ${msg.tool}`,
-        `Args: ${formatParamsPreview(msg.params)}`,
-        `Error: ${formatError(err, "ptc")}`,
-      ].join("\n");
-      this.send({ type: "tool_error", id: msg.id, error: pretty });
+      this.send({
+        type: "tool_error",
+        id: msg.id,
+        failure: nestedToolFailure(msg.tool, msg.params, err),
+      });
     }
   }
 
@@ -306,6 +312,24 @@ export class RpcBridge {
     if (this.proc.stdin && !this.proc.stdin.destroyed)
       this.proc.stdin.write(JSON.stringify(msg) + "\n");
   }
+}
+
+function nestedToolFailure(
+  tool: string,
+  params: Record<string, unknown>,
+  cause: unknown,
+): PtcToolFailure {
+  if (cause instanceof PtcToolDispatchError) return cause.failure;
+  return {
+    class: PtcToolFailureClass.Nested,
+    tool,
+    message: [
+      "PTC nested tool call failed",
+      `Tool: ${tool}`,
+      `Args: ${formatParamsPreview(params)}`,
+      `Error: ${formatError(cause, "ptc")}`,
+    ].join("\n"),
+  };
 }
 
 function formatCallLabel(tool: string, params: Record<string, unknown>, n: number): string {

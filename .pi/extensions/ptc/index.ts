@@ -2,17 +2,99 @@
  * ptc — Programmatic Tool Calling extension for pi-env
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import type {
+  AgentToolUpdateCallback,
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Text } from "@earendil-works/pi-tui";
 import { txt } from "../_shared/result";
 import { formatError } from "../_shared/errors";
 import { ToolRegistry } from "./tool-registry";
 import { PtcExecutor } from "./executor";
-import { BLOCKED_TOOLS } from "./types";
+import { formatPtcInspection, type PtcToolCatalog } from "./catalog";
+import { BLOCKED_TOOLS, PtcAction } from "./types";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { toolExpandHint, toolExpandKeyHint } from "../_shared/tool-render";
+
+const DESCRIPTION = [
+  "Inspect the current PTC runtime contract or run a TypeScript/JavaScript batch script.",
+  "When action is omitted, PTC uses run and requires code. Use inspect after dynamic tool activation or when availability is uncertain.",
+  "Canonical calls use tools.read({ ... }) or tools[\"dev-tools\"]({ ... }). Global underscore aliases remain compatible.",
+  "Nested tools return Promise<string>. Only selected console.log() output and explicit return values enter model context.",
+  "Limits: timeout 120 s, max output 50 KB, max tool calls per run 100.",
+  "Blocked tools must be called directly, not inside ptc: " + [...BLOCKED_TOOLS].join(", "),
+].join("\n");
+
+const PARAM_DESCRIPTION = [
+  "The script body for action=run. Write it as the body of an async function.",
+  "Top-level await is supported. Variables declared at the top level persist for the script.",
+  "",
+  "Use tools.read({ path }) for canonical access.",
+  'Use tools["dev-tools"]({ action: "diagnostics", path }) for an exact tool name.',
+  "Compatibility aliases such as read(...) and dev_tools(...) remain available.",
+  "Each tool accepts one object argument and returns Promise<string>.",
+  "",
+  "Use return for one final value. Use console.log() for multiple selected values.",
+  "Use settle(toolPromise) for an independent call that can fail without stopping the batch.",
+].join("\n");
+
+const PTC_PARAMETERS = Type.Object({
+  action: Type.Optional(
+    StringEnum([PtcAction.Inspect, PtcAction.Run] as const, {
+      description: 'Use "inspect" for the current runtime contract. Use "run" to execute code.',
+    }),
+  ),
+  code: Type.Optional(Type.String({ description: PARAM_DESCRIPTION })),
+});
+
+type PtcInput = Static<typeof PTC_PARAMETERS>;
+
+interface PtcExecutionRuntime {
+  execute(
+    code: string,
+    cwd: string,
+    signal?: AbortSignal,
+    onUpdate?: AgentToolUpdateCallback<unknown>,
+    ctx?: ExtensionContext,
+  ): Promise<string>;
+}
+
+interface PtcActionResult {
+  readonly output: string;
+  readonly details: Record<string, unknown>;
+}
+
+export async function executePtcAction(
+  input: PtcInput,
+  runtime: PtcExecutionRuntime,
+  registry: ToolRegistry,
+  pi: ExtensionAPI,
+  cwd: string,
+  signal?: AbortSignal,
+  onUpdate?: AgentToolUpdateCallback<unknown>,
+  ctx?: ExtensionContext,
+): Promise<PtcActionResult> {
+  const action = input.action ?? PtcAction.Run;
+  switch (action) {
+    case PtcAction.Inspect: {
+      const catalog: PtcToolCatalog = registry.getRuntimeSnapshot(pi).catalog;
+      return {
+        output: formatPtcInspection(catalog),
+        details: { action: PtcAction.Inspect, catalog },
+      };
+    }
+    case PtcAction.Run:
+      if (input.code === undefined) throw new Error('PTC action="run" requires code.');
+      return {
+        output: await runtime.execute(input.code, cwd, signal, onUpdate, ctx),
+        details: {},
+      };
+  }
+}
 
 export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
@@ -23,35 +105,53 @@ export default function ptcExtension(pi: ExtensionAPI) {
     label: "Programmatic Tool Calling",
     description: DESCRIPTION,
     promptSnippet:
-      "Run a TypeScript script that calls tools as async functions — intermediate results stay out of context",
+      "Inspect the runtime tool contract or run a TypeScript batch script without exposing intermediate results",
     promptGuidelines: [
       "Prefer ptc over sequential tool calls when you need the same tool more than twice or want to filter results before they enter context.",
-      "ptc is best for aggregation, loops, and conditional branching over tool output.",
-      "Avoid ptc for one-off tool calls — the overhead is not worth it.",
+      "Use ptc for aggregation, loops, and conditional branching over nested tool output.",
+      "Use ptc action=inspect when tool availability is uncertain, when you need an extension tool, or after tool activation changes.",
+      "Avoid ptc for one-off tool calls. The startup overhead is not useful for one call.",
     ],
-    parameters: Type.Object({
-      code: Type.String({
-        description: PARAM_DESCRIPTION,
-      }),
-    }),
+    parameters: PTC_PARAMETERS,
 
-    async execute(_toolCallId, { code }, signal, onUpdate, ctx) {
+    async execute(_toolCallId, input, signal, onUpdate, ctx) {
       try {
-        const output = await executor.execute(code, ctx.cwd, signal, onUpdate, ctx);
-        return { content: [txt(output || "(no output)")], details: {} };
+        const result = await executePtcAction(
+          input,
+          executor,
+          registry,
+          pi,
+          ctx.cwd,
+          signal,
+          onUpdate,
+          ctx,
+        );
+        return { content: [txt(result.output || "(no output)")], details: result.details };
       } catch (e: unknown) {
         throw new Error(formatError(e, "ptc"), { cause: e });
       }
     },
 
     renderCall(args, theme, _ctx) {
-      const lines = args.code.split("\n");
-      const lineCount = lines.filter((l) => l.trim().length > 0).length;
+      if (args.action === PtcAction.Inspect) {
+        return new Text(
+          theme.fg("toolTitle", theme.bold("ptc")) + theme.fg("muted", " inspect"),
+          0,
+          0,
+        );
+      }
+      const lines = (args.code ?? "").split("\n");
+      const lineCount = lines.filter((line) => line.trim().length > 0).length;
       const firstCodeLine =
         lines
-          .find((l) => {
-            const t = l.trim();
-            return t.length > 0 && !t.startsWith("//") && !t.startsWith("/*") && !t.startsWith("*");
+          .find((line) => {
+            const text = line.trim();
+            return (
+              text.length > 0 &&
+              !text.startsWith("//") &&
+              !text.startsWith("/*") &&
+              !text.startsWith("*")
+            );
           })
           ?.trim() ?? "";
       const preview =
@@ -81,14 +181,19 @@ export default function ptcExtension(pi: ExtensionAPI) {
     name: "ptc",
     label: "Programmatic Tool Calling",
     description: DESCRIPTION,
-    parameters: Type.Object({
-      code: Type.String({ description: PARAM_DESCRIPTION }),
-    }),
-    execute: async (_toolCallId, params, signal, onUpdate) => {
+    parameters: PTC_PARAMETERS,
+    execute: async (_toolCallId, input, signal, onUpdate) => {
       try {
-        const { code } = params as { code: string };
-        const output = await executor.execute(code, cwd, signal, onUpdate);
-        return { content: [txt(output || "(no output)")], details: {} };
+        const result = await executePtcAction(
+          input as PtcInput,
+          executor,
+          registry,
+          pi,
+          cwd,
+          signal,
+          onUpdate,
+        );
+        return { content: [txt(result.output || "(no output)")], details: result.details };
       } catch (e: unknown) {
         throw new Error(formatError(e, "ptc"), { cause: e });
       }
@@ -101,34 +206,13 @@ export default function ptcExtension(pi: ExtensionAPI) {
   }));
 }
 
-const DESCRIPTION = [
-  "Run a TypeScript/JavaScript script where active available tools are async functions.",
-  "Only console.log() output and explicit return values are returned; intermediate tool results stay out of context.",
-  "Tool calls must be awaited and use a single object argument; hyphens in tool names become underscores.",
-  "Limits: timeout 120 s, max output 50 KB, max tool calls per run 100.",
-  "Blocked tools must be called directly, not inside ptc: " + [...BLOCKED_TOOLS].join(", "),
-].join("\n");
-
-const PARAM_DESCRIPTION = [
-  "The script body to execute. Write it as if it is the body of an async function:",
-  "top-level await is supported, variables declared at the top level persist for the whole script.",
-  "",
-  "Tool names: hyphens become underscores (dev-tools → dev_tools).",
-  "Each tool accepts a single object argument: await toolName({ param1: val1, param2: val2 }).",
-  "All tool calls must be awaited — tools are async.",
-  "",
-  "Return a string to set the output, or use console.log(). Both are captured.",
-  "Throwing an error marks the result as failed.",
-  "For scripts that can fail, wrap calls in try/catch and rethrow with tool-specific context.",
-].join("\n");
-
 interface PtcRenderTheme {
   fg(style: string, text: string): string;
 }
 
 interface PtcRenderContext {
   state: Record<string, unknown>;
-  args?: { code?: string };
+  args?: { action?: string; code?: string };
 }
 
 function renderPtcError(text: string, expanded: boolean | undefined, theme: PtcRenderTheme): Text {

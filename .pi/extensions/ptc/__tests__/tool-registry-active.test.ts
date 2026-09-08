@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, test } from "vitest";
 import { defineTool, type ExtensionAPI, type ToolDefinition, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { registerAgentTools, resetAgentToolRegistryForTests, ToolCapability } from "../../_shared/agent-tools";
+import {
+  registerAgentTools,
+  resetAgentToolRegistryForTests,
+  ToolCapability,
+  unregisterAgentTools,
+} from "../../_shared/agent-tools";
 import { registerPtcTools, resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 import toolManager from "../../tool-manager";
 import { ToolRegistry } from "../tool-registry";
@@ -72,8 +77,12 @@ describe("ToolRegistry active filtering", () => {
     const registry = new ToolRegistry(harness.api);
 
     expect(registry.getAvailableTools(harness.api).map((tool) => tool.name)).toEqual([]);
-    await expect(registry.dispatch("read", {}, process.cwd(), undefined)).rejects.toThrow("inactive");
-    await expect(registry.dispatch("external", {}, process.cwd(), undefined)).rejects.toThrow("inactive");
+    await expect(
+      registry.dispatch("read", {}, process.cwd(), undefined),
+    ).rejects.toMatchObject({ failure: { class: "inactive-tool", tool: "read" } });
+    await expect(
+      registry.dispatch("external", {}, process.cwd(), undefined),
+    ).rejects.toMatchObject({ failure: { class: "inactive-tool", tool: "external" } });
   });
 
   test.each([
@@ -108,6 +117,38 @@ describe("ToolRegistry active filtering", () => {
     await expect(
       registry.dispatch("external", {}, process.cwd(), undefined, { cwd: process.cwd() }),
     ).resolves.toBe("agent ok");
+  });
+
+  it("removes a session-scoped AgentTool from the runtime catalog and dispatcher", async () => {
+    const harness = createHarness(["external"]);
+    harness.tools.push({
+      name: "external",
+      description: "external",
+      parameters: {},
+      sourceInfo: sourceInfo("extension"),
+    });
+    const registry = new ToolRegistry(harness.api);
+    const registrations = registerAgentTools(harness.createApi(), {
+      tool: {
+        name: "external",
+        label: "external",
+        description: "external",
+        parameters: Type.Object({}),
+        execute: async () => ({ content: [{ type: "text", text: "agent ok" }], details: {} }),
+      },
+      capabilities: [ToolCapability.Read],
+    });
+
+    expect(registry.getRuntimeSnapshot().catalog.callable.map((entry) => entry.name)).toContain(
+      "external",
+    );
+    unregisterAgentTools(harness.createApi(), registrations);
+    expect(registry.getRuntimeSnapshot().catalog.unavailable.map((entry) => entry.name)).toContain(
+      "external",
+    );
+    await expect(
+      registry.dispatch("external", {}, process.cwd(), undefined),
+    ).rejects.toMatchObject({ failure: { class: "unavailable-tool", tool: "external" } });
   });
 
   it("does not expose DAG-only agent tools through PTC", async () => {
