@@ -4,7 +4,6 @@ import {
   cleanupTempScript,
   createTempScript,
   PtcExecutionPhase,
-  resolvePtcNodeCommand,
   type PtcNodeRuntime,
 } from "../node-runtime";
 
@@ -49,11 +48,4 @@ describe("ptc node runtime", () => {
     })))).resolves.toBeUndefined();
   });
 
-  it("uses process.execPath when PI_ENV_NODE_BIN is empty", () => {
-    expect(resolvePtcNodeCommand({ PI_ENV_NODE_BIN: "" }, "/nix/store/ld-linux-x86-64.so.2")).toBe("/nix/store/ld-linux-x86-64.so.2");
-  });
-
-  it("uses PI_ENV_NODE_BIN when present, including ld-linux execPath launchers", () => {
-    expect(resolvePtcNodeCommand({ PI_ENV_NODE_BIN: "/selected/node" }, "/nix/store/ld-linux-x86-64.so.2")).toBe("/selected/node");
-  });
 });

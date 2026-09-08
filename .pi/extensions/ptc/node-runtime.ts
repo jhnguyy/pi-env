@@ -12,10 +12,12 @@ import { resolveNodeCommand } from "../../../src/process/platform.js";
 
 export const PtcExecutionPhase = {
   Prepare: "prepare",
+  Transform: "transform",
+  Protocol: "protocol",
   Run: "run",
   Cleanup: "cleanup",
 } as const;
-export type PtcExecutionPhase = typeof PtcExecutionPhase[keyof typeof PtcExecutionPhase];
+export type PtcExecutionPhase = (typeof PtcExecutionPhase)[keyof typeof PtcExecutionPhase];
 
 export class PtcExecutionError extends Data.TaggedError("PtcExecutionError")<{
   readonly phase: PtcExecutionPhase;
@@ -24,6 +26,14 @@ export class PtcExecutionError extends Data.TaggedError("PtcExecutionError")<{
   override get message(): string {
     const reason = this.cause instanceof Error ? this.cause.message : String(this.cause);
     return `PTC ${this.phase} failed: ${reason}`;
+  }
+}
+
+export class PtcProtocolError extends Data.TaggedError("PtcProtocolError")<{
+  readonly reason: string;
+}> {
+  override get message(): string {
+    return `PTC RPC protocol error: ${this.reason}`;
   }
 }
 
@@ -55,7 +65,10 @@ export function createTempScript(
   });
 }
 
-export function cleanupTempScript(path: string, runtime: PtcNodeRuntime = defaultRuntime): Effect.Effect<void> {
+export function cleanupTempScript(
+  path: string,
+  runtime: PtcNodeRuntime = defaultRuntime,
+): Effect.Effect<void> {
   return Effect.sync(() => {
     try {
       runtime.unlink(path);
