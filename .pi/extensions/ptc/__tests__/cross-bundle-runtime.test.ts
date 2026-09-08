@@ -11,6 +11,7 @@ import type {
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 import type { PtcToolCatalog } from "../catalog";
+import type { PtcExecutionResult } from "../executor";
 
 const here = dirname(fileURLToPath(import.meta.url));
 let fixtureDirectory: string;
@@ -111,7 +112,7 @@ function createHarness() {
 
 interface RuntimeFixture {
   catalog(): PtcToolCatalog;
-  execute(code: string, cwd: string): Promise<string>;
+  execute(code: string, cwd: string): Promise<PtcExecutionResult>;
 }
 
 describe("PTC cross-bundle runtime", () => {
@@ -140,12 +141,11 @@ describe("PTC cross-bundle runtime", () => {
       expect(runtime.catalog().callable).toEqual([
         expect.objectContaining({ name: "dynamic-cross-host", key: "dynamic_cross_host" }),
       ]);
-      await expect(
-        runtime.execute(
-          'return await tools["dynamic-cross-host"]({ value: "ok" });',
-          process.cwd(),
-        ),
-      ).resolves.toBe("ok:/dynamic-session");
+      const execution = await runtime.execute(
+        'return await tools["dynamic-cross-host"]({ value: "ok" });',
+        process.cwd(),
+      );
+      expect(execution.output).toBe("ok:/dynamic-session");
 
       harness.trigger("session_shutdown", { type: "session_shutdown" });
       expect(runtime.catalog().callable).toEqual([]);

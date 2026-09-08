@@ -1,5 +1,6 @@
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
+import { PtcFailureClass } from "../execution-details";
 import {
   cleanupTempScript,
   createTempScript,
@@ -38,6 +39,7 @@ describe("ptc node runtime", () => {
     expect(Result.isFailure(result)).toBe(true);
     if (Result.isFailure(result)) {
       expect(result.failure.phase).toBe(PtcExecutionPhase.Prepare);
+      expect(result.failure.failureClass).toBe(PtcFailureClass.Preparation);
       expect(result.failure.message).toBe("PTC prepare failed: disk full");
     }
   });

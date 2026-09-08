@@ -33,3 +33,20 @@ return output.join("\n");
 Normal wrappers remain fail-fast. `settle` returns either `{ ok: true, value }` or `{ ok: false, error }`. The error contains a class, a message, and the tool name when known.
 
 PTC returns only nested text content to the script. It does not expose direct-tool `details` or non-text content. Blocked and active direct-only tools must run directly.
+
+## Execution details
+
+A completed `run` stores a versioned details record for session inspection and final rendering. The record contains:
+
+- `schemaVersion` and `action`.
+- `completion` and an optional `failureClass`.
+- `durationMs`.
+- Nested call totals and bounded per-tool counts.
+- The last nested call name, ordinal, and status.
+- `outputTruncated`.
+
+Failure classes are `preparation`, `transformation`, `user-script`, `nested-tool`, `timeout`, `cancellation`, and `infrastructure`.
+
+Details do not contain code, arguments, paths, prompts, nested output, user output, or credentials. Live progress labels can contain bounded argument previews. Final rendering uses durable details and does not infer call totals from these transient labels.
+
+PTC errors keep a useful visible message and bounded partial user output. The executor attaches details to `PtcExecutionError`. The current Pi failure boundary replaces details when it converts a thrown tool error to a result.
