@@ -6,15 +6,11 @@
 
 <!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? -->
 
-## Test intent
+## Test evidence
 
-- **Class:** <!-- requirement | regression | safety invariant | integration/e2e | existing coverage only -->
-- **Protected capability/regression:**
-- **Evidence map and owning boundary:** <!-- requirement or risk → existing evidence → new evidence -->
-- **Independent design origin:** <!-- clean-base session/agent, or why separation was not triggered -->
-- **Counterfactual evidence:** <!-- red/green, mutation, or negative control -->
-- **Adversarial pass:** <!-- high-risk mutation or injected failure, or why not triggered -->
-- **Portfolio evidence:** <!-- added, reused, removed, and any retained cross-layer repetition -->
+- **Intent:** <!-- class and protected requirement, regression, or safety invariant -->
+- **Design:** <!-- owning boundary and independent design origin for risk-triggered work -->
+- **Evidence:** <!-- red/green or negative control; include material adversarial, added, reused, or removed evidence -->
 - **Runtime impact:**
 
 ## Validation
