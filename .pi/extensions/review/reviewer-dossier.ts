@@ -6,7 +6,12 @@ import {
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { ReviewerNodes } from "./review-topology";
-import { type ReviewerOutput, validateReviewerOutputShape } from "./schema";
+import {
+  type RawFindingRecord,
+  type ReviewerOutput,
+  validateReviewerOutputShape,
+} from "./schema";
+import { buildRawFindingRecords } from "./synthesis-provenance";
 
 export const MaxReviewerDossierBytes = 1_750_000;
 
@@ -26,6 +31,7 @@ export interface AdmittedReviewerArtifact extends VerifiedReviewerArtifact {
 /** A single, fail-closed admission pass over all reviewer nodes. */
 export interface ReviewerDossier {
   readonly admitted: readonly AdmittedReviewerArtifact[];
+  readonly rawFindings: readonly RawFindingRecord[];
   /** References whose bytes and DAG identity were verified, including malformed results. */
   readonly raw: readonly VerifiedReviewerArtifact[];
   readonly failed: readonly string[];
@@ -39,6 +45,10 @@ export function reviewerDossierContext(dossier: ReviewerDossier) {
       outputName: item.outputName,
       reference: item.reference,
       text: item.text,
+      role: item.reviewer.role,
+      evidenceDigest: item.reviewer.evidenceDigest,
+      verdict: item.reviewer.verdict,
+      rawFindings: dossier.rawFindings.filter((raw) => raw.role === item.reviewer.role),
     })),
     failed: dossier.failed,
     malformed: dossier.malformed,
@@ -145,13 +155,19 @@ export async function admitReviewerDossier(options: {
     admitted.push({ ...verified[0], reviewer });
   }
 
-  while (
-    admitted.length > 0 &&
-    Buffer.byteLength(
-      serializedReviewerDossierContext({ admitted, raw, failed, malformed }),
-      "utf8",
-    ) > MaxReviewerDossierBytes
-  ) {
+  while (admitted.length > 0) {
+    const candidate = {
+      admitted,
+      rawFindings: buildRawFindingRecords(admitted.map((item) => item.reviewer)),
+      raw,
+      failed,
+      malformed,
+    };
+    if (
+      Buffer.byteLength(serializedReviewerDossierContext(candidate), "utf8") <=
+      MaxReviewerDossierBytes
+    )
+      break;
     const removed = admitted.pop();
     if (removed) malformed.push(removed.nodeId);
   }
@@ -165,6 +181,7 @@ export async function admitReviewerDossier(options: {
   );
   return Object.freeze({
     admitted: Object.freeze(admitted),
+    rawFindings: buildRawFindingRecords(admitted.map((item) => item.reviewer)),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),

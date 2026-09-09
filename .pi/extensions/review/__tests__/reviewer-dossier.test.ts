@@ -152,6 +152,7 @@ describe("reviewer dossier admission contract", () => {
       ReviewerNodes.map((node) => node.nodeId),
     );
     expect(dossier.raw.map((item) => item.reference)).toHaveLength(ReviewerNodes.length);
+    expect(dossier.rawFindings).toEqual([]);
     expect(dossier.failed).toEqual([]);
     expect(dossier.malformed).toEqual([]);
   });
@@ -173,6 +174,7 @@ describe("reviewer dossier admission contract", () => {
       "review-maintainability",
     ]);
     expect(dossier.raw).toHaveLength(ReviewerNodes.length);
+    expect(dossier.rawFindings).toEqual([]);
   });
 
   it("fails closed for tampered artifacts and wrong provenance", async () => {
@@ -226,6 +228,20 @@ describe("reviewer dossier admission contract", () => {
             reference: {} as any,
             text,
             reviewer: JSON.parse(output("correctness")),
+          },
+        ],
+        rawFindings: [
+          {
+            id: `R-${"a".repeat(64)}`,
+            role: "correctness",
+            evidenceDigest: Digest,
+            finding: {
+              severity: "medium",
+              impact: "medium",
+              problem: text,
+              consequence: text,
+              suggestedFix: text,
+            },
           },
         ],
         raw: [],

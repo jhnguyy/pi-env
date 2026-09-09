@@ -23,14 +23,14 @@ import {
 } from "./evidence-resolver";
 import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
+  ConsolidationReviewV2Schema,
   PlanSchema,
-  SynthesisReviewSchema,
+  type ConsolidationReviewV2,
   type ReviewPlan,
-  type SynthesisReview,
-  validateSynthesisReviewShape,
+  validateConsolidationReviewV2Shape,
 } from "./schema";
 import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph";
-import { validSynthesisSources } from "./synthesis-provenance";
+import { consolidateSynthesis } from "./synthesis-provenance";
 import {
   admitReviewerDossier,
   readVerifiedReviewArtifact,
@@ -195,7 +195,8 @@ export function registerReviewDagTools(options: {
     {
       name: referencesName,
       label: "Review Result References",
-      description: "Read admitted reviewer artifacts and explicit failed and malformed node names.",
+      description:
+        "Read admitted raw findings with stable IDs and explicit failed and malformed node names.",
       parameters: EmptySchema,
       async execute(_params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
@@ -217,22 +218,25 @@ export function registerReviewDagTools(options: {
     {
       name: synthesisName,
       label: "Submit Review Synthesis",
-      description: "Validate and return the canonical synthesized review with explicit coverage.",
-      parameters: SynthesisReviewSchema,
+      description:
+        "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
+      parameters: ConsolidationReviewV2Schema,
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const raw = params as SynthesisReview;
+        const raw = params as ConsolidationReviewV2;
         const dossier = await getReviewerDossier(context.signal);
-        const reviewers = dossier.admitted.map((artifact) => artifact.reviewer);
-        if (!validateSynthesisReviewShape(raw) || !validSynthesisSources(raw, reviewers))
+        if (
+          !validateConsolidationReviewV2Shape(raw) ||
+          !consolidateSynthesis(raw, dossier.rawFindings)
+        )
           return {
             content: [
               txt(
-                "Synthesis provenance is invalid. Copy each finding exactly from every named source reviewer and retry.",
+                "Synthesis provenance is invalid. Account for every admitted raw finding ID exactly once in a retained group or a dismissal with a nonblank reason.",
               ),
             ],
             isError: true,
-            details: { ok: false, reason: "invalid-provenance" },
+            details: { ok: false, reason: "invalid-provenance-accounting" },
           };
         return {
           content: [txt(boundedSubmission(raw))],

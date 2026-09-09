@@ -33,15 +33,19 @@ import {
 import {
   PlanSchema,
   type Finding,
-  type FindingInput,
+  type RawFindingRecord,
   type ReviewerOutput,
   type ReviewPlan,
   type ReviewResult,
   type ReviewState,
-  type SynthesisReview,
+  validateConsolidationReviewV2Shape,
   validateSynthesisReviewShape,
 } from "./schema";
-import { findingKey, validSynthesisSources } from "./synthesis-provenance";
+import {
+  consolidateSynthesis,
+  fallbackConsolidation,
+  validSynthesisSources,
+} from "./synthesis-provenance";
 
 type ReviewerRole = ReviewerOutput["role"];
 
@@ -56,6 +60,7 @@ interface CollectedOutputs {
   readonly evidenceCoverage?: ReviewEvidenceCoverage;
   readonly evidenceReferences: DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
+  readonly rawFindings: readonly RawFindingRecord[];
   readonly rawResultReferences: DagTextArtifactReference[];
   readonly failedReviewerNodes: string[];
   readonly malformedNodes: string[];
@@ -121,35 +126,6 @@ async function admittedOutputForNodeOutput(
   } catch {
     return undefined;
   }
-}
-function fallbackSynthesis(outputs: readonly ReviewerOutput[], diff: string): ReviewResult {
-  const grouped = new Map<
-    string,
-    { finding: FindingInput; sources: Set<ReviewerOutput["role"]> }
-  >();
-  for (const output of outputs) {
-    for (const finding of output.findings) {
-      const key = findingKey(finding);
-      const existing = grouped.get(key);
-      if (existing) existing.sources.add(output.role);
-      else grouped.set(key, { finding, sources: new Set([output.role]) });
-    }
-  }
-  const findings = [...grouped.values()].map(({ finding, sources }) => ({
-    ...finding,
-    sourceReviewers: [...sources].sort(),
-    agreement: sources.size,
-  }));
-  return {
-    ...validateFindingAnchors(
-      {
-        verdict: "Reviewer synthesis failed. Valid reviewer findings are preserved below.",
-        findings: findings as Finding[],
-      },
-      diff,
-    ),
-    coverage: { status: "degraded", succeeded: [], failed: [], malformed: [] },
-  };
 }
 function outcomeStatus(
   reconstruction: DagSessionReconstruction,
@@ -249,6 +225,7 @@ async function collectOutputs(
     ...(evidence.coverage ? { evidenceCoverage: evidence.coverage } : {}),
     evidenceReferences: evidence.references,
     reviewers: dossier.admitted.map((artifact) => artifact.reviewer),
+    rawFindings: dossier.rawFindings,
     rawResultReferences: dossier.raw.map((artifact) => artifact.reference),
     failedReviewerNodes: [...dossier.failed],
     malformedNodes,
@@ -256,18 +233,29 @@ async function collectOutputs(
 }
 function decodeSynthesis(
   text: string,
+  rawFindings: readonly RawFindingRecord[],
   reviewers: readonly ReviewerOutput[],
   diff: string,
+  allowLegacy: boolean,
 ): ReviewResult | undefined {
   try {
     const decoded = parseJson(text);
-    if (!validateSynthesisReviewShape(decoded) || !validSynthesisSources(decoded, reviewers))
-      return undefined;
-    const validated = validateFindingAnchors(
-      { verdict: decoded.verdict, findings: decoded.findings as Finding[] },
-      diff,
-    );
-    return { ...validated, coverage: decoded.coverage };
+    if (validateConsolidationReviewV2Shape(decoded)) {
+      const consolidated = consolidateSynthesis(decoded, rawFindings);
+      return consolidated ? validateFindingAnchors(consolidated, diff) : undefined;
+    }
+    if (
+      allowLegacy &&
+      validateSynthesisReviewShape(decoded) &&
+      validSynthesisSources(decoded, reviewers)
+    ) {
+      const validated = validateFindingAnchors(
+        { verdict: decoded.verdict, findings: decoded.findings as Finding[] },
+        diff,
+      );
+      return { ...validated, coverage: decoded.coverage };
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -423,6 +411,7 @@ interface FinalizeReviewInput {
   readonly service: ActiveDagRuntimeService;
   readonly startedAt: number;
   readonly reviewerDossier?: Promise<ReviewerDossier>;
+  readonly allowLegacySynthesis?: boolean;
 }
 async function resolveSynthesis(input: FinalizeReviewInput, collected: CollectedOutputs) {
   const output = await admittedOutputForNode(
@@ -435,9 +424,25 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
   const diff = await import("node:fs/promises").then((fs) =>
     fs.readFile(input.state.snapshot.diffPath, "utf8"),
   );
-  const synthesized = output ? decodeSynthesis(output.text, collected.reviewers, diff) : undefined;
+  const synthesized = output
+    ? decodeSynthesis(
+        output.text,
+        collected.rawFindings,
+        collected.reviewers,
+        diff,
+        input.allowLegacySynthesis === true,
+      )
+    : undefined;
   if (output && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
-  return { output, result: synthesized ?? fallbackSynthesis(collected.reviewers, diff) };
+  const fallbackReason = output
+    ? "Synthesis output was malformed or did not account for every admitted raw finding exactly once."
+    : "Synthesis output was unavailable.";
+  const result = synthesized ?? fallbackConsolidation(collected.rawFindings, fallbackReason);
+  return {
+    output,
+    result: synthesized ? result : validateFindingAnchors(result, diff),
+    fallback: !synthesized,
+  };
 }
 function reviewerAttemptCount(reconstruction: DagSessionReconstruction): number {
   return reconstruction.state.nodes.filter(
@@ -472,7 +477,7 @@ function finalizedReviewState(
     collected.malformedNodes.length > 0 ||
     (collected.evidenceCoverage?.omissions.length ?? 0) > 0 ||
     !collected.plan ||
-    !synthesis.output;
+    synthesis.fallback;
   synthesis.result.coverage = {
     status: degraded ? "degraded" : "complete",
     succeeded: successfulRoles,
@@ -585,6 +590,7 @@ export async function reconstructReviewDagState(options: {
     reconstruction: options.reconstruction,
     service: options.service,
     startedAt: Number.isFinite(parsedStart) ? parsedStart : Date.now(),
+    allowLegacySynthesis: true,
   });
 }
 

@@ -109,7 +109,15 @@ The reading-plan node submits the pull request goal, goal assessment, risk, conc
 
 Each reviewer returns its fixed role, evidence digest, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
 
-The synthesis node reads one admitted reviewer dossier. The dossier verifies artifact identity, output names, schema, roles, and evidence digests. It classifies failed and malformed reviewers once. Synthesis and terminal finalization consume the same admission result. Synthesis reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
+The synthesis node reads one admitted reviewer dossier. The dossier verifies artifact identity, output names, schema, roles, and evidence digests. It classifies failed and malformed reviewers once. Synthesis and terminal finalization consume the same admission result.
+
+For new runs, the harness assigns a stable opaque ID to every admitted raw finding occurrence. IDs are scoped to the source role, admitted evidence digest, original finding, and occurrence. Identical occurrences remain separate. The bounded synthesis context includes these IDs and unchanged raw finding payloads.
+
+Synthesis uses the version 2 editorial consolidation contract. A retained finding can group and rephrase one or more raw findings by ID. Every admitted raw ID must occur exactly once, either in one retained group or in one dismissal with a nonblank reason. Trusted code derives source roles in deterministic role order and agreement as the number of distinct represented roles. It does not accept model-authored provenance, infer dissent from silence, or treat editorial consolidation as verified correctness.
+
+The persisted result retains bounded raw records, retained raw ID references, and dismissal reasons. Invalid, incomplete, malformed, or unavailable consolidation degrades the review and falls back to one result finding per admitted raw occurrence. Fallback does not deduplicate identical findings and does not admit content from rejected reviewer outputs.
+
+The legacy unversioned exact-text synthesis schema remains readable only when reconstructing historical terminal DAG artifacts. Legacy states without version 2 provenance remain readable and do not receive fabricated raw IDs, dismissals, source roles, or agreement. New runs require version 2 and never reinterpret malformed version 2 output as legacy output.
 
 The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. High-impact, blocking, and serious findings start selected. Other findings start unselected.
 
