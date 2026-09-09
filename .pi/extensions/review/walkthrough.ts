@@ -25,7 +25,7 @@ function planFiles(state: ReviewState): readonly WalkthroughFile[] {
     state.snapshot.metadata.changedFiles.map((file) => ({
       path: file.path,
       attention: "normal" as const,
-      role: "Reading plan unavailable; changed-file manifest entry",
+      role: "Reading plan unavailable. Changed-file manifest entry.",
     }))
   );
 }

@@ -1072,7 +1072,7 @@ async function finalizeWalkthrough(
   let acknowledgement = state.degradationAcknowledgement;
   if (isDegraded(state) && !hasCurrentAcknowledgement(state)) {
     if (!ctx.hasUI)
-      return `Finalization requires acknowledgement of degraded review ${reviewId}; interactive UI is unavailable.`;
+      return `Finalization requires acknowledgement of degraded review ${reviewId}. Interactive UI is unavailable.`;
     const acknowledged = await ctx.ui.confirm(
       "Acknowledge degraded review",
       `Review ${reviewId} has failed, malformed, omitted, or fallback evidence. Continue without a quorum?`,
@@ -1709,7 +1709,7 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   if (existsSync(state.snapshot.artifactDir)) assertManagedPath(root, state.snapshot.artifactDir);
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
   if (!coordinator.isScopeActive(scope))
-    return "The review session changed during cleanup. Owned resources may already be removed; no cleanup state was appended.";
+    return "The review session changed during cleanup. Owned resources may already be removed. No cleanup state was appended.";
   const cleaned = { ...state, cleaned: true };
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(cleaned));
   if (!coordinator.isScopeActive(scope))

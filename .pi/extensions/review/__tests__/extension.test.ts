@@ -712,7 +712,7 @@ describe("review extension pull request surface", () => {
     releaseRemoval();
     await cleaning;
     expect(pi.appended).toHaveLength(0);
-    expect(notes.at(-1)).toContain("no cleanup state was appended");
+    expect(notes.at(-1)).toContain("No cleanup state was appended");
     expect(existsSync(original.snapshot.artifactDir)).toBe(false);
   });
 
