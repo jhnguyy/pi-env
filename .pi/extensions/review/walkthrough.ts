@@ -27,10 +27,17 @@ function findingLine(state: ReviewState, finding: Finding): string {
   );
 }
 
+function coverageStatus(state: ReviewState): string {
+  if (isDegraded(state)) return "degraded";
+  if (state.dag?.status === "running") return "running";
+  if (!state.plan || !state.result) return "unavailable";
+  return state.result.coverage?.status ?? "unavailable";
+}
+
 function coverageText(state: ReviewState): string {
   const omissions = state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [];
   return [
-    `Coverage: ${state.result?.coverage?.status ?? state.dag?.status ?? "unavailable"}`,
+    `Coverage: ${coverageStatus(state)}`,
     `Evidence omissions: ${omissions.join(", ") || "none"}`,
     `Failed nodes: ${state.dag?.failedNodes?.join(", ") || "none"}`,
     `Malformed nodes: ${state.dag?.malformedNodes?.join(", ") || "none"}`,
@@ -63,7 +70,6 @@ export function walkthroughSummary(state: ReviewState, interactive: boolean): st
       provenance
         ? `Provenance: ${provenance.rawFindings.length} raw finding(s), ${provenance.dismissals.length} dismissal(s), ${provenance.status}`
         : "Legacy provenance unavailable. No provenance was fabricated.",
-      isDegraded(state) ? "Coverage is degraded; posting confirmation will show a warning." : "Coverage is complete.",
       interactive
         ? "Interactive inspection and decisions are available. Posting remains a separate explicit confirmation."
         : `Interactive decisions unavailable. Rerun: /review pr walkthrough ${state.snapshot.id}`,
@@ -153,7 +159,9 @@ async function inspectFindings(ctx: ExtensionCommandContext, actions: Walkthroug
   while (true) {
     const state = actions.state();
     const findings = state.result?.findings ?? [];
-    const options = findings.map((finding, index) => `${index + 1}. ${findingLine(state, finding)}`);
+    const options = findings.map(
+      (finding, index) => `${index + 1}. ${findingLine(state, finding)}`,
+    );
     const choice = await ctx.ui.select("Findings (anchored and unanchored)", [...options, "Back"]);
     actions.assertCurrent();
     if (!choice || choice === "Back") return;
@@ -179,7 +187,12 @@ async function inspectProvenance(ctx: ExtensionCommandContext, actions: Walkthro
     if (!choice || choice === "Back") return;
     const index = options.indexOf(choice);
     const record = provenance.rawFindings[index];
-    await detail(ctx, record ? await actions.rawFinding(record.id) : (dismissed[index - raw.length] ?? "Unavailable"));
+    await detail(
+      ctx,
+      record
+        ? await actions.rawFinding(record.id)
+        : (dismissed[index - raw.length] ?? "Unavailable"),
+    );
   }
 }
 
@@ -187,7 +200,14 @@ export async function guidedWalkthrough(
   ctx: ExtensionCommandContext,
   actions: WalkthroughActions,
 ): Promise<string> {
-  const stages = ["Overview and coverage", "Reading plan", "Findings", "Provenance", "Edit preface", "Exit"];
+  const stages = [
+    "Overview and coverage",
+    "Reading plan",
+    "Findings",
+    "Provenance",
+    "Edit preface",
+    "Exit",
+  ];
   while (true) {
     actions.assertCurrent();
     const state = actions.state();

@@ -201,6 +201,20 @@ function context(hasUI = true) {
 }
 
 describe("registered review walkthrough boundary", () => {
+  it.each(["running", "unavailable"])(
+    "does not claim complete coverage for %s reviews",
+    async (status) => {
+      const { command, handlers, fixtures, session } = await harness();
+      if (status === "running") fixtures[0].dag!.status = "running";
+      else delete fixtures[0].plan;
+      handlers.session_tree({}, session("session-a", fixtures));
+      const view = context(false);
+      await command("pr walkthrough older", view.ctx);
+      expect(view.notes.at(-1)).toContain(`Coverage: ${status}`);
+      expect(view.notes.at(-1)).not.toContain("Coverage is complete");
+    },
+  );
+
   it("persists explicit-ID decisions and keeps defaults pending after reconstruction", async () => {
     const { command, appended, handlers, fixtures, session } = await harness();
     const view = context();
@@ -250,7 +264,10 @@ describe("registered review walkthrough boundary", () => {
     await command("pr walkthrough older", {
       hasUI: true,
       cwd: mocked.agentDir,
-      ui: { notify: (message: string) => notes.push(message), select: async () => tampered.shift() },
+      ui: {
+        notify: (message: string) => notes.push(message),
+        select: async () => tampered.shift(),
+      },
     });
     expect(notes.at(-1)).toContain("Pinned diff integrity check failed");
     expect(notes.at(-1)).not.toContain("worktree-like content");
