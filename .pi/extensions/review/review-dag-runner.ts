@@ -32,6 +32,7 @@ import {
 } from "./evidence-resolver";
 import {
   PlanSchema,
+  type AdmittedRawFinding,
   type Finding,
   type RawFindingRecord,
   type ReviewerOutput,
@@ -46,6 +47,7 @@ import {
   fallbackConsolidation,
   validSynthesisSources,
 } from "./synthesis-provenance";
+import { persistRawFindingArtifacts } from "./raw-provenance";
 
 type ReviewerRole = ReviewerOutput["role"];
 
@@ -60,7 +62,8 @@ interface CollectedOutputs {
   readonly evidenceCoverage?: ReviewEvidenceCoverage;
   readonly evidenceReferences: DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
-  readonly rawFindings: readonly RawFindingRecord[];
+  readonly rawFindings: readonly AdmittedRawFinding[];
+  readonly rawFindingRecords: readonly RawFindingRecord[];
   readonly rawResultReferences: DagTextArtifactReference[];
   readonly failedReviewerNodes: string[];
   readonly malformedNodes: string[];
@@ -201,6 +204,7 @@ async function collectEvidence(
 }
 async function collectOutputs(
   root: string,
+  runId: string,
   reconstruction: DagSessionReconstruction,
   state: ReviewState,
   admittedDossier?: Promise<ReviewerDossier>,
@@ -226,6 +230,12 @@ async function collectOutputs(
     evidenceReferences: evidence.references,
     reviewers: dossier.admitted.map((artifact) => artifact.reviewer),
     rawFindings: dossier.rawFindings,
+    rawFindingRecords:
+      dossier.rawFindings.length === 0
+        ? []
+        : await Effect.runPromise(
+            persistRawFindingArtifacts(state.snapshot.artifactDir, runId, dossier.rawFindings),
+          ),
     rawResultReferences: dossier.raw.map((artifact) => artifact.reference),
     failedReviewerNodes: [...dossier.failed],
     malformedNodes,
@@ -233,19 +243,21 @@ async function collectOutputs(
 }
 function decodeSynthesis(
   text: string,
-  rawFindings: readonly RawFindingRecord[],
+  rawFindings: readonly AdmittedRawFinding[],
+  rawFindingRecords: readonly RawFindingRecord[],
   reviewers: readonly ReviewerOutput[],
   diff: string,
-  allowLegacy: boolean,
+  protocol: 2 | "legacy" | "unsupported",
 ): ReviewResult | undefined {
   try {
     const decoded = parseJson(text);
+    if (protocol === "unsupported") return undefined;
     if (validateConsolidationReviewV2Shape(decoded)) {
-      const consolidated = consolidateSynthesis(decoded, rawFindings);
+      const consolidated = consolidateSynthesis(decoded, rawFindings, rawFindingRecords);
       return consolidated ? validateFindingAnchors(consolidated, diff) : undefined;
     }
     if (
-      allowLegacy &&
+      protocol === "legacy" &&
       validateSynthesisReviewShape(decoded) &&
       validSynthesisSources(decoded, reviewers)
     ) {
@@ -387,6 +399,9 @@ function preserveAllFailedOutputs(
       runId,
       startedAt: state.dag?.startedAt,
       submitted: state.dag?.submitted,
+      ...(state.dag?.synthesisProtocol === undefined
+        ? {}
+        : { synthesisProtocol: state.dag.synthesisProtocol }),
       status: noReviewerStatus(reconstruction),
       rawResultReferences: collected.rawResultReferences,
       ...(collected.readingPlanReference
@@ -411,7 +426,7 @@ interface FinalizeReviewInput {
   readonly service: ActiveDagRuntimeService;
   readonly startedAt: number;
   readonly reviewerDossier?: Promise<ReviewerDossier>;
-  readonly allowLegacySynthesis?: boolean;
+  readonly synthesisProtocol: 2 | "legacy" | "unsupported";
 }
 async function resolveSynthesis(input: FinalizeReviewInput, collected: CollectedOutputs) {
   const output = await admittedOutputForNode(
@@ -428,16 +443,19 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
     ? decodeSynthesis(
         output.text,
         collected.rawFindings,
+        collected.rawFindingRecords,
         collected.reviewers,
         diff,
-        input.allowLegacySynthesis === true,
+        input.synthesisProtocol,
       )
     : undefined;
   if (output && !synthesized) collected.malformedNodes.push(SynthesisNode.nodeId);
   const fallbackReason = output
     ? "Synthesis output was malformed or did not account for every admitted raw finding exactly once."
     : "Synthesis output was unavailable.";
-  const result = synthesized ?? fallbackConsolidation(collected.rawFindings, fallbackReason);
+  const result =
+    synthesized ??
+    fallbackConsolidation(collected.rawFindings, collected.rawFindingRecords, fallbackReason);
   return {
     output,
     result: synthesized ? result : validateFindingAnchors(result, diff),
@@ -514,6 +532,9 @@ function finalizedReviewState(
       runId: input.runId,
       startedAt: input.state.dag?.startedAt,
       submitted: input.state.dag?.submitted,
+      ...(input.state.dag?.synthesisProtocol === undefined
+        ? {}
+        : { synthesisProtocol: input.state.dag.synthesisProtocol }),
       status: outcomeStatus(input.reconstruction, degraded),
       rawResultReferences: collected.rawResultReferences,
       ...(collected.readingPlanReference
@@ -531,6 +552,7 @@ function finalizedReviewState(
 async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> {
   const collected = await collectOutputs(
     input.root,
+    input.runId,
     input.reconstruction,
     input.state,
     input.reviewerDossier,
@@ -597,7 +619,12 @@ export async function reconstructReviewDagState(options: {
     reconstruction: options.reconstruction,
     service: options.service,
     startedAt: Number.isFinite(parsedStart) ? parsedStart : Date.now(),
-    allowLegacySynthesis: true,
+    synthesisProtocol:
+      options.state.dag.synthesisProtocol === undefined
+        ? "legacy"
+        : options.state.dag.synthesisProtocol === 2
+          ? 2
+          : "unsupported",
   });
 }
 
@@ -666,6 +693,7 @@ export async function runReviewDag(options: {
         startedAt: new Date(startedAt).toISOString(),
         status: "running",
         submitted: false,
+        synthesisProtocol: 2,
         rawResultReferences: [],
       },
     };
@@ -690,6 +718,7 @@ export async function runReviewDag(options: {
       service: options.service,
       startedAt,
       reviewerDossier: tools.reviewerDossier(options.signal),
+      synthesisProtocol: 2,
     });
     options.save(state);
     if (state.dag?.error) throw new Error(state.dag.error);

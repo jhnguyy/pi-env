@@ -30,7 +30,7 @@ import {
   validateConsolidationReviewV2Shape,
 } from "./schema";
 import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph";
-import { consolidateSynthesis } from "./synthesis-provenance";
+import { validConsolidationAccounting } from "./synthesis-provenance";
 import {
   admitReviewerDossier,
   readVerifiedReviewArtifact,
@@ -218,8 +218,7 @@ export function registerReviewDagTools(options: {
     {
       name: synthesisName,
       label: "Submit Review Synthesis",
-      description:
-        "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
+      description: "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
       parameters: ConsolidationReviewV2Schema,
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
@@ -227,7 +226,7 @@ export function registerReviewDagTools(options: {
         const dossier = await getReviewerDossier(context.signal);
         if (
           !validateConsolidationReviewV2Shape(raw) ||
-          !consolidateSynthesis(raw, dossier.rawFindings)
+          !validConsolidationAccounting(raw, dossier.rawFindings)
         )
           return {
             content: [

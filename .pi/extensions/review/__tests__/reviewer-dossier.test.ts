@@ -11,6 +11,7 @@ import {
 import {
   admitReviewerDossier,
   MaxReviewerDossierBytes,
+  reviewerDossierContext,
   serializeReviewerDossierContext,
 } from "../reviewer-dossier";
 import {
@@ -153,6 +154,10 @@ describe("reviewer dossier admission contract", () => {
     );
     expect(dossier.raw.map((item) => item.reference)).toHaveLength(ReviewerNodes.length);
     expect(dossier.rawFindings).toEqual([]);
+    const context = reviewerDossierContext(dossier);
+    expect(context.succeeded[0]).not.toHaveProperty("text");
+    expect(context.verifiedReferences).toHaveLength(ReviewerNodes.length);
+    expect(serializeReviewerDossierContext(dossier)).not.toContain('"text"');
     expect(dossier.failed).toEqual([]);
     expect(dossier.malformed).toEqual([]);
   });
@@ -192,7 +197,7 @@ describe("reviewer dossier admission contract", () => {
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-intent");
   });
 
-  it("degrades excess valid reviewers instead of failing aggregate admission", async () => {
+  it("keeps the bounded raw-finding dossier without transcript-driven duplicate inflation", async () => {
     const long = `x${"\n".repeat(19_998)}`;
     const findings = Array.from({ length: 2 }, () => ({
       severity: "medium",
@@ -211,10 +216,11 @@ describe("reviewer dossier admission contract", () => {
       reconstruction: f.reconstruction,
       expectedEvidenceDigest: Digest,
     });
-    expect(dossier.admitted.length).toBeGreaterThan(0);
-    expect(dossier.admitted.length).toBeLessThan(ReviewerNodes.length);
-    expect(dossier.malformed).toHaveLength(ReviewerNodes.length - dossier.admitted.length);
-    expect(() => serializeReviewerDossierContext(dossier)).not.toThrow();
+    expect(dossier.admitted).toHaveLength(ReviewerNodes.length);
+    expect(dossier.malformed).toEqual([]);
+    const serialized = serializeReviewerDossierContext(dossier);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(MaxReviewerDossierBytes);
+    expect(serialized).not.toContain('"text"');
   });
 
   it("applies the tool limit after JSON escaping", () => {

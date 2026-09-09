@@ -6,8 +6,10 @@ import {
   validSynthesisSources,
 } from "../synthesis-provenance";
 import type {
+  AdmittedRawFinding,
   ConsolidationReviewV2,
   FindingInput,
+  RawFindingRecord,
   ReviewerOutput,
   SynthesisReview,
 } from "../schema";
@@ -22,6 +24,25 @@ const finding: FindingInput = {
 };
 function reviewer(role: ReviewerOutput["role"], findings: FindingInput[]): ReviewerOutput {
   return { role, evidenceDigest: Digest, verdict: "Reviewed.", findings };
+}
+function provenance(raw: readonly AdmittedRawFinding[]): RawFindingRecord[] {
+  return raw.map((record) => ({
+    id: record.id,
+    role: record.role,
+    evidenceDigest: record.evidenceDigest,
+    artifact: {
+      v: 1,
+      path: `raw-provenance-v2/${record.id}.json`,
+      bytes: 1,
+      digestAlgorithm: "sha256",
+      digest: "b".repeat(64),
+      mediaType: "text/plain",
+      encoding: "utf-8",
+      runId: "run",
+      producerNodeId: "pr-review-raw-provenance-v2",
+      outputName: record.id,
+    },
+  }));
 }
 function synthesis(
   rawFindingIds: string[],
@@ -58,6 +79,7 @@ describe("provenance-backed editorial consolidation", () => {
     const result = consolidateSynthesis(
       synthesis(raw.map((record) => record.id)),
       raw,
+      provenance(raw),
     );
 
     expect(result?.findings[0]).toMatchObject({
@@ -66,13 +88,11 @@ describe("provenance-backed editorial consolidation", () => {
       sourceReviewers: ["correctness", "security"],
       agreement: 2,
     });
-    expect(result?.provenance?.rawFindings.map((record) => record.finding)).toEqual([
-      finding,
-      { ...finding, consequence: "Attackers can exploit the behavior." },
-    ]);
+    expect(result?.provenance?.rawFindings).toEqual(provenance(raw));
+    expect(result?.provenance?.rawFindings[0]).not.toHaveProperty("finding");
 
     // Practical negative control: omission is not accepted as a silent subset.
-    expect(consolidateSynthesis(synthesis([raw[0].id]), raw)).toBeUndefined();
+    expect(consolidateSynthesis(synthesis([raw[0].id]), raw, provenance(raw))).toBeUndefined();
   });
 
   it("derives agreement from distinct roles rather than raw occurrences or model claims", () => {
@@ -83,6 +103,7 @@ describe("provenance-backed editorial consolidation", () => {
     const result = consolidateSynthesis(
       synthesis(raw.map((record) => record.id)),
       raw,
+      provenance(raw),
     );
     expect(result?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness", "security"],
@@ -100,7 +121,7 @@ describe("provenance-backed editorial consolidation", () => {
         },
       ],
     } as unknown as ConsolidationReviewV2;
-    const inflatedResult = consolidateSynthesis(inflated, raw);
+    const inflatedResult = consolidateSynthesis(inflated, raw, provenance(raw));
     expect(inflatedResult?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness", "security"],
       agreement: 2,
@@ -115,7 +136,9 @@ describe("provenance-backed editorial consolidation", () => {
     const valid = synthesis([raw[0].id, raw[1].id], {
       dismissals: [{ rawFindingId: raw[2].id, reason: "Duplicate concern after inspection." }],
     });
-    expect(consolidateSynthesis(valid, raw)?.provenance?.dismissals).toEqual(valid.dismissals);
+    expect(consolidateSynthesis(valid, raw, provenance(raw))?.provenance?.dismissals).toEqual(
+      valid.dismissals,
+    );
 
     const mutations: ConsolidationReviewV2[] = [
       synthesis([raw[0].id, raw[1].id]),
@@ -139,15 +162,13 @@ describe("provenance-backed editorial consolidation", () => {
         dismissals: [{ rawFindingId: `R-${"f".repeat(64)}`, reason: "Unknown." }],
       }),
     ];
-    for (const mutation of mutations) expect(consolidateSynthesis(mutation, raw)).toBeUndefined();
+    for (const mutation of mutations)
+      expect(consolidateSynthesis(mutation, raw, provenance(raw))).toBeUndefined();
   });
 
   it("assigns stable opaque IDs scoped to role, evidence, payload, and duplicate occurrence", () => {
     const duplicate = { ...finding };
-    const first = [
-      reviewer("correctness", [finding, duplicate]),
-      reviewer("security", [finding]),
-    ];
+    const first = [reviewer("correctness", [finding, duplicate]), reviewer("security", [finding])];
     const reordered = [first[1], first[0]];
     const ids = buildRawFindingRecords(first).map((record) => record.id);
     expect(buildRawFindingRecords(reordered).map((record) => record.id)).toEqual(ids);
@@ -162,7 +183,7 @@ describe("provenance-backed editorial consolidation", () => {
       reviewer("correctness", [finding, finding]),
       reviewer("security", [finding]),
     ]);
-    const result = fallbackConsolidation(raw, "Invalid accounting.");
+    const result = fallbackConsolidation(raw, provenance(raw), "Invalid accounting.");
     expect(result.findings).toHaveLength(3);
     expect(result.findings.flatMap((item) => item.rawFindingIds ?? [])).toEqual(
       raw.map((record) => record.id),

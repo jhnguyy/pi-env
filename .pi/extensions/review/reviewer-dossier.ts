@@ -7,7 +7,7 @@ import {
 } from "../../../src/dag/index.js";
 import { ReviewerNodes } from "./review-topology";
 import {
-  type RawFindingRecord,
+  type AdmittedRawFinding,
   type ReviewerOutput,
   validateReviewerOutputShape,
 } from "./schema";
@@ -31,7 +31,7 @@ export interface AdmittedReviewerArtifact extends VerifiedReviewerArtifact {
 /** A single, fail-closed admission pass over all reviewer nodes. */
 export interface ReviewerDossier {
   readonly admitted: readonly AdmittedReviewerArtifact[];
-  readonly rawFindings: readonly RawFindingRecord[];
+  readonly rawFindings: readonly AdmittedRawFinding[];
   /** References whose bytes and DAG identity were verified, including malformed results. */
   readonly raw: readonly VerifiedReviewerArtifact[];
   readonly failed: readonly string[];
@@ -44,11 +44,15 @@ export function reviewerDossierContext(dossier: ReviewerDossier) {
       nodeId: item.nodeId,
       outputName: item.outputName,
       reference: item.reference,
-      text: item.text,
       role: item.reviewer.role,
       evidenceDigest: item.reviewer.evidenceDigest,
       verdict: item.reviewer.verdict,
       rawFindings: dossier.rawFindings.filter((raw) => raw.role === item.reviewer.role),
+    })),
+    verifiedReferences: dossier.raw.map((item) => ({
+      nodeId: item.nodeId,
+      outputName: item.outputName,
+      reference: item.reference,
     })),
     failed: dossier.failed,
     malformed: dossier.malformed,

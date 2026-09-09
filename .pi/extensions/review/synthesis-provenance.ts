@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   ReviewerRoles,
+  type AdmittedRawFinding,
   type ConsolidationReviewV2,
   type Finding,
   type FindingInput,
@@ -32,8 +33,8 @@ function copyFinding(finding: FindingInput): FindingInput {
 /** Assigns one stable, evidence-scoped ID to every admitted raw occurrence. */
 export function buildRawFindingRecords(
   reviewers: readonly ReviewerOutput[],
-): readonly RawFindingRecord[] {
-  const records: RawFindingRecord[] = [];
+): readonly AdmittedRawFinding[] {
+  const records: AdmittedRawFinding[] = [];
   const ordered = [...reviewers].sort(
     (left, right) =>
       (roleOrder.get(left.role) ?? Number.MAX_SAFE_INTEGER) -
@@ -71,20 +72,20 @@ export function buildRawFindingRecords(
 
 function rolesFor(
   rawFindingIds: readonly string[],
-  rawById: ReadonlyMap<string, RawFindingRecord>,
+  rawById: ReadonlyMap<string, AdmittedRawFinding>,
 ): ReviewerOutput["role"][] {
   return [...new Set(rawFindingIds.map((id) => rawById.get(id)!.role))].sort(
     (left, right) => roleOrder.get(left)! - roleOrder.get(right)!,
   );
 }
 
-/** Validates membership and exactly-once accounting, then derives authoritative provenance. */
-export function consolidateSynthesis(
+/** Validates membership and exactly-once accounting at the synthesis submission boundary. */
+export function validConsolidationAccounting(
   synthesis: ConsolidationReviewV2,
-  rawFindings: readonly RawFindingRecord[],
-): ReviewResult | undefined {
+  rawFindings: readonly AdmittedRawFinding[],
+): boolean {
   const rawById = new Map(rawFindings.map((raw) => [raw.id, raw]));
-  if (rawById.size !== rawFindings.length) return undefined;
+  if (rawById.size !== rawFindings.length) return false;
   const accounted = new Set<string>();
   const admit = (id: string): boolean => {
     if (!rawById.has(id) || accounted.has(id)) return false;
@@ -92,12 +93,30 @@ export function consolidateSynthesis(
     return true;
   };
   for (const finding of synthesis.findings) {
-    if (!finding.rawFindingIds.every(admit)) return undefined;
+    if (!finding.rawFindingIds.every(admit)) return false;
   }
   for (const dismissal of synthesis.dismissals) {
-    if (dismissal.reason.trim().length === 0 || !admit(dismissal.rawFindingId)) return undefined;
+    if (dismissal.reason.trim().length === 0 || !admit(dismissal.rawFindingId)) return false;
   }
-  if (accounted.size !== rawById.size) return undefined;
+  return accounted.size === rawById.size;
+}
+
+/** Derives authoritative provenance after valid accounting and artifact persistence. */
+export function consolidateSynthesis(
+  synthesis: ConsolidationReviewV2,
+  rawFindings: readonly AdmittedRawFinding[],
+  provenanceRecords: readonly RawFindingRecord[],
+): ReviewResult | undefined {
+  const rawById = new Map(rawFindings.map((raw) => [raw.id, raw]));
+  if (
+    !validConsolidationAccounting(synthesis, rawFindings) ||
+    provenanceRecords.length !== rawFindings.length ||
+    provenanceRecords.some((record) => {
+      const raw = rawById.get(record.id);
+      return !raw || raw.role !== record.role || raw.evidenceDigest !== record.evidenceDigest;
+    })
+  )
+    return undefined;
 
   const findings: Finding[] = synthesis.findings.map((finding) => {
     const { rawFindingIds, ...editorialFinding } = finding;
@@ -117,7 +136,10 @@ export function consolidateSynthesis(
       v: 2,
       kind: "editorial-consolidation",
       status: "accepted",
-      rawFindings: rawFindings.map((raw) => ({ ...raw, finding: { ...raw.finding } })),
+      rawFindings: provenanceRecords.map((record) => ({
+        ...record,
+        artifact: { ...record.artifact },
+      })),
       dismissals: synthesis.dismissals.map((dismissal) => ({ ...dismissal })),
     },
   };
@@ -125,7 +147,8 @@ export function consolidateSynthesis(
 
 /** Truthful fallback retains every admitted occurrence as its own finding. */
 export function fallbackConsolidation(
-  rawFindings: readonly RawFindingRecord[],
+  rawFindings: readonly AdmittedRawFinding[],
+  provenanceRecords: readonly RawFindingRecord[],
   reason: string,
 ): ReviewResult {
   return {
@@ -145,7 +168,10 @@ export function fallbackConsolidation(
       kind: "editorial-consolidation",
       status: "fallback",
       fallbackReason: reason,
-      rawFindings: rawFindings.map((raw) => ({ ...raw, finding: { ...raw.finding } })),
+      rawFindings: provenanceRecords.map((record) => ({
+        ...record,
+        artifact: { ...record.artifact },
+      })),
       dismissals: [],
     },
   };

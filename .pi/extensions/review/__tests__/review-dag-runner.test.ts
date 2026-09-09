@@ -42,6 +42,7 @@ import {
 import { buildReviewDeck, updateReviewDeckLaterRefs } from "../deck";
 import type { ReviewState } from "../schema";
 import { buildRawFindingRecords } from "../synthesis-provenance";
+import { readRawFindingArtifact } from "../raw-provenance";
 
 class TestAppendFailure extends Data.TaggedError("TestAppendFailure")<{
   readonly message: string;
@@ -609,9 +610,15 @@ describe("DAG-backed pull request review runner", () => {
       status: "accepted",
       dismissals: [],
     });
-    expect(result.result?.provenance?.rawFindings[0].finding.problem).toBe(
-      "The value is wrong.",
-    );
+    const rawRecord = result.result?.provenance?.rawFindings[0];
+    expect(rawRecord).not.toHaveProperty("finding");
+    expect(
+      (
+        await Effect.runPromise(
+          readRawFindingArtifact(f.state.snapshot.artifactDir, result.dag!.runId, rawRecord),
+        )
+      ).finding.problem,
+    ).toBe("The value is wrong.");
     expect(
       saved.at(-1)?.dag?.rawResultReferences.every((reference) => !reference.path.includes("{")),
     ).toBe(true);
@@ -903,14 +910,28 @@ describe("DAG-backed pull request review runner", () => {
     expect(rebuilt.result?.provenance?.dismissals[0].reason).toBe(
       "Not actionable for this change.",
     );
-    expect(rebuilt.result?.provenance?.rawFindings[0].finding.problem).toBe(
-      "The value is wrong.",
-    );
+    const rawRecord = rebuilt.result?.provenance?.rawFindings[0];
+    expect(rawRecord).not.toHaveProperty("finding");
+    expect(
+      (
+        await Effect.runPromise(
+          readRawFindingArtifact(
+            f.state.snapshot.artifactDir,
+            reconstruction.graph.runId,
+            rawRecord,
+          ),
+        )
+      ).finding.problem,
+    ).toBe("The value is wrong.");
   });
 
-  it("reads legacy terminal synthesis explicitly but rejects it for a new run", async () => {
+  it("binds restart synthesis decoding to the protocol persisted before submission", async () => {
     const f = fixture();
-    const service = serviceFor(f.artifactRoot, { synthesis: legacySynthesis() });
+    const saved: ReviewState[] = [];
+    let protocolWasPersistedAtSubmission = false;
+    const service = serviceFor(f.artifactRoot, { synthesis: legacySynthesis() }, () => {
+      protocolWasPersistedAtSubmission = saved.at(-1)?.dag?.synthesisProtocol === 2;
+    });
     const current = await runReviewDag({
       pi: piEvents(),
       ctx: f.ctx,
@@ -918,28 +939,38 @@ describe("DAG-backed pull request review runner", () => {
       assignments,
       deckPath: f.deckPath,
       state: f.state,
-      save: () => {},
+      save: (state) => saved.push(structuredClone(state)),
     });
+    expect(saved[0].dag).toMatchObject({ submitted: false, synthesisProtocol: 2 });
+    expect(protocolWasPersistedAtSubmission).toBe(true);
     expect(current.result?.provenance?.status).toBe("fallback");
 
     const reconstruction = (await Effect.runPromise(
       service.reconstruct(),
     )) as DagSessionReconstruction;
-    const historical = await reconstructReviewDagState({
-      ctx: f.ctx,
-      service,
-      state: {
-        ...f.state,
-        dag: {
-          runId: reconstruction.graph.runId,
-          status: "running",
-          rawResultReferences: [],
-        },
-      },
-      reconstruction,
-    });
+    const reconstruct = (synthesisProtocol: 2 | undefined | number) =>
+      reconstructReviewDagState({
+        ctx: f.ctx,
+        service,
+        state: {
+          ...f.state,
+          dag: {
+            runId: reconstruction.graph.runId,
+            status: "running",
+            rawResultReferences: [],
+            ...(synthesisProtocol === undefined ? {} : { synthesisProtocol }),
+          },
+        } as ReviewState,
+        reconstruction,
+      });
+
+    const marked = await reconstruct(2);
+    expect(marked.result?.provenance?.status).toBe("fallback");
+    const historical = await reconstruct(undefined);
     expect(historical.result?.verdict).toBe("Historical exact-text summary.");
     expect(historical.result?.provenance).toBeUndefined();
+    const unknown = await reconstruct(99);
+    expect(unknown.result?.provenance?.status).toBe("fallback");
   });
 
   it("records a failed run when the session graph append rejects submission", async () => {
