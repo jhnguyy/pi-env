@@ -66,7 +66,7 @@ import {
   hasCurrentAcknowledgement,
   isDegraded,
 } from "./decision";
-import { walkthroughSummary } from "./walkthrough";
+import { guidedWalkthrough, walkthroughSummary } from "./walkthrough";
 import {
   ReviewCoordinator,
   type ReviewActionResult,
@@ -1016,38 +1016,113 @@ function selectedFindings(s: ReviewState): Finding[] {
 function explicitReview(reviewId: string): ReviewState {
   if (!reviewId.trim()) throw new Error("An explicit review ID is required.");
   const state = coordinator.review(reviewId);
-  if (!state) throw new Error(`Review not found: ${reviewId}.`);
+  if (!state || state.cleaned) throw new Error(`Review not found: ${reviewId}.`);
   return state;
 }
 
-function decisionCommand(pi: ExtensionAPI, reviewId: string, findingIds: string[], status: "selected" | "rejected" | "deferred"): string {
+function decisionCommand(
+  pi: ExtensionAPI,
+  reviewId: string,
+  findingIds: string[],
+  status: "selected" | "rejected" | "deferred",
+  expectedScope?: ReviewCoordinatorScope,
+): string {
+  const scope = expectedScope ?? coordinator.captureScope();
+  assertActiveCoordinatorScope(scope);
   const state = explicitReview(reviewId);
+  if (!state.result) throw new Error(`Review ${reviewId} has no inspectable findings.`);
   if (findingIds.length === 0) throw new Error("At least one finding ID is required.");
   const next = applyDecision(state, findingIds, status);
-  if (!saveState(pi, next)) throw new Error("The review session changed during the operation.");
+  if (!saveState(pi, next, scope)) throw new Error("The review session changed during the operation.");
   return `Review ${reviewId}: ${findingIds.length} finding(s) ${status}.`;
 }
 
-async function finalizeWalkthrough(pi: ExtensionAPI, ctx: ExtensionCommandContext, reviewId: string): Promise<string> {
-  const scope = coordinator.captureScope();
+function isFinalizable(state: ReviewState): boolean {
+  return Boolean(
+    state.result &&
+      (state.dag?.status === "succeeded" || state.dag?.status === "degraded") &&
+      state.preparation?.status !== "failed",
+  );
+}
+
+async function finalizeWalkthrough(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  reviewId: string,
+  expectedScope?: ReviewCoordinatorScope,
+): Promise<string> {
+  const scope = expectedScope ?? coordinator.captureScope();
+  assertActiveCoordinatorScope(scope);
   const state = explicitReview(reviewId);
+  if (!isFinalizable(state))
+    return `Review ${reviewId} is incomplete (${state.preparation?.status ?? state.dag?.status ?? "not started"}) and cannot be finalized.`;
+  const expectedContentHash = contentHash(state);
+  const expectedDegradationHash = degradationHash(state);
+  let acknowledgement = state.degradationAcknowledgement;
   if (isDegraded(state) && !hasCurrentAcknowledgement(state)) {
-    if (!ctx.hasUI || typeof (ctx.ui as any).confirm !== "function")
+    if (!ctx.hasUI)
       return `Finalization requires acknowledgement of degraded review ${reviewId}; interactive UI is unavailable.`;
-    const acknowledged = await (ctx.ui as any).confirm("Acknowledge degraded review", `Review ${reviewId} has failed, malformed, omitted, or fallback evidence. Continue without a quorum?`);
+    const acknowledged = await ctx.ui.confirm(
+      "Acknowledge degraded review",
+      `Review ${reviewId} has failed, malformed, omitted, or fallback evidence. Continue without a quorum?`,
+    );
     if (!coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
     if (!acknowledged) return "Finalization cancelled.";
     const current = explicitReview(reviewId);
-    const next = { ...current, degradationAcknowledgement: { contentHash: contentHash(current), degradationHash: degradationHash(current), at: new Date().toISOString() } };
-    if (!saveState(pi, next, scope)) return "The review session changed during the operation.";
+    if (
+      contentHash(current) !== expectedContentHash ||
+      degradationHash(current) !== expectedDegradationHash
+    )
+      return "The review changed during acknowledgement. Inspect and acknowledge the updated review again.";
+    acknowledgement = {
+      contentHash: expectedContentHash,
+      degradationHash: expectedDegradationHash,
+      at: new Date().toISOString(),
+    };
   }
   const current = explicitReview(reviewId);
-  if (!saveState(pi, { ...current, finalizedAt: new Date().toISOString() }, scope)) return "The review session changed during the operation.";
-  return `Review ${reviewId} finalized for inspection. No post was attempted. Next: /review pr post comment`;
+  if (
+    contentHash(current) !== expectedContentHash ||
+    degradationHash(current) !== expectedDegradationHash
+  )
+    return "The review changed before finalization. Inspect the updated review again.";
+  const next = {
+    ...current,
+    ...(acknowledgement ? { degradationAcknowledgement: acknowledgement } : {}),
+    finalizedAt: new Date().toISOString(),
+  };
+  if (!saveState(pi, next, scope)) return "The review session changed during the operation.";
+  const statuses = (next.result?.findings ?? []).reduce(
+    (counts, finding) => {
+      const status = next.decisions?.[finding.id ?? ""]?.status ?? "pending";
+      counts[status] += 1;
+      return counts;
+    },
+    { pending: 0, selected: 0, rejected: 0, deferred: 0 },
+  );
+  return bound(
+    `Review ${reviewId} finalized for inspection. Decisions: ${statuses.selected} selected, ${statuses.rejected} rejected, ${statuses.deferred} deferred, ${statuses.pending} pending. Preface: ${prefacePreview(next)}. No post was attempted. Next: /review pr post ${reviewId} comment`,
+    1_200,
+  );
 }
 
-function walkthrough(reviewId: string, interactive: boolean): string {
-  return walkthroughSummary(explicitReview(reviewId), interactive);
+async function walkthrough(
+  pi: ExtensionAPI,
+  reviewId: string,
+  ctx: ExtensionCommandContext,
+): Promise<string> {
+  const state = explicitReview(reviewId);
+  if (!ctx.hasUI) return walkthroughSummary(state, false);
+  const scope = coordinator.captureScope();
+  const assertCurrent = () => assertActiveCoordinatorScope(scope);
+  return guidedWalkthrough(ctx, {
+    state: () => explicitReview(reviewId),
+    assertCurrent,
+    decide: async (findingId, status) => decisionCommand(pi, reviewId, [findingId], status, scope),
+    editFinding: (findingId) => editFinding(pi, ctx, reviewId, findingId, scope),
+    editPreface: () => editPreface(pi, ctx, reviewId, scope),
+    finalize: () => finalizeWalkthrough(pi, ctx, reviewId, scope),
+  });
 }
 function draftImplementationPlan(pi: ExtensionAPI): string {
   const state = latestState();
@@ -1182,6 +1257,8 @@ async function postingPreflight(
     (s.dag?.status !== "succeeded" && s.dag?.status !== "degraded")
   )
     return "Review is not complete and cannot be posted.";
+  if (isDegraded(s) && !hasCurrentAcknowledgement(s))
+    return `Degraded review ${s.snapshot.id} must be acknowledged with /review pr finalize ${s.snapshot.id} before posting.`;
   const remote = await currentRemoteHead(
     pi.exec.bind(pi),
     ctx.cwd,
@@ -1318,16 +1395,14 @@ export async function postReview(
   ctx: ExtensionCommandContext,
   event: ReviewEventValue,
   signal?: AbortSignal,
+  reviewId?: string,
 ): Promise<string> {
-  const keyState = latestState();
-  if (!keyState) return "No active PR review.";
+  const keyState = reviewId ? coordinator.review(reviewId) : latestState();
+  if (!keyState || keyState.cleaned)
+    return reviewId ? `Review not found: ${reviewId}.` : "No active PR review.";
   const key = `${keyState.snapshot.id}:${contentHashFor(keyState, event)}`;
   return Effect.runPromise(
-    PartitionedSemaphore.withPermits(
-      coordinator.postSemaphore,
-      key,
-      1,
-    )(
+    PartitionedSemaphore.withPermits(coordinator.postSemaphore, key, 1)(
       Effect.tryPromise((effectSignal) =>
         postReviewCritical(
           pi,
@@ -1347,9 +1422,8 @@ async function editWithUi(
   title: string,
   initial: string,
 ): Promise<string | undefined> {
-  const ui: any = ctx.ui;
-  if (typeof ui.editor === "function") return await ui.editor(title, initial);
-  return initial;
+  if (!ctx.hasUI) return undefined;
+  return ctx.ui.editor(title, initial);
 }
 function findingTemplate(f: Finding): string {
   return [
@@ -1367,40 +1441,57 @@ function applyFindingTemplate(f: Finding, text: string): void {
   f.consequence = consequence;
   f.suggestedFix = fix;
 }
+function findingEditIdentity(finding: Finding): string {
+  return sha256(JSON.stringify(finding));
+}
+
 async function editFinding(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   reviewId: string,
   id: string,
+  expectedScope?: ReviewCoordinatorScope,
 ): Promise<string> {
-  const s = explicitReview(reviewId);
-  const scope = s.decisions === undefined ? undefined : coordinator.captureScope();
-  const f = s.result?.findings.find((x) => x.id === id);
-  if (!f) return "Finding not found.";
-  const edited = await editWithUi(ctx, `Edit finding ${id}`, findingTemplate(f));
+  const scope = expectedScope ?? coordinator.captureScope();
+  assertActiveCoordinatorScope(scope);
+  const state = explicitReview(reviewId);
+  const finding = state.result?.findings.find((candidate) => candidate.id === id);
+  if (!finding) return `Finding ${id || "(missing finding ID)"} is not owned by review ${reviewId}.`;
+  if (!ctx.hasUI) return "Finding edit requires interactive editor UI.";
+  const expectedIdentity = findingEditIdentity(finding);
+  const edited = await editWithUi(ctx, `Edit finding ${id}`, findingTemplate(finding));
   if (edited === undefined) return "Edit cancelled.";
-  if (scope && !coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
-  const next = structuredClone(s);
-  const target = next.result?.findings.find((x) => x.id === id);
-  if (!target) return "Finding not found.";
+  if (!coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
+  const current = explicitReview(reviewId);
+  const currentFinding = current.result?.findings.find((candidate) => candidate.id === id);
+  if (!currentFinding || findingEditIdentity(currentFinding) !== expectedIdentity)
+    return "The finding changed during editing. Reopen the editor for the current finding.";
+  const next = structuredClone(current);
+  const target = next.result?.findings.find((candidate) => candidate.id === id);
+  if (!target) return `Finding ${id} is not owned by review ${reviewId}.`;
   applyFindingTemplate(target, edited);
-  saveState(pi, next, scope);
+  if (!saveState(pi, next, scope)) return "The review session changed during the operation.";
   return `Finding ${id} updated.`;
 }
 async function editPreface(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   reviewId: string,
-  inline: string,
+  expectedScope?: ReviewCoordinatorScope,
 ): Promise<string> {
-  const s = explicitReview(reviewId);
-  const scope = s.decisions === undefined ? undefined : coordinator.captureScope();
-  const edited = inline.trim()
-    ? inline
-    : await editWithUi(ctx, "Edit PR review preface", s.preface ?? "");
+  const scope = expectedScope ?? coordinator.captureScope();
+  assertActiveCoordinatorScope(scope);
+  const state = explicitReview(reviewId);
+  if (!ctx.hasUI) return "Preface edit requires interactive editor UI.";
+  const expectedPreface = state.preface;
+  const edited = await editWithUi(ctx, "Edit PR review preface", state.preface ?? "");
   if (edited === undefined) return "Preface edit cancelled.";
-  if (scope && !coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
-  saveState(pi, { ...s, preface: edited }, scope);
+  if (!coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
+  const current = explicitReview(reviewId);
+  if (current.preface !== expectedPreface)
+    return "The preface changed during editing. Reopen the editor for the current preface.";
+  if (!saveState(pi, { ...current, preface: edited }, scope))
+    return "The review session changed during the operation.";
   return "Preface updated.";
 }
 function assertManagedPath(root: string, absolute: string): void {
@@ -1443,6 +1534,17 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   return `Review cleanup complete: ${state.snapshot.id}.`;
 }
 
+function postCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  rest: string[],
+): Promise<string> {
+  const first = rest[0] ?? "";
+  const legacyEvent = first === "" || ["comment", "approve", "request-changes"].includes(first);
+  if (legacyEvent) return postReview(pi, ctx, eventFrom(first || "comment"));
+  return postReview(pi, ctx, eventFrom(rest[1] ?? "comment"), undefined, first);
+}
+
 const handlers: Partial<
   Record<
     string,
@@ -1468,17 +1570,9 @@ const handlers: Partial<
   select: (pi, rest) => decisionCommand(pi, rest[0] ?? "", rest.slice(1), "selected"),
   reject: (pi, rest) => decisionCommand(pi, rest[0] ?? "", rest.slice(1), "rejected"),
   defer: (pi, rest) => decisionCommand(pi, rest[0] ?? "", rest.slice(1), "deferred"),
-  walkthrough: (_pi, rest, ctx) => walkthrough(rest[0] ?? "", ctx.hasUI),
-  edit: (pi, rest, ctx) => {
-    const legacy = latestState();
-    const legacyInvocation = rest.length < 2 && legacy?.decisions === undefined;
-    return editFinding(pi, ctx, legacyInvocation ? (legacy?.snapshot.id ?? "") : rest[0] ?? "", legacyInvocation ? rest[0] ?? "" : rest[1] ?? "");
-  },
-  preface: (pi, rest, ctx) => {
-    const legacy = latestState();
-    const legacyInvocation = rest.length === 0 && legacy?.decisions === undefined;
-    return editPreface(pi, ctx, legacyInvocation ? (legacy?.snapshot.id ?? "") : rest[0] ?? "", legacyInvocation ? "" : rest.slice(1).join(" "));
-  },
+  walkthrough: (pi, rest, ctx) => walkthrough(pi, rest[0] ?? "", ctx),
+  edit: (pi, rest, ctx) => editFinding(pi, ctx, rest[0] ?? "", rest[1] ?? ""),
+  preface: (pi, rest, ctx) => editPreface(pi, ctx, rest[0] ?? ""),
   finalize: (pi, rest, ctx) => finalizeWalkthrough(pi, ctx, rest[0] ?? ""),
   rerun: async (pi, _rest, ctx) => {
     const s = latestState();
@@ -1488,7 +1582,7 @@ const handlers: Partial<
         ?.text ?? "Rerun started."
     );
   },
-  post: (pi, rest, ctx) => postReview(pi, ctx, eventFrom(rest[0] ?? "comment")),
+  post: (pi, rest, ctx) => postCommand(pi, ctx, rest),
   "draft-plan": (pi) => draftImplementationPlan(pi),
   cleanup: (pi, rest) => cleanup(pi, rest[0]),
 };
@@ -1550,7 +1644,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|finalize <id>|rerun|post|draft-plan|cleanup [id]",
+      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|finalize <id>|rerun|post <id> [comment|approve|request-changes]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {

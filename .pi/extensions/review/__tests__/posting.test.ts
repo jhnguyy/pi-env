@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,7 +83,7 @@ function state(): ReviewState {
     },
     dag: {
       runId: "run",
-      status: "degraded",
+      status: "succeeded",
       submitted: true,
       rawResultReferences: [],
     },
@@ -285,6 +285,58 @@ describe("review pull request posting", () => {
     expect(posted).toBe(false);
   });
 
+  it("posts the explicit review ID with only human-selected decisions through the existing authority path", async () => {
+    const older = {
+      ...state(),
+      snapshot: { ...state().snapshot, id: "older" },
+      decisions: {
+        F1: { status: "selected" as const, at: "now" },
+        F2: { status: "rejected" as const, at: "now" },
+      },
+      selectedFindingIds: ["F1"],
+    };
+    const newer = {
+      ...structuredClone(older),
+      snapshot: { ...structuredClone(older.snapshot), id: "newer", metadata: { ...older.snapshot.metadata, headOid: "newer-head" } },
+      decisions: { F2: { status: "selected" as const, at: "now" } },
+      selectedFindingIds: ["F2"],
+    };
+    const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};
+    const notes: string[] = [];
+    let payload: { comments: Array<{ body: string }>; body: string } | undefined;
+    const pi: any = {
+      events: { on: () => () => {} },
+      registerTool() {},
+      registerCommand(_name: string, options: any) { this.command = options.handler; },
+      on(name: string, handler: (event: unknown, ctx: unknown) => void) { handlers[name] = handler; },
+      appendEntry() {},
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+        const input = args.at(-1)!;
+        payload = JSON.parse(readFileSync(input, "utf8"));
+        return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+      },
+    };
+    (await import("../index")).default(pi);
+    const runtime: any = {
+      cwd: "/tmp",
+      hasUI: true,
+      sessionManager: {
+        getSessionId: () => "session",
+        getSessionDir: () => "/tmp",
+        getBranch: () => [custom(older), custom(newer)],
+      },
+      ui: { notify: (message: string) => notes.push(message), confirm: async () => true },
+    };
+    handlers.session_start?.({}, runtime);
+    await pi.command("pr post older comment", runtime);
+    expect(notes.at(-1)).toBe("Review posted.");
+    expect(payload?.comments).toHaveLength(1);
+    expect(payload?.comments[0]?.body).toContain("p");
+    expect(payload?.body).not.toContain("u");
+  });
+
   it("rejects unknown post events through the command", async () => {
     restore({ sessionManager: { getBranch: () => [custom(state())] } } as any);
     const notes: string[] = [];
@@ -298,7 +350,7 @@ describe("review pull request posting", () => {
       },
     };
     (await import("../index")).default(pi);
-    await pi.command("pr post merge", {
+    await pi.command("pr post r merge", {
       ui: { notify: (m: string) => notes.push(m), confirm: async () => true },
       cwd: "/tmp",
     } as any);

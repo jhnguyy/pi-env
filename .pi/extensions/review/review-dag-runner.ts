@@ -500,9 +500,16 @@ function finalizedReviewState(
     }),
     ...(collected.plan ? { plan: collected.plan } : {}),
     result: synthesis.result,
-    selectedFindingIds: synthesis.result.findings.flatMap((finding) =>
-      finding.selected && finding.id ? [finding.id] : [],
-    ),
+    selectedFindingIds:
+      input.state.decisions === undefined
+        ? synthesis.result.findings.flatMap((finding) =>
+            finding.selected && finding.id ? [finding.id] : [],
+          )
+        : synthesis.result.findings.flatMap((finding) =>
+            finding.id && input.state.decisions?.[finding.id]?.status === "selected"
+              ? [finding.id]
+              : [],
+          ),
     dag: {
       runId: input.runId,
       startedAt: input.state.dag?.startedAt,

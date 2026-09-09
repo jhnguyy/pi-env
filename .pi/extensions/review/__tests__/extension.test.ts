@@ -699,12 +699,15 @@ describe("review extension pull request surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("pr edit F1", {
+    const runtime = {
+      cwd: mocked.agentDir,
+      hasUI: true,
+      sessionManager: { getSessionId: () => "parent", getBranch: () => [custom(state)] },
       ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
-    } as any);
-    await pi.command("pr preface", {
-      ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
-    } as any);
+    } as any;
+    pi.handlers.session_start({}, runtime);
+    await pi.command("pr edit r F1", runtime);
+    await pi.command("pr preface r", runtime);
     expect(notes).toContain("Edit cancelled.");
     expect(notes).toContain("Preface edit cancelled.");
     expect(pi.appended).toHaveLength(0);
