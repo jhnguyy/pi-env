@@ -51,7 +51,8 @@ export interface PinnedDiffPage {
 
 export function pinnedDiffPages(state: ReviewState, path: string): readonly PinnedDiffPage[] {
   const section = fileSection(readVerifiedPinnedDiff(state), path);
-  if (section === undefined) return [{ number: 1, total: 1, text: `No pinned diff section for ${path}.` }];
+  if (section === undefined)
+    return [{ number: 1, total: 1, text: `No pinned diff section for ${path}.` }];
   const pages: string[] = [];
   for (let offset = 0; offset < section.length; offset += DIFF_PAGE_CHARS)
     pages.push(section.slice(offset, offset + DIFF_PAGE_CHARS));
@@ -59,26 +60,51 @@ export function pinnedDiffPages(state: ReviewState, path: string): readonly Pinn
   return pages.map((text, index) => ({ number: index + 1, total: pages.length, text }));
 }
 
+interface DiffLinePosition {
+  oldLine: number;
+  newLine: number;
+}
+
+function hunkPosition(line: string): DiffLinePosition | undefined {
+  const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
+  return hunk ? { oldLine: Number(hunk[1]), newLine: Number(hunk[2]) } : undefined;
+}
+
+function isDiffMetadata(line: string): boolean {
+  return line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++");
+}
+
+function advanceDiffPosition(position: DiffLinePosition, line: string): void {
+  if (!line.startsWith("+") && !line.startsWith("\\")) position.oldLine += 1;
+  if (!line.startsWith("-") && !line.startsWith("\\")) position.newLine += 1;
+}
+
+function lineMatchesFinding(
+  position: DiffLinePosition,
+  line: string,
+  finding: Finding & Required<Pick<Finding, "line" | "side">>,
+): boolean {
+  const sideLine = finding.side === "LEFT" ? position.oldLine : position.newLine;
+  const existsOnSide = finding.side === "LEFT" ? !line.startsWith("+") : !line.startsWith("-");
+  return existsOnSide && sideLine === finding.line;
+}
+
 function anchoredLines(section: string, finding: Finding): string[] | undefined {
   if (!finding.line || !finding.side) return undefined;
+  const anchoredFinding = finding as Finding & Required<Pick<Finding, "line" | "side">>;
   const lines = section.split(/\r?\n/u);
-  let oldLine = 0;
-  let newLine = 0;
+  let position: DiffLinePosition = { oldLine: 0, newLine: 0 };
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
-    const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
-    if (hunk) {
-      oldLine = Number(hunk[1]);
-      newLine = Number(hunk[2]);
+    const nextHunk = hunkPosition(line);
+    if (nextHunk) {
+      position = nextHunk;
       continue;
     }
-    const isMetadata = line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++");
-    const sideLine = finding.side === "LEFT" ? oldLine : newLine;
-    const existsOnSide = finding.side === "LEFT" ? !line.startsWith("+") : !line.startsWith("-");
-    if (!isMetadata && existsOnSide && sideLine === finding.line)
+    const metadata = isDiffMetadata(line);
+    if (!metadata && lineMatchesFinding(position, line, anchoredFinding))
       return lines.slice(Math.max(0, index - 5), Math.min(lines.length, index + 6));
-    if (!isMetadata && !line.startsWith("+") && !line.startsWith("\\")) oldLine += 1;
-    if (!isMetadata && !line.startsWith("-") && !line.startsWith("\\")) newLine += 1;
+    if (!metadata) advanceDiffPosition(position, line);
   }
   return undefined;
 }
@@ -87,7 +113,9 @@ export function findingContext(state: ReviewState, findingId: string): string {
   const finding = state.result?.findings.find((candidate) => candidate.id === findingId);
   if (!finding) return "Finding not found.";
   const details = [
-    finding.file ? `Anchor: ${finding.file}${finding.line ? `:${finding.line}` : ""}` : "Anchor: unanchored",
+    finding.file
+      ? `Anchor: ${finding.file}${finding.line ? `:${finding.line}` : ""}`
+      : "Anchor: unanchored",
     `Problem: ${finding.problem}`,
     `Consequence: ${finding.consequence}`,
     `Suggested fix: ${finding.suggestedFix}`,
@@ -97,7 +125,8 @@ export function findingContext(state: ReviewState, findingId: string): string {
     const evidence = section ? anchoredLines(section, finding) : undefined;
     details.push(
       "Pinned diff evidence (hash verified)",
-      evidence?.join("\n") ?? "Anchor was validated previously, but bounded context could not be located.",
+      evidence?.join("\n") ??
+        "Anchor was validated previously, but bounded context could not be located.",
     );
   } else {
     details.push("Pinned diff evidence: unanchored finding. No source text is substituted.");

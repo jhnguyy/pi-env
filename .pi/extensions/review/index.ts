@@ -1384,6 +1384,120 @@ function prefacePreview(s: ReviewState): string {
   const preface = (s.preface ?? "").trim();
   return preface ? bound(preface, 500) : "(none)";
 }
+
+async function queuedPostingState(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  scope: ReviewCoordinatorScope,
+  reviewId: string,
+  event: ReviewEventValue,
+  expectedContentHash: string,
+  signal: AbortSignal,
+): Promise<{ state?: ReviewState; error?: string }> {
+  if (!coordinator.isScopeActive(scope))
+    return { error: "The review session changed while posting was queued. Nothing was posted." };
+  const state = coordinator.review(reviewId);
+  if (!state || state.cleaned) return { error: `Review not found: ${reviewId}.` };
+  if (contentHashFor(state, event) !== expectedContentHash)
+    return {
+      error: "The review changed while posting was queued. Confirm the updated review again.",
+    };
+  const blocked = await postingPreflight(pi, ctx, state, event, signal);
+  if (blocked) return { error: blocked };
+  if (!coordinator.isScopeActive(scope))
+    return { error: "The review session changed during posting preflight. Nothing was posted." };
+  return { state };
+}
+
+function recordPostingAttempt(
+  pi: ExtensionAPI,
+  state: ReviewState,
+  attempt: PostAttempt | undefined,
+  event: ReviewEventValue,
+  contentHash: string,
+  scope: ReviewCoordinatorScope,
+): { attempt?: PostAttempt; error?: string } {
+  if (attempt) return { attempt };
+  const pending = newAttempt(state, event, contentHash);
+  if (!saveState(pi, state, scope))
+    return {
+      error:
+        "The review session changed before the posting attempt was recorded. Nothing was posted.",
+    };
+  return { attempt: pending };
+}
+
+function pendingSubmission(
+  scope: ReviewCoordinatorScope,
+  reviewId: string,
+  event: ReviewEventValue,
+  contentHash: string,
+  attemptId: string,
+): { state: ReviewState; attempt: PostAttempt } | undefined {
+  const state = coordinator.review(reviewId);
+  const attempt = state?.posts.find((candidate) => candidate.id === attemptId);
+  if (
+    !coordinator.isScopeActive(scope) ||
+    !state ||
+    state.cleaned ||
+    contentHashFor(state, event) !== contentHash ||
+    !attempt ||
+    attempt.status !== "pending"
+  )
+    return undefined;
+  return { state, attempt };
+}
+
+async function submitRecordedPost(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  scope: ReviewCoordinatorScope,
+  operation: { submissionIssued: boolean },
+  submission: { state: ReviewState; attempt: PostAttempt },
+  event: ReviewEventValue,
+  signal: AbortSignal,
+): Promise<string> {
+  let result: Awaited<ReturnType<typeof submitPost>>;
+  try {
+    operation.submissionIssued = true;
+    result = await submitPost(pi, ctx, submission.state, event, submission.attempt, signal);
+  } catch (cause) {
+    if (!coordinator.isScopeActive(scope))
+      return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+    return handlePostFailure(
+      pi,
+      ctx,
+      submission.state,
+      submission.attempt,
+      cause instanceof Error ? cause.message : String(cause),
+      "",
+      scope,
+      signal,
+    );
+  }
+  if (!coordinator.isScopeActive(scope))
+    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+  if (result.code === -1) return result.stderr;
+  if (result.code !== 0)
+    return handlePostFailure(
+      pi,
+      ctx,
+      submission.state,
+      submission.attempt,
+      result.stderr,
+      result.stdout,
+      scope,
+      signal,
+    );
+  submission.attempt.status = "posted";
+  try {
+    submission.attempt.reviewId = String(JSON.parse(result.stdout || "{}").id);
+  } catch {}
+  if (!saveState(pi, submission.state, scope))
+    return "The review was accepted remotely, but the session changed before completion was recorded. The original pending attempt remains for replay reconciliation.";
+  return "Review posted.";
+}
+
 async function postReviewCritical(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
@@ -1394,29 +1508,27 @@ async function postReviewCritical(
   expectedContentHash: string,
   signal: AbortSignal,
 ): Promise<string> {
-  if (!coordinator.isScopeActive(scope))
-    return "The review session changed while posting was queued. Nothing was posted.";
-  let s = coordinator.review(reviewId);
-  if (!s || s.cleaned) return `Review not found: ${reviewId}.`;
-  if (contentHashFor(s, event) !== expectedContentHash)
-    return "The review changed while posting was queued. Confirm the updated review again.";
-  const blocked = await postingPreflight(pi, ctx, s, event, signal);
-  if (blocked) return blocked;
-  if (!coordinator.isScopeActive(scope))
-    return "The review session changed during posting preflight. Nothing was posted.";
-  const contentHash = contentHashFor(s, event);
-  const disposition = await existingPostDisposition(pi, ctx, s, contentHash, scope, signal);
+  const queued = await queuedPostingState(
+    pi,
+    ctx,
+    scope,
+    reviewId,
+    event,
+    expectedContentHash,
+    signal,
+  );
+  if (queued.error) return queued.error;
+  let state = queued.state!;
+  const contentHash = contentHashFor(state, event);
+  const disposition = await existingPostDisposition(pi, ctx, state, contentHash, scope, signal);
   if (disposition.result) return disposition.result;
-  let attempt = disposition.attempt;
-  const selected = selectedFindings(s);
-  if (
-    !(await confirm(
-      ctx,
-      "Post PR review?",
-      `Post ${event} review to ${s.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(s)}`,
-    ))
-  )
-    return "Posting cancelled.";
+  const selected = selectedFindings(state);
+  const accepted = await confirm(
+    ctx,
+    "Post PR review?",
+    `Post ${event} review to ${state.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(state)}`,
+  );
+  if (!accepted) return "Posting cancelled.";
   const confirmed = await confirmedPostingState(
     pi,
     ctx,
@@ -1427,62 +1539,12 @@ async function postReviewCritical(
     signal,
   );
   if (confirmed.error) return confirmed.error;
-  s = confirmed.state!;
-  if (!attempt) {
-    attempt = newAttempt(s, event, contentHash);
-    if (!saveState(pi, s, scope))
-      return "The review session changed before the posting attempt was recorded. Nothing was posted.";
-  }
-  const submissionState = coordinator.review(reviewId);
-  const submissionAttempt = submissionState?.posts.find((candidate) => candidate.id === attempt.id);
-  if (
-    !coordinator.isScopeActive(scope) ||
-    !submissionState ||
-    submissionState.cleaned ||
-    contentHashFor(submissionState, event) !== contentHash ||
-    !submissionAttempt ||
-    submissionAttempt.status !== "pending"
-  )
-    return "The review changed immediately before submission. Nothing was posted.";
-  let r: Awaited<ReturnType<typeof submitPost>>;
-  try {
-    operation.submissionIssued = true;
-    r = await submitPost(pi, ctx, submissionState, event, submissionAttempt, signal);
-  } catch (cause) {
-    if (!coordinator.isScopeActive(scope))
-      return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-    return handlePostFailure(
-      pi,
-      ctx,
-      submissionState,
-      submissionAttempt,
-      cause instanceof Error ? cause.message : String(cause),
-      "",
-      scope,
-      signal,
-    );
-  }
-  if (!coordinator.isScopeActive(scope))
-    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-  if (r.code === -1) return r.stderr;
-  if (r.code !== 0)
-    return handlePostFailure(
-      pi,
-      ctx,
-      submissionState,
-      submissionAttempt,
-      r.stderr,
-      r.stdout,
-      scope,
-      signal,
-    );
-  submissionAttempt.status = "posted";
-  try {
-    submissionAttempt.reviewId = String(JSON.parse(r.stdout || "{}").id);
-  } catch {}
-  if (!saveState(pi, submissionState, scope))
-    return "The review was accepted remotely, but the session changed before completion was recorded. The original pending attempt remains for replay reconciliation.";
-  return "Review posted.";
+  state = confirmed.state!;
+  const recorded = recordPostingAttempt(pi, state, disposition.attempt, event, contentHash, scope);
+  if (recorded.error) return recorded.error;
+  const submission = pendingSubmission(scope, reviewId, event, contentHash, recorded.attempt!.id);
+  if (!submission) return "The review changed immediately before submission. Nothing was posted.";
+  return submitRecordedPost(pi, ctx, scope, operation, submission, event, signal);
 }
 
 export async function postReview(

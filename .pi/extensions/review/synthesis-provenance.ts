@@ -105,6 +105,22 @@ export function validConsolidationAccounting(
   return accounted.size === rawById.size;
 }
 
+function validProvenanceRecord(
+  record: RawFindingRecord,
+  raw: AdmittedRawFinding | undefined,
+  runId: string,
+): boolean {
+  if (!validateRawFindingRecordShape(record) || !raw) return false;
+  const artifact = record.artifact;
+  const validRawIdentity = raw.role === record.role && raw.evidenceDigest === record.evidenceDigest;
+  const validArtifactIdentity =
+    artifact.runId === runId &&
+    artifact.producerNodeId === RawFindingProducer &&
+    artifact.outputName === record.id &&
+    artifact.path === `${RawFindingDirectory}/${record.id}.json`;
+  return validRawIdentity && validArtifactIdentity && artifact.bytes <= MaxRawFindingArtifactBytes;
+}
+
 function validProvenanceRecordSet(
   rawFindings: readonly AdmittedRawFinding[],
   provenanceRecords: readonly RawFindingRecord[],
@@ -119,18 +135,7 @@ function validProvenanceRecordSet(
     return false;
   const recordIds = new Set<string>();
   for (const record of provenanceRecords) {
-    if (!validateRawFindingRecordShape(record) || recordIds.has(record.id)) return false;
-    const raw = rawById.get(record.id);
-    if (
-      !raw ||
-      raw.role !== record.role ||
-      raw.evidenceDigest !== record.evidenceDigest ||
-      record.artifact.runId !== runId ||
-      record.artifact.bytes > MaxRawFindingArtifactBytes ||
-      record.artifact.producerNodeId !== RawFindingProducer ||
-      record.artifact.outputName !== record.id ||
-      record.artifact.path !== `${RawFindingDirectory}/${record.id}.json`
-    )
+    if (recordIds.has(record.id) || !validProvenanceRecord(record, rawById.get(record.id), runId))
       return false;
     recordIds.add(record.id);
   }

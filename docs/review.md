@@ -119,7 +119,7 @@ The harness writes each admitted raw finding to an immutable review-owned artifa
 
 The legacy unversioned exact-text synthesis schema remains readable only when reconstructing historical terminal DAG artifacts whose persisted DAG state has no synthesis protocol marker. New runs persist `synthesisProtocol: 2` before graph submission and preserve it through later snapshots. Marked version 2 runs never reinterpret malformed output as legacy output. Unknown markers fail safely to fallback. Legacy states without version 2 provenance remain readable and do not receive fabricated raw IDs, dismissals, source roles, or agreement.
 
-The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. High-impact, blocking, and serious findings start selected. Other findings start unselected.
+The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. For new decision-enabled runs, impact and severity classifications are machine recommendations. Posting selection requires an explicit human decision.
 
 ## Parent session state
 

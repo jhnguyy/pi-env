@@ -571,42 +571,68 @@ export function validateAdmittedRawFindingShape(value: unknown): value is Admitt
   );
 }
 
+const RawFindingArtifactKeys = [
+  "v",
+  "path",
+  "bytes",
+  "digestAlgorithm",
+  "digest",
+  "mediaType",
+  "encoding",
+  "runId",
+  "producerNodeId",
+  "outputName",
+] as const;
+
+function validRawArtifactSize(bytes: unknown): boolean {
+  return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0;
+}
+
+function validSha256Digest(digest: unknown): boolean {
+  return typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest);
+}
+
+function validRawArtifactFormat(value: Record<string, unknown>): boolean {
+  return (
+    value.v === 1 &&
+    typeof value.path === "string" &&
+    value.digestAlgorithm === "sha256" &&
+    value.mediaType === "text/plain" &&
+    value.encoding === "utf-8"
+  );
+}
+
+function validRawArtifactIdentity(value: Record<string, unknown>, outputName: unknown): boolean {
+  return (
+    typeof value.runId === "string" &&
+    value.runId.length > 0 &&
+    typeof value.producerNodeId === "string" &&
+    value.producerNodeId.length > 0 &&
+    value.outputName === outputName
+  );
+}
+
+function validateRawFindingArtifactShape(
+  value: unknown,
+  outputName: unknown,
+): value is RawFindingArtifactReference {
+  return (
+    isExactRecord(value, RawFindingArtifactKeys) &&
+    validRawArtifactFormat(value) &&
+    validRawArtifactSize(value.bytes) &&
+    validSha256Digest(value.digest) &&
+    validRawArtifactIdentity(value, outputName)
+  );
+}
+
 export function validateRawFindingRecordShape(value: unknown): value is RawFindingRecord {
   if (!isExactRecord(value, ["id", "role", "evidenceDigest", "artifact"])) return false;
-  if (
-    !isExactRecord(value.artifact, [
-      "v",
-      "path",
-      "bytes",
-      "digestAlgorithm",
-      "digest",
-      "mediaType",
-      "encoding",
-      "runId",
-      "producerNodeId",
-      "outputName",
-    ])
-  )
-    return false;
+  const validEvidenceDigest =
+    typeof value.evidenceDigest === "string" && /^[0-9a-f]{64}$/u.test(value.evidenceDigest);
   return (
     Check(RawFindingIdSchema, value.id) &&
     (ReviewerRoles as readonly unknown[]).includes(value.role) &&
-    typeof value.evidenceDigest === "string" &&
-    /^[0-9a-f]{64}$/u.test(value.evidenceDigest) &&
-    value.artifact.v === 1 &&
-    typeof value.artifact.path === "string" &&
-    typeof value.artifact.bytes === "number" &&
-    Number.isSafeInteger(value.artifact.bytes) &&
-    value.artifact.bytes >= 0 &&
-    value.artifact.digestAlgorithm === "sha256" &&
-    typeof value.artifact.digest === "string" &&
-    /^[0-9a-f]{64}$/u.test(value.artifact.digest) &&
-    value.artifact.mediaType === "text/plain" &&
-    value.artifact.encoding === "utf-8" &&
-    typeof value.artifact.runId === "string" &&
-    value.artifact.runId.length > 0 &&
-    typeof value.artifact.producerNodeId === "string" &&
-    value.artifact.producerNodeId.length > 0 &&
-    value.artifact.outputName === value.id
+    validEvidenceDigest &&
+    validateRawFindingArtifactShape(value.artifact, value.id)
   );
 }
