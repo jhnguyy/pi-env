@@ -146,7 +146,9 @@ Each post attempt includes an invisible marker:
 <!-- pi-env-pr-review:<review-id>:<attempt-id> -->
 ```
 
-If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review.
+If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review. The pending marker is persisted before submission so replay can reconcile an interrupted result.
+
+Posting is bound to the parent session generation. A session change cancels local waits and process work and prevents completion state from being written into the replacement session. Cancellation cannot revoke a request after GitHub may have accepted it. In that case the original session's pending attempt remains the reconciliation authority and the result is reported as potentially accepted, not undone.
 
 ## Command and tool surface
 
@@ -166,6 +168,6 @@ Use the explicit review ID for every walkthrough mutation:
 - `/review pr preface <review-id>`
 - `/review pr finalize <review-id>`
 
-Human decisions are durable `pending`, `selected`, `rejected`, or `deferred` records. Missing decisions, including machine defaults and legacy selected IDs, remain pending and are not human inspection. New decision-enabled reviews post only explicitly selected findings. Finalize records review-state completion and never posts. Degraded reviews require acknowledgement in interactive mode, bound to the current pinned content, decisions, preface, omissions, and degradation facts. Headless walkthroughs are bounded and read-only.
+Human decisions are durable `pending`, `selected`, `rejected`, or `deferred` records. Missing decisions, including machine defaults and legacy selected IDs, remain pending and are not human inspection. New decision-enabled reviews post only explicitly selected findings. Finalize records review-state completion and never posts or approves. Its durable record binds the content hash and degradation hash to a timestamp. Walkthroughs report finalization as current only while both hashes match, and report later edits, decisions, or preface changes as stale. A historical timestamp alone is stale, not finalization authority. Degraded reviews require acknowledgement in interactive mode, bound to the current pinned content, decisions, preface, omissions, and degradation facts. Headless walkthroughs are bounded and read-only.
 
 Posting remains the only remote authority. Use `/review pr post <review-id> [comment|approve|request-changes]` to target the inspected review exactly. The legacy `/review pr post [comment|approve|request-changes]` form remains a compatibility boundary that targets the currently opened review. Both forms use the same stale-head, content revalidation, confirmation, marker, and retry implementation. A degraded current review must have a current walkthrough acknowledgement before either form can post.

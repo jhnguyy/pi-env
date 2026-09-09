@@ -132,7 +132,9 @@ export class ReviewCoordinator {
   }
 
   activate(ctx: ExtensionContext): void {
-    const sessionId = ctx.sessionManager.getSessionId();
+    const sessionId =
+      (ctx.sessionManager as { getSessionId?: () => string }).getSessionId?.() ??
+      "__direct-review-restore__";
     if (this.sessionId !== undefined && this.sessionId !== sessionId) this.reset();
     this.context = ctx;
     this.sessionId = sessionId;

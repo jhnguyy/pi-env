@@ -500,6 +500,13 @@ export interface ReviewState {
     degradationHash: string;
     at: string;
   };
+  /** Finalization is valid only while both recorded hashes match the current review. */
+  finalization?: {
+    contentHash: string;
+    degradationHash: string;
+    at: string;
+  };
+  /** Historical timestamp retained for persisted-state compatibility. It is not current authority. */
   finalizedAt?: string;
   preface?: string;
   child?: {

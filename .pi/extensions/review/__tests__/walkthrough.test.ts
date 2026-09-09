@@ -439,8 +439,51 @@ describe("registered review walkthrough boundary", () => {
     await command("pr finalize older", ctx);
     expect(notes.at(-1)).toContain("Next: /review pr post older comment");
     expect(appended.at(-1)?.state.degradationAcknowledgement).toBeDefined();
+    expect(appended.at(-1)?.state.finalization).toMatchObject({
+      contentHash: expect.any(String),
+      degradationHash: expect.any(String),
+      at: expect.any(String),
+    });
     expect(appended.at(-1)?.state.finalizedAt).toBeDefined();
     expect(appended.at(-1)?.state.posts).toEqual([]);
+  });
+
+  it("reports restored finalization as stale after content mutation despite a fresh timestamp", async () => {
+    const { command, appended, handlers, fixtures, session } = await harness([{ id: "older" }]);
+    const notes: string[] = [];
+    await command("pr finalize older", {
+      hasUI: true,
+      ui: { notify: (message: string) => notes.push(message), confirm: async () => true },
+    });
+    const finalized = structuredClone(appended.at(-1)!.state);
+    expect(finalized.posts).toEqual([]);
+
+    await command("pr preface older", {
+      hasUI: true,
+      ui: {
+        notify: (message: string) => notes.push(message),
+        editor: async () => "content changed after finalization",
+      },
+    });
+    const mutated = structuredClone(appended.at(-1)!.state);
+    mutated.finalizedAt = "2099-01-01T00:00:00.000Z";
+    expect(mutated.finalization).toEqual(finalized.finalization);
+    expect(mutated.posts).toEqual([]);
+
+    const replay = [
+      ...fixtures.map(entry),
+      {
+        type: "custom",
+        customType: REVIEW_ENTRY_TYPE,
+        data: { reviewId: "older", state: mutated },
+      },
+    ];
+    handlers.session_tree?.({}, session("session-a", replay));
+    const headless = notifications(false);
+    await command("pr walkthrough older", headless.ctx);
+    expect(headless.notes.at(-1)).toContain("Finalization status: stale");
+    expect(headless.notes.at(-1)).not.toContain("Finalization status: current");
+    expect(mutated.posts).toEqual([]);
   });
 
   it("keeps headless walkthrough read-only and rejects a stale editor generation", async () => {

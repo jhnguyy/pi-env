@@ -41,10 +41,12 @@ export function degradationHash(state: ReviewState): string {
       head: state.snapshot.metadata.headOid,
       preparation: state.preparation,
       coverage: state.result?.coverage,
-      evidenceOmissions: state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [],
-      provenanceFallback: state.result?.provenance?.status === "fallback"
-        ? state.result.provenance.fallbackReason ?? "fallback"
-        : undefined,
+      evidenceOmissions:
+        state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [],
+      provenanceFallback:
+        state.result?.provenance?.status === "fallback"
+          ? (state.result.provenance.fallbackReason ?? "fallback")
+          : undefined,
       dag: {
         status: state.dag?.status,
         failedNodes: state.dag?.failedNodes,
@@ -66,7 +68,8 @@ export function contentHash(state: ReviewState): string {
       decisions: state.decisions,
       selectedFindingIds: state.selectedFindingIds,
       preface: state.preface,
-      evidenceOmissions: state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [],
+      evidenceOmissions:
+        state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [],
     }),
   );
 }
@@ -94,7 +97,22 @@ export function hasCurrentAcknowledgement(state: ReviewState): boolean {
   const acknowledgement = state.degradationAcknowledgement;
   return Boolean(
     acknowledgement &&
-      acknowledgement.contentHash === contentHash(state) &&
-      acknowledgement.degradationHash === degradationHash(state),
+    acknowledgement.contentHash === contentHash(state) &&
+    acknowledgement.degradationHash === degradationHash(state),
   );
+}
+
+export type FinalizationStatus = "current" | "stale" | "not-finalized";
+
+export function finalizationStatus(state: ReviewState): FinalizationStatus {
+  const finalization = state.finalization;
+  if (!finalization) return state.finalizedAt ? "stale" : "not-finalized";
+  return finalization.contentHash === contentHash(state) &&
+    finalization.degradationHash === degradationHash(state)
+    ? "current"
+    : "stale";
+}
+
+export function hasCurrentFinalization(state: ReviewState): boolean {
+  return finalizationStatus(state) === "current";
 }

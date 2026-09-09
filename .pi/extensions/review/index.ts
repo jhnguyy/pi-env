@@ -163,6 +163,7 @@ function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
     throw new Error("The review session changed during the operation.");
 }
 export function restore(ctx: ExtensionContext): void {
+  coordinator.activate(ctx);
   coordinator.resetReviews();
   const latestById = new Map<string, ReviewState>();
   const order: string[] = [];
@@ -489,7 +490,11 @@ function reviewActionResult(state: ReviewState, reused = false): ReviewActionRes
   };
 }
 
-async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Promise<boolean> {
+async function removeManagedWorktree(
+  pi: ExtensionAPI,
+  state: ReviewState,
+  signal?: AbortSignal,
+): Promise<boolean> {
   const root = join(getAgentDir(), "pr-review");
   const repoDir = state.snapshot.cache?.repoDir;
   const worktree = state.snapshot.cache?.worktree ?? state.snapshot.worktree;
@@ -505,11 +510,16 @@ async function removeManagedWorktree(pi: ExtensionAPI, state: ReviewState): Prom
   const remove = existsSync(worktree)
     ? await pi.exec("git", ["worktree", "remove", "--force", worktree], {
         cwd: repoDir,
+        signal,
         timeout: 120000,
       })
     : { code: 0 };
   if (remove.code !== 0) rmSync(worktree, { recursive: true, force: true });
-  const prune = await pi.exec("git", ["worktree", "prune"], { cwd: repoDir, timeout: 120000 });
+  const prune = await pi.exec("git", ["worktree", "prune"], {
+    cwd: repoDir,
+    signal,
+    timeout: 120000,
+  });
   return prune.code === 0;
 }
 
@@ -1010,7 +1020,7 @@ function eventFrom(arg: string): ReviewEventValue {
 function selectedFindings(s: ReviewState): Finding[] {
   return s.decisions !== undefined
     ? findingsForDecision(s, "selected")
-    : s.result?.findings.filter((f) => s.selectedFindingIds.includes(f.id!)) ?? [];
+    : (s.result?.findings.filter((f) => s.selectedFindingIds.includes(f.id!)) ?? []);
 }
 
 function explicitReview(reviewId: string): ReviewState {
@@ -1033,15 +1043,16 @@ function decisionCommand(
   if (!state.result) throw new Error(`Review ${reviewId} has no inspectable findings.`);
   if (findingIds.length === 0) throw new Error("At least one finding ID is required.");
   const next = applyDecision(state, findingIds, status);
-  if (!saveState(pi, next, scope)) throw new Error("The review session changed during the operation.");
+  if (!saveState(pi, next, scope))
+    throw new Error("The review session changed during the operation.");
   return `Review ${reviewId}: ${findingIds.length} finding(s) ${status}.`;
 }
 
 function isFinalizable(state: ReviewState): boolean {
   return Boolean(
     state.result &&
-      (state.dag?.status === "succeeded" || state.dag?.status === "degraded") &&
-      state.preparation?.status !== "failed",
+    (state.dag?.status === "succeeded" || state.dag?.status === "degraded") &&
+    state.preparation?.status !== "failed",
   );
 }
 
@@ -1066,7 +1077,8 @@ async function finalizeWalkthrough(
       "Acknowledge degraded review",
       `Review ${reviewId} has failed, malformed, omitted, or fallback evidence. Continue without a quorum?`,
     );
-    if (!coordinator.isScopeActive(scope)) return "The review session changed during the operation.";
+    if (!coordinator.isScopeActive(scope))
+      return "The review session changed during the operation.";
     if (!acknowledged) return "Finalization cancelled.";
     const current = explicitReview(reviewId);
     if (
@@ -1086,10 +1098,16 @@ async function finalizeWalkthrough(
     degradationHash(current) !== expectedDegradationHash
   )
     return "The review changed before finalization. Inspect the updated review again.";
+  const finalizedAt = new Date().toISOString();
   const next = {
     ...current,
     ...(acknowledgement ? { degradationAcknowledgement: acknowledgement } : {}),
-    finalizedAt: new Date().toISOString(),
+    finalization: {
+      contentHash: expectedContentHash,
+      degradationHash: expectedDegradationHash,
+      at: finalizedAt,
+    },
+    finalizedAt,
   };
   if (!saveState(pi, next, scope)) return "The review session changed during the operation.";
   const statuses = (next.result?.findings ?? []).reduce(
@@ -1189,8 +1207,10 @@ async function reconcileAttempt(
   ctx: ExtensionCommandContext,
   s: ReviewState,
   attempt: { marker: string; status: string; reviewId?: string },
-  signal?: AbortSignal,
+  scope: ReviewCoordinatorScope,
+  signal: AbortSignal,
 ): Promise<string | undefined> {
+  assertActiveCoordinatorScope(scope);
   const prior = await existingReviewWithMarker(
     pi.exec.bind(pi),
     ctx.cwd,
@@ -1198,10 +1218,12 @@ async function reconcileAttempt(
     attempt.marker,
     signal,
   );
+  assertActiveCoordinatorScope(scope);
   if (!prior) return undefined;
   attempt.status = "posted";
   attempt.reviewId = prior;
-  saveState(pi, s);
+  if (!saveState(pi, s, scope))
+    throw new Error("The review session changed during reconciliation.");
   return prior;
 }
 
@@ -1289,7 +1311,8 @@ async function existingPostDisposition(
   ctx: ExtensionCommandContext,
   state: ReviewState,
   contentHash: string,
-  signal?: AbortSignal,
+  scope: ReviewCoordinatorScope,
+  signal: AbortSignal,
 ): Promise<{ attempt?: PostAttempt; result?: string }> {
   const attempt = state.posts.find(
     (candidate) => candidate.contentHash === contentHash && candidate.status !== "posted",
@@ -1298,7 +1321,9 @@ async function existingPostDisposition(
     (candidate) => candidate.contentHash === contentHash && candidate.status === "posted",
   );
   if (posted) return { result: `Review already posted (${posted.reviewId ?? posted.id}).` };
-  const prior = attempt ? await reconcileAttempt(pi, ctx, state, attempt, signal) : undefined;
+  const prior = attempt
+    ? await reconcileAttempt(pi, ctx, state, attempt, scope, signal)
+    : undefined;
   if (prior)
     return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
   if (attempt?.status === "uncertain")
@@ -1312,16 +1337,26 @@ async function existingPostDisposition(
 async function confirmedPostingState(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
+  scope: ReviewCoordinatorScope,
   reviewId: string,
   event: ReviewEventValue,
   contentHash: string,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<{ state?: ReviewState; error?: string }> {
+  if (!coordinator.isScopeActive(scope))
+    return { error: "The review session changed during confirmation. Nothing was posted." };
   const state = coordinator.review(reviewId);
-  if (!state || contentHashFor(state, event) !== contentHash)
+  if (!state || state.cleaned || contentHashFor(state, event) !== contentHash)
     return { error: "The review changed during confirmation. Confirm the updated review again." };
   const blocked = await postingPreflight(pi, ctx, state, event, signal);
-  return blocked ? { error: blocked } : { state };
+  if (!coordinator.isScopeActive(scope))
+    return { error: "The review session changed during posting preflight. Nothing was posted." };
+  const current = coordinator.review(reviewId);
+  if (!current || current.cleaned || contentHashFor(current, event) !== contentHash)
+    return {
+      error: "The review changed during posting preflight. Confirm the updated review again.",
+    };
+  return blocked ? { error: blocked } : { state: current };
 }
 
 async function handlePostFailure(
@@ -1331,11 +1366,15 @@ async function handlePostFailure(
   attempt: PostAttempt,
   stderr: string,
   stdout: string,
-  signal?: AbortSignal,
+  scope: ReviewCoordinatorScope,
+  signal: AbortSignal,
 ): Promise<string> {
+  if (!coordinator.isScopeActive(scope))
+    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
   attempt.status = "uncertain";
-  saveState(pi, s);
-  const reconciled = await reconcileAttempt(pi, ctx, s, attempt, signal);
+  if (!saveState(pi, s, scope))
+    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+  const reconciled = await reconcileAttempt(pi, ctx, s, attempt, scope, signal);
   return reconciled
     ? `Posted review reconciled after uncertain result (${reconciled}).`
     : `Posting uncertain or failed: ${stderr || stdout}`;
@@ -1348,19 +1387,25 @@ function prefacePreview(s: ReviewState): string {
 async function postReviewCritical(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
+  scope: ReviewCoordinatorScope,
+  operation: { submissionIssued: boolean },
   reviewId: string,
   event: ReviewEventValue,
   expectedContentHash: string,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<string> {
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed while posting was queued. Nothing was posted.";
   let s = coordinator.review(reviewId);
-  if (!s) return `Review not found: ${reviewId}.`;
+  if (!s || s.cleaned) return `Review not found: ${reviewId}.`;
   if (contentHashFor(s, event) !== expectedContentHash)
     return "The review changed while posting was queued. Confirm the updated review again.";
   const blocked = await postingPreflight(pi, ctx, s, event, signal);
   if (blocked) return blocked;
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed during posting preflight. Nothing was posted.";
   const contentHash = contentHashFor(s, event);
-  const disposition = await existingPostDisposition(pi, ctx, s, contentHash, signal);
+  const disposition = await existingPostDisposition(pi, ctx, s, contentHash, scope, signal);
   if (disposition.result) return disposition.result;
   let attempt = disposition.attempt;
   const selected = selectedFindings(s);
@@ -1372,21 +1417,71 @@ async function postReviewCritical(
     ))
   )
     return "Posting cancelled.";
-  const confirmed = await confirmedPostingState(pi, ctx, reviewId, event, contentHash, signal);
+  const confirmed = await confirmedPostingState(
+    pi,
+    ctx,
+    scope,
+    reviewId,
+    event,
+    contentHash,
+    signal,
+  );
   if (confirmed.error) return confirmed.error;
   s = confirmed.state!;
   if (!attempt) {
     attempt = newAttempt(s, event, contentHash);
-    saveState(pi, s);
+    if (!saveState(pi, s, scope))
+      return "The review session changed before the posting attempt was recorded. Nothing was posted.";
   }
-  const r = await submitPost(pi, ctx, s, event, attempt, signal);
-  if (r.code === -1) return r.stderr;
-  if (r.code !== 0) return handlePostFailure(pi, ctx, s, attempt, r.stderr, r.stdout, signal);
-  attempt.status = "posted";
+  const submissionState = coordinator.review(reviewId);
+  const submissionAttempt = submissionState?.posts.find((candidate) => candidate.id === attempt.id);
+  if (
+    !coordinator.isScopeActive(scope) ||
+    !submissionState ||
+    submissionState.cleaned ||
+    contentHashFor(submissionState, event) !== contentHash ||
+    !submissionAttempt ||
+    submissionAttempt.status !== "pending"
+  )
+    return "The review changed immediately before submission. Nothing was posted.";
+  let r: Awaited<ReturnType<typeof submitPost>>;
   try {
-    attempt.reviewId = String(JSON.parse(r.stdout || "{}").id);
+    operation.submissionIssued = true;
+    r = await submitPost(pi, ctx, submissionState, event, submissionAttempt, signal);
+  } catch (cause) {
+    if (!coordinator.isScopeActive(scope))
+      return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+    return handlePostFailure(
+      pi,
+      ctx,
+      submissionState,
+      submissionAttempt,
+      cause instanceof Error ? cause.message : String(cause),
+      "",
+      scope,
+      signal,
+    );
+  }
+  if (!coordinator.isScopeActive(scope))
+    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+  if (r.code === -1) return r.stderr;
+  if (r.code !== 0)
+    return handlePostFailure(
+      pi,
+      ctx,
+      submissionState,
+      submissionAttempt,
+      r.stderr,
+      r.stdout,
+      scope,
+      signal,
+    );
+  submissionAttempt.status = "posted";
+  try {
+    submissionAttempt.reviewId = String(JSON.parse(r.stdout || "{}").id);
   } catch {}
-  saveState(pi, s);
+  if (!saveState(pi, submissionState, scope))
+    return "The review was accepted remotely, but the session changed before completion was recorded. The original pending attempt remains for replay reconciliation.";
   return "Review posted.";
 }
 
@@ -1397,25 +1492,44 @@ export async function postReview(
   signal?: AbortSignal,
   reviewId?: string,
 ): Promise<string> {
+  const scope = coordinator.captureScope();
   const keyState = reviewId ? coordinator.review(reviewId) : latestState();
   if (!keyState || keyState.cleaned)
     return reviewId ? `Review not found: ${reviewId}.` : "No active PR review.";
-  const key = `${keyState.snapshot.id}:${contentHashFor(keyState, event)}`;
-  return Effect.runPromise(
-    PartitionedSemaphore.withPermits(coordinator.postSemaphore, key, 1)(
-      Effect.tryPromise((effectSignal) =>
-        postReviewCritical(
-          pi,
-          ctx,
-          keyState.snapshot.id,
-          event,
-          contentHashFor(keyState, event),
-          effectSignal,
+  const targetReviewId = keyState.snapshot.id;
+  const expectedContentHash = contentHashFor(keyState, event);
+  const key = `${targetReviewId}:${expectedContentHash}`;
+  const operationSignal = coordinator.operationSignal(scope, signal);
+  const operation = { submissionIssued: false };
+  try {
+    return await Effect.runPromise(
+      PartitionedSemaphore.withPermits(
+        coordinator.postSemaphore,
+        key,
+        1,
+      )(
+        Effect.tryPromise(() =>
+          postReviewCritical(
+            pi,
+            ctx,
+            scope,
+            operation,
+            targetReviewId,
+            event,
+            expectedContentHash,
+            operationSignal,
+          ),
         ),
       ),
-    ),
-    { signal },
-  );
+      { signal: operationSignal },
+    );
+  } catch (cause) {
+    if (!coordinator.isScopeActive(scope))
+      return operation.submissionIssued
+        ? "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation."
+        : "The review session changed before remote submission. Nothing was posted.";
+    throw cause;
+  }
 }
 async function editWithUi(
   ctx: ExtensionCommandContext,
@@ -1456,7 +1570,8 @@ async function editFinding(
   assertActiveCoordinatorScope(scope);
   const state = explicitReview(reviewId);
   const finding = state.result?.findings.find((candidate) => candidate.id === id);
-  if (!finding) return `Finding ${id || "(missing finding ID)"} is not owned by review ${reviewId}.`;
+  if (!finding)
+    return `Finding ${id || "(missing finding ID)"} is not owned by review ${reviewId}.`;
   if (!ctx.hasUI) return "Finding edit requires interactive editor UI.";
   const expectedIdentity = findingEditIdentity(finding);
   const edited = await editWithUi(ctx, `Edit finding ${id}`, findingTemplate(finding));
@@ -1519,19 +1634,26 @@ function openReview(reviewId: string): string {
 }
 
 async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
+  const scope = coordinator.captureScope();
   const state = stateById(reviewId);
   if (!state || state.cleaned) return "Review cleanup complete.";
-  if (coordinator.isPreparing(state.snapshot.id) || state.dag?.status === "running")
-    return `Review ${state.snapshot.id} is active. Cancel or wait for it before cleanup.`;
-  const worktreeCleaned = await removeManagedWorktree(pi, state);
+  const targetReviewId = state.snapshot.id;
+  if (coordinator.isPreparing(targetReviewId) || state.dag?.status === "running")
+    return `Review ${targetReviewId} is active. Cancel or wait for it before cleanup.`;
+  const signal = coordinator.operationSignal(scope);
+  const worktreeCleaned = await removeManagedWorktree(pi, state, signal);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
   const root = join(getAgentDir(), "pr-review");
   if (existsSync(state.snapshot.artifactDir)) assertManagedPath(root, state.snapshot.artifactDir);
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed during cleanup. Owned resources may already be removed; no cleanup state was appended.";
   const cleaned = { ...state, cleaned: true };
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(cleaned));
-  coordinator.deleteReview(state.snapshot.id);
-  return `Review cleanup complete: ${state.snapshot.id}.`;
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed during cleanup. Cleanup state was not applied to the replacement session.";
+  coordinator.deleteReview(targetReviewId);
+  return `Review cleanup complete: ${targetReviewId}.`;
 }
 
 function postCommand(

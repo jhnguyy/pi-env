@@ -49,9 +49,7 @@ function state(): ReviewState {
       riskReasons: [],
       cohorts: [{ label: "main", purpose: "review changed file", paths: ["a.ts"] }],
       files: [{ path: "a.ts", attention: "normal", role: "changed file" }],
-      evidence: [
-        { kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" },
-      ],
+      evidence: [{ kind: "file", path: "a.ts", startLine: 1, endLine: 1, purpose: "review" }],
     },
     result: {
       verdict: "v",
@@ -297,7 +295,11 @@ describe("review pull request posting", () => {
     };
     const newer = {
       ...structuredClone(older),
-      snapshot: { ...structuredClone(older.snapshot), id: "newer", metadata: { ...older.snapshot.metadata, headOid: "newer-head" } },
+      snapshot: {
+        ...structuredClone(older.snapshot),
+        id: "newer",
+        metadata: { ...older.snapshot.metadata, headOid: "newer-head" },
+      },
       decisions: { F2: { status: "selected" as const, at: "now" } },
       selectedFindingIds: ["F2"],
     };
@@ -307,8 +309,12 @@ describe("review pull request posting", () => {
     const pi: any = {
       events: { on: () => () => {} },
       registerTool() {},
-      registerCommand(_name: string, options: any) { this.command = options.handler; },
-      on(name: string, handler: (event: unknown, ctx: unknown) => void) { handlers[name] = handler; },
+      registerCommand(_name: string, options: any) {
+        this.command = options.handler;
+      },
+      on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+        handlers[name] = handler;
+      },
       appendEntry() {},
       exec: async (_cmd: string, args: string[]) => {
         if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
@@ -335,6 +341,150 @@ describe("review pull request posting", () => {
     expect(payload?.comments).toHaveLength(1);
     expect(payload?.comments[0]?.body).toContain("p");
     expect(payload?.body).not.toContain("u");
+  });
+
+  it("registered post rejects a session switch while confirmation is open", async () => {
+    const original = state();
+    const replacement = { ...structuredClone(original), preface: "replacement" };
+    const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};
+    const notes: string[] = [];
+    let posts = 0;
+    let releaseConfirm!: (confirmed: boolean) => void;
+    let markConfirmEntered!: () => void;
+    const confirmEntered = new Promise<void>((resolve) => {
+      markConfirmEntered = resolve;
+    });
+    const confirmation = new Promise<boolean>((resolve) => {
+      releaseConfirm = resolve;
+    });
+    const pi: any = {
+      events: { on: () => () => {} },
+      registerTool() {},
+      registerCommand(_name: string, options: any) {
+        this.command = options.handler;
+      },
+      on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+        handlers[name] = handler;
+      },
+      appendEntry() {
+        throw new Error("stale confirmation must not append");
+      },
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+        posts += 1;
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    (await import("../index")).default(pi);
+    const runtime = (sessionId: string, review: ReviewState, confirm = async () => true) =>
+      ({
+        cwd: "/tmp",
+        hasUI: true,
+        sessionManager: {
+          getSessionId: () => sessionId,
+          getSessionDir: () => "/tmp",
+          getBranch: () => [custom(review)],
+        },
+        ui: { notify: (message: string) => notes.push(message), confirm },
+      }) as any;
+    const originalRuntime = runtime("original", original, async () => {
+      markConfirmEntered();
+      return confirmation;
+    });
+    handlers.session_start?.({}, originalRuntime);
+    const posting = pi.command("pr post r comment", originalRuntime);
+    await confirmEntered;
+    handlers.session_tree?.({}, runtime("replacement", replacement));
+    releaseConfirm(true);
+    await posting;
+    expect(posts).toBe(0);
+    expect(notes.at(-1)).toMatch(/session changed|interrupted/i);
+  });
+
+  it("journals before submission and never writes an in-flight result into a replacement session", async () => {
+    const original = state();
+    const replacement = { ...structuredClone(original), preface: "replacement" };
+    const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};
+    const appended: Array<{ session: string; state: ReviewState }> = [];
+    const notes: string[] = [];
+    let activeSession = "original";
+    let posts = 0;
+    let releasePost!: () => void;
+    const postBlocked = new Promise<void>((resolve) => {
+      releasePost = resolve;
+    });
+    let rotateOnPending = true;
+    let replacementRuntime: any;
+    const pi: any = {
+      events: { on: () => () => {} },
+      registerTool() {},
+      registerCommand(_name: string, options: any) {
+        this.command = options.handler;
+      },
+      on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+        handlers[name] = handler;
+      },
+      appendEntry(_type: string, data: { state: ReviewState }) {
+        appended.push({ session: activeSession, state: structuredClone(data.state) });
+        if (rotateOnPending && data.state.posts.at(-1)?.status === "pending") {
+          rotateOnPending = false;
+          activeSession = "replacement";
+          handlers.session_tree?.({}, replacementRuntime);
+        }
+      },
+      exec: async (_cmd: string, args: string[], options: { signal?: AbortSignal }) => {
+        if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+        posts += 1;
+        await postBlocked;
+        expect(options.signal?.aborted).toBe(true);
+        return { code: 1, stdout: "", stderr: "uncertain" };
+      },
+    };
+    (await import("../index")).default(pi);
+    const runtime = (sessionId: string, review: ReviewState) =>
+      ({
+        cwd: "/tmp",
+        hasUI: true,
+        sessionManager: {
+          getSessionId: () => sessionId,
+          getSessionDir: () => "/tmp",
+          getBranch: () => [custom(review)],
+        },
+        ui: { notify: (message: string) => notes.push(message), confirm: async () => true },
+      }) as any;
+    replacementRuntime = runtime("replacement", replacement);
+    const originalRuntime = runtime("original", original);
+    handlers.session_start?.({}, originalRuntime);
+
+    await pi.command("pr post r comment", originalRuntime);
+    expect(posts).toBe(0);
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toMatchObject({
+      session: "original",
+      state: { posts: [{ status: "pending" }] },
+    });
+    expect(appended.some((entry) => entry.session === "replacement")).toBe(false);
+
+    clearInMemoryStateForTests();
+    appended.length = 0;
+    activeSession = "original";
+    rotateOnPending = false;
+    handlers.session_start?.({}, originalRuntime);
+    const inFlight = pi.command("pr post r comment", originalRuntime);
+    await vi.waitFor(() => expect(posts).toBe(1));
+    activeSession = "replacement";
+    handlers.session_tree?.({}, replacementRuntime);
+    releasePost();
+    await inFlight;
+    await Promise.resolve();
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toMatchObject({
+      session: "original",
+      state: { posts: [{ status: "pending" }] },
+    });
+    expect(appended.some((entry) => entry.session === "replacement")).toBe(false);
   });
 
   it("rejects unknown post events through the command", async () => {

@@ -677,6 +677,45 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
+  it("does not append stale cleanup completion after blocked removal rotates sessions", async () => {
+    tempRoot();
+    const original = sampleState("r", []);
+    const replacement = { ...structuredClone(original), preface: "replacement" };
+    mkdirSync(original.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(original.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(original.snapshot.artifactDir, { recursive: true });
+    const pi = extensionPi();
+    const notes: string[] = [];
+    let releaseRemoval!: () => void;
+    const removalBlocked = new Promise<void>((resolve) => {
+      releaseRemoval = resolve;
+    });
+    let ownedSignal: AbortSignal | undefined;
+    pi.exec = async (_cmd: string, args: string[], options: { signal?: AbortSignal }) => {
+      ownedSignal = options.signal;
+      if (args[1] === "remove") await removalBlocked;
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const runtime = (sessionId: string, state: ReviewState) => ({
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getSessionDir: () => mocked.agentDir,
+        getBranch: () => [custom(state)],
+      },
+      ui: { notify: (message: string) => notes.push(message) },
+    });
+    pi.handlers.session_start?.({}, runtime("original", original));
+    const cleaning = pi.command("pr cleanup r", runtime("original", original));
+    await vi.waitFor(() => expect(ownedSignal).toBeDefined());
+    pi.handlers.session_tree?.({}, runtime("replacement", replacement));
+    expect(ownedSignal?.aborted).toBe(true);
+    releaseRemoval();
+    await cleaning;
+    expect(pi.appended).toHaveLength(0);
+    expect(notes.at(-1)).toContain("no cleanup state was appended");
+    expect(existsSync(original.snapshot.artifactDir)).toBe(false);
+  });
+
   it("creates an approval-required draft plan from selected findings", async () => {
     const root = tempRoot();
     const state = sampleState("r", ["F1"]);

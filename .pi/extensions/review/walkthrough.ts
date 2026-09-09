@@ -1,7 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { bound, type Finding, type ReviewState } from "./core";
-import { decisionFor, hasCurrentAcknowledgement, isDegraded } from "./decision";
+import { decisionFor, finalizationStatus, hasCurrentAcknowledgement, isDegraded } from "./decision";
 import { readRawFindingArtifact } from "./raw-provenance";
 import { findingContext, pinnedContext, pinnedDiffPages } from "./walkthrough-context";
 
@@ -93,6 +93,7 @@ export function walkthroughSummary(state: ReviewState, interactive: boolean): st
       findings.map((finding) => findingLine(state, finding)),
     ),
     "Finalize",
+    `Finalization status: ${finalizationStatus(state)}`,
     isDegraded(state)
       ? `Degraded review acknowledgement: ${hasCurrentAcknowledgement(state) ? "current" : "required or stale"}`
       : "Review is not degraded.",
