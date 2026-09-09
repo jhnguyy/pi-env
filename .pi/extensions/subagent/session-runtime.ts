@@ -8,6 +8,7 @@ import {
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import { clearSlot, setSlot } from "../_shared/ui-render";
 import {
   loadSubagentRuntimeConfig,
   resolveSubagentRuntimeConfig,
@@ -31,6 +32,48 @@ import {
   type SubagentSessionState as SubagentSessionStateValue,
 } from "./types";
 import { formatUsageCompact, SubagentUsageLedger } from "./usage";
+
+const ACTIVE_JOB_STATUSES = new Set<SubagentJobStatus>([
+  SubagentJobStatus.Queued,
+  SubagentJobStatus.Running,
+  SubagentJobStatus.Cancelling,
+]);
+
+function briefJobName(name: string): string {
+  const singleLine = name
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+  return singleLine.length > 48 ? `${singleLine.slice(0, 45)}...` : singleLine;
+}
+
+export function formatActiveJobStatusLines(
+  jobs: readonly SubagentJob[],
+  theme: ExtensionContext["ui"]["theme"],
+): string[] {
+  return jobs
+    .filter((job) => ACTIVE_JOB_STATUSES.has(job.status))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map((job) => {
+      const color =
+        job.status === SubagentJobStatus.Cancelling
+          ? "warning"
+          : job.status === SubagentJobStatus.Queued
+            ? "dim"
+            : "accent";
+      return `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", briefJobName(job.name))} ${theme.fg(color, `[${job.status}]`)}`;
+    });
+}
+
+export function renderActiveJobStatusSlot(
+  jobs: readonly SubagentJob[],
+  ctx: ExtensionContext,
+): void {
+  if (!ctx.hasUI) return;
+  const lines = formatActiveJobStatusLines(jobs, ctx.ui.theme);
+  if (lines.length === 0) clearSlot("subagents", ctx);
+  else setSlot("subagents", lines, ctx);
+}
 
 export class SubagentSessionRuntime {
   private readonly ledger = new SubagentUsageLedger();
@@ -86,6 +129,7 @@ export class SubagentSessionRuntime {
   startSession(ctx: ExtensionContext): Promise<boolean> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
+    clearSlot("subagents", ctx);
     this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       await this.disposeActiveResources();
@@ -119,6 +163,7 @@ export class SubagentSessionRuntime {
         nextRuntime,
         config,
         supervisor,
+        (jobs) => this.updateJobStatusSlot(jobs, ctx),
       );
       let dagRuntime: DagSessionRuntime;
       try {
@@ -147,13 +192,15 @@ export class SubagentSessionRuntime {
       this.jobs = jobs;
       this.dagRuntime = dagRuntime;
       this.sessionState = SubagentSessionState.Active;
+      this.updateJobStatusSlot([], ctx);
       return true;
     });
   }
 
-  shutdownSession(): Promise<void> {
+  shutdownSession(ctx?: ExtensionContext): Promise<void> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
+    if (ctx) clearSlot("subagents", ctx);
     this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       try {
@@ -241,6 +288,14 @@ export class SubagentSessionRuntime {
       return "No subagent usage recorded.";
     }
     return `session: ${formatUsageCompact(usage)}`;
+  }
+
+  private updateJobStatusSlot(jobs: readonly SubagentJob[], ctx: ExtensionContext): void {
+    if (this.sessionState !== SubagentSessionState.Active) {
+      clearSlot("subagents", ctx);
+      return;
+    }
+    renderActiveJobStatusSlot(jobs, ctx);
   }
 
   private enqueueTransition<T>(run: () => Promise<T>): Promise<T> {

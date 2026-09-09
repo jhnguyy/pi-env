@@ -86,19 +86,34 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
-    it("registers each stable tool exactly once", () => {
+    it("registers one action-selected public tool", () => {
       expect(registeredTool).toBeDefined();
-      expect([...registeredTools.keys()]).toEqual(["subagent", "subagent_start", "subagent_job"]);
+      expect([...registeredTools.keys()]).toEqual(["subagent"]);
       expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
+      expect(registeredTool.parameters.properties.action.enum).toEqual([
+        "run",
+        "start",
+        "status",
+        "wait",
+        "cancel",
+        "list",
+        "usage",
+        "result",
+      ]);
     });
 
     it("does not expose a caller-selected turn limit", () => {
-      for (const name of ["subagent", "subagent_start"]) {
-        const tool = registeredTools.get(name);
-        expect(tool.parameters.properties).not.toHaveProperty("max_turns");
-        expect(tool.parameters.properties).not.toHaveProperty("maxTurns");
-        expect(tool.description).not.toContain("max_turns");
-      }
+      expect(registeredTool.parameters.properties).not.toHaveProperty("max_turns");
+      expect(registeredTool.parameters.properties).not.toHaveProperty("maxTurns");
+      expect(registeredTool.description).not.toContain("max_turns");
+    });
+
+    it("prepares legacy blocking calls as run actions", () => {
+      expect(registeredTool.prepareArguments({ name: "legacy", task: "inspect" })).toEqual({
+        action: "run",
+        name: "legacy",
+        task: "inspect",
+      });
     });
 
     it("reports completed asynchronous usage exactly once", () => {
@@ -117,8 +132,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     });
 
     it("supports compact usage reporting for the active session", async () => {
-      const usageTool = registeredTools.get("subagent_job");
-      const result = await usageTool.execute(
+      const result = await registeredTool.execute(
         "usage-1",
         { action: "usage" },
         undefined,
@@ -347,15 +361,15 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── async tool rendering ────────────────────────────────────────────────
 
   describe("async tool rendering", () => {
-    it("keeps subagent_start delegated content hidden until expansion", () => {
-      const startTool = registeredTools.get("subagent_start");
+    it("keeps accepted background-start acknowledgements out of the tool summary", () => {
       const longTask = "A".repeat(500);
       const call = extractText(
-        startTool.renderCall(
-          { name: "audit", task: longTask, system_prompt: "private context" },
+        registeredTool.renderCall(
+          { action: "start", name: "audit", task: longTask, system_prompt: "private context" },
           mockTheme,
         ),
       );
+      expect(call).toContain("subagent start");
       expect(call).toContain("audit");
       expect(call).toContain("...");
       expect(call).not.toContain("A".repeat(100));
@@ -365,22 +379,14 @@ describeIfEnabled("subagent", "subagent extension", () => {
         content: [{ type: "text", text: "Started subagent job job-1 (audit)." }],
         details: { jobId: "job-1", status: "queued", name: "audit" },
       };
-      const context = { args: { task: longTask } };
-      const collapsed = extractText(startTool.renderResult(result, {}, mockTheme, context));
-      expect(collapsed).toContain("audit");
-      expect(collapsed).toContain("queued");
-      expect(collapsed).not.toContain(longTask);
-      expect(collapsed).not.toContain("Started subagent job");
-
-      const expanded = extractText(
-        startTool.renderResult(result, { expanded: true }, mockTheme, context),
-      );
-      expect(expanded).toContain(longTask);
-      expect(expanded).toContain("Started subagent job");
+      const context = { args: { action: "start", task: longTask } };
+      expect(extractText(registeredTool.renderResult(result, {}, mockTheme, context))).toBe("");
+      expect(
+        extractText(registeredTool.renderResult(result, { expanded: true }, mockTheme, context)),
+      ).toBe("");
     });
 
-    it("keeps subagent_job child output hidden until expansion", () => {
-      const jobTool = registeredTools.get("subagent_job");
+    it("keeps background child output hidden until expansion", () => {
       const longTask = `inspect ${"B".repeat(500)}`;
       const fullOutput = `full child output\n${"C".repeat(500)}`;
       const result = {
@@ -399,7 +405,8 @@ describeIfEnabled("subagent", "subagent extension", () => {
         },
       };
 
-      const collapsed = extractText(jobTool.renderResult(result, {}, mockTheme));
+      const context = { args: { action: "result", job_id: "job-1" } };
+      const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
       expect(collapsed).toContain("completed");
       expect(collapsed).toContain("6 tool calls");
       expect(collapsed).toContain("4 turns");
@@ -409,7 +416,9 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(collapsed).not.toContain("B".repeat(100));
       expect(collapsed).not.toContain(fullOutput);
 
-      const expanded = extractText(jobTool.renderResult(result, { expanded: true }, mockTheme));
+      const expanded = extractText(
+        registeredTool.renderResult(result, { expanded: true }, mockTheme, context),
+      );
       expect(expanded).toContain(longTask);
       expect(expanded).toContain(fullOutput);
     });

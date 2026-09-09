@@ -27,7 +27,7 @@ import {
   type SubagentDetails,
   type SubagentJobStatus as SubagentJobStatusValue,
 } from "./types";
-import type { SubagentUsageLedger} from "./usage";
+import type { SubagentUsageLedger } from "./usage";
 import { formatUsageCompact, SubagentUsageMode } from "./usage";
 
 export const MAX_CONCURRENT_SUBAGENT_JOBS = DEFAULT_SUBAGENT_LIMITS.maxConcurrentRuns;
@@ -60,6 +60,8 @@ export type SubagentJobRunner = (
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   options: RunSubagentOptions,
 ) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
+
+export type SubagentJobsChanged = (jobs: readonly SubagentJob[]) => void;
 
 function failureFromCause(cause: Cause.Cause<unknown>): unknown {
   for (const reason of cause.reasons) {
@@ -142,6 +144,7 @@ export class SubagentJobManager {
     private readonly telemetryRuntime?: ToolingTelemetryRuntime,
     private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_LIMITS },
     supervisor?: SubagentRunSupervisor,
+    private readonly onJobsChanged?: SubagentJobsChanged,
   ) {
     this.supervisor =
       supervisor ?? getOrCreateSubagentRunSupervisor(`jobs-${randomUUID()}`, this.config);
@@ -239,6 +242,7 @@ export class SubagentJobManager {
         job.status = SubagentJobStatus.Cancelling;
         job.controller.abort();
         Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
+        this.record(job);
         break;
       default:
         break;
@@ -402,6 +406,7 @@ export class SubagentJobManager {
       createdAt: job.createdAt,
       finishedAt: job.finishedAt,
     });
+    this.onJobsChanged?.(this.list());
   }
 
   private pruneTerminalJobs(): void {

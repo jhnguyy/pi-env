@@ -96,9 +96,7 @@ export class PtcToolDispatchError extends Error {
  */
 export const BLOCKED_TOOLS = new Set<string>([
   "ptc",           // self — prevent recursion
-  "subagent",      // in-process agent loops
-  "subagent_start", // long-running process management
-  "subagent_job",  // long-running process management
+  "subagent",      // in-process agent loops and background job management
   "jit_catch",     // spawns a subagent internally
   "skill_build",   // spawns a subagent internally
 ]);

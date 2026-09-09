@@ -7,6 +7,7 @@ import {
   formatJobResult,
   SubagentJobManager,
   type SubagentJobRunner,
+  type SubagentJobsChanged,
 } from "../jobs";
 import { zeroUsage } from "../usage";
 
@@ -35,7 +36,11 @@ function result(name: string, output = "done") {
   };
 }
 
-function manager(runner: SubagentJobRunner, overrides: Partial<SubagentRuntimeConfig> = {}) {
+function manager(
+  runner: SubagentJobRunner,
+  overrides: Partial<SubagentRuntimeConfig> = {},
+  onJobsChanged?: SubagentJobsChanged,
+) {
   return new SubagentJobManager(
     { appendEntry: () => {} } as any,
     new Map(),
@@ -43,6 +48,8 @@ function manager(runner: SubagentJobRunner, overrides: Partial<SubagentRuntimeCo
     undefined,
     undefined,
     config(overrides),
+    undefined,
+    onJobsChanged,
   );
 }
 
@@ -93,6 +100,32 @@ describe("asynchronous subagent hardening", () => {
     await stuckJobs.wait(stuck.id);
     expect(stuck.status).toBe("interrupted");
     await stuckJobs.shutdown();
+  });
+
+  it("reports each state transition for persistent status rendering", async () => {
+    let settle!: () => void;
+    const states: string[][] = [];
+    const jobs = manager(
+      (params, _ctx, _tools, options) =>
+        Effect.callback((resume) => {
+          settle = () => resume(Effect.succeed(result(params.name ?? "status")));
+          options.signal?.addEventListener("abort", () => {}, { once: true });
+        }),
+      { cancellationGraceMs: 1_000 },
+      (current) => states.push(current.map((job) => job.status)),
+    );
+
+    const started = jobs.start({ name: "status", task: "task" }, {} as any);
+    await expect.poll(() => started.status).toBe("running");
+    jobs.cancel(started.id);
+    settle();
+    await jobs.wait(started.id);
+
+    expect(states).toContainEqual(["queued"]);
+    expect(states).toContainEqual(["running"]);
+    expect(states).toContainEqual(["cancelling"]);
+    expect(states).toContainEqual(["cancelled"]);
+    await jobs.shutdown();
   });
 
   it("settles active jobs and does not launch an already aborted start", async () => {
