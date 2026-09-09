@@ -148,6 +148,8 @@ Each post attempt includes an invisible marker:
 
 If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review. The pending marker is persisted before submission so replay can reconcile an interrupted result.
 
+Late results update only the original posting attempt. They preserve newer human edits and do not recreate a cleaned review. Posting changed content still requires confirmation.
+
 Posting is bound to the parent session generation. A session change cancels local waits and process work and prevents completion state from being written into the replacement session. Cancellation cannot revoke a request after GitHub may have accepted it. In that case the original session's pending attempt remains the reconciliation authority and the result is reported as potentially accepted, not undone.
 
 ## Command and tool surface

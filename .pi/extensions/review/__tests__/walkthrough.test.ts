@@ -1,85 +1,22 @@
 import { writeFileSync } from "node:fs";
-import type * as CodingAgent from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import reviewExtension, { clearInMemoryStateForTests } from "../index";
-import { runRealReviewFlow, type RealReviewFlow } from "./fixtures/review-flow";
+import { afterEach, describe, expect, it } from "vitest";
+import { clearInMemoryStateForTests } from "../index";
+import { runRealReviewFlow } from "./fixtures/review-flow";
+import { persistedReviewEntries, registeredReview, reviewContext } from "./fixtures/review-ui";
 
-const mocked = vi.hoisted(() => ({ agentDir: "" }));
-vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
-  ...(await original<typeof CodingAgent>()),
-  getAgentDir: () => mocked.agentDir,
-}));
-
-afterEach(() => {
-  clearInMemoryStateForTests();
-});
+afterEach(clearInMemoryStateForTests);
 
 async function harness() {
   const flow = await runRealReviewFlow();
-  mocked.agentDir = flow.root;
-  const commands: Record<string, any> = {};
-  const handlers: Record<string, any> = {};
-  const appended: any[] = [];
-  let githubCalls = 0;
-  const pi = {
-    events: { on: () => () => {} },
-    registerTool() {},
-    registerCommand(name: string, command: any) {
-      commands[name] = command;
-    },
-    on(name: string, handler: any) {
-      handlers[name] = handler;
-    },
-    appendEntry(_type: string, data: any) {
-      appended.push(structuredClone(data));
-    },
-    exec: async () => {
-      githubCalls++;
-      throw new Error("walkthrough must not post or call GitHub");
-    },
-  };
-  reviewExtension(pi as never);
-  const session = (entries: readonly unknown[] = flow.entries, id = flow.sessionId) => ({
-    cwd: flow.root,
-    hasUI: true,
-    sessionManager: {
-      getSessionId: () => id,
-      getSessionDir: () => flow.sessionDir,
-      getBranch: () => entries,
-    },
-    modelRegistry: { getAvailable: () => [] },
-  });
   return {
     flow,
-    command: commands.review.handler,
-    handlers,
-    appended,
-    session,
-    githubCalls: () => githubCalls,
+    ...registeredReview({
+      root: flow.root,
+      sessionDir: flow.sessionDir,
+      sessionId: flow.sessionId,
+      entries: flow.entries,
+    }),
   };
-}
-
-function context(hasUI = true) {
-  const notes: string[] = [];
-  return {
-    notes,
-    ctx: {
-      hasUI,
-      cwd: mocked.agentDir,
-      ui: {
-        notify: (message: string) => notes.push(message),
-        select: async () => undefined,
-        editor: async () => undefined,
-      },
-    },
-  };
-}
-
-function persistedEntries(flow: RealReviewFlow, appended: readonly any[]): unknown[] {
-  return [
-    ...flow.entries,
-    ...appended.map((data) => ({ type: "custom", customType: "pr-review", data })),
-  ];
 }
 
 describe("registered review walkthrough boundary", () => {
@@ -92,9 +29,9 @@ describe("registered review walkthrough boundary", () => {
       else delete state.plan;
       h.handlers.session_start(
         {},
-        h.session(persistedEntries(h.flow, [{ reviewId: state.snapshot.id, state }])),
+        h.session(persistedReviewEntries(h.flow.entries, [{ reviewId: state.snapshot.id, state }])),
       );
-      const view = context(false);
+      const view = reviewContext(h.flow.root, false);
       await h.command(`pr walkthrough ${state.snapshot.id}`, view.ctx);
       expect(view.notes.at(-1)).toContain(`Coverage: ${status}`);
       expect(h.appended).toHaveLength(0);
@@ -110,12 +47,12 @@ describe("registered review walkthrough boundary", () => {
     // Negative control: the consumer cannot see the producer result unless its save entries cross
     // the extension restore boundary.
     h.handlers.session_start({}, h.session([]));
-    const disconnected = context(false);
+    const disconnected = reviewContext(h.flow.root, false);
     await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, disconnected.ctx);
     expect(disconnected.notes.at(-1)).toContain("not found");
 
     h.handlers.session_tree({}, h.session());
-    const pending = context(false);
+    const pending = reviewContext(h.flow.root, false);
     await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, pending.ctx);
     expect(pending.notes.at(-1)).toContain(`${findingId} [pending]`);
     expect(h.appended).toHaveLength(0);
@@ -167,16 +104,22 @@ describe("registered review walkthrough boundary", () => {
     expect(rawPage).toContain(selected.problem);
     expect(pages.every((page) => page.length < 5_050)).toBe(true);
 
-    await h.command(`pr reject ${h.flow.state.snapshot.id} ${rejected.id}`, context().ctx);
-    await h.command(`pr defer ${h.flow.state.snapshot.id} ${deferred.id}`, context().ctx);
+    await h.command(
+      `pr reject ${h.flow.state.snapshot.id} ${rejected.id}`,
+      reviewContext(h.flow.root).ctx,
+    );
+    await h.command(
+      `pr defer ${h.flow.state.snapshot.id} ${deferred.id}`,
+      reviewContext(h.flow.root).ctx,
+    );
     expect(h.appended.at(-1).state.result.findings[0]).toMatchObject({
       id: findingId,
       problem: "edited",
       rawFindingIds: h.flow.state.result!.findings[0].rawFindingIds,
     });
 
-    h.handlers.session_tree({}, h.session(persistedEntries(h.flow, h.appended)));
-    const restored = context(false);
+    h.handlers.session_tree({}, h.session(persistedReviewEntries(h.flow.entries, h.appended)));
+    const restored = reviewContext(h.flow.root, false);
     await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, restored.ctx);
     expect(restored.notes.at(-1)).toContain(`${findingId} [selected]`);
     expect(restored.notes.at(-1)).toContain(`${rejected.id} [rejected]`);
@@ -188,7 +131,7 @@ describe("registered review walkthrough boundary", () => {
   it("rejects unknown finding IDs without applying part of a decision", async () => {
     const h = await harness();
     h.handlers.session_start({}, h.session());
-    const view = context();
+    const view = reviewContext(h.flow.root);
     await h.command(
       `pr select ${h.flow.state.snapshot.id} ${h.flow.state.result!.findings[0].id} unknown`,
       view.ctx,

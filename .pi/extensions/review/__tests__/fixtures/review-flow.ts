@@ -168,7 +168,7 @@ export interface RealReviewFlow {
   readonly serviceDisposals: number;
 }
 
-/** A real offline DagSessionRuntime run. Only model output and the external GH boundary are faked. */
+/** Run the real DAG with scripted model output and in-memory host adapters. */
 export async function runRealReviewFlow(
   beforeSynthesis?: (boundary: {
     artifactRoot: string;
@@ -233,20 +233,15 @@ export async function runRealReviewFlow(
   let dossierRawIds: string[] = [];
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
     if (request.node.id === "reading-plan") {
-      const submitted = await findTool("submit_review_plan_").execute(
-        "plan",
-        {
-          goal: "Change the exported value.",
-          goalAssessment: "The diff changes the value.",
-          risk: "low",
-          riskReasons: [],
-          cohorts: [{ label: "code", purpose: "implementation", paths: ["a.ts"] }],
-          files: [{ path: "a.ts", attention: "high", role: "implementation" }],
-          evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 12, purpose: "patch" }],
-        },
-        undefined,
-        undefined,
-      );
+      const submitted = await findTool("submit_review_plan_").execute("plan", {
+        goal: "Change the exported value.",
+        goalAssessment: "The diff changes the value.",
+        risk: "low",
+        riskReasons: [],
+        cohorts: [{ label: "code", purpose: "implementation", paths: ["a.ts"] }],
+        files: [{ path: "a.ts", attention: "high", role: "implementation" }],
+        evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 12, purpose: "patch" }],
+      });
       if (submitted.isError) throw new Error("Reading plan was rejected");
       return submitted.content[0].text;
     }
@@ -271,7 +266,7 @@ export async function runRealReviewFlow(
     }
     if (request.node.id === "synthesis") {
       const inspect = (signal?: AbortSignal) =>
-        findTool("review_result_refs_").execute("refs", {}, signal, undefined);
+        findTool("review_result_refs_").execute("refs", {}, signal);
       await beforeSynthesis?.({ artifactRoot, request, inspect });
       const refs = await inspect();
       if (refs.isError) throw new Error("Reviewer dossier was unavailable");
@@ -280,63 +275,53 @@ export async function runRealReviewFlow(
         dossier.succeeded.map((item: any) => [item.role, item.rawFindings[0]]),
       );
       dossierRawIds = dossier.succeeded.map((item: any) => item.rawFindings[0].id);
-      const invalid = await findTool("submit_review_synthesis_").execute(
-        "synthesis",
-        {
-          v: 2,
-          verdict: "invalid accounting",
-          coverage: { status: "complete", succeeded: [], failed: [], malformed: [] },
-          findings: [{ ...raw.correctness.finding, rawFindingIds: ["R-invented"] }],
-          dismissals: [],
-        },
-        undefined,
-        undefined,
-      );
+      const invalid = await findTool("submit_review_synthesis_").execute("synthesis", {
+        v: 2,
+        verdict: "invalid accounting",
+        coverage: { status: "complete", succeeded: [], failed: [], malformed: [] },
+        findings: [{ ...raw.correctness.finding, rawFindingIds: ["R-invented"] }],
+        dismissals: [],
+      });
       invalidSynthesisRejected = invalid.isError === true;
-      const submitted = await findTool("submit_review_synthesis_").execute(
-        "synthesis",
-        {
-          v: 2,
-          verdict: "Editorial consolidation retained three actionable concerns.",
-          coverage: {
-            status: "complete",
-            succeeded: dossier.succeeded.map((item: any) => item.role),
-            failed: [],
-            malformed: [],
-          },
-          findings: [
-            { ...raw.correctness.finding, rawFindingIds: [raw.correctness.id, raw.intent.id] },
-            {
-              ...raw.maintainability.finding,
-              rawFindingIds: [raw.maintainability.id, raw.tests.id],
-            },
-            { ...raw.security.finding, rawFindingIds: [raw.security.id] },
-          ],
-          dismissals: [
-            {
-              rawFindingId: raw["whole-change"].id,
-              reason: "The formatting concern is outside this change's actionable scope.",
-            },
-          ],
+      const submitted = await findTool("submit_review_synthesis_").execute("synthesis", {
+        v: 2,
+        verdict: "Editorial consolidation retained three actionable concerns.",
+        coverage: {
+          status: "complete",
+          succeeded: dossier.succeeded.map((item: any) => item.role),
+          failed: [],
+          malformed: [],
         },
-        undefined,
-        undefined,
-      );
+        findings: [
+          { ...raw.correctness.finding, rawFindingIds: [raw.correctness.id, raw.intent.id] },
+          {
+            ...raw.maintainability.finding,
+            rawFindingIds: [raw.maintainability.id, raw.tests.id],
+          },
+          { ...raw.security.finding, rawFindingIds: [raw.security.id] },
+        ],
+        dismissals: [
+          {
+            rawFindingId: raw["whole-change"].id,
+            reason: "The formatting concern is outside this change's actionable scope.",
+          },
+        ],
+      });
       if (submitted.isError) throw new Error("Valid semantic consolidation was rejected");
       return submitted.content[0].text;
     }
     throw new Error(`Unexpected scripted node ${request.node.id}`);
   };
   const scriptedSubagent: DagEffectExecutor = (request) =>
-    Effect.promise(async () =>
-      Effect.runPromise(
+    Effect.promise(() => scriptedText(request)).pipe(
+      Effect.flatMap((text) =>
         publishDagSubagentTextResult(
           artifactRoot,
           request.runId,
           request.node.id,
           request.attemptId,
           (request.node.executor.payload as any).output.name,
-          await scriptedText(request),
+          text,
         ),
       ),
     );

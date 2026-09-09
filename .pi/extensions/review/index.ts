@@ -118,7 +118,7 @@ function matchingReview(identityKey: string, parentSessionId: string): ReviewSta
 }
 
 function stateById(reviewId?: string): ReviewState | undefined {
-  return reviewId ? coordinator.review(reviewId) : latestState();
+  return reviewId ? coordinator.review(reviewId) : coordinator.latestState();
 }
 function statePath(id: string): string {
   return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
@@ -134,17 +134,11 @@ function stateEntry(state: ReviewState) {
     at: new Date().toISOString(),
   };
 }
-function remember(state: ReviewState): void {
-  coordinator.remember(state);
-}
 function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
   if (!coordinator.remember(state, scope)) return false;
   persistJson(statePath(state.snapshot.id), state);
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
   return true;
-}
-function latestState(): ReviewState | undefined {
-  return coordinator.latestState();
 }
 function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
   if (!coordinator.isScopeActive(scope))
@@ -154,19 +148,13 @@ export function restore(ctx: ExtensionContext): void {
   coordinator.activate(ctx);
   coordinator.resetReviews();
   const latestById = new Map<string, ReviewState>();
-  const order: string[] = [];
   for (const entry of (ctx.sessionManager as any).getBranch?.() ?? []) {
     const data = customData(entry);
     if (!data?.reviewId || !data.state) continue;
-    const priorIndex = order.indexOf(data.reviewId);
-    if (priorIndex >= 0) order.splice(priorIndex, 1);
-    order.push(data.reviewId);
+    latestById.delete(data.reviewId);
     latestById.set(data.reviewId, data.state);
   }
-  for (const reviewId of order) {
-    const state = latestById.get(reviewId);
-    if (state && !state.cleaned) remember(state);
-  }
+  for (const state of latestById.values()) if (!state.cleaned) coordinator.remember(state);
 }
 function failedReconstructionState(current: ReviewState, cause: unknown): ReviewState {
   return {
@@ -424,13 +412,13 @@ async function removeManagedWorktree(
   const worktree = state.snapshot.cache?.worktree ?? state.snapshot.worktree;
   if (!repoDir || !existsSync(repoDir)) {
     if (existsSync(worktree)) {
-      assertManagedPath(root, worktree);
+      assertContainedResolved(root, worktree);
       rmSync(worktree, { recursive: true, force: true });
     }
     return true;
   }
-  assertManagedPath(root, repoDir);
-  if (existsSync(worktree)) assertManagedPath(root, worktree);
+  assertContainedResolved(root, repoDir);
+  if (existsSync(worktree)) assertContainedResolved(root, worktree);
   const remove = existsSync(worktree)
     ? await pi.exec("git", ["worktree", "remove", "--force", worktree], {
         cwd: repoDir,
@@ -754,7 +742,7 @@ async function startReview(
     if (active) return active.then(withoutNestedUsage);
     const existing = matchingReview(identityKey, parentSessionId);
     if (existing) {
-      remember(existing);
+      coordinator.remember(existing);
       return reviewActionResult(existing, true);
     }
   }
@@ -870,7 +858,7 @@ async function executeReviewTool(
 }
 
 function renderStatus(): string {
-  const s = latestState();
+  const s = coordinator.latestState();
   if (!s) return "No active PR review.";
   return [
     `Review: ${s.snapshot.id}`,
@@ -897,7 +885,7 @@ function renderStatus(): string {
     .join("\n");
 }
 function renderFindings(): string {
-  const s = latestState();
+  const s = coordinator.latestState();
   if (!s?.result) return "No findings.";
   const selected = new Set(selectedFindings(s).map((finding) => finding.id));
   return (
@@ -999,7 +987,7 @@ async function walkthrough(
   });
 }
 function draftImplementationPlan(pi: ExtensionAPI): string {
-  const state = latestState();
+  const state = coordinator.latestState();
   if (!state?.result) throw new Error("No completed PR review is available.");
   const selected = selectedFindings(state);
   if (selected.length === 0) throw new Error("Select at least one finding before drafting a plan.");
@@ -1058,31 +1046,6 @@ function reviewPayload(s: ReviewState, event: ReviewEventValue, mark: string) {
       })),
   };
 }
-async function reconcileAttempt(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  s: ReviewState,
-  attempt: { marker: string; status: string; reviewId?: string },
-  scope: ReviewCoordinatorScope,
-  signal: AbortSignal,
-): Promise<string | undefined> {
-  assertActiveCoordinatorScope(scope);
-  const prior = await existingReviewWithMarker(
-    pi.exec.bind(pi),
-    ctx.cwd,
-    s.snapshot,
-    attempt.marker,
-    signal,
-  );
-  assertActiveCoordinatorScope(scope);
-  if (!prior) return undefined;
-  attempt.status = "posted";
-  attempt.reviewId = prior;
-  if (!saveState(pi, s, scope))
-    throw new Error("The review session changed during reconciliation.");
-  return prior;
-}
-
 function newAttempt(s: ReviewState, event: ReviewEventValue, contentHash: string): PostAttempt {
   const id = randomUUID();
   const attempt: PostAttempt = {
@@ -1160,230 +1123,21 @@ function contentHashFor(s: ReviewState, event: ReviewEventValue): string {
   );
 }
 
-async function existingPostDisposition(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  state: ReviewState,
-  contentHash: string,
-  scope: ReviewCoordinatorScope,
-  signal: AbortSignal,
-): Promise<{ attempt?: PostAttempt; result?: string }> {
-  const attempt = state.posts.find(
-    (candidate) => candidate.contentHash === contentHash && candidate.status !== "posted",
-  );
-  const posted = state.posts.find(
-    (candidate) => candidate.contentHash === contentHash && candidate.status === "posted",
-  );
-  if (posted) return { result: `Review already posted (${posted.reviewId ?? posted.id}).` };
-  const prior = attempt
-    ? await reconcileAttempt(pi, ctx, state, attempt, scope, signal)
-    : undefined;
-  if (prior)
-    return { result: `Existing review found for marker; not posting duplicate (${prior}).` };
-  if (attempt?.status === "uncertain")
-    return {
-      result:
-        "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.",
-    };
-  return { attempt };
-}
-
-async function checkedPostingState(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  scope: ReviewCoordinatorScope,
-  reviewId: string,
-  event: ReviewEventValue,
-  contentHash: string,
-  signal: AbortSignal,
-  stage: "posting queue" | "confirmation",
-): Promise<{ state?: ReviewState; error?: string }> {
-  if (!coordinator.isScopeActive(scope))
-    return { error: `The review session changed during ${stage}. Nothing was posted.` };
-  const state = coordinator.review(reviewId);
-  if (!state || state.cleaned || contentHashFor(state, event) !== contentHash)
-    return { error: `The review changed during ${stage}. Confirm the updated review again.` };
-  const blocked = await postingPreflight(pi, ctx, state, event, signal);
-  if (!coordinator.isScopeActive(scope))
-    return { error: "The review session changed during posting preflight. Nothing was posted." };
-  const current = coordinator.review(reviewId);
-  if (!current || current.cleaned || contentHashFor(current, event) !== contentHash)
-    return {
-      error: "The review changed during posting preflight. Confirm the updated review again.",
-    };
-  return blocked ? { error: blocked } : { state: current };
-}
-
-async function handlePostFailure(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  s: ReviewState,
-  attempt: PostAttempt,
-  stderr: string,
-  stdout: string,
-  scope: ReviewCoordinatorScope,
-  signal: AbortSignal,
-): Promise<string> {
-  if (!coordinator.isScopeActive(scope))
-    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-  attempt.status = "uncertain";
-  if (!saveState(pi, s, scope))
-    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-  const reconciled = await reconcileAttempt(pi, ctx, s, attempt, scope, signal);
-  return reconciled
-    ? `Posted review reconciled after uncertain result (${reconciled}).`
-    : `Posting uncertain or failed: ${stderr || stdout}`;
-}
-
-function prefacePreview(s: ReviewState): string {
-  const preface = (s.preface ?? "").trim();
-  return preface ? bound(preface, 500) : "(none)";
-}
-
-function recordPostingAttempt(
-  pi: ExtensionAPI,
-  state: ReviewState,
-  attempt: PostAttempt | undefined,
-  event: ReviewEventValue,
-  contentHash: string,
-  scope: ReviewCoordinatorScope,
-): { attempt?: PostAttempt; error?: string } {
-  if (attempt) return { attempt };
-  const pending = newAttempt(state, event, contentHash);
-  if (!saveState(pi, state, scope))
-    return {
-      error:
-        "The review session changed before the posting attempt was recorded. Nothing was posted.",
-    };
-  return { attempt: pending };
-}
-
-function pendingSubmission(
-  scope: ReviewCoordinatorScope,
-  reviewId: string,
-  event: ReviewEventValue,
-  contentHash: string,
-  attemptId: string,
-): { state: ReviewState; attempt: PostAttempt } | undefined {
-  const state = coordinator.review(reviewId);
-  const attempt = state?.posts.find((candidate) => candidate.id === attemptId);
-  if (
-    !coordinator.isScopeActive(scope) ||
-    !state ||
-    state.cleaned ||
-    contentHashFor(state, event) !== contentHash ||
-    !attempt ||
-    attempt.status !== "pending"
-  )
-    return undefined;
-  return { state, attempt };
-}
-
-async function submitRecordedPost(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  scope: ReviewCoordinatorScope,
-  operation: { submissionIssued: boolean },
-  submission: { state: ReviewState; attempt: PostAttempt },
-  event: ReviewEventValue,
-  signal: AbortSignal,
-): Promise<string> {
-  let result: Awaited<ReturnType<typeof submitPost>>;
-  try {
-    operation.submissionIssued = true;
-    result = await submitPost(pi, ctx, submission.state, event, submission.attempt, signal);
-  } catch (cause) {
-    if (!coordinator.isScopeActive(scope))
-      return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-    return handlePostFailure(
-      pi,
-      ctx,
-      submission.state,
-      submission.attempt,
-      cause instanceof Error ? cause.message : String(cause),
-      "",
-      scope,
-      signal,
-    );
-  }
-  if (!coordinator.isScopeActive(scope))
-    return "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
-  if (result.code === -1) return result.stderr;
-  if (result.code !== 0)
-    return handlePostFailure(
-      pi,
-      ctx,
-      submission.state,
-      submission.attempt,
-      result.stderr,
-      result.stdout,
-      scope,
-      signal,
-    );
-  submission.attempt.status = "posted";
-  try {
-    submission.attempt.reviewId = String(JSON.parse(result.stdout || "{}").id);
-  } catch {}
-  if (!saveState(pi, submission.state, scope))
-    return "The review was accepted remotely, but the session changed before completion was recorded. The original pending attempt remains for replay reconciliation.";
-  return "Review posted.";
-}
-
-async function postReviewCritical(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  scope: ReviewCoordinatorScope,
-  operation: { submissionIssued: boolean },
-  reviewId: string,
-  event: ReviewEventValue,
-  expectedContentHash: string,
-  signal: AbortSignal,
-): Promise<string> {
-  const queued = await checkedPostingState(
-    pi,
-    ctx,
-    scope,
-    reviewId,
-    event,
-    expectedContentHash,
-    signal,
-    "posting queue",
-  );
-  if (queued.error) return queued.error;
-  let state = queued.state!;
-  const contentHash = contentHashFor(state, event);
-  const disposition = await existingPostDisposition(pi, ctx, state, contentHash, scope, signal);
-  if (disposition.result) return disposition.result;
+function postingConfirmation(state: ReviewState, event: ReviewEventValue): string {
   const selected = selectedFindings(state);
   const coverage = isDegraded(state)
     ? `WARNING: degraded coverage. Failed: ${state.result?.coverage?.failed.join(", ") || "none"}; malformed: ${state.result?.coverage?.malformed.join(", ") || "none"}; omissions: ${(state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? []).join(", ") || "none"}; fallback: ${state.result?.provenance?.status === "fallback" ? "yes" : "no"}.`
     : "Coverage: complete.";
-  const accepted = await confirm(
-    ctx,
-    "Post PR review?",
-    bound(
-      `${coverage}\nEvent: ${event}\nHead: ${state.snapshot.metadata.headOid}\nSelected (${selected.length}): ${selected.map((finding) => finding.id).join(", ") || "none"}\nPreface preview:\n${prefacePreview(state)}`,
-      1_200,
-    ),
+  const preface = bound((state.preface ?? "").trim(), 500) || "(none)";
+  return bound(
+    `${coverage}
+Event: ${event}
+Head: ${state.snapshot.metadata.headOid}
+Selected (${selected.length}): ${selected.map((finding) => finding.id).join(", ") || "none"}
+Preface preview:
+${preface}`,
+    1_200,
   );
-  if (!accepted) return "Posting cancelled.";
-  const confirmed = await checkedPostingState(
-    pi,
-    ctx,
-    scope,
-    reviewId,
-    event,
-    contentHash,
-    signal,
-    "confirmation",
-  );
-  if (confirmed.error) return confirmed.error;
-  state = confirmed.state!;
-  const recorded = recordPostingAttempt(pi, state, disposition.attempt, event, contentHash, scope);
-  if (recorded.error) return recorded.error;
-  const submission = pendingSubmission(scope, reviewId, event, contentHash, recorded.attempt!.id);
-  if (!submission) return "The review changed immediately before submission. Nothing was posted.";
-  return submitRecordedPost(pi, ctx, scope, operation, submission, event, signal);
 }
 
 export async function postReview(
@@ -1394,44 +1148,149 @@ export async function postReview(
   reviewId?: string,
 ): Promise<string> {
   const scope = coordinator.captureScope();
-  const keyState = reviewId ? coordinator.review(reviewId) : latestState();
-  if (!keyState || keyState.cleaned)
+  const initial = stateById(reviewId);
+  if (!initial || initial.cleaned)
     return reviewId ? `Review not found: ${reviewId}.` : "No active PR review.";
-  const targetReviewId = keyState.snapshot.id;
-  const expectedContentHash = contentHashFor(keyState, event);
-  const key = `${targetReviewId}:${expectedContentHash}`;
+  const targetId = initial.snapshot.id;
+  const contentHash = contentHashFor(initial, event);
   const operationSignal = coordinator.operationSignal(scope, signal);
-  const operation = { submissionIssued: false };
+  const uncertainSession =
+    "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation.";
+  let submissionIssued = false;
+
+  function currentState(stage: string): ReviewState | string {
+    if (!coordinator.isScopeActive(scope))
+      return `The review session changed during ${stage}. Nothing was posted.`;
+    const state = coordinator.review(targetId);
+    return !state || state.cleaned || contentHashFor(state, event) !== contentHash
+      ? `The review changed during ${stage}. Confirm the updated review again.`
+      : state;
+  }
+
+  async function preflight(stage: string): Promise<ReviewState | string> {
+    const state = currentState(stage);
+    if (typeof state === "string") return state;
+    const blocked = await postingPreflight(pi, ctx, state, event, operationSignal);
+    const current = currentState("posting preflight");
+    return typeof current === "string" ? current : (blocked ?? current);
+  }
+
+  function recordResult(attempt: PostAttempt): boolean {
+    if (!coordinator.isScopeActive(scope)) return false;
+    const state = coordinator.review(targetId);
+    const index =
+      state?.posts.findIndex(
+        (post) =>
+          post.id === attempt.id &&
+          post.contentHash === contentHash &&
+          post.marker === attempt.marker,
+      ) ?? -1;
+    if (!state || state.cleaned || index < 0) return false;
+    // Record only the original attempt. Preserve newer human edits to the review.
+    const posts = [...state.posts];
+    posts[index] = { ...posts[index], status: attempt.status, reviewId: attempt.reviewId };
+    return saveState(pi, { ...state, posts }, scope);
+  }
+
+  async function reconcile(state: ReviewState, attempt: PostAttempt): Promise<string | undefined> {
+    assertActiveCoordinatorScope(scope);
+    const prior = await existingReviewWithMarker(
+      pi.exec.bind(pi),
+      ctx.cwd,
+      state.snapshot,
+      attempt.marker,
+      operationSignal,
+    );
+    assertActiveCoordinatorScope(scope);
+    if (prior && !recordResult({ ...attempt, status: "posted", reviewId: prior }))
+      throw new Error("The review changed before reconciliation could be recorded.");
+    return prior;
+  }
+
+  async function submit(state: ReviewState, attempt: PostAttempt): Promise<string> {
+    let result: Awaited<ReturnType<typeof submitPost>>;
+    try {
+      submissionIssued = true;
+      result = await submitPost(pi, ctx, state, event, attempt, operationSignal);
+    } catch (cause) {
+      result = {
+        code: 1,
+        stdout: "",
+        stderr: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+    if (!coordinator.isScopeActive(scope)) return uncertainSession;
+    if (result.code === -1) return result.stderr;
+    if (result.code !== 0) {
+      if (!recordResult({ ...attempt, status: "uncertain" }))
+        return "Posting is uncertain. The review changed before the result could be recorded.";
+      const prior = await reconcile(state, attempt);
+      return prior
+        ? `Posted review reconciled after uncertain result (${prior}).`
+        : `Posting uncertain or failed: ${result.stderr || result.stdout}`;
+    }
+    let remoteId = attempt.reviewId;
+    try {
+      remoteId = String(JSON.parse(result.stdout || "{}").id);
+    } catch {}
+    return recordResult({ ...attempt, status: "posted", reviewId: remoteId })
+      ? "Review posted."
+      : "The review was accepted remotely, but the review changed before completion was recorded.";
+  }
+
+  async function execute(): Promise<string> {
+    let state = await preflight("posting queue");
+    if (typeof state === "string") return state;
+    const posted = state.posts.find(
+      (post) => post.contentHash === contentHash && post.status === "posted",
+    );
+    if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
+    let attempt = state.posts.find(
+      (post) => post.contentHash === contentHash && post.status !== "posted",
+    );
+    if (attempt) {
+      const prior = await reconcile(state, attempt);
+      if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
+      if (attempt.status === "uncertain")
+        return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
+      state = currentState("reconciliation");
+      if (typeof state === "string") return state;
+    }
+    if (!(await confirm(ctx, "Post PR review?", postingConfirmation(state, event))))
+      return "Posting cancelled.";
+    state = await preflight("confirmation");
+    if (typeof state === "string") return state;
+    if (!attempt) {
+      attempt = newAttempt(state, event, contentHash);
+      if (!saveState(pi, state, scope))
+        return "The review session changed before the posting attempt was recorded. Nothing was posted.";
+    }
+    const current = currentState("submission");
+    if (typeof current === "string") return current;
+    const pending = current.posts.find((post) => post.id === attempt.id);
+    if (!pending || pending.status !== "pending")
+      return "The review changed immediately before submission. Nothing was posted.";
+    return submit(current, pending);
+  }
+
   try {
     return await Effect.runPromise(
       PartitionedSemaphore.withPermits(
         coordinator.postSemaphore,
-        key,
+        `${targetId}:${contentHash}`,
         1,
-      )(
-        Effect.tryPromise(() =>
-          postReviewCritical(
-            pi,
-            ctx,
-            scope,
-            operation,
-            targetReviewId,
-            event,
-            expectedContentHash,
-            operationSignal,
-          ),
-        ),
-      ),
+      )(Effect.tryPromise(execute)),
       { signal: operationSignal },
     );
   } catch (cause) {
     if (!coordinator.isScopeActive(scope))
-      return operation.submissionIssued
-        ? "Posting may have been accepted remotely after the session changed. The original pending attempt remains for replay reconciliation."
+      return submissionIssued
+        ? uncertainSession
         : "The review session changed before remote submission. Nothing was posted.";
     throw cause;
   }
 }
+
 function findingTemplate(f: Finding): string {
   return [
     `Problem: ${f.problem}`,
@@ -1498,9 +1357,6 @@ async function editPreface(
     return "The review session changed during the operation.";
   return "Preface updated.";
 }
-function assertManagedPath(root: string, absolute: string): void {
-  assertContainedResolved(root, absolute);
-}
 function listReviews(): string {
   const reviews = [...coordinator.reviews()].sort((left, right) =>
     right.snapshot.createdAt.localeCompare(left.snapshot.createdAt),
@@ -1533,7 +1389,8 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const worktreeCleaned = await removeManagedWorktree(pi, state, signal);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
   const root = join(getAgentDir(), "pr-review");
-  if (existsSync(state.snapshot.artifactDir)) assertManagedPath(root, state.snapshot.artifactDir);
+  if (existsSync(state.snapshot.artifactDir))
+    assertContainedResolved(root, state.snapshot.artifactDir);
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
   if (!coordinator.isScopeActive(scope))
     return "The review session changed during cleanup. Owned resources may already be removed. No cleanup state was appended.";
@@ -1585,7 +1442,7 @@ const handlers: Partial<
   edit: (pi, rest, ctx) => editFinding(pi, ctx, rest[0] ?? "", rest[1] ?? ""),
   preface: (pi, rest, ctx) => editPreface(pi, ctx, rest[0] ?? ""),
   rerun: async (pi, _rest, ctx) => {
-    const s = latestState();
+    const s = coordinator.latestState();
     if (!s) return "No active PR review.";
     return (
       (await startReview(pi, { url: s.snapshot.metadata.url }, undefined, ctx, true)).content[0]
@@ -1658,13 +1515,11 @@ export default function reviewExtension(pi: ExtensionAPI) {
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
-    coordinator.activate(ctx);
     restore(ctx);
     void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
   });
   pi.on("session_tree" as any, (_event: unknown, ctx: ExtensionContext) => {
-    coordinator.activate(ctx);
     restore(ctx);
     void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);
