@@ -1,6 +1,8 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
 import { bound, type Finding, type ReviewState } from "./core";
 import { decisionFor, hasCurrentAcknowledgement, isDegraded } from "./decision";
+import { readRawFindingArtifact } from "./raw-provenance";
 import { findingContext, pinnedContext, pinnedDiffPages } from "./walkthrough-context";
 
 function findingLine(state: ReviewState, finding: Finding): string {
@@ -9,17 +11,23 @@ function findingLine(state: ReviewState, finding: Finding): string {
   const anchor = finding.file
     ? `${finding.file}${finding.line ? `:${finding.line}` : ""}`
     : "unanchored";
-  return bound(`${finding.id} [${decision.status}]${recommendation} ${anchor} - ${finding.problem}`, 280);
+  return bound(
+    `${finding.id} [${decision.status}]${recommendation} ${anchor} - ${finding.problem}`,
+    280,
+  );
 }
 
 type WalkthroughFile = NonNullable<ReviewState["plan"]>["files"][number];
 
 function planFiles(state: ReviewState): readonly WalkthroughFile[] {
-  return state.plan?.files ?? state.snapshot.metadata.changedFiles.map((file) => ({
-    path: file.path,
-    attention: "normal" as const,
-    role: "Reading plan unavailable; changed-file manifest entry",
-  }));
+  return (
+    state.plan?.files ??
+    state.snapshot.metadata.changedFiles.map((file) => ({
+      path: file.path,
+      attention: "normal" as const,
+      role: "Reading plan unavailable; changed-file manifest entry",
+    }))
+  );
 }
 
 function fileLine(index: number, file: WalkthroughFile): string {
@@ -41,7 +49,7 @@ function coverageText(state: ReviewState, boundedOutput = false): string {
     `Failed nodes: ${state.dag?.failedNodes?.join(", ") || "none"}`,
     `Malformed nodes: ${state.dag?.malformedNodes?.join(", ") || "none"}`,
     `Preparation failure: ${state.preparation ? `${state.preparation.stage}/${state.preparation.code}: ${state.preparation.message}` : "none"}`,
-    `Fallback: ${provenance?.status === "fallback" ? provenance.fallbackReason ?? "used" : "none"}`,
+    `Fallback: ${provenance?.status === "fallback" ? (provenance.fallbackReason ?? "used") : "none"}`,
     `Usage: ${state.metrics?.usage?.turns ?? 0} turns, ${state.metrics?.usage?.input ?? 0} input, ${state.metrics?.usage?.output ?? 0} output`,
   ].join("\n");
   return boundedOutput ? bound(text, 1_500) : text;
@@ -68,13 +76,22 @@ export function walkthroughSummary(state: ReviewState, interactive: boolean): st
       "Reading plan",
       files.map((file, index) => fileLine(index, file)),
     ),
-    boundedIndex("Anchored findings", anchored.map((finding) => findingLine(state, finding))),
-    boundedIndex("Unanchored findings", unanchored.map((finding) => findingLine(state, finding))),
+    boundedIndex(
+      "Anchored findings",
+      anchored.map((finding) => findingLine(state, finding)),
+    ),
+    boundedIndex(
+      "Unanchored findings",
+      unanchored.map((finding) => findingLine(state, finding)),
+    ),
     "Provenance and dispositions",
     provenance
       ? `${provenance.rawFindings.length} raw finding(s), ${provenance.dismissals.length} dismissal(s), ${provenance.status}`
       : "Legacy provenance unavailable. No provenance was fabricated.",
-    boundedIndex("Human decisions", findings.map((finding) => findingLine(state, finding))),
+    boundedIndex(
+      "Human decisions",
+      findings.map((finding) => findingLine(state, finding)),
+    ),
     "Finalize",
     isDegraded(state)
       ? `Degraded review acknowledgement: ${hasCurrentAcknowledgement(state) ? "current" : "required or stale"}`
@@ -89,7 +106,10 @@ export function walkthroughSummary(state: ReviewState, interactive: boolean): st
 interface WalkthroughActions {
   readonly state: () => ReviewState;
   readonly assertCurrent: () => void;
-  readonly decide: (findingId: string, status: "selected" | "rejected" | "deferred") => Promise<string>;
+  readonly decide: (
+    findingId: string,
+    status: "selected" | "rejected" | "deferred",
+  ) => Promise<string>;
   readonly editFinding: (findingId: string) => Promise<string>;
   readonly editPreface: () => Promise<string>;
   readonly finalize: () => Promise<string>;
@@ -155,10 +175,18 @@ async function findingIndex(
   while (true) {
     const state = actions.state();
     const findings = (state.result?.findings ?? []).filter((finding) =>
-      anchored ? Boolean(finding.anchorValid && finding.file) : !finding.anchorValid || !finding.file,
+      anchored
+        ? Boolean(finding.anchorValid && finding.file)
+        : !finding.anchorValid || !finding.file,
     );
-    const options = [...findings.map((finding, index) => `${index + 1}. ${findingLine(state, finding)}`), "Back"];
-    const choice = await ctx.ui.select(anchored ? "Anchored findings" : "Unanchored findings", options);
+    const options = [
+      ...findings.map((finding, index) => `${index + 1}. ${findingLine(state, finding)}`),
+      "Back",
+    ];
+    const choice = await ctx.ui.select(
+      anchored ? "Anchored findings" : "Unanchored findings",
+      options,
+    );
     actions.assertCurrent();
     if (!choice || choice === "Back") return;
     const index = options.indexOf(choice);
@@ -167,7 +195,10 @@ async function findingIndex(
   }
 }
 
-async function readingPlan(ctx: ExtensionCommandContext, actions: WalkthroughActions): Promise<void> {
+async function readingPlan(
+  ctx: ExtensionCommandContext,
+  actions: WalkthroughActions,
+): Promise<void> {
   while (true) {
     const state = actions.state();
     const files = planFiles(state);
@@ -179,7 +210,10 @@ async function readingPlan(ctx: ExtensionCommandContext, actions: WalkthroughAct
     if (!file) continue;
     const pages = pinnedDiffPages(state, file.path);
     while (true) {
-      const pageOptions = [...pages.map((page) => `Pinned diff page ${page.number}/${page.total}`), "Back"];
+      const pageOptions = [
+        ...pages.map((page) => `Pinned diff page ${page.number}/${page.total}`),
+        "Back",
+      ];
       const pageChoice = await ctx.ui.select(
         bound(
           `${file.path}\nAttention: ${file.attention}\nRole: ${file.role}\nPinned diff is hash verified. ${pages.length} bounded page(s).`,
@@ -190,20 +224,31 @@ async function readingPlan(ctx: ExtensionCommandContext, actions: WalkthroughAct
       actions.assertCurrent();
       if (!pageChoice || pageChoice === "Back") break;
       const page = pages[pageOptions.indexOf(pageChoice)];
-      if (page) await detail(ctx, `${file.path} — pinned diff ${page.number}/${page.total}\n${page.text}`);
+      if (page)
+        await detail(ctx, `${file.path} — pinned diff ${page.number}/${page.total}\n${page.text}`);
     }
   }
 }
 
-async function provenance(ctx: ExtensionCommandContext, actions: WalkthroughActions): Promise<void> {
+async function provenance(
+  ctx: ExtensionCommandContext,
+  actions: WalkthroughActions,
+): Promise<void> {
   while (true) {
     const value = actions.state().result?.provenance;
     if (!value) {
-      await detail(ctx, "Provenance and dispositions\nLegacy provenance unavailable. No raw IDs or human inspection were fabricated.");
+      await detail(
+        ctx,
+        "Provenance and dispositions\nLegacy provenance unavailable. No raw IDs or human inspection were fabricated.",
+      );
       return;
     }
-    const rawOptions = value.rawFindings.map((raw, index) => `Raw ${index + 1}: ${raw.id} [${raw.role}]`);
-    const dismissalOptions = value.dismissals.map((item, index) => `Dismissal ${index + 1}: ${item.rawFindingId}`);
+    const rawOptions = value.rawFindings.map(
+      (raw, index) => `Raw ${index + 1}: ${raw.id} [${raw.role}]`,
+    );
+    const dismissalOptions = value.dismissals.map(
+      (item, index) => `Dismissal ${index + 1}: ${item.rawFindingId}`,
+    );
     const options = [...rawOptions, ...dismissalOptions, "Back"];
     const choice = await ctx.ui.select(
       `Provenance and dispositions\nEditorial consolidation: ${value.status}. Every raw record and dismissal is listed.`,
@@ -214,10 +259,25 @@ async function provenance(ctx: ExtensionCommandContext, actions: WalkthroughActi
     const index = options.indexOf(choice);
     if (index < rawOptions.length) {
       const raw = value.rawFindings[index];
-      if (raw) await detail(ctx, `Raw finding ${raw.id}\nRole: ${raw.role}\nEvidence digest: ${raw.evidenceDigest}\n${JSON.stringify(raw.finding, null, 2)}`);
+      if (!raw) continue;
+      const state = actions.state();
+      const materialized = await Effect.runPromise(
+        Effect.match(readRawFindingArtifact(state.snapshot.artifactDir, state.dag!.runId, raw), {
+          onFailure: (error) => ({ available: false as const, error }),
+          onSuccess: (finding) => ({ available: true as const, finding }),
+        }),
+      );
+      actions.assertCurrent();
+      await detail(
+        ctx,
+        materialized.available
+          ? `Raw finding ${materialized.finding.id}\nRole: ${materialized.finding.role}\nEvidence digest: ${materialized.finding.evidenceDigest}\n${JSON.stringify(materialized.finding.finding, null, 2)}`
+          : `Raw finding ${raw.id}\nRaw evidence unavailable or tampered: ${materialized.error.message}`,
+      );
     } else {
       const dismissal = value.dismissals[index - rawOptions.length];
-      if (dismissal) await detail(ctx, `Dismissed ${dismissal.rawFindingId}\nReason: ${dismissal.reason}`);
+      if (dismissal)
+        await detail(ctx, `Dismissed ${dismissal.rawFindingId}\nReason: ${dismissal.reason}`);
     }
   }
 }
@@ -263,7 +323,10 @@ export async function guidedWalkthrough(
   while (true) {
     actions.assertCurrent();
     const state = actions.state();
-    const choice = await ctx.ui.select(`PR review walkthrough ${state.snapshot.id}\nChoose a stage. Stages are ordered and all indexed items remain reachable.`, stages);
+    const choice = await ctx.ui.select(
+      `PR review walkthrough ${state.snapshot.id}\nChoose a stage. Stages are ordered and all indexed items remain reachable.`,
+      stages,
+    );
     actions.assertCurrent();
     switch (choice) {
       case "1. Overview and coverage":
