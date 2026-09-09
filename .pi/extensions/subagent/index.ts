@@ -91,9 +91,8 @@ const SUBAGENT_PARAMETERS = Type.Object(
 
 type SubagentToolParams = Static<typeof SUBAGENT_PARAMETERS>;
 
-function requireRunParams(params: SubagentToolParams, requireName = true): SubagentParams {
-  if (requireName && !params.name)
-    throw new Error(`name is required for subagent ${params.action}.`);
+function requireRunParams(params: SubagentToolParams): SubagentParams {
+  if (!params.name) throw new Error(`name is required for subagent ${params.action}.`);
   if (!params.task) throw new Error(`task is required for subagent ${params.action}.`);
   return {
     name: params.name,
@@ -220,27 +219,18 @@ export default function (pi: ExtensionAPI) {
       label: "Subagent",
       description,
       parameters: SUBAGENT_PARAMETERS,
-      prepareArguments(args): SubagentToolParams {
-        if (!args || typeof args !== "object") return args as SubagentToolParams;
-        const legacy = args as { action?: unknown; task?: unknown };
-        if (legacy.action === undefined && typeof legacy.task === "string") {
-          return { ...legacy, action: SubagentAction.Run } as SubagentToolParams;
-        }
-        return args as SubagentToolParams;
-      },
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-        const action = params.action ?? SubagentAction.Run;
-        if (action === SubagentAction.Run) {
+        if (params.action === SubagentAction.Run) {
           const result = await runtime.execute(
             toolCallId,
-            requireRunParams(params, params.action !== undefined),
+            requireRunParams(params),
             signal,
             onUpdate,
             ctx,
           );
           return { ...result, usage: toNestedToolUsage(result.details.usage) };
         }
-        if (action === SubagentAction.Start) {
+        if (params.action === SubagentAction.Start) {
           if (signal?.aborted) throw new Error("Subagent start aborted.");
           return runtime.startJob(requireRunParams(params), ctx, signal);
         }

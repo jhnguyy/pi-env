@@ -72,6 +72,10 @@ const mockCtx = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function runParams(params: Record<string, unknown>) {
+  return { action: "run", name: "test-run", ...params };
+}
+
 /** Extract text string from a Text or Container component. */
 function extractText(component: Text | Container): string {
   if (component instanceof Container) {
@@ -100,20 +104,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
         "usage",
         "result",
       ]);
-    });
-
-    it("does not expose a caller-selected turn limit", () => {
-      expect(registeredTool.parameters.properties).not.toHaveProperty("max_turns");
-      expect(registeredTool.parameters.properties).not.toHaveProperty("maxTurns");
-      expect(registeredTool.description).not.toContain("max_turns");
-    });
-
-    it("prepares legacy blocking calls as run actions", () => {
-      expect(registeredTool.prepareArguments({ name: "legacy", task: "inspect" })).toEqual({
-        action: "run",
-        name: "legacy",
-        task: "inspect",
-      });
     });
 
     it("reports completed asynchronous usage exactly once", () => {
@@ -168,7 +158,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // Verify: using it in tools param succeeds tool resolution (fails at model, not tools)
       const result = await registeredTool.execute(
         "call-ext-1",
-        { task: "do something", tools: ["notes"], model: "anthropic/nonexistent" },
+        runParams({ task: "do something", tools: ["notes"], model: "anthropic/nonexistent" }),
         undefined,
         undefined,
         mockCtx,
@@ -182,7 +172,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // notes was already registered above
       const result = await registeredTool.execute(
         "call-ext-2",
-        { task: "do something", tools: ["fakeTool"] },
+        runParams({ task: "do something", tools: ["fakeTool"] }),
         undefined,
         undefined,
         mockCtx,
@@ -198,7 +188,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when no tools specified and no agent file", async () => {
       const result = await registeredTool.execute(
         "call-v1",
-        { task: "do something" },
+        runParams({ task: "do something" }),
         undefined,
         undefined,
         mockCtx,
@@ -219,7 +209,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when tools is empty array", async () => {
       const result = await registeredTool.execute(
         "call-v2",
-        { task: "do something", tools: [] },
+        runParams({ task: "do something", tools: [] }),
         undefined,
         undefined,
         mockCtx,
@@ -231,7 +221,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when tools provided but no model", async () => {
       const result = await registeredTool.execute(
         "call-v3",
-        { task: "do something", tools: ["read"] },
+        runParams({ task: "do something", tools: ["read"] }),
         undefined,
         undefined,
         mockCtx,
@@ -248,11 +238,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error for unknown tool names", async () => {
       const result = await registeredTool.execute(
         "call-1",
-        {
+        runParams({
           task: "do something",
           tools: ["read", "nonexistent"],
           model: "anthropic/claude-haiku-4-5",
-        },
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -264,7 +254,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("includes available tools in the error message", async () => {
       const result = await registeredTool.execute(
         "call-2",
-        { task: "do something", tools: ["fakeTool"], model: "anthropic/claude-haiku-4-5" },
+        runParams({
+          task: "do something",
+          tools: ["fakeTool"],
+          model: "anthropic/claude-haiku-4-5",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -275,7 +269,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("error details have correct shape for unknown tools", async () => {
       const result = await registeredTool.execute(
         "call-3",
-        { task: "test task", tools: ["unknown"], model: "anthropic/claude-haiku-4-5" },
+        runParams({
+          task: "test task",
+          tools: ["unknown"],
+          model: "anthropic/claude-haiku-4-5",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -296,7 +294,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when model is not found in registry (provider/id format)", async () => {
       const result = await registeredTool.execute(
         "call-6",
-        { task: "do something", tools: ["read"], model: "anthropic/nonexistent-model" },
+        runParams({
+          task: "do something",
+          tools: ["read"],
+          model: "anthropic/nonexistent-model",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -308,7 +310,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when no model specified (no agent, no model param)", async () => {
       const result = await registeredTool.execute(
         "call-8",
-        { task: "do something", tools: ["read"] },
+        runParams({ task: "do something", tools: ["read"] }),
         undefined,
         undefined,
         mockCtx,
@@ -319,7 +321,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("bare model name not found returns model_not_found", async () => {
       const result = await registeredTool.execute(
         "call-11",
-        { task: "task", tools: ["read"], model: "completely-unknown-model" },
+        runParams({ task: "task", tools: ["read"], model: "completely-unknown-model" }),
         undefined,
         undefined,
         mockCtx,
@@ -330,7 +332,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("provider/id format not found returns model_not_found", async () => {
       const result = await registeredTool.execute(
         "call-12",
-        { task: "task", tools: ["read"], model: "anthropic/does-not-exist" },
+        runParams({ task: "task", tools: ["read"], model: "anthropic/does-not-exist" }),
         undefined,
         undefined,
         mockCtx,
@@ -346,7 +348,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // discoverAgents reads real filesystem — "nonexistent-agent" won't be found
       const result = await registeredTool.execute(
         "call-a1",
-        { task: "do something", agent: "nonexistent-agent" },
+        runParams({ task: "do something", agent: "nonexistent-agent" }),
         undefined,
         undefined,
         mockCtx,

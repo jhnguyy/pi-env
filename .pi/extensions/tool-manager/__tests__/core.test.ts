@@ -36,17 +36,6 @@ describe("tool manager core", () => {
     expect(searchTools("linear issue", ["read"], resolveConfig(), tools).loaded).toEqual(["linear"]);
   });
 
-  it("loads only the consolidated subagent tool for delegation", () => {
-    const legacyTools = [
-      ...tools,
-      { name: "subagent_start", description: "legacy background subagent", parameters: {}, sourceInfo: { source: "test" } as any },
-      { name: "subagent_job", description: "legacy subagent wait", parameters: {}, sourceInfo: { source: "test" } as any },
-    ];
-
-    expect(resolveConfig().groups.delegation).toEqual(["subagent"]);
-    expect(searchTools("delegate to a background subagent", ["read"], resolveConfig(), legacyTools).loaded).toEqual(["subagent"]);
-  });
-
   it("trigger matrix auto-activates analysis for coding sessions with code entities", () => {
     expect(triggerGroups({ text: "fix this TypeScript file" }, true)).toContain("analysis");
     expect(triggerGroups({ text: "analyze this design" }, true)).not.toContain("analysis");

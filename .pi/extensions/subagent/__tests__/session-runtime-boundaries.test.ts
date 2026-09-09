@@ -103,7 +103,7 @@ function createContext(cwd: string) {
 }
 
 describe("SubagentSessionRuntime public boundaries", () => {
-  it("keeps sync subagent compatible before session_start and resets async jobs/usage across replacement and shutdown", async () => {
+  it("runs blocking work before session_start and resets background jobs and usage across session lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-session-runtime-"));
     tempDirs.push(cwd);
     const { tools, handlers } = createHarness();
