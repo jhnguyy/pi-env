@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
@@ -83,17 +91,38 @@ describe("bounded raw finding provenance artifacts", () => {
       ),
     ).rejects.toBeDefined();
 
-    const linkPath = path.join(f.root, "raw-provenance-v2", "linked.json");
-    symlinkSync(`${f.raw.id}.json`, linkPath);
+    const artifactPath = path.join(f.root, f.record.artifact.path);
+    const movedPath = path.join(path.dirname(artifactPath), "moved.json");
+    renameSync(artifactPath, movedPath);
+    symlinkSync("moved.json", artifactPath);
     await expect(
-      Effect.runPromise(
-        readRawFindingArtifact(
-          f.root,
-          f.runId,
-          changed(f.record, { path: "raw-provenance-v2/linked.json" }),
-        ),
-      ),
+      Effect.runPromise(readRawFindingArtifact(f.root, f.runId, f.record)),
     ).rejects.toThrow(/symlink/i);
+  });
+
+  it("rejects a symlinked artifact root before public writes and leaves its target unchanged", async () => {
+    const f = fixture();
+    const outside = mkdtempSync(path.join(tmpdir(), "raw-review-root-target-"));
+    roots.push(outside);
+    rmSync(f.root, { recursive: true });
+    symlinkSync(outside, f.root, "dir");
+
+    await expect(
+      Effect.runPromise(persistRawFindingArtifacts(f.root, f.runId, [f.raw])),
+    ).rejects.toThrow(/root.*symlink/i);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("rejects a symlinked artifact root before public reads", async () => {
+    const f = await persistFixture();
+    const alias = mkdtempSync(path.join(tmpdir(), "raw-review-root-link-"));
+    roots.push(alias);
+    rmSync(alias, { recursive: true });
+    symlinkSync(f.root, alias, "dir");
+
+    await expect(
+      Effect.runPromise(readRawFindingArtifact(alias, f.runId, f.record)),
+    ).rejects.toThrow(/root.*symlink/i);
   });
 
   it("does not overwrite a changed artifact when persistence is replayed", async () => {
@@ -113,6 +142,6 @@ describe("bounded raw finding provenance artifacts", () => {
     await expect(
       Effect.runPromise(persistRawFindingArtifacts(f.root, f.runId, [f.raw])),
     ).rejects.toBeDefined();
-    expect(() => writeFileSync(path.join(outside, "sentinel"), "safe")).not.toThrow();
+    expect(readdirSync(outside)).toEqual([]);
   });
 });

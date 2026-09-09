@@ -9,8 +9,12 @@ import {
   type ReviewResult,
   type ReviewerOutput,
   type SynthesisReview,
+  validateRawFindingRecordShape,
 } from "./schema";
 
+const MaxRawFindingArtifactBytes = 262_144;
+const RawFindingDirectory = "raw-provenance-v2";
+const RawFindingProducer = "pr-review-raw-provenance-v2";
 const roleOrder = new Map(ReviewerRoles.map((role, index) => [role, index]));
 
 export function findingKey(finding: FindingInput): string {
@@ -101,20 +105,49 @@ export function validConsolidationAccounting(
   return accounted.size === rawById.size;
 }
 
+function validProvenanceRecordSet(
+  rawFindings: readonly AdmittedRawFinding[],
+  provenanceRecords: readonly RawFindingRecord[],
+  runId: string,
+): boolean {
+  const rawById = new Map(rawFindings.map((raw) => [raw.id, raw]));
+  if (
+    runId.length === 0 ||
+    rawById.size !== rawFindings.length ||
+    provenanceRecords.length !== rawById.size
+  )
+    return false;
+  const recordIds = new Set<string>();
+  for (const record of provenanceRecords) {
+    if (!validateRawFindingRecordShape(record) || recordIds.has(record.id)) return false;
+    const raw = rawById.get(record.id);
+    if (
+      !raw ||
+      raw.role !== record.role ||
+      raw.evidenceDigest !== record.evidenceDigest ||
+      record.artifact.runId !== runId ||
+      record.artifact.bytes > MaxRawFindingArtifactBytes ||
+      record.artifact.producerNodeId !== RawFindingProducer ||
+      record.artifact.outputName !== record.id ||
+      record.artifact.path !== `${RawFindingDirectory}/${record.id}.json`
+    )
+      return false;
+    recordIds.add(record.id);
+  }
+  return recordIds.size === rawById.size;
+}
+
 /** Derives authoritative provenance after valid accounting and artifact persistence. */
 export function consolidateSynthesis(
   synthesis: ConsolidationReviewV2,
   rawFindings: readonly AdmittedRawFinding[],
   provenanceRecords: readonly RawFindingRecord[],
+  runId: string,
 ): ReviewResult | undefined {
   const rawById = new Map(rawFindings.map((raw) => [raw.id, raw]));
   if (
     !validConsolidationAccounting(synthesis, rawFindings) ||
-    provenanceRecords.length !== rawFindings.length ||
-    provenanceRecords.some((record) => {
-      const raw = rawById.get(record.id);
-      return !raw || raw.role !== record.role || raw.evidenceDigest !== record.evidenceDigest;
-    })
+    !validProvenanceRecordSet(rawFindings, provenanceRecords, runId)
   )
     return undefined;
 
@@ -149,8 +182,10 @@ export function consolidateSynthesis(
 export function fallbackConsolidation(
   rawFindings: readonly AdmittedRawFinding[],
   provenanceRecords: readonly RawFindingRecord[],
+  runId: string,
   reason: string,
-): ReviewResult {
+): ReviewResult | undefined {
+  if (!validProvenanceRecordSet(rawFindings, provenanceRecords, runId)) return undefined;
   return {
     verdict: `Reviewer consolidation failed. Every admitted raw finding is preserved below. ${reason}`,
     findings: rawFindings.map(

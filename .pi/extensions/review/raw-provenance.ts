@@ -43,42 +43,64 @@ function isCanonicalChild(root: string, candidate: string): boolean {
   return relative.length > 0 && relative !== ".." && !relative.startsWith(`..${path.sep}`);
 }
 
-function prepareArtifactDirectory(root: string): Effect.Effect<string, RawFindingArtifactError> {
+function canonicalArtifactRoot(root: string): Effect.Effect<string, RawFindingArtifactError> {
   return Effect.tryPromise({
     try: async () => {
-      const canonicalRoot = await Fs.realpath(root);
-      const directory = path.join(canonicalRoot, RawFindingDirectory);
-      await Fs.mkdir(directory, { recursive: true, mode: 0o700 });
-      const directoryStat = await Fs.lstat(directory);
-      const canonicalDirectory = await Fs.realpath(directory);
-      if (
-        directoryStat.isSymbolicLink() ||
-        !directoryStat.isDirectory() ||
-        !isCanonicalChild(canonicalRoot, canonicalDirectory)
-      )
-        throw failure("Raw finding artifact directory is not a confined real directory.");
-      return canonicalDirectory;
+      const rootStat = await Fs.lstat(root);
+      if (rootStat.isSymbolicLink() || !rootStat.isDirectory())
+        throw failure("Raw finding artifact root must be a real directory, not a symlink.");
+      return await Fs.realpath(root);
     },
     catch: (cause) =>
       cause instanceof RawFindingArtifactError
         ? cause
-        : failure("Could not prepare raw finding artifact storage.", cause),
+        : failure("Could not verify raw finding artifact root.", cause),
+  });
+}
+
+function prepareArtifactDirectory(root: string): Effect.Effect<string, RawFindingArtifactError> {
+  return Effect.gen(function* () {
+    const canonicalRoot = yield* canonicalArtifactRoot(root);
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const directory = path.join(canonicalRoot, RawFindingDirectory);
+        await Fs.mkdir(directory, { recursive: true, mode: 0o700 });
+        const directoryStat = await Fs.lstat(directory);
+        const canonicalDirectory = await Fs.realpath(directory);
+        if (
+          directoryStat.isSymbolicLink() ||
+          !directoryStat.isDirectory() ||
+          !isCanonicalChild(canonicalRoot, canonicalDirectory)
+        )
+          throw failure("Raw finding artifact directory is not a confined real directory.");
+        return canonicalDirectory;
+      },
+      catch: (cause) =>
+        cause instanceof RawFindingArtifactError
+          ? cause
+          : failure("Could not prepare raw finding artifact storage.", cause),
+    });
   });
 }
 
 function rejectSymlinkComponents(
-  root: string,
+  canonicalRoot: string,
   relativePath: string,
 ): Effect.Effect<void, RawFindingArtifactError> {
   return Effect.tryPromise({
     try: async () => {
-      const canonicalRoot = await Fs.realpath(root);
+      const candidate = path.resolve(canonicalRoot, relativePath);
+      if (!isCanonicalChild(canonicalRoot, candidate))
+        throw failure("Raw finding artifact path is outside its storage root.");
       let current = canonicalRoot;
       for (const component of relativePath.split("/")) {
         current = path.join(current, component);
         if ((await Fs.lstat(current)).isSymbolicLink())
           throw failure("Raw finding artifact references must not traverse symlinks.");
       }
+      const canonicalCandidate = await Fs.realpath(candidate);
+      if (!isCanonicalChild(canonicalRoot, canonicalCandidate))
+        throw failure("Raw finding artifact path is outside its storage root.");
     },
     catch: (cause) =>
       cause instanceof RawFindingArtifactError
@@ -120,11 +142,14 @@ export function readRawFindingArtifact(
       return yield* failure(
         "Raw finding artifact run identity does not match the requested review.",
       );
+    if (record.artifact.path !== `${RawFindingDirectory}/${record.id}.json`)
+      return yield* failure("Raw finding artifact path does not match its provenance identity.");
     if (record.artifact.bytes > MaxRawFindingArtifactBytes)
       return yield* failure("Raw finding artifact exceeds the public byte ceiling.");
-    yield* rejectSymlinkComponents(artifactRoot, record.artifact.path);
+    const canonicalRoot = yield* canonicalArtifactRoot(artifactRoot);
+    yield* rejectSymlinkComponents(canonicalRoot, record.artifact.path);
     const materialized = yield* materializeDagTextArtifact(
-      artifactRoot,
+      canonicalRoot,
       record.artifact,
       {
         runId,

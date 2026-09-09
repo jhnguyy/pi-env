@@ -80,6 +80,7 @@ describe("provenance-backed editorial consolidation", () => {
       synthesis(raw.map((record) => record.id)),
       raw,
       provenance(raw),
+      "run",
     );
 
     expect(result?.findings[0]).toMatchObject({
@@ -92,7 +93,9 @@ describe("provenance-backed editorial consolidation", () => {
     expect(result?.provenance?.rawFindings[0]).not.toHaveProperty("finding");
 
     // Practical negative control: omission is not accepted as a silent subset.
-    expect(consolidateSynthesis(synthesis([raw[0].id]), raw, provenance(raw))).toBeUndefined();
+    expect(
+      consolidateSynthesis(synthesis([raw[0].id]), raw, provenance(raw), "run"),
+    ).toBeUndefined();
   });
 
   it("derives agreement from distinct roles rather than raw occurrences or model claims", () => {
@@ -104,6 +107,7 @@ describe("provenance-backed editorial consolidation", () => {
       synthesis(raw.map((record) => record.id)),
       raw,
       provenance(raw),
+      "run",
     );
     expect(result?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness", "security"],
@@ -121,7 +125,7 @@ describe("provenance-backed editorial consolidation", () => {
         },
       ],
     } as unknown as ConsolidationReviewV2;
-    const inflatedResult = consolidateSynthesis(inflated, raw, provenance(raw));
+    const inflatedResult = consolidateSynthesis(inflated, raw, provenance(raw), "run");
     expect(inflatedResult?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness", "security"],
       agreement: 2,
@@ -136,9 +140,9 @@ describe("provenance-backed editorial consolidation", () => {
     const valid = synthesis([raw[0].id, raw[1].id], {
       dismissals: [{ rawFindingId: raw[2].id, reason: "Duplicate concern after inspection." }],
     });
-    expect(consolidateSynthesis(valid, raw, provenance(raw))?.provenance?.dismissals).toEqual(
-      valid.dismissals,
-    );
+    expect(
+      consolidateSynthesis(valid, raw, provenance(raw), "run")?.provenance?.dismissals,
+    ).toEqual(valid.dismissals);
 
     const mutations: ConsolidationReviewV2[] = [
       synthesis([raw[0].id, raw[1].id]),
@@ -163,7 +167,33 @@ describe("provenance-backed editorial consolidation", () => {
       }),
     ];
     for (const mutation of mutations)
-      expect(consolidateSynthesis(mutation, raw, provenance(raw))).toBeUndefined();
+      expect(consolidateSynthesis(mutation, raw, provenance(raw), "run")).toBeUndefined();
+  });
+
+  it("rejects incomplete, duplicate, or identity-invalid persisted provenance", () => {
+    const raw = buildRawFindingRecords([
+      reviewer("correctness", [finding]),
+      reviewer("security", [{ ...finding, problem: "Second." }]),
+    ]);
+    const validSynthesis = synthesis(raw.map((record) => record.id));
+    const records = provenance(raw);
+    const invalidSets: RawFindingRecord[][] = [
+      [records[0], records[0]],
+      [records[0]],
+      [records[0], { ...records[1], artifact: { ...records[1].artifact, runId: "other" } }],
+      [
+        records[0],
+        {
+          ...records[1],
+          artifact: { ...records[1].artifact, path: `raw-provenance-v2/${records[0].id}.json` },
+        },
+      ],
+    ];
+
+    for (const invalid of invalidSets) {
+      expect(consolidateSynthesis(validSynthesis, raw, invalid, "run")).toBeUndefined();
+      expect(fallbackConsolidation(raw, invalid, "run", "Invalid synthesis.")).toBeUndefined();
+    }
   });
 
   it("assigns stable opaque IDs scoped to role, evidence, payload, and duplicate occurrence", () => {
@@ -183,12 +213,12 @@ describe("provenance-backed editorial consolidation", () => {
       reviewer("correctness", [finding, finding]),
       reviewer("security", [finding]),
     ]);
-    const result = fallbackConsolidation(raw, provenance(raw), "Invalid accounting.");
-    expect(result.findings).toHaveLength(3);
-    expect(result.findings.flatMap((item) => item.rawFindingIds ?? [])).toEqual(
+    const result = fallbackConsolidation(raw, provenance(raw), "run", "Invalid accounting.");
+    expect(result?.findings).toHaveLength(3);
+    expect(result?.findings.flatMap((item) => item.rawFindingIds ?? [])).toEqual(
       raw.map((record) => record.id),
     );
-    expect(result.provenance).toMatchObject({
+    expect(result?.provenance).toMatchObject({
       status: "fallback",
       fallbackReason: "Invalid accounting.",
     });

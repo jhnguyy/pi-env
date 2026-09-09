@@ -243,6 +243,7 @@ async function collectOutputs(
 }
 function decodeSynthesis(
   text: string,
+  runId: string,
   rawFindings: readonly AdmittedRawFinding[],
   rawFindingRecords: readonly RawFindingRecord[],
   reviewers: readonly ReviewerOutput[],
@@ -253,7 +254,7 @@ function decodeSynthesis(
     const decoded = parseJson(text);
     if (protocol === "unsupported") return undefined;
     if (validateConsolidationReviewV2Shape(decoded)) {
-      const consolidated = consolidateSynthesis(decoded, rawFindings, rawFindingRecords);
+      const consolidated = consolidateSynthesis(decoded, rawFindings, rawFindingRecords, runId);
       return consolidated ? validateFindingAnchors(consolidated, diff) : undefined;
     }
     if (
@@ -442,6 +443,7 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
   const synthesized = output
     ? decodeSynthesis(
         output.text,
+        input.runId,
         collected.rawFindings,
         collected.rawFindingRecords,
         collected.reviewers,
@@ -455,7 +457,13 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
     : "Synthesis output was unavailable.";
   const result =
     synthesized ??
-    fallbackConsolidation(collected.rawFindings, collected.rawFindingRecords, fallbackReason);
+    fallbackConsolidation(
+      collected.rawFindings,
+      collected.rawFindingRecords,
+      input.runId,
+      fallbackReason,
+    );
+  if (!result) throw new Error("Raw finding provenance records failed identity validation.");
   return {
     output,
     result: synthesized ? result : validateFindingAnchors(result, diff),

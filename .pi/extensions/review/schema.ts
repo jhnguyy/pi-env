@@ -567,7 +567,7 @@ export function validateAdmittedRawFindingShape(value: unknown): value is Admitt
     typeof value.evidenceDigest === "string" &&
     /^[0-9a-f]{64}$/u.test(value.evidenceDigest) &&
     Check(FindingInputSchema, value.finding) &&
-    coherentFindingAnchor(value.finding as FindingInput)
+    coherentFindingAnchor(value.finding)
   );
 }
 
@@ -595,8 +595,9 @@ export function validateRawFindingRecordShape(value: unknown): value is RawFindi
     /^[0-9a-f]{64}$/u.test(value.evidenceDigest) &&
     value.artifact.v === 1 &&
     typeof value.artifact.path === "string" &&
+    typeof value.artifact.bytes === "number" &&
     Number.isSafeInteger(value.artifact.bytes) &&
-    (value.artifact.bytes as number) >= 0 &&
+    value.artifact.bytes >= 0 &&
     value.artifact.digestAlgorithm === "sha256" &&
     typeof value.artifact.digest === "string" &&
     /^[0-9a-f]{64}$/u.test(value.artifact.digest) &&
