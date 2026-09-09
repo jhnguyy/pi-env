@@ -236,7 +236,15 @@ export default function (pi: ExtensionAPI) {
         }
         return executeJobAction(params, signal);
       },
-      renderCall: renderSubagentToolCall,
+      renderCall: (args, theme, context) =>
+        renderSubagentToolCall(
+          args,
+          theme,
+          context,
+          args.action === SubagentAction.Wait && args.job_id
+            ? runtime.getJob(args.job_id)?.name
+            : undefined,
+        ),
       renderResult: renderSubagentToolResult,
     });
 

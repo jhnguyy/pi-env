@@ -103,6 +103,52 @@ function createContext(cwd: string) {
 }
 
 describe("SubagentSessionRuntime public boundaries", () => {
+  it("labels wait calls with the child name and moves the job ID to a muted footer", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-wait-render-"));
+    tempDirs.push(cwd);
+    const { tools, handlers } = createHarness();
+    const ctx = createContext(cwd);
+    const subagent = tools.get("subagent");
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+    const started = await subagent.execute(
+      "start-named-child",
+      {
+        action: "start",
+        name: "named-child",
+        task: "inspect the workspace",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const rendered = extractText(
+      subagent.renderCall(
+        { action: "wait", job_id: started.details.jobId },
+        {
+          fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+          bold: (text: string) => text,
+        },
+      ),
+    );
+    const [title, footer] = rendered.split("\n");
+    expect(title).toContain("<accent>named-child</accent>");
+    expect(title).not.toContain(started.details.jobId);
+    expect(footer).toBe(`  <muted>job ${started.details.jobId}</muted>`);
+
+    await subagent.execute(
+      "wait-named-child",
+      { action: "wait", job_id: started.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    await handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+  });
+
   it("runs blocking work before session_start and resets background jobs and usage across session lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-session-runtime-"));
     tempDirs.push(cwd);

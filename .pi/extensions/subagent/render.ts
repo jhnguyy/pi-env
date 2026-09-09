@@ -261,14 +261,22 @@ export function renderSubagentStartResult(
   return new Text(text, 0, 0);
 }
 
-export function renderSubagentJobCall(args: { action?: string; job_id?: string }, theme: any) {
+export function renderSubagentJobCall(
+  args: { action?: string; job_id?: string },
+  theme: any,
+  jobName?: string,
+) {
   const action = args.action ?? "status";
+  const title = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", action)}`;
+  if (action === "wait" && jobName && args.job_id) {
+    return new Text(
+      `${title} ${theme.fg("accent", jobName)}\n  ${theme.fg("muted", `job ${args.job_id}`)}`,
+      0,
+      0,
+    );
+  }
   const jobId = args.job_id ? ` ${theme.fg("dim", args.job_id)}` : "";
-  return new Text(
-    `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", action)}${jobId}`,
-    0,
-    0,
-  );
+  return new Text(`${title}${jobId}`, 0, 0);
 }
 
 /** Render async job inspection compactly while preserving full content on expansion. */
@@ -317,9 +325,14 @@ export function renderSubagentJobResult(
 
 const JOB_ACTIONS = new Set(["status", "wait", "cancel", "list", "usage", "result"]);
 
-export function renderSubagentToolCall(args: SubagentCallArgs, theme: any, context?: unknown) {
+export function renderSubagentToolCall(
+  args: SubagentCallArgs,
+  theme: any,
+  context?: unknown,
+  jobName?: string,
+) {
   return JOB_ACTIONS.has(args.action ?? "")
-    ? renderSubagentJobCall(args, theme)
+    ? renderSubagentJobCall(args, theme, jobName)
     : renderSubagentCall(args, theme, context);
 }
 
