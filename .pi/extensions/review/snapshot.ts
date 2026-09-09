@@ -1,4 +1,15 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Exit, PartitionedSemaphore } from "effect";
@@ -13,6 +24,50 @@ import {
   type ReviewMetadata,
   type ReviewSnapshot,
 } from "./core";
+
+const MAX_PINNED_DIFF_BYTES = 8_000_000;
+
+/** Reads pinned evidence through one descriptor and admits it before bounded allocation. */
+export function readVerifiedPinnedDiff(
+  snapshot: Pick<ReviewSnapshot, "diffPath" | "diffHash">,
+): string {
+  if (!snapshot.diffHash) throw new Error("Pinned diff evidence is unavailable.");
+  let fd: number;
+  try {
+    fd = openSync(
+      snapshot.diffPath,
+      constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
+    );
+  } catch {
+    throw new Error("Pinned diff evidence is unavailable.");
+  }
+  try {
+    const before = fstatSync(fd);
+    if (!before.isFile()) throw new Error("Pinned diff evidence is not a regular file.");
+    if (before.size > MAX_PINNED_DIFF_BYTES)
+      throw new Error("Pinned diff exceeds the evidence limit.");
+
+    const buffer = Buffer.alloc(before.size + 1);
+    let bytes = 0;
+    while (bytes < buffer.length) {
+      const count = readSync(fd, buffer, bytes, buffer.length - bytes, bytes);
+      if (count === 0) break;
+      bytes += count;
+    }
+    const after = fstatSync(fd);
+    if (bytes < before.size || after.size < before.size)
+      throw new Error("Pinned diff was truncated while being read.");
+    if (bytes > before.size || after.size > before.size)
+      throw new Error("Pinned diff grew while being read.");
+    const evidence = buffer.subarray(0, bytes);
+    const actualHash = createHash("sha256").update(evidence).digest("hex");
+    if (actualHash !== snapshot.diffHash)
+      throw new Error("Pinned diff integrity check failed. Refusing unverified evidence.");
+    return evidence.toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
 
 type Exec = ExtensionAPI["exec"];
 

@@ -46,7 +46,7 @@ Extension-managed data lives below the pi agent directory:
     └── diff.patch
 ```
 
-The preparation step records the base commit, head commit, diff hash, changed-file manifest, and pull request metadata. All later stages use the persisted diff. They must not replace it with a live diff.
+The preparation step records the base commit, head commit, diff hash, changed-file manifest, and pull request metadata. All later stages use the same bounded, hash-verified snapshot reader. It rejects non-regular files and diffs above 8,000,000 bytes before allocation. No stage substitutes a live diff.
 
 The review deck stores one shared metadata reference, one shared pinned-diff reference, and one canonical file table. Compact file IDs connect selected ranges to the file table. The deck does not repeat shared artifact identity for each file.
 
@@ -95,7 +95,7 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
 
-One immutable diff index owns canonical rename, deletion, repeated-section, and hunk-range semantics. The deck, diff reader, and evidence resolver consume this index. The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+One immutable diff index owns canonical rename, deletion, repeated-section, hunk-range, and side-specific anchor semantics. Each walkthrough loads this verified index once, on first evidence inspection. It pages the admitted content without rereading the diff. Reopening the walkthrough verifies the persisted file again. The deck, diff reader, and evidence resolver consume this index. The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
 
 Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 

@@ -1,7 +1,11 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { bound, type Finding, type ReviewState } from "./core";
 import { decisionFor, isDegraded } from "./decision";
-import { findingContext, pinnedContext, pinnedDiffPages } from "./walkthrough-context";
+import {
+  createWalkthroughContext,
+  pinnedContext,
+  type WalkthroughContext,
+} from "./walkthrough-context";
 
 type WalkthroughFile = NonNullable<ReviewState["plan"]>["files"][number];
 
@@ -90,15 +94,17 @@ interface WalkthroughActions {
   readonly rawFinding: (rawFindingId: string) => Promise<string>;
 }
 
-async function detail(ctx: ExtensionCommandContext, text: string): Promise<void> {
-  const pages = text.match(/[\s\S]{1,5000}/gu) ?? ["(empty detail)"];
+async function detail(
+  select: ExtensionCommandContext["ui"]["select"],
+  text: string,
+): Promise<void> {
+  const total = Math.max(1, Math.ceil(text.length / 5_000));
   let page = 0;
   while (true) {
-    const choice = await ctx.ui.select(`${pages[page]}\n\nPage ${page + 1}/${pages.length}`, [
-      ...(page > 0 ? ["Previous"] : []),
-      ...(page + 1 < pages.length ? ["Next"] : []),
-      "Back",
-    ]);
+    const choice = await select(
+      `${text.slice(page * 5_000, (page + 1) * 5_000) || "(empty detail)"}\n\nPage ${page + 1}/${total}`,
+      [...(page > 0 ? ["Previous"] : []), ...(page + 1 < total ? ["Next"] : []), "Back"],
+    );
     if (choice === "Previous") page -= 1;
     else if (choice === "Next") page += 1;
     else return;
@@ -106,20 +112,19 @@ async function detail(ctx: ExtensionCommandContext, text: string): Promise<void>
 }
 
 async function inspectFinding(
-  ctx: ExtensionCommandContext,
+  select: ExtensionCommandContext["ui"]["select"],
   actions: WalkthroughActions,
+  evidence: WalkthroughContext,
   findingId: string,
 ): Promise<void> {
   while (true) {
-    actions.assertCurrent();
-    const choice = await ctx.ui.select(findingContext(actions.state(), findingId), [
+    const choice = await select(evidence.finding(findingId), [
       "Select for posting",
       "Reject",
       "Defer",
       "Edit presentation",
       "Back",
     ]);
-    actions.assertCurrent();
     if (!choice || choice === "Back") return;
     const message =
       choice === "Edit presentation"
@@ -128,53 +133,60 @@ async function inspectFinding(
             findingId,
             choice === "Reject" ? "rejected" : choice === "Defer" ? "deferred" : "selected",
           );
-    actions.assertCurrent();
-    await detail(ctx, message);
+    await detail(select, message);
   }
 }
 
-async function inspectFiles(ctx: ExtensionCommandContext, actions: WalkthroughActions) {
+async function inspectFiles(
+  select: ExtensionCommandContext["ui"]["select"],
+  actions: WalkthroughActions,
+  evidence: WalkthroughContext,
+) {
   while (true) {
     const files = planFiles(actions.state());
     const options = files.map(
       (file, index) => `${index + 1}. ${file.path} [${file.attention}] - ${file.role}`,
     );
-    const choice = await ctx.ui.select(`Reading plan: ${files.length} ordered file(s)`, [
+    const choice = await select(`Reading plan: ${files.length} ordered file(s)`, [
       ...options,
       "Back",
     ]);
-    actions.assertCurrent();
     if (!choice || choice === "Back") return;
     const file = files[options.indexOf(choice)];
     if (!file) continue;
-    const pages = pinnedDiffPages(actions.state(), file.path);
     await detail(
-      ctx,
-      `${file.path}\nAttention: ${file.attention}\nRole: ${file.role}\nPinned diff is hash verified.\n${pages.map((page) => `Page ${page.number}/${page.total}\n${page.text}`).join("\n")}`,
+      select,
+      `${file.path}\nAttention: ${file.attention}\nRole: ${file.role}\nPinned diff is hash verified.\n${evidence.fileDiff(file.path)}`,
     );
   }
 }
 
-async function inspectFindings(ctx: ExtensionCommandContext, actions: WalkthroughActions) {
+async function inspectFindings(
+  select: ExtensionCommandContext["ui"]["select"],
+  actions: WalkthroughActions,
+  evidence: WalkthroughContext,
+) {
   while (true) {
     const state = actions.state();
     const findings = state.result?.findings ?? [];
     const options = findings.map(
       (finding, index) => `${index + 1}. ${findingLine(state, finding)}`,
     );
-    const choice = await ctx.ui.select("Findings (anchored and unanchored)", [...options, "Back"]);
-    actions.assertCurrent();
+    const choice = await select("Findings (anchored and unanchored)", [...options, "Back"]);
     if (!choice || choice === "Back") return;
     const finding = findings[options.indexOf(choice)];
-    if (finding?.id) await inspectFinding(ctx, actions, finding.id);
+    if (finding?.id) await inspectFinding(select, actions, evidence, finding.id);
   }
 }
 
-async function inspectProvenance(ctx: ExtensionCommandContext, actions: WalkthroughActions) {
+async function inspectProvenance(
+  select: ExtensionCommandContext["ui"]["select"],
+  actions: WalkthroughActions,
+) {
   while (true) {
     const provenance = actions.state().result?.provenance;
     if (!provenance) {
-      await detail(ctx, "Legacy provenance unavailable. No raw IDs were fabricated.");
+      await detail(select, "Legacy provenance unavailable. No raw IDs were fabricated.");
       return;
     }
     const raw = provenance.rawFindings.map((item) => `${item.id} [${item.role}] #${item.index}`);
@@ -182,13 +194,12 @@ async function inspectProvenance(ctx: ExtensionCommandContext, actions: Walkthro
       (item) => `Dismissed ${item.rawFindingId}: ${item.reason}`,
     );
     const options = [...raw, ...dismissed];
-    const choice = await ctx.ui.select("Provenance and dispositions", [...options, "Back"]);
-    actions.assertCurrent();
+    const choice = await select("Provenance and dispositions", [...options, "Back"]);
     if (!choice || choice === "Back") return;
     const index = options.indexOf(choice);
     const record = provenance.rawFindings[index];
     await detail(
-      ctx,
+      select,
       record
         ? await actions.rawFinding(record.id)
         : (dismissed[index - raw.length] ?? "Unavailable"),
@@ -200,26 +211,26 @@ export async function guidedWalkthrough(
   ctx: ExtensionCommandContext,
   actions: WalkthroughActions,
 ): Promise<string> {
-  const stages = [
-    "Overview and coverage",
-    "Reading plan",
-    "Findings",
-    "Provenance",
-    "Edit preface",
-    "Exit",
-  ];
+  const select: ExtensionCommandContext["ui"]["select"] = async (...args) => {
+    actions.assertCurrent();
+    const choice = await ctx.ui.select(...args);
+    actions.assertCurrent();
+    return choice;
+  };
+  const evidence = createWalkthroughContext(actions.state);
+  const stageActions: Record<string, () => Promise<void>> = {
+    "Overview and coverage": () =>
+      detail(select, `${pinnedContext(actions.state())}\n${coverageText(actions.state())}`),
+    "Reading plan": () => inspectFiles(select, actions, evidence),
+    Findings: () => inspectFindings(select, actions, evidence),
+    Provenance: () => inspectProvenance(select, actions),
+    "Edit preface": async () => detail(select, await actions.editPreface()),
+  };
   while (true) {
-    actions.assertCurrent();
-    const state = actions.state();
-    const stageActions: Record<string, () => Promise<void>> = {
-      "Overview and coverage": () => detail(ctx, `${pinnedContext(state)}\n${coverageText(state)}`),
-      "Reading plan": () => inspectFiles(ctx, actions),
-      Findings: () => inspectFindings(ctx, actions),
-      Provenance: () => inspectProvenance(ctx, actions),
-      "Edit preface": async () => detail(ctx, await actions.editPreface()),
-    };
-    const choice = await ctx.ui.select(`PR review walkthrough ${state.snapshot.id}`, stages);
-    actions.assertCurrent();
+    const choice = await select(`PR review walkthrough ${actions.state().snapshot.id}`, [
+      ...Object.keys(stageActions),
+      "Exit",
+    ]);
     const run = choice ? stageActions[choice] : undefined;
     if (!run) return walkthroughSummary(actions.state(), true);
     await run();

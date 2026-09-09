@@ -1,189 +1,64 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { clearInMemoryStateForTests } from "../index";
-import { REVIEW_ENTRY_TYPE, sha256, type ReviewState } from "../core";
+import { runRealReviewFlow, type RealReviewFlow } from "./fixtures/review-flow";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   ...(await original<typeof CodingAgent>()),
   getAgentDir: () => mocked.agentDir,
 }));
-const roots: string[] = [];
+
 afterEach(() => {
   clearInMemoryStateForTests();
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function reviewState(id: string): ReviewState {
-  const artifactDir = join(mocked.agentDir, "pr-review", "artifacts", id);
-  mkdirSync(artifactDir, { recursive: true });
-  const diff = [
-    "diff --git a/a.ts b/a.ts",
-    "--- a/a.ts",
-    "+++ b/a.ts",
-    "@@ -1 +1 @@",
-    "-old",
-    "+new pinned evidence",
-    "diff --git a/b.ts b/b.ts",
-    "--- a/b.ts",
-    "+++ b/b.ts",
-    "@@ -1 +1 @@",
-    "-before",
-    "+after",
-  ].join("\n");
-  const diffPath = join(artifactDir, "diff.patch");
-  writeFileSync(diffPath, diff);
-  const reviewerArtifact = {
-    v: 1 as const,
-    path: "review-correctness/result.json",
-    bytes: 10,
-    digest: "a".repeat(64),
-    runId: `${id}-run`,
-    producerNodeId: "review-correctness",
-    outputName: "correctness_review",
-  };
-  return {
-    snapshot: {
-      id,
-      artifactDir,
-      worktree: join(mocked.agentDir, "pr-review", "worktrees", id),
-      diffPath,
-      diffHash: sha256(diff),
-      createdAt: id,
-      metadata: {
-        owner: "o",
-        repo: "r",
-        number: 1,
-        url: "https://github.com/o/r/pull/1",
-        baseOid: "base",
-        headOid: `${id}-head`,
-        changedFiles: [{ path: "a.ts" }, { path: "b.ts" }],
-      },
-    },
-    dag: {
-      runId: `${id}-run`,
-      synthesisProtocol: 2,
-      status: "succeeded",
-      rawResultReferences: [reviewerArtifact],
-      evidenceCoverage: {
-        digest: "d".repeat(64),
-        uniqueBytes: 20,
-        dossierBytes: 20,
-        chunks: 1,
-        omissions: [],
-      },
-    },
-    plan: {
-      goal: "goal",
-      goalAssessment: "assessment",
-      risk: "risk",
-      riskReasons: [],
-      cohorts: [{ label: "all", purpose: "inspection", paths: ["a.ts", "b.ts"] }],
-      files: [
-        { path: "a.ts", attention: "high", role: "core behavior" },
-        { path: "b.ts", attention: "normal", role: "supporting behavior" },
-      ],
-      evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 1, purpose: "change" }],
-    },
-    result: {
-      verdict: "complete",
-      coverage: {
-        status: "complete",
-        succeeded: ["correctness"],
-        failed: [],
-        malformed: [],
-      },
-      findings: [
-        {
-          id: "F1",
-          severity: "serious",
-          impact: "high",
-          file: "a.ts",
-          side: "RIGHT",
-          line: 1,
-          problem: "problem one",
-          consequence: "consequence one",
-          suggestedFix: "fix one",
-          selected: true,
-          anchorValid: true,
-          rawFindingIds: ["R-a1"],
-        },
-        {
-          id: "F2",
-          severity: "medium",
-          impact: "medium",
-          problem: "problem two",
-          consequence: "consequence two",
-          suggestedFix: "fix two",
-          selected: true,
-          anchorValid: false,
-          rawFindingIds: ["R-a2"],
-        },
-      ],
-      provenance: {
-        v: 2,
-        kind: "editorial-consolidation",
-        status: "accepted",
-        rawFindings: [0, 1].map((index) => ({
-          id: `R-a${index + 1}`,
-          role: "correctness" as const,
-          evidenceDigest: "d".repeat(64),
-          index,
-          artifact: reviewerArtifact,
-        })),
-        dismissals: [],
-      },
-    },
-    selectedFindingIds: ["F1", "F2"],
-    decisions: {},
-    posts: [],
-  };
-}
-function entry(state: ReviewState) {
-  return {
-    type: "custom",
-    customType: REVIEW_ENTRY_TYPE,
-    data: { reviewId: state.snapshot.id, state },
-  };
-}
 async function harness() {
-  mocked.agentDir = mkdtempSync(join(tmpdir(), "review-walkthrough-"));
-  roots.push(mocked.agentDir);
-  const fixtures = [reviewState("older"), reviewState("newer")];
+  const flow = await runRealReviewFlow();
+  mocked.agentDir = flow.root;
   const commands: Record<string, any> = {};
   const handlers: Record<string, any> = {};
-  const appended: Array<{ reviewId: string; state: ReviewState }> = [];
+  const appended: any[] = [];
+  let githubCalls = 0;
   const pi = {
     events: { on: () => () => {} },
     registerTool() {},
-    registerCommand(name: string, command: unknown) {
+    registerCommand(name: string, command: any) {
       commands[name] = command;
     },
-    on(name: string, handler: unknown) {
+    on(name: string, handler: any) {
       handlers[name] = handler;
     },
-    appendEntry(_type: string, data: { reviewId: string; state: ReviewState }) {
+    appendEntry(_type: string, data: any) {
       appended.push(structuredClone(data));
     },
-    exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+    exec: async () => {
+      githubCalls++;
+      throw new Error("walkthrough must not post or call GitHub");
+    },
   };
   reviewExtension(pi as never);
-  const session = (id: string, states = fixtures) => ({
-    cwd: mocked.agentDir,
+  const session = (entries: readonly unknown[] = flow.entries, id = flow.sessionId) => ({
+    cwd: flow.root,
     hasUI: true,
     sessionManager: {
       getSessionId: () => id,
-      getSessionDir: () => mocked.agentDir,
-      getBranch: () => states.map(entry),
+      getSessionDir: () => flow.sessionDir,
+      getBranch: () => entries,
     },
     modelRegistry: { getAvailable: () => [] },
   });
-  handlers.session_start({}, session("session-a"));
-  return { command: commands.review.handler, handlers, appended, fixtures, session };
+  return {
+    flow,
+    command: commands.review.handler,
+    handlers,
+    appended,
+    session,
+    githubCalls: () => githubCalls,
+  };
 }
+
 function context(hasUI = true) {
   const notes: string[] = [];
   return {
@@ -200,138 +75,187 @@ function context(hasUI = true) {
   };
 }
 
+function persistedEntries(flow: RealReviewFlow, appended: readonly any[]): unknown[] {
+  return [
+    ...flow.entries,
+    ...appended.map((data) => ({ type: "custom", customType: "pr-review", data })),
+  ];
+}
+
 describe("registered review walkthrough boundary", () => {
   it.each(["running", "unavailable"])(
-    "does not claim complete coverage for %s reviews",
+    "does not claim complete coverage when restored evidence is %s",
     async (status) => {
-      const { command, handlers, fixtures, session } = await harness();
-      if (status === "running") fixtures[0].dag!.status = "running";
-      else delete fixtures[0].plan;
-      handlers.session_tree({}, session("session-a", fixtures));
+      const h = await harness();
+      const state = structuredClone(h.flow.state);
+      if (status === "running") state.dag!.status = "running";
+      else delete state.plan;
+      h.handlers.session_start(
+        {},
+        h.session(persistedEntries(h.flow, [{ reviewId: state.snapshot.id, state }])),
+      );
       const view = context(false);
-      await command("pr walkthrough older", view.ctx);
+      await h.command(`pr walkthrough ${state.snapshot.id}`, view.ctx);
       expect(view.notes.at(-1)).toContain(`Coverage: ${status}`);
-      expect(view.notes.at(-1)).not.toContain("Coverage is complete");
+      expect(h.appended).toHaveLength(0);
     },
   );
 
-  it("persists explicit-ID decisions and keeps defaults pending after reconstruction", async () => {
-    const { command, appended, handlers, fixtures, session } = await harness();
-    const view = context();
-    await command("pr select older F1", view.ctx);
-    await command("pr reject older F2", view.ctx);
-    expect(appended.at(-1)?.state.decisions).toMatchObject({
-      F1: { status: "selected" },
-      F2: { status: "rejected" },
-    });
-    expect(appended.at(-1)?.state.selectedFindingIds).toEqual(["F1"]);
-    const count = appended.length;
-    await command("pr defer older unknown", view.ctx);
-    expect(appended).toHaveLength(count);
+  it("hands the real finalized DAG result to restore, inspection, and persistent decisions", async () => {
+    const h = await harness();
+    const [selected, rejected, deferred] = h.flow.state.result!.findings;
+    const findingId = selected.id!;
+    const raw = h.flow.state.result!.provenance!.rawFindings[0];
 
-    handlers.session_tree(
-      {},
-      session("session-a", [fixtures[0], ...appended.map((item) => item.state)]),
-    );
-    const restored = context(false);
-    await command("pr walkthrough older", restored.ctx);
-    expect(restored.notes.at(-1)).toContain("F1 [selected]");
-    expect(restored.notes.at(-1)).toContain("F2 [rejected]");
-  });
+    // Negative control: the consumer cannot see the producer result unless its save entries cross
+    // the extension restore boundary.
+    h.handlers.session_start({}, h.session([]));
+    const disconnected = context(false);
+    await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, disconnected.ctx);
+    expect(disconnected.notes.at(-1)).toContain("not found");
 
-  it("navigates every planned file using only hash-verified pinned evidence", async () => {
-    const { command, fixtures } = await harness();
-    const choices = ["Reading plan", "2. b.ts [normal] - supporting behavior", "Back", "Exit"];
+    h.handlers.session_tree({}, h.session());
+    const pending = context(false);
+    await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, pending.ctx);
+    expect(pending.notes.at(-1)).toContain(`${findingId} [pending]`);
+    expect(h.appended).toHaveLength(0);
+
+    const choices: Array<string | ((options: string[]) => string | undefined)> = [
+      "Reading plan",
+      (options) => options.find((option) => option.includes("a.ts")),
+      "Next",
+      "Back",
+      "Back",
+      "Findings",
+      (options) => options.find((option) => option.includes(findingId)),
+      "Select for posting",
+      "Back",
+      "Edit presentation",
+      "Back",
+      "Back",
+      "Back",
+      "Provenance",
+      `${raw.id} [${raw.role}] #${raw.index}`,
+      "Back",
+      "Back",
+      "Exit",
+    ];
     const shown: string[] = [];
-    const notes: string[] = [];
-    await command("pr walkthrough older", {
+    await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, {
       hasUI: true,
-      cwd: mocked.agentDir,
+      cwd: h.flow.root,
+      sessionManager: h.session().sessionManager,
       ui: {
-        notify: (message: string) => notes.push(message),
-        select: async (title: string) => {
+        notify() {},
+        select: async (title: string, options: string[]) => {
           shown.push(title);
-          return choices.shift();
+          const choice = choices.shift();
+          return typeof choice === "function" ? choice(options) : choice;
         },
-      },
-    });
-    expect(shown.join("\n")).toContain("b.ts");
-    expect(shown.join("\n")).toContain("Pinned diff is hash verified");
-    expect(shown.join("\n")).toContain("+after");
-
-    writeFileSync(fixtures[0].snapshot.diffPath, "tampered worktree-like content");
-    const tampered = ["Reading plan", "1. a.ts [high] - core behavior"];
-    await command("pr walkthrough older", {
-      hasUI: true,
-      cwd: mocked.agentDir,
-      ui: {
-        notify: (message: string) => notes.push(message),
-        select: async () => tampered.shift(),
-      },
-    });
-    expect(notes.at(-1)).toContain("Pinned diff integrity check failed");
-    expect(notes.at(-1)).not.toContain("worktree-like content");
-  });
-
-  it("preserves finding identity and provenance while editing", async () => {
-    const { command, appended, fixtures } = await harness();
-    const before = structuredClone(fixtures[0].result?.provenance);
-    const notes: string[] = [];
-    await command("pr edit older F1", {
-      hasUI: true,
-      ui: {
-        notify: (message: string) => notes.push(message),
         editor: async () =>
           "Problem: edited\nConsequence: edited consequence\nSuggested fix: edited fix",
       },
     });
-    expect(appended.at(-1)?.state.result?.findings[0]).toMatchObject({
-      id: "F1",
+    const pages = shown.filter((title) => title.includes("\n\nPage "));
+    expect(pages.join("\n")).toContain("+export const value = 1;");
+    expect(pages.join("\n")).toContain("end-of-later-evidence");
+    expect(shown.find((title) => title.startsWith("Anchor: a.ts:1"))).toContain(
+      "+export const value = 1;",
+    );
+    const rawPage = shown.find((title) => title.startsWith(`Raw finding ${raw.id}`));
+    expect(rawPage).toContain(raw.evidenceDigest);
+    expect(rawPage).toContain(selected.problem);
+    expect(pages.every((page) => page.length < 5_050)).toBe(true);
+
+    await h.command(`pr reject ${h.flow.state.snapshot.id} ${rejected.id}`, context().ctx);
+    await h.command(`pr defer ${h.flow.state.snapshot.id} ${deferred.id}`, context().ctx);
+    expect(h.appended.at(-1).state.result.findings[0]).toMatchObject({
+      id: findingId,
       problem: "edited",
-      rawFindingIds: ["R-a1"],
+      rawFindingIds: h.flow.state.result!.findings[0].rawFindingIds,
     });
-    expect(appended.at(-1)?.state.result?.provenance).toEqual(before);
+
+    h.handlers.session_tree({}, h.session(persistedEntries(h.flow, h.appended)));
+    const restored = context(false);
+    await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, restored.ctx);
+    expect(restored.notes.at(-1)).toContain(`${findingId} [selected]`);
+    expect(restored.notes.at(-1)).toContain(`${rejected.id} [rejected]`);
+    expect(restored.notes.at(-1)).toContain(`${deferred.id} [deferred]`);
+    expect(restored.notes.at(-1)).toContain("Interactive decisions unavailable");
+    expect(h.githubCalls()).toBe(0);
   });
 
-  it("keeps headless walkthrough read-only and invalidates stale editor actions", async () => {
-    const { command, appended, handlers, fixtures, session } = await harness();
-    const headless = context(false);
-    await command("pr walkthrough older", headless.ctx);
-    expect(headless.notes.at(-1)).toContain("Interactive decisions unavailable");
-    expect(appended).toHaveLength(0);
+  it("rejects unknown finding IDs without applying part of a decision", async () => {
+    const h = await harness();
+    h.handlers.session_start({}, h.session());
+    const view = context();
+    await h.command(
+      `pr select ${h.flow.state.snapshot.id} ${h.flow.state.result!.findings[0].id} unknown`,
+      view.ctx,
+    );
+    expect(view.notes.at(-1)).toContain("not owned");
+    expect(h.appended).toHaveLength(0);
+  });
 
-    let release!: (value: string) => void;
-    const editing = command("pr edit older F1", {
+  it("fails closed when the real run's pinned diff is tampered", async () => {
+    const h = await harness();
+    h.handlers.session_start({}, h.session());
+    writeFileSync(h.flow.state.snapshot.diffPath, "tampered");
+    const notices: string[] = [];
+    const choices = ["Reading plan", "1. a.ts [high] - implementation"];
+    await h.command(`pr walkthrough ${h.flow.state.snapshot.id}`, {
       hasUI: true,
       ui: {
-        notify: (message: string) => headless.notes.push(message),
-        editor: () => new Promise<string>((resolve) => (release = resolve)),
+        notify: (message: string) => notices.push(message),
+        select: async () => choices.shift(),
       },
     });
-    await Promise.resolve();
-    handlers.session_tree({}, session("session-b", fixtures));
-    release("Problem: stale\nConsequence: stale\nSuggested fix: stale");
-    await editing;
-    expect(headless.notes.at(-1)).toContain("session changed");
-    expect(appended).toHaveLength(0);
+    expect(notices.at(-1)).toContain("Pinned diff integrity check failed");
+    expect(h.githubCalls()).toBe(0);
+  });
 
-    handlers.session_tree({}, session("session-a", fixtures));
-    const choices = ["Provenance", "R-a1 [correctness] #0"];
-    await command("pr walkthrough older", {
-      hasUI: true,
-      cwd: mocked.agentDir,
-      sessionManager: session("session-a").sessionManager,
-      ui: {
-        notify: (message: string) => headless.notes.push(message),
-        select: async () => {
-          const choice = choices.shift();
-          if (choice?.startsWith("R-"))
-            queueMicrotask(() => handlers.session_tree({}, session("session-b", fixtures)));
-          return choice;
+  it.each(["editor", "decision"])(
+    "rejects a stale %s after the restored session is replaced",
+    async (action) => {
+      const h = await harness();
+      h.handlers.session_start({}, h.session());
+      const findingId = h.flow.state.result!.findings[0].id;
+      const notices: string[] = [];
+      let release!: (text: string) => void;
+      let entered!: () => void;
+      const opened = new Promise<void>((resolve) => (entered = resolve));
+      const waitForUser = () =>
+        new Promise<string>((resolve) => {
+          release = resolve;
+          entered();
+        });
+      const command =
+        action === "editor"
+          ? `pr edit ${h.flow.state.snapshot.id} ${findingId}`
+          : `pr walkthrough ${h.flow.state.snapshot.id}`;
+      const editing = h.command(command, {
+        hasUI: true,
+        ui: {
+          notify: (message: string) => notices.push(message),
+          editor: waitForUser,
+          select: async (_title: string, options: string[]) => {
+            if (options.includes("Findings")) return "Findings";
+            if (options.includes("Select for posting")) return waitForUser();
+            return options.find((option) => option.includes(findingId!));
+          },
         },
-      },
-    });
-    expect(headless.notes.at(-1)).toContain("session changed");
-    expect(headless.notes.at(-1)).not.toContain("Raw evidence unavailable");
-  });
+      });
+      await opened;
+      h.handlers.session_tree({}, h.session(h.flow.entries, "replacement"));
+      release(
+        action === "editor"
+          ? "Problem: stale\nConsequence: stale\nSuggested fix: stale"
+          : "Select for posting",
+      );
+      await editing;
+      expect(notices.at(-1)).toContain("session changed");
+      expect(h.appended).toHaveLength(0);
+      expect(h.githubCalls()).toBe(0);
+    },
+  );
 });

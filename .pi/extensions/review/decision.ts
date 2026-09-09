@@ -1,17 +1,17 @@
 import type { Finding, ReviewState } from "./core";
 import type { HumanDecision, HumanDecisionStatus } from "./schema";
 
-export const DECISION_STATUSES = ["pending", "selected", "rejected", "deferred"] as const;
-
 export function decisionFor(state: ReviewState, findingId: string): HumanDecision {
   return state.decisions?.[findingId] ?? { status: "pending", at: "" };
 }
 
-export function findingsForDecision(state: ReviewState, status?: HumanDecisionStatus): Finding[] {
-  return (state.result?.findings ?? []).filter((finding) => {
-    const decision = decisionFor(state, finding.id!);
-    return status === undefined ? decision.status === "selected" : decision.status === status;
-  });
+export function selectedFindings(state: ReviewState): Finding[] {
+  const legacyIds = new Set(state.selectedFindingIds);
+  return (state.result?.findings ?? []).filter((finding) =>
+    state.decisions === undefined
+      ? legacyIds.has(finding.id!)
+      : decisionFor(state, finding.id!).status === "selected",
+  );
 }
 
 export function applyDecision(
@@ -25,10 +25,8 @@ export function applyDecision(
   if (invalid) throw new Error(`Finding ${invalid} is not owned by review ${state.snapshot.id}.`);
   const decisions = { ...(state.decisions ?? {}) };
   for (const id of findingIds) decisions[id] = { status, at };
-  const selectedFindingIds = (state.result?.findings ?? []).flatMap((finding) =>
-    finding.id && decisions[finding.id]?.status === "selected" ? [finding.id] : [],
-  );
-  return { ...state, decisions, selectedFindingIds };
+  const next = { ...state, decisions };
+  return { ...next, selectedFindingIds: selectedFindings(next).map((finding) => finding.id!) };
 }
 
 export function isDegraded(state: ReviewState): boolean {

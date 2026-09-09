@@ -1,0 +1,25 @@
+diff --git "a/src/old name.ts" "b/src/new name.ts"
+similarity index 80%
+rename from src/old name.ts
+rename to src/new name.ts
+--- "a/src/old name.ts"
++++ "b/src/new name.ts"
+@@ -4,2 +4,2 @@ export const value = 1;
+-old value
++new value
+ context
+
+diff --git a/src/gone.ts b/src/gone.ts
+deleted file mode 100644
+--- a/src/gone.ts
++++ /dev/null
+@@ -7,2 +0,0 @@
+-first gone
+-second gone
+
+diff --git "a/src/new name.ts" "b/src/new name.ts"
+--- "a/src/new name.ts"
++++ "b/src/new name.ts"
+@@ -20 +20,2 @@ export function next() {
+ keep
++added

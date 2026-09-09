@@ -1,8 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
-import { bound, parseDiffGitPath, sha256, type Finding, type ReviewState } from "./core";
+import { bound, type ReviewState } from "./core";
+import {
+  createDiffIndex,
+  type DiffAnchorSide,
+  type DiffIndex,
+  type DiffIndexEntry,
+} from "./diff-index";
+import { readVerifiedPinnedDiff } from "./snapshot";
 
-const MAX_DIFF_BYTES = 8_000_000;
-const DIFF_PAGE_CHARS = 3_500;
+const MAX_ANCHOR_CONTEXT_CHARS = 12_000;
 
 export function pinnedContext(state: ReviewState): string {
   const metadata = state.snapshot.metadata;
@@ -17,119 +22,69 @@ export function pinnedContext(state: ReviewState): string {
   );
 }
 
-export function readVerifiedPinnedDiff(state: ReviewState): string {
-  const { diffPath, diffHash } = state.snapshot;
-  if (!diffHash || !existsSync(diffPath)) throw new Error("Pinned diff evidence is unavailable.");
-  const diff = readFileSync(diffPath, "utf8");
-  if (Buffer.byteLength(diff, "utf8") > MAX_DIFF_BYTES)
-    throw new Error("Pinned diff exceeds the walkthrough evidence limit.");
-  if (sha256(diff) !== diffHash)
-    throw new Error("Pinned diff integrity check failed. Refusing unverified evidence.");
-  return diff;
-}
-
-function fileSection(diff: string, path: string): string | undefined {
-  const lines = diff.split(/\r?\n/u);
-  let start = -1;
-  let end = lines.length;
-  for (let index = 0; index < lines.length; index += 1) {
-    const parsed = parseDiffGitPath(lines[index] ?? "");
-    if (parsed === path) start = index;
-    else if (parsed && start >= 0) {
-      end = index;
-      break;
-    }
+function lineWindow(text: string, anchorOffset: number, radius: number): string {
+  const lowerBound = Math.max(0, anchorOffset - MAX_ANCHOR_CONTEXT_CHARS / 2);
+  const upperBound = Math.min(text.length, anchorOffset + MAX_ANCHOR_CONTEXT_CHARS / 2);
+  let start = anchorOffset;
+  let end = anchorOffset;
+  for (let lines = 0; lines <= radius && start > lowerBound; lines += 1) {
+    const previous = text.lastIndexOf("\n", start - 1);
+    start = previous < lowerBound ? lowerBound : previous;
   }
-  return start < 0 ? undefined : lines.slice(start, end).join("\n");
-}
-
-export interface PinnedDiffPage {
-  readonly number: number;
-  readonly total: number;
-  readonly text: string;
-}
-
-export function pinnedDiffPages(state: ReviewState, path: string): readonly PinnedDiffPage[] {
-  const section = fileSection(readVerifiedPinnedDiff(state), path);
-  if (section === undefined)
-    return [{ number: 1, total: 1, text: `No pinned diff section for ${path}.` }];
-  const pages: string[] = [];
-  for (let offset = 0; offset < section.length; offset += DIFF_PAGE_CHARS)
-    pages.push(section.slice(offset, offset + DIFF_PAGE_CHARS));
-  if (pages.length === 0) pages.push("(empty pinned diff section)");
-  return pages.map((text, index) => ({ number: index + 1, total: pages.length, text }));
-}
-
-interface DiffLinePosition {
-  oldLine: number;
-  newLine: number;
-}
-
-function hunkPosition(line: string): DiffLinePosition | undefined {
-  const hunk = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/u);
-  return hunk ? { oldLine: Number(hunk[1]), newLine: Number(hunk[2]) } : undefined;
-}
-
-function isDiffMetadata(line: string): boolean {
-  return line.startsWith("diff --git") || line.startsWith("---") || line.startsWith("+++");
-}
-
-function advanceDiffPosition(position: DiffLinePosition, line: string): void {
-  if (!line.startsWith("+") && !line.startsWith("\\")) position.oldLine += 1;
-  if (!line.startsWith("-") && !line.startsWith("\\")) position.newLine += 1;
-}
-
-function lineMatchesFinding(
-  position: DiffLinePosition,
-  line: string,
-  finding: Finding & Required<Pick<Finding, "line" | "side">>,
-): boolean {
-  const sideLine = finding.side === "LEFT" ? position.oldLine : position.newLine;
-  const existsOnSide = finding.side === "LEFT" ? !line.startsWith("+") : !line.startsWith("-");
-  return existsOnSide && sideLine === finding.line;
-}
-
-function anchoredLines(section: string, finding: Finding): string[] | undefined {
-  if (!finding.line || !finding.side) return undefined;
-  const anchoredFinding = finding as Finding & Required<Pick<Finding, "line" | "side">>;
-  const lines = section.split(/\r?\n/u);
-  let position: DiffLinePosition = { oldLine: 0, newLine: 0 };
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const nextHunk = hunkPosition(line);
-    if (nextHunk) {
-      position = nextHunk;
-      continue;
-    }
-    const metadata = isDiffMetadata(line);
-    if (!metadata && lineMatchesFinding(position, line, anchoredFinding))
-      return lines.slice(Math.max(0, index - 5), Math.min(lines.length, index + 6));
-    if (!metadata) advanceDiffPosition(position, line);
+  if (text[start] === "\n") start += 1;
+  for (let lines = 0; lines <= radius && end < upperBound; lines += 1) {
+    const next = text.indexOf("\n", end);
+    end = next < 0 || next > upperBound ? upperBound : next + 1;
   }
-  return undefined;
+  return text.slice(start, end).replace(/\n$/u, "");
 }
 
-export function findingContext(state: ReviewState, findingId: string): string {
-  const finding = state.result?.findings.find((candidate) => candidate.id === findingId);
-  if (!finding) return "Finding not found.";
-  const details = [
-    finding.file
-      ? `Anchor: ${finding.file}${finding.line ? `:${finding.line}` : ""}`
-      : "Anchor: unanchored",
-    `Problem: ${finding.problem}`,
-    `Consequence: ${finding.consequence}`,
-    `Suggested fix: ${finding.suggestedFix}`,
-  ];
-  if (finding.anchorValid && finding.file) {
-    const section = fileSection(readVerifiedPinnedDiff(state), finding.file);
-    const evidence = section ? anchoredLines(section, finding) : undefined;
-    details.push(
-      "Pinned diff evidence (hash verified)",
-      evidence?.join("\n") ??
-        "Anchor was validated previously, but bounded context could not be located.",
-    );
-  } else {
-    details.push("Pinned diff evidence: unanchored finding. No source text is substituted.");
-  }
-  return details.join("\n");
+function anchorEvidence(
+  entry: DiffIndexEntry,
+  side: DiffAnchorSide,
+  line: number,
+): string | undefined {
+  const offsets = entry.anchors[side].get(line);
+  const offset = offsets?.at(0);
+  return offset === undefined ? undefined : lineWindow(entry.text, offset, 5);
+}
+
+export interface WalkthroughContext {
+  readonly fileDiff: (path: string) => string;
+  readonly finding: (findingId: string) => string;
+}
+
+/** Creates invocation-local walkthrough evidence. The verified index is loaded once, on first use. */
+export function createWalkthroughContext(state: () => ReviewState): WalkthroughContext {
+  const snapshot = state().snapshot;
+  let index: DiffIndex | undefined;
+  const diffIndex = () => (index ??= createDiffIndex(readVerifiedPinnedDiff(snapshot)));
+  return {
+    fileDiff(path) {
+      return diffIndex().get(path)?.text ?? `No pinned diff section for ${path}.`;
+    },
+    finding(findingId) {
+      const finding = state().result?.findings.find((candidate) => candidate.id === findingId);
+      if (!finding) return "Finding not found.";
+      const details = [
+        finding.file
+          ? `Anchor: ${finding.file}${finding.line ? `:${finding.line}` : ""}`
+          : "Anchor: unanchored",
+        `Problem: ${finding.problem}`,
+        `Consequence: ${finding.consequence}`,
+        `Suggested fix: ${finding.suggestedFix}`,
+      ];
+      if (finding.anchorValid && finding.file && finding.line && finding.side) {
+        const entry = diffIndex().get(finding.file);
+        const evidence = entry ? anchorEvidence(entry, finding.side, finding.line) : undefined;
+        details.push(
+          "Pinned diff evidence (hash verified)",
+          evidence ?? "Anchor was validated previously, but bounded context could not be located.",
+        );
+      } else {
+        details.push("Pinned diff evidence: unanchored finding. No source text is substituted.");
+      }
+      return details.join("\n");
+    },
+  };
 }

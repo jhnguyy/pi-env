@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createDiffIndex, type DiffIndex } from "./diff-index";
 import type { ReviewSnapshot } from "./schema";
+import { readVerifiedPinnedDiff } from "./snapshot";
 
 const DECK_VERSION = 1;
 const DECK_FILE_NAME = "review-deck.json";
@@ -430,7 +431,7 @@ export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
   );
   const metadataArtifactRef = makeMetadataArtifactRef(input.snapshot);
   const pinnedDiffRef = makePinnedDiffRef(input.snapshot, failures);
-  const diff = readFileSync(input.snapshot.diffPath, "utf8");
+  const diff = readVerifiedPinnedDiff(input.snapshot);
   const files = buildFileTable(
     changedFiles,
     sourceRangeRefs,
@@ -438,7 +439,7 @@ export function buildReviewDeck(input: BuildReviewDeckInput): ReviewDeckResult {
     createDiffIndex(diff),
     failures,
   );
-  const diffBytes = statSync(input.snapshot.diffPath).size;
+  const diffBytes = Buffer.byteLength(diff, "utf8");
   const risk = computeRisk(
     changedFiles.map((file) => file.path),
     diffBytes,

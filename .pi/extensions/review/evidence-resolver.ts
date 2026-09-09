@@ -3,20 +3,25 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as Fs from "node:fs/promises";
 import path from "node:path";
-import { Data, Effect } from "effect";
+import { Data, Effect, Schema } from "effect";
 import { Check } from "typebox/value";
 import {
   DagExecutorKind,
+  DagNodeStatus,
   DagSubagentReservedOutputTokens,
   materializeDagTextContext,
+  materializeDagTextArtifact,
   publishDagSubagentTextResult,
   type DagEffectExecutor,
+  type DagSessionReconstruction,
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { isPathContained } from "../_shared/path-containment";
-import { sha256, validatePlan } from "./core";
+import { validatePlan } from "./core";
 import { createDiffIndex, type DiffIndexEntry } from "./diff-index";
 import { PlanSchema, type EvidenceReference, type ReviewPlan } from "./schema";
+import { EvidenceResolverNode } from "./review-topology";
+import { readVerifiedPinnedDiff } from "./snapshot";
 
 export const ReviewEvidenceResolverKey = "pr-review/evidence-resolver-v1" as const;
 export const ReviewEvidenceDossierMaxBytes = 160_000 as const;
@@ -49,19 +54,29 @@ export interface ReviewEvidenceResolverPayloadV1 {
   readonly reviewerContextWindow: number;
 }
 
-export interface ReviewEvidenceCoverage {
-  readonly v: 1;
-  readonly snapshotId: string;
-  readonly headOid: string;
-  readonly diffHash: string;
-  readonly digest: string;
-  readonly uniqueBytes: number;
-  readonly dossierBytes: number;
-  readonly chunks: number;
-  readonly chunkOutputs: readonly string[];
-  readonly omissions: readonly string[];
-  readonly references: number;
+export interface ReviewEvidenceBundle {
+  readonly coverage?: ReviewEvidenceCoverage;
+  /** References admitted by identity and digest, including malformed output. */
+  readonly references: readonly DagTextArtifactReference[];
+  readonly malformed: boolean;
 }
+
+const EvidenceDigest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u));
+const EvidenceCount = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
+const EvidenceCoverageSchema = Schema.Struct({
+  v: Schema.Literal(1),
+  snapshotId: Schema.String,
+  headOid: Schema.String,
+  diffHash: EvidenceDigest,
+  digest: EvidenceDigest,
+  uniqueBytes: EvidenceCount,
+  dossierBytes: EvidenceCount,
+  chunks: EvidenceCount,
+  chunkOutputs: Schema.Array(Schema.String),
+  omissions: Schema.Array(Schema.String),
+  references: EvidenceCount,
+});
+export type ReviewEvidenceCoverage = typeof EvidenceCoverageSchema.Type;
 
 export class ReviewEvidenceResolutionFailure extends Data.TaggedError(
   "ReviewEvidenceResolutionFailure",
@@ -145,6 +160,55 @@ function parsePayload(value: unknown): ReviewEvidenceResolverPayloadV1 {
     changedPaths: Object.freeze([...(value.changedPaths as string[])]),
     planOutputName: value.planOutputName as string,
     reviewerContextWindow: value.reviewerContextWindow as number,
+  });
+}
+
+function decodeEvidenceCoverage(text: string): ReviewEvidenceCoverage | undefined {
+  try {
+    return Schema.decodeUnknownSync(EvidenceCoverageSchema)(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Admit the resolver's complete topology-defined output set once. */
+export async function admitReviewEvidenceBundle(
+  artifactRoot: string,
+  reconstruction: DagSessionReconstruction,
+): Promise<ReviewEvidenceBundle> {
+  const node = reconstruction.state.nodes.find(
+    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
+  );
+  if (node?.status !== DagNodeStatus.Succeeded) return { references: [], malformed: false };
+  const references: DagTextArtifactReference[] = [];
+  let coverage: ReviewEvidenceCoverage | undefined;
+  for (const outputName of ReviewEvidenceOutputs) {
+    const referenceValue = node.outputs[outputName];
+    if (!referenceValue) continue;
+    try {
+      const artifact = await Effect.runPromise(
+        materializeDagTextArtifact(
+          artifactRoot,
+          referenceValue,
+          { runId: reconstruction.graph.runId, producerNodeId: node.nodeId, outputName },
+          ReviewEvidenceDossierMaxBytes,
+        ),
+      );
+      references.push(artifact.reference);
+      if (outputName === ReviewEvidenceCoverageOutput)
+        coverage = decodeEvidenceCoverage(artifact.text);
+    } catch {
+      // Preserve only artifacts whose identity and bytes were verified.
+    }
+  }
+  const malformed =
+    Object.keys(node.outputs).length !== ReviewEvidenceOutputs.length ||
+    references.length !== ReviewEvidenceOutputs.length ||
+    !coverage;
+  return Object.freeze({
+    ...(!malformed && coverage ? { coverage } : {}),
+    references: Object.freeze(references),
+    malformed,
   });
 }
 
@@ -294,21 +358,20 @@ function byteChunks(text: string): string[] {
 }
 
 async function verifySnapshot(payload: ReviewEvidenceResolverPayloadV1, signal: AbortSignal) {
-  const [canonicalWorktree, diff] = await Promise.all([
-    Fs.realpath(payload.worktree),
-    Fs.readFile(payload.diffPath, "utf8"),
-  ]).catch((cause) => {
+  let canonicalWorktree: string;
+  let diff: string;
+  try {
+    signal.throwIfAborted();
+    canonicalWorktree = await Fs.realpath(payload.worktree);
+    signal.throwIfAborted();
+    diff = readVerifiedPinnedDiff(payload);
+  } catch (cause) {
     throw new ReviewEvidenceResolutionFailure({
       code: "snapshot-mismatch",
-      message: "Pinned snapshot paths are not available.",
+      message: "Pinned snapshot evidence is unavailable or does not match the resolver payload.",
       cause,
     });
-  });
-  if (sha256(diff) !== payload.diffHash)
-    throw new ReviewEvidenceResolutionFailure({
-      code: "snapshot-mismatch",
-      message: "Pinned diff identity does not match the resolver payload.",
-    });
+  }
   let head: string;
   try {
     const [headResult, statusResult] = await Promise.all([

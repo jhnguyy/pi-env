@@ -277,7 +277,7 @@ describe("review pull request posting", () => {
     expect(confirms[0].length).toBeLessThan(700);
   });
 
-  it("blocks incomplete reviews and revalidates content after confirmation", async () => {
+  it("blocks incomplete reviews before posting", async () => {
     const incomplete = { ...state(), result: undefined };
     restore({ sessionManager: { getBranch: () => [custom(incomplete)] } } as any);
     const pi = {
@@ -286,30 +286,58 @@ describe("review pull request posting", () => {
     } as any;
     const ctx = { cwd: "/tmp", ui: { confirm: async () => true } } as any;
     await expect(postReview(pi, ctx, ReviewEvent.Approve)).resolves.toContain("not complete");
-
-    clearInMemoryStateForTests();
-    const changed = state();
-    restore({ sessionManager: { getBranch: () => [custom(changed)] } } as any);
-    let posts = 0;
-    pi.exec = async (_cmd: string, args: string[]) => {
-      if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
-      if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
-      posts += 1;
-      return { code: 0, stdout: "{}", stderr: "" };
-    };
-    ctx.ui.confirm = async () => {
-      restore({
-        sessionManager: {
-          getBranch: () => [custom({ ...changed, preface: "changed during confirmation" })],
-        },
-      } as any);
-      return true;
-    };
-    await expect(postReview(pi, ctx, ReviewEvent.Comment)).resolves.toContain(
-      "changed during confirmation",
-    );
-    expect(posts).toBe(0);
   });
+
+  it.each(["preflight", "confirmation", "confirmed preflight"])(
+    "refuses changed content during %s before proceeding",
+    async (stage) => {
+      const changed = state();
+      restore({ sessionManager: { getBranch: () => [custom(changed)] } } as any);
+      const changeContent = () =>
+        restore({
+          sessionManager: {
+            getBranch: () => [custom({ ...changed, preface: "Updated human preface" })],
+          },
+        } as any);
+      let posts = 0;
+      let headChecks = 0;
+      let confirmations = 0;
+      const pi = {
+        appendEntry() {
+          throw new Error("Changed content must not create a posting attempt.");
+        },
+        exec: async (_cmd: string, args: string[]) => {
+          if (args[0] === "pr") {
+            headChecks += 1;
+            if (
+              (stage === "preflight" && headChecks === 1) ||
+              (stage === "confirmed preflight" && headChecks === 2)
+            )
+              changeContent();
+            return { code: 0, stdout: "head\n", stderr: "" };
+          }
+          if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+          posts += 1;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      };
+      const ctx = {
+        cwd: "/tmp",
+        ui: {
+          confirm: async () => {
+            confirmations += 1;
+            if (stage === "confirmation") changeContent();
+            return true;
+          },
+        },
+      };
+      await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).resolves.toContain(
+        "changed",
+      );
+      expect(posts).toBe(0);
+      expect(confirmations).toBe(stage === "preflight" ? 0 : 1);
+    },
+  );
 
   it("blocks posting before confirmation when the remote head is stale", async () => {
     const s = state();

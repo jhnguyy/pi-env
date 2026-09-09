@@ -6,6 +6,7 @@ import {
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { ReviewerNodes } from "./review-topology";
+import { admitReviewEvidenceBundle, type ReviewEvidenceBundle } from "./evidence-resolver";
 import {
   type AdmittedRawFinding,
   type RawFindingRecord,
@@ -15,6 +16,24 @@ import {
 import { buildRawFindingRecords } from "./synthesis-provenance";
 
 export const MaxReviewerDossierBytes = 1_750_000;
+
+export interface ReviewAdmission {
+  readonly evidence: ReviewEvidenceBundle;
+  readonly reviewers: ReviewerDossier;
+}
+
+export async function admitReviewArtifacts(
+  artifactRoot: string,
+  reconstruction: DagSessionReconstruction,
+): Promise<ReviewAdmission> {
+  const evidence = await admitReviewEvidenceBundle(artifactRoot, reconstruction);
+  const reviewers = await admitReviewerDossier({
+    artifactRoot,
+    reconstruction,
+    expectedEvidenceDigest: evidence.coverage?.digest,
+  });
+  return { evidence, reviewers };
+}
 
 type ReviewerTopologyNode = (typeof ReviewerNodes)[number];
 
@@ -60,12 +79,8 @@ export function reviewerDossierContext(dossier: ReviewerDossier) {
   };
 }
 
-function serializedReviewerDossierContext(dossier: ReviewerDossier): string {
-  return JSON.stringify(reviewerDossierContext(dossier));
-}
-
 export function serializeReviewerDossierContext(dossier: ReviewerDossier): string {
-  const text = serializedReviewerDossierContext(dossier);
+  const text = JSON.stringify(reviewerDossierContext(dossier));
   if (Buffer.byteLength(text, "utf8") > MaxReviewerDossierBytes)
     throw new Error("Reviewer result context exceeds the absolute byte limit.");
   return text;
@@ -129,7 +144,7 @@ export async function readVerifiedRawFinding(
   if (!reviewer || value.index >= reviewer.findings.length)
     throw new Error("Raw finding provenance does not match the admitted reviewer output.");
   const admitted = buildRawFindingRecords([{ reviewer, reference: materialized.reference }]);
-  const finding = admitted.find((candidate) => candidate.index === value.index);
+  const finding = admitted[value.index];
   if (!finding || finding.id !== value.id)
     throw new Error("Raw finding identity does not match its reviewer occurrence.");
   const { artifact: _artifact, ...inspected } = finding;
@@ -185,21 +200,23 @@ export async function admitReviewerDossier(options: {
     admitted.push({ ...verified[0], reviewer });
   }
 
+  let rawFindings = buildRawFindingRecords(admitted);
   while (admitted.length > 0) {
     const candidate = {
       admitted,
-      rawFindings: buildRawFindingRecords(admitted),
+      rawFindings,
       raw,
       failed,
       malformed,
     };
     if (
-      Buffer.byteLength(serializedReviewerDossierContext(candidate), "utf8") <=
+      Buffer.byteLength(JSON.stringify(reviewerDossierContext(candidate)), "utf8") <=
       MaxReviewerDossierBytes
     )
       break;
-    const removed = admitted.pop();
-    if (removed) malformed.push(removed.nodeId);
+    const removed = admitted.pop()!;
+    malformed.push(removed.nodeId);
+    rawFindings = rawFindings.filter((raw) => raw.role !== removed.reviewer.role);
   }
   const topologyIndex = new Map<string, number>(
     ReviewerNodes.map((node, index) => [node.nodeId, index]),
@@ -211,7 +228,7 @@ export async function admitReviewerDossier(options: {
   );
   return Object.freeze({
     admitted: Object.freeze(admitted),
-    rawFindings: buildRawFindingRecords(admitted),
+    rawFindings: Object.freeze(rawFindings),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),

@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { Effect } from "effect";
-import { DagNodeStatus, type DagSessionReconstruction } from "../../../src/dag/index.js";
 import {
   registerAgentTools,
   unregisterAgentTools,
@@ -17,7 +16,6 @@ import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { validatePlan } from "./core";
 import {
   preflightReviewEvidence,
-  ReviewEvidenceCoverageOutput,
   ReviewEvidenceResolutionFailure,
   type ReviewEvidenceResolverPayloadV1,
 } from "./evidence-resolver";
@@ -29,13 +27,12 @@ import {
   type ReviewPlan,
   validateConsolidationReviewV2Shape,
 } from "./schema";
-import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph";
+import type { ReviewGraphToolNames } from "./review-graph";
 import { validConsolidationAccounting } from "./synthesis-provenance";
 import {
-  admitReviewerDossier,
-  readVerifiedReviewArtifact,
+  admitReviewArtifacts,
   serializeReviewerDossierContext,
-  type ReviewerDossier,
+  type ReviewAdmission,
 } from "./reviewer-dossier";
 
 export { readVerifiedReviewArtifact } from "./reviewer-dossier";
@@ -68,35 +65,10 @@ function boundedSubmission(value: unknown): string {
   return text;
 }
 
-async function evidenceDigestFor(
-  artifactRoot: string,
-  reconstruction: DagSessionReconstruction,
-): Promise<string | undefined> {
-  const node = reconstruction.state.nodes.find(
-    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
-  );
-  if (node?.status !== DagNodeStatus.Succeeded) return undefined;
-  const reference = node.outputs[ReviewEvidenceCoverageOutput];
-  if (!reference) return undefined;
-  try {
-    const artifact = await readVerifiedReviewArtifact(artifactRoot, reference, {
-      runId: reconstruction.graph.runId,
-      producerNodeId: EvidenceResolverNode.nodeId,
-      outputName: ReviewEvidenceCoverageOutput,
-    });
-    const value = JSON.parse(artifact.text) as { digest?: unknown };
-    return typeof value.digest === "string" && /^[0-9a-f]{64}$/u.test(value.digest)
-      ? value.digest
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export interface ReviewDagTools {
   readonly names: ReviewGraphToolNames;
   readonly registrations: readonly ExtToolRegistration[];
-  readonly reviewerDossier: (signal?: AbortSignal) => Promise<ReviewerDossier>;
+  readonly admission: (signal?: AbortSignal) => Promise<ReviewAdmission>;
   unregister(): void;
 }
 
@@ -118,19 +90,23 @@ export function registerReviewDagTools(options: {
   const planName = `submit_review_plan_${suffix}`;
   const referencesName = `review_result_refs_${suffix}`;
   const synthesisName = `submit_review_synthesis_${suffix}`;
-  let reviewerDossier: Promise<ReviewerDossier> | undefined;
-  const getReviewerDossier = (signal?: AbortSignal): Promise<ReviewerDossier> => {
-    reviewerDossier ??= Effect.runPromise(options.service.reconstruct(options.runId), {
-      signal,
-    }).then(async (reconstruction) =>
-      admitReviewerDossier({
-        artifactRoot: options.artifactRoot,
-        reconstruction,
-        expectedEvidenceDigest: await evidenceDigestFor(options.artifactRoot, reconstruction),
-      }),
-    );
-    return reviewerDossier;
-  };
+  let admission: Promise<ReviewAdmission> | undefined;
+  const admittedReview = (signal?: AbortSignal) =>
+    (admission ??= Effect.runPromise(
+      options.service
+        .reconstruct(options.runId)
+        .pipe(
+          Effect.flatMap((reconstruction) =>
+            Effect.tryPromise(() => admitReviewArtifacts(options.artifactRoot, reconstruction)),
+          ),
+        ),
+      { signal },
+    ).catch((cause) => {
+      admission = undefined;
+      throw cause;
+    }));
+  const getReviewerDossier = async (signal?: AbortSignal) =>
+    (await admittedReview(signal)).reviewers;
   const deckTool = customTool(
     {
       name: deckName,
@@ -264,7 +240,7 @@ export function registerReviewDagTools(options: {
   return {
     names,
     registrations,
-    reviewerDossier: getReviewerDossier,
+    admission: admittedReview,
     unregister: () => unregisterAgentTools(options.pi, registrations),
   };
 }

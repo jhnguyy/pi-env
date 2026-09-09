@@ -12,10 +12,12 @@ import {
 import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
 import { registerReviewDagTools } from "./dag-tools";
+import { readVerifiedPinnedDiff } from "./snapshot";
+import { selectedFindings } from "./decision";
 import {
-  admitReviewerDossier,
+  admitReviewArtifacts,
+  type ReviewAdmission,
   readVerifiedReviewArtifact,
-  type ReviewerDossier,
 } from "./reviewer-dossier";
 import {
   EvidenceResolverNode,
@@ -25,11 +27,7 @@ import {
   compileReviewGraph,
   type ReviewRoleAssignments,
 } from "./review-graph";
-import {
-  ReviewEvidenceCoverageOutput,
-  ReviewEvidenceOutputs,
-  type ReviewEvidenceCoverage,
-} from "./evidence-resolver";
+import type { ReviewEvidenceCoverage } from "./evidence-resolver";
 import {
   PlanSchema,
   type AdmittedRawFinding,
@@ -58,7 +56,7 @@ interface CollectedOutputs {
   readonly plan?: ReviewPlan;
   readonly readingPlanReference?: DagTextArtifactReference;
   readonly evidenceCoverage?: ReviewEvidenceCoverage;
-  readonly evidenceReferences: DagTextArtifactReference[];
+  readonly evidenceReferences: readonly DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
   readonly rawFindings: readonly AdmittedRawFinding[];
   readonly rawResultReferences: DagTextArtifactReference[];
@@ -85,44 +83,27 @@ async function outputForNode(
   root: string,
   reconstruction: DagSessionReconstruction,
   nodeId: string,
+  expectedOutputName: string,
 ): Promise<NodeOutput | undefined> {
   const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
   if (!node || node.status !== DagNodeStatus.Succeeded) return undefined;
-  const outputs = Object.entries(node.outputs);
-  if (outputs.length !== 1) throw new Error(`DAG node ${nodeId} did not publish one output.`);
-  const [outputName, reference] = outputs[0];
+  const reference = node.outputs[expectedOutputName];
+  if (!reference || Object.keys(node.outputs).length !== 1)
+    throw new Error(`DAG node ${nodeId} did not publish its topology output.`);
   return readVerifiedReviewArtifact(root, reference, {
     runId: reconstruction.graph.runId,
     producerNodeId: nodeId,
-    outputName,
+    outputName: expectedOutputName,
   });
 }
 async function admittedOutputForNode(
   root: string,
   reconstruction: DagSessionReconstruction,
   nodeId: string,
+  expectedOutputName: string,
 ): Promise<NodeOutput | undefined> {
   try {
-    return await outputForNode(root, reconstruction, nodeId);
-  } catch {
-    return undefined;
-  }
-}
-async function admittedOutputForNodeOutput(
-  root: string,
-  reconstruction: DagSessionReconstruction,
-  nodeId: string,
-  outputName: string,
-): Promise<NodeOutput | undefined> {
-  const node = reconstruction.state.nodes.find((candidate) => candidate.nodeId === nodeId);
-  if (!node || node.status !== DagNodeStatus.Succeeded || !node.outputs[outputName])
-    return undefined;
-  try {
-    return await readVerifiedReviewArtifact(root, node.outputs[outputName], {
-      runId: reconstruction.graph.runId,
-      producerNodeId: nodeId,
-      outputName,
-    });
+    return await outputForNode(root, reconstruction, nodeId, expectedOutputName);
   } catch {
     return undefined;
   }
@@ -152,69 +133,21 @@ function decodePlan(text: string, state: ReviewState): ReviewPlan | undefined {
     return undefined;
   }
 }
-function decodeEvidenceCoverage(text: string): ReviewEvidenceCoverage | undefined {
-  try {
-    const decoded = parseJson(text) as Partial<ReviewEvidenceCoverage>;
-    return decoded.v === 1 &&
-      typeof decoded.digest === "string" &&
-      /^[0-9a-f]{64}$/u.test(decoded.digest) &&
-      typeof decoded.uniqueBytes === "number" &&
-      typeof decoded.dossierBytes === "number" &&
-      typeof decoded.chunks === "number" &&
-      Array.isArray(decoded.omissions)
-      ? (decoded as ReviewEvidenceCoverage)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-async function collectEvidence(
-  root: string,
-  reconstruction: DagSessionReconstruction,
-): Promise<{
-  coverage?: ReviewEvidenceCoverage;
-  references: DagTextArtifactReference[];
-  malformed: boolean;
-}> {
-  const node = reconstruction.state.nodes.find(
-    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
-  );
-  if (node?.status !== DagNodeStatus.Succeeded) return { references: [], malformed: false };
-  const references: DagTextArtifactReference[] = [];
-  let coverage: ReviewEvidenceCoverage | undefined;
-  for (const outputName of ReviewEvidenceOutputs) {
-    const output = await admittedOutputForNodeOutput(
-      root,
-      reconstruction,
-      EvidenceResolverNode.nodeId,
-      outputName,
-    );
-    if (!output) continue;
-    references.push(output.reference);
-    if (outputName === ReviewEvidenceCoverageOutput) coverage = decodeEvidenceCoverage(output.text);
-  }
-  return {
-    ...(coverage ? { coverage } : {}),
-    references,
-    malformed: references.length !== ReviewEvidenceOutputs.length || !coverage,
-  };
-}
 async function collectOutputs(
   root: string,
   reconstruction: DagSessionReconstruction,
   state: ReviewState,
-  admittedDossier?: Promise<ReviewerDossier>,
+  admitted?: Promise<ReviewAdmission>,
 ): Promise<CollectedOutputs> {
-  const planOutput = await admittedOutputForNode(root, reconstruction, ReadingPlanNode.nodeId);
+  const { evidence, reviewers: dossier } = await (admitted ??
+    admitReviewArtifacts(root, reconstruction));
+  const planOutput = await admittedOutputForNode(
+    root,
+    reconstruction,
+    ReadingPlanNode.nodeId,
+    ReadingPlanNode.outputName,
+  );
   const plan = planOutput ? decodePlan(planOutput.text, state) : undefined;
-  const evidence = await collectEvidence(root, reconstruction);
-  const dossier = admittedDossier
-    ? await admittedDossier
-    : await admitReviewerDossier({
-        artifactRoot: root,
-        reconstruction,
-        expectedEvidenceDigest: evidence.coverage?.digest,
-      });
   const malformedNodes = [...dossier.malformed];
   if (nodeSucceeded(reconstruction, ReadingPlanNode.nodeId) && !plan)
     malformedNodes.push(ReadingPlanNode.nodeId);
@@ -396,7 +329,7 @@ function preserveAllFailedOutputs(
       ...(collected.readingPlanReference
         ? { readingPlanReference: collected.readingPlanReference }
         : {}),
-      evidenceReferences: collected.evidenceReferences,
+      evidenceReferences: [...collected.evidenceReferences],
       ...evidenceCoverageState(collected.evidenceCoverage),
       failedNodes,
       malformedNodes: [...new Set(collected.malformedNodes)].sort(),
@@ -414,7 +347,7 @@ interface FinalizeReviewInput {
   readonly reconstruction: DagSessionReconstruction;
   readonly service: ActiveDagRuntimeService;
   readonly startedAt: number;
-  readonly reviewerDossier?: Promise<ReviewerDossier>;
+  readonly admission?: Promise<ReviewAdmission>;
   readonly synthesisProtocol: 2 | "legacy" | "unsupported";
 }
 async function resolveSynthesis(input: FinalizeReviewInput, collected: CollectedOutputs) {
@@ -422,12 +355,11 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
     input.root,
     input.reconstruction,
     SynthesisNode.nodeId,
+    SynthesisNode.outputName,
   );
   if (nodeSucceeded(input.reconstruction, SynthesisNode.nodeId) && !output)
     collected.malformedNodes.push(SynthesisNode.nodeId);
-  const diff = await import("node:fs/promises").then((fs) =>
-    fs.readFile(input.state.snapshot.diffPath, "utf8"),
-  );
+  const diff = readVerifiedPinnedDiff(input.state.snapshot);
   const synthesized = output
     ? decodeSynthesis(
         output.text,
@@ -441,9 +373,7 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
   const fallbackReason = output
     ? "Synthesis output was malformed or did not account for every admitted raw finding exactly once."
     : "Synthesis output was unavailable.";
-  const result =
-    synthesized ??
-    fallbackConsolidation(collected.rawFindings, fallbackReason);
+  const result = synthesized ?? fallbackConsolidation(collected.rawFindings, fallbackReason);
   return {
     output,
     result: synthesized ? result : validateFindingAnchors(result, diff),
@@ -506,16 +436,13 @@ function finalizedReviewState(
     }),
     ...(collected.plan ? { plan: collected.plan } : {}),
     result: synthesis.result,
-    selectedFindingIds:
-      input.state.decisions === undefined
-        ? synthesis.result.findings.flatMap((finding) =>
-            finding.selected && finding.id ? [finding.id] : [],
-          )
-        : synthesis.result.findings.flatMap((finding) =>
-            finding.id && input.state.decisions?.[finding.id]?.status === "selected"
-              ? [finding.id]
-              : [],
-          ),
+    selectedFindingIds: selectedFindings({
+      ...input.state,
+      result: synthesis.result,
+      selectedFindingIds: synthesis.result.findings.flatMap((finding) =>
+        finding.selected && finding.id ? [finding.id] : [],
+      ),
+    }).map((finding) => finding.id!),
     dag: {
       runId: input.runId,
       startedAt: input.state.dag?.startedAt,
@@ -528,7 +455,7 @@ function finalizedReviewState(
       ...(collected.readingPlanReference
         ? { readingPlanReference: collected.readingPlanReference }
         : {}),
-      evidenceReferences: collected.evidenceReferences,
+      evidenceReferences: [...collected.evidenceReferences],
       ...evidenceCoverageState(collected.evidenceCoverage),
       ...(synthesis.output ? { synthesisReference: synthesis.output.reference } : {}),
       failedNodes,
@@ -542,7 +469,7 @@ async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> 
     input.root,
     input.reconstruction,
     input.state,
-    input.reviewerDossier,
+    input.admission,
   );
   const failedNodes = [
     ...new Set([...failedNodeIds(input.reconstruction), ...collected.failedReviewerNodes]),
@@ -704,7 +631,7 @@ export async function runReviewDag(options: {
       reconstruction,
       service: options.service,
       startedAt,
-      reviewerDossier: tools.reviewerDossier(options.signal),
+      admission: tools.admission(options.signal),
       synthesisProtocol: 2,
     });
     options.save(state);

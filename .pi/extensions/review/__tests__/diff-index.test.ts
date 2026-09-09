@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createDiffIndex } from "../diff-index";
 
@@ -12,6 +15,25 @@ function section(oldPath: string, newPath: string, body = "-old\n+new"): string 
 }
 
 describe("canonical diff index", () => {
+  it("indexes a real repeated rename/deletion patch with side-specific anchor offsets", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const diff = readFileSync(join(here, "fixtures", "canonical-repeated.patch"), "utf8");
+    const index = createDiffIndex(diff);
+    const renamed = index.get("src/new name.ts");
+    const deleted = index.get("src/gone.ts");
+
+    expect([...index.keys()]).toEqual(["src/new name.ts", "src/gone.ts"]);
+    expect(renamed?.text.match(/^diff --git /gmu)).toHaveLength(2);
+    expect(renamed?.anchors.LEFT.has(4)).toBe(true);
+    expect(renamed?.anchors.RIGHT.has(4)).toBe(true);
+    expect(renamed?.anchors.LEFT.has(21)).toBe(false);
+    expect(renamed?.anchors.RIGHT.has(21)).toBe(true);
+    expect(
+      renamed?.anchors.RIGHT.get(21)?.map((offset) => renamed.text.slice(offset, offset + 6)),
+    ).toEqual(["+added"]);
+    expect(deleted?.anchors.LEFT.has(7)).toBe(true);
+    expect(deleted?.anchors.RIGHT.has(7)).toBe(false);
+  });
   it("indexes a modification by its destination path", () => {
     const index = createDiffIndex(section("src/a.ts", "src/a.ts"));
     expect([...index.keys()]).toEqual(["src/a.ts"]);
