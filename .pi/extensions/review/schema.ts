@@ -70,6 +70,10 @@ export const REVIEW_COMMANDS = [
   "select",
   "edit",
   "preface",
+  "walkthrough",
+  "reject",
+  "defer",
+  "finalize",
   "rerun",
   "post",
   "draft-plan",
@@ -380,6 +384,13 @@ export interface ReviewArtifactReference {
   readonly producerNodeId: string;
   readonly outputName: string;
 }
+export const HumanDecisionStatus = ["pending", "selected", "rejected", "deferred"] as const;
+export type HumanDecisionStatus = (typeof HumanDecisionStatus)[number];
+export interface HumanDecision {
+  status: HumanDecisionStatus;
+  at: string;
+}
+
 export interface ReviewState {
   snapshot: ReviewSnapshot;
   preparation?: {
@@ -461,6 +472,15 @@ export interface ReviewState {
   plan?: ReviewPlan;
   result?: ReviewResult;
   selectedFindingIds: string[];
+  /** Durable human inspection decisions. Missing entries are pending, including defaults. */
+  decisions?: Record<string, HumanDecision>;
+  /** Acknowledgement is bound to the unchanged review and degradation facts. */
+  degradationAcknowledgement?: {
+    contentHash: string;
+    degradationHash: string;
+    at: string;
+  };
+  finalizedAt?: string;
   preface?: string;
   child?: {
     sessionFile?: string;

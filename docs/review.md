@@ -154,6 +154,16 @@ The tool manager activates `review` for pull request review and feedback request
 
 Use `/review pr list`, `/review pr open <review-id>`, and `/review pr cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
 
-## Deferred UI
+## Guided walkthrough and human decisions
 
-A guided review walkthrough is intentionally deferred. The later UI will consume the same pinned snapshot, plan, findings, decisions, and posting state. The extension must not couple the core workflow to a specific layout.
+Use the explicit review ID for every walkthrough mutation:
+
+- `/review pr walkthrough <review-id>` shows the bounded current-state review in overview, coverage, reading-plan, anchored and unanchored findings, provenance, decisions, and finalize order.
+- `/review pr select <review-id> <finding-id>...`
+- `/review pr reject <review-id> <finding-id>...`
+- `/review pr defer <review-id> <finding-id>...`
+- `/review pr edit <review-id> <finding-id>`
+- `/review pr preface <review-id>`
+- `/review pr finalize <review-id>`
+
+Human decisions are durable `pending`, `selected`, `rejected`, or `deferred` records. Missing decisions, including machine defaults and legacy selected IDs, remain pending and are not human inspection. New decision-enabled reviews post only explicitly selected findings. Finalize records review-state completion and never posts. Degraded reviews require acknowledgement in interactive mode, bound to the current pinned content and degradation facts. Headless walkthroughs are bounded and read-only. `/review pr post` remains the only posting path.
