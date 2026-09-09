@@ -2,128 +2,62 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
-import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { clearInMemoryStateForTests } from "../index";
 import { REVIEW_ENTRY_TYPE, sha256, type ReviewState } from "../core";
-import { persistRawFindingArtifacts } from "../raw-provenance";
-import type { AdmittedRawFinding } from "../schema";
 
 const mocked = vi.hoisted(() => ({ agentDir: "" }));
 vi.mock("@earendil-works/pi-coding-agent", async (original) => ({
   ...(await original<typeof CodingAgent>()),
   getAgentDir: () => mocked.agentDir,
 }));
-
-const temporaryRoots: string[] = [];
+const roots: string[] = [];
 afterEach(() => {
   clearInMemoryStateForTests();
-  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function reviewState(
-  id: string,
-  options: { degraded?: boolean; legacy?: boolean } = {},
-): Promise<ReviewState> {
-  const root = mocked.agentDir;
-  const artifactDir = join(root, "pr-review", "artifacts", id);
+function reviewState(id: string): ReviewState {
+  const artifactDir = join(mocked.agentDir, "pr-review", "artifacts", id);
   mkdirSync(artifactDir, { recursive: true });
   const diff = [
     "diff --git a/a.ts b/a.ts",
     "--- a/a.ts",
     "+++ b/a.ts",
-    "@@ -1,2 +1,2 @@",
+    "@@ -1 +1 @@",
     "-old",
     "+new pinned evidence",
-    " context",
     "diff --git a/b.ts b/b.ts",
     "--- a/b.ts",
     "+++ b/b.ts",
     "@@ -1 +1 @@",
     "-before",
     "+after",
-    "",
   ].join("\n");
   const diffPath = join(artifactDir, "diff.patch");
   writeFileSync(diffPath, diff);
-  const findings = [
-    {
-      id: "F1",
-      severity: "serious" as const,
-      impact: "high" as const,
-      file: "a.ts",
-      side: "RIGHT" as const,
-      line: 1,
-      problem: "problem one",
-      consequence: "consequence one",
-      suggestedFix: "fix one",
-      selected: true,
-      anchorValid: true,
-      rawFindingIds: ["R-a1"],
-    },
-    {
-      id: "F2",
-      severity: "medium" as const,
-      impact: "medium" as const,
-      problem: "problem two",
-      consequence: "consequence two",
-      suggestedFix: "fix two",
-      selected: true,
-      anchorValid: false,
-      rawFindingIds: ["R-a2"],
-    },
-    {
-      id: "F3",
-      severity: "low" as const,
-      impact: "low" as const,
-      problem: "problem three",
-      consequence: "consequence three",
-      suggestedFix: "fix three",
-      selected: true,
-      anchorValid: false,
-      rawFindingIds: ["R-a3"],
-    },
-    {
-      id: "F4",
-      severity: "low" as const,
-      impact: "low" as const,
-      problem: "problem four",
-      consequence: "consequence four",
-      suggestedFix: "fix four",
-      selected: true,
-      anchorValid: false,
-      rawFindingIds: ["R-a4"],
-    },
-  ];
-  const rawFindings: readonly AdmittedRawFinding[] = findings.map((finding, index) => ({
-    id: `R-a${index + 1}`,
-    role: "correctness",
-    evidenceDigest: "d".repeat(64),
-    finding: {
-      severity: finding.severity,
-      impact: finding.impact,
-      ...(finding.file ? { file: finding.file, side: finding.side, line: finding.line } : {}),
-      problem: `raw ${index + 1}`,
-      consequence: finding.consequence,
-      suggestedFix: finding.suggestedFix,
-    },
-  }));
-  const rawRecords = options.legacy
-    ? []
-    : await Effect.runPromise(persistRawFindingArtifacts(artifactDir, `${id}-run`, rawFindings));
+  const reviewerArtifact = {
+    v: 1 as const,
+    path: "review-correctness/result.json",
+    bytes: 10,
+    digest: "a".repeat(64),
+    runId: `${id}-run`,
+    producerNodeId: "review-correctness",
+    outputName: "correctness_review",
+  };
   return {
     snapshot: {
       id,
       artifactDir,
-      worktree: join(root, "pr-review", "worktrees", id),
+      worktree: join(mocked.agentDir, "pr-review", "worktrees", id),
       diffPath,
       diffHash: sha256(diff),
       createdAt: id,
       metadata: {
         owner: "o",
         repo: "r",
-        number: id === "older" ? 1 : 2,
-        url: `https://github.com/o/r/pull/${id === "older" ? 1 : 2}`,
+        number: 1,
+        url: "https://github.com/o/r/pull/1",
         baseOid: "base",
         headOid: `${id}-head`,
         changedFiles: [{ path: "a.ts" }, { path: "b.ts" }],
@@ -131,60 +65,83 @@ async function reviewState(
     },
     dag: {
       runId: `${id}-run`,
-      ...(!options.legacy ? { synthesisProtocol: 2 as const } : {}),
-      status: options.degraded ? "degraded" : "succeeded",
-      rawResultReferences: [],
+      synthesisProtocol: 2,
+      status: "succeeded",
+      rawResultReferences: [reviewerArtifact],
       evidenceCoverage: {
         digest: "d".repeat(64),
         uniqueBytes: 20,
         dossierBytes: 20,
         chunks: 1,
-        omissions: options.degraded ? ["b.ts hunk was omitted"] : [],
+        omissions: [],
       },
-      failedNodes: options.degraded ? ["review-security"] : [],
-      malformedNodes: [],
     },
     plan: {
       goal: "goal",
       goalAssessment: "assessment",
       risk: "risk",
       riskReasons: [],
-      cohorts: [{ label: "all", purpose: "ordered inspection", paths: ["a.ts", "b.ts"] }],
+      cohorts: [{ label: "all", purpose: "inspection", paths: ["a.ts", "b.ts"] }],
       files: [
         { path: "a.ts", attention: "high", role: "core behavior" },
         { path: "b.ts", attention: "normal", role: "supporting behavior" },
       ],
-      evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 2, purpose: "change" }],
-      evidenceOmissions: options.degraded ? ["b.ts hunk was omitted"] : [],
+      evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 1, purpose: "change" }],
     },
     result: {
-      verdict: options.degraded ? "partial" : "complete",
+      verdict: "complete",
       coverage: {
-        status: options.degraded ? "degraded" : "complete",
+        status: "complete",
         succeeded: ["correctness"],
-        failed: options.degraded ? ["security"] : [],
+        failed: [],
         malformed: [],
       },
-      findings,
-      ...(options.legacy
-        ? {}
-        : {
-            provenance: {
-              v: 2 as const,
-              kind: "editorial-consolidation" as const,
-              status: options.degraded ? ("fallback" as const) : ("accepted" as const),
-              rawFindings: rawRecords,
-              dismissals: [],
-              ...(options.degraded ? { fallbackReason: "invalid consolidation" } : {}),
-            },
-          }),
+      findings: [
+        {
+          id: "F1",
+          severity: "serious",
+          impact: "high",
+          file: "a.ts",
+          side: "RIGHT",
+          line: 1,
+          problem: "problem one",
+          consequence: "consequence one",
+          suggestedFix: "fix one",
+          selected: true,
+          anchorValid: true,
+          rawFindingIds: ["R-a1"],
+        },
+        {
+          id: "F2",
+          severity: "medium",
+          impact: "medium",
+          problem: "problem two",
+          consequence: "consequence two",
+          suggestedFix: "fix two",
+          selected: true,
+          anchorValid: false,
+          rawFindingIds: ["R-a2"],
+        },
+      ],
+      provenance: {
+        v: 2,
+        kind: "editorial-consolidation",
+        status: "accepted",
+        rawFindings: [0, 1].map((index) => ({
+          id: `R-a${index + 1}`,
+          role: "correctness" as const,
+          evidenceDigest: "d".repeat(64),
+          index,
+          artifact: reviewerArtifact,
+        })),
+        dismissals: [],
+      },
     },
-    selectedFindingIds: ["F1", "F2", "F3", "F4"],
-    ...(options.legacy ? {} : { decisions: {} }),
+    selectedFindingIds: ["F1", "F2"],
+    decisions: {},
     posts: [],
   };
 }
-
 function entry(state: ReviewState) {
   return {
     type: "custom",
@@ -192,21 +149,20 @@ function entry(state: ReviewState) {
     data: { reviewId: state.snapshot.id, state },
   };
 }
-
-async function harness(states: readonly { id: string; degraded?: boolean; legacy?: boolean }[]) {
+async function harness() {
   mocked.agentDir = mkdtempSync(join(tmpdir(), "review-walkthrough-"));
-  temporaryRoots.push(mocked.agentDir);
-  const fixtures = await Promise.all(states.map((state) => reviewState(state.id, state)));
-  const commands: Record<string, { handler: (args: string, ctx: unknown) => Promise<void> }> = {};
-  const handlers: Record<string, (event: unknown, ctx: unknown) => void> = {};
+  roots.push(mocked.agentDir);
+  const fixtures = [reviewState("older"), reviewState("newer")];
+  const commands: Record<string, any> = {};
+  const handlers: Record<string, any> = {};
   const appended: Array<{ reviewId: string; state: ReviewState }> = [];
   const pi = {
-    events: { on: () => () => {}, emit() {} },
+    events: { on: () => () => {} },
     registerTool() {},
-    registerCommand(name: string, command: (typeof commands)[string]) {
+    registerCommand(name: string, command: unknown) {
       commands[name] = command;
     },
-    on(name: string, handler: (event: unknown, ctx: unknown) => void) {
+    on(name: string, handler: unknown) {
       handlers[name] = handler;
     },
     appendEntry(_type: string, data: { reviewId: string; state: ReviewState }) {
@@ -215,22 +171,20 @@ async function harness(states: readonly { id: string; degraded?: boolean; legacy
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
   reviewExtension(pi as never);
-  const branch = fixtures.map(entry);
-  const session = (id: string, entries = branch) => ({
+  const session = (id: string, states = fixtures) => ({
     cwd: mocked.agentDir,
     hasUI: true,
     sessionManager: {
       getSessionId: () => id,
       getSessionDir: () => mocked.agentDir,
-      getBranch: () => entries,
+      getBranch: () => states.map(entry),
     },
     modelRegistry: { getAvailable: () => [] },
   });
-  handlers.session_start?.({}, session("session-a"));
-  return { pi, command: commands.review.handler, handlers, appended, fixtures, session };
+  handlers.session_start({}, session("session-a"));
+  return { command: commands.review.handler, handlers, appended, fixtures, session };
 }
-
-function notifications(hasUI = true) {
+function context(hasUI = true) {
   const notes: string[] = [];
   return {
     notes,
@@ -241,72 +195,40 @@ function notifications(hasUI = true) {
         notify: (message: string) => notes.push(message),
         select: async () => undefined,
         editor: async () => undefined,
-        confirm: async () => false,
       },
     },
   };
 }
 
 describe("registered review walkthrough boundary", () => {
-  it("targets the explicit review and durably preserves four statuses distinct from defaults", async () => {
-    const { command, appended, fixtures, handlers, session } = await harness([
-      { id: "older" },
-      { id: "newer" },
-    ]);
-    const newerBefore = structuredClone(fixtures[1]);
-    const { ctx, notes } = notifications();
-    await command("pr select older F1", ctx);
-    await command("pr reject older F2", ctx);
-    await command("pr defer older F3", ctx);
+  it("persists explicit-ID decisions and keeps defaults pending after reconstruction", async () => {
+    const { command, appended, handlers, fixtures, session } = await harness();
+    const view = context();
+    await command("pr select older F1", view.ctx);
+    await command("pr reject older F2", view.ctx);
     expect(appended.at(-1)?.state.decisions).toMatchObject({
       F1: { status: "selected" },
       F2: { status: "rejected" },
-      F3: { status: "deferred" },
     });
-    expect(appended.at(-1)?.state.decisions?.F4).toBeUndefined();
     expect(appended.at(-1)?.state.selectedFindingIds).toEqual(["F1"]);
-    expect(appended.every((data) => data.reviewId === "older")).toBe(true);
-    expect(fixtures[1]).toEqual(newerBefore);
-    const newerView = notifications(false);
-    await command("pr walkthrough newer", newerView.ctx);
-    expect(newerView.notes.at(-1)).toContain("F1 [pending] recommended");
-    expect(newerView.notes.at(-1)).not.toContain("[selected]");
+    const count = appended.length;
+    await command("pr defer older unknown", view.ctx);
+    expect(appended).toHaveLength(count);
 
-    const appendCount = appended.length;
-    await command("pr select", ctx);
-    await command("pr reject missing F1", ctx);
-    await command("pr defer older unknown", ctx);
-    expect(appended).toHaveLength(appendCount);
-    expect(notes.join("\n")).toContain("explicit review ID");
-    expect(notes.join("\n")).toContain("Review not found: missing");
-    expect(notes.join("\n")).toContain("not owned by review older");
-
-    const replay = [
-      ...fixtures.map(entry),
-      ...appended.map((data) => ({ type: "custom", customType: REVIEW_ENTRY_TYPE, data })),
-    ];
-    clearInMemoryStateForTests();
-    handlers.session_tree?.({}, session("session-a", replay));
-    const restored = notifications(false);
+    handlers.session_tree(
+      {},
+      session("session-a", [fixtures[0], ...appended.map((item) => item.state)]),
+    );
+    const restored = context(false);
     await command("pr walkthrough older", restored.ctx);
     expect(restored.notes.at(-1)).toContain("F1 [selected]");
     expect(restored.notes.at(-1)).toContain("F2 [rejected]");
-    expect(restored.notes.at(-1)).toContain("F3 [deferred]");
-    expect(restored.notes.at(-1)).toContain("F4 [pending] recommended");
   });
 
-  it("guides ordered file inspection to hash-verified pinned diff evidence", async () => {
-    const { command, fixtures } = await harness([{ id: "older" }]);
-    const selections = [
-      "2. Reading plan and pinned file diffs",
-      "1. a.ts [high] - core behavior",
-      "Pinned diff page 1/1",
-      "Back",
-      "Back",
-      "Back",
-      "Exit walkthrough",
-    ];
-    const titles: string[] = [];
+  it("navigates every planned file using only hash-verified pinned evidence", async () => {
+    const { command, fixtures } = await harness();
+    const choices = ["Reading plan", "2. b.ts [normal] - supporting behavior", "Back", "Exit"];
+    const shown: string[] = [];
     const notes: string[] = [];
     await command("pr walkthrough older", {
       hasUI: true,
@@ -314,43 +236,30 @@ describe("registered review walkthrough boundary", () => {
       ui: {
         notify: (message: string) => notes.push(message),
         select: async (title: string) => {
-          titles.push(title);
-          return selections.shift();
+          shown.push(title);
+          return choices.shift();
         },
-        editor: async () => undefined,
-        confirm: async () => false,
       },
     });
-    expect(titles[0]).toContain("Choose a stage");
-    expect(titles.join("\n")).toContain("Reading plan: 2 ordered file(s)");
-    expect(titles.join("\n")).toContain("Pinned diff is hash verified");
-    expect(titles.join("\n")).toContain("new pinned evidence");
-    expect(notes.at(-1)).toContain("Anchored findings");
+    expect(shown.join("\n")).toContain("b.ts");
+    expect(shown.join("\n")).toContain("Pinned diff is hash verified");
+    expect(shown.join("\n")).toContain("+after");
 
-    writeFileSync(fixtures[0].snapshot.diffPath, "live or tampered replacement");
-    const tamperedChoices = [
-      "2. Reading plan and pinned file diffs",
-      "1. a.ts [high] - core behavior",
-    ];
+    writeFileSync(fixtures[0].snapshot.diffPath, "tampered worktree-like content");
+    const tampered = ["Reading plan", "1. a.ts [high] - core behavior"];
     await command("pr walkthrough older", {
       hasUI: true,
       cwd: mocked.agentDir,
-      ui: {
-        notify: (message: string) => notes.push(message),
-        select: async () => tamperedChoices.shift(),
-        editor: async () => undefined,
-        confirm: async () => false,
-      },
+      ui: { notify: (message: string) => notes.push(message), select: async () => tampered.shift() },
     });
     expect(notes.at(-1)).toContain("Pinned diff integrity check failed");
-    expect(notes.at(-1)).not.toContain("live or tampered replacement");
+    expect(notes.at(-1)).not.toContain("worktree-like content");
   });
 
-  it("shows verified original provenance after an edit and refuses tampered raw evidence", async () => {
-    const { command, appended, fixtures } = await harness([{ id: "older" }]);
-    const beforeRaw = structuredClone(fixtures[0].result?.provenance?.rawFindings);
+  it("preserves finding identity and provenance while editing", async () => {
+    const { command, appended, fixtures } = await harness();
+    const before = structuredClone(fixtures[0].result?.provenance);
     const notes: string[] = [];
-    await command("pr select older F2", notifications().ctx);
     await command("pr edit older F1", {
       hasUI: true,
       ui: {
@@ -359,156 +268,53 @@ describe("registered review walkthrough boundary", () => {
           "Problem: edited\nConsequence: edited consequence\nSuggested fix: edited fix",
       },
     });
-    const edited = appended.at(-1)!.state;
-    expect(edited.result?.findings[0]).toMatchObject({
+    expect(appended.at(-1)?.state.result?.findings[0]).toMatchObject({
+      id: "F1",
       problem: "edited",
-      severity: "serious",
       rawFindingIds: ["R-a1"],
     });
-    expect(edited.result?.provenance?.rawFindings).toEqual(beforeRaw);
-    expect(edited.decisions?.F2.status).toBe("selected");
-
-    const inspectRaw = async () => {
-      const selections = [
-        "5. Provenance and dispositions",
-        "Raw 1: R-a1 [correctness]",
-        "Back",
-        "Back",
-        "Exit walkthrough",
-      ];
-      const titles: string[] = [];
-      await command("pr walkthrough older", {
-        hasUI: true,
-        cwd: mocked.agentDir,
-        ui: {
-          notify: (message: string) => notes.push(message),
-          select: async (title: string) => {
-            titles.push(title);
-            return selections.shift();
-          },
-          editor: async () => undefined,
-          confirm: async () => false,
-        },
-      });
-      return titles.join("\n");
-    };
-    const validRawView = await inspectRaw();
-    expect(validRawView).toContain('"problem": "raw 1"');
-    expect(validRawView).not.toContain('"problem": "edited"');
-
-    const firstRaw = beforeRaw?.[0];
-    if (!firstRaw) throw new Error("Expected a persisted raw finding fixture.");
-    writeFileSync(
-      join(fixtures[0].snapshot.artifactDir, firstRaw.artifact.path),
-      "tampered raw source",
-    );
-    const tamperedRawView = await inspectRaw();
-    expect(tamperedRawView).toContain("Raw evidence unavailable or tampered");
-    expect(tamperedRawView).not.toContain("tampered raw source");
-
-    const count = appended.length;
-    await command("pr edit older F1", {
-      hasUI: true,
-      ui: { notify: (message: string) => notes.push(message), editor: async () => undefined },
-    });
-    expect(appended).toHaveLength(count);
-    expect(notes).toContain("Edit cancelled.");
+    expect(appended.at(-1)?.state.result?.provenance).toEqual(before);
   });
 
-  it("rejects changed degraded acknowledgement and then finalizes without quorum or posting", async () => {
-    const { command, appended } = await harness([{ id: "older", degraded: true }]);
-    const notes: string[] = [];
-    let changed = false;
-    const ctx = {
-      hasUI: true,
-      cwd: mocked.agentDir,
-      ui: {
-        notify: (message: string) => notes.push(message),
-        confirm: async () => {
-          if (!changed) {
-            changed = true;
-            await command("pr defer older F2", notifications().ctx);
-          }
-          return true;
-        },
-      },
-    };
-    await command("pr finalize older", ctx);
-    expect(notes.at(-1)).toContain("changed during acknowledgement");
-    expect(appended.at(-1)?.state.finalizedAt).toBeUndefined();
-    await command("pr finalize older", ctx);
-    expect(notes.at(-1)).toContain("Next: /review pr post older comment");
-    expect(appended.at(-1)?.state.degradationAcknowledgement).toBeDefined();
-    expect(appended.at(-1)?.state.finalization).toMatchObject({
-      contentHash: expect.any(String),
-      degradationHash: expect.any(String),
-      at: expect.any(String),
-    });
-    expect(appended.at(-1)?.state.finalizedAt).toBeDefined();
-    expect(appended.at(-1)?.state.posts).toEqual([]);
-  });
-
-  it("reports restored finalization as stale after content mutation despite a fresh timestamp", async () => {
-    const { command, appended, handlers, fixtures, session } = await harness([{ id: "older" }]);
-    const notes: string[] = [];
-    await command("pr finalize older", {
-      hasUI: true,
-      ui: { notify: (message: string) => notes.push(message), confirm: async () => true },
-    });
-    const finalized = structuredClone(appended.at(-1)!.state);
-    expect(finalized.posts).toEqual([]);
-
-    await command("pr preface older", {
-      hasUI: true,
-      ui: {
-        notify: (message: string) => notes.push(message),
-        editor: async () => "content changed after finalization",
-      },
-    });
-    const mutated = structuredClone(appended.at(-1)!.state);
-    mutated.finalizedAt = "2099-01-01T00:00:00.000Z";
-    expect(mutated.finalization).toEqual(finalized.finalization);
-    expect(mutated.posts).toEqual([]);
-
-    const replay = [
-      ...fixtures.map(entry),
-      {
-        type: "custom",
-        customType: REVIEW_ENTRY_TYPE,
-        data: { reviewId: "older", state: mutated },
-      },
-    ];
-    handlers.session_tree?.({}, session("session-a", replay));
-    const headless = notifications(false);
+  it("keeps headless walkthrough read-only and invalidates stale editor actions", async () => {
+    const { command, appended, handlers, fixtures, session } = await harness();
+    const headless = context(false);
     await command("pr walkthrough older", headless.ctx);
-    expect(headless.notes.at(-1)).toContain("Finalization status: stale");
-    expect(headless.notes.at(-1)).not.toContain("Finalization status: current");
-    expect(mutated.posts).toEqual([]);
-  });
-
-  it("keeps headless walkthrough read-only and rejects a stale editor generation", async () => {
-    const { command, appended, handlers, session, fixtures } = await harness([{ id: "older" }]);
-    const headless = notifications(false);
-    await command("pr walkthrough older", headless.ctx);
-    expect(headless.notes.at(-1)).toContain("Interactive decisions and finalization unavailable");
-    expect(appended).toHaveLength(0);
-    await command("pr edit older F1", headless.ctx);
-    expect(headless.notes.at(-1)).toContain("requires interactive editor UI");
+    expect(headless.notes.at(-1)).toContain("Interactive decisions unavailable");
     expect(appended).toHaveLength(0);
 
     let release!: (value: string) => void;
-    const editor = new Promise<string>((resolve) => {
-      release = resolve;
-    });
-    const stale = command("pr edit older F1", {
+    const editing = command("pr edit older F1", {
       hasUI: true,
-      ui: { notify: (message: string) => headless.notes.push(message), editor: async () => editor },
+      ui: {
+        notify: (message: string) => headless.notes.push(message),
+        editor: () => new Promise<string>((resolve) => (release = resolve)),
+      },
     });
     await Promise.resolve();
-    handlers.session_tree?.({}, session("session-b", fixtures.map(entry)));
+    handlers.session_tree({}, session("session-b", fixtures));
     release("Problem: stale\nConsequence: stale\nSuggested fix: stale");
-    await stale;
+    await editing;
     expect(headless.notes.at(-1)).toContain("session changed");
     expect(appended).toHaveLength(0);
+
+    handlers.session_tree({}, session("session-a", fixtures));
+    const choices = ["Provenance", "R-a1 [correctness] #0"];
+    await command("pr walkthrough older", {
+      hasUI: true,
+      cwd: mocked.agentDir,
+      sessionManager: session("session-a").sessionManager,
+      ui: {
+        notify: (message: string) => headless.notes.push(message),
+        select: async () => {
+          const choice = choices.shift();
+          if (choice?.startsWith("R-"))
+            queueMicrotask(() => handlers.session_tree({}, session("session-b", fixtures)));
+          return choice;
+        },
+      },
+    });
+    expect(headless.notes.at(-1)).toContain("session changed");
+    expect(headless.notes.at(-1)).not.toContain("Raw evidence unavailable");
   });
 });

@@ -11,6 +11,7 @@ import {
 import {
   admitReviewerDossier,
   MaxReviewerDossierBytes,
+  readVerifiedRawFinding,
   reviewerDossierContext,
   serializeReviewerDossierContext,
 } from "../reviewer-dossier";
@@ -197,6 +198,51 @@ describe("reviewer dossier admission contract", () => {
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-intent");
   });
 
+  it("lazily reads a later raw occurrence and refuses mismatched provenance", async () => {
+    const findings = [
+      {
+        severity: "medium",
+        impact: "medium",
+        problem: "First.",
+        consequence: "Consequence.",
+        suggestedFix: "Fix.",
+      },
+      {
+        severity: "serious",
+        impact: "high",
+        problem: "Later finding.",
+        consequence: "Consequence.",
+        suggestedFix: "Fix.",
+      },
+    ];
+    const f = await fixture({
+      "review-correctness": { text: output("correctness", { findings }) },
+    });
+    const dossier = await admitReviewerDossier({
+      artifactRoot: f.root,
+      reconstruction: f.reconstruction,
+      expectedEvidenceDigest: Digest,
+    });
+    const later = dossier.rawFindings.find(
+      (record) => record.role === "correctness" && record.index === 1,
+    )!;
+    const inspected = await readVerifiedRawFinding(f.root, f.reconstruction.graph.runId, later);
+    expect(inspected.finding.problem).toBe("Later finding.");
+    expect(inspected).not.toHaveProperty("artifact");
+
+    const mutations = [
+      { ...later, role: "intent" as const },
+      { ...later, index: 99 },
+      { ...later, evidenceDigest: "0".repeat(64) },
+      { ...later, artifact: { ...later.artifact, outputName: "wrong" } },
+      { ...later, artifact: { ...later.artifact, digest: "0".repeat(64) } },
+    ];
+    for (const mutation of mutations)
+      await expect(
+        readVerifiedRawFinding(f.root, f.reconstruction.graph.runId, mutation),
+      ).rejects.toThrow();
+  });
+
   it("keeps the bounded raw-finding dossier without transcript-driven duplicate inflation", async () => {
     const long = `x${"\n".repeat(19_998)}`;
     const findings = Array.from({ length: 2 }, () => ({
@@ -241,6 +287,8 @@ describe("reviewer dossier admission contract", () => {
             id: `R-${"a".repeat(64)}`,
             role: "correctness",
             evidenceDigest: Digest,
+            index: 0,
+            artifact: {} as any,
             finding: {
               severity: "medium",
               impact: "medium",

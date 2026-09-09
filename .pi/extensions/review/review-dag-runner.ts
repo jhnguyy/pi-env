@@ -34,7 +34,6 @@ import {
   PlanSchema,
   type AdmittedRawFinding,
   type Finding,
-  type RawFindingRecord,
   type ReviewerOutput,
   type ReviewPlan,
   type ReviewResult,
@@ -47,7 +46,6 @@ import {
   fallbackConsolidation,
   validSynthesisSources,
 } from "./synthesis-provenance";
-import { persistRawFindingArtifacts } from "./raw-provenance";
 
 type ReviewerRole = ReviewerOutput["role"];
 
@@ -63,7 +61,6 @@ interface CollectedOutputs {
   readonly evidenceReferences: DagTextArtifactReference[];
   readonly reviewers: ReviewerOutput[];
   readonly rawFindings: readonly AdmittedRawFinding[];
-  readonly rawFindingRecords: readonly RawFindingRecord[];
   readonly rawResultReferences: DagTextArtifactReference[];
   readonly failedReviewerNodes: string[];
   readonly malformedNodes: string[];
@@ -204,7 +201,6 @@ async function collectEvidence(
 }
 async function collectOutputs(
   root: string,
-  runId: string,
   reconstruction: DagSessionReconstruction,
   state: ReviewState,
   admittedDossier?: Promise<ReviewerDossier>,
@@ -230,12 +226,6 @@ async function collectOutputs(
     evidenceReferences: evidence.references,
     reviewers: dossier.admitted.map((artifact) => artifact.reviewer),
     rawFindings: dossier.rawFindings,
-    rawFindingRecords:
-      dossier.rawFindings.length === 0
-        ? []
-        : await Effect.runPromise(
-            persistRawFindingArtifacts(state.snapshot.artifactDir, runId, dossier.rawFindings),
-          ),
     rawResultReferences: dossier.raw.map((artifact) => artifact.reference),
     failedReviewerNodes: [...dossier.failed],
     malformedNodes,
@@ -243,9 +233,7 @@ async function collectOutputs(
 }
 function decodeSynthesis(
   text: string,
-  runId: string,
   rawFindings: readonly AdmittedRawFinding[],
-  rawFindingRecords: readonly RawFindingRecord[],
   reviewers: readonly ReviewerOutput[],
   diff: string,
   protocol: 2 | "legacy" | "unsupported",
@@ -254,7 +242,7 @@ function decodeSynthesis(
     const decoded = parseJson(text);
     if (protocol === "unsupported") return undefined;
     if (validateConsolidationReviewV2Shape(decoded)) {
-      const consolidated = consolidateSynthesis(decoded, rawFindings, rawFindingRecords, runId);
+      const consolidated = consolidateSynthesis(decoded, rawFindings);
       return consolidated ? validateFindingAnchors(consolidated, diff) : undefined;
     }
     if (
@@ -443,9 +431,7 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
   const synthesized = output
     ? decodeSynthesis(
         output.text,
-        input.runId,
         collected.rawFindings,
-        collected.rawFindingRecords,
         collected.reviewers,
         diff,
         input.synthesisProtocol,
@@ -457,13 +443,7 @@ async function resolveSynthesis(input: FinalizeReviewInput, collected: Collected
     : "Synthesis output was unavailable.";
   const result =
     synthesized ??
-    fallbackConsolidation(
-      collected.rawFindings,
-      collected.rawFindingRecords,
-      input.runId,
-      fallbackReason,
-    );
-  if (!result) throw new Error("Raw finding provenance records failed identity validation.");
+    fallbackConsolidation(collected.rawFindings, fallbackReason);
   return {
     output,
     result: synthesized ? result : validateFindingAnchors(result, diff),
@@ -560,7 +540,6 @@ function finalizedReviewState(
 async function finalizeReview(input: FinalizeReviewInput): Promise<ReviewState> {
   const collected = await collectOutputs(
     input.root,
-    input.runId,
     input.reconstruction,
     input.state,
     input.reviewerDossier,

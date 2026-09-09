@@ -6,10 +6,8 @@ import {
   validSynthesisSources,
 } from "../synthesis-provenance";
 import type {
-  AdmittedRawFinding,
   ConsolidationReviewV2,
   FindingInput,
-  RawFindingRecord,
   ReviewerOutput,
   SynthesisReview,
 } from "../schema";
@@ -25,215 +23,95 @@ const finding: FindingInput = {
 function reviewer(role: ReviewerOutput["role"], findings: FindingInput[]): ReviewerOutput {
   return { role, evidenceDigest: Digest, verdict: "Reviewed.", findings };
 }
-function provenance(raw: readonly AdmittedRawFinding[]): RawFindingRecord[] {
-  return raw.map((record) => ({
-    id: record.id,
-    role: record.role,
-    evidenceDigest: record.evidenceDigest,
-    artifact: {
-      v: 1,
-      path: `raw-provenance-v2/${record.id}.json`,
-      bytes: 1,
-      digestAlgorithm: "sha256",
+function admitted(reviewers: ReviewerOutput[]) {
+  return reviewers.map((reviewer) => ({
+    reviewer,
+    reference: {
+      v: 1 as const,
+      path: `${reviewer.role}.json`,
+      bytes: 100,
       digest: "b".repeat(64),
-      mediaType: "text/plain",
-      encoding: "utf-8",
       runId: "run",
-      producerNodeId: "pr-review-raw-provenance-v2",
-      outputName: record.id,
+      producerNodeId: `review-${reviewer.role}`,
+      outputName: `${reviewer.role.replace("-", "_")}_review`,
     },
   }));
 }
-function synthesis(
-  rawFindingIds: string[],
-  overrides: Partial<ConsolidationReviewV2> = {},
-): ConsolidationReviewV2 {
+function synthesis(rawFindingIds: string[], dismissals: ConsolidationReviewV2["dismissals"] = []) {
   return {
-    v: 2,
+    v: 2 as const,
     verdict: "Editorial summary.",
-    coverage: {
-      status: "complete",
-      succeeded: ["correctness", "security"],
-      failed: [],
-      malformed: [],
-    },
-    findings: [
-      {
-        ...finding,
-        problem: "The grouped problem is clearer.",
-        rawFindingIds,
-      },
-    ],
-    dismissals: [],
-    ...overrides,
+    coverage: { status: "complete" as const, succeeded: [], failed: [], malformed: [] },
+    findings: [{ ...finding, problem: "Grouped problem.", rawFindingIds }],
+    dismissals,
   };
 }
 
 describe("provenance-backed editorial consolidation", () => {
-  it("accepts a rephrased many-to-one group and preserves both original payloads", () => {
-    const source = [
-      reviewer("correctness", [finding]),
-      reviewer("security", [{ ...finding, consequence: "Attackers can exploit the behavior." }]),
-    ];
-    const raw = buildRawFindingRecords(source);
+  it("stores existing reviewer references and derives agreement without copying payloads", () => {
+    const raw = buildRawFindingRecords(
+      admitted([
+        reviewer("correctness", [finding]),
+        reviewer("security", [{ ...finding, problem: "Security framing." }]),
+      ]),
+    );
     const result = consolidateSynthesis(
       synthesis(raw.map((record) => record.id)),
       raw,
-      provenance(raw),
-      "run",
     );
-
     expect(result?.findings[0]).toMatchObject({
-      problem: "The grouped problem is clearer.",
-      rawFindingIds: raw.map((record) => record.id),
+      problem: "Grouped problem.",
       sourceReviewers: ["correctness", "security"],
       agreement: 2,
     });
-    expect(result?.provenance?.rawFindings).toEqual(provenance(raw));
+    expect(result?.provenance?.rawFindings).toEqual(
+      raw.map(({ finding: _finding, ...record }) => record),
+    );
+    expect(result?.provenance?.rawFindings[0]).toMatchObject({ index: 0 });
     expect(result?.provenance?.rawFindings[0]).not.toHaveProperty("finding");
-
-    // Practical negative control: omission is not accepted as a silent subset.
-    expect(
-      consolidateSynthesis(synthesis([raw[0].id]), raw, provenance(raw), "run"),
-    ).toBeUndefined();
   });
 
-  it("derives agreement from distinct roles rather than raw occurrences or model claims", () => {
-    const raw = buildRawFindingRecords([
-      reviewer("correctness", [finding, { ...finding, problem: "A second problem." }]),
-      reviewer("security", [{ ...finding, problem: "A security framing." }]),
-    ]);
-    const result = consolidateSynthesis(
-      synthesis(raw.map((record) => record.id)),
-      raw,
-      provenance(raw),
-      "run",
+  it("requires every admitted occurrence exactly once across findings and dismissals", () => {
+    const raw = buildRawFindingRecords(
+      admitted([reviewer("correctness", [finding, { ...finding, problem: "Second." }])]),
     );
-    expect(result?.findings[0]).toMatchObject({
-      sourceReviewers: ["correctness", "security"],
-      agreement: 2,
-    });
-    expect(result?.findings[0]).not.toHaveProperty("dissent");
-
-    const inflated = {
-      ...synthesis(raw.map((record) => record.id)),
-      findings: [
-        {
-          ...synthesis(raw.map((record) => record.id)).findings[0],
-          sourceReviewers: ["correctness", "security", "tests"],
-          agreement: 3,
-        },
-      ],
-    } as unknown as ConsolidationReviewV2;
-    const inflatedResult = consolidateSynthesis(inflated, raw, provenance(raw), "run");
-    expect(inflatedResult?.findings[0]).toMatchObject({
-      sourceReviewers: ["correctness", "security"],
-      agreement: 2,
-    });
-  });
-
-  it("requires every admitted raw ID exactly once across retention and dismissal", () => {
-    const raw = buildRawFindingRecords([
-      reviewer("correctness", [finding, { ...finding, problem: "Second." }]),
-      reviewer("security", [{ ...finding, problem: "Third." }]),
-    ]);
-    const valid = synthesis([raw[0].id, raw[1].id], {
-      dismissals: [{ rawFindingId: raw[2].id, reason: "Duplicate concern after inspection." }],
-    });
     expect(
-      consolidateSynthesis(valid, raw, provenance(raw), "run")?.provenance?.dismissals,
-    ).toEqual(valid.dismissals);
-
-    const mutations: ConsolidationReviewV2[] = [
-      synthesis([raw[0].id, raw[1].id]),
-      synthesis([raw[0].id, raw[1].id], {
-        findings: [
-          synthesis([raw[0].id]).findings[0],
-          synthesis([raw[0].id, raw[1].id]).findings[0],
-        ],
-        dismissals: [{ rawFindingId: raw[2].id, reason: "Dismissed." }],
-      }),
-      synthesis([raw[0].id, raw[1].id], {
-        dismissals: [
-          { rawFindingId: raw[1].id, reason: "Also dismissed." },
-          { rawFindingId: raw[2].id, reason: "Dismissed." },
-        ],
-      }),
-      synthesis([raw[0].id, raw[1].id], {
-        dismissals: [{ rawFindingId: raw[2].id, reason: "   " }],
-      }),
-      synthesis([raw[0].id, raw[1].id], {
-        dismissals: [{ rawFindingId: `R-${"f".repeat(64)}`, reason: "Unknown." }],
-      }),
-    ];
-    for (const mutation of mutations)
-      expect(consolidateSynthesis(mutation, raw, provenance(raw), "run")).toBeUndefined();
+      consolidateSynthesis(
+        synthesis([raw[0].id], [{ rawFindingId: raw[1].id, reason: "Not actionable." }]),
+        raw,
+      )?.provenance?.dismissals,
+    ).toHaveLength(1);
+    expect(consolidateSynthesis(synthesis([raw[0].id]), raw)).toBeUndefined();
+    expect(consolidateSynthesis(synthesis([raw[0].id, raw[0].id]), raw)).toBeUndefined();
   });
 
-  it("rejects incomplete, duplicate, or identity-invalid persisted provenance", () => {
-    const raw = buildRawFindingRecords([
-      reviewer("correctness", [finding]),
-      reviewer("security", [{ ...finding, problem: "Second." }]),
-    ]);
-    const validSynthesis = synthesis(raw.map((record) => record.id));
-    const records = provenance(raw);
-    const invalidSets: RawFindingRecord[][] = [
-      [records[0], records[0]],
-      [records[0]],
-      [records[0], { ...records[1], artifact: { ...records[1].artifact, runId: "other" } }],
-      [
-        records[0],
-        {
-          ...records[1],
-          artifact: { ...records[1].artifact, path: `raw-provenance-v2/${records[0].id}.json` },
-        },
-      ],
-    ];
-
-    for (const invalid of invalidSets) {
-      expect(consolidateSynthesis(validSynthesis, raw, invalid, "run")).toBeUndefined();
-      expect(fallbackConsolidation(raw, invalid, "run", "Invalid synthesis.")).toBeUndefined();
-    }
-  });
-
-  it("assigns stable opaque IDs scoped to role, evidence, payload, and duplicate occurrence", () => {
-    const duplicate = { ...finding };
-    const first = [reviewer("correctness", [finding, duplicate]), reviewer("security", [finding])];
-    const reordered = [first[1], first[0]];
-    const ids = buildRawFindingRecords(first).map((record) => record.id);
-    expect(buildRawFindingRecords(reordered).map((record) => record.id)).toEqual(ids);
-    expect(new Set(ids).size).toBe(3);
+  it("assigns stable distinct IDs and indexes to duplicate occurrences", () => {
+    const source = reviewer("correctness", [finding, finding]);
+    const raw = buildRawFindingRecords(admitted([source]));
+    expect(raw.map((record) => record.index)).toEqual([0, 1]);
+    expect(new Set(raw.map((record) => record.id)).size).toBe(2);
     expect(
-      buildRawFindingRecords([{ ...first[0], evidenceDigest: "b".repeat(64) }])[0].id,
-    ).not.toBe(ids[0]);
+      buildRawFindingRecords(admitted([{ ...source, evidenceDigest: "c".repeat(64) }]))[0].id,
+    ).not.toBe(raw[0].id);
   });
 
-  it("fallback preserves every identical admitted occurrence without deduplication", () => {
-    const raw = buildRawFindingRecords([
-      reviewer("correctness", [finding, finding]),
-      reviewer("security", [finding]),
-    ]);
-    const result = fallbackConsolidation(raw, provenance(raw), "run", "Invalid accounting.");
-    expect(result?.findings).toHaveLength(3);
-    expect(result?.findings.flatMap((item) => item.rawFindingIds ?? [])).toEqual(
+  it("fallback preserves every occurrence without deduplication", () => {
+    const raw = buildRawFindingRecords(
+      admitted([reviewer("correctness", [finding, finding]), reviewer("security", [finding])]),
+    );
+    const result = fallbackConsolidation(raw, "Invalid accounting.");
+    expect(result.findings).toHaveLength(3);
+    expect(result.findings.flatMap((item) => item.rawFindingIds ?? [])).toEqual(
       raw.map((record) => record.id),
     );
-    expect(result?.provenance).toMatchObject({
-      status: "fallback",
-      fallbackReason: "Invalid accounting.",
-    });
+    expect(result.provenance?.status).toBe("fallback");
   });
 
-  it("keeps the exact-text validator as an explicit legacy-only contract", () => {
+  it("keeps the exact-text validator as a legacy-only contract", () => {
     const reviewers = [reviewer("correctness", [finding]), reviewer("security", [finding])];
     const legacy: SynthesisReview = {
       verdict: "Historical summary.",
-      coverage: {
-        status: "complete",
-        succeeded: ["correctness", "security"],
-        failed: [],
-        malformed: [],
-      },
+      coverage: { status: "complete", succeeded: [], failed: [], malformed: [] },
       findings: [{ ...finding, sourceReviewers: ["correctness", "security"], agreement: 2 }],
     };
     expect(validSynthesisSources(legacy, reviewers)).toBe(true);

@@ -73,7 +73,6 @@ export const REVIEW_COMMANDS = [
   "walkthrough",
   "reject",
   "defer",
-  "finalize",
   "rerun",
   "post",
   "draft-plan",
@@ -306,29 +305,16 @@ export type ReviewerOutput = Static<typeof ReviewerOutputSchema>;
 export type SynthesisReview = Static<typeof SynthesisReviewSchema>;
 export type ConsolidationReviewV2 = Static<typeof ConsolidationReviewV2Schema>;
 export type RawFindingDismissal = Static<typeof RawFindingDismissalSchema>;
-export interface AdmittedRawFinding {
-  readonly id: string;
-  readonly role: ReviewerOutput["role"];
-  readonly evidenceDigest: string;
-  readonly finding: Readonly<FindingInput>;
-}
-export interface RawFindingArtifactReference {
-  readonly v: 1;
-  readonly path: string;
-  readonly bytes: number;
-  readonly digestAlgorithm: "sha256";
-  readonly digest: string;
-  readonly mediaType: "text/plain";
-  readonly encoding: "utf-8";
-  readonly runId: string;
-  readonly producerNodeId: string;
-  readonly outputName: string;
-}
 export interface RawFindingRecord {
   readonly id: string;
   readonly role: ReviewerOutput["role"];
   readonly evidenceDigest: string;
-  readonly artifact: RawFindingArtifactReference;
+  readonly index: number;
+  /** The existing verified reviewer DAG output; no finding payload is copied to parent state. */
+  readonly artifact: ReviewArtifactReference;
+}
+export interface AdmittedRawFinding extends RawFindingRecord {
+  readonly finding: Readonly<FindingInput>;
 }
 export type Finding = Omit<FindingInput, "side"> & {
   side?: AnchorSide;
@@ -494,20 +480,6 @@ export interface ReviewState {
   selectedFindingIds: string[];
   /** Durable human inspection decisions. Missing entries are pending, including defaults. */
   decisions?: Record<string, HumanDecision>;
-  /** Acknowledgement is bound to the unchanged review and degradation facts. */
-  degradationAcknowledgement?: {
-    contentHash: string;
-    degradationHash: string;
-    at: string;
-  };
-  /** Finalization is valid only while both recorded hashes match the current review. */
-  finalization?: {
-    contentHash: string;
-    degradationHash: string;
-    at: string;
-  };
-  /** Historical timestamp retained for persisted-state compatibility. It is not current authority. */
-  finalizedAt?: string;
   preface?: string;
   child?: {
     sessionFile?: string;
@@ -547,92 +519,5 @@ export function validateConsolidationReviewV2Shape(
     Check(ConsolidationReviewV2Schema, result) &&
     result.findings.every(coherentFindingAnchor) &&
     result.dismissals.every((dismissal) => dismissal.reason.trim().length > 0)
-  );
-}
-
-function isExactRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value).sort().join("\0") === [...keys].sort().join("\0")
-  );
-}
-
-export function validateAdmittedRawFindingShape(value: unknown): value is AdmittedRawFinding {
-  if (!isExactRecord(value, ["id", "role", "evidenceDigest", "finding"])) return false;
-  return (
-    Check(RawFindingIdSchema, value.id) &&
-    (ReviewerRoles as readonly unknown[]).includes(value.role) &&
-    typeof value.evidenceDigest === "string" &&
-    /^[0-9a-f]{64}$/u.test(value.evidenceDigest) &&
-    Check(FindingInputSchema, value.finding) &&
-    coherentFindingAnchor(value.finding)
-  );
-}
-
-const RawFindingArtifactKeys = [
-  "v",
-  "path",
-  "bytes",
-  "digestAlgorithm",
-  "digest",
-  "mediaType",
-  "encoding",
-  "runId",
-  "producerNodeId",
-  "outputName",
-] as const;
-
-function validRawArtifactSize(bytes: unknown): boolean {
-  return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0;
-}
-
-function validSha256Digest(digest: unknown): boolean {
-  return typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest);
-}
-
-function validRawArtifactFormat(value: Record<string, unknown>): boolean {
-  return (
-    value.v === 1 &&
-    typeof value.path === "string" &&
-    value.digestAlgorithm === "sha256" &&
-    value.mediaType === "text/plain" &&
-    value.encoding === "utf-8"
-  );
-}
-
-function validRawArtifactIdentity(value: Record<string, unknown>, outputName: unknown): boolean {
-  return (
-    typeof value.runId === "string" &&
-    value.runId.length > 0 &&
-    typeof value.producerNodeId === "string" &&
-    value.producerNodeId.length > 0 &&
-    value.outputName === outputName
-  );
-}
-
-function validateRawFindingArtifactShape(
-  value: unknown,
-  outputName: unknown,
-): value is RawFindingArtifactReference {
-  return (
-    isExactRecord(value, RawFindingArtifactKeys) &&
-    validRawArtifactFormat(value) &&
-    validRawArtifactSize(value.bytes) &&
-    validSha256Digest(value.digest) &&
-    validRawArtifactIdentity(value, outputName)
-  );
-}
-
-export function validateRawFindingRecordShape(value: unknown): value is RawFindingRecord {
-  if (!isExactRecord(value, ["id", "role", "evidenceDigest", "artifact"])) return false;
-  const validEvidenceDigest =
-    typeof value.evidenceDigest === "string" && /^[0-9a-f]{64}$/u.test(value.evidenceDigest);
-  return (
-    Check(RawFindingIdSchema, value.id) &&
-    (ReviewerRoles as readonly unknown[]).includes(value.role) &&
-    validEvidenceDigest &&
-    validateRawFindingArtifactShape(value.artifact, value.id)
   );
 }

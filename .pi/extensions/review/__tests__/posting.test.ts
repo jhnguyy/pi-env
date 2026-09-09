@@ -150,9 +150,63 @@ describe("review pull request posting", () => {
     ).toBeGreaterThan(0);
     expect(confirms).toHaveLength(1);
     expect(confirms[0][1]).toContain("Preface preview:\n(none)");
+    expect(confirms[0][1]).toContain("Coverage: complete.");
+    expect(confirms[0][1]).not.toContain("WARNING: degraded coverage");
     expect(persistedMarker).toBe(
       "<!-- pi-env-pr-review:r:" + appended[0].state.posts[0].id + " -->",
     );
+  });
+
+  it("discloses degraded coverage and selections only at cancellable post confirmation", async () => {
+    const degraded = state();
+    degraded.dag = {
+      ...degraded.dag!,
+      status: "degraded",
+      failedNodes: ["review-security"],
+      evidenceCoverage: {
+        digest: "d".repeat(64),
+        uniqueBytes: 1,
+        dossierBytes: 1,
+        chunks: 1,
+        omissions: ["b.ts hunk"],
+      },
+    };
+    degraded.result!.coverage = {
+      status: "degraded",
+      succeeded: ["correctness"],
+      failed: ["security"],
+      malformed: [],
+    };
+    restore({ sessionManager: { getBranch: () => [custom(degraded)] } } as any);
+    let posted = false;
+    let confirmation = "";
+    const pi = {
+      appendEntry() {},
+      exec: async (_cmd: string, args: string[]) => {
+        if (args[0] === "pr") return { code: 0, stdout: "head\n", stderr: "" };
+        if (args.includes("--method")) return { code: 0, stdout: "[]", stderr: "" };
+        posted = true;
+        return { code: 0, stdout: "{}", stderr: "" };
+      },
+    };
+    const result = await postReview(
+      pi as any,
+      {
+        cwd: "/tmp",
+        ui: {
+          confirm: async (_title: string, message: string) => {
+            confirmation = message;
+            return false;
+          },
+        },
+      } as any,
+      ReviewEvent.Comment,
+    );
+    expect(result).toBe("Posting cancelled.");
+    expect(confirmation).toContain("WARNING: degraded coverage");
+    expect(confirmation).toContain("Selected (2): F1, F2");
+    expect(confirmation).toContain("Failed: security");
+    expect(posted).toBe(false);
   });
 
   it("does not repost while an earlier attempt remains uncertain", async () => {

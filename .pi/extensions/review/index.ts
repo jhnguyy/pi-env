@@ -58,14 +58,7 @@ import {
   type DeckReference,
 } from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
-import {
-  applyDecision,
-  contentHash,
-  degradationHash,
-  findingsForDecision,
-  hasCurrentAcknowledgement,
-  isDegraded,
-} from "./decision";
+import { applyDecision, findingsForDecision, isDegraded } from "./decision";
 import { guidedWalkthrough, walkthroughSummary } from "./walkthrough";
 import {
   ReviewCoordinator,
@@ -73,6 +66,7 @@ import {
   type ReviewCoordinatorScope,
 } from "./review-coordinator";
 import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
+import { readVerifiedRawFinding } from "./reviewer-dossier";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
@@ -1048,82 +1042,6 @@ function decisionCommand(
   return `Review ${reviewId}: ${findingIds.length} finding(s) ${status}.`;
 }
 
-function isFinalizable(state: ReviewState): boolean {
-  return Boolean(
-    state.result &&
-    (state.dag?.status === "succeeded" || state.dag?.status === "degraded") &&
-    state.preparation?.status !== "failed",
-  );
-}
-
-async function finalizeWalkthrough(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  reviewId: string,
-  expectedScope?: ReviewCoordinatorScope,
-): Promise<string> {
-  const scope = expectedScope ?? coordinator.captureScope();
-  assertActiveCoordinatorScope(scope);
-  const state = explicitReview(reviewId);
-  if (!isFinalizable(state))
-    return `Review ${reviewId} is incomplete (${state.preparation?.status ?? state.dag?.status ?? "not started"}) and cannot be finalized.`;
-  const expectedContentHash = contentHash(state);
-  const expectedDegradationHash = degradationHash(state);
-  let acknowledgement = state.degradationAcknowledgement;
-  if (isDegraded(state) && !hasCurrentAcknowledgement(state)) {
-    if (!ctx.hasUI)
-      return `Finalization requires acknowledgement of degraded review ${reviewId}. Interactive UI is unavailable.`;
-    const acknowledged = await ctx.ui.confirm(
-      "Acknowledge degraded review",
-      `Review ${reviewId} has failed, malformed, omitted, or fallback evidence. Continue without a quorum?`,
-    );
-    if (!coordinator.isScopeActive(scope))
-      return "The review session changed during the operation.";
-    if (!acknowledged) return "Finalization cancelled.";
-    const current = explicitReview(reviewId);
-    if (
-      contentHash(current) !== expectedContentHash ||
-      degradationHash(current) !== expectedDegradationHash
-    )
-      return "The review changed during acknowledgement. Inspect and acknowledge the updated review again.";
-    acknowledgement = {
-      contentHash: expectedContentHash,
-      degradationHash: expectedDegradationHash,
-      at: new Date().toISOString(),
-    };
-  }
-  const current = explicitReview(reviewId);
-  if (
-    contentHash(current) !== expectedContentHash ||
-    degradationHash(current) !== expectedDegradationHash
-  )
-    return "The review changed before finalization. Inspect the updated review again.";
-  const finalizedAt = new Date().toISOString();
-  const next = {
-    ...current,
-    ...(acknowledgement ? { degradationAcknowledgement: acknowledgement } : {}),
-    finalization: {
-      contentHash: expectedContentHash,
-      degradationHash: expectedDegradationHash,
-      at: finalizedAt,
-    },
-    finalizedAt,
-  };
-  if (!saveState(pi, next, scope)) return "The review session changed during the operation.";
-  const statuses = (next.result?.findings ?? []).reduce(
-    (counts, finding) => {
-      const status = next.decisions?.[finding.id ?? ""]?.status ?? "pending";
-      counts[status] += 1;
-      return counts;
-    },
-    { pending: 0, selected: 0, rejected: 0, deferred: 0 },
-  );
-  return bound(
-    `Review ${reviewId} finalized for inspection. Decisions: ${statuses.selected} selected, ${statuses.rejected} rejected, ${statuses.deferred} deferred, ${statuses.pending} pending. Preface: ${prefacePreview(next)}. No post was attempted. Next: /review pr post ${reviewId} comment`,
-    1_200,
-  );
-}
-
 async function walkthrough(
   pi: ExtensionAPI,
   reviewId: string,
@@ -1139,7 +1057,30 @@ async function walkthrough(
     decide: async (findingId, status) => decisionCommand(pi, reviewId, [findingId], status, scope),
     editFinding: (findingId) => editFinding(pi, ctx, reviewId, findingId, scope),
     editPreface: () => editPreface(pi, ctx, reviewId, scope),
-    finalize: () => finalizeWalkthrough(pi, ctx, reviewId, scope),
+    rawFinding: async (rawFindingId) => {
+      const current = explicitReview(reviewId);
+      const record = current.result?.provenance?.rawFindings.find(
+        (candidate) => candidate.id === rawFindingId,
+      );
+      if (!record || !current.dag) return `Raw finding not found: ${rawFindingId}.`;
+      try {
+        const finding = await readVerifiedRawFinding(
+          join(
+            ctx.sessionManager.getSessionDir(),
+            "dag-artifacts",
+            ctx.sessionManager.getSessionId(),
+          ),
+          current.dag.runId,
+          record,
+        );
+        assertActiveCoordinatorScope(scope);
+        explicitReview(reviewId);
+        return `Raw finding ${finding.id}\nRole: ${finding.role}\nEvidence digest: ${finding.evidenceDigest}\n${JSON.stringify(finding.finding, null, 2)}`;
+      } catch (cause) {
+        assertActiveCoordinatorScope(scope);
+        return `Raw finding ${rawFindingId}\nRaw evidence unavailable or tampered: ${cause instanceof Error ? cause.message : String(cause)}`;
+      }
+    },
   });
 }
 function draftImplementationPlan(pi: ExtensionAPI): string {
@@ -1279,8 +1220,6 @@ async function postingPreflight(
     (s.dag?.status !== "succeeded" && s.dag?.status !== "degraded")
   )
     return "Review is not complete and cannot be posted.";
-  if (isDegraded(s) && !hasCurrentAcknowledgement(s))
-    return `Degraded review ${s.snapshot.id} must be acknowledged with /review pr finalize ${s.snapshot.id} before posting.`;
   const remote = await currentRemoteHead(
     pi.exec.bind(pi),
     ctx.cwd,
@@ -1523,10 +1462,16 @@ async function postReviewCritical(
   const disposition = await existingPostDisposition(pi, ctx, state, contentHash, scope, signal);
   if (disposition.result) return disposition.result;
   const selected = selectedFindings(state);
+  const coverage = isDegraded(state)
+    ? `WARNING: degraded coverage. Failed: ${state.result?.coverage?.failed.join(", ") || "none"}; malformed: ${state.result?.coverage?.malformed.join(", ") || "none"}; omissions: ${(state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? []).join(", ") || "none"}; fallback: ${state.result?.provenance?.status === "fallback" ? "yes" : "no"}.`
+    : "Coverage: complete.";
   const accepted = await confirm(
     ctx,
     "Post PR review?",
-    `Post ${event} review to ${state.snapshot.metadata.headOid} with ${selected.length} selected findings?\nPreface preview:\n${prefacePreview(state)}`,
+    bound(
+      `${coverage}\nEvent: ${event}\nHead: ${state.snapshot.metadata.headOid}\nSelected (${selected.length}): ${selected.map((finding) => finding.id).join(", ") || "none"}\nPreface preview:\n${prefacePreview(state)}`,
+      1_200,
+    ),
   );
   if (!accepted) return "Posting cancelled.";
   const confirmed = await confirmedPostingState(
@@ -1757,7 +1702,6 @@ const handlers: Partial<
   walkthrough: (pi, rest, ctx) => walkthrough(pi, rest[0] ?? "", ctx),
   edit: (pi, rest, ctx) => editFinding(pi, ctx, rest[0] ?? "", rest[1] ?? ""),
   preface: (pi, rest, ctx) => editPreface(pi, ctx, rest[0] ?? ""),
-  finalize: (pi, rest, ctx) => finalizeWalkthrough(pi, ctx, rest[0] ?? ""),
   rerun: async (pi, _rest, ctx) => {
     const s = latestState();
     if (!s) return "No active PR review.";
@@ -1828,7 +1772,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
   });
   pi.registerCommand("review", {
     description:
-      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|finalize <id>|rerun|post <id> [comment|approve|request-changes]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
+      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|rerun|post <id> [comment|approve|request-changes]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
     handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {

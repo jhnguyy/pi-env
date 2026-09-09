@@ -8,6 +8,7 @@ import {
 import { ReviewerNodes } from "./review-topology";
 import {
   type AdmittedRawFinding,
+  type RawFindingRecord,
   type ReviewerOutput,
   validateReviewerOutputShape,
 } from "./schema";
@@ -110,6 +111,31 @@ function decodeReviewer(
   }
 }
 
+/** Lazily reads one occurrence from its already-admitted reviewer DAG artifact. */
+export async function readVerifiedRawFinding(
+  artifactRoot: string,
+  runId: string,
+  value: RawFindingRecord,
+): Promise<Omit<AdmittedRawFinding, "artifact">> {
+  const topology = ReviewerNodes.find((node) => node.role === value?.role);
+  if (!topology || !Number.isSafeInteger(value.index) || value.index < 0)
+    throw new Error("Raw finding provenance is malformed.");
+  const materialized = await readVerifiedReviewArtifact(artifactRoot, value.artifact, {
+    runId,
+    producerNodeId: topology.nodeId,
+    outputName: topology.outputName,
+  });
+  const reviewer = decodeReviewer(materialized.text, value.role, value.evidenceDigest);
+  if (!reviewer || value.index >= reviewer.findings.length)
+    throw new Error("Raw finding provenance does not match the admitted reviewer output.");
+  const admitted = buildRawFindingRecords([{ reviewer, reference: materialized.reference }]);
+  const finding = admitted.find((candidate) => candidate.index === value.index);
+  if (!finding || finding.id !== value.id)
+    throw new Error("Raw finding identity does not match its reviewer occurrence.");
+  const { artifact: _artifact, ...inspected } = finding;
+  return inspected;
+}
+
 export async function admitReviewerDossier(options: {
   readonly artifactRoot: string;
   readonly reconstruction: DagSessionReconstruction;
@@ -162,7 +188,7 @@ export async function admitReviewerDossier(options: {
   while (admitted.length > 0) {
     const candidate = {
       admitted,
-      rawFindings: buildRawFindingRecords(admitted.map((item) => item.reviewer)),
+      rawFindings: buildRawFindingRecords(admitted),
       raw,
       failed,
       malformed,
@@ -185,7 +211,7 @@ export async function admitReviewerDossier(options: {
   );
   return Object.freeze({
     admitted: Object.freeze(admitted),
-    rawFindings: buildRawFindingRecords(admitted.map((item) => item.reviewer)),
+    rawFindings: buildRawFindingRecords(admitted),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),

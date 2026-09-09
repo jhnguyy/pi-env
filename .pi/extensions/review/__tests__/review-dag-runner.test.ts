@@ -42,7 +42,7 @@ import {
 import { buildReviewDeck, updateReviewDeckLaterRefs } from "../deck";
 import type { ReviewState } from "../schema";
 import { buildRawFindingRecords } from "../synthesis-provenance";
-import { readRawFindingArtifact } from "../raw-provenance";
+import { readVerifiedRawFinding } from "../reviewer-dossier";
 
 class TestAppendFailure extends Data.TaggedError("TestAppendFailure")<{
   readonly message: string;
@@ -178,9 +178,25 @@ function legacySynthesis(): string {
     ],
   });
 }
-function synthesis(): string {
+function expectedRawFindingId(): string {
   const correctness = JSON.parse(reviewer("correctness"));
-  const rawFindingId = buildRawFindingRecords([correctness])[0].id;
+  return buildRawFindingRecords([
+    {
+      reviewer: correctness,
+      reference: {
+        v: 1,
+        path: "unused",
+        bytes: 1,
+        digest: "0".repeat(64),
+        runId: "unused",
+        producerNodeId: "review-correctness",
+        outputName: "correctness_review",
+      },
+    },
+  ])[0].id;
+}
+function synthesis(): string {
+  const rawFindingId = expectedRawFindingId();
   return JSON.stringify({
     v: 2,
     verdict: "One serious issue was found.",
@@ -203,8 +219,7 @@ function synthesis(): string {
 }
 
 function dismissedSynthesis(): string {
-  const correctness = JSON.parse(reviewer("correctness"));
-  const rawFindingId = buildRawFindingRecords([correctness])[0].id;
+  const rawFindingId = expectedRawFindingId();
   return JSON.stringify({
     v: 2,
     verdict: "The raw concern was dismissed editorially.",
@@ -614,9 +629,7 @@ describe("DAG-backed pull request review runner", () => {
     expect(rawRecord).not.toHaveProperty("finding");
     expect(
       (
-        await Effect.runPromise(
-          readRawFindingArtifact(f.state.snapshot.artifactDir, result.dag!.runId, rawRecord),
-        )
+        await readVerifiedRawFinding(f.artifactRoot, result.dag!.runId, rawRecord!)
       ).finding.problem,
     ).toBe("The value is wrong.");
     expect(
@@ -914,13 +927,7 @@ describe("DAG-backed pull request review runner", () => {
     expect(rawRecord).not.toHaveProperty("finding");
     expect(
       (
-        await Effect.runPromise(
-          readRawFindingArtifact(
-            f.state.snapshot.artifactDir,
-            reconstruction.graph.runId,
-            rawRecord,
-          ),
-        )
+        await readVerifiedRawFinding(f.artifactRoot, reconstruction.graph.runId, rawRecord!)
       ).finding.problem,
     ).toBe("The value is wrong.");
   });
