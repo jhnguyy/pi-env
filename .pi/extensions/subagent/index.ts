@@ -1,19 +1,13 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
 import { discoverAgents } from "./agents";
 import { formatJobMetadata, formatJobResult, type SubagentJob } from "./jobs";
 import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
-import {
-  renderSubagentCall,
-  renderSubagentJobCall,
-  renderSubagentJobResult,
-  renderSubagentResult,
-  renderSubagentStartResult,
-} from "./render";
+import { renderSubagentToolCall, renderSubagentToolResult } from "./render";
 import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
 import { SubagentSessionRuntime } from "./session-runtime";
 import { toNestedToolUsage } from "./usage";
@@ -26,49 +20,9 @@ export {
   makeDagSubagentRuntime,
 } from "./dag-runtime";
 
-const SUBAGENT_PARAMETERS = Type.Object({
-  name: Type.String({
-    description:
-      "Required human-readable child-session name. Stored as a `sub-` prefixed session name.",
-  }),
-  agent: Type.Optional(
-    Type.String({
-      description:
-        "Agent name — resolves to an agent definition file with tools/model/system prompt configured",
-    }),
-  ),
-  task: Type.String({ description: "Task to delegate to the subagent" }),
-  tools: Type.Optional(
-    Type.Array(Type.String(), {
-      description: "Tool whitelist. Required when not using an agent file.",
-    }),
-  ),
-  model: Type.Optional(
-    Type.String({
-      description: "Model as 'provider/model-id'. Required when not using an agent file.",
-    }),
-  ),
-  system_prompt: Type.Optional(
-    Type.String({
-      description:
-        "System prompt override. Optional — agent files provide this, or a minimal default is used.",
-    }),
-  ),
-  cwd: Type.Optional(
-    Type.String({
-      description:
-        "Optional absolute working directory for this subagent. Resolved with realpath and must be an existing directory.",
-    }),
-  ),
-  agent_scope: Type.Optional(
-    StringEnum(["user", "project"] as const, {
-      description:
-        "Agent definition scope. Defaults to user and installed package agents. Project agents require explicit scope and project trust.",
-    }),
-  ),
-});
-
-const SubagentJobAction = {
+export const SubagentAction = {
+  Run: "run",
+  Start: "start",
   Status: "status",
   Wait: "wait",
   Cancel: "cancel",
@@ -76,26 +30,83 @@ const SubagentJobAction = {
   Usage: "usage",
   Result: "result",
 } as const;
-type SubagentJobAction = (typeof SubagentJobAction)[keyof typeof SubagentJobAction];
+export type SubagentAction = (typeof SubagentAction)[keyof typeof SubagentAction];
 
-const SUBAGENT_JOB_PARAMETERS = Type.Object({
-  action: StringEnum(
-    Object.values(SubagentJobAction) as [SubagentJobAction, ...SubagentJobAction[]],
-    {
+const SUBAGENT_PARAMETERS = Type.Object(
+  {
+    action: StringEnum(Object.values(SubagentAction) as [SubagentAction, ...SubagentAction[]], {
       description:
-        "Inspect, wait for, cancel, list, retrieve a bounded result, or summarize asynchronous subagent jobs.",
-    },
-  ),
-  job_id: Type.Optional(Type.String({ description: "Job ID (required except for list/usage)." })),
-});
+        "Operation to perform. Use run for a blocking child, start for a background child, or a job-management action.",
+    }),
+    name: Type.Optional(
+      Type.String({
+        description:
+          "Human-readable child-session name. Required for run/start. Stored as a `sub-` prefixed session name.",
+      }),
+    ),
+    agent: Type.Optional(
+      Type.String({
+        description:
+          "Agent name for run/start. Resolves to an agent definition with tools, model, and system prompt configuration.",
+      }),
+    ),
+    task: Type.Optional(Type.String({ description: "Task to delegate. Required for run/start." })),
+    tools: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Tool whitelist for run/start. Required when not using an agent file.",
+      }),
+    ),
+    model: Type.Optional(
+      Type.String({
+        description:
+          "Model as 'provider/model-id' for run/start. Required when not using an agent file.",
+      }),
+    ),
+    system_prompt: Type.Optional(
+      Type.String({
+        description:
+          "System prompt override for run/start. Agent files can provide the prompt instead.",
+      }),
+    ),
+    cwd: Type.Optional(
+      Type.String({
+        description:
+          "Absolute working directory for run/start. Resolved with realpath and must be an existing directory.",
+      }),
+    ),
+    agent_scope: Type.Optional(
+      StringEnum(["user", "project"] as const, {
+        description:
+          "Agent definition scope for run/start. Defaults to user and installed package agents. Project agents require explicit scope and project trust.",
+      }),
+    ),
+    job_id: Type.Optional(
+      Type.String({
+        description: "Job ID. Required for status, wait, result, and cancel.",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-type SubagentStartParams = Static<typeof SUBAGENT_PARAMETERS>;
-type SubagentJobParams = Static<typeof SUBAGENT_JOB_PARAMETERS>;
+type SubagentToolParams = Static<typeof SUBAGENT_PARAMETERS>;
 
-export function completedJobUsageOnce(
-  reportedJobUsage: Set<string>,
-  job: SubagentJob,
-) {
+function requireRunParams(params: SubagentToolParams): SubagentParams {
+  if (!params.name) throw new Error(`name is required for subagent ${params.action}.`);
+  if (!params.task) throw new Error(`task is required for subagent ${params.action}.`);
+  return {
+    name: params.name,
+    agent: params.agent,
+    task: params.task,
+    tools: params.tools,
+    model: params.model,
+    system_prompt: params.system_prompt,
+    cwd: params.cwd,
+    agent_scope: params.agent_scope,
+  };
+}
+
+export function completedJobUsageOnce(reportedJobUsage: Set<string>, job: SubagentJob) {
   if (
     job.status === SubagentJobStatus.Queued ||
     job.status === SubagentJobStatus.Running ||
@@ -141,41 +152,17 @@ export default function (pi: ExtensionAPI) {
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
   const reportedJobUsage = new Set<string>();
 
-  const registerSubagentTool = (description: string) =>
-    pi.registerTool({
-      name: "subagent",
-      label: "Subagent",
-      description,
-      parameters: SUBAGENT_PARAMETERS,
-      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-        const result = await runtime.execute(toolCallId, params, signal, onUpdate, ctx);
-        return { ...result, usage: toNestedToolUsage(result.details.usage) };
-      },
-      renderCall: renderSubagentCall,
-      renderResult: renderSubagentResult,
-    });
-  const executeAsyncSubagent = async (
-    _id: string,
-    params: SubagentStartParams,
-    signal: AbortSignal | undefined,
-    _onUpdate: unknown,
-    ctx: ExtensionContext,
-  ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
-    if (signal?.aborted) throw new Error("Subagent start aborted.");
-    return runtime.startJob(params, ctx, signal);
-  };
-  const executeSubagentJob = async (
-    _id: string,
-    params: SubagentJobParams,
+  const executeJobAction = async (
+    params: SubagentToolParams,
     signal?: AbortSignal,
   ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
-    if (params.action === SubagentJobAction.Usage) {
+    if (params.action === SubagentAction.Usage) {
       return {
         content: [{ type: "text", text: runtime.usageText() }],
         details: { status: SubagentJobToolStatus.Usage },
       };
     }
-    if (params.action === SubagentJobAction.List) {
+    if (params.action === SubagentAction.List) {
       const activeJobs = runtime.listJobs();
       const output = activeJobs.map(formatJobMetadata).join("\n") || "No subagent jobs.";
       return {
@@ -184,7 +171,7 @@ export default function (pi: ExtensionAPI) {
       };
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, result, and cancel.");
-    if (params.action === SubagentJobAction.Wait) {
+    if (params.action === SubagentAction.Wait) {
       const waited = await runtime.waitJob(params.job_id, signal);
       if (waited.interrupted) {
         return {
@@ -206,7 +193,7 @@ export default function (pi: ExtensionAPI) {
         ...completedJobUsageOnce(reportedJobUsage, waited.job),
       };
     }
-    if (params.action === SubagentJobAction.Result) {
+    if (params.action === SubagentAction.Result) {
       const job = runtime.getJob(params.job_id);
       if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
@@ -216,7 +203,7 @@ export default function (pi: ExtensionAPI) {
       };
     }
     const job =
-      params.action === SubagentJobAction.Cancel
+      params.action === SubagentAction.Cancel
         ? runtime.cancelJob(params.job_id)
         : runtime.getJob(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
@@ -226,33 +213,40 @@ export default function (pi: ExtensionAPI) {
     };
   };
 
+  const registerSubagentTool = (description: string) =>
+    pi.registerTool({
+      name: "subagent",
+      label: "Subagent",
+      description,
+      parameters: SUBAGENT_PARAMETERS,
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        if (params.action === SubagentAction.Run) {
+          const result = await runtime.execute(
+            toolCallId,
+            requireRunParams(params),
+            signal,
+            onUpdate,
+            ctx,
+          );
+          return { ...result, usage: toNestedToolUsage(result.details.usage) };
+        }
+        if (params.action === SubagentAction.Start) {
+          if (signal?.aborted) throw new Error("Subagent start aborted.");
+          return runtime.startJob(requireRunParams(params), ctx, signal);
+        }
+        return executeJobAction(params, signal);
+      },
+      renderCall: renderSubagentToolCall,
+      renderResult: renderSubagentToolResult,
+    });
+
   registerSubagentTool(STATIC_DESCRIPTION);
-  pi.registerTool({
-    name: "subagent_start",
-    label: "Start Subagent",
-    description:
-      "Start a session-scoped subagent job without waiting. The live job handle is volatile. The linked child transcript persists. Use subagent_job to inspect, wait, retrieve a bounded result, or cancel the job.",
-    parameters: SUBAGENT_PARAMETERS,
-    execute: executeAsyncSubagent,
-    renderCall: renderSubagentCall,
-    renderResult: renderSubagentStartResult,
-  });
-  pi.registerTool({
-    name: "subagent_job",
-    label: "Subagent Job",
-    description:
-      "Inspect, wait for, cancel, list, retrieve bounded results, or summarize session-scoped asynchronous subagent jobs.",
-    parameters: SUBAGENT_JOB_PARAMETERS,
-    execute: executeSubagentJob,
-    renderCall: renderSubagentJobCall,
-    renderResult: renderSubagentJobResult,
-  });
   pi.on(PiEvent.SessionBeforeTree, async () => {
     await runtime.settleJobsBeforeTreeNavigation();
   });
-  pi.on("session_shutdown", async () => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     stopListeningForAgentTools();
-    await runtime.shutdownSession();
+    await runtime.shutdownSession(ctx);
   });
 
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {

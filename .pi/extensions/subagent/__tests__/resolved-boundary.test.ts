@@ -104,42 +104,4 @@ describe("resolved subagent boundary", () => {
     expect(captured.config.sessionId).toBe(result.details.sessionId);
   });
 
-  it("ignores legacy max_turns input on public runs", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-public-"));
-    temps.push(cwd);
-    const sessionManager = SessionManager.create(cwd, cwd);
-    const ctx: any = {
-      cwd,
-      sessionManager,
-      modelRegistry: {
-        find: () => ({ provider: "p", id: "m" }),
-        getApiKeyForProvider: () => undefined,
-      },
-    };
-    captured.multiTurn = true;
-
-    const result = await Effect.runPromise(
-      runSubagentEffect(
-        {
-          name: "legacy-limit",
-          task: "task",
-          tools: ["read"],
-          model: "p/m",
-          // The cast models a legacy caller that sends this retired argument.
-          max_turns: 1,
-        } as any,
-        ctx,
-        new Map(),
-        { env: { OTEL_SDK_DISABLED: "true" } },
-      ),
-    );
-
-    expect(captured.stopAfterFirst).toBe(false);
-    expect(result.content).toEqual([{ type: "text", text: "done" }]);
-    expect(result.details).toMatchObject({
-      maxTurns: undefined,
-      turnLimitExceeded: false,
-      usage: { turns: 2 },
-    });
-  });
 });

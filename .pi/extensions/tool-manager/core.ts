@@ -18,7 +18,7 @@ const LINEAR_TOOLS = ["linear"];
 
 export const DEFAULT_GROUPS: Record<string, string[]> = {
   analysis: ["analyze"],
-  delegation: ["subagent", "subagent_start", "subagent_job"],
+  delegation: ["subagent"],
   skills: ["reference_skill", "skill_build"],
   "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],

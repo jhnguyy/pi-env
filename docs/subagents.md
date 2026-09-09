@@ -2,22 +2,24 @@
 
 The subagent extension runs child agents in the parent Pi process. Each child has an isolated context and a linked persistent session transcript.
 
-## Execution modes
+## Actions
 
-Use `subagent` when the parent must wait for the child result.
+The `subagent` tool uses one `action` parameter for blocking runs and background job management.
 
-Use `subagent_start` to start a session-scoped job and continue parent work. The tool returns a volatile job ID. Use `subagent_job` to manage the job:
+Use `action: "run"` when the parent must wait for the child result.
+
+Use `action: "start"` to start a session-scoped job and continue parent work. The tool returns a volatile job ID. Use these actions to manage the job:
 
 - `list` returns bounded metadata for retained jobs.
 - `status` returns metadata for one job.
-- `wait` waits for a terminal state. A successfully completed job returns its bounded retained final answer directly; other terminal states return status metadata.
+- `wait` waits for a terminal state. A successfully completed job returns its bounded retained final answer directly. Other terminal states return status metadata.
 - `result` returns only the bounded retained final answer for a completed job. Job, usage, session, and truncation metadata remain available in tool details and the TUI.
 - `cancel` requests cancellation.
 - `usage` returns aggregate subagent usage for the parent session.
 
 Use the child session file when you need the complete transcript. Live job handles do not survive a restart. The extension does not retry interrupted work automatically.
 
-Collapsed TUI views omit the full delegated task and child output. Expanded views show the task and available child output. Tool call summaries never show an inline system prompt. Job summaries keep status, usage, truncation, and child-session references.
+Collapsed TUI views omit the full delegated task and child output. Expanded views show the task and available child output. Tool call summaries never show an inline system prompt. Each active background child has one brief line in the lower status area immediately above the built-in footer. The line disappears when the child reaches a terminal state.
 
 ## Agent definitions and trust
 
@@ -29,7 +31,7 @@ Set `agent_scope` to `project` to use a project agent. Pi must trust the project
 
 One supervisor controls admission for blocking jobs, asynchronous jobs, and direct child-runtime callers. The supervisor controls concurrency, pending runs, workspace writers, and run time.
 
-Public `subagent` and `subagent_start` runs do not have a turn-count limit. The configured run-time limit still applies.
+Public `run` and `start` actions do not have a turn-count limit. The configured run-time limit still applies.
 
 Configure limits in the `subagent` settings block:
 
