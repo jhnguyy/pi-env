@@ -70,6 +70,9 @@ export const REVIEW_COMMANDS = [
   "select",
   "edit",
   "preface",
+  "walkthrough",
+  "reject",
+  "defer",
   "rerun",
   "post",
   "draft-plan",
@@ -166,7 +169,7 @@ export const ReviewSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-const ReviewerRoleValues = [
+export const ReviewerRoles = [
   "correctness",
   "intent",
   "maintainability",
@@ -176,7 +179,7 @@ const ReviewerRoleValues = [
 ] as const;
 export const ReviewerOutputSchema = Type.Object(
   {
-    role: StringEnum(ReviewerRoleValues),
+    role: StringEnum(ReviewerRoles),
     evidenceDigest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
     verdict: NonEmptyString,
     findings: Type.Array(FindingInputSchema, { maxItems: 1000 }),
@@ -186,12 +189,12 @@ export const ReviewerOutputSchema = Type.Object(
 export const SynthesisFindingSchema = Type.Object(
   {
     ...FindingInputSchema.properties,
-    sourceReviewers: Type.Array(StringEnum(ReviewerRoleValues), {
+    sourceReviewers: Type.Array(StringEnum(ReviewerRoles), {
       minItems: 1,
-      maxItems: ReviewerRoleValues.length,
+      maxItems: ReviewerRoles.length,
       uniqueItems: true,
     }),
-    agreement: Type.Integer({ minimum: 1, maximum: ReviewerRoleValues.length }),
+    agreement: Type.Integer({ minimum: 1, maximum: ReviewerRoles.length }),
   },
   { additionalProperties: false },
 );
@@ -201,22 +204,52 @@ export const SynthesisReviewSchema = Type.Object(
     coverage: Type.Object(
       {
         status: StringEnum(["complete", "degraded"] as const),
-        succeeded: Type.Array(StringEnum(ReviewerRoleValues), {
-          maxItems: ReviewerRoleValues.length,
+        succeeded: Type.Array(StringEnum(ReviewerRoles), {
+          maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),
-        failed: Type.Array(StringEnum(ReviewerRoleValues), {
-          maxItems: ReviewerRoleValues.length,
+        failed: Type.Array(StringEnum(ReviewerRoles), {
+          maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),
-        malformed: Type.Array(StringEnum(ReviewerRoleValues), {
-          maxItems: ReviewerRoleValues.length,
+        malformed: Type.Array(StringEnum(ReviewerRoles), {
+          maxItems: ReviewerRoles.length,
           uniqueItems: true,
         }),
       },
       { additionalProperties: false },
     ),
     findings: Type.Array(SynthesisFindingSchema, { maxItems: 1000 }),
+  },
+  { additionalProperties: false },
+);
+export const RawFindingIdSchema = Type.String({
+  minLength: 3,
+  maxLength: 80,
+  pattern: "^R-[0-9a-f]+$",
+});
+export const ConsolidatedFindingSchema = Type.Object(
+  {
+    ...FindingInputSchema.properties,
+    rawFindingIds: Type.Array(RawFindingIdSchema, {
+      minItems: 1,
+      maxItems: 6000,
+      uniqueItems: true,
+    }),
+  },
+  { additionalProperties: false },
+);
+export const RawFindingDismissalSchema = Type.Object(
+  { rawFindingId: RawFindingIdSchema, reason: NonEmptyString },
+  { additionalProperties: false },
+);
+export const ConsolidationReviewV2Schema = Type.Object(
+  {
+    v: Type.Literal(2),
+    verdict: NonEmptyString,
+    coverage: SynthesisReviewSchema.properties.coverage,
+    findings: Type.Array(ConsolidatedFindingSchema, { maxItems: 1000 }),
+    dismissals: Type.Array(RawFindingDismissalSchema, { maxItems: 6000 }),
   },
   { additionalProperties: false },
 );
@@ -270,18 +303,42 @@ export type ReviewPlan = Static<typeof PlanSchema>;
 export type FindingInput = Static<typeof FindingInputSchema>;
 export type ReviewerOutput = Static<typeof ReviewerOutputSchema>;
 export type SynthesisReview = Static<typeof SynthesisReviewSchema>;
+export type ConsolidationReviewV2 = Static<typeof ConsolidationReviewV2Schema>;
+export type RawFindingDismissal = Static<typeof RawFindingDismissalSchema>;
+export interface RawFindingRecord {
+  readonly id: string;
+  readonly role: ReviewerOutput["role"];
+  readonly evidenceDigest: string;
+  readonly index: number;
+  /** The existing verified reviewer DAG output; no finding payload is copied to parent state. */
+  readonly artifact: ReviewArtifactReference;
+}
+export interface AdmittedRawFinding extends RawFindingRecord {
+  readonly finding: Readonly<FindingInput>;
+}
 export type Finding = Omit<FindingInput, "side"> & {
   side?: AnchorSide;
   id?: string;
   selected?: boolean;
   anchorValid?: boolean;
+  rawFindingIds?: string[];
   sourceReviewers?: ReviewerOutput["role"][];
   agreement?: number;
 };
+export interface ConsolidationProvenance {
+  readonly v: 2;
+  /** Editorial consolidation is traceable accounting, not verified semantic correctness. */
+  readonly kind: "editorial-consolidation";
+  readonly status: "accepted" | "fallback";
+  readonly rawFindings: readonly RawFindingRecord[];
+  readonly dismissals: readonly RawFindingDismissal[];
+  readonly fallbackReason?: string;
+}
 export interface ReviewResult {
   verdict: string;
   findings: Finding[];
   coverage?: SynthesisReview["coverage"];
+  provenance?: ConsolidationProvenance;
 }
 export type AnchorSide = "LEFT" | "RIGHT";
 
@@ -331,6 +388,13 @@ export interface ReviewArtifactReference {
   readonly producerNodeId: string;
   readonly outputName: string;
 }
+export const HumanDecisionStatus = ["pending", "selected", "rejected", "deferred"] as const;
+export type HumanDecisionStatus = (typeof HumanDecisionStatus)[number];
+export interface HumanDecision {
+  status: HumanDecisionStatus;
+  at: string;
+}
+
 export interface ReviewState {
   snapshot: ReviewSnapshot;
   preparation?: {
@@ -365,6 +429,8 @@ export interface ReviewState {
     runId: string;
     startedAt?: string;
     submitted?: boolean;
+    /** Present before submission for new provenance-accounted runs. Absence identifies historical runs. */
+    synthesisProtocol?: 2;
     status: "running" | "succeeded" | "degraded" | "failed" | "cancelled" | "interrupted";
     rawResultReferences: ReviewArtifactReference[];
     readingPlanReference?: ReviewArtifactReference;
@@ -412,6 +478,8 @@ export interface ReviewState {
   plan?: ReviewPlan;
   result?: ReviewResult;
   selectedFindingIds: string[];
+  /** Durable human inspection decisions. Missing entries are pending, including defaults. */
+  decisions?: Record<string, HumanDecision>;
   preface?: string;
   child?: {
     sessionFile?: string;
@@ -443,4 +511,13 @@ export function validateReviewerOutputShape(result: unknown): result is Reviewer
 }
 export function validateSynthesisReviewShape(result: unknown): result is SynthesisReview {
   return Check(SynthesisReviewSchema, result) && result.findings.every(coherentFindingAnchor);
+}
+export function validateConsolidationReviewV2Shape(
+  result: unknown,
+): result is ConsolidationReviewV2 {
+  return (
+    Check(ConsolidationReviewV2Schema, result) &&
+    result.findings.every(coherentFindingAnchor) &&
+    result.dismissals.every((dismissal) => dismissal.reason.trim().length > 0)
+  );
 }

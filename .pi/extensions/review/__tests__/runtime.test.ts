@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ReviewState } from "../core";
+import { sha256, type ReviewState } from "../core";
 import { makeReviewReadTools } from "../runtime";
+import { readVerifiedPinnedDiff } from "../snapshot";
 
 const temps: string[] = [];
 afterEach(() => {
@@ -18,17 +19,16 @@ function state(): ReviewState {
   const artifact = mkdtempSync(join(tmpdir(), "pi-pr-review-art-"));
   temps.push(artifact);
   const diffPath = join(artifact, "diff.patch");
-  writeFileSync(
-    diffPath,
-    "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,2 @@\n same\n+needle\n",
-  );
+  const diff =
+    "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,1 +1,2 @@\n same\n+needle\n";
+  writeFileSync(diffPath, diff);
   return {
     snapshot: {
       id: "r",
       artifactDir: artifact,
       worktree: root,
       diffPath,
-      diffHash: "h",
+      diffHash: sha256(diff),
       createdAt: "now",
       metadata: {
         owner: "o",
@@ -48,6 +48,20 @@ function state(): ReviewState {
 }
 
 describe("review pull request run-scoped tools", () => {
+  it("admits only bounded, regular, hash-matching pinned evidence", () => {
+    const s = state();
+    expect(readVerifiedPinnedDiff(s.snapshot)).toContain("+needle");
+
+    writeFileSync(s.snapshot.diffPath, "tampered");
+    expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/integrity/);
+
+    writeFileSync(s.snapshot.diffPath, Buffer.alloc(8_000_001));
+    expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/exceeds/);
+
+    rmSync(s.snapshot.diffPath);
+    mkdirSync(s.snapshot.diffPath);
+    expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/regular file/);
+  });
   it("uses fixed-string grep, exact diff path matching, and bounded large-line reads", async () => {
     let s = state();
     const saved: ReviewState[] = [];
@@ -102,10 +116,10 @@ describe("review pull request run-scoped tools", () => {
         )) as any
       ).content[0].text,
     ).toContain("diff --git");
-    writeFileSync(
-      s.snapshot.diffPath,
-      "diff --git a/dir b/part/a.ts b/dir b/part/a.ts\n--- a/dir b/part/a.ts\n+++ b/dir b/part/a.ts\n@@ -1 +1 @@\n-old\n+new\n",
-    );
+    const ambiguousDiff =
+      "diff --git a/dir b/part/a.ts b/dir b/part/a.ts\n--- a/dir b/part/a.ts\n+++ b/dir b/part/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    writeFileSync(s.snapshot.diffPath, ambiguousDiff);
+    s.snapshot.diffHash = sha256(ambiguousDiff);
     const ambiguousTools = Object.fromEntries(
       makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
     );
@@ -129,16 +143,15 @@ describe("review pull request run-scoped tools", () => {
       latePath,
       Array.from({ length: 300 }, (_, index) => `line-${index + 1}`).join("\n"),
     );
-    writeFileSync(
-      s.snapshot.diffPath,
-      [
-        "diff --git a/src/late.ts b/src/late.ts",
-        "--- a/src/late.ts",
-        "+++ b/src/late.ts",
-        "@@ -1,1 +1,300 @@",
-        ...Array.from({ length: 300 }, (_, index) => `+line-${index + 1}`),
-      ].join("\n"),
-    );
+    const lateDiff = [
+      "diff --git a/src/late.ts b/src/late.ts",
+      "--- a/src/late.ts",
+      "+++ b/src/late.ts",
+      "@@ -1,1 +1,300 @@",
+      ...Array.from({ length: 300 }, (_, index) => `+line-${index + 1}`),
+    ].join("\n");
+    writeFileSync(s.snapshot.diffPath, lateDiff);
+    s.snapshot.diffHash = sha256(lateDiff);
     const tools = Object.fromEntries(
       makeReviewReadTools({ state: s, save: () => {} }).map((tool) => [tool.name, tool]),
     );

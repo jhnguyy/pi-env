@@ -29,7 +29,7 @@ Before assuming a toolchain problem is a code problem, verify whether the host c
 
 ## Extension development
 
-Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules.
+Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules. Follow [change discipline](docs/conventions/change-discipline.md) for scope and prior-art reuse decisions.
 
 Source-owned contracts:
 

@@ -6,9 +6,34 @@ import {
   type DagTextArtifactReference,
 } from "../../../src/dag/index.js";
 import { ReviewerNodes } from "./review-topology";
-import { type ReviewerOutput, validateReviewerOutputShape } from "./schema";
+import { admitReviewEvidenceBundle, type ReviewEvidenceBundle } from "./evidence-resolver";
+import {
+  type AdmittedRawFinding,
+  type RawFindingRecord,
+  type ReviewerOutput,
+  validateReviewerOutputShape,
+} from "./schema";
+import { buildRawFindingRecords } from "./synthesis-provenance";
 
 export const MaxReviewerDossierBytes = 1_750_000;
+
+export interface ReviewAdmission {
+  readonly evidence: ReviewEvidenceBundle;
+  readonly reviewers: ReviewerDossier;
+}
+
+export async function admitReviewArtifacts(
+  artifactRoot: string,
+  reconstruction: DagSessionReconstruction,
+): Promise<ReviewAdmission> {
+  const evidence = await admitReviewEvidenceBundle(artifactRoot, reconstruction);
+  const reviewers = await admitReviewerDossier({
+    artifactRoot,
+    reconstruction,
+    expectedEvidenceDigest: evidence.coverage?.digest,
+  });
+  return { evidence, reviewers };
+}
 
 type ReviewerTopologyNode = (typeof ReviewerNodes)[number];
 
@@ -26,6 +51,7 @@ export interface AdmittedReviewerArtifact extends VerifiedReviewerArtifact {
 /** A single, fail-closed admission pass over all reviewer nodes. */
 export interface ReviewerDossier {
   readonly admitted: readonly AdmittedReviewerArtifact[];
+  readonly rawFindings: readonly AdmittedRawFinding[];
   /** References whose bytes and DAG identity were verified, including malformed results. */
   readonly raw: readonly VerifiedReviewerArtifact[];
   readonly failed: readonly string[];
@@ -38,19 +64,23 @@ export function reviewerDossierContext(dossier: ReviewerDossier) {
       nodeId: item.nodeId,
       outputName: item.outputName,
       reference: item.reference,
-      text: item.text,
+      role: item.reviewer.role,
+      evidenceDigest: item.reviewer.evidenceDigest,
+      verdict: item.reviewer.verdict,
+      rawFindings: dossier.rawFindings.filter((raw) => raw.role === item.reviewer.role),
+    })),
+    verifiedReferences: dossier.raw.map((item) => ({
+      nodeId: item.nodeId,
+      outputName: item.outputName,
+      reference: item.reference,
     })),
     failed: dossier.failed,
     malformed: dossier.malformed,
   };
 }
 
-function serializedReviewerDossierContext(dossier: ReviewerDossier): string {
-  return JSON.stringify(reviewerDossierContext(dossier));
-}
-
 export function serializeReviewerDossierContext(dossier: ReviewerDossier): string {
-  const text = serializedReviewerDossierContext(dossier);
+  const text = JSON.stringify(reviewerDossierContext(dossier));
   if (Buffer.byteLength(text, "utf8") > MaxReviewerDossierBytes)
     throw new Error("Reviewer result context exceeds the absolute byte limit.");
   return text;
@@ -94,6 +124,31 @@ function decodeReviewer(
   } catch {
     return undefined;
   }
+}
+
+/** Lazily reads one occurrence from its already-admitted reviewer DAG artifact. */
+export async function readVerifiedRawFinding(
+  artifactRoot: string,
+  runId: string,
+  value: RawFindingRecord,
+): Promise<Omit<AdmittedRawFinding, "artifact">> {
+  const topology = ReviewerNodes.find((node) => node.role === value?.role);
+  if (!topology || !Number.isSafeInteger(value.index) || value.index < 0)
+    throw new Error("Raw finding provenance is malformed.");
+  const materialized = await readVerifiedReviewArtifact(artifactRoot, value.artifact, {
+    runId,
+    producerNodeId: topology.nodeId,
+    outputName: topology.outputName,
+  });
+  const reviewer = decodeReviewer(materialized.text, value.role, value.evidenceDigest);
+  if (!reviewer || value.index >= reviewer.findings.length)
+    throw new Error("Raw finding provenance does not match the admitted reviewer output.");
+  const admitted = buildRawFindingRecords([{ reviewer, reference: materialized.reference }]);
+  const finding = admitted[value.index];
+  if (!finding || finding.id !== value.id)
+    throw new Error("Raw finding identity does not match its reviewer occurrence.");
+  const { artifact: _artifact, ...inspected } = finding;
+  return inspected;
 }
 
 export async function admitReviewerDossier(options: {
@@ -145,15 +200,23 @@ export async function admitReviewerDossier(options: {
     admitted.push({ ...verified[0], reviewer });
   }
 
-  while (
-    admitted.length > 0 &&
-    Buffer.byteLength(
-      serializedReviewerDossierContext({ admitted, raw, failed, malformed }),
-      "utf8",
-    ) > MaxReviewerDossierBytes
-  ) {
-    const removed = admitted.pop();
-    if (removed) malformed.push(removed.nodeId);
+  let rawFindings = buildRawFindingRecords(admitted);
+  while (admitted.length > 0) {
+    const candidate = {
+      admitted,
+      rawFindings,
+      raw,
+      failed,
+      malformed,
+    };
+    if (
+      Buffer.byteLength(JSON.stringify(reviewerDossierContext(candidate)), "utf8") <=
+      MaxReviewerDossierBytes
+    )
+      break;
+    const removed = admitted.pop()!;
+    malformed.push(removed.nodeId);
+    rawFindings = rawFindings.filter((raw) => raw.role !== removed.reviewer.role);
   }
   const topologyIndex = new Map<string, number>(
     ReviewerNodes.map((node, index) => [node.nodeId, index]),
@@ -165,6 +228,7 @@ export async function admitReviewerDossier(options: {
   );
   return Object.freeze({
     admitted: Object.freeze(admitted),
+    rawFindings: Object.freeze(rawFindings),
     raw: Object.freeze(raw),
     failed: Object.freeze(failed),
     malformed: Object.freeze(malformed),
