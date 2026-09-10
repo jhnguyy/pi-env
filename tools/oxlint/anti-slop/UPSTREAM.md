@@ -1,15 +1,15 @@
-# Vendored anti-slop Oxlint plugins
+# Anti-slop provenance
+
+This file identifies the source used for future vendor updates. Anti-slop has no supported package and asks consumers to vendor the plugin.
 
 Source: [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop), commit `c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b`.
 
-Use the upstream [rule reference](https://github.com/dmmulroy/anti-slop/tree/c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b#rules) for rule behavior and examples.
+The complete upstream install asset is copied into this directory. Use the pinned [rule reference](https://github.com/dmmulroy/anti-slop/tree/c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b#rules) for behavior and examples.
 
-## Local selection
+## Local changes
 
-This directory copies only the rules enabled in [`.oxlintrc.json`](../../../.oxlintrc.json) and their shared modules. The local `index.ts` files expose that selection. This selective copy is an intentional deviation from the upstream full-plugin installer so each rollout phase adds only the source it enforces.
+- Apply the readable-spacing rule to the vendored source.
+- Consolidate repeated ESTree traversal, literal checks, and Reflect rule construction.
+- Inline the negated semicolon predicate instead of exporting it.
 
-The source is MIT-licensed. Keep `LICENSE` with redistributed copies.
-
-## Updates
-
-Stage an explicit upstream revision outside this directory. Compare and update the selected rule files, their transitive local imports, and the entry points. When a rollout phase enables another rule, copy that rule and only its required local modules. Record the new source revision and any local changes here.
+Keep the exact source commit above as the merge base. For an update, stage the new complete install asset and merge its changes with the local Git diff. Preserve `LICENSE` and the nested ESLint Stylistic notice.

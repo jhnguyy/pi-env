@@ -1,12 +1,12 @@
 import type { ESTree } from "@oxlint/plugins";
 
-const equalityOperators = new Set(["==", "===", "!=", "!=="]);
-const broadEffectCatchMethods = new Set(["catch", "catchAll", "catchIf"]);
+import { isStringLiteral } from "../../shared/estree.ts";
 
-export const isStringLiteral = (
-	node: ESTree.Node | null | undefined,
-): node is ESTree.StringLiteral =>
-	node?.type === "Literal" && typeof node.value === "string";
+export { isStringLiteral } from "../../shared/estree.ts";
+
+const equalityOperators = new Set(["==", "===", "!=", "!=="]);
+
+const broadEffectCatchMethods = new Set(["catch", "catchAll", "catchIf"]);
 
 export const isTagMember = (
 	node: ESTree.Node | null | undefined,
@@ -23,8 +23,11 @@ export const tagMemberFromComparison = (
 	node: ESTree.BinaryExpression,
 ): ESTree.MemberExpression | undefined => {
 	if (!equalityOperators.has(node.operator)) return undefined;
+
 	if (isTagMember(node.left) && isStringLiteral(node.right)) return node.left;
+
 	if (isTagMember(node.right) && isStringLiteral(node.left)) return node.right;
+
 	return undefined;
 };
 
@@ -41,6 +44,7 @@ const isBroadEffectCatchCall = (
 
 export const isInsideBroadEffectHandler = (node: ESTree.Node): boolean => {
 	let current: ESTree.Node | null | undefined = node.parent;
+
 	while (current !== null && current !== undefined) {
 		if (
 			current.type === "ArrowFunctionExpression" ||
@@ -51,8 +55,10 @@ export const isInsideBroadEffectHandler = (node: ESTree.Node): boolean => {
 				current.parent.arguments.includes(current)
 			);
 		}
+
 		current = current.parent;
 	}
+
 	return false;
 };
 
@@ -71,21 +77,21 @@ export const propertyName = (
 	if (!property.computed && property.key.type === "Identifier") {
 		return property.key.name;
 	}
-	if (
-		property.key.type === "Literal" &&
-		typeof property.key.value === "string"
-	) {
-		return property.key.value;
-	}
+
+	if (isStringLiteral(property.key)) return property.key.value;
+
 	return undefined;
 };
 
 export const isMatchPatternObject = (node: ESTree.ObjectExpression): boolean => {
 	const call = node.parent;
+
 	if (call?.type !== "CallExpression" || !call.arguments.includes(node)) {
 		return false;
 	}
+
 	const callee = call.callee;
+
 	return (
 		callee.type === "MemberExpression" &&
 		callee.object.type === "Identifier" &&

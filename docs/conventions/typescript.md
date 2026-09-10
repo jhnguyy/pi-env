@@ -74,8 +74,6 @@ Avoid cascading `if`/`else if` for state-machine or parser logic. Avoid forcing 
 
 For algebraic data types or error/result variants, prefer tagged objects/classes over enums. With Effect, use patterns such as `Data.TaggedError`, `_tag` discriminants, or `Data.taggedEnum`-style constructors when they fit the boundary. Keep tags as literal values derived from objects or constructors rather than TypeScript enums.
 
-## Lint policy
+## Lint
 
-[`.oxlintrc.json`](../../.oxlintrc.json) owns the enabled rules. [`tools/oxlint/anti-slop/UPSTREAM.md`](../../tools/oxlint/anti-slop/UPSTREAM.md) owns vendored source and update provenance. Use the upstream rule reference from that file instead of copying rule details into repository conventions.
-
-Adopt rules in reviewable phases when the existing baseline is large. Enable each completed rule at `error`. Do not add suppressions or unsafe casts only to make validation pass.
+Run `nub run lint:type`. See [`tools/oxlint/anti-slop/UPSTREAM.md`](../../tools/oxlint/anti-slop/UPSTREAM.md) for the vendored rule source and upstream reference.
