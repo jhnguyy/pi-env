@@ -10,7 +10,8 @@ export interface Scope { mode: ScopeMode; files: readonly string[]; hunks: Reado
 const MAX_SCOPE_FILES = 50_000 as const;
 const SCOPE_ENTRIES_PER_FILE = 16 as const;
 const MAX_GIT_OUTPUT_BYTES = 8_388_608;
-const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", "dist", "coverage", ".analyze-bundle", ".turbo", ".next", ".svelte-kit"]);
+const SKIPPED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist", "coverage", ".analyze-bundle", ".turbo", ".next", ".svelte-kit"]);
+const SKIPPED_ROOTS = new Set(["tools/oxlint/anti-slop"]);
 const ANALYZABLE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".json", ".jsonc", ".yaml", ".yml"]);
 
 export const intersectsHunks = (start: number, end: number, hunks: readonly Hunk[] | undefined): boolean => !hunks || hunks.some((hunk) => start <= hunk.end && end >= hunk.start);
@@ -35,7 +36,8 @@ export function parseUnifiedHunks(text: string): Map<string, Hunk[]> {
 
 const normalize = (path: string): string => path.replaceAll("\\", "/");
 const analyzablePath = (path: string): boolean => ANALYZABLE_EXTENSIONS.has(extname(path));
-const isSkippedRoot = (relativeRoot: string): boolean => [...SKIPPED_DIRECTORIES].some((name) => relativeRoot === name || relativeRoot.startsWith(`${name}/`));
+const isSkippedRoot = (relativeRoot: string): boolean =>
+  [...SKIPPED_DIRECTORY_NAMES, ...SKIPPED_ROOTS].some((name) => relativeRoot === name || relativeRoot.startsWith(`${name}/`));
 const eligibleScopePath = (path: string): boolean => {
   const normalized = normalize(path);
   return analyzablePath(normalized) && !isSkippedRoot(normalized);
@@ -88,8 +90,9 @@ function walkDirectoryEffect(
             if (budget.visitedEntries > budget.maxEntries) {
               throw new ScopeError({ message: `Scope entry limit exceeded: visited more than ${budget.maxEntries} directory entries` });
             }
-            if (entry.isDirectory() && SKIPPED_DIRECTORIES.has(entry.name)) continue;
             const entryPath = resolve(current, entry.name);
+            const relativePath = normalize(relative(cwd, entryPath));
+            if (entry.isDirectory() && (SKIPPED_DIRECTORY_NAMES.has(entry.name) || isSkippedRoot(relativePath))) continue;
             if (entry.isDirectory()) stack.push(entryPath);
             else if (entry.isFile()) addAnalyzableFile(cwd, entryPath, files, maxFiles);
           }

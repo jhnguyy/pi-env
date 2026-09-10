@@ -42,6 +42,18 @@ The pinned Effect declarations, repository typecheck, and runtime tests are auth
 - Prefer an Effect- or Result-returning core API and keep throwing or Promise-returning wrappers at compatibility edges. Bootstrap code that runs before install must not import dependency-backed Effect modules at top level.
 - Compatibility runners (`Effect.runPromise`, `Effect.runSync`, `Effect.runFork`, `NodeRuntime.runMain`) belong at deliberate boundaries: extension/tool entrypoints, CLI/bootstrap adapters, test harnesses, and supervised process/fiber edges. Keep Effect-returning core APIs available behind those wrappers when callers benefit from typed failures.
 
+## Tagged values and matching
+
+Use the constructor and matching API that owns each tagged value.
+
+- `no-manual-effect-error-tag` requires `Effect.catchTag`, `Effect.catchTags`, `Effect.catchReason`, or `Effect.catchReasons` for selective recovery. Do not inspect `_tag` manually inside a broad catch handler.
+- `no-manual-tag-comparison` requires `Predicate.isTagged` for a tag predicate or `Match` for branching. Do not compare `_tag` directly or switch on it.
+- `no-manual-tagged-construction` requires the Schema, tagged class, tagged error, or `Data.taggedEnum` constructor. Object patterns passed to `Match.when` and `Match.not` are valid.
+- `no-service-constructor-imports` prevents runtime modules from importing a relative `make<CapabilityName>` service constructor. Import the owning Layer and yield the contextual service. Focused test files can import the constructor directly.
+- `prefer-effect-match` requires Effect `Match` instead of chained literal ternaries over the same value.
+
+The `anti-slop-effect` rules enforce these patterns by syntax. They recognize the standard Effect identifiers and relative project imports. They do not resolve import aliases or package-alias imports. The [TypeScript lint policy](typescript.md#lint-policy-and-provenance) defines staged adoption and provenance.
+
 ## Composition
 
 - Use `Effect.gen` for multi-step sequential workflows. Keep single transforms and short local compositions as direct effects or explicit pipes.
