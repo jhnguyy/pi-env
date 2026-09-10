@@ -2,19 +2,14 @@
 
 Source: [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop), commit `c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b`.
 
-The installation copied `skills/install-anti-slop/assets/anti-slop/` from that revision into this directory. The copied files provide these plugin entry points:
+Use the upstream [rule reference](https://github.com/dmmulroy/anti-slop/tree/c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b#rules) for rule behavior and examples.
 
-- `index.ts` for generic TypeScript and JavaScript policy
-- `effect/index.ts` for Effect-specific policy
+## Local selection
 
-The source is MIT-licensed. Keep this directory's `LICENSE` with redistributed copies. The readable-spacing rule also contains adapted ESLint Stylistic source. Its separate license and provenance are under `vendor/eslint-stylistic/`.
+This directory copies only the rules enabled in [`.oxlintrc.json`](../../../.oxlintrc.json) and their shared modules. The local `index.ts` files expose that selection. This selective copy is an intentional deviation from the upstream full-plugin installer so each rollout phase adds only the source it enforces.
 
-## Local policy
-
-The plugin source has no local modifications at this revision. The repository owns the rule policy and can change the vendored implementation when project requirements differ.
-
-[`.oxlintrc.json`](../../../.oxlintrc.json) is the source of truth for enabled rules. The initial adoption enables rules with a clean baseline. Later phases can migrate related findings and enable more rules at `error`.
+The source is MIT-licensed. Keep `LICENSE` with redistributed copies.
 
 ## Updates
 
-Fetch an explicit upstream revision. Stage its install assets outside this directory. Compare the staged source with this revision, then port reviewed changes while preserving local policy and nested notices. Update this file with the new source commit and intentional deviations.
+Stage an explicit upstream revision outside this directory. Compare and update the selected rule files, their transitive local imports, and the entry points. When a rollout phase enables another rule, copy that rule and only its required local modules. Record the new source revision and any local changes here.
