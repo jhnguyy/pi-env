@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import { setManagedGitExecForTests } from "../snapshot";
 import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
   registerDagRuntimeService,
@@ -25,6 +26,7 @@ const temps: string[] = [];
 afterEach(() => {
   clearInMemoryStateForTests();
   resetDagRuntimeServiceRegistryForTests();
+  setManagedGitExecForTests();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -122,6 +124,7 @@ function extensionPi() {
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
+  setManagedGitExecForTests((command, args, options) => pi.exec(command, args, options));
   reviewExtension(pi);
   return pi;
 }
@@ -746,13 +749,16 @@ describe("review extension pull request surface", () => {
     expect(pi.appended).toHaveLength(0);
   });
 
-  it("owns a pre-DAG failure and reopens the same review for an identical create", async () => {
+  it("retries a failed snapshot preparation with the same review identity", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "pr-review", "artifacts"), { recursive: true });
     const pi = extensionPi();
     const calls: string[][] = [];
+    let failFetch = true;
     pi.exec = async (cmd: string, args: string[]) => {
       calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "fetch" && failFetch)
+        return { code: 1, stdout: "", stderr: "fixture fetch failure" };
       if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
         mkdirSync(args[3], { recursive: true });
       if (cmd === "gh")
@@ -795,23 +801,25 @@ describe("review extension pull request surface", () => {
         command: "pr",
         action: "create",
         status: "failed",
-        stage: "dag-service",
-        failureCode: "dag_service_failed",
-        error: "The session DAG runtime is not available for PR review.",
+        stage: "snapshot",
+        failureCode: "fetch_failed",
+        error: expect.stringContaining("Git fetch exited 1"),
+        stderr: "fixture fetch failure",
         worktreeCleaned: true,
       },
     });
     expect(result.content[0].text).toContain("Next: /review pr open");
-    expect(pi.appended).toHaveLength(3);
+    expect(pi.appended).toHaveLength(2);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
     expect(pi.appended[0]?.[1].state.snapshot.diffHash).toBe("");
-    expect(pi.appended.at(-1)?.[1].state).toMatchObject({
-      preparation: {
-        status: "failed",
-        stage: "dag-service",
-        worktreeCleaned: true,
-      },
+    expect(pi.appended.at(-1)?.[1].state.preparation).toMatchObject({
+      status: "failed",
+      stage: "snapshot",
+      code: "fetch_failed",
+      worktreeCleaned: true,
     });
+
+    failFetch = false;
     const second = await pi.tools[0].execute(
       "2",
       { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
@@ -821,16 +829,86 @@ describe("review extension pull request surface", () => {
     );
     expect(second).toMatchObject({
       isError: true,
-      details: { reviewId: result.details.reviewId, reused: true },
+      details: { stage: "dag-service", reused: false },
+    });
+    expect(second.details.reviewId).toBe(result.details.reviewId);
+    expect(
+      pi.appended.some(
+        (entry: any[]) =>
+          entry[1]?.state.snapshot.id === result.details.reviewId &&
+          entry[1]?.state.cleaned === true,
+      ),
+    ).toBe(true);
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+
+    const third = await pi.tools[0].execute(
+      "3",
+      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(third).toMatchObject({
+      isError: true,
+      details: { reviewId: result.details.reviewId, stage: "dag-service", reused: true },
     });
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
-    const notes: string[] = [];
-    await pi.command("pr rerun", {
-      ...ctx,
-      ui: { notify: (message: string) => notes.push(message) },
-    });
-    expect(notes.at(-1)).toContain("failed during dag-service");
-    expect(notes.at(-1)).not.toContain(`Review ${result.details.reviewId} failed`);
+  });
+
+  it("creates a new snapshot identity when the pinned base changes", async () => {
+    const root = tempRoot();
+    const pi = extensionPi();
+    const calls: string[][] = [];
+    let baseOid = "base-one";
+    pi.exec = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+        mkdirSync(args[3], { recursive: true });
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/o/r/pull/1",
+            baseRefName: "trunk",
+            baseRefOid: baseOid,
+            headRefOid: "head",
+          }),
+          stderr: "",
+        };
+      if (args[0] === "rev-parse")
+        return {
+          code: 0,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? baseOid : "head"}\n`,
+          stderr: "",
+        };
+      if (args[0] === "merge-base") return { code: 0, stdout: `${baseOid}\n`, stderr: "" };
+      if (args[0] === "diff" && args.includes("--name-status"))
+        return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
+      return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent" },
+      modelRegistry: { getAvailable: () => [] },
+    };
+    let toolCall = 0;
+    const create = () =>
+      pi.tools[0].execute(
+        String(++toolCall),
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+    const first = await create();
+    baseOid = "base-two";
+    const second = await create();
+
+    expect(first.details.stage).toBe("dag-service");
+    expect(second.details.stage).toBe("dag-service");
+    expect(second.details.reviewId).not.toBe(first.details.reviewId);
+    expect(second.details.reused).toBe(false);
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
   });
 
