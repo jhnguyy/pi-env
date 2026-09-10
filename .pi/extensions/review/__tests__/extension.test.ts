@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
   registerDagRuntimeService,
   resetDagRuntimeServiceRegistryForTests,
@@ -32,13 +33,6 @@ function tempRoot(): string {
   temps.push(dir);
   mocked.agentDir = dir;
   return dir;
-}
-function custom(state: ReviewState) {
-  return {
-    type: "custom",
-    customType: REVIEW_ENTRY_TYPE,
-    data: { reviewId: state.snapshot.id, state },
-  };
 }
 function sampleState(id: string, selected: string[]): ReviewState {
   const root = mocked.agentDir || tempRoot();

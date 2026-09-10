@@ -1,11 +1,12 @@
-import { afterEach, vi } from "vitest";
+import { onTestFinished, vi } from "vitest";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import reviewExtension from "../../index";
 
-afterEach(() => vi.unstubAllEnvs());
-
 export function useReviewAgentDir(root: string): void {
   vi.stubEnv("PI_CODING_AGENT_DIR", root);
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
 }
 
 export function reviewEntry(state: ReviewState): unknown {
