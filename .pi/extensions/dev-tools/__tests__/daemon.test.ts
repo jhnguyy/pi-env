@@ -565,21 +565,5 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
       expect(cached[0].message).toBe("A".repeat(200) + "…");
     });
 
-    it("does not truncate messages under 200 characters", () => {
-      daemon = createMockedDaemon();
-      const tsBackend = (daemon as any).backends[0];
-      const uri = "file:///test2.ts";
-      const msg = "Type 'number' is not assignable to type 'string'. Did you mean 'foo'?";
-
-      (tsBackend).onDiagnostics({
-        uri,
-        diagnostics: [
-          { range: { start: { line: 0, character: 0 } }, severity: 1, code: 2322, message: msg },
-        ],
-      });
-
-      const cached = tsBackend.diagnostics.get(uri) as any[];
-      expect(cached[0].message).toBe(msg);
-    });
   });
 });

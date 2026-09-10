@@ -9,7 +9,8 @@ Each active extension should have:
 1. `.pi/extensions/<name>/index.ts` with the default export
 2. `.pi/extensions/<name>/package.json` with name `@pi-env/<name>` and `"type": "module"`
 3. `.pi/extensions/<name>` in both `package.json#workspaces` and `package.json#pi.extensions`
-4. at least one `__tests__/*.test.ts` file
+
+Add permanent tests only when they protect a capability, regression, or safety invariant. Do not require a test file only to satisfy an extension layout rule.
 
 ## Lifecycle contract
 
@@ -67,7 +68,7 @@ Use `jit_catch` as the canonical shared-contract example and `closeout` as the m
 
 Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration automatically exposes eligible tools to subagents and PTC, subject to the PTC blocklist in `.pi/extensions/ptc/types.ts`.
 
-Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start`, `subagent`, `subagent_start`, and `subagent_job`.
+Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start` and `subagent`.
 
 The public test boundary for shared cross-host tools is the helper contract in `.pi/extensions/__tests__/register-cross-host-tool.test.ts` plus representative tool coverage such as `.pi/extensions/jit-catch/__tests__/contract.test.ts`: schema identity, capabilities, cwd/context behavior, cancellation, progress, Pi-only metadata, and unregister lifecycle. Safety-sensitive descriptions must state side effects and operational boundaries.
 

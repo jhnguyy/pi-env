@@ -74,23 +74,10 @@ function execFor(meta: any, mismatch = false) {
 }
 
 describe("review pull request snapshot", () => {
-  it("resolves missing URL through gh pr view or returns a clear needs-url message", async () => {
-    const cwd = roots();
-    const ok = await resolvePrUrl(
-      async (cmd: string, args: string[]) =>
-        ({
-          code: 0,
-          stdout: "https://github.com/acme/widgets/pull/7\n",
-          stderr: "",
-          command: cmd,
-          args,
-        }) as any,
-      cwd,
-    );
-    expect(ok.url).toBe("https://github.com/acme/widgets/pull/7");
+  it("returns a clear needs-url message when gh cannot resolve the pull request", async () => {
     const missing = await resolvePrUrl(
       async () => ({ code: 1, stdout: "", stderr: "no pr" }) as any,
-      cwd,
+      roots(),
     );
     expect(missing.message).toContain("Please provide a GitHub PR URL");
   });
@@ -187,7 +174,26 @@ describe("review pull request snapshot", () => {
         cwd,
         "https://github.com/acme/widgets/pull/7",
       ),
-    ).rejects.toThrow(/did not match/);
+    ).rejects.toMatchObject({ code: "fetched_ref_mismatch" });
+  });
+
+  it("bounds generic Git failure messages before they enter review state", async () => {
+    const cwd = roots();
+    const stderr = `failure:${"x".repeat(10_000)}`;
+    const failingExec = async () => ({ code: 1, stdout: "", stderr }) as any;
+    const error = await prepareResolvedSnapshot(failingExec, cwd, {
+      owner: "acme",
+      repo: "widgets",
+      number: 7,
+      url: "https://github.com/acme/widgets/pull/7",
+      baseRef: "trunk",
+      baseOid: "b",
+      headOid: "h",
+      changedFiles: [],
+    }).catch((cause) => cause);
+    expect(error).toMatchObject({ code: "snapshot_failed" });
+    expect(error.message).toHaveLength(8_000);
+    expect(error.message).toMatch(/^git init exited 1: failure:/);
   });
 
   it("reports a fetch timeout without replacing it with a missing-ref error", async () => {
@@ -242,6 +248,31 @@ describe("review pull request snapshot", () => {
     ).rejects.toMatchObject({
       code: "fetched_ref_missing",
       stderr: "fatal: couldn't find remote ref",
+    });
+  });
+
+  it("reports a fetched ref that cannot be resolved after a successful fetch", async () => {
+    const cwd = roots();
+    const { exec } = execFor({ headRefOid: "h", baseRefOid: "b" });
+    const missingLocalRefExec = async (cmd: string, args: string[], opts: any) => {
+      if (cmd === "git" && args[0] === "rev-parse")
+        return { code: 128, stdout: "", stderr: "unknown revision" } as any;
+      return exec(cmd, args, opts);
+    };
+    await expect(
+      prepareResolvedSnapshot(missingLocalRefExec as any, cwd, {
+        owner: "acme",
+        repo: "widgets",
+        number: 7,
+        url: "https://github.com/acme/widgets/pull/7",
+        baseRef: "trunk",
+        baseOid: "b",
+        headOid: "h",
+        changedFiles: [],
+      }),
+    ).rejects.toMatchObject({
+      code: "fetched_ref_missing",
+      stderr: "unknown revision",
     });
   });
 
@@ -337,9 +368,9 @@ describe("review pull request snapshot", () => {
     ).rejects.toThrow(/worktree/);
     expect(readdirSync(join(mocked.agentDir, "pr-review", "artifacts"))).toEqual([]);
     expect(existsSync(join(mocked.agentDir, "pr-review", "worktrees"))).toBe(false);
-    expect(calls.some((call) => call.args.slice(0, 3).join(" ") === "worktree remove --force")).toBe(
-      true,
-    );
+    expect(
+      calls.some((call) => call.args.slice(0, 3).join(" ") === "worktree remove --force"),
+    ).toBe(true);
     expect(calls.some((call) => call.args.join(" ") === "worktree prune")).toBe(true);
   });
 });

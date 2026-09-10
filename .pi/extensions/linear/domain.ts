@@ -3,7 +3,6 @@ import { CredentialSourceError } from "../_shared/credential-source";
 
 export const LinearErrorCode = {
   AuthRequired: "auth_required",
-  CredentialConfirmationRequired: "credential_confirmation_required",
   NetworkUnavailable: "network_unavailable",
   RateLimited: "rate_limited",
   Forbidden: "forbidden",

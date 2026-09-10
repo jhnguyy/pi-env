@@ -1,0 +1,22 @@
+{
+  "name": "@pi-env/notes",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "dependencies": {
+    "effect": "4.0.0-beta.97"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}

@@ -96,7 +96,7 @@ orch cleanup {}
 
 **Env vars:** `orch spawn` auto-injects `PI_BUS_SESSION`, `PI_AGENT_ID`, and `ORCH_DIR`. If spawning via `tmux` directly (outside an `orch` run), you must set `PI_BUS_SESSION` and `PI_AGENT_ID` manually or `bus publish` will silently fail.
 
-**Subagent cwd:** `subagent` and `subagent_start` accept an optional `cwd` for intentional cross-worktree execution. Pass an existing absolute directory. The tool resolves it to a canonical real path and uses it for agent discovery, built-in tools, execution metadata, and the child session working directory. Use absolute paths in task packets. Keep integration and shutdown ownership in the parent session.
+**Subagent cwd:** The `subagent` `run` and `start` actions accept an optional `cwd` for intentional cross-worktree execution. Pass an existing absolute directory. The tool resolves it to a canonical real path and uses it for agent discovery, built-in tools, execution metadata, and the child session working directory. Use absolute paths in task packets. Keep integration and shutdown ownership in the parent session.
 
 ---
 

@@ -1,9 +1,6 @@
 /**
  * @module ptc/tool-registry
- * @purpose Manages tool execute functions for PTC dispatch.
- *
- * Only ACTIVE built-in and explicitly registered extension tools are available
- * inside PTC. Built-ins are resolved via createXxxToolDefinition(cwd).
+ * @purpose Manages tool execute functions and runtime discovery for PTC dispatch.
  */
 import type {
   ExtensionAPI,
@@ -13,10 +10,16 @@ import type {
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
-import { BLOCKED_TOOLS } from "./types";
 import { listenForAgentTools } from "../_shared/agent-tools";
 import { BUILT_IN_TOOL_CONTRACTS, BUILT_IN_TOOL_NAMES } from "../_shared/built-in-tools";
 import { listenForPtcTools } from "../_shared/ptc-tools";
+import { createPtcToolCatalog, type PtcRuntimeSnapshot } from "./catalog";
+import {
+  BLOCKED_TOOLS,
+  PtcToolDispatchError,
+  PtcToolFailureClass,
+  type PtcToolFailureClass as FailureClass,
+} from "./types";
 
 type ExecuteFn = (
   toolCallId: string,
@@ -26,13 +29,12 @@ type ExecuteFn = (
   ctx: ExtensionContext,
 ) => Promise<AgentToolResult<unknown>>;
 
-/**
- * Minimal context sufficient for tool dispatch.
- * Built-in tools only need `cwd`. Extension tools receive the full ctx but
- * only ACTIVE captured tools can be dispatched. This allows ptc to run as a
- * subagent tool where full ExtensionContext isn't available.
- */
 export type DispatchContext = { cwd: string } | ExtensionContext;
+
+interface RememberedTool {
+  readonly registration: object;
+  readonly execute: ExecuteFn;
+}
 
 const BUILTIN_FACTORIES = Object.fromEntries(
   Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
@@ -44,7 +46,7 @@ const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
   private readonly pi: ExtensionAPI;
-  private extensionTools = new Map<string, ExecuteFn>();
+  private extensionTools = new Map<string, RememberedTool>();
   private builtinCache = new Map<string, ToolDefinition<any, any, any>>(); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   constructor(pi: ExtensionAPI) {
@@ -53,43 +55,60 @@ export class ToolRegistry {
     this.installPtcToolsListener(pi);
   }
 
-  private rememberTool(tool: { name: string; execute: ExecuteFn }): void {
+  private rememberTool(registration: object, tool: { name: string; execute: ExecuteFn }): void {
     if (BLOCKED_TOOLS.has(tool.name) || BUILTIN_NAMES.has(tool.name)) return;
-    this.extensionTools.set(tool.name, tool.execute);
+    this.extensionTools.set(tool.name, { registration, execute: tool.execute });
+  }
+
+  private forgetTool(registration: object, name: string): void {
+    const remembered = this.extensionTools.get(name);
+    if (remembered?.registration === registration) this.extensionTools.delete(name);
   }
 
   private installAgentToolsListener(pi: ExtensionAPI): void {
-    listenForAgentTools(pi, ({ tool, audience }) => {
-      if (audience === "dag") return;
-      this.rememberTool({
-        name: tool.name,
-        execute: (id, params, signal) => tool.execute(id, params, signal, undefined),
-      });
-    });
+    listenForAgentTools(
+      pi,
+      (registration) => {
+        if (registration.audience === "dag") return;
+        this.rememberTool(registration, {
+          name: registration.tool.name,
+          execute: (id, params, signal) =>
+            registration.tool.execute(id, params, signal, undefined),
+        });
+      },
+      (registration) => this.forgetTool(registration, registration.tool.name),
+    );
   }
 
   private installPtcToolsListener(pi: ExtensionAPI): void {
-    listenForPtcTools(pi, ({ tool }) => this.rememberTool(tool));
+    listenForPtcTools(pi, (registration) =>
+      this.rememberTool(registration, registration.tool),
+    );
   }
 
-  /** Returns the active tools available inside PTC. */
-  getAvailableTools(pi: ExtensionAPI): ToolInfo[] {
-    const activeNames = new Set(pi.getActiveTools());
-    const allTools = pi.getAllTools().filter((tool) => activeNames.has(tool.name));
-    const unavailable: string[] = [];
-    const available = allTools.filter((t) => {
-      if (BLOCKED_TOOLS.has(t.name)) return false;
-      if (t.sourceInfo.source === "builtin") return true;
-      if (this.extensionTools.has(t.name)) return true;
-      unavailable.push(t.name);
-      return false;
-    });
-    if (unavailable.length > 0) {
-      console.warn(
-        `[ptc] The following tools are unavailable inside PTC: ${unavailable.join(", ")}.`,
-      );
+  getRuntimeSnapshot(): PtcRuntimeSnapshot {
+    const activeNames = new Set(this.pi.getActiveTools());
+    const activeTools = this.pi.getAllTools().filter((tool) => activeNames.has(tool.name));
+    const availableTools: ToolInfo[] = [];
+    const unavailableNames: string[] = [];
+
+    for (const tool of activeTools) {
+      if (BLOCKED_TOOLS.has(tool.name)) continue;
+      if (tool.sourceInfo.source === "builtin" || this.extensionTools.has(tool.name)) {
+        availableTools.push(tool);
+      } else {
+        unavailableNames.push(tool.name);
+      }
     }
-    return available;
+
+    return {
+      availableTools,
+      catalog: createPtcToolCatalog(availableTools, unavailableNames),
+    };
+  }
+
+  getAvailableTools(): ToolInfo[] {
+    return [...this.getRuntimeSnapshot().availableTools];
   }
 
   async dispatch(
@@ -99,7 +118,7 @@ export class ToolRegistry {
     signal: AbortSignal | undefined,
     ctx?: DispatchContext,
   ): Promise<string> {
-    this.assertActive(toolName);
+    this.assertCallable(toolName);
     const toolCallId = `ptc_${generateId()}`;
     const effectiveCtx = (ctx ?? { cwd }) as ExtensionContext;
     let result: AgentToolResult<unknown>;
@@ -114,32 +133,63 @@ export class ToolRegistry {
       }
       result = await def.execute(toolCallId, params, signal, undefined, effectiveCtx);
     } else {
-      const execute = this.extensionTools.get(toolName);
-      if (!execute) {
-        throw new Error(
-          `[ptc] Tool "${toolName}" is not available. ` +
-            `It may be blocked or not registered for PTC.`,
-        );
-      }
-      result = await execute(toolCallId, params, signal, undefined, effectiveCtx);
+      result = await this.extensionTools
+        .get(toolName)!
+        .execute(toolCallId, params, signal, undefined, effectiveCtx);
     }
 
     return extractText(result);
   }
 
-  private assertActive(toolName: string): void {
-    if (BLOCKED_TOOLS.has(toolName)) throw new Error(`[ptc] Tool "${toolName}" is blocked.`);
-    if (!this.pi.getActiveTools().includes(toolName)) {
-      throw new Error(
-        `[ptc] Tool "${toolName}" is inactive. Activate it before calling it through ptc.`,
+  private assertCallable(toolName: string): void {
+    if (BLOCKED_TOOLS.has(toolName)) {
+      throw toolAccessError(
+        PtcToolFailureClass.Blocked,
+        toolName,
+        `PTC blocked tool "${toolName}". Call it directly, not inside PTC.`,
+      );
+    }
+
+    const active = this.pi.getActiveTools().includes(toolName);
+    const captured = this.extensionTools.has(toolName);
+    const known = captured || this.pi.getAllTools().some((tool) => tool.name === toolName);
+    if (!known && !active) {
+      throw toolAccessError(
+        PtcToolFailureClass.Unknown,
+        toolName,
+        `PTC unknown tool "${toolName}". Call PTC with action="inspect" to view current tools.`,
+      );
+    }
+
+    if (!active) {
+      throw toolAccessError(
+        PtcToolFailureClass.Inactive,
+        toolName,
+        `PTC inactive tool "${toolName}". Activate it, then start a new PTC run.`,
+      );
+    }
+
+    if (!BUILTIN_NAMES.has(toolName) && !captured) {
+      throw toolAccessError(
+        PtcToolFailureClass.Unavailable,
+        toolName,
+        `PTC tool "${toolName}" is not available inside PTC. It has no PTC dispatcher. Call it directly.`,
       );
     }
   }
 }
 
+function toolAccessError(
+  failureClass: FailureClass,
+  tool: string,
+  message: string,
+): PtcToolDispatchError {
+  return new PtcToolDispatchError({ class: failureClass, tool, message });
+}
+
 function extractText(result: AgentToolResult<unknown>): string {
   return result.content
-    .filter((c): c is { type: "text"; text: string } => c.type === "text")
-    .map((c) => c.text)
+    .filter((content): content is { type: "text"; text: string } => content.type === "text")
+    .map((content) => content.text)
     .join("\n");
 }

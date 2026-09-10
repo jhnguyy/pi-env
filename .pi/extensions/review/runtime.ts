@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
 import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { bound, confined } from "./core";
+import { readVerifiedPinnedDiff } from "./snapshot";
 import { createDiffIndex, type DiffIndex } from "./diff-index";
 import {
   ChangedFilesParamSchema,
@@ -103,10 +104,10 @@ export function boundedChangedFileContext(state: ReviewState): string {
 
 export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
   const root = store.state.snapshot.worktree;
-  const diffPath = store.state.snapshot.diffPath;
+  const snapshot = store.state.snapshot;
   let diffText: string | undefined;
   let diffIndex: DiffIndex | undefined;
-  const fullDiff = () => (diffText ??= readFileSync(diffPath, "utf8"));
+  const fullDiff = () => (diffText ??= readVerifiedPinnedDiff(snapshot));
   const indexedDiff = () => (diffIndex ??= createDiffIndex(fullDiff()));
   const getDiff = (path?: string) => (path ? (indexedDiff().get(path)?.text ?? "") : fullDiff());
   const manifest = store.state.snapshot.metadata.changedFiles.map((f) => f.path);

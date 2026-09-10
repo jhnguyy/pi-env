@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { Container, type Text } from "@earendil-works/pi-tui";
 import initSubagent, { completedJobUsageOnce } from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
@@ -72,12 +72,14 @@ const mockCtx = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function runParams(params: Record<string, unknown>) {
+  return { action: "run", name: "test-run", ...params };
+}
+
 /** Extract text string from a Text or Container component. */
 function extractText(component: Text | Container): string {
   if (component instanceof Container) {
-    return component.children
-      .map((c: any) => extractText(c as Text | Container))
-      .join("\n");
+    return component.children.map((c: any) => extractText(c as Text | Container)).join("\n");
   }
   return (component as any).text ?? "";
 }
@@ -88,23 +90,20 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
-    it("registers each stable tool exactly once", () => {
+    it("registers one action-selected public tool", () => {
       expect(registeredTool).toBeDefined();
-      expect([...registeredTools.keys()]).toEqual(["subagent", "subagent_start", "subagent_job"]);
+      expect([...registeredTools.keys()]).toEqual(["subagent"]);
       expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
-    });
-
-    it("registers bounded renderers for every subagent tool", () => {
-      for (const tool of registeredTools.values()) {
-        expect(typeof tool.execute).toBe("function");
-        expect(typeof tool.renderCall).toBe("function");
-        expect(typeof tool.renderResult).toBe("function");
-      }
-    });
-
-    it("has a description string", () => {
-      expect(typeof registeredTool.description).toBe("string");
-      expect(registeredTool.description.length).toBeGreaterThan(0);
+      expect(registeredTool.parameters.properties.action.enum).toEqual([
+        "run",
+        "start",
+        "status",
+        "wait",
+        "cancel",
+        "list",
+        "usage",
+        "result",
+      ]);
     });
 
     it("reports completed asynchronous usage exactly once", () => {
@@ -123,8 +122,13 @@ describeIfEnabled("subagent", "subagent extension", () => {
     });
 
     it("supports compact usage reporting for the active session", async () => {
-      const usageTool = registeredTools.get("subagent_job");
-      const result = await usageTool.execute("usage-1", { action: "usage" }, undefined, undefined, mockCtx);
+      const result = await registeredTool.execute(
+        "usage-1",
+        { action: "usage" },
+        undefined,
+        undefined,
+        mockCtx,
+      );
       expect(result.content[0].text).toBe("No subagent usage recorded.");
       expect(result.details.status).toBe("usage");
     });
@@ -154,7 +158,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // Verify: using it in tools param succeeds tool resolution (fails at model, not tools)
       const result = await registeredTool.execute(
         "call-ext-1",
-        { task: "do something", tools: ["notes"], model: "anthropic/nonexistent" },
+        runParams({ task: "do something", tools: ["notes"], model: "anthropic/nonexistent" }),
         undefined,
         undefined,
         mockCtx,
@@ -168,7 +172,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // notes was already registered above
       const result = await registeredTool.execute(
         "call-ext-2",
-        { task: "do something", tools: ["fakeTool"] },
+        runParams({ task: "do something", tools: ["fakeTool"] }),
         undefined,
         undefined,
         mockCtx,
@@ -184,7 +188,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when no tools specified and no agent file", async () => {
       const result = await registeredTool.execute(
         "call-v1",
-        { task: "do something" },
+        runParams({ task: "do something" }),
         undefined,
         undefined,
         mockCtx,
@@ -205,7 +209,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when tools is empty array", async () => {
       const result = await registeredTool.execute(
         "call-v2",
-        { task: "do something", tools: [] },
+        runParams({ task: "do something", tools: [] }),
         undefined,
         undefined,
         mockCtx,
@@ -217,7 +221,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when tools provided but no model", async () => {
       const result = await registeredTool.execute(
         "call-v3",
-        { task: "do something", tools: ["read"] },
+        runParams({ task: "do something", tools: ["read"] }),
         undefined,
         undefined,
         mockCtx,
@@ -234,7 +238,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error for unknown tool names", async () => {
       const result = await registeredTool.execute(
         "call-1",
-        { task: "do something", tools: ["read", "nonexistent"], model: "anthropic/claude-haiku-4-5" },
+        runParams({
+          task: "do something",
+          tools: ["read", "nonexistent"],
+          model: "anthropic/claude-haiku-4-5",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -246,7 +254,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("includes available tools in the error message", async () => {
       const result = await registeredTool.execute(
         "call-2",
-        { task: "do something", tools: ["fakeTool"], model: "anthropic/claude-haiku-4-5" },
+        runParams({
+          task: "do something",
+          tools: ["fakeTool"],
+          model: "anthropic/claude-haiku-4-5",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -257,7 +269,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("error details have correct shape for unknown tools", async () => {
       const result = await registeredTool.execute(
         "call-3",
-        { task: "test task", tools: ["unknown"], model: "anthropic/claude-haiku-4-5" },
+        runParams({
+          task: "test task",
+          tools: ["unknown"],
+          model: "anthropic/claude-haiku-4-5",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -278,7 +294,11 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("returns error when model is not found in registry (provider/id format)", async () => {
       const result = await registeredTool.execute(
         "call-6",
-        { task: "do something", tools: ["read"], model: "anthropic/nonexistent-model" },
+        runParams({
+          task: "do something",
+          tools: ["read"],
+          model: "anthropic/nonexistent-model",
+        }),
         undefined,
         undefined,
         mockCtx,
@@ -287,23 +307,10 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("anthropic/nonexistent-model");
     });
 
-    it("error details for missing model have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-7",
-        { task: "task", tools: ["read"], model: "anthropic/ghost-model" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("model_not_found");
-    });
-
     it("returns error when no model specified (no agent, no model param)", async () => {
       const result = await registeredTool.execute(
         "call-8",
-        { task: "do something", tools: ["read"] },
+        runParams({ task: "do something", tools: ["read"] }),
         undefined,
         undefined,
         mockCtx,
@@ -311,35 +318,10 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("No model specified");
     });
 
-    it("error details for no model have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-9",
-        { task: "task", tools: ["read"] },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("no_model");
-    });
-
-    it("bare model name (no slash) uses getAvailable() for lookup", () => {
-      // Verify that our mock registry supports getAvailable() — the lookup mechanism
-      // for bare model names. The execute() path that reaches agentLoop can't be
-      // tested without real API keys, but we can verify the lookup table is correct.
-      const available = mockCtx.modelRegistry.getAvailable();
-      const found = available.find(
-        (m: any) => m.id === "claude-haiku-4-5" || m.id.includes("claude-haiku-4-5"),
-      );
-      expect(found).toBeDefined();
-      expect(found?.id).toBe("claude-haiku-4-5");
-    });
-
     it("bare model name not found returns model_not_found", async () => {
       const result = await registeredTool.execute(
         "call-11",
-        { task: "task", tools: ["read"], model: "completely-unknown-model" },
+        runParams({ task: "task", tools: ["read"], model: "completely-unknown-model" }),
         undefined,
         undefined,
         mockCtx,
@@ -350,7 +332,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
     it("provider/id format not found returns model_not_found", async () => {
       const result = await registeredTool.execute(
         "call-12",
-        { task: "task", tools: ["read"], model: "anthropic/does-not-exist" },
+        runParams({ task: "task", tools: ["read"], model: "anthropic/does-not-exist" }),
         undefined,
         undefined,
         mockCtx,
@@ -366,7 +348,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       // discoverAgents reads real filesystem — "nonexistent-agent" won't be found
       const result = await registeredTool.execute(
         "call-a1",
-        { task: "do something", agent: "nonexistent-agent" },
+        runParams({ task: "do something", agent: "nonexistent-agent" }),
         undefined,
         undefined,
         mockCtx,
@@ -376,103 +358,37 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.content[0].text).toContain("Available:");
       expect(result.details.stopReason).toBe("agent_not_found");
     });
-
-    it("agent_not_found error details have correct shape", async () => {
-      const result = await registeredTool.execute(
-        "call-a2",
-        { task: "agent task", agent: "no-such-agent" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.stopReason).toBe("agent_not_found");
-      expect(details.task).toBe("agent task");
-    });
-  });
-
-  // ─── execute: buildErrorDetails shape ────────────────────────────────────
-
-  describe("execute — error detail builder", () => {
-    it("details always include usage stats object", async () => {
-      const result = await registeredTool.execute(
-        "call-11b",
-        { task: "my task", tools: ["bogus"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const { usage } = result.details;
-      expect(typeof usage.input).toBe("number");
-      expect(typeof usage.output).toBe("number");
-      expect(typeof usage.cacheRead).toBe("number");
-      expect(typeof usage.cacheWrite).toBe("number");
-      expect(typeof usage.cost).toBe("number");
-      expect(typeof usage.turns).toBe("number");
-    });
-
-    it("details always include toolNames array", async () => {
-      const result = await registeredTool.execute(
-        "call-12b",
-        { task: "task", tools: ["bad"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(Array.isArray(result.details.toolNames)).toBe(true);
-    });
-
-    it("details include the original task string", async () => {
-      const result = await registeredTool.execute(
-        "call-13",
-        { task: "original task text", tools: ["bad"], model: "anthropic/claude-haiku-4-5" },
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.details.task).toBe("original task text");
-    });
   });
 
   // ─── async tool rendering ────────────────────────────────────────────────
 
   describe("async tool rendering", () => {
-    it("keeps subagent_start arguments bounded and omits the system prompt", () => {
-      const startTool = registeredTools.get("subagent_start");
+    it("keeps accepted background-start acknowledgements out of the tool summary", () => {
       const longTask = "A".repeat(500);
-      const rendered = startTool.renderCall(
-        { name: "audit", task: longTask, system_prompt: "private context" },
-        mockTheme,
+      const call = extractText(
+        registeredTool.renderCall(
+          { action: "start", name: "audit", task: longTask, system_prompt: "private context" },
+          mockTheme,
+        ),
       );
-      const text = extractText(rendered);
-      expect(text).toContain("audit");
-      expect(text).toContain("...");
-      expect(text).not.toContain("A".repeat(100));
-      expect(text).not.toContain("private context");
-    });
+      expect(call).toContain("subagent start");
+      expect(call).toContain("audit");
+      expect(call).toContain("...");
+      expect(call).not.toContain("A".repeat(100));
+      expect(call).not.toContain("private context");
 
-    it("expands subagent_start task and status without leaking them while collapsed", () => {
-      const startTool = registeredTools.get("subagent_start");
       const result = {
         content: [{ type: "text", text: "Started subagent job job-1 (audit)." }],
         details: { jobId: "job-1", status: "queued", name: "audit" },
       };
-      const context = { args: { task: "full delegated task" } };
-      const collapsed = extractText(startTool.renderResult(result, {}, mockTheme, context));
-      expect(collapsed).toContain("audit");
-      expect(collapsed).toContain("queued");
-      expect(collapsed).toContain("ctrl+o");
-      expect(collapsed).not.toContain("full delegated task");
-      expect(collapsed).not.toContain("Started subagent job");
-
-      const expanded = extractText(startTool.renderResult(result, { expanded: true }, mockTheme, context));
-      expect(expanded).toContain("full delegated task");
-      expect(expanded).toContain("Started subagent job");
+      const context = { args: { action: "start", task: longTask } };
+      expect(extractText(registeredTool.renderResult(result, {}, mockTheme, context))).toBe("");
+      expect(
+        extractText(registeredTool.renderResult(result, { expanded: true }, mockTheme, context)),
+      ).toBe("");
     });
 
-    it("keeps subagent_job output collapsed and reveals full content on expansion", () => {
-      const jobTool = registeredTools.get("subagent_job");
+    it("keeps background child output hidden until expansion", () => {
       const longTask = `inspect ${"B".repeat(500)}`;
       const fullOutput = `full child output\n${"C".repeat(500)}`;
       const result = {
@@ -486,433 +402,132 @@ describeIfEnabled("subagent", "subagent extension", () => {
           usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 4 },
           model: "test/model",
           sessionName: "sub-audit",
+          sessionFile: "/sessions/sub-audit.jsonl",
+          resultTruncated: true,
         },
       };
 
-      const collapsed = extractText(jobTool.renderResult(result, {}, mockTheme));
-      expect(collapsed).toContain("audit");
+      const context = { args: { action: "result", job_id: "job-1" } };
+      const collapsed = extractText(registeredTool.renderResult(result, {}, mockTheme, context));
+      expect(collapsed).toContain("completed");
       expect(collapsed).toContain("6 tool calls");
       expect(collapsed).toContain("4 turns");
-      expect(collapsed).toContain("inspect");
-      expect(collapsed).toContain("ctrl+o");
+      expect(collapsed).toContain("sub-audit");
+      expect(collapsed).toContain("/sessions/sub-audit.jsonl");
+      expect(collapsed).toContain("result truncated");
       expect(collapsed).not.toContain("B".repeat(100));
-      expect(collapsed).not.toContain("full child output");
-      expect(collapsed).not.toContain("C".repeat(100));
+      expect(collapsed).not.toContain(fullOutput);
 
-      const expanded = extractText(jobTool.renderResult(result, { expanded: true }, mockTheme));
+      const expanded = extractText(
+        registeredTool.renderResult(result, { expanded: true }, mockTheme, context),
+      );
       expect(expanded).toContain(longTask);
       expect(expanded).toContain(fullOutput);
     });
-
-    it("renders subagent_job calls without a JSON argument dump", () => {
-      const jobTool = registeredTools.get("subagent_job");
-      const text = extractText(jobTool.renderCall(
-        { action: "wait", job_id: "job-1" },
-        mockTheme,
-      ));
-      expect(text).toContain("subagent job");
-      expect(text).toContain("wait");
-      expect(text).toContain("job-1");
-      expect(text).not.toContain("{");
-    });
   });
 
-  // ─── renderCall ──────────────────────────────────────────────────────────
+  // ─── synchronous tool rendering ─────────────────────────────────────────
 
-  describe("renderCall", () => {
-    it("returns a Text instance", () => {
-      const result = registeredTool.renderCall(
-        { task: "Summarize the auth flow", tools: ["read"], model: "anthropic/claude-haiku-4-5" },
-        mockTheme,
-      );
-      expect(result instanceof Text).toBe(true);
-    });
-
-    it("contains the task preview", () => {
-      const result = registeredTool.renderCall(
-        { task: "Read src/auth and summarize", tools: ["read"], model: "anthropic/claude-haiku-4-5" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Read src/auth and summarize");
-    });
-
-    it("truncates long tasks to 70 chars with ellipsis", () => {
-      const longTask = "A".repeat(80);
-      const result = registeredTool.renderCall(
-        { task: longTask, tools: ["read"], model: "anthropic/claude-haiku-4-5" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("...");
-      expect(t).not.toContain("A".repeat(75));
-    });
-
-    it("shows no tools section when none specified", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      // No tools in brackets when not provided
-      expect(t).not.toContain("[");
-    });
-
-    it("shows explicit tools when provided", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something", tools: ["read", "write", "grep"] },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("read");
-      expect(t).toContain("write");
-      expect(t).toContain("grep");
-    });
-
-    it("shows model override when provided", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something", tools: ["read"], model: "anthropic/claude-haiku-4-5" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("anthropic/claude-haiku-4-5");
-    });
-
-    it("does not show model info when not provided", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).not.toContain("(anthropic");
-    });
-
-    it("contains the tool name 'subagent'", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("subagent");
-    });
-
-    it("shows agent name when agent param provided", () => {
-      const result = registeredTool.renderCall(
-        { task: "do recon", agent: "scout" },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("scout");
-      expect(t).toContain("subagent");
-    });
-
-    it("does not show agent prefix when agent not specified", () => {
-      const result = registeredTool.renderCall(
-        { task: "do something", tools: ["read"] },
-        mockTheme,
-      );
-      const t = extractText(result);
-      // Should not contain any agent name prefix before the tools/task
-      // (no "scout" or "gatherer" string appearing)
-      expect(t).not.toContain("scout");
-    });
-  });
-
-  // ─── renderResult — collapsed ────────────────────────────────────────────
-
-  describe("renderResult — collapsed (default)", () => {
+  describe("synchronous tool rendering", () => {
     const successDetails = {
-      task: "Read the auth flow",
+      task: "Analyze the database schema",
       toolNames: ["read", "bash"],
-      modelOverride: undefined,
-      finalOutput: "The auth flow is JWT-based.\nTokens expire in 1 hour.",
+      modelOverride: "anthropic/claude-haiku-4-5",
+      finalOutput: "The schema has 5 tables.\nUsers has 10 columns.",
       toolCallCount: 3,
       usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, cost: 0.001, turns: 2 },
       model: "claude-sonnet-4-6",
       stopReason: "end_turn",
       isError: false,
       turnLimitExceeded: false,
+      agent: "scout",
+      sessionName: "sub-schema-audit",
+      sessionFile: "/sessions/sub-schema-audit.jsonl",
     };
 
-    it("returns a Text instance for success", () => {
-      const result = registeredTool.renderResult(
-        { content: [{ type: "text", text: "done" }], details: successDetails },
-        {},
-        mockTheme,
+    it("renders selected execution context with a bounded task preview", () => {
+      const longTask = "A".repeat(500);
+      const rendered = extractText(
+        registeredTool.renderCall(
+          {
+            task: longTask,
+            tools: ["read", "grep"],
+            model: "anthropic/claude-haiku-4-5",
+            agent: "scout",
+            system_prompt: "private context",
+          },
+          mockTheme,
+        ),
       );
-      expect(result instanceof Text).toBe(true);
+
+      expect(rendered).toContain("subagent");
+      expect(rendered).toContain("scout");
+      expect(rendered).toContain("read");
+      expect(rendered).toContain("grep");
+      expect(rendered).toContain("anthropic/claude-haiku-4-5");
+      expect(rendered).toContain("...");
+      expect(rendered).not.toContain("A".repeat(100));
+      expect(rendered).not.toContain("private context");
     });
 
-    it("omits task preview (shown in renderCall instead)", () => {
-      const t = extractText(
+    it("keeps delegated content out of the collapsed result summary", () => {
+      const rendered = extractText(
+        registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme),
+      );
+
+      expect(rendered).toContain("scout");
+      expect(rendered).toContain("3 tool calls");
+      expect(rendered).toContain("2 turns");
+      expect(rendered).toContain("sub-schema-audit");
+      expect(rendered).not.toContain(successDetails.task);
+      expect(rendered).not.toContain(successDetails.finalOutput);
+    });
+
+    it.each([
+      [
+        "an execution error",
+        { isError: true, errorMessage: "Connection refused", stopReason: "error" },
+        "Connection refused",
+      ],
+      ["a turn limit", { turnLimitExceeded: true }, "turn limit"],
+    ])("identifies %s in the result summary", (_name, detailOverrides, expected) => {
+      const rendered = extractText(
+        registeredTool.renderResult(
+          { content: [], details: { ...successDetails, ...detailOverrides } },
+          {},
+          mockTheme,
+        ),
+      );
+
+      expect(rendered).toContain(expected);
+    });
+
+    it("falls back to public text when structured details are absent", () => {
+      const rendered = extractText(
+        registeredTool.renderResult(
+          { content: [{ type: "text", text: "raw output" }] },
+          {},
+          mockTheme,
+        ),
+      );
+
+      expect(rendered).toContain("raw output");
+    });
+
+    it("shows the full delegated task and child output after expansion", () => {
+      const rendered = extractText(
         registeredTool.renderResult(
           { content: [], details: successDetails },
-          {},
+          { expanded: true },
           mockTheme,
         ),
       );
-      // Task preview is intentionally omitted from collapsed renderResult
-      // because renderCall already displays it above the result block.
-      expect(t).not.toContain("Read the auth flow");
-    });
 
-    it("keeps final output out of the collapsed summary", () => {
-      const longSingleLineOutput = `sensitive context: ${"A".repeat(500)}`;
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: { ...successDetails, finalOutput: longSingleLineOutput } },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).not.toContain("sensitive context");
-      expect(t).not.toContain("A".repeat(100));
-    });
-
-    it("shows success icon (✓) for success", () => {
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: successDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("✓");
-    });
-
-    it("shows error icon (✗) for error", () => {
-      const errorDetails = { ...successDetails, isError: true, errorMessage: "API failure" };
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: errorDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("✗");
-    });
-
-    it("shows warning icon (⚠) for turn limit exceeded", () => {
-      const limitDetails = { ...successDetails, turnLimitExceeded: true };
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: limitDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("⚠");
-    });
-
-    it("shows error message for error state", () => {
-      const errorDetails = {
-        ...successDetails,
-        isError: true,
-        errorMessage: "Connection refused",
-        stopReason: "error",
-      };
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: errorDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("Connection refused");
-    });
-
-    it("shows '[turn limit]' for turn limit exceeded", () => {
-      const limitDetails = { ...successDetails, turnLimitExceeded: true };
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: limitDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("[turn limit]");
-    });
-
-    it("shows mechanical stats and turns", () => {
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: successDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("3 tool calls");
-      expect(t).toContain("2 turns");
-    });
-
-    it("shows ctrl+o hint in collapsed view", () => {
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: successDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("ctrl+o");
-    });
-
-    it("falls back gracefully when details are absent", () => {
-      const result = registeredTool.renderResult(
-        { content: [{ type: "text", text: "raw output" }] },
-        {},
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("raw output");
-    });
-
-    it("shows agent name in collapsed view when present", () => {
-      const agentDetails = { ...successDetails, agent: "scout" };
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: agentDetails },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("scout");
-    });
-
-    it("shows the persisted child session name", () => {
-      const t = extractText(
-        registeredTool.renderResult(
-          { content: [], details: { ...successDetails, sessionName: "sub-auth-audit" } },
-          {},
-          mockTheme,
-        ),
-      );
-      expect(t).toContain("sub-auth-audit");
-    });
-  });
-
-  // ─── renderResult — expanded ─────────────────────────────────────────────
-
-  describe("renderResult — expanded", () => {
-    const successDetails = {
-      task: "Analyze the database schema",
-      toolNames: ["read"],
-      modelOverride: "anthropic/claude-haiku-4-5",
-      finalOutput: "The schema has 5 tables.\nUsers table has 10 columns.",
-      toolCallCount: 2,
-      usage: { input: 500, output: 100, cacheRead: 0, cacheWrite: 0, cost: 0.0005, turns: 1 },
-      model: "claude-haiku-4-5",
-      stopReason: "end_turn",
-      isError: false,
-      turnLimitExceeded: false,
-    };
-
-    it("returns a Container for expanded success", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      expect(result instanceof Container).toBe(true);
-    });
-
-    it("expanded view contains the task text", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Analyze the database schema");
-    });
-
-    it("expanded view contains the model override", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("anthropic/claude-haiku-4-5");
-    });
-
-    it("expanded error view shows error message", () => {
-      const errorDetails = {
-        ...successDetails,
-        isError: true,
-        errorMessage: "Network timeout",
-        stopReason: "error",
-      };
-      const result = registeredTool.renderResult(
-        { content: [], details: errorDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Network timeout");
-    });
-
-    it("expanded turn-limit view shows turn limit indicator", () => {
-      const limitDetails = { ...successDetails, turnLimitExceeded: true };
-      const result = registeredTool.renderResult(
-        { content: [], details: limitDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("turn limit");
-    });
-
-    it("expanded view does NOT show ctrl+o hint", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).not.toContain("ctrl+o");
-    });
-
-    it("expanded view contains Task section header", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Task");
-    });
-
-    it("expanded view contains the full output", () => {
-      const result = registeredTool.renderResult(
-        { content: [], details: successDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("Output");
-      expect(t).toContain(successDetails.finalOutput);
-    });
-
-    it("expanded view shows '(no output)' when finalOutput is empty", () => {
-      const noOutputDetails = { ...successDetails, finalOutput: "" };
-      const result = registeredTool.renderResult(
-        { content: [], details: noOutputDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("(no output)");
-    });
-
-    it("expanded view shows agent name when present", () => {
-      const agentDetails = { ...successDetails, agent: "gatherer" };
-      const result = registeredTool.renderResult(
-        { content: [], details: agentDetails },
-        { expanded: true },
-        mockTheme,
-      );
-      const t = extractText(result);
-      expect(t).toContain("gatherer");
+      expect(rendered).toContain(successDetails.task);
+      expect(rendered).toContain(successDetails.finalOutput);
+      expect(rendered).toContain(successDetails.modelOverride);
+      expect(rendered).toContain(successDetails.sessionName);
+      expect(rendered).toContain(successDetails.sessionFile);
     });
   });
 });

@@ -10,7 +10,7 @@ Use `review pr get` for existing pull request context or feedback work. The resu
 
 Use `review pr create` for a new independent review. Each run uses new child agent sessions with no parent conversation context. The `create` action does not post a GitHub review.
 
-Within one parent session, `create` is idempotent for the same pull request and pinned head. An identical call opens the existing review. If preparation failed, an identical call cleans the incomplete snapshot and retries preparation. Use the explicit rerun command to create another attempt after preparation succeeds.
+Within one parent session, `create` is idempotent for the same pull request and pinned base and head. An identical call retries a failed snapshot preparation with the same review ID. It opens an existing review after snapshot preparation succeeds or fails at a later stage. Use the explicit rerun command to create another attempt.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
@@ -46,13 +46,13 @@ Extension-managed data lives below the pi agent directory:
     └── diff.patch
 ```
 
-The preparation step records the base commit, head commit, diff hash, changed-file manifest, and pull request metadata. All later stages use the persisted diff. They must not replace it with a live diff.
+The preparation step records the base commit, head commit, diff hash, changed-file manifest, and pull request metadata. All later stages use the same bounded, hash-verified snapshot reader. It rejects non-regular files and diffs above 8,000,000 bytes before allocation. No stage substitutes a live diff.
 
 The review deck stores one shared metadata reference, one shared pinned-diff reference, and one canonical file table. Compact file IDs connect selected ranges to the file table. The deck does not repeat shared artifact identity for each file.
 
-Repository cache operations use a per-repository lock. Snapshot fetches use a blob filter. If a reused shallow cache lacks merge-base ancestry, the extension restores the ancestry and retries the calculation. Fetch timeout, missing ref, ref mismatch, and missing ancestry failures remain distinct in the failed review record. The extension owns each Git process group and terminates the complete group on cancellation or timeout.
+Repository cache operations use a per-repository lock. Snapshot fetches use a blob filter. If a reused shallow cache lacks merge-base ancestry, the extension restores the ancestry and retries the calculation. Fetch timeout, missing-ref, ref-mismatch, and missing-ancestry failures remain distinct in the failed review record. On POSIX hosts, the extension owns each Git process group and terminates the complete group on cancellation or timeout. Other hosts terminate the direct Git process.
 
-A successful review worktree remains available until explicit cleanup. If preparation fails before DAG submission, the extension removes incomplete worktrees and artifacts, preserves the repository cache, and retains a bounded failed review record in parent session state.
+A successful review worktree remains available until explicit cleanup. If snapshot preparation fails, the extension removes incomplete worktrees and artifacts, preserves the repository cache, and retains a bounded failed review record in parent session state.
 
 ## Review DAG and model policy
 
@@ -97,7 +97,7 @@ A child receives no generic `bash`, `read`, `write`, `edit`, language-server, an
 - submit a reading plan or synthesis;
 - load verified reviewer result references during synthesis.
 
-One immutable diff index owns canonical rename, deletion, repeated-section, and hunk-range semantics. The deck, diff reader, and evidence resolver consume this index. The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
+One immutable diff index owns canonical rename, deletion, repeated-section, hunk-range, and side-specific anchor semantics. Each walkthrough loads this verified index once, on first evidence inspection. It pages the admitted content without rereading the diff. Reopening the walkthrough verifies the persisted file again. The deck, diff reader, and evidence resolver consume this index. The deck file table contains compact line ranges for every pinned diff hunk. The reading plan uses these ranges to produce strict file and pinned-diff references without one tool call for each changed path. Each selected diff range must contain a complete hunk. The reading plan prioritizes hunks under the dossier limit. The deterministic resolver validates snapshot identity, paths, ranges, containment, changed-hunk coverage, and admission limits. It records exact uncovered hunks as omissions and makes final coverage degraded. It publishes one coverage record and bounded evidence chunks. Every reviewer consumes the same coverage digest and chunks through normal DAG context materialization.
 
 Reviewer nodes receive no tools. Each reviewer sets `maxTurns: 1` and returns one direct JSON object. The parent validates the role, evidence digest, schema, findings, provenance, and anchors. Synthesis keeps the bounded result-reference and submission tools.
 
@@ -111,9 +111,17 @@ The reading-plan node submits the pull request goal, goal assessment, risk, conc
 
 Each reviewer returns its fixed role, evidence digest, verdict, and findings. Each finding contains severity, goal-relative impact, optional anchor, problem, consequence, and suggested fix.
 
-The synthesis node reads one admitted reviewer dossier. The dossier verifies artifact identity, output names, schema, roles, and evidence digests. It classifies failed and malformed reviewers once. Synthesis and terminal finalization consume the same admission result. Synthesis reports explicit complete or degraded coverage. Each synthesized finding must match the findings from every claimed source reviewer. Trusted parent code verifies the source roles and agreement count against the reviewer findings.
+The synthesis node reads one admitted reviewer dossier. The dossier verifies artifact identity, output names, schema, roles, and evidence digests. It classifies failed and malformed reviewers once. Synthesis and terminal finalization consume the same admission result.
 
-The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. High-impact, blocking, and serious findings start selected. Other findings start unselected.
+For new runs, the harness assigns a stable opaque ID to every admitted raw finding occurrence. IDs are scoped to the source role, admitted evidence digest, original finding, and occurrence. Identical occurrences remain separate. The bounded synthesis context includes these IDs and unchanged raw finding payloads without duplicating the full reviewer transcript text.
+
+Synthesis uses the version 2 editorial consolidation contract. A retained finding can group and rephrase one or more raw findings by ID. Every admitted raw ID must occur exactly once, either in one retained group or in one dismissal with a nonblank reason. Trusted code derives source roles in deterministic role order and agreement as the number of distinct represented roles. It does not accept model-authored provenance, infer dissent from silence, or treat editorial consolidation as verified correctness.
+
+Parent state stores each admitted raw finding's compact ID, role, evidence digest, occurrence index, existing verified reviewer DAG artifact reference, retained raw ID references, and dismissal reasons. It does not copy finding payloads or create per-finding artifacts. Lazy raw inspection reuses the dossier materializer and admission rules, then verifies the reviewer role, evidence digest, occurrence index, and raw ID before returning bounded content. Invalid, incomplete, malformed, or unavailable consolidation degrades the review and falls back to one result finding per admitted raw occurrence. Fallback does not deduplicate identical findings and does not admit content from rejected reviewer outputs.
+
+The legacy unversioned exact-text synthesis schema remains readable only when reconstructing historical terminal DAG artifacts whose persisted DAG state has no synthesis protocol marker. New runs persist `synthesisProtocol: 2` before graph submission and preserve it through later snapshots. Marked version 2 runs never reinterpret malformed output as legacy output. Unknown markers fail safely to fallback. Legacy states without version 2 provenance remain readable and do not receive fabricated raw IDs, dismissals, source roles, or agreement.
+
+The extension validates anchors against the pinned diff. It preserves an invalid anchor as an unanchored finding. For new decision-enabled runs, impact and severity classifications are machine recommendations. Posting selection requires an explicit human decision.
 
 ## Parent session state
 
@@ -140,7 +148,11 @@ Each post attempt includes an invisible marker:
 <!-- pi-env-pr-review:<review-id>:<attempt-id> -->
 ```
 
-If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review.
+If a post result is uncertain, the extension searches existing review bodies for the marker before it retries. This prevents a process failure between the remote post and local state update from creating a duplicate review. The pending marker is persisted before submission so replay can reconcile an interrupted result.
+
+Late results update only the original posting attempt. They preserve newer human edits and do not recreate a cleaned review. Posting changed content still requires confirmation.
+
+Posting is bound to the parent session generation. A session change cancels local waits and process work and prevents completion state from being written into the replacement session. Cancellation cannot revoke a request after GitHub may have accepted it. In that case the original session's pending attempt remains the reconciliation authority and the result is reported as potentially accepted, not undone.
 
 ## Command and tool surface
 
@@ -148,6 +160,17 @@ The tool manager activates `review` for pull request review and feedback request
 
 Use `/review pr list`, `/review pr open <review-id>`, and `/review pr cleanup <review-id>` when a session has multiple review records. A successful create returns the review ID and the exact open command.
 
-## Deferred UI
+## Guided walkthrough and human decisions
 
-A guided review walkthrough is intentionally deferred. The later UI will consume the same pinned snapshot, plan, findings, decisions, and posting state. The extension must not couple the core workflow to a specific layout.
+Use the explicit review ID for every walkthrough mutation:
+
+- `/review pr walkthrough <review-id>` opens a compact overview, ordered reading-plan, finding, and provenance flow. Every planned file remains reachable and exposes bounded pages from the persisted, hash-verified diff. Findings expose consequence, suggested fix, pinned anchor context when available, and select, reject, defer, or edit actions.
+- `/review pr select <review-id> <finding-id>...`
+- `/review pr reject <review-id> <finding-id>...`
+- `/review pr defer <review-id> <finding-id>...`
+- `/review pr edit <review-id> <finding-id>`
+- `/review pr preface <review-id>`
+
+Human decisions are durable `pending`, `selected`, `rejected`, or `deferred` records. Missing decisions, including machine defaults and legacy selected IDs, remain pending and are not human inspection. New decision-enabled reviews post only explicitly selected findings. Headless walkthroughs are bounded and read-only.
+
+Posting remains the only remote authority. Use `/review pr post <review-id> [comment|approve|request-changes]` to target the inspected review exactly. The legacy `/review pr post [comment|approve|request-changes]` form remains a compatibility boundary that targets the currently opened review. Both forms use the same stale-head, content revalidation, confirmation, marker, and retry implementation. The confirmation shows event, head, selected IDs, bounded preface, and an explicit warning when coverage is degraded.

@@ -110,6 +110,10 @@ describe("fixed pull request review graph", () => {
     expect(synthesis.completionGuard?.dependencyIds).toEqual(
       ReviewerNodes.map((node) => node.nodeId),
     );
+    const synthesisPayload = subagentPayload(synthesis);
+    expect(synthesisPayload.instructions).toContain("v: 2 editorial consolidation");
+    expect(synthesisPayload.instructions).toContain("every admitted raw finding ID exactly once");
+    expect(synthesisPayload.instructions).toContain("Silence is not dissent");
   });
 
   it("gives reviewers no model-facing tools and retains bounded plan and synthesis tools", () => {

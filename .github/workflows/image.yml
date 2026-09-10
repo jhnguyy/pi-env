@@ -1,4 +1,5 @@
-name: Image Build
+name: Container Image
+run-name: ${{ github.event_name == 'push' && 'Publish verified pi-env image to GHCR' || 'Verify pi-env image artifact' }}
 
 on:
   pull_request:
@@ -11,14 +12,16 @@ permissions:
 
 concurrency:
   group: image-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
+  CANDIDATE_TAG: pi-env:ci
 
 jobs:
-  build:
-    name: Build pi-env image artifact
+  verify:
+    name: Build, verify, and scan image candidate
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -29,61 +32,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
-
-      - name: Build image locally
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+      - name: Qualify image candidate
+        uses: ./.github/actions/qualify-image
         with:
-          context: .
-          file: ./Dockerfile
-          load: true
-          push: false
-          tags: pi-env:ci
-
-      - name: Verify image artifact contract
-        run: docker run --rm pi-env:ci nub run verify:image-artifact
-
-      - name: Scan built image with Trivy
-        shell: bash
-        run: |
-          set -euo pipefail
-          image_tar="$RUNNER_TEMP/pi-env-image.tar"
-          results_dir="$RUNNER_TEMP/trivy-results"
-          results="$results_dir/trivy-image-results.json"
-          cache_dir="$RUNNER_TEMP/trivy-cache"
-          ignore_file="$GITHUB_WORKSPACE/.trivyignore.yaml"
-          docker save pi-env:ci --output "$image_tar"
-          chmod 0644 "$image_tar"
-          mkdir -p "$cache_dir" "$results_dir"
-          chmod 0777 "$cache_dir" "$results_dir"
-          docker run --rm \
-            --cap-drop=ALL \
-            --security-opt=no-new-privileges \
-            --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev \
-            -e TRIVY_CACHE_DIR=/cache \
-            -v "$image_tar:/image/pi-env-image.tar:ro" \
-            -v "$cache_dir:/cache:rw" \
-            -v "$results_dir:/results:rw" \
-            -v "$ignore_file:/etc/trivy/.trivyignore.yaml:ro" \
-            aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f \
-            image \
-            --input /image/pi-env-image.tar \
-            --scanners vuln,secret,misconfig \
-            --file-patterns pnpm:lock.yaml \
-            --severity HIGH,CRITICAL \
-            --ignorefile /etc/trivy/.trivyignore.yaml \
-            --format json \
-            --output /results/trivy-image-results.json \
-            --exit-code 0 \
-            --skip-version-check
-          node scripts/trivy-image-summary.mjs "$results"
+          image-tag: ${{ env.CANDIDATE_TAG }}
 
   publish:
-    name: Publish pi-env image
+    name: Build, verify, scan, and publish image candidate
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -95,22 +51,41 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+      - name: Qualify image candidate
+        id: qualified-image
+        uses: ./.github/actions/qualify-image
+        with:
+          image-tag: ${{ env.CANDIDATE_TAG }}
 
-      - name: Login to GHCR
+      - name: Authenticate publisher with GHCR
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Build and publish image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:main
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+      - name: Publish verified image to GHCR
+        shell: bash
+        env:
+          EXPECTED_IMAGE_ID: ${{ steps.qualified-image.outputs.image-id }}
+        run: |
+          set -euo pipefail
+          actual_image_id="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_TAG")"
+          if [[ "$actual_image_id" != "$EXPECTED_IMAGE_ID" ]]; then
+            echo "::error title=Container candidate identity changed::The image selected for publication is not the qualified image candidate."
+            exit 1
+          fi
+
+          immutable_tag="$IMAGE_NAME:$GITHUB_SHA"
+          main_tag="$IMAGE_NAME:main"
+          docker tag "$CANDIDATE_TAG" "$immutable_tag"
+          docker tag "$CANDIDATE_TAG" "$main_tag"
+
+          if ! docker push "$immutable_tag"; then
+            echo "::error title=Container image publication failed::GHCR rejected the immutable commit tag."
+            exit 1
+          fi
+          if ! docker push "$main_tag"; then
+            echo "::error title=Container image publication failed::GHCR rejected the main tag."
+            exit 1
+          fi

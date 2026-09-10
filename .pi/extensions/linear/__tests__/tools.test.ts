@@ -1,10 +1,10 @@
+import { Check } from "typebox/value";
 import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import type { IssueSummary } from "../api";
+import type { IssueSummary, LinearResourceSummary } from "../api";
 import type { LinearGateway } from "../client";
-import { createLinearTools } from "../tools";
-
-const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
+import { LinearErrorCode, linearError, type LinearToolError } from "../domain";
+import { createLinearTool, LinearAction } from "../tools";
 
 function issue(number: number): IssueSummary {
   return {
@@ -19,6 +19,10 @@ function issue(number: number): IssueSummary {
   };
 }
 
+function resource(number: number): LinearResourceSummary {
+  return { id: `team-${number}`, type: "teams", name: `Team ${number}`, key: `T${number}` };
+}
+
 function gateway() {
   return {
     viewer: vi.fn(async () => ({
@@ -30,88 +34,122 @@ function gateway() {
         email: "agent@example.com",
       },
     })),
-    listResources: vi.fn(async () => ({ nodes: [], hasMore: false })),
+    listResources: vi.fn(async () => ({
+      nodes: Array.from({ length: 100 }, (_, index) => resource(index + 1)),
+      hasMore: true,
+      endCursor: "resource-cursor",
+    })),
     listIssues: vi.fn(async () => ({
       nodes: Array.from({ length: 100 }, (_, index) => issue(index + 1)),
       hasMore: true,
       endCursor: "issue-cursor",
     })),
-    searchIssues: vi.fn(async () => ({ nodes: [], hasMore: false, totalCount: 0 })),
+    searchIssues: vi.fn(async () => ({
+      nodes: Array.from({ length: 100 }, (_, index) => issue(index + 1)),
+      hasMore: true,
+      endCursor: "search-cursor",
+      totalCount: 100,
+    })),
     issue: vi.fn(async () => issue(1)),
   };
 }
 
-function findTool(fakeGateway: ReturnType<typeof gateway>, name: string) {
-  const tool = createLinearTools(fakeGateway as unknown as LinearGateway).find(
-    (candidate) => candidate.name === name,
-  );
-  if (!tool) throw new Error(`Missing tool: ${name}`);
-  return tool;
+function tool(fakeGateway: ReturnType<typeof gateway>) {
+  return createLinearTool(fakeGateway as unknown as LinearGateway);
 }
 
-describeIfEnabled("linear", "Linear read tools", () => {
-  it("registers only focused read tools", () => {
-    expect(
-      createLinearTools(gateway() as unknown as LinearGateway).map((tool) => tool.name),
-    ).toEqual([
-      "linear_viewer",
-      "linear_list_resources",
-      "linear_list_issues",
-      "linear_search_issues",
-      "linear_get_issue",
-    ]);
+async function execute(
+  fakeGateway: ReturnType<typeof gateway>,
+  params: Record<string, unknown>,
+  signal?: AbortSignal,
+  ctx: any = {},
+) {
+  return tool(fakeGateway).execute("tool-call", params, signal, undefined, ctx);
+}
+
+describeIfEnabled("linear", "Linear tool", () => {
+  it("exposes one tool with the five read actions", () => {
+    const definition = tool(gateway());
+    expect(definition.name).toBe("linear");
+    for (const action of Object.values(LinearAction)) {
+      expect(Check(definition.parameters, { action })).toBe(true);
+    }
+    expect(Check(definition.parameters, {})).toBe(false);
+    expect(Check(definition.parameters, { action: "create-issue" })).toBe(false);
   });
 
-  it("bounds list details and excludes credentials from model-facing results", async () => {
+  it("routes each action, forwards cancellation, and never asks for confirmation", async () => {
     const fakeGateway = gateway();
-    const result = await findTool(fakeGateway, "linear_list_issues").execute(
-      "tool-call",
-      { limit: 50 },
-      undefined,
-      undefined,
-      {
-        hasUI: true,
-        ui: { confirm: vi.fn(async () => true) },
-      } as any,
-    );
+    const controller = new AbortController();
+    const confirm = vi.fn(async () => {
+      throw new Error("Linear read actions must not prompt for credential use.");
+    });
+    const ctx = { hasUI: true, ui: { confirm } } as any;
+    const calls = [
+      [LinearAction.Viewer, {}, "viewer"],
+      [LinearAction.ListResources, { resourceType: "teams" }, "listResources"],
+      [LinearAction.ListIssues, {}, "listIssues"],
+      [LinearAction.SearchIssues, { query: "Issue" }, "searchIssues"],
+      [LinearAction.GetIssue, { issueId: "ENG-1" }, "issue"],
+    ] as const;
 
-    expect((result.details as { nodes: IssueSummary[] }).nodes).toHaveLength(50);
-    expect(JSON.stringify(result)).not.toContain(SENTINEL);
-    expect(JSON.stringify(result)).not.toContain("ENG-51");
+    for (const [action, params, method] of calls) {
+      await expect(
+        execute(fakeGateway, { action, ...params }, controller.signal, ctx),
+      ).resolves.toBeDefined();
+      expect(fakeGateway[method]).toHaveBeenCalledOnce();
+      expect(fakeGateway[method].mock.calls[0]?.at(-1)).toBe(controller.signal);
+    }
+    expect(confirm).not.toHaveBeenCalled();
   });
 
-  it("confirms the exact operation before credential-backed gateway use", async () => {
-    const fakeGateway = gateway();
-    const ctx = {
-      hasUI: true,
-      ui: { confirm: vi.fn(async () => false) },
-    } as any;
+  it.each([
+    [LinearAction.ListResources, { resourceType: "teams", limit: 50 }, "T51"],
+    [LinearAction.ListIssues, { limit: 50 }, "ENG-51"],
+    [LinearAction.SearchIssues, { query: "Issue", limit: 50 }, "ENG-51"],
+  ] as const)(
+    "bounds %s results and preserves the continuation cursor",
+    async (action, params, excluded) => {
+      const result = await execute(gateway(), { action, ...params });
+      expect((result.details as { nodes: unknown[] }).nodes).toHaveLength(50);
+      expect((result.details as { endCursor?: string }).endCursor).toBeTruthy();
+      expect(JSON.stringify(result)).not.toContain(excluded);
+    },
+  );
 
+  it("rejects action-specific parameter errors before gateway access", async () => {
+    const fakeGateway = gateway();
     await expect(
-      findTool(fakeGateway, "linear_get_issue").execute(
-        "tool-call",
-        { issueId: "ENG-1" },
-        undefined,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow("credential_confirmation_required");
-    expect(ctx.ui.confirm).toHaveBeenCalledWith(
-      "Read Linear issue?",
-      "Use the configured Linear credential to read ENG-1.",
-      { signal: undefined },
-    );
+      execute(fakeGateway, { action: LinearAction.Viewer, issueId: "ENG-1" }),
+    ).rejects.toMatchObject({
+      name: "LinearToolError",
+      envelope: { error: { code: LinearErrorCode.Validation } },
+    });
+    expect(fakeGateway.viewer).not.toHaveBeenCalled();
     expect(fakeGateway.issue).not.toHaveBeenCalled();
   });
 
-  it("fails closed without an interactive confirmation surface", async () => {
+  it("preserves typed gateway failures", async () => {
     const fakeGateway = gateway();
-
+    fakeGateway.issue.mockRejectedValueOnce(
+      linearError(LinearErrorCode.Forbidden, "Issue access is forbidden.", {
+        recovery: "Request access.",
+      }),
+    );
     await expect(
-      findTool(fakeGateway, "linear_viewer").execute("tool-call", {}, undefined, undefined, {
-        hasUI: false,
-      } as any),
-    ).rejects.toThrow("credential_confirmation_required");
-    expect(fakeGateway.viewer).not.toHaveBeenCalled();
+      execute(fakeGateway, { action: LinearAction.GetIssue, issueId: "ENG-1" }),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<LinearToolError>>({
+        name: "LinearToolError",
+        envelope: {
+          error: {
+            code: LinearErrorCode.Forbidden,
+            message: "Issue access is forbidden.",
+            retryable: false,
+            recovery: "Request access.",
+          },
+        },
+      }),
+    );
   });
 });

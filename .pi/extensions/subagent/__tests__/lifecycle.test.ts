@@ -36,8 +36,7 @@ describe("subagent extension session lifecycle", () => {
     const harness = createHarness();
     const startSession = harness.handlers.get("session_start")!;
     const shutdownSession = harness.handlers.get("session_shutdown")!;
-    const startTool = harness.tools.get("subagent_start");
-    const jobTool = harness.tools.get("subagent_job");
+    const subagent = harness.tools.get("subagent");
     const ctx = sessionContext(directory);
     await startSession({ type: "session_start" }, ctx);
 
@@ -65,15 +64,15 @@ describe("subagent extension session lifecycle", () => {
     release();
     await Promise.all([staleStart, shutdown]);
 
-    const result = await startTool.execute(
+    const result = await subagent.execute(
       "after",
-      { name: "after", task: "x" },
+      { action: "start", name: "after", task: "x" },
       undefined,
       undefined,
       ctx,
     );
     expect(result.details).toMatchObject({ status: "inactive", name: "after", task: "x" });
-    const list = await jobTool.execute("list", { action: "list" }, undefined, undefined, ctx);
+    const list = await subagent.execute("list", { action: "list" }, undefined, undefined, ctx);
     expect(list.content[0]?.text).toBe("No subagent jobs.");
     if (oldManager) await originalShutdown.call(oldManager);
   });
@@ -84,13 +83,12 @@ describe("subagent extension session lifecycle", () => {
     const harness = createHarness();
     const startSession = harness.handlers.get("session_start")!;
     const shutdownSession = harness.handlers.get("session_shutdown")!;
-    const startTool = harness.tools.get("subagent_start");
-    const jobTool = harness.tools.get("subagent_job");
+    const subagent = harness.tools.get("subagent");
     const ctx = sessionContext(directory);
 
-    const beforeStart = await startTool.execute(
+    const beforeStart = await subagent.execute(
       "before",
-      { name: "before", task: "x" },
+      { action: "start", name: "before", task: "x" },
       undefined,
       undefined,
       ctx,
@@ -99,9 +97,9 @@ describe("subagent extension session lifecycle", () => {
 
     await startSession({ type: "session_start" }, ctx);
     const shutdown = shutdownSession({ type: "session_shutdown" }, ctx);
-    const duringShutdown = await startTool.execute(
+    const duringShutdown = await subagent.execute(
       "during",
-      { name: "during", task: "x" },
+      { action: "start", name: "during", task: "x" },
       undefined,
       undefined,
       ctx,
@@ -109,9 +107,9 @@ describe("subagent extension session lifecycle", () => {
     expect(duringShutdown.details).toMatchObject({ status: "shutting-down" });
     await shutdown;
 
-    const afterShutdown = await startTool.execute(
+    const afterShutdown = await subagent.execute(
       "after",
-      { name: "after", task: "x" },
+      { action: "start", name: "after", task: "x" },
       undefined,
       undefined,
       ctx,
@@ -119,15 +117,15 @@ describe("subagent extension session lifecycle", () => {
     expect(afterShutdown.details).toMatchObject({ status: "inactive" });
 
     await startSession({ type: "session_start" }, ctx);
-    const active = await startTool.execute(
+    const active = await subagent.execute(
       "active",
-      { name: "active", task: "x" },
+      { action: "start", name: "active", task: "x" },
       undefined,
       undefined,
       ctx,
     );
     expect(active.details.jobId).toEqual(expect.any(String));
-    const status = await jobTool.execute(
+    const status = await subagent.execute(
       "status",
       { action: "status", job_id: active.details.jobId },
       undefined,

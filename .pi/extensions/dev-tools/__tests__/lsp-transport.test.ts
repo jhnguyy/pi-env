@@ -110,17 +110,6 @@ describeIfEnabled("dev-tools", "LspTransport", () => {
       parser.push(serializeMessage(msg));
       expect(parser.buffered).toBe(0);
     });
-
-    it("accepts string input", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", id: 1, method: "stringTest" };
-      const buf = serializeMessage(msg);
-      // Feed as latin1 string (fine for ASCII headers)
-      const msgs: LspMessage[] = [];
-      const parser = new LspParser((m) => msgs.push(m));
-      parser.push(buf.toString("binary"));
-      // May or may not parse correctly depending on encoding, but shouldn't throw
-      expect(typeof msgs.length).toBe("number");
-    });
   });
 
 });

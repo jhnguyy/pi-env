@@ -1,29 +1,17 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const REQUIRED_FILES = [
   "THIRD_PARTY_LICENSES/manifest.json",
   "THIRD_PARTY_LICENSES/THIRD_PARTY_NOTICES.md",
   "THIRD_PARTY_LICENSES/SOURCE_CODE.md",
-  "THIRD_PARTY_LICENSES/ALPINE_PACKAGES.md",
-  "THIRD_PARTY_LICENSES/ALPINE_SOURCE_CODE.md",
   "THIRD_PARTY_LICENSES/system/node-LICENSE.txt",
-  "THIRD_PARTY_SOURCES/alpine/manifest.json",
 ];
 
 const REQUIRED_DIRECTORIES = [".pi/extensions/dev-tools/dist"];
-
-function safeArchivePath(manifestPath, archive) {
-  if (typeof archive !== "string" || archive === "" || isAbsolute(archive)) return null;
-  const base = dirname(manifestPath);
-  const archivePath = resolve(base, archive);
-  const fromBase = relative(base, archivePath);
-  if (fromBase === ".." || fromBase.startsWith("../")) return null;
-  return archivePath;
-}
 
 function requiredOutputIssues(root) {
   const missingFiles = REQUIRED_FILES.filter((path) => {
@@ -37,39 +25,8 @@ function requiredOutputIssues(root) {
   return [...missingFiles, ...missingDirectories];
 }
 
-function sourceArchiveIssues(root) {
-  const manifestPath = join(root, "THIRD_PARTY_SOURCES", "alpine", "manifest.json");
-  if (!existsSync(manifestPath)) return [];
-
-  let manifest;
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  } catch (cause) {
-    return [
-      `Alpine source manifest is invalid: ${cause instanceof Error ? cause.message : String(cause)}`,
-    ];
-  }
-  if (manifest.schemaVersion !== 1 || !Array.isArray(manifest.sources)) {
-    return ["Alpine source manifest has an unsupported schema"];
-  }
-  if (manifest.sources.length === 0) {
-    return ["Alpine source manifest contains no source archives"];
-  }
-  return manifest.sources.flatMap((source) => {
-    const archivePath = safeArchivePath(manifestPath, source.archive);
-    const validArchive =
-      archivePath &&
-      existsSync(archivePath) &&
-      statSync(archivePath).isFile() &&
-      statSync(archivePath).size > 0;
-    return validArchive
-      ? []
-      : [`${source.origin ?? "unknown origin"}: source archive is missing or empty`];
-  });
-}
-
 export function imageArtifactIssues(root) {
-  return [...requiredOutputIssues(root), ...sourceArchiveIssues(root)];
+  return requiredOutputIssues(root);
 }
 
 function run(command, args, label) {
@@ -93,10 +50,6 @@ export function verifyImageArtifact(root) {
       "--check",
       "--package-root",
       "/usr/local/lib/node_modules",
-      "--apk-db",
-      "/lib/apk/db/installed",
-      "--alpine-source-manifest",
-      join(root, "THIRD_PARTY_SOURCES", "alpine", "manifest.json"),
       "--system-license",
       "node-LICENSE.txt=/usr/local/LICENSE",
     ],

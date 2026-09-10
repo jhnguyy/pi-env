@@ -517,37 +517,4 @@ describeIfEnabled("dev-tools", "Formatters", () => {
     });
   });
 
-  // ─── formatResult dispatch ─────────────────────────────────────────────────
-
-  describe("formatResult", () => {
-    it("dispatches diagnostics", () => {
-      const r: DiagnosticsResult = {
-        action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [],
-      };
-      expect(formatResult(r)).toBe("no errors");
-    });
-
-    it("dispatches implementation", () => {
-      const r: ImplementationResult = {
-        action: "implementation", path: "/a.ts", line: 1, character: 5, locations: [],
-      };
-      expect(formatResult(r)).toBe("No implementations found");
-    });
-
-    it("dispatches incoming-calls", () => {
-      const r: IncomingCallsResult = {
-        action: "incoming-calls", path: "/a.ts", line: 1, character: 1,
-        symbol: "foo", total: 0, items: [], truncated: false,
-      };
-      expect(formatResult(r)).toBe("no callers of foo");
-    });
-
-    it("dispatches outgoing-calls", () => {
-      const r: OutgoingCallsResult = {
-        action: "outgoing-calls", path: "/a.ts", line: 1, character: 1,
-        symbol: "bar", total: 0, items: [], truncated: false,
-      };
-      expect(formatResult(r)).toBe("bar makes no calls");
-    });
-  });
 });

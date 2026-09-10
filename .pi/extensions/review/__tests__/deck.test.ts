@@ -17,6 +17,7 @@ import {
   type DeckReference,
 } from "../deck";
 import type { ReviewSnapshot } from "../schema";
+import { sha256 } from "../core";
 
 const temps: string[] = [];
 afterEach(() => {
@@ -49,7 +50,7 @@ function makeSnapshot(overrides: Partial<ReviewSnapshot> = {}): ReviewSnapshot {
     artifactDir,
     worktree,
     diffPath,
-    diffHash: "diff-hash",
+    diffHash: sha256(diff),
     createdAt: "2024-01-01T00:00:00.000Z",
     metadata: {
       owner: "acme",
@@ -100,7 +101,7 @@ function makeLargeSnapshot(): ReviewSnapshot {
     artifactDir,
     worktree,
     diffPath,
-    diffHash: "diff-hash-large",
+    diffHash: sha256(diff),
     createdAt: "2024-01-01T00:00:00.000Z",
     metadata: {
       owner: "acme",
@@ -224,9 +225,9 @@ describe("review pull request deck", () => {
     ).toBe(true);
     expect(built.deck.metadataArtifactRef.id).toBe("m");
     expect(built.deck.pinnedDiffRef.id).toBe("d");
-    expect(built.deck.pinnedDiffRef.diffHash).toBe("diff-hash-large");
+    expect(built.deck.pinnedDiffRef.diffHash).toBe(snapshot.diffHash);
     const raw = readFileSync(built.path, "utf8");
-    expect(raw.match(/"diffHash": "diff-hash-large"/g)?.length ?? 0).toBe(1);
+    expect(raw.split(snapshot.diffHash)).toHaveLength(2);
     expect(raw).not.toContain("x".repeat(80));
     const updated = updateReviewDeckLaterRefs({
       snapshot,
@@ -238,9 +239,7 @@ describe("review pull request deck", () => {
       })),
     });
     expect(updated.bytes).toBeLessThan(49152);
-    expect(
-      readFileSync(updated.path, "utf8").match(/"diffHash": "diff-hash-large"/g)?.length ?? 0,
-    ).toBe(1);
+    expect(readFileSync(updated.path, "utf8").split(snapshot.diffHash)).toHaveLength(2);
   });
 
   it("rejects source/test refs for unchanged paths", () => {

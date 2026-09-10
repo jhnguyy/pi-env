@@ -115,4 +115,4 @@ export interface LinearApi {
   createComment(input: CreateCommentApiInput): Promise<CommentSummary>;
 }
 
-export type LinearApiFactory = (accessToken: string, signal?: AbortSignal) => LinearApi;
+export type LinearApiFactory = (apiKey: string, signal?: AbortSignal) => LinearApi;

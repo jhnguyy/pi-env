@@ -4,15 +4,13 @@
 
 ## Decisions and risks
 
-<!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? -->
+<!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? For new responsibilities or module boundaries, include the reuse decision required by docs/conventions/change-discipline.md. -->
 
-## Test intent
+## Test evidence
 
-- **Class:** <!-- requirement | regression | safety invariant | integration/e2e | existing coverage only -->
-- **Protected capability/regression:**
-- **Independent design origin:** <!-- base-worktree session/agent, or why separation was not triggered -->
-- **Red/green, mutation, or negative-control evidence:**
-- **Added, reused, or removed portfolio evidence:**
+- **Intent:** <!-- class and protected requirement, regression, or safety invariant -->
+- **Design:** <!-- owning boundary and independent design origin for risk-triggered work -->
+- **Evidence:** <!-- red/green or negative control; include material adversarial, added, reused, or removed evidence -->
 - **Runtime impact:**
 
 ## Validation

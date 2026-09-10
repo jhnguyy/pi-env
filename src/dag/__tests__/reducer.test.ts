@@ -4,49 +4,19 @@ import {
   DagDependencyMode,
   DagNodeResultTag,
   DagNodeStatus,
+  DagRunOutcome,
+  DagRunOutcomeResultTag,
   DagTransitionErrorTag,
   DagTransitionResultTag,
   DagTransitionType,
   createDagRunState,
-  deriveDagSchedulingStep,
-  getDagNodeState,
-  getDagOutputReference,
+  deriveDagRunOutcome,
   reduceDagRunState,
   type DagTransition,
 } from "../index.js";
 import * as Fixtures from "./shared.js";
 
 describe("DAG state reduction", () => {
-  it("represents all seven node states", () => {
-    const dag = Fixtures.graph([
-      Fixtures.node("source"),
-      Fixtures.node("dependent", [{ nodeId: "source", mode: DagDependencyMode.Required }]),
-    ]);
-    const statuses = new Set<DagNodeStatus>();
-    const initial = createDagRunState(dag);
-    statuses.add(getDagNodeState(dag, initial, "source")!.status);
-    const running = Fixtures.apply(dag, initial, { type: DagTransitionType.Start, nodeId: "source" });
-    statuses.add(getDagNodeState(dag, running, "source")!.status);
-    for (const tag of Object.values(DagNodeResultTag)) {
-      statuses.add(
-        getDagNodeState(
-          dag,
-          Fixtures.apply(dag, running, {
-            type: DagTransitionType.Complete,
-            nodeId: "source",
-            result: Fixtures.terminalResult(tag),
-          }),
-          "source",
-        )!.status,
-      );
-    }
-    const failed = Fixtures.finish(dag, initial, "source", Fixtures.terminalResult(DagNodeResultTag.Failed));
-    statuses.add(
-      getDagNodeState(dag, deriveDagSchedulingStep(dag, failed).state, "dependent")!.status,
-    );
-    expect(statuses).toEqual(new Set(Object.values(DagNodeStatus)));
-  });
-
   it("rejects starts before readiness and transitions from terminal states", () => {
     const dag = Fixtures.graph([
       Fixtures.node("source"),
@@ -141,14 +111,41 @@ describe("DAG state reduction", () => {
     });
   });
 
-  it("stores generic outputs by node and output name", () => {
-    const dag = Fixtures.graph([Fixtures.node("producer")]);
-    const artifact = { kind: "managed-file", relativePath: "outputs/report.json" };
-    const succeeded = Fixtures.finish(dag, createDagRunState(dag), "producer", {
-      _tag: DagNodeResultTag.Succeeded,
-      outputs: { report: artifact },
+  it("derives terminal outcome by fixed precedence instead of completion order", () => {
+    const dag = Fixtures.graph([Fixtures.node("first"), Fixtures.node("second")]);
+    const initial = createDagRunState(dag);
+    expect(deriveDagRunOutcome(dag, initial)).toEqual({
+      _tag: DagRunOutcomeResultTag.NonTerminal,
+      nodeIds: ["first", "second"],
     });
-    expect(getDagOutputReference(dag, succeeded, "producer", "report")).toBe(artifact);
-    expect(getDagOutputReference(dag, succeeded, "producer", "missing")).toBeUndefined();
+    const failedThenCancelled = Fixtures.finish(
+      dag,
+      Fixtures.finish(
+        dag,
+        initial,
+        "first",
+        Fixtures.terminalResult(DagNodeResultTag.Failed),
+      ),
+      "second",
+      Fixtures.terminalResult(DagNodeResultTag.Cancelled),
+    );
+    const cancelledThenFailed = Fixtures.finish(
+      dag,
+      Fixtures.finish(
+        dag,
+        initial,
+        "second",
+        Fixtures.terminalResult(DagNodeResultTag.Cancelled),
+      ),
+      "first",
+      Fixtures.terminalResult(DagNodeResultTag.Failed),
+    );
+    expect(deriveDagRunOutcome(dag, failedThenCancelled)).toEqual({
+      _tag: DagRunOutcomeResultTag.Terminal,
+      outcome: DagRunOutcome.Failed,
+    });
+    expect(deriveDagRunOutcome(dag, cancelledThenFailed)).toEqual(
+      deriveDagRunOutcome(dag, failedThenCancelled),
+    );
   });
 });

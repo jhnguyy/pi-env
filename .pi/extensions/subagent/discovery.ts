@@ -26,17 +26,21 @@ function formatToolList(
 }
 
 const DESCRIPTION_INTRO = [
-  "Delegate a focused task to an in-process subagent running via agentLoop().",
-  "The subagent runs inside the parent tool call — abort propagates automatically,",
-  "progress streams live to the TUI. No subprocess overhead.",
+  "Run and manage focused in-process subagents through one action-selected interface.",
   "",
-  "Two modes:",
-  '  1. Agent file: subagent({ name: "recon", agent: "scout", task: "..." }) — tools/capabilities/model/prompt from the agent definition',
-  "     User and installed package agents are the default. Project agents require agent_scope and project trust.",
-  "     `name` is required and creates a persistent `sub-<name>` transcript beside the parent.",
-  "     If the agent file omits model, you MUST pass model explicitly.",
-  '  2. Inline: subagent({ name: "task", task: "...", tools: [...], model: "provider/id" }) — explicit config, no defaults',
-  "  max_turns is optional; omit it to use the session time limit only. Use subagent_start for non-blocking jobs and subagent_job to inspect them.",
+  "Actions:",
+  '  - run: Wait for one child result. Example: subagent({ action: "run", name: "recon", agent: "scout", task: "..." }).',
+  '  - start: Start a session-scoped background job. Example: subagent({ action: "start", name: "recon", agent: "scout", task: "..." }).',
+  "  - status, wait, result, or cancel: Manage one background job by job_id.",
+  "  - list: List retained jobs.",
+  "  - usage: Summarize aggregate subagent usage for the parent session.",
+  "",
+  "For run/start, agent files provide tools, capabilities, model, and prompt defaults.",
+  "User and installed package agents are the default. Project agents require agent_scope and project trust.",
+  "The required name creates a persistent `sub-<name>` transcript beside the parent.",
+  "If the agent file omits model, you MUST pass model explicitly.",
+  'Inline run/start calls require tools and model. Example: subagent({ action: "run", name: "task", task: "...", tools: [...], model: "provider/id" }).',
+  "Public runs have no turn-count limit. The configured run-time limit still applies.",
   "",
 ] as const;
 
@@ -79,9 +83,7 @@ function appendModelTagGuidance(
   annotations?: Record<string, string[]>,
 ): boolean {
   const availableTags = new Set(
-    models.flatMap((model) =>
-      modelDescriptionTags(annotations?.[`${model.provider}/${model.id}`]),
-    ),
+    models.flatMap((model) => modelDescriptionTags(annotations?.[`${model.provider}/${model.id}`])),
   );
   const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => availableTags.has(tag));
   if (guidance.length === 0) return false;

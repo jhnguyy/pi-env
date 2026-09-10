@@ -1,4 +1,8 @@
-import type { CredentialSource } from "../_shared/credential-source";
+import {
+  CredentialErrorCode,
+  CredentialSourceError,
+  type CredentialSource,
+} from "../_shared/credential-source";
 import type {
   CursorPage,
   IssueSummary,
@@ -53,13 +57,13 @@ function selectResource(
       LinearErrorCode.AmbiguousReference,
       `Linear ${type} reference is ambiguous: ${reference}.`,
       {
-        recovery: "Use an exact UUID or a unique name, key, or email from linear_list_resources.",
+        recovery: "Use the Linear list-resources action to find an exact UUID or unique name, key, or email.",
         details: { type, candidates: matches.slice(0, 20) },
       },
     );
   }
   throw linearError(LinearErrorCode.NotFound, `Linear ${type} resource not found: ${reference}.`, {
-    recovery: "Use linear_list_resources to find a valid reference.",
+    recovery: "Use the Linear list-resources action to find a valid reference.",
     details: { type, reference },
   });
 }
@@ -171,11 +175,21 @@ export class LinearGateway {
     return this.#withApi(signal, (api) => api.issue(issueId));
   }
 
-  #withApi<T>(
+  async #withApi<T>(
     signal: AbortSignal | undefined,
     operation: (api: LinearApi) => Promise<T>,
   ): Promise<T> {
-    return this.#credentials().use(
+    const credentials = this.#credentials();
+    if (!credentials.has("linear.apiKey")) {
+      throw new CredentialSourceError({
+        code: CredentialErrorCode.NotConfigured,
+        message: "Credential linear.apiKey is not configured.",
+        retryable: false,
+        name: "linear.apiKey",
+        recovery: "Configure linear.apiKey in the global credentialSource settings and reload Pi.",
+      });
+    }
+    return await credentials.use(
       { name: "linear.apiKey", consumer: "linear" },
       (apiKey) => operation(this.#createApi(apiKey, signal)),
       signal,

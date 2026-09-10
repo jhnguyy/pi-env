@@ -76,10 +76,12 @@ function roleInstructions(role: ReviewRole): string {
   if (role === "synthesis") {
     return [
       ...common,
-      "Load the successful reading-plan and reviewer result references with the result-reference tool.",
-      "Report failed or malformed reviewer paths as degraded coverage. Do not invent agreement.",
-      "Use only these coverage role values: correctness, intent, maintainability, tests, security, whole-change. Do not use DAG node IDs or reading-plan.",
-      "Preserve source reviewer names and agreement counts on each finding.",
+      "Load the successful reading-plan and admitted raw findings with the result-reference tool.",
+      "Return v: 2 editorial consolidation. Retained findings may group and rephrase one or more raw findings by rawFindingIds.",
+      "Account for every admitted raw finding ID exactly once, either in one retained finding or in dismissals with a specific nonblank reason. Never omit, duplicate, or invent an ID.",
+      "Do not supply source reviewer or agreement claims. The harness derives distinct source roles and agreement from raw IDs. Silence is not dissent.",
+      "Report failed or malformed reviewer paths as degraded coverage. Use only these coverage role values: correctness, intent, maintainability, tests, security, whole-change. Do not use DAG node IDs or reading-plan.",
+      "Return exactly one JSON object shaped as {\"v\":2,\"verdict\":\"<non-empty editorial summary>\",\"coverage\":{\"status\":\"complete|degraded\",\"succeeded\":[],\"failed\":[],\"malformed\":[]},\"findings\":[{\"severity\":\"low|medium|serious|blocking\",\"impact\":\"low|medium|high\",\"problem\":\"<non-empty text>\",\"consequence\":\"<non-empty text>\",\"suggestedFix\":\"<non-empty text>\",\"rawFindingIds\":[\"R-...\"]}],\"dismissals\":[{\"rawFindingId\":\"R-...\",\"reason\":\"<non-empty reason>\"}]}. Optional anchor fields remain file, side, and line.",
       "Call the structured synthesis submission tool. Then return only the accepted canonical JSON from that tool.",
     ].join("\n");
   }

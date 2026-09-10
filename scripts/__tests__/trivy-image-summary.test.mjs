@@ -18,10 +18,10 @@ function vulnerability({ severity, fixedVersion = "", id = `CVE-TEST-${severity}
   };
 }
 
-function runSummary(result) {
+function runReport(report) {
   const directory = mkdtempSync(join(tmpdir(), "pi-env-trivy-summary-"));
   const reportPath = join(directory, "report.json");
-  writeFileSync(reportPath, JSON.stringify({ Results: [result] }));
+  writeFileSync(reportPath, JSON.stringify(report));
 
   try {
     return spawnSync(NODE_RUNNER_PATH, [SUMMARY_PATH, reportPath], { encoding: "utf8" });
@@ -30,7 +30,18 @@ function runSummary(result) {
   }
 }
 
+function runSummary(result) {
+  return runReport({ Results: [result] });
+}
+
 describe("built-image Trivy policy", () => {
+  it("rejects reports that contain no scanned targets", () => {
+    const result = runReport({ Results: [] });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Trivy image scan did not report any targets.");
+  });
+
   it("keeps an unfixed critical vulnerability informational", () => {
     const result = runSummary({
       Target: "test-image",

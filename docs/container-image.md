@@ -18,11 +18,13 @@ Verify the complete image artifact contract with one in-image command:
 docker run --rm IMAGE nub run verify:image-artifact
 ```
 
+The workflow builds one local candidate for each run. It verifies and scans that candidate before publication. A `main` push publishes the same local image under the immutable `GITHUB_SHA` tag for the `main` commit and the `main` tag. The publication path does not rebuild the image.
+
+GitHub run names distinguish pull-request verification from `main` publication. Step names and failure annotations identify the build, artifact contract, security scanner, security policy, candidate identity, authentication, or registry publication boundary.
+
 The workflow does not sign or deploy.
 
-The image stores generated dependency notices and license texts in `/opt/pi-env/THIRD_PARTY_LICENSES`.
-It stores Alpine corresponding-source archives in `/opt/pi-env/THIRD_PARTY_SOURCES`.
-See [licensing](licensing.md) for the artifact contract and package review policy.
+See [licensing](licensing.md) for the artifact contract.
 
 The artifact includes Git for HTTPS workflows but not an SSH client. Downstream agent images that require SSH transport or SSH signing must add a client and own its security update policy.
 

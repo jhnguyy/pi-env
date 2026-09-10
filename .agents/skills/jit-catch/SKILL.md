@@ -5,6 +5,8 @@ description: Judgment criteria for promoting catching tests to hardening tests. 
 
 # Promoting Catching Tests to Hardening
 
+Use `testing-practices` for general test design. Use this skill only after a generated catching test passes and promotion is under consideration.
+
 A passing catching test is ephemeral by default (auto-discarded). A permanent hardening test is justified only when it validates either:
 
 1. **Public API requirement** — the test exercises a contract that clients depend on, or

@@ -103,20 +103,72 @@ function createContext(cwd: string) {
 }
 
 describe("SubagentSessionRuntime public boundaries", () => {
-  it("keeps sync subagent compatible before session_start and resets async jobs/usage across replacement and shutdown", async () => {
+  it("labels wait calls with the child name and moves the job ID to a muted footer", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-wait-render-"));
+    tempDirs.push(cwd);
+    const { tools, handlers } = createHarness();
+    const ctx = createContext(cwd);
+    const subagent = tools.get("subagent");
+
+    await handlers.get("session_start")!({ type: "session_start" }, ctx);
+    const started = await subagent.execute(
+      "start-named-child",
+      {
+        action: "start",
+        name: "named-child",
+        task: "inspect the workspace",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const rendered = extractText(
+      subagent.renderCall(
+        { action: "wait", job_id: started.details.jobId },
+        {
+          fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
+          bold: (text: string) => text,
+        },
+      ),
+    );
+    const [title, footer] = rendered.split("\n");
+    expect(title).toContain("<accent>named-child</accent>");
+    expect(title).not.toContain(started.details.jobId);
+    expect(footer).toBe(`  <muted>job ${started.details.jobId}</muted>`);
+
+    await subagent.execute(
+      "wait-named-child",
+      { action: "wait", job_id: started.details.jobId },
+      undefined,
+      undefined,
+      ctx,
+    );
+    await handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+  });
+
+  it("runs blocking work before session_start and resets background jobs and usage across session lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-session-runtime-"));
     tempDirs.push(cwd);
     const { tools, handlers } = createHarness();
     const ctx = createContext(cwd);
     const subagent = tools.get("subagent");
-    const startTool = tools.get("subagent_start");
-    const jobTool = tools.get("subagent_job");
+    const startTool = subagent;
+    const jobTool = subagent;
     const startSession = handlers.get("session_start")!;
     const shutdownSession = handlers.get("session_shutdown")!;
 
     const syncBeforeStart = await subagent.execute(
       "sync-before-start",
-      { name: "sync-before", task: "first", tools: ["read"], model: "test-provider/test-model" },
+      {
+        action: "run",
+        name: "sync-before",
+        task: "first",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -128,7 +180,13 @@ describe("SubagentSessionRuntime public boundaries", () => {
 
     const asyncA = await startTool.execute(
       "async-a",
-      { name: "async-a", task: "record usage", tools: ["read"], model: "test-provider/test-model" },
+      {
+        action: "start",
+        name: "async-a",
+        task: "record usage",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -167,6 +225,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
         { ...resultA, details: { ...resultA.details, resultTruncated: true } },
         {},
         { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+        { args: { action: "result", job_id: asyncA.details.jobId } },
       ),
     );
     expect(renderedResult).toContain(asyncA.details.jobId);
@@ -193,7 +252,13 @@ describe("SubagentSessionRuntime public boundaries", () => {
 
     const asyncB = await startTool.execute(
       "async-b",
-      { name: "async-b", task: "must cancel", tools: ["read"], model: "test-provider/test-model" },
+      {
+        action: "start",
+        name: "async-b",
+        task: "must cancel",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -264,7 +329,13 @@ describe("SubagentSessionRuntime public boundaries", () => {
     state.onBlockedStart = undefined;
     const failed = await startTool.execute(
       "async-failed",
-      { name: "async-failed", task: "fail", tools: ["read"], model: "test-provider/test-model" },
+      {
+        action: "start",
+        name: "async-failed",
+        task: "fail",
+        tools: ["read"],
+        model: "test-provider/test-model",
+      },
       undefined,
       undefined,
       ctx,
@@ -284,6 +355,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
     const asyncC = await startTool.execute(
       "async-c",
       {
+        action: "start",
         name: "async-c",
         task: "fresh session",
         tools: ["read"],

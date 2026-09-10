@@ -1,132 +1,31 @@
-import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Data, Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  DagExecutorKind,
   DagNodeStatus,
   DagRunOutcome,
-  materializeDagTextArtifact,
   publishDagSubagentTextResult,
-  type DagEffectExecutor,
   type DagSessionReconstruction,
+  type DagTextArtifactReference,
   type ValidatedDagDefinition,
 } from "../../../../src/dag/index.js";
 import { reconstructReviewDagState, runReviewDag } from "../review-dag-runner";
-import { DagSessionRuntime } from "../../subagent/dag-session-runtime";
 import {
-  lookupRegisteredDagExecutor,
-  registerDagExecutor,
-  unregisterDagExecutor,
-} from "../../_shared/dag-executor-registration";
-import {
-  listenForDagRuntimeService,
-  resetDagRuntimeServiceRegistryForTests,
-} from "../../_shared/dag-runtime-service";
-import {
-  EvidenceResolverNode,
-  ReviewRoles,
-  compileReviewGraph,
-  type ReviewRoleAssignments,
-} from "../review-graph";
-import {
-  makeReviewEvidenceResolverExecutor,
-  ReviewEvidenceChunkOutputs,
-  ReviewEvidenceExecutorKind,
-  ReviewEvidenceResolverKey,
-  ReviewEvidenceCoverageOutput,
-} from "../evidence-resolver";
-import { buildReviewDeck, updateReviewDeckLaterRefs } from "../deck";
+  runRealReviewFlow,
+  reviewFixture as fixture,
+  assignments,
+  eventsApi as piEvents,
+} from "./fixtures/review-flow";
+import { EvidenceResolverNode, compileReviewGraph } from "../review-graph";
+import { ReviewEvidenceChunkOutputs, ReviewEvidenceCoverageOutput } from "../evidence-resolver";
 import type { ReviewState } from "../schema";
+import { buildRawFindingRecords } from "../synthesis-provenance";
+import { readVerifiedRawFinding } from "../reviewer-dossier";
 
 class TestAppendFailure extends Data.TaggedError("TestAppendFailure")<{
   readonly message: string;
 }> {}
-
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-function fixture(): {
-  root: string;
-  artifactRoot: string;
-  deckPath: string;
-  state: ReviewState;
-  ctx: any;
-} {
-  const root = mkdtempSync(path.join(tmpdir(), "pr-review-dag-runner-"));
-  roots.push(root);
-  const worktree = path.join(root, "worktree");
-  const artifacts = path.join(root, "review-artifacts");
-  const sessionDir = path.join(root, "session");
-  const artifactRoot = path.join(sessionDir, "dag-artifacts", "parent");
-  const entries: unknown[] = [];
-  mkdirSync(worktree, { recursive: true });
-  mkdirSync(artifacts, { recursive: true });
-  mkdirSync(artifactRoot, { recursive: true });
-  writeFileSync(path.join(worktree, "a.ts"), "export const value = 1;\n");
-  const diffPath = path.join(artifacts, "diff.patch");
-  writeFileSync(
-    diffPath,
-    "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-export const value = 0;\n+export const value = 1;\n",
-  );
-  const deckPath = path.join(artifacts, "review-deck.json");
-  writeFileSync(deckPath, JSON.stringify({ version: 1, snapshotId: "review" }));
-  const state: ReviewState = {
-    snapshot: {
-      id: "review",
-      artifactDir: artifacts,
-      worktree,
-      diffPath,
-      diffHash: "hash",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      metadata: {
-        owner: "o",
-        repo: "r",
-        number: 1,
-        url: "https://github.com/o/r/pull/1",
-        baseOid: "base",
-        headOid: "head",
-        changedFiles: [{ path: "a.ts" }],
-      },
-    },
-    selectedFindingIds: [],
-    posts: [],
-  };
-  return {
-    root,
-    artifactRoot,
-    deckPath,
-    state,
-    ctx: {
-      cwd: root,
-      sessionManager: {
-        getSessionDir: () => sessionDir,
-        getSessionId: () => "parent",
-        getBranch: () => entries,
-        appendCustomEntry: (customType: string, data: unknown) => {
-          entries.push({ type: "custom", customType, data });
-          return String(entries.length);
-        },
-      },
-    },
-  };
-}
-
-const assignments = Object.fromEntries(
-  ReviewRoles.map((role, index) => [
-    role,
-    {
-      model: index % 2 ? "provider-b/model" : "provider-a/model",
-      reasoning: "high",
-      contextWindow: 272_000,
-    },
-  ]),
-) as ReviewRoleAssignments;
 
 function plan(): string {
   return JSON.stringify({
@@ -162,8 +61,41 @@ function reviewer(role: string): string {
         : [],
   });
 }
-function synthesis(): string {
+function legacySynthesis(): string {
+  const correctness = JSON.parse(reviewer("correctness"));
   return JSON.stringify({
+    verdict: "Historical exact-text summary.",
+    coverage: { status: "complete", succeeded: ["correctness"], failed: [], malformed: [] },
+    findings: [
+      {
+        ...correctness.findings[0],
+        sourceReviewers: ["correctness"],
+        agreement: 1,
+      },
+    ],
+  });
+}
+function expectedRawFindingId(): string {
+  const correctness = JSON.parse(reviewer("correctness"));
+  return buildRawFindingRecords([
+    {
+      reviewer: correctness,
+      reference: {
+        v: 1,
+        path: "unused",
+        bytes: 1,
+        digest: "0".repeat(64),
+        runId: "unused",
+        producerNodeId: "review-correctness",
+        outputName: "correctness_review",
+      },
+    },
+  ])[0].id;
+}
+function synthesis(): string {
+  const rawFindingId = expectedRawFindingId();
+  return JSON.stringify({
+    v: 2,
     verdict: "One serious issue was found.",
     coverage: { status: "complete", succeeded: [], failed: [], malformed: [] },
     findings: [
@@ -176,10 +108,21 @@ function synthesis(): string {
         problem: "The value is wrong.",
         consequence: "Callers receive the wrong value.",
         suggestedFix: "Use the required value.",
-        sourceReviewers: ["correctness"],
-        agreement: 1,
+        rawFindingIds: [rawFindingId],
       },
     ],
+    dismissals: [],
+  });
+}
+
+function dismissedSynthesis(): string {
+  const rawFindingId = expectedRawFindingId();
+  return JSON.stringify({
+    v: 2,
+    verdict: "The raw concern was dismissed editorially.",
+    coverage: { status: "complete", succeeded: [], failed: [], malformed: [] },
+    findings: [],
+    dismissals: [{ rawFindingId, reason: "Not actionable for this change." }],
   });
 }
 
@@ -290,221 +233,64 @@ function serviceFor(
   };
 }
 
-function piEvents(): any {
-  const handlers = new Map<string, Set<(data: unknown) => void>>();
-  const tools = new Map<string, any>();
-  return {
-    tools,
-    events: {
-      emit(event: string, data: any) {
-        if (event === "agent-tools:register") tools.set(data.tool.name, data.tool);
-        if (event === "agent-tools:unregister") tools.delete(data.tool.name);
-        for (const handler of handlers.get(event) ?? []) handler(data);
-      },
-      on(event: string, handler: (data: unknown) => void) {
-        const listeners = handlers.get(event) ?? new Set();
-        listeners.add(handler);
-        handlers.set(event, listeners);
-        return () => listeners.delete(handler);
-      },
-    },
-  };
-}
-
 describe("DAG-backed pull request review runner", () => {
-  it("orchestrates the real session runtime, scheduler, evidence, tools, and fallback offline", async () => {
-    const f = fixture();
-    resetDagRuntimeServiceRegistryForTests();
-    execFileSync("git", ["init", "-q"], { cwd: f.state.snapshot.worktree });
-    execFileSync("git", ["config", "user.email", "review@example.test"], {
-      cwd: f.state.snapshot.worktree,
+  it.each(["missing", "tampered"])(
+    "does not admit findings from a %s evidence bundle",
+    async (fault) => {
+      await expect(
+        runRealReviewFlow(async ({ artifactRoot, request }) => {
+          const node = request.graphState.nodes.find(
+            (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
+          );
+          if (node?.status !== DagNodeStatus.Succeeded)
+            throw new Error("Evidence was not produced.");
+          const chunk = node.outputs[ReviewEvidenceChunkOutputs[0]] as DagTextArtifactReference;
+          const file = path.join(artifactRoot, chunk.path);
+          if (fault === "missing") rmSync(file);
+          else writeFileSync(file, "tampered evidence");
+        }),
+      ).rejects.toThrow(/All PR reviewers failed or returned malformed output/);
+    },
+  );
+
+  it("can inspect and consolidate after cancelling an earlier dossier read", async () => {
+    const flow = await runRealReviewFlow(async ({ inspect }) => {
+      const controller = new AbortController();
+      const cancelled = inspect(controller.signal);
+      controller.abort();
+      await expect(cancelled).rejects.toBeDefined();
     });
-    execFileSync("git", ["config", "user.name", "Review Test"], { cwd: f.state.snapshot.worktree });
-    execFileSync("git", ["add", "a.ts"], { cwd: f.state.snapshot.worktree });
-    execFileSync("git", ["commit", "-qm", "snapshot"], { cwd: f.state.snapshot.worktree });
-    const headOid = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: f.state.snapshot.worktree,
-      encoding: "utf8",
-    }).trim();
-    const diff =
-      "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-export const value = 0;\n+export const value = 1;\n";
-    writeFileSync(f.state.snapshot.diffPath, diff);
-    f.state.snapshot.metadata.headOid = headOid;
-    f.state.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
-    const deck = buildReviewDeck({ snapshot: f.state.snapshot });
-    const pi = piEvents();
-    const services: any[] = [];
-    let serviceDisposals = 0;
-    listenForDagRuntimeService(
-      pi,
-      (service) => services.push(service),
-      () => serviceDisposals++,
+    expect(flow.state.result?.provenance?.status).toBe("accepted");
+  });
+  it("produces a finalized review through the real offline session runtime", async () => {
+    const flow = await runRealReviewFlow();
+    expect(flow.state.dag).toMatchObject({ status: "succeeded" });
+    expect(flow.state.result?.coverage?.succeeded).toEqual(
+      expect.arrayContaining([
+        "correctness",
+        "intent",
+        "maintainability",
+        "tests",
+        "security",
+        "whole-change",
+      ]),
     );
-    let registered = 0;
-    let unregistered = 0;
-    pi.events.on("agent-tools:register", () => registered++);
-    pi.events.on("agent-tools:unregister", () => unregistered++);
-    const generation = "review-scenario";
-    const evidenceRegistration = registerDagExecutor({
-      parentSessionId: "parent",
-      sessionGeneration: generation,
-      kind: ReviewEvidenceExecutorKind,
-      key: ReviewEvidenceResolverKey,
-      executor: makeReviewEvidenceResolverExecutor({ artifactRoot: f.artifactRoot }),
-    });
-    const findTool = (prefix: string) => {
-      const tool = [...pi.tools.values()].find((candidate) => candidate.name.startsWith(prefix));
-      if (!tool) throw new Error(`Missing run-scoped tool ${prefix}`);
-      return tool;
-    };
-    const scriptedSubagent: DagEffectExecutor = (request) =>
-      Effect.promise(async () => {
-        const output = (request.node.executor.payload as any).output;
-        if (request.node.id === "reading-plan") {
-          const submitted = await findTool("submit_review_plan_").execute(
-            "plan",
-            {
-              ...JSON.parse(plan()),
-              evidence: [
-                { kind: "diff", path: "a.ts", startLine: 1, endLine: 6, purpose: "patch" },
-              ],
-            },
-            undefined,
-            undefined,
-          );
-          expect(submitted.isError).not.toBe(true);
-          return Effect.runPromise(
-            publishDagSubagentTextResult(
-              f.artifactRoot,
-              request.runId,
-              request.node.id,
-              request.attemptId,
-              output.name,
-              submitted.content[0].text,
-            ),
-          );
-        }
-        if (request.node.id.startsWith("review-")) {
-          const coverage = await Effect.runPromise(
-            materializeDagTextArtifact(
-              f.artifactRoot,
-              (
-                request.graphState.nodes.find(
-                  (node) =>
-                    node.nodeId === EvidenceResolverNode.nodeId &&
-                    node.status === DagNodeStatus.Succeeded,
-                ) as any
-              ).outputs[ReviewEvidenceCoverageOutput],
-              {
-                runId: request.runId,
-                producerNodeId: EvidenceResolverNode.nodeId,
-                outputName: ReviewEvidenceCoverageOutput,
-              },
-            ),
-          );
-          const role = request.node.id.slice("review-".length);
-          const value = JSON.parse(reviewer(role));
-          value.evidenceDigest =
-            role === "intent" ? "0".repeat(64) : JSON.parse(coverage.text).digest;
-          return Effect.runPromise(
-            publishDagSubagentTextResult(
-              f.artifactRoot,
-              request.runId,
-              request.node.id,
-              request.attemptId,
-              output.name,
-              JSON.stringify(value),
-            ),
-          );
-        }
-        if (request.node.id === "synthesis") {
-          const refs = await findTool("review_result_refs_").execute(
-            "refs",
-            {},
-            undefined,
-            undefined,
-          );
-          expect(refs.isError).not.toBe(true);
-          const rejected = JSON.parse(synthesis());
-          rejected.findings[0].problem = "Not present in an admitted reviewer result.";
-          const submitted = await findTool("submit_review_synthesis_").execute(
-            "synthesis",
-            rejected,
-            undefined,
-            undefined,
-          );
-          expect(submitted.isError).toBe(true);
-          return Effect.runPromise(
-            publishDagSubagentTextResult(
-              f.artifactRoot,
-              request.runId,
-              request.node.id,
-              request.attemptId,
-              output.name,
-              JSON.stringify(rejected),
-            ),
-          );
-        }
-        throw new Error(`Unexpected scripted node ${request.node.id}`);
-      });
-    const registry = {
-      lookup: (kind: DagExecutorKind, key: string) =>
-        Effect.succeed(
-          kind === DagExecutorKind.Subagent && key === "pi/subagent-v1"
-            ? scriptedSubagent
-            : lookupRegisteredDagExecutor("parent", generation, kind, key),
-        ),
-    };
-    const runtime = await DagSessionRuntime.create(pi, f.ctx, new Map(), {
-      sessionGeneration: generation,
-      supervisor: {
-        usage: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }),
-      } as any,
-      telemetryRuntime: {} as any,
-      ledger: {} as any,
-      executorRegistry: registry,
-    });
-    expect(services).toHaveLength(1);
-    const saved: ReviewState[] = [];
-    try {
-      const result = await runReviewDag({
-        pi,
-        ctx: f.ctx,
-        service: services[0].service,
-        assignments,
-        deckPath: deck.path,
-        state: f.state,
-        save: (state) => saved.push(structuredClone(state)),
-      });
-      expect(result.dag).toMatchObject({
-        status: "degraded",
-        malformedNodes: ["review-intent", "synthesis"],
-      });
-      expect(result.dag?.evidenceCoverage?.digest).toMatch(/^[0-9a-f]{64}$/u);
-      expect(result.result?.verdict).toContain("Reviewer synthesis failed");
-      expect(result.result?.coverage?.succeeded).not.toContain("intent");
-      expect(saved.some((state) => state.dag?.submitted)).toBe(true);
-      expect(saved.at(-1)?.dag?.status).toBe("degraded");
-      expect(unregistered).toBe(registered);
-      const updated = updateReviewDeckLaterRefs({
-        snapshot: f.state.snapshot,
-        readingPlanRefs: [
-          { kind: "reading-plan", id: "plan", uri: result.dag!.readingPlanReference!.path },
-        ],
-        rawResultRefs: result.dag!.rawResultReferences.map((reference, index) => ({
-          kind: "raw-result",
-          id: `result-${index}`,
-          uri: reference.path,
-        })),
-      });
-      expect(updated.deck.laterRefs.readingPlanRefs).toHaveLength(1);
-      expect(updated.deck.laterRefs.rawResultRefs).toHaveLength(6);
-    } finally {
-      await runtime.dispose();
-      unregisterDagExecutor(evidenceRegistration);
-      resetDagRuntimeServiceRegistryForTests();
-    }
-    expect(serviceDisposals).toBe(1);
+    expect(flow.state.result?.findings.map((finding) => finding.sourceReviewers)).toEqual([
+      ["correctness", "intent"],
+      ["maintainability", "tests"],
+      ["security"],
+    ]);
+    expect(flow.state.result?.provenance?.dismissals[0]?.reason).toContain("outside");
+    expect(flow.invalidSynthesisRejected).toBe(true);
+    const accountedRawIds = [
+      ...flow.state.result!.findings.flatMap((finding) => finding.rawFindingIds ?? []),
+      ...flow.state.result!.provenance!.dismissals.map((dismissal) => dismissal.rawFindingId),
+    ];
+    expect(accountedRawIds.sort()).toEqual([...flow.dossierRawIds].sort());
+    expect(flow.saved.some((state) => state.dag?.submitted)).toBe(true);
+    expect(flow.saved.at(-1)).toEqual(flow.state);
+    expect(flow.unregisteredTools).toBe(flow.registeredTools);
+    expect(flow.serviceDisposals).toBe(1);
   });
 
   it("unregisters run-scoped tools when the first state save fails", async () => {
@@ -574,6 +360,16 @@ describe("DAG-backed pull request review runner", () => {
       sourceReviewers: ["correctness"],
       agreement: 1,
     });
+    expect(result.result?.provenance).toMatchObject({
+      v: 2,
+      status: "accepted",
+      dismissals: [],
+    });
+    const rawRecord = result.result?.provenance?.rawFindings[0];
+    expect(rawRecord).not.toHaveProperty("finding");
+    expect(
+      (await readVerifiedRawFinding(f.artifactRoot, result.dag!.runId, rawRecord!)).finding.problem,
+    ).toBe("The value is wrong.");
     expect(
       saved.at(-1)?.dag?.rawResultReferences.every((reference) => !reference.path.includes("{")),
     ).toBe(true);
@@ -631,10 +427,10 @@ describe("DAG-backed pull request review runner", () => {
     expect(result.result?.findings[0]?.problem).toBe("The value is wrong.");
   });
 
-  it("rejects synthesis provenance that is not present in the claimed reviewer output", async () => {
+  it("rejects synthesis provenance that is not present in the admitted raw findings", async () => {
     const f = fixture();
     const invented = JSON.parse(synthesis());
-    invented.findings[0].problem = "The synthesis invented this problem.";
+    invented.findings[0].rawFindingIds = [`R-${"f".repeat(64)}`];
     const result = await runReviewDag({
       pi: piEvents(),
       ctx: f.ctx,
@@ -645,11 +441,15 @@ describe("DAG-backed pull request review runner", () => {
       save: () => {},
     });
     expect(result.dag?.status).toBe("degraded");
-    expect(result.result?.verdict).toContain("Reviewer synthesis failed");
+    expect(result.result?.verdict).toContain("Reviewer consolidation failed");
     expect(result.result?.findings[0]?.problem).toBe("The value is wrong.");
     expect(result.result?.findings[0]).toMatchObject({
       sourceReviewers: ["correctness"],
       agreement: 1,
+    });
+    expect(result.result?.provenance).toMatchObject({
+      status: "fallback",
+      fallbackReason: expect.stringContaining("exactly once"),
     });
   });
 
@@ -701,7 +501,7 @@ describe("DAG-backed pull request review runner", () => {
     expect(result.result?.coverage?.succeeded).not.toContain("intent");
   });
 
-  it("deduplicates fallback findings by fields instead of JSON property order", async () => {
+  it("preserves identical fallback occurrences instead of field-deduplicating them", async () => {
     const f = fixture();
     const reordered = JSON.stringify({
       role: "intent",
@@ -721,7 +521,7 @@ describe("DAG-backed pull request review runner", () => {
       ],
     });
     const invented = JSON.parse(synthesis());
-    invented.findings[0].problem = "Force fallback.";
+    invented.findings[0].rawFindingIds = [`R-${"f".repeat(64)}`];
     const result = await runReviewDag({
       pi: piEvents(),
       ctx: f.ctx,
@@ -734,11 +534,14 @@ describe("DAG-backed pull request review runner", () => {
       state: f.state,
       save: () => {},
     });
-    expect(result.result?.findings).toHaveLength(1);
-    expect(result.result?.findings[0]).toMatchObject({
-      sourceReviewers: ["correctness", "intent"],
-      agreement: 2,
-    });
+    expect(result.result?.findings).toHaveLength(2);
+    expect(result.result?.findings.map((finding) => finding.sourceReviewers)).toEqual([
+      ["correctness"],
+      ["intent"],
+    ]);
+    expect(
+      new Set(result.result?.findings.flatMap((finding) => finding.rawFindingIds ?? [])).size,
+    ).toBe(2);
   });
 
   it("fails when every reviewer output is malformed but preserves every raw reference", async () => {
@@ -820,8 +623,98 @@ describe("DAG-backed pull request review runner", () => {
     });
     expect(rebuilt.plan?.files.map((file) => file.path)).toEqual(["a.ts"]);
     expect(rebuilt.result?.findings[0]).toMatchObject({ id: "F1", anchorValid: true });
+    expect(rebuilt.result?.provenance).toMatchObject({ v: 2, status: "accepted" });
+    expect(rebuilt.result?.provenance?.rawFindings).toHaveLength(1);
     expect(rebuilt.selectedFindingIds).toEqual(["F1"]);
     expect(rebuilt.metrics).toMatchObject({ reviewersSucceeded: 6, findings: 1 });
+  });
+
+  it("retains dismissed raw content and its reason during terminal reconstruction", async () => {
+    const f = fixture();
+    const service = serviceFor(f.artifactRoot, { synthesis: dismissedSynthesis() });
+    await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service,
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: () => {},
+    });
+    const reconstruction = (await Effect.runPromise(
+      service.reconstruct(),
+    )) as DagSessionReconstruction;
+    const rebuilt = await reconstructReviewDagState({
+      ctx: f.ctx,
+      service,
+      state: {
+        ...f.state,
+        dag: {
+          runId: reconstruction.graph.runId,
+          status: "running",
+          rawResultReferences: [],
+        },
+      },
+      reconstruction,
+    });
+    expect(rebuilt.result?.findings).toEqual([]);
+    expect(rebuilt.result?.provenance?.dismissals[0].reason).toBe(
+      "Not actionable for this change.",
+    );
+    const rawRecord = rebuilt.result?.provenance?.rawFindings[0];
+    expect(rawRecord).not.toHaveProperty("finding");
+    expect(
+      (await readVerifiedRawFinding(f.artifactRoot, reconstruction.graph.runId, rawRecord!)).finding
+        .problem,
+    ).toBe("The value is wrong.");
+  });
+
+  it("binds restart synthesis decoding to the protocol persisted before submission", async () => {
+    const f = fixture();
+    const saved: ReviewState[] = [];
+    let protocolWasPersistedAtSubmission = false;
+    const service = serviceFor(f.artifactRoot, { synthesis: legacySynthesis() }, () => {
+      protocolWasPersistedAtSubmission = saved.at(-1)?.dag?.synthesisProtocol === 2;
+    });
+    const current = await runReviewDag({
+      pi: piEvents(),
+      ctx: f.ctx,
+      service,
+      assignments,
+      deckPath: f.deckPath,
+      state: f.state,
+      save: (state) => saved.push(structuredClone(state)),
+    });
+    expect(saved[0].dag).toMatchObject({ submitted: false, synthesisProtocol: 2 });
+    expect(protocolWasPersistedAtSubmission).toBe(true);
+    expect(current.result?.provenance?.status).toBe("fallback");
+
+    const reconstruction = (await Effect.runPromise(
+      service.reconstruct(),
+    )) as DagSessionReconstruction;
+    const reconstruct = (synthesisProtocol: 2 | undefined | number) =>
+      reconstructReviewDagState({
+        ctx: f.ctx,
+        service,
+        state: {
+          ...f.state,
+          dag: {
+            runId: reconstruction.graph.runId,
+            status: "running",
+            rawResultReferences: [],
+            ...(synthesisProtocol === undefined ? {} : { synthesisProtocol }),
+          },
+        } as ReviewState,
+        reconstruction,
+      });
+
+    const marked = await reconstruct(2);
+    expect(marked.result?.provenance?.status).toBe("fallback");
+    const historical = await reconstruct(undefined);
+    expect(historical.result?.verdict).toBe("Historical exact-text summary.");
+    expect(historical.result?.provenance).toBeUndefined();
+    const unknown = await reconstruct(99);
+    expect(unknown.result?.provenance?.status).toBe("fallback");
   });
 
   it("records a failed run when the session graph append rejects submission", async () => {

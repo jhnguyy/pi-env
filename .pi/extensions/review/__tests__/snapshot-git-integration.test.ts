@@ -1,12 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
@@ -104,43 +97,47 @@ function fixture() {
 }
 
 describe("review snapshot Git integration", () => {
-  it("terminates the complete command process group on cancellation", async () => {
-    const root = temp("pi-review-process-");
-    const script = join(root, "git-process.mjs");
-    const parentPidPath = join(root, "parent.pid");
-    const childPidPath = join(root, "child.pid");
-    const node = resolveNodeCommand();
-    const childCode = `require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setInterval(() => {}, 1000);`;
-    writeFileSync(
-      script,
-      `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";\n` +
-        `spawn(${JSON.stringify(resolveNodeCommand())}, ["-e", ${JSON.stringify(childCode)}], { stdio: "ignore" });\n` +
-        `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid));\n` +
-        `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);\n`,
-    );
-    const controller = new AbortController();
-    const running = managedGitExec(node, [script], {
-      cwd: root,
-      signal: controller.signal,
-      timeout: 10_000,
-    });
-    await vi.waitFor(
-      () => {
-        expect(existsSync(parentPidPath)).toBe(true);
-        expect(existsSync(childPidPath)).toBe(true);
-      },
-      { timeout: 3_000 },
-    );
-    const parentPid = Number(readFileSync(parentPidPath, "utf8"));
-    const childPid = Number(readFileSync(childPidPath, "utf8"));
+  it.skipIf(process.platform === "win32")(
+    "terminates the complete command process group on cancellation",
+    async () => {
+      const root = temp("pi-review-process-");
+      const script = join(root, "git-process.mjs");
+      const parentPidPath = join(root, "parent.pid");
+      const childPidPath = join(root, "child.pid");
+      const node = resolveNodeCommand();
+      const childCode = `require("node:fs").writeFileSync(${JSON.stringify(childPidPath)}, String(process.pid)); setInterval(() => {}, 1000);`;
+      writeFileSync(
+        script,
+        `import { spawn } from "node:child_process"; import { writeFileSync } from "node:fs";\n` +
+          `spawn(${JSON.stringify(resolveNodeCommand())}, ["-e", ${JSON.stringify(childCode)}], { stdio: "ignore" });\n` +
+          `writeFileSync(${JSON.stringify(parentPidPath)}, String(process.pid));\n` +
+          `process.on("SIGTERM", () => {}); setInterval(() => {}, 1000);\n`,
+      );
+      const controller = new AbortController();
+      const running = managedGitExec(node, [script], {
+        cwd: root,
+        signal: controller.signal,
+        timeout: 10_000,
+      });
+      await vi.waitFor(
+        () => {
+          expect(existsSync(parentPidPath)).toBe(true);
+          expect(existsSync(childPidPath)).toBe(true);
+        },
+        { timeout: 3_000 },
+      );
+      const parentPid = Number(readFileSync(parentPidPath, "utf8"));
+      const childPid = Number(readFileSync(childPidPath, "utf8"));
 
-    controller.abort();
-    await expect(running).rejects.toBeDefined();
-    await vi.waitFor(() => {
-      expect(processIsAlive(parentPid)).toBe(false);
-      expect(processIsAlive(childPid)).toBe(false);
-    });
-  }, 10_000);
+      controller.abort();
+      await expect(running).rejects.toBeDefined();
+      await vi.waitFor(() => {
+        expect(processIsAlive(parentPid)).toBe(false);
+        expect(processIsAlive(childPid)).toBe(false);
+      });
+    },
+    10_000,
+  );
 
   it("prepares a fresh snapshot for divergent base and head histories", async () => {
     const f = fixture();
@@ -150,6 +147,23 @@ describe("review snapshot Git integration", () => {
     expect(git(snapshot.cache!.repoDir, "merge-base", f.metadata.baseOid, f.metadata.headOid)).toBe(
       f.commonOid,
     );
+  });
+
+  it("unregisters a created worktree when later snapshot persistence fails", async () => {
+    const f = fixture();
+    const reviewId = "snapshot-persistence-failure";
+    const artifactDir = join(mocked.agentDir, "pr-review", "artifacts", reviewId);
+    const worktree = join(mocked.agentDir, "pr-review", "worktrees", reviewId);
+    mkdirSync(join(artifactDir, "metadata.json"), { recursive: true });
+
+    await expect(
+      prepareResolvedSnapshot(f.localExec, mocked.agentDir, f.metadata, undefined, reviewId),
+    ).rejects.toBeDefined();
+
+    const repoDir = join(mocked.agentDir, "pr-review", "repos", "acme", "widgets");
+    expect(git(repoDir, "worktree", "list", "--porcelain")).not.toContain(worktree);
+    expect(existsSync(worktree)).toBe(false);
+    expect(existsSync(artifactDir)).toBe(false);
   });
 
   it("repairs a shallow cache that has both tips but no merge base", async () => {

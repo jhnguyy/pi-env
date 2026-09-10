@@ -44,11 +44,13 @@ interface SlotDef {
  *   [session-todos]   aboveEditor  — todo list visible above where you type
  *   ── input editor ──
  *   [work-tracker]    belowEditor  — git branch/dirty state
+ *   [subagents]       belowEditor  — one line per active background child
  *   ── footer: token stats · model ──
  */
 export const SLOTS = {
   "session-todos": { order: 1, placement: "aboveEditor" },
   "work-tracker":  { order: 1, placement: "belowEditor" },
+  "subagents":     { order: 2, placement: "belowEditor" },
 } as const satisfies Record<string, SlotDef>;
 
 export type SlotKey = keyof typeof SLOTS;

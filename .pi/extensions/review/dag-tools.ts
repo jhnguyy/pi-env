@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { Effect } from "effect";
-import { DagNodeStatus, type DagSessionReconstruction } from "../../../src/dag/index.js";
 import {
   registerAgentTools,
   unregisterAgentTools,
@@ -17,25 +16,23 @@ import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
 import { validatePlan } from "./core";
 import {
   preflightReviewEvidence,
-  ReviewEvidenceCoverageOutput,
   ReviewEvidenceResolutionFailure,
   type ReviewEvidenceResolverPayloadV1,
 } from "./evidence-resolver";
 import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
+  ConsolidationReviewV2Schema,
   PlanSchema,
-  SynthesisReviewSchema,
+  type ConsolidationReviewV2,
   type ReviewPlan,
-  type SynthesisReview,
-  validateSynthesisReviewShape,
+  validateConsolidationReviewV2Shape,
 } from "./schema";
-import { EvidenceResolverNode, type ReviewGraphToolNames } from "./review-graph";
-import { validSynthesisSources } from "./synthesis-provenance";
+import type { ReviewGraphToolNames } from "./review-graph";
+import { validConsolidationAccounting } from "./synthesis-provenance";
 import {
-  admitReviewerDossier,
-  readVerifiedReviewArtifact,
+  admitReviewArtifacts,
   serializeReviewerDossierContext,
-  type ReviewerDossier,
+  type ReviewAdmission,
 } from "./reviewer-dossier";
 
 export { readVerifiedReviewArtifact } from "./reviewer-dossier";
@@ -68,35 +65,10 @@ function boundedSubmission(value: unknown): string {
   return text;
 }
 
-async function evidenceDigestFor(
-  artifactRoot: string,
-  reconstruction: DagSessionReconstruction,
-): Promise<string | undefined> {
-  const node = reconstruction.state.nodes.find(
-    (candidate) => candidate.nodeId === EvidenceResolverNode.nodeId,
-  );
-  if (node?.status !== DagNodeStatus.Succeeded) return undefined;
-  const reference = node.outputs[ReviewEvidenceCoverageOutput];
-  if (!reference) return undefined;
-  try {
-    const artifact = await readVerifiedReviewArtifact(artifactRoot, reference, {
-      runId: reconstruction.graph.runId,
-      producerNodeId: EvidenceResolverNode.nodeId,
-      outputName: ReviewEvidenceCoverageOutput,
-    });
-    const value = JSON.parse(artifact.text) as { digest?: unknown };
-    return typeof value.digest === "string" && /^[0-9a-f]{64}$/u.test(value.digest)
-      ? value.digest
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export interface ReviewDagTools {
   readonly names: ReviewGraphToolNames;
   readonly registrations: readonly ExtToolRegistration[];
-  readonly reviewerDossier: (signal?: AbortSignal) => Promise<ReviewerDossier>;
+  readonly admission: (signal?: AbortSignal) => Promise<ReviewAdmission>;
   unregister(): void;
 }
 
@@ -118,19 +90,23 @@ export function registerReviewDagTools(options: {
   const planName = `submit_review_plan_${suffix}`;
   const referencesName = `review_result_refs_${suffix}`;
   const synthesisName = `submit_review_synthesis_${suffix}`;
-  let reviewerDossier: Promise<ReviewerDossier> | undefined;
-  const getReviewerDossier = (signal?: AbortSignal): Promise<ReviewerDossier> => {
-    reviewerDossier ??= Effect.runPromise(options.service.reconstruct(options.runId), {
-      signal,
-    }).then(async (reconstruction) =>
-      admitReviewerDossier({
-        artifactRoot: options.artifactRoot,
-        reconstruction,
-        expectedEvidenceDigest: await evidenceDigestFor(options.artifactRoot, reconstruction),
-      }),
-    );
-    return reviewerDossier;
-  };
+  let admission: Promise<ReviewAdmission> | undefined;
+  const admittedReview = (signal?: AbortSignal) =>
+    (admission ??= Effect.runPromise(
+      options.service
+        .reconstruct(options.runId)
+        .pipe(
+          Effect.flatMap((reconstruction) =>
+            Effect.tryPromise(() => admitReviewArtifacts(options.artifactRoot, reconstruction)),
+          ),
+        ),
+      { signal },
+    ).catch((cause) => {
+      admission = undefined;
+      throw cause;
+    }));
+  const getReviewerDossier = async (signal?: AbortSignal) =>
+    (await admittedReview(signal)).reviewers;
   const deckTool = customTool(
     {
       name: deckName,
@@ -195,7 +171,8 @@ export function registerReviewDagTools(options: {
     {
       name: referencesName,
       label: "Review Result References",
-      description: "Read admitted reviewer artifacts and explicit failed and malformed node names.",
+      description:
+        "Read admitted raw findings with stable IDs and explicit failed and malformed node names.",
       parameters: EmptySchema,
       async execute(_params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
@@ -217,22 +194,24 @@ export function registerReviewDagTools(options: {
     {
       name: synthesisName,
       label: "Submit Review Synthesis",
-      description: "Validate and return the canonical synthesized review with explicit coverage.",
-      parameters: SynthesisReviewSchema,
+      description: "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
+      parameters: ConsolidationReviewV2Schema,
       async execute(params, context) {
         if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const raw = params as SynthesisReview;
+        const raw = params as ConsolidationReviewV2;
         const dossier = await getReviewerDossier(context.signal);
-        const reviewers = dossier.admitted.map((artifact) => artifact.reviewer);
-        if (!validateSynthesisReviewShape(raw) || !validSynthesisSources(raw, reviewers))
+        if (
+          !validateConsolidationReviewV2Shape(raw) ||
+          !validConsolidationAccounting(raw, dossier.rawFindings)
+        )
           return {
             content: [
               txt(
-                "Synthesis provenance is invalid. Copy each finding exactly from every named source reviewer and retry.",
+                "Synthesis provenance is invalid. Account for every admitted raw finding ID exactly once in a retained group or a dismissal with a nonblank reason.",
               ),
             ],
             isError: true,
-            details: { ok: false, reason: "invalid-provenance" },
+            details: { ok: false, reason: "invalid-provenance-accounting" },
           };
         return {
           content: [txt(boundedSubmission(raw))],
@@ -261,7 +240,7 @@ export function registerReviewDagTools(options: {
   return {
     names,
     registrations,
-    reviewerDossier: getReviewerDossier,
+    admission: admittedReview,
     unregister: () => unregisterAgentTools(options.pi, registrations),
   };
 }

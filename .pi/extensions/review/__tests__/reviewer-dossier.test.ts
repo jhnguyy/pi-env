@@ -11,6 +11,8 @@ import {
 import {
   admitReviewerDossier,
   MaxReviewerDossierBytes,
+  readVerifiedRawFinding,
+  reviewerDossierContext,
   serializeReviewerDossierContext,
 } from "../reviewer-dossier";
 import {
@@ -152,6 +154,11 @@ describe("reviewer dossier admission contract", () => {
       ReviewerNodes.map((node) => node.nodeId),
     );
     expect(dossier.raw.map((item) => item.reference)).toHaveLength(ReviewerNodes.length);
+    expect(dossier.rawFindings).toEqual([]);
+    const context = reviewerDossierContext(dossier);
+    expect(context.succeeded[0]).not.toHaveProperty("text");
+    expect(context.verifiedReferences).toHaveLength(ReviewerNodes.length);
+    expect(serializeReviewerDossierContext(dossier)).not.toContain('"text"');
     expect(dossier.failed).toEqual([]);
     expect(dossier.malformed).toEqual([]);
   });
@@ -173,6 +180,7 @@ describe("reviewer dossier admission contract", () => {
       "review-maintainability",
     ]);
     expect(dossier.raw).toHaveLength(ReviewerNodes.length);
+    expect(dossier.rawFindings).toEqual([]);
   });
 
   it("fails closed for tampered artifacts and wrong provenance", async () => {
@@ -190,7 +198,52 @@ describe("reviewer dossier admission contract", () => {
     expect(dossier.raw.map((item) => item.nodeId)).not.toContain("review-intent");
   });
 
-  it("degrades excess valid reviewers instead of failing aggregate admission", async () => {
+  it("lazily reads a later raw occurrence and refuses mismatched provenance", async () => {
+    const findings = [
+      {
+        severity: "medium",
+        impact: "medium",
+        problem: "First.",
+        consequence: "Consequence.",
+        suggestedFix: "Fix.",
+      },
+      {
+        severity: "serious",
+        impact: "high",
+        problem: "Later finding.",
+        consequence: "Consequence.",
+        suggestedFix: "Fix.",
+      },
+    ];
+    const f = await fixture({
+      "review-correctness": { text: output("correctness", { findings }) },
+    });
+    const dossier = await admitReviewerDossier({
+      artifactRoot: f.root,
+      reconstruction: f.reconstruction,
+      expectedEvidenceDigest: Digest,
+    });
+    const later = dossier.rawFindings.find(
+      (record) => record.role === "correctness" && record.index === 1,
+    )!;
+    const inspected = await readVerifiedRawFinding(f.root, f.reconstruction.graph.runId, later);
+    expect(inspected.finding.problem).toBe("Later finding.");
+    expect(inspected).not.toHaveProperty("artifact");
+
+    const mutations = [
+      { ...later, role: "intent" as const },
+      { ...later, index: 99 },
+      { ...later, evidenceDigest: "0".repeat(64) },
+      { ...later, artifact: { ...later.artifact, outputName: "wrong" } },
+      { ...later, artifact: { ...later.artifact, digest: "0".repeat(64) } },
+    ];
+    for (const mutation of mutations)
+      await expect(
+        readVerifiedRawFinding(f.root, f.reconstruction.graph.runId, mutation),
+      ).rejects.toThrow();
+  });
+
+  it("keeps the bounded raw-finding dossier without transcript-driven duplicate inflation", async () => {
     const long = `x${"\n".repeat(19_998)}`;
     const findings = Array.from({ length: 2 }, () => ({
       severity: "medium",
@@ -209,10 +262,11 @@ describe("reviewer dossier admission contract", () => {
       reconstruction: f.reconstruction,
       expectedEvidenceDigest: Digest,
     });
-    expect(dossier.admitted.length).toBeGreaterThan(0);
-    expect(dossier.admitted.length).toBeLessThan(ReviewerNodes.length);
-    expect(dossier.malformed).toHaveLength(ReviewerNodes.length - dossier.admitted.length);
-    expect(() => serializeReviewerDossierContext(dossier)).not.toThrow();
+    expect(dossier.admitted).toHaveLength(ReviewerNodes.length);
+    expect(dossier.malformed).toEqual([]);
+    const serialized = serializeReviewerDossierContext(dossier);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(MaxReviewerDossierBytes);
+    expect(serialized).not.toContain('"text"');
   });
 
   it("applies the tool limit after JSON escaping", () => {
@@ -226,6 +280,22 @@ describe("reviewer dossier admission contract", () => {
             reference: {} as any,
             text,
             reviewer: JSON.parse(output("correctness")),
+          },
+        ],
+        rawFindings: [
+          {
+            id: `R-${"a".repeat(64)}`,
+            role: "correctness",
+            evidenceDigest: Digest,
+            index: 0,
+            artifact: {} as any,
+            finding: {
+              severity: "medium",
+              impact: "medium",
+              problem: text,
+              consequence: text,
+              suggestedFix: text,
+            },
           },
         ],
         raw: [],

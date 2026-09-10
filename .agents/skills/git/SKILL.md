@@ -1,6 +1,6 @@
 ---
 name: git
-description: "Manages Git changes in dedicated worktrees from branch setup through commit, pull request preparation, and post-merge cleanup."
+description: "Prepares and manages changes in Git repositories, including instruction discovery, dedicated worktrees, commits, pull requests, publishing, and cleanup. Use before modifying a Git repository or performing branch, commit, push, pull-request, merge, or cleanup work."
 ---
 
 # Git Change Workflow
@@ -9,7 +9,7 @@ Use when starting, resuming, committing, publishing, or cleaning up work in a Gi
 
 ## Prepare
 
-- Read the repository instructions first. Follow its rules for the base branch, branch names, worktrees, validation, pushes, merges, and pull requests.
+- Read the repository instructions before changing files. Read `README.md` and `CONTRIBUTING.md` when they exist. Follow linked and area-specific instructions that apply to the change.
 - Determine the base branch from the repository instructions or the remote default branch. Ask if neither source identifies it.
 - Reserve the base worktree for the base branch. Do not create, switch to, or edit a feature branch there.
 

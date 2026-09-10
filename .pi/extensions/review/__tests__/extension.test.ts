@@ -9,8 +9,9 @@ import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { clearInMemoryStateForTests, restore } from "../index";
 import { formatPullRequestContext } from "../context";
-import { setManagedGitExecForTests } from "../snapshot";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import { setManagedGitExecForTests } from "../snapshot";
+import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
   registerDagRuntimeService,
   resetDagRuntimeServiceRegistryForTests,
@@ -34,13 +35,6 @@ function tempRoot(): string {
   temps.push(dir);
   mocked.agentDir = dir;
   return dir;
-}
-function custom(state: ReviewState) {
-  return {
-    type: "custom",
-    customType: REVIEW_ENTRY_TYPE,
-    data: { reviewId: state.snapshot.id, state },
-  };
 }
 function sampleState(id: string, selected: string[]): ReviewState {
   const root = mocked.agentDir || tempRoot();
@@ -680,6 +674,45 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
+  it("does not append stale cleanup completion after blocked removal rotates sessions", async () => {
+    tempRoot();
+    const original = sampleState("r", []);
+    const replacement = { ...structuredClone(original), preface: "replacement" };
+    mkdirSync(original.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(original.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(original.snapshot.artifactDir, { recursive: true });
+    const pi = extensionPi();
+    const notes: string[] = [];
+    let releaseRemoval!: () => void;
+    const removalBlocked = new Promise<void>((resolve) => {
+      releaseRemoval = resolve;
+    });
+    let ownedSignal: AbortSignal | undefined;
+    pi.exec = async (_cmd: string, args: string[], options: { signal?: AbortSignal }) => {
+      ownedSignal = options.signal;
+      if (args[1] === "remove") await removalBlocked;
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const runtime = (sessionId: string, state: ReviewState) => ({
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getSessionDir: () => mocked.agentDir,
+        getBranch: () => [custom(state)],
+      },
+      ui: { notify: (message: string) => notes.push(message) },
+    });
+    pi.handlers.session_start?.({}, runtime("original", original));
+    const cleaning = pi.command("pr cleanup r", runtime("original", original));
+    await vi.waitFor(() => expect(ownedSignal).toBeDefined());
+    pi.handlers.session_tree?.({}, runtime("replacement", replacement));
+    expect(ownedSignal?.aborted).toBe(true);
+    releaseRemoval();
+    await cleaning;
+    expect(pi.appended).toHaveLength(0);
+    expect(notes.at(-1)).toContain("No cleanup state was appended");
+    expect(existsSync(original.snapshot.artifactDir)).toBe(false);
+  });
+
   it("creates an approval-required draft plan from selected findings", async () => {
     const root = tempRoot();
     const state = sampleState("r", ["F1"]);
@@ -702,18 +735,21 @@ describe("review extension pull request surface", () => {
     restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
     const pi = extensionPi();
     const notes: string[] = [];
-    await pi.command("pr edit F1", {
+    const runtime = {
+      cwd: mocked.agentDir,
+      hasUI: true,
+      sessionManager: { getSessionId: () => "parent", getBranch: () => [custom(state)] },
       ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
-    } as any);
-    await pi.command("pr preface", {
-      ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },
-    } as any);
+    } as any;
+    pi.handlers.session_start({}, runtime);
+    await pi.command("pr edit r F1", runtime);
+    await pi.command("pr preface r", runtime);
     expect(notes).toContain("Edit cancelled.");
     expect(notes).toContain("Preface edit cancelled.");
     expect(pi.appended).toHaveLength(0);
   });
 
-  it("retries a failed preparation for an identical create", async () => {
+  it("retries a failed snapshot preparation with the same review identity", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "pr-review", "artifacts"), { recursive: true });
     const pi = extensionPi();
@@ -776,14 +812,13 @@ describe("review extension pull request surface", () => {
     expect(pi.appended).toHaveLength(2);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
     expect(pi.appended[0]?.[1].state.snapshot.diffHash).toBe("");
-    expect(pi.appended.at(-1)?.[1].state).toMatchObject({
-      preparation: {
-        status: "failed",
-        stage: "snapshot",
-        code: "fetch_failed",
-        worktreeCleaned: true,
-      },
+    expect(pi.appended.at(-1)?.[1].state.preparation).toMatchObject({
+      status: "failed",
+      stage: "snapshot",
+      code: "fetch_failed",
+      worktreeCleaned: true,
     });
+
     failFetch = false;
     const second = await pi.tools[0].execute(
       "2",
@@ -800,17 +835,80 @@ describe("review extension pull request surface", () => {
     expect(
       pi.appended.some(
         (entry: any[]) =>
-          entry[1]?.state.snapshot.id === result.details.reviewId && entry[1]?.state.cleaned === true,
+          entry[1]?.state.snapshot.id === result.details.reviewId &&
+          entry[1]?.state.cleaned === true,
       ),
     ).toBe(true);
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
-    const notes: string[] = [];
-    await pi.command("pr rerun", {
-      ...ctx,
-      ui: { notify: (message: string) => notes.push(message) },
+
+    const third = await pi.tools[0].execute(
+      "3",
+      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(third).toMatchObject({
+      isError: true,
+      details: { reviewId: result.details.reviewId, stage: "dag-service", reused: true },
     });
-    expect(notes.at(-1)).toContain("failed during dag-service");
-    expect(notes.at(-1)).not.toContain(`Review ${result.details.reviewId} failed`);
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+  });
+
+  it("creates a new snapshot identity when the pinned base changes", async () => {
+    const root = tempRoot();
+    const pi = extensionPi();
+    const calls: string[][] = [];
+    let baseOid = "base-one";
+    pi.exec = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+        mkdirSync(args[3], { recursive: true });
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/o/r/pull/1",
+            baseRefName: "trunk",
+            baseRefOid: baseOid,
+            headRefOid: "head",
+          }),
+          stderr: "",
+        };
+      if (args[0] === "rev-parse")
+        return {
+          code: 0,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? baseOid : "head"}\n`,
+          stderr: "",
+        };
+      if (args[0] === "merge-base") return { code: 0, stdout: `${baseOid}\n`, stderr: "" };
+      if (args[0] === "diff" && args.includes("--name-status"))
+        return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
+      return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent" },
+      modelRegistry: { getAvailable: () => [] },
+    };
+    let toolCall = 0;
+    const create = () =>
+      pi.tools[0].execute(
+        String(++toolCall),
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+    const first = await create();
+    baseOid = "base-two";
+    const second = await create();
+
+    expect(first.details.stage).toBe("dag-service");
+    expect(second.details.stage).toBe("dag-service");
+    expect(second.details.reviewId).not.toBe(first.details.reviewId);
+    expect(second.details.reused).toBe(false);
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
   });
 

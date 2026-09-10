@@ -5,12 +5,14 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runResolvedSubagentEffect } from "../execute";
+import { runResolvedSubagentEffect, runSubagentEffect } from "../execute";
 
 const captured = vi.hoisted(() => ({
   prompts: undefined as any,
   context: undefined as any,
   config: undefined as any,
+  multiTurn: false,
+  stopAfterFirst: undefined as boolean | undefined,
 }));
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
   const actual = await importOriginal<typeof AgentCore>();
@@ -21,7 +23,33 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
       captured.context = context;
       captured.config = config;
       return {
-        async *[Symbol.asyncIterator]() {},
+        async *[Symbol.asyncIterator]() {
+          if (!captured.multiTurn) return;
+          yield {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "working" }],
+              timestamp: Date.now(),
+              model: "m",
+              stopReason: "toolUse",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+            },
+          };
+          captured.stopAfterFirst = captured.config.shouldStopAfterTurn();
+          if (captured.stopAfterFirst) return;
+          yield {
+            type: "message_end",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "done" }],
+              timestamp: Date.now(),
+              model: "m",
+              stopReason: "stop",
+              usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+            },
+          };
+        },
         async result() {
           return [];
         },
@@ -35,6 +63,8 @@ afterEach(() => {
   captured.prompts = undefined;
   captured.context = undefined;
   captured.config = undefined;
+  captured.multiTurn = false;
+  captured.stopAfterFirst = undefined;
 });
 
 describe("resolved subagent boundary", () => {
@@ -73,4 +103,5 @@ describe("resolved subagent boundary", () => {
     expect(captured.context.tools).toEqual([tool]);
     expect(captured.config.sessionId).toBe(result.details.sessionId);
   });
+
 });

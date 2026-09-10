@@ -16,28 +16,10 @@ import { LspBackend, findBinary } from "../backend";
 // ─── isSupported ──────────────────────────────────────────────────────────────
 
 describe("isSupported", () => {
-  // LSP-backed extensions
+  // Representative LSP and format-backed extensions; config and backend tests cover families.
   it("returns true for .ts files", () => expect(isSupported("foo.ts")).toBe(true));
-  it("returns true for .tsx files", () => expect(isSupported("foo.tsx")).toBe(true));
-  it("returns true for .js files", () => expect(isSupported("foo.js")).toBe(true));
-  it("returns true for .jsx files", () => expect(isSupported("foo.jsx")).toBe(true));
-  it("returns true for .mts files", () => expect(isSupported("foo.mts")).toBe(true));
-  it("returns true for .cts files", () => expect(isSupported("foo.cts")).toBe(true));
-  it("returns true for .mjs files", () => expect(isSupported("foo.mjs")).toBe(true));
-  it("returns true for .cjs files", () => expect(isSupported("foo.cjs")).toBe(true));
-  it("returns true for .sh files", () => expect(isSupported("foo.sh")).toBe(true));
-  it("returns true for .bash files", () => expect(isSupported("foo.bash")).toBe(true));
-  it("returns true for .zsh files", () => expect(isSupported("foo.zsh")).toBe(true));
-  it("returns true for .ksh files", () => expect(isSupported("foo.ksh")).toBe(true));
-  it("returns true for .nix files", () => expect(isSupported("foo.nix")).toBe(true));
-  // Format-backed extensions
   it("returns true for .hcl files", () => expect(isSupported("foo.hcl")).toBe(true));
-  it("returns true for .tf files", () => expect(isSupported("foo.tf")).toBe(true));
-  it("returns true for .tfvars files", () => expect(isSupported("foo.tfvars")).toBe(true));
-  // Unsupported
-  it("returns false for .md files", () => expect(isSupported("foo.md")).toBe(false));
-  it("returns false for .py files", () => expect(isSupported("foo.py")).toBe(false));
-  it("returns false for files with no extension", () => expect(isSupported("Makefile")).toBe(false));
+  it("returns false for unsupported extensions", () => expect(isSupported("foo.md")).toBe(false));
   it("works with absolute paths", () => expect(isSupported("/home/user/project/src/index.ts")).toBe(true));
 });
 

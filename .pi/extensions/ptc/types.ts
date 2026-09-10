@@ -53,6 +53,39 @@ export function buildSubprocessEnv(): Record<string, string | undefined> {
  */
 export type DispatchFn = (tool: string, params: Record<string, unknown>) => Promise<string>;
 
+export const PtcAction = {
+  Inspect: "inspect",
+  Run: "run",
+} as const;
+export type PtcAction = (typeof PtcAction)[keyof typeof PtcAction];
+
+export const PtcToolFailureClass = {
+  Blocked: "blocked-tool",
+  Unavailable: "unavailable-tool",
+  Inactive: "inactive-tool",
+  Unknown: "unknown-tool",
+  Nested: "nested-tool",
+  UserScript: "user-script",
+} as const;
+export type PtcToolFailureClass =
+  (typeof PtcToolFailureClass)[keyof typeof PtcToolFailureClass];
+
+export interface PtcToolFailure {
+  readonly class: PtcToolFailureClass;
+  readonly tool?: string;
+  readonly message: string;
+}
+
+export class PtcToolDispatchError extends Error {
+  readonly failure: PtcToolFailure;
+
+  constructor(failure: PtcToolFailure) {
+    super(failure.message);
+    this.name = "PtcToolDispatchError";
+    this.failure = failure;
+  }
+}
+
 // ─── Blocklist ────────────────────────────────────────────────────────────────
 
 /**
@@ -63,22 +96,20 @@ export type DispatchFn = (tool: string, params: Record<string, unknown>) => Prom
  */
 export const BLOCKED_TOOLS = new Set<string>([
   "ptc",           // self — prevent recursion
-  "subagent",      // in-process agent loops
-  "subagent_start", // long-running process management
-  "subagent_job",  // long-running process management
+  "subagent",      // in-process agent loops and background job management
   "jit_catch",     // spawns a subagent internally
   "skill_build",   // spawns a subagent internally
 ]);
 
 // ─── RPC message types ────────────────────────────────────────────────────────
 
-/** Messages written to stdout by the subprocess (read by parent RpcBridge). */
+/** Messages written to fd 3 by the subprocess (read by parent RpcBridge). */
 export type RpcOutbound =
   | { type: "tool_call"; id: string; tool: string; params: Record<string, unknown> }
-  | { type: "complete"; output: string }
-  | { type: "error"; message: string; stack?: string };
+  | { type: "complete"; output: string; outputTruncated?: boolean }
+  | { type: "error"; message: string; stack?: string; failure?: PtcToolFailure };
 
 /** Messages written to subprocess stdin by the parent RpcBridge. */
 export type RpcInbound =
   | { type: "tool_result"; id: string; result: string }
-  | { type: "tool_error"; id: string; error: string };
+  | { type: "tool_error"; id: string; failure: PtcToolFailure };
