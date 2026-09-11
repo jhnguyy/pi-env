@@ -9,17 +9,19 @@ export interface ParentSessionEntryStore {
   readonly appendCustomEntry: (customType: string, data?: unknown) => string;
 }
 
-function isDagSessionWrapper(
-  entry: unknown,
-): entry is { readonly data?: unknown } {
+function isDagSessionWrapper(entry: unknown): entry is { readonly data?: unknown } {
   if (typeof entry !== "object" || entry === null) return false;
   const wrapper = entry as { readonly type?: unknown; readonly customType?: unknown };
   return wrapper.type === "custom" && wrapper.customType === DagSessionEntryType;
 }
 
-export function makeDagSessionStore(manager: ParentSessionEntryStore): DagSessionStore {
+export function createDagSessionStore(manager: ParentSessionEntryStore): DagSessionStore {
   return Object.freeze({
-    read: () => manager.getBranch().filter(isDagSessionWrapper).map((entry) => entry.data),
+    read: () =>
+      manager
+        .getBranch()
+        .filter(isDagSessionWrapper)
+        .map((entry) => entry.data),
     append: (entry: DagSessionEntry) => {
       manager.appendCustomEntry(DagSessionEntryType, entry);
     },

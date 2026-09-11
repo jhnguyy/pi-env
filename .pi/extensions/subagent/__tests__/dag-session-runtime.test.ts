@@ -6,51 +6,17 @@ import { Cause, Effect, Fiber, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtToolRegistration } from "../../_shared/agent-tools";
 
-const state = vi.hoisted(() => ({
+const state = {
   adapterCalls: [] as Array<{
     ctx: unknown;
     tools: unknown;
     artifactRoot: string;
-    options: Record<string, unknown>;
+    options: Parameters<DagSubagentExecutorRegistryFactory>[4];
   }>,
   executor: undefined as (() => Effect.Effect<Record<string, unknown>>) | undefined,
   telemetry: undefined as Record<string, unknown> | undefined,
   lifecycle: [] as string[],
-}));
-
-vi.mock("../../../../src/telemetry/tooling", () => ({
-  makeToolingTelemetryRuntime: vi.fn(() =>
-    Effect.sync(() => {
-      const telemetry = {
-        diagnostics: {
-          span: (_name: string, _attributes: unknown, effect: unknown) => effect,
-          annotate: () => Effect.void,
-        },
-        provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
-        disposeEffect: Effect.sync(() => state.lifecycle.push("telemetry-disposed")),
-      };
-      state.telemetry = telemetry;
-      return telemetry;
-    }),
-  ),
-}));
-
-vi.mock("../dag-runtime", () => ({
-  makeDagSubagentExecutorRegistry: vi.fn(
-    (
-      ctx: unknown,
-      tools: unknown,
-      artifactRoot: string,
-      _sessionGeneration: string,
-      options: Record<string, unknown>,
-    ) => {
-      state.adapterCalls.push({ ctx, tools, artifactRoot, options });
-      return {
-        lookup: () => Effect.succeed(state.executor),
-      };
-    },
-  ),
-}));
+};
 
 import {
   DagExecutorKind,
@@ -70,7 +36,43 @@ import {
   type DagRuntimeServiceRegistration,
 } from "../../_shared/dag-runtime-service";
 import { SubagentJobManager } from "../jobs";
-import { SubagentSessionRuntime } from "../session-runtime";
+import type { DagSubagentExecutorRegistryFactory } from "../dag-session-runtime";
+import {
+  SubagentSessionRuntime,
+  type SubagentSessionRuntimeDependencies,
+} from "../session-runtime";
+
+const telemetryRuntimeFactory: NonNullable<
+  SubagentSessionRuntimeDependencies["telemetryRuntimeFactory"]
+> = () =>
+  Effect.sync(() => {
+    const telemetry = {
+      diagnostics: {
+        span: (_name: string, _attributes: unknown, effect: any) => effect,
+        annotate: () => Effect.void,
+      },
+      provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
+      disposeEffect: Effect.sync(() => state.lifecycle.push("telemetry-disposed")),
+    };
+    state.telemetry = telemetry;
+    return telemetry;
+  });
+
+const dagExecutorRegistryFactory: DagSubagentExecutorRegistryFactory = (
+  ctx,
+  tools,
+  artifactRoot,
+  _sessionGeneration,
+  options,
+) => {
+  state.adapterCalls.push({ ctx, tools, artifactRoot, options });
+  return { lookup: () => Effect.succeed(state.executor) };
+};
+
+const runtimeDependencies: SubagentSessionRuntimeDependencies = {
+  telemetryRuntimeFactory,
+  dagExecutorRegistryFactory,
+};
 
 const tempDirectories: string[] = [];
 
@@ -153,7 +155,7 @@ describe("session-owned DAG runtime composition", () => {
     const pi = makePi();
     const ctx = makeContext(cwd);
     const tools = new Map<string, ExtToolRegistration>();
-    const runtime = new SubagentSessionRuntime(pi, tools);
+    const runtime = new SubagentSessionRuntime(pi, tools, runtimeDependencies);
 
     await runtime.startSession(ctx);
     const registrations: DagRuntimeServiceRegistration[] = [];
@@ -242,7 +244,7 @@ describe("session-owned DAG runtime composition", () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-append-failure-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, new Map());
+    const runtime = new SubagentSessionRuntime(pi, new Map(), runtimeDependencies);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(pi, (active) => {
@@ -290,7 +292,7 @@ describe("session-owned DAG runtime composition", () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-shutdown-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, new Map());
+    const runtime = new SubagentSessionRuntime(pi, new Map(), runtimeDependencies);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(

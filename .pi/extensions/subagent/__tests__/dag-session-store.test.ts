@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { DagSessionEntryType, type DagSessionEntry } from "../../../../src/dag/index.js";
-import { makeDagSessionStore, persistedDagRunIds } from "../dag-session-store";
+import { createDagSessionStore, persistedDagRunIds } from "../dag-session-store";
 
 const entry = {
   v: 1,
@@ -16,7 +16,7 @@ const entry = {
 describe("DAG parent session store", () => {
   it("isolates DAG entry wrappers from the DAG session layer", () => {
     const appendCustomEntry = vi.fn(() => "entry-id");
-    const store = makeDagSessionStore({
+    const store = createDagSessionStore({
       getBranch: () => [
         { type: "custom", customType: "other", data: { runId: "other" } },
         { type: "custom", customType: DagSessionEntryType, data: entry },
@@ -30,7 +30,7 @@ describe("DAG parent session store", () => {
   });
 
   it("derives claimed run IDs from session-native entries", () => {
-    const store = makeDagSessionStore({
+    const store = createDagSessionStore({
       getBranch: () => [
         { type: "custom", customType: DagSessionEntryType, data: entry },
         { type: "custom", customType: DagSessionEntryType, data: null },

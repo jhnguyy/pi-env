@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   DagExecutorKind,
   buildDagSubagentPrompt,
@@ -10,9 +10,8 @@ import {
   type DagSubagentRuntimeRequest,
 } from "../../../../src/dag/index.js";
 import { ToolCapability } from "../types";
-import type * as Execute from "../execute";
 
-const shared = vi.hoisted(() => ({
+const shared = {
   calls: [] as any[],
   result: {
     details: {
@@ -21,22 +20,11 @@ const shared = vi.hoisted(() => ({
       turnLimitExceeded: false,
     },
   } as any,
-}));
-
-vi.mock("../execute", async (importOriginal) => {
-  const actual = await importOriginal<typeof Execute>();
-  return {
-    ...actual,
-    runResolvedSubagentEffect: (run: unknown, _ctx: unknown, options: unknown) => {
-      shared.calls.push({ run, options });
-      return Effect.succeed(shared.result);
-    },
-  };
-});
+};
 
 import {
   DagSubagentExecutorKey,
-  makeDagSubagentExecutorRegistry,
+  createDagSubagentExecutorRegistry,
   makeDagSubagentRuntime,
 } from "../dag-runtime";
 
@@ -92,8 +80,15 @@ async function failure(effect: Effect.Effect<string, unknown>): Promise<any> {
   return Effect.runPromise(Effect.flip(effect));
 }
 
+const executeResolved: NonNullable<
+  Parameters<typeof makeDagSubagentRuntime>[2]["executeResolved"]
+> = (run, _ctx, options) => {
+  shared.calls.push({ run, options });
+  return Effect.succeed(shared.result);
+};
+
 function adapter(ctx: any, tools: ReadonlyMap<string, any> = new Map()) {
-  return makeDagSubagentRuntime(ctx, tools, {});
+  return makeDagSubagentRuntime(ctx, tools, { executeResolved });
 }
 
 describe("DAG shared subagent runtime adapter", () => {
@@ -127,9 +122,9 @@ describe("DAG shared subagent runtime adapter", () => {
       },
     };
 
-    await expect(
-      Effect.runPromise(runtime.run(request(cwd, { maxTurns: 1 }))),
-    ).resolves.toContain('"role":"correctness"');
+    await expect(Effect.runPromise(runtime.run(request(cwd, { maxTurns: 1 })))).resolves.toContain(
+      '"role":"correctness"',
+    );
     expect(shared.calls).toHaveLength(1);
   });
 
@@ -208,6 +203,7 @@ describe("DAG shared subagent runtime adapter", () => {
     const ctx = context(parent, { provider: "test", id: "model", contextWindow: 32_000 });
     const runtime = makeDagSubagentRuntime(ctx, new Map(), {
       workspaceRootForRun: (runId) => (runId === "run" ? managed : undefined),
+      executeResolved,
     });
 
     await expect(Effect.runPromise(runtime.run(request(managed)))).resolves.toBe("complete result");
@@ -260,7 +256,7 @@ describe("DAG shared subagent runtime adapter", () => {
   it("registers only the versioned subagent executor key", async () => {
     const cwd = root();
     const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
-    const registry = makeDagSubagentExecutorRegistry(ctx, new Map(), cwd, "generation", {});
+    const registry = createDagSubagentExecutorRegistry(ctx, new Map(), cwd, "generation", {});
 
     await expect(
       Effect.runPromise(registry.lookup(DagExecutorKind.Subagent, DagSubagentExecutorKey)),

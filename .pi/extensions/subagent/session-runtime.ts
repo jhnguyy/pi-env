@@ -20,8 +20,13 @@ import {
   SubagentAdmissionError,
   type SubagentRunSupervisor,
 } from "./control";
-import { DagSessionRuntime } from "./dag-session-runtime";
-import { buildErrorDetails, runSubagentEffect, SUBAGENT_TELEMETRY_SERVICE_NAME } from "./execute";
+import { DagSessionRuntime, type DagSubagentExecutorRegistryFactory } from "./dag-session-runtime";
+import {
+  buildErrorDetails,
+  runSubagentEffect,
+  SUBAGENT_TELEMETRY_SERVICE_NAME,
+  type RunSubagentOptions,
+} from "./execute";
 import { SubagentJobManager, type SubagentJob } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
 import {
@@ -32,6 +37,12 @@ import {
   type SubagentSessionState as SubagentSessionStateValue,
 } from "./types";
 import { formatUsageCompact, SubagentUsageLedger } from "./usage";
+
+export interface SubagentSessionRuntimeDependencies {
+  readonly agentLoop?: RunSubagentOptions["agentLoop"];
+  readonly telemetryRuntimeFactory?: typeof makeToolingTelemetryRuntime;
+  readonly dagExecutorRegistryFactory?: DagSubagentExecutorRegistryFactory;
+}
 
 const ACTIVE_JOB_STATUSES = new Set<SubagentJobStatus>([
   SubagentJobStatus.Queued,
@@ -89,6 +100,7 @@ export class SubagentSessionRuntime {
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+    private readonly dependencies: SubagentSessionRuntimeDependencies = {},
   ) {}
 
   get state(): SubagentSessionStateValue {
@@ -112,6 +124,7 @@ export class SubagentSessionRuntime {
           supervisor: this.supervisor,
           telemetryRuntime:
             this.sessionState === SubagentSessionState.Active ? this.telemetryRuntime : undefined,
+          agentLoop: this.dependencies.agentLoop,
         }),
         (error) => {
           const reason =
@@ -136,7 +149,7 @@ export class SubagentSessionRuntime {
       if (generation !== this.lifecycleGeneration) return false;
 
       const nextRuntime = await Effect.runPromise(
-        makeToolingTelemetryRuntime({
+        (this.dependencies.telemetryRuntimeFactory ?? makeToolingTelemetryRuntime)({
           env: process.env,
           serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
         }),
@@ -164,6 +177,7 @@ export class SubagentSessionRuntime {
         config,
         supervisor,
         (jobs) => this.updateJobStatusSlot(jobs, ctx),
+        this.dependencies.agentLoop,
       );
       let dagRuntime: DagSessionRuntime;
       try {
@@ -172,6 +186,8 @@ export class SubagentSessionRuntime {
           supervisor,
           telemetryRuntime: nextRuntime,
           ledger: this.ledger,
+          executorRegistryFactory: this.dependencies.dagExecutorRegistryFactory,
+          agentLoop: this.dependencies.agentLoop,
         });
       } catch (cause) {
         await disposeSubagentRunSupervisor(sessionId);

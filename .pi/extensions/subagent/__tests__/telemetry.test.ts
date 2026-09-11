@@ -1,58 +1,56 @@
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
-import type * as AgentCore from "@earendil-works/pi-agent-core";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { runSubagent, type RunSubagentOptions } from "../execute";
 
-const state = vi.hoisted(() => ({
+const state = {
   output: "",
   blockUntilAbort: false,
   onStart: undefined as (() => void) | undefined,
-}));
+};
 
-vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof AgentCore>();
-  return {
-    ...actual,
-    agentLoop: (_prompts: unknown, _context: unknown, _config: unknown, signal: AbortSignal) => ({
-      async *[Symbol.asyncIterator]() {
-        if (state.blockUntilAbort) {
-          await new Promise<void>((_resolve, reject) => {
-            state.onStart?.();
-            signal.addEventListener("abort", () => reject(new Error("cancelled")), {
-              once: true,
-            });
+const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (
+  _prompts,
+  _context,
+  _config,
+  signal,
+) =>
+  ({
+    async *[Symbol.asyncIterator]() {
+      if (state.blockUntilAbort) {
+        await new Promise<void>((_resolve, reject) => {
+          state.onStart?.();
+          signal!.addEventListener("abort", () => reject(new Error("cancelled")), {
+            once: true,
           });
-        }
-        yield {
-          type: "message_end",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: state.output }],
-            timestamp: Date.now(),
-            model: "test-model",
-            stopReason: "stop",
-            usage: {
-              input: 11,
-              output: 13,
-              cacheRead: 0,
-              cacheWrite: 0,
-              cost: { total: 17 },
-            },
+        });
+      }
+      yield {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: state.output }],
+          timestamp: Date.now(),
+          model: "test-model",
+          stopReason: "stop",
+          usage: {
+            input: 11,
+            output: 13,
+            cacheRead: 0,
+            cacheWrite: 0,
+            cost: { total: 17 },
           },
-        };
-        yield { type: "turn_end" };
-      },
-      async result() {
-        return [];
-      },
-    }),
-  };
-});
-
-const { runSubagent } = await import("../execute");
+        },
+      };
+      yield { type: "turn_end" };
+    },
+    async result() {
+      return [];
+    },
+  }) as any;
 
 const roots: string[] = [];
 afterEach(() => {
@@ -127,6 +125,7 @@ describe("subagent tooling telemetry", () => {
           PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318",
         },
         telemetryExporter: inMemoryExporter(finished),
+        agentLoop,
       },
     );
 
@@ -192,7 +191,7 @@ describe("subagent tooling telemetry", () => {
       },
       context,
       tools,
-      { env: {}, signal: controller.signal },
+      { env: {}, signal: controller.signal, agentLoop },
     );
     await agentLoopStarted;
     controller.abort();
@@ -217,7 +216,7 @@ describe("subagent tooling telemetry", () => {
       },
       context,
       tools,
-      { env: {}, telemetryExporter: inMemoryExporter(finished) },
+      { env: {}, telemetryExporter: inMemoryExporter(finished), agentLoop },
     );
 
     expect(finished).toEqual([]);
