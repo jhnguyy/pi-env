@@ -10,7 +10,7 @@ import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benc
 import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, findingId, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
-import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
+import { AnalyzerName, AnalyzerRunError, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
 import { createAnalysisProjectEffect, createProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
 import { analyzerDescriptor, projectRequirement, projectSourceSelection } from "../registry.js";
 import { childHeapLimitMb, ProcessServiceLive, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
@@ -368,7 +368,10 @@ describe("analyze contracts", () => {
       cwd: fixtureRoot(), scope: allScope, maxMemoryMb: 256, beforeBundleEntry: () => true,
     }).pipe(Effect.provide(ProcessServiceLive))));
     expect(outcome._tag).toBe("Failure");
-    if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
+    if (outcome._tag === "Failure") {
+      expect(outcome.failure).toBeInstanceOf(AnalyzerRunError);
+      expect(outcome.failure.analyzer).toBe(AnalyzerName.Complexity);
+    }
   });
 
   it("returns structured results for unknown checks and missing tsconfig", async () => {
@@ -762,7 +765,13 @@ describe("bundle entrypoints", () => {
       Effect.provide(processServiceLayer((command) => Effect.fail(new ProcessError({ kind: ProcessErrorKind.Timeout, command, message: "timed out" })))),
     )));
     expect(outcome._tag).toBe("Failure");
-    if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Bundle, message: "timed out" });
+    if (outcome._tag === "Failure") {
+      expect(outcome.failure).toBeInstanceOf(AnalyzerRunError);
+      expect(outcome.failure).toMatchObject({
+        analyzer: AnalyzerName.Bundle,
+        message: "timed out",
+      });
+    }
   });
 
   it("bundles the owning extension for helper changes but ignores unrelated files", async () => {
