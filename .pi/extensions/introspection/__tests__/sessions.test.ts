@@ -161,4 +161,24 @@ describeIfEnabled("introspection", "session listing", () => {
     const misses = listSessionDigests({ sessionDir: root, query: "beta", limit: 10 });
     expect(misses).toHaveLength(0);
   });
+
+  it("discovers child sessions below a parent-specific nested directory", () => {
+    const root = join(tmpdir(), `introspection-child-sessions-${Date.now()}`);
+    roots.push(root);
+    const childDir = join(root, "--repo--", "_children", "parent-1");
+    mkdirSync(childDir, { recursive: true });
+    writeFileSync(
+      join(childDir, "2026-03-06T23-15-17-780Z_child.jsonl"),
+      lines(
+        { type: "session", id: "child-1", cwd: "/repo", parentSession: "/sessions/parent.jsonl" },
+        { type: "session_info", id: "info-1", parentId: null, name: "sub-audit" },
+        { type: "message", message: { role: "user", content: [{ type: "text", text: "Inspect nested storage" }] } },
+      ).join("\n"),
+    );
+
+    const matches = listSessionDigests({ sessionDir: root, query: "sub-audit", limit: 10 });
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({ name: "sub-audit", firstUserPrompt: "Inspect nested storage" });
+  });
 });

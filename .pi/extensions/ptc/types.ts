@@ -34,9 +34,6 @@ export function buildSubprocessEnv(): Record<string, string | undefined> {
     "LANG",            // string encoding
     "LC_ALL",
     "LC_CTYPE",
-    // ── Agent coordination (not secrets — IDs and paths) ──
-    "PI_BUS_SESSION",  // bus session ID for inter-agent messaging
-    "PI_AGENT_ID",     // agent identity on the bus
   ] as const;
 
   const env: Record<string, string | undefined> = {};

@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "../config";
+import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
 import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
   return {
-    ...DEFAULT_SUBAGENT_LIMITS,
+    ...DEFAULT_SUBAGENT_CONFIG,
     maxConcurrentRuns: 2,
     maxPendingRuns: 2,
     cancellationGraceMs: 10,

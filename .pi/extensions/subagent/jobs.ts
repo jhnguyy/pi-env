@@ -11,7 +11,11 @@ import { Cause, Data, Deferred, Effect } from "effect";
 
 import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
-import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "./config";
+import {
+  DEFAULT_SUBAGENT_CONFIG,
+  DEFAULT_SUBAGENT_LIMITS,
+  type SubagentRuntimeConfig,
+} from "./config";
 import {
   getOrCreateSubagentRunSupervisor,
   SubagentAdmissionError,
@@ -142,7 +146,7 @@ export class SubagentJobManager {
     private readonly runJob: SubagentJobRunner = runSubagentEffect,
     private readonly ledger?: SubagentUsageLedger,
     private readonly telemetryRuntime?: ToolingTelemetryRuntime,
-    private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_LIMITS },
+    private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_CONFIG },
     supervisor?: SubagentRunSupervisor,
     private readonly onJobsChanged?: SubagentJobsChanged,
     private readonly agentLoop?: RunSubagentOptions["agentLoop"],
@@ -291,6 +295,7 @@ export class SubagentJobManager {
       runId: job.id,
       supervisor: this.supervisor,
       telemetryRuntime: this.telemetryRuntime,
+      sessionStorage: this.config.sessionStorage,
       onAdmitted,
       onUsage,
       agentLoop: this.agentLoop,

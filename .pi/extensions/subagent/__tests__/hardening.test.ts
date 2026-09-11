@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SUBAGENT_LIMITS, type SubagentRuntimeConfig } from "../config";
+import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
 import {
   formatJobMetadata,
   formatJobResult,
@@ -13,7 +13,7 @@ import { zeroUsage } from "../usage";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
   return {
-    ...DEFAULT_SUBAGENT_LIMITS,
+    ...DEFAULT_SUBAGENT_CONFIG,
     cancellationGraceMs: 50,
     ...overrides,
   };

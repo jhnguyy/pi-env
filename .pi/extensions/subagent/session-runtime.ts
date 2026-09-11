@@ -10,6 +10,7 @@ import {
 import type { ExtToolRegistration } from "../_shared/agent-tools";
 import { clearSlot, setSlot } from "../_shared/ui-render";
 import {
+  DEFAULT_SUBAGENT_CONFIG,
   loadSubagentRuntimeConfig,
   resolveSubagentRuntimeConfig,
   type SubagentRuntimeConfig,
@@ -91,6 +92,8 @@ export class SubagentSessionRuntime {
   private telemetryRuntime: ToolingTelemetryRuntime | undefined;
   private supervisor: SubagentRunSupervisor | undefined;
   private supervisorSessionId: string | undefined;
+  private sessionStorage: SubagentRuntimeConfig["sessionStorage"] =
+    DEFAULT_SUBAGENT_CONFIG.sessionStorage;
   private jobs: SubagentJobManager | undefined;
   private dagRuntime: DagSessionRuntime | undefined;
   private sessionState: SubagentSessionStateValue = SubagentSessionState.Inactive;
@@ -122,6 +125,8 @@ export class SubagentSessionRuntime {
           ledger: this.ledger,
           runId: toolCallId,
           supervisor: this.supervisor,
+          sessionStorage:
+            this.sessionState === SubagentSessionState.Active ? this.sessionStorage : undefined,
           telemetryRuntime:
             this.sessionState === SubagentSessionState.Active ? this.telemetryRuntime : undefined,
           agentLoop: this.dependencies.agentLoop,
@@ -186,6 +191,7 @@ export class SubagentSessionRuntime {
           supervisor,
           telemetryRuntime: nextRuntime,
           ledger: this.ledger,
+          sessionStorage: config.sessionStorage,
           executorRegistryFactory: this.dependencies.dagExecutorRegistryFactory,
           agentLoop: this.dependencies.agentLoop,
         });
@@ -205,6 +211,7 @@ export class SubagentSessionRuntime {
       this.telemetryRuntime = nextRuntime;
       this.supervisor = supervisor;
       this.supervisorSessionId = sessionId;
+      this.sessionStorage = config.sessionStorage;
       this.jobs = jobs;
       this.dagRuntime = dagRuntime;
       this.sessionState = SubagentSessionState.Active;
@@ -347,6 +354,7 @@ export class SubagentSessionRuntime {
     this.dagRuntime = undefined;
     this.supervisor = undefined;
     this.supervisorSessionId = undefined;
+    this.sessionStorage = DEFAULT_SUBAGENT_CONFIG.sessionStorage;
     this.telemetryRuntime = undefined;
     await settle(runtime ? this.disposeTelemetry(runtime) : undefined);
     if (failure !== undefined) throw failure;
