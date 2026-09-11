@@ -196,8 +196,10 @@ function decodeSynthesis(
 }
 function reviewerRolesForNodes(nodeIds: readonly string[]): ReviewerRole[] {
   return nodeIds
-    .map((nodeId) => reviewerRoleByNode.get(nodeId))
-    .filter((role): role is ReviewerRole => role !== undefined)
+    .flatMap((nodeId) => {
+      const role = reviewerRoleByNode.get(nodeId);
+      return role === undefined ? [] : [role];
+    })
     .sort();
 }
 function reviewMetrics(input: {

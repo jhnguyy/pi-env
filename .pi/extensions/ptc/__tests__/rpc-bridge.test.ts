@@ -15,11 +15,12 @@ import {
   MAX_STDERR_BYTES,
   MAX_TOOL_CALLS,
   PtcToolDispatchError,
+  type RpcOutbound,
 } from "../types";
 
 interface MockProc {
   proc: ChildProcess;
-  send: (msg: object) => void;
+  send: (msg: RpcOutbound) => void;
   stdout: (text: string) => void;
   exit: (code: number) => void;
   exitThenClose: (code: number) => void;

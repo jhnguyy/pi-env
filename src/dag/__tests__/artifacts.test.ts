@@ -357,7 +357,9 @@ function materializeReferences(root: string, producerNodeIds: readonly string[],
   const target = Shared.node("target", producerNodeIds.map((nodeId) => ({ nodeId, mode: DagDependencyMode.Required })));
   const dag = Shared.graph([...producers, target]);
   const state = producers.reduce((current, producer) => {
-    const outputs = Object.fromEntries(references.filter((reference) => reference.producerNodeId === producer.id).map((reference) => [reference.outputName, reference]));
+    const outputs = Object.fromEntries(references.flatMap((reference) =>
+      reference.producerNodeId === producer.id ? [[reference.outputName, reference] as const] : [],
+    ));
     return Shared.finish(dag, current, producer.id, { _tag: DagNodeResultTag.Succeeded, outputs });
   }, createDagRunState(dag));
   return materializeDagTextContext(root, references[0]?.runId ?? "run", target, state, references.map((reference) => reference.outputName));

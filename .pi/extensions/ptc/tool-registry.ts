@@ -10,9 +10,9 @@ import type {
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { generateId } from "../_shared/id";
-import { listenForAgentTools } from "../_shared/agent-tools";
+import { listenForAgentTools, type ExtToolRegistration } from "../_shared/agent-tools";
 import { BUILT_IN_TOOL_CONTRACTS, BUILT_IN_TOOL_NAMES } from "../_shared/built-in-tools";
-import { listenForPtcTools } from "../_shared/ptc-tools";
+import { listenForPtcTools, type PtcToolRegistration } from "../_shared/ptc-tools";
 import { createPtcToolCatalog, type PtcRuntimeSnapshot } from "./catalog";
 import {
   BLOCKED_TOOLS,
@@ -31,8 +31,10 @@ type ExecuteFn = (
 
 export type DispatchContext = { cwd: string } | ExtensionContext;
 
+type RememberedRegistration = ExtToolRegistration | PtcToolRegistration;
+
 interface RememberedTool {
-  readonly registration: object;
+  readonly registration: RememberedRegistration;
   readonly execute: ExecuteFn;
 }
 
@@ -55,12 +57,12 @@ export class ToolRegistry {
     this.installPtcToolsListener(pi);
   }
 
-  private rememberTool(registration: object, tool: { name: string; execute: ExecuteFn }): void {
+  private rememberTool(registration: RememberedRegistration, tool: { name: string; execute: ExecuteFn }): void {
     if (BLOCKED_TOOLS.has(tool.name) || BUILTIN_NAMES.has(tool.name)) return;
     this.extensionTools.set(tool.name, { registration, execute: tool.execute });
   }
 
-  private forgetTool(registration: object, name: string): void {
+  private forgetTool(registration: RememberedRegistration, name: string): void {
     const remembered = this.extensionTools.get(name);
     if (remembered?.registration === registration) this.extensionTools.delete(name);
   }

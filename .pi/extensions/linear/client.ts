@@ -34,9 +34,9 @@ export interface ListResourcesInput {
 }
 
 function resourceAliases(item: LinearResourceSummary): string[] {
-  return [item.id, item.name, item.key, item.email]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value.toLowerCase());
+  return [item.id, item.name, item.key, item.email].flatMap((value) =>
+    value ? [value.toLowerCase()] : [],
+  );
 }
 
 function selectResource(

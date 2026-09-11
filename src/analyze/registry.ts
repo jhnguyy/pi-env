@@ -122,9 +122,9 @@ const requirementRank: Readonly<Record<ProjectRequirement, number>> = {
   [ProjectRequirement.Types]: 3,
 };
 
-export const defaultAnalyzerNames = ANALYZERS
-  .filter((descriptor) => descriptor.defaultEnabled)
-  .map((descriptor) => descriptor.name);
+export const defaultAnalyzerNames = ANALYZERS.flatMap((descriptor) =>
+  descriptor.defaultEnabled ? [descriptor.name] : [],
+);
 
 export function analyzerDescriptor(name: AnalyzerName): AnalyzerDescriptor {
   return descriptorByName.get(name)!;
