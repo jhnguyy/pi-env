@@ -494,8 +494,9 @@ describeIfEnabled("dev-tools", "rename action", () => {
         ensureFile: secondEnsureFile,
       } satisfies RenameBackend;
       const originalGetBackend = deps.getBackend;
-      deps.getBackend = (path: string) =>
-        path === secondPath ? secondBackend : originalGetBackend(path);
+      deps.getBackend = (path: string) => (
+        path === secondPath ? secondBackend : originalGetBackend(path)
+      );
 
       const response = await handleRename({
         id: 9,

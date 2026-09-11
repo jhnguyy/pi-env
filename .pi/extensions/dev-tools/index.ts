@@ -121,10 +121,10 @@ export function registerDevTools(pi: DevToolsRegistrationApi) {
       return renderDevToolsResult(result, opts, theme);
     },
   });
-
 }
 
 export default function initDevTools(pi: ExtensionAPI): void {
   registerDevTools(pi);
+  // ─── post-edit lifecycle ─────────────────────────────────────────────────
   registerDevToolsLifecycle(pi);
 }
