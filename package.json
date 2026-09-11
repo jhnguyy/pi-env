@@ -60,7 +60,7 @@
     "clean:extensions": "scripts/node-run.sh scripts/clean-extension-artifacts.mjs",
     "worktree:init": "bash scripts/init-worktree.sh",
     "test": "nub run test:vitest",
-    "test:vitest": "scripts/node-run.sh scripts/run-supervised-node.mjs node_modules/vitest/vitest.mjs run --pool=threads",
+    "test:vitest": "scripts/node-run.sh scripts/run-supervised-node.mjs node_modules/vitest/vitest.mjs run --pool=threads --maxWorkers=4",
     "test:unit": "PI_ENV_TEST_PORTFOLIO=unit nub run test:vitest",
     "test:integration": "PI_ENV_TEST_PORTFOLIO=integration nub run test:vitest",
     "test:changed": "nub run test:vitest --changed",
