@@ -5,6 +5,11 @@ import { Type } from "typebox";
 
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
+  registerPublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+} from "../_shared/tool-render";
+import {
   DEFAULT_SESSION_DIR,
   assertUnderSessionDir,
   formatDigestList,
@@ -97,7 +102,7 @@ function executeReadSession(
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "list_sessions",
     label: "List Sessions",
     description:
@@ -106,9 +111,13 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, signal) {
       return executeListSessions(params, signal);
     },
+    renderCall: (params, theme) =>
+      renderCompactToolCall("list_sessions", params.query ?? params.cwd, theme),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("list_sessions", result, options, theme, context),
   });
 
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "read_session",
     label: "Read Session",
     description:
@@ -117,6 +126,9 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, signal) {
       return executeReadSession(params, signal);
     },
+    renderCall: (params, theme) => renderCompactToolCall("read_session", params.path, theme),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("read_session", result, options, theme, context),
   });
 
   pi.registerCommand("sessions", {

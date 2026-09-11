@@ -1,5 +1,7 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { TSchema } from "typebox";
 import { createRememberedRegistrationChannel } from "./remembered-registration-channel";
+import { registerPublicTool, type PublicPiToolDefinition } from "./tool-render";
 
 export const PtcToolEvent = {
   Register: "ptc-tools:register",
@@ -32,13 +34,15 @@ const ptcToolChannel = createRememberedRegistrationChannel<PtcToolRegistration, 
   isDuplicate: (previous, next) => previous?.tool === next.tool,
 });
 
-export function registerPtcTools(
+export function registerPtcTools<Schema extends TSchema, Details = unknown, State = any>(
   pi: PtcToolRegistrar,
-  tools: ToolDefinition<any, any, any> | ToolDefinition<any, any, any>[],
+  tools:
+    | PublicPiToolDefinition<Schema, Details, State>
+    | PublicPiToolDefinition<Schema, Details, State>[],
 ): void {
   for (const tool of Array.isArray(tools) ? tools : [tools]) {
-    pi.registerTool(tool);
-    ptcToolChannel.publish(pi.events, { tool });
+    registerPublicTool(pi, tool);
+    ptcToolChannel.publish(pi.events, { tool: tool as ToolDefinition<any, any, any> });
   }
 }
 

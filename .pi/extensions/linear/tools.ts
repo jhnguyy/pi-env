@@ -1,9 +1,15 @@
 import { StringEnum } from "@earendil-works/pi-ai";
-import { defineTool, truncateHead, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import type { CursorPage, IssueSummary, LinearResourceSummary } from "./api";
 import type { LinearGateway } from "./client";
 import { asLinearError, LinearErrorCode, linearError, throwToolError } from "./domain";
+import {
+  definePublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+  type PublicPiToolDefinition,
+} from "../_shared/tool-render";
 
 const MAX_RESULTS = 50;
 const DEFAULT_RESULTS = 20;
@@ -197,8 +203,10 @@ async function dispatchLinear(
   }
 }
 
-export function createLinearTool(gateway: LinearGateway): ToolDefinition {
-  return defineTool<typeof LinearParameters, unknown>({
+export function createLinearTool(
+  gateway: LinearGateway,
+): PublicPiToolDefinition<typeof LinearParameters, unknown> {
+  return definePublicTool<typeof LinearParameters, unknown>({
     name: "linear",
     label: "Linear",
     description:
@@ -207,5 +215,13 @@ export function createLinearTool(gateway: LinearGateway): ToolDefinition {
     async execute(_id, params, signal) {
       return executeTool(() => dispatchLinear(gateway, params, signal));
     },
+    renderCall: (params, theme) =>
+      renderCompactToolCall(
+        "linear",
+        [params.action, params.issueId, params.query].filter(Boolean).join(" "),
+        theme,
+      ),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("linear", result, options, theme, context),
   });
 }

@@ -8,12 +8,13 @@ import {
   type AgentToolFactoryContext,
   type ToolCapability,
 } from "./agent-tools";
-import { toAgentTool, toPiTool, type PiToolUi, type ToolContract } from "./tool-contract";
+import { toAgentTool, toPiTool, type PublicPiToolUi, type ToolContract } from "./tool-contract";
+import { registerPublicTool, type PublicPiToolDefinition } from "./tool-render";
 
 export interface CrossHostToolRegistration<Params, Details, Schema extends TSchema> {
   readonly contract: ToolContract<Params, Details, Schema>;
   readonly capabilities: readonly [ToolCapability, ...ToolCapability[]];
-  readonly piTool: ToolDefinition<Schema, Details, any>;
+  readonly piTool: PublicPiToolDefinition<Schema, Details, any>;
   readonly createAgentTool: (context: AgentToolFactoryContext) => AgentTool<any, any>;
 }
 
@@ -21,9 +22,9 @@ interface PiRegistrationHost {
   registerTool(tool: ToolDefinition<any, any, any>): void;
 }
 
-type PiOnlyOptions<Schema extends TSchema, Details> = PiToolUi<Schema, Details> & {
+type PiOnlyOptions<Schema extends TSchema, Details> = PublicPiToolUi<Schema, Details> & {
   promptSnippet?: string;
-  promptGuidelines?: string | string[];
+  promptGuidelines?: string[];
 };
 
 function toMainSessionContext(ctx: ExtensionContext): Pick<ExtensionContext, "cwd"> {
@@ -35,20 +36,22 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
   options: {
     contract: ToolContract<Params, Details, Schema>;
     capabilities: readonly [ToolCapability, ...ToolCapability[]];
-    piOptions?: PiOnlyOptions<Schema, Details>;
+    piOptions: PiOnlyOptions<Schema, Details>;
   },
 ): CrossHostToolRegistration<Params, Details, Schema> {
   const { contract, capabilities, piOptions } = options;
-  const piTool = {
+  const piTool: PublicPiToolDefinition<Schema, Details, any> = {
     ...toPiTool(contract, piOptions),
-    promptSnippet: piOptions?.promptSnippet,
-    promptGuidelines: piOptions?.promptGuidelines,
-  } as ToolDefinition<Schema, Details, any>;
+    promptSnippet: piOptions.promptSnippet,
+    promptGuidelines: piOptions.promptGuidelines,
+    renderCall: piOptions.renderCall,
+    renderResult: piOptions.renderResult,
+  };
 
   const createAgentTool = (context: AgentToolFactoryContext): AgentTool<any, any> =>
     toAgentTool(contract, () => context.parentContext ?? { cwd: context.cwd });
 
-  pi.registerTool(piTool);
+  registerPublicTool(pi, piTool);
   registerAgentToolsOnSessionStart(pi, (_sessionGeneration, ctx) => ({
     tool: toAgentTool(contract, () => toMainSessionContext(ctx)),
     capabilities: [...capabilities],

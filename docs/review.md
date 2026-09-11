@@ -76,7 +76,11 @@ Each review child uses its durable child-session ID as the provider session ID. 
 
 Pi computes a usage tree recursively. Each subagent result includes its own assistant usage plus nested tool usage. The calling session adds that nested total to its own assistant usage. Repeated review reuse and repeated asynchronous job retrieval do not add the same nested usage again.
 
-Interactive review tools publish structured progress updates every two seconds. The updates contain node statuses and aggregate usage. Noninteractive `pi -p` output shows only the final result.
+Interactive review tools publish structured progress updates about every two seconds. The top-level `review` tool projects the fixed graph into `planning`, `reviewing`, and `synthesizing` phases. Active review phases show the running reviewer roles. The progress view shows aggregate cost when usage data is available. Internal review subagents do not add child tool rows to the parent transcript.
+
+Partial updates store cumulative aggregate usage in result details. They do not set top-level tool usage. The terminal result reports nested usage once so that Pi does not count repeated progress snapshots.
+
+The collapsed terminal result shows the verdict, aggregate cost when available, and the exact review ID. It normalizes and bounds the verdict. It does not show turn counts, token counts, model names, findings, snapshot metadata, or DAG run IDs. The expanded result keeps the complete verdict and the detailed review result. An idempotently reused review labels its persisted value as recorded cost. Noninteractive `pi -p` output shows only the final result.
 
 ## Untrusted input boundary
 

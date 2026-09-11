@@ -20,6 +20,7 @@ import {
   decodeSettingsBlockFromSnapshotEffect,
   loadSettingsSnapshotEffect,
 } from "../_shared/settings";
+import { registerPublicTool } from "../_shared/tool-render";
 import {
   Disclosure,
   REVIEW_COMMANDS,
@@ -58,8 +59,13 @@ import {
   type ReviewActionResult,
   type ReviewCoordinatorScope,
 } from "./review-coordinator";
-import { reconstructReviewDagState, runReviewDag } from "./review-dag-runner";
+import {
+  reconstructReviewDagState,
+  runReviewDag,
+  type ReviewDagProgress,
+} from "./review-dag-runner";
 import { readVerifiedRawFinding } from "./reviewer-dossier";
+import { renderReviewCall, renderReviewResult } from "./render";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
@@ -107,7 +113,7 @@ function nestedReviewUsage(state: ReviewState): Usage | undefined {
   };
 }
 
-function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
+export function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
   const { usage: _usage, ...withoutUsage } = result;
   return withoutUsage;
 }
@@ -351,7 +357,7 @@ function selectedRangeRefs(snapshot: ReviewState["snapshot"]): {
 }
 type PreparationStage = NonNullable<ReviewState["preparation"]>["stage"];
 
-function reviewActionResult(state: ReviewState, reused = false): ReviewActionResult {
+export function reviewActionResult(state: ReviewState, reused = false): ReviewActionResult {
   if (state.preparation?.status === "failed") {
     const failure = state.preparation;
     const measured =
@@ -1488,6 +1494,19 @@ async function command(
   }
 }
 
+export function reviewProgressResult(progress: ReviewDagProgress) {
+  return {
+    content: [
+      txt(
+        `DAG ${progress.runId}: ${Object.entries(progress.nodes)
+          .map(([nodeId, status]) => `${nodeId}=${status}`)
+          .join(", ")}. Cost: ${progress.usage?.cost ?? 0}.`,
+      ),
+    ],
+    details: { status: "running", ...progress },
+  };
+}
+
 export default function reviewExtension(
   pi: ExtensionAPI,
   dependencies: ReviewExtensionDependencies = defaultDependencies,
@@ -1505,7 +1524,7 @@ export default function reviewExtension(
         coordinator.clearDagRegistration(registration.registrationId);
       },
     );
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "review",
     label: "Review",
     description:
@@ -1519,17 +1538,10 @@ export default function reviewExtension(
     parameters: PrReviewParamsSchema,
     execute: (_id, params, signal, onUpdate, ctx) =>
       executeReviewTool(pi, params, signal, ctx, (progress) =>
-        onUpdate?.({
-          content: [
-            txt(
-              `DAG ${progress.runId}: ${Object.entries(progress.nodes)
-                .map(([nodeId, status]) => `${nodeId}=${status}`)
-                .join(", ")}. Cost: ${progress.usage?.cost ?? 0}.`,
-            ),
-          ],
-          details: { status: "running", ...progress },
-        }),
+        onUpdate?.(reviewProgressResult(progress)),
       ),
+    renderCall: renderReviewCall,
+    renderResult: renderReviewResult,
   });
   pi.registerCommand("review", {
     description:

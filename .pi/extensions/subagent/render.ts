@@ -15,21 +15,16 @@ import {
   type SubagentJobRenderDetails,
   type SubagentJobRenderStatus,
 } from "./types";
-import { toolExpandHint } from "../_shared/tool-render";
+import {
+  shortDescription,
+  toolExpandHint,
+  toolResultText,
+} from "../_shared/tool-render";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const PROMPT_PREVIEW_LENGTH = 70;
-
 function formatPromptPreview(task: string): string {
-  return task.length > PROMPT_PREVIEW_LENGTH ? `${task.slice(0, PROMPT_PREVIEW_LENGTH)}...` : task;
-}
-
-function textContent(result: AgentToolResult<unknown>): string {
-  return result.content
-    .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-    .map((part) => part.text)
-    .join("\n");
+  return shortDescription(task, { oneLine: true });
 }
 
 function formatTokens(count: number): string {
@@ -256,7 +251,7 @@ export function renderSubagentStartResult(
   let text = theme.fg("toolTitle", theme.bold("subagent start"));
   if (details?.name) text += ` ${theme.fg("accent", details.name)}`;
   if (status) text += ` ${theme.fg("error", `[${status}]`)}`;
-  const output = textContent(result);
+  const output = toolResultText(result);
   if (output) text += `\n${theme.fg("error", output)}`;
   return new Text(text, 0, 0);
 }
@@ -295,7 +290,7 @@ export function renderSubagentJobResult(
 
   const statParts: string[] = [];
   appendJobStats(statParts, details);
-  const output = textContent(result);
+  const output = toolResultText(result);
 
   if (!expanded) {
     let text = header;
@@ -347,11 +342,7 @@ export function renderSubagentToolResult(
     return renderSubagentStartResult(result, options, theme);
   }
   if (JOB_ACTIONS.has(action)) {
-    return renderSubagentJobResult(
-      result,
-      { expanded: options.expanded ?? false },
-      theme,
-    );
+    return renderSubagentJobResult(result, { expanded: options.expanded ?? false }, theme);
   }
   return renderSubagentResult(
     result as AgentToolResult<SubagentDetails>,

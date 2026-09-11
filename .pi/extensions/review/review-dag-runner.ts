@@ -241,6 +241,7 @@ function reviewMetrics(input: {
   };
 }
 export interface ReviewDagProgress {
+  readonly reviewId: string;
   readonly runId: string;
   readonly nodes: Readonly<Record<string, string>>;
   readonly usage?: DagRuntimeUsage;
@@ -250,6 +251,7 @@ async function awaitSubmittedGraph(
   service: ActiveDagRuntimeService,
   graph: ValidatedDagDefinition<unknown>,
   workspaceRoot: string,
+  reviewId: string,
   onSubmitted: () => void,
   onProgress?: (progress: ReviewDagProgress) => void,
   signal?: AbortSignal,
@@ -262,6 +264,7 @@ async function awaitSubmittedGraph(
     try {
       const snapshot = await Effect.runPromise(handle.snapshot);
       onProgress({
+        reviewId,
         runId: graph.runId,
         nodes: Object.fromEntries(snapshot.state.nodes.map((node) => [node.nodeId, node.status])),
         ...(service.usage ? { usage: service.usage(graph.runId) } : {}),
@@ -618,6 +621,7 @@ export async function runReviewDag(options: {
       options.service,
       graph,
       state.snapshot.worktree,
+      state.snapshot.id,
       () => {
         state = { ...state, dag: { ...state.dag!, submitted: true } };
         options.save(state);

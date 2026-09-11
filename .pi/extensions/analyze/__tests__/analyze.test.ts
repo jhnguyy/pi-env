@@ -22,7 +22,7 @@ const execute = async (
   signal = new AbortController().signal,
 ) => {
   const tool = createAnalyzeTool(runner);
-  const output = await tool.execute("call", params, signal, undefined);
+  const output = await tool.execute("call", params, signal, undefined, {} as never);
   return { output, runner };
 };
 
@@ -58,7 +58,13 @@ describe("analyze tool", () => {
   it("fails closed when public checks are omitted", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "analyze-tool-"));
     const tool = createAnalyzeTool();
-    const output = await tool.execute("call", { worktree }, new AbortController().signal, undefined);
+    const output = await tool.execute(
+      "call",
+      { worktree },
+      new AbortController().signal,
+      undefined,
+      {} as never,
+    );
     expect(output.details?.summary.failures).toBe(1);
     expect(output.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("checks must explicitly") });
   });

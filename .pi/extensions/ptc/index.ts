@@ -19,12 +19,17 @@ import { formatPtcInspection, type PtcToolCatalog } from "./catalog";
 import { BLOCKED_TOOLS, PtcAction } from "./types";
 import { decodePtcRunDetails, type PtcRunDetails } from "./execution-details";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
-import { toolExpandHint, toolExpandKeyHint } from "../_shared/tool-render";
+import {
+  registerPublicTool,
+  shortDescription,
+  toolExpandHint,
+  toolExpandKeyHint,
+} from "../_shared/tool-render";
 
 const DESCRIPTION = [
   "Inspect the current PTC runtime contract or run a TypeScript/JavaScript batch script.",
   "When action is omitted, PTC uses run and requires code. Use inspect after dynamic tool activation or when availability is uncertain.",
-  "Canonical calls use tools.read({ ... }) or tools[\"dev-tools\"]({ ... }). Global underscore aliases remain compatible.",
+  'Canonical calls use tools.read({ ... }) or tools["dev-tools"]({ ... }). Global underscore aliases remain compatible.',
   "Nested tools return Promise<string>. Only selected console.log() output and explicit return values enter model context.",
   "Limits: timeout 120 s, max output 50 KB, max tool calls per run 100.",
   "Blocked tools must be called directly, not inside ptc: " + [...BLOCKED_TOOLS].join(", "),
@@ -97,7 +102,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
   const executor = new PtcExecutor(registry);
 
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "ptc",
     label: "Programmatic Tool Calling",
     description: DESCRIPTION,
@@ -150,8 +155,7 @@ export default function ptcExtension(pi: ExtensionAPI) {
             );
           })
           ?.trim() ?? "";
-      const preview =
-        firstCodeLine.length > 72 ? firstCodeLine.substring(0, 72) + "…" : firstCodeLine;
+      const preview = shortDescription(firstCodeLine, { limit: 72 });
       return new Text(
         theme.fg("toolTitle", theme.bold("ptc")) +
           theme.fg("muted", ` ${lineCount}L`) +
@@ -219,9 +223,9 @@ function renderPtcError(text: string, expanded: boolean | undefined, theme: PtcR
       0,
     );
   }
-  const summary = (text.split("\n").find((line) => line.trim().length > 0) ?? "error").slice(
-    0,
-    120,
+  const summary = shortDescription(
+    text.split("\n").find((line) => line.trim().length > 0) ?? "error",
+    { limit: 120 },
   );
   return new Text(theme.fg("error", "✗ ptc ") + theme.fg("error", summary), 0, 0);
 }
@@ -247,9 +251,7 @@ function finalResultMetadata(
   const failedSuffix = details?.failedNestedCallCount
     ? theme.fg("warning", ` · ${details.failedNestedCallCount} failed`)
     : "";
-  const truncatedSuffix = details?.outputTruncated
-    ? theme.fg("warning", " · [truncated]")
-    : "";
+  const truncatedSuffix = details?.outputTruncated ? theme.fg("warning", " · [truncated]") : "";
   return { outputLines, countLabel, callSuffix, failedSuffix, truncatedSuffix };
 }
 
@@ -292,7 +294,7 @@ function renderPtcCollapsedFinal(
 ): Text {
   const { outputLines, countLabel, callSuffix, failedSuffix, truncatedSuffix } =
     finalResultMetadata(text, details, theme);
-  const firstLine = outputLines[0]?.substring(0, 72) ?? "";
+  const firstLine = outputLines[0] ? shortDescription(outputLines[0], { limit: 72 }) : "";
   const hiddenOutputLines = Math.max(0, outputLines.length - (firstLine ? 1 : 0));
   let collapsed =
     theme.fg("success", "✓ ") +

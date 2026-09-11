@@ -1,10 +1,16 @@
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
+import { isAbsolute } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import {
+  registerPublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+  type PublicPiToolDefinition,
+} from "../_shared/tool-render";
 import { runPublicAnalyze } from "../../../src/analyze/public";
 import { AnalyzerName, ScopeMode, type AnalysisResult } from "../../../src/analyze/model";
 
@@ -60,7 +66,9 @@ function compactResult(result: AnalysisResult, maxFindings: number): { text: str
   };
 }
 
-export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentTool<typeof analyzeToolSchema, AnalyzeToolDetails> {
+export function createAnalyzeTool(
+  runner: AnalyzeRunner = runAnalysis,
+): PublicPiToolDefinition<typeof analyzeToolSchema, AnalyzeToolDetails> {
   return {
     name: "analyze",
     label: "Analyze",
@@ -85,11 +93,30 @@ export function createAnalyzeTool(runner: AnalyzeRunner = runAnalysis): AgentToo
       const compact = compactResult(result, params.max_findings ?? 25);
       return { content: [{ type: "text", text: compact.text }], details: compact.details };
     },
+    renderCall: (params, theme) =>
+      renderCompactToolCall(
+        "analyze",
+        `${params.scope ?? ScopeMode.Diff}: ${(params.checks ?? []).join(", ") || "checks required"}`,
+        theme,
+      ),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("analyze", result, options, theme, context),
   };
 }
 
 export default function (pi: ExtensionAPI) {
   const tool = createAnalyzeTool();
-  pi.registerTool(tool);
-  registerAgentToolsOnSessionStart(pi, { tool, capabilities: [ToolCapability.Read, ToolCapability.Execute] });
+  registerPublicTool(pi, tool);
+  const agentTool: AgentTool<any, AnalyzeToolDetails> = {
+    name: tool.name,
+    label: tool.label,
+    description: tool.description,
+    parameters: tool.parameters,
+    execute: (id, params, signal, onUpdate) =>
+      tool.execute(id, params as never, signal, onUpdate, {} as never),
+  };
+  registerAgentToolsOnSessionStart(pi, {
+    tool: agentTool,
+    capabilities: [ToolCapability.Read, ToolCapability.Execute],
+  });
 }

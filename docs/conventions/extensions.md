@@ -30,6 +30,10 @@ Keep tool output context-economical:
 - Use opt-in detail views for larger data.
 - Never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced.
 
+Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.ts` or a shared registration helper that uses it. Each public tool must provide its complete model-facing `description`, a compact `renderCall`, and a `renderResult` for collapsed and expanded output. Run-scoped and child-only `AgentTool` definitions do not own parent transcript rows and do not need these renderers.
+
+Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
+
 ## Settings boundary
 
 Use `.pi/extensions/_shared/settings.ts` as the single settings boundary. It owns path resolution, file IO, JSON/root validation, missing-file semantics, shallow overlay precedence, and Effect Schema decode.

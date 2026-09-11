@@ -3,6 +3,7 @@ import { Type, type Static } from "typebox";
 import { ToolCapability } from "../../../_shared/agent-tools";
 import { registerCrossHostTool } from "../../../_shared/register-cross-host-tool";
 import type { ToolContract } from "../../../_shared/tool-contract";
+import { renderCompactToolCall, renderTextToolResult } from "../../../_shared/tool-render";
 
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
@@ -23,5 +24,10 @@ export default function crossHostFixture(pi: ExtensionAPI): void {
   registerCrossHostTool(pi, {
     contract: CONTRACT,
     capabilities: [ToolCapability.Read],
+    piOptions: {
+      renderCall: (args, theme) => renderCompactToolCall("dynamic-cross-host", args.value, theme),
+      renderResult: (result, options, theme, renderContext) =>
+        renderTextToolResult("dynamic-cross-host", result, options, theme, renderContext),
+    },
   });
 }
