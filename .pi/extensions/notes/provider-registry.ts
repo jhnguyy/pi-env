@@ -43,14 +43,19 @@ export function resolveNotesProvider(id: string): NotesProvider {
 }
 
 function validateProvider(provider: unknown): asserts provider is NotesProvider {
+  if (typeof provider !== "object" || provider === null) {
+    throw new NotesProviderError({
+      code: "invalid-provider",
+      message: "Notes provider does not implement the baseline interface.",
+    });
+  }
+  const candidate = provider as Record<string, unknown>;
   const methods = ["index", "list", "read", "search", "write", "delete"] as const;
   if (
-    typeof provider !== "object" ||
-    provider === null ||
-    typeof Reflect.get(provider, "id") !== "string" ||
-    Reflect.get(provider, "id").length === 0 ||
-    methods.some((method) => typeof Reflect.get(provider, method) !== "function") ||
-    (Reflect.get(provider, "resolve") !== undefined && typeof Reflect.get(provider, "resolve") !== "function")
+    typeof candidate.id !== "string" ||
+    candidate.id.length === 0 ||
+    methods.some((method) => typeof candidate[method] !== "function") ||
+    (candidate.resolve !== undefined && typeof candidate.resolve !== "function")
   ) {
     throw new NotesProviderError({
       code: "invalid-provider",

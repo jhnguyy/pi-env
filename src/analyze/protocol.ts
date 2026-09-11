@@ -211,15 +211,8 @@ function validateEnvelope(
   return Effect.succeed(value.runId);
 }
 
-type ValidRequestEnvelope = Pick<AnalyzeWorkerRequest, "version" | "type" | "runId">;
 type ValidRequestRoot = Pick<AnalyzeWorkerRequest, "cwd" | "scope">;
 type ValidRequestLimits = Pick<AnalyzeWorkerRequest, "maxMemoryMb" | "maxSourceFiles" | "maxSourceFileBytes" | "maxSourceBytes" | "timeoutMs">;
-
-function validRequestEnvelope(value: Record<string, unknown>): value is Record<string, unknown> & ValidRequestEnvelope {
-  return value.version === ANALYZE_WORKER_PROTOCOL_VERSION
-    && value.type === AnalyzeWorkerMessageType.Request
-    && isBoundedString(value.runId, 128);
-}
 
 function validRequestRoot(value: Record<string, unknown>): value is Record<string, unknown> & ValidRequestRoot {
   return (
@@ -279,13 +272,7 @@ export function parseAnalyzeWorkerRequest(
 ): Effect.Effect<AnalyzeWorkerRequest, AnalyzeProtocolError> {
   return Effect.gen(function* () {
     const value = yield* parseObjectLine(line);
-    yield* validateEnvelope(value, AnalyzeWorkerMessageType.Request);
-    if (!validRequestEnvelope(value)) {
-      return yield* protocolFailure(
-        AnalyzeProtocolErrorKind.Malformed,
-        "Analyze worker request envelope is invalid",
-      );
-    }
+    const runId = yield* validateEnvelope(value, AnalyzeWorkerMessageType.Request);
     if (!validRequestRoot(value)) {
       return yield* protocolFailure(
         AnalyzeProtocolErrorKind.Malformed,
@@ -322,7 +309,12 @@ export function parseAnalyzeWorkerRequest(
         "Analyze worker request ref is invalid",
       );
     }
-    return value;
+    return {
+      ...value,
+      version: ANALYZE_WORKER_PROTOCOL_VERSION,
+      type: AnalyzeWorkerMessageType.Request,
+      runId,
+    };
   });
 }
 
