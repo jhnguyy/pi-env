@@ -129,8 +129,13 @@ function validateParameters(params: LinearParameters): void {
   }
 }
 
+export type LinearToolGateway = Pick<
+  LinearGateway,
+  "viewer" | "listResources" | "listIssues" | "searchIssues" | "issue"
+>;
+
 async function dispatchLinear(
-  gateway: LinearGateway,
+  gateway: LinearToolGateway,
   params: LinearParameters,
   signal?: AbortSignal,
 ) {
@@ -197,7 +202,7 @@ async function dispatchLinear(
   }
 }
 
-export function createLinearTool(gateway: LinearGateway): ToolDefinition {
+export function createLinearTool(gateway: LinearToolGateway): ToolDefinition {
   return defineTool<typeof LinearParameters, unknown>({
     name: "linear",
     label: "Linear",

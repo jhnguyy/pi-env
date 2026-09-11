@@ -21,14 +21,17 @@ function tool(name: string): ToolInfo {
   } as ToolInfo;
 }
 
-function registrySnapshot(callable: string[], unavailable: string[] = []): ToolRegistry {
+function registrySnapshot(
+  callable: string[],
+  unavailable: string[] = [],
+): Pick<ToolRegistry, "getRuntimeSnapshot"> {
   const availableTools = callable.map(tool);
   return {
     getRuntimeSnapshot: () => ({
       availableTools,
       catalog: createPtcToolCatalog(availableTools, unavailable),
     }),
-  } as unknown as ToolRegistry;
+  };
 }
 
 describe("PTC actions", () => {
@@ -47,12 +50,7 @@ describe("PTC actions", () => {
       details: { action: PtcAction.Run, completion: PtcCompletion.Success },
     });
     await expect(
-      executePtcAction(
-        { action: PtcAction.Run, code: 'return "ok";' },
-        runtime,
-        registry,
-        "/cwd",
-      ),
+      executePtcAction({ action: PtcAction.Run, code: 'return "ok";' }, runtime, registry, "/cwd"),
     ).resolves.toMatchObject({
       output: 'ran:return "ok";',
       details: { action: PtcAction.Run, completion: PtcCompletion.Success },
@@ -76,9 +74,15 @@ describe("PTC actions", () => {
 
     expect(execute).not.toHaveBeenCalled();
     expect(result.output).toContain("Nested tool result: Promise<string> (plain text).");
-    expect(result.output).toContain('"dev_tools"(args?: Record<string, unknown>): Promise<string>;');
-    expect(result.output).toContain('"dev-tools"(args?: Record<string, unknown>): Promise<string>;');
-    expect(result.output).toContain("direct_only: This active direct tool has no PTC dispatcher. Call it directly.");
+    expect(result.output).toContain(
+      '"dev_tools"(args?: Record<string, unknown>): Promise<string>;',
+    );
+    expect(result.output).toContain(
+      '"dev-tools"(args?: Record<string, unknown>): Promise<string>;',
+    );
+    expect(result.output).toContain(
+      "direct_only: This active direct tool has no PTC dispatcher. Call it directly.",
+    );
     expect(result.output).toContain("ptc: This tool is blocked inside PTC. Call it directly.");
     expect(result.details).toMatchObject({
       action: PtcAction.Inspect,

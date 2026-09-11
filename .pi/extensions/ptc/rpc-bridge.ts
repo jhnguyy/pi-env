@@ -10,11 +10,7 @@ import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { Schema } from "effect";
 import { formatParamsPreview } from "../_shared/code-frame";
 import { formatError } from "../_shared/errors";
-import {
-  PtcCancellationError,
-  PtcProtocolError,
-  PtcSubprocessError,
-} from "./node-runtime";
+import { PtcCancellationError, PtcProtocolError, PtcSubprocessError } from "./node-runtime";
 import { PtcExecutionTracker } from "./execution-details";
 import {
   MAX_STDERR_BYTES,
@@ -101,7 +97,19 @@ function combineOutput(userOutput: Buffer, returnValue: string): string {
   return stdout.endsWith("\n") ? stdout + returnValue : `${stdout}\n${returnValue}`;
 }
 
-function rpcOutput(proc: ChildProcess): Readable {
+export interface RpcChildProcess {
+  readonly stdin: ChildProcess["stdin"];
+  readonly stdout: ChildProcess["stdout"];
+  readonly stderr: ChildProcess["stderr"];
+  readonly stdio: ChildProcess["stdio"];
+  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  once(event: "error", listener: (error: Error) => void): this;
+  off(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  off(event: "error", listener: (error: Error) => void): this;
+  listenerCount(event: string | symbol): number;
+}
+
+function rpcOutput(proc: RpcChildProcess): Readable {
   const stream = proc.stdio[3];
   if (!(stream instanceof Readable)) {
     throw new PtcProtocolError({ reason: "fd 3 is not a readable pipe" });
@@ -153,7 +161,7 @@ export class RpcBridge {
   readonly completion: Promise<string>;
 
   constructor(
-    private proc: ChildProcess,
+    private proc: RpcChildProcess,
     private dispatch: DispatchFn,
     signal?: AbortSignal,
     private onUpdate?: AgentToolUpdateCallback<unknown>,

@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, it, test } from "vitest";
-import { defineTool, type ExtensionAPI, type ToolDefinition, type ToolInfo } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type ExtensionAPI,
+  type ToolDefinition,
+  type ToolInfo,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { registerAgentTools, resetAgentToolRegistryForTests, ToolCapability } from "../../_shared/agent-tools";
+import {
+  registerAgentTools,
+  resetAgentToolRegistryForTests,
+  ToolCapability,
+} from "../../_shared/agent-tools";
 import { registerPtcTools, resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 import toolManager from "../../tool-manager";
 import { ToolRegistry } from "../tool-registry";
@@ -36,18 +45,21 @@ function createHarness(activeNames: string[]) {
   ];
   const appended: Array<{ type: string; data: unknown }> = [];
 
-  const createApi = (): ExtensionAPI => ({
-    registerTool(tool: ToolDefinition<any, any, any>) {
-      tools.push({ ...tool, sourceInfo: sourceInfo("extension") });
-    },
-    registerCommand() {},
-    appendEntry: (type: string, data: unknown) => appended.push({ type, data }),
-    getActiveTools: () => active,
-    setActiveTools: (next: string[]) => active.splice(0, active.length, ...next),
-    getAllTools: () => tools,
-    on() {},
-    events: bus.events,
-  } as unknown as ExtensionAPI);
+  const createApi = (): ExtensionAPI =>
+    // The shared registration APIs require the external host's full ExtensionAPI; this harness implements only the exercised host surface.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+    ({
+      registerTool(tool: ToolDefinition<any, any, any>) {
+        tools.push({ ...tool, sourceInfo: sourceInfo("extension") });
+      },
+      registerCommand() {},
+      appendEntry: (type: string, data: unknown) => appended.push({ type, data }),
+      getActiveTools: () => active,
+      setActiveTools: (next: string[]) => active.splice(0, active.length, ...next),
+      getAllTools: () => tools,
+      on() {},
+      events: bus.events,
+    }) as unknown as ExtensionAPI;
 
   return { api: createApi(), createApi, tools, bus, active, appended };
 }
@@ -72,17 +84,23 @@ describe("ToolRegistry active filtering", () => {
     const registry = new ToolRegistry(harness.api);
 
     expect(registry.getAvailableTools().map((tool) => tool.name)).toEqual([]);
-    await expect(
-      registry.dispatch("read", {}, process.cwd(), undefined),
-    ).rejects.toMatchObject({ failure: { class: "inactive-tool", tool: "read" } });
-    await expect(
-      registry.dispatch("external", {}, process.cwd(), undefined),
-    ).rejects.toMatchObject({ failure: { class: "inactive-tool", tool: "external" } });
+    await expect(registry.dispatch("read", {}, process.cwd(), undefined)).rejects.toMatchObject({
+      failure: { class: "inactive-tool", tool: "read" },
+    });
+    await expect(registry.dispatch("external", {}, process.cwd(), undefined)).rejects.toMatchObject(
+      { failure: { class: "inactive-tool", tool: "external" } },
+    );
   });
 
   test.each([
     ["before", (register: () => void, _registry: () => ToolRegistry) => register()],
-    ["after", (register: () => void, registry: () => ToolRegistry) => { registry(); register(); }],
+    [
+      "after",
+      (register: () => void, registry: () => ToolRegistry) => {
+        registry();
+        register();
+      },
+    ],
   ] as const)("%s-construction PTC registrations are available", async (_label, arrange) => {
     const harness = createHarness(["external"]);
     let registry: ToolRegistry | undefined;
@@ -90,8 +108,14 @@ describe("ToolRegistry active filtering", () => {
 
     arrange(() => registerPtcTools(harness.createApi(), externalTool), getRegistry);
 
-    expect(getRegistry().getAvailableTools().map((tool) => tool.name)).toContain("external");
-    await expect(getRegistry().dispatch("external", {}, process.cwd(), undefined)).resolves.toBe("ok");
+    expect(
+      getRegistry()
+        .getAvailableTools()
+        .map((tool) => tool.name),
+    ).toContain("external");
+    await expect(getRegistry().dispatch("external", {}, process.cwd(), undefined)).resolves.toBe(
+      "ok",
+    );
   });
 
   it("executes agent-tool registrations", async () => {
@@ -128,14 +152,19 @@ describe("ToolRegistry active filtering", () => {
       capabilities: [ToolCapability.Read],
       audience: "dag",
     });
-    await expect(registry.dispatch("review_private", {}, process.cwd(), undefined)).rejects.toThrow("not available");
+    await expect(registry.dispatch("review_private", {}, process.cwd(), undefined)).rejects.toThrow(
+      "not available",
+    );
   });
 
   it("dispatches real search_tools from a distinct extension API without agent-channel emission", async () => {
     const harness = createHarness(["search_tools"]);
-    harness.tools.push(
-      { name: "web_fetch", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") },
-    );
+    harness.tools.push({
+      name: "web_fetch",
+      description: "web",
+      parameters: {},
+      sourceInfo: sourceInfo("extension"),
+    });
 
     const ptcApi = harness.createApi();
     const managerApi = harness.createApi();
@@ -147,13 +176,20 @@ describe("ToolRegistry active filtering", () => {
     expect(managerApi.registerTool).toBe(originalRegisterTool);
     expect(registry.getAvailableTools().map((tool) => tool.name)).toContain("search_tools");
 
-    const result = await registry.dispatch("search_tools", { query: "web" }, process.cwd(), undefined);
+    const result = await registry.dispatch(
+      "search_tools",
+      { query: "web" },
+      process.cwd(),
+      undefined,
+    );
     expect(result).toContain("loaded:");
     expect(result).toContain("web_fetch");
     expect(harness.active).toEqual(expect.arrayContaining(["search_tools", "web_fetch"]));
     expect(harness.appended).toEqual([
       { type: "tool-manager:state", data: expect.objectContaining({ reason: "search" }) },
     ]);
-    expect(harness.bus.emitted.filter((event) => event.event === "agent-tools:register")).toEqual([]);
+    expect(harness.bus.emitted.filter((event) => event.event === "agent-tools:register")).toEqual(
+      [],
+    );
   });
 });

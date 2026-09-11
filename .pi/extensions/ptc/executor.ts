@@ -7,10 +7,7 @@ import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { transformSync, type Message } from "esbuild";
 import { Cause, Effect } from "effect";
-import type {
-  ExtensionContext,
-  AgentToolUpdateCallback,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { buildCodeFrame, mapGeneratedStackToUserLine } from "../_shared/code-frame";
 import { RpcBridge } from "./rpc-bridge";
@@ -50,9 +47,11 @@ export interface PtcExecutionResult {
   readonly details: PtcRunDetails;
 }
 
+export type PtcExecutorRegistry = Pick<ToolRegistry, "getRuntimeSnapshot" | "dispatch">;
+
 export class PtcExecutor {
   constructor(
-    private registry: ToolRegistry,
+    private registry: PtcExecutorRegistry,
     private preamblePath = PREAMBLE_PATH,
     private timeoutMs = MAX_TIMEOUT_MS,
   ) {}

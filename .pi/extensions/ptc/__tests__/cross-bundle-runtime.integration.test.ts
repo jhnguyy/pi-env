@@ -3,11 +3,7 @@ import { buildSync } from "esbuild";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import type {
-  ExtensionAPI,
-  ToolDefinition,
-  ToolInfo,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 import type { PtcToolCatalog } from "../catalog";
@@ -68,6 +64,8 @@ function createHarness() {
   const listeners = new Map<string, Array<(...args: any[]) => void>>();
 
   const createApi = (): ExtensionAPI =>
+    // Both dynamically loaded public entrypoints require the external host's full ExtensionAPI; this cross-bundle harness implements only their exercised surface.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     ({
       registerTool(tool: ToolDefinition<any, any, any>) {
         tools.push({
@@ -116,43 +114,43 @@ interface RuntimeFixture {
 }
 
 describe("PTC cross-bundle runtime", () => {
-  it(
-    "runs a cross-host tool after dynamic activation through separate bundles and API instances",
-    async () => {
-      const harness = createHarness();
-      const ptcApi = harness.createApi();
-      const toolApi = harness.createApi();
+  it("runs a cross-host tool after dynamic activation through separate bundles and API instances", async () => {
+    const harness = createHarness();
+    const ptcApi = harness.createApi();
+    const toolApi = harness.createApi();
 
-      const runtimeModule = (await import(pathToFileURL(ptcRuntimePath).href)) as {
-        createPtcRuntime(pi: ExtensionAPI, path: string): RuntimeFixture;
-      };
-      const extensionModule = (await import(pathToFileURL(crossHostExtensionPath).href)) as {
-        default(pi: ExtensionAPI): void;
-      };
-      const runtime = runtimeModule.createPtcRuntime(ptcApi, preamblePath);
-      extensionModule.default(toolApi);
+    const runtimeModule = (await import(pathToFileURL(ptcRuntimePath).href)) as {
+      createPtcRuntime(pi: ExtensionAPI, path: string): RuntimeFixture;
+    };
+    const extensionModule = (await import(pathToFileURL(crossHostExtensionPath).href)) as {
+      default(pi: ExtensionAPI): void;
+    };
+    const runtime = runtimeModule.createPtcRuntime(ptcApi, preamblePath);
+    extensionModule.default(toolApi);
 
-      harness.trigger("session_start", { type: "session_start" }, {
+    harness.trigger(
+      "session_start",
+      { type: "session_start" },
+      {
         cwd: "/dynamic-session",
-      });
-      expect(runtime.catalog().callable).toEqual([]);
+      },
+    );
+    expect(runtime.catalog().callable).toEqual([]);
 
-      ptcApi.setActiveTools(["dynamic-cross-host"]);
-      expect(runtime.catalog().callable).toEqual([
-        expect.objectContaining({ name: "dynamic-cross-host", key: "dynamic_cross_host" }),
-      ]);
-      const execution = await runtime.execute(
-        'return await tools["dynamic-cross-host"]({ value: "ok" });',
-        process.cwd(),
-      );
-      expect(execution.output).toBe("ok:/dynamic-session");
+    ptcApi.setActiveTools(["dynamic-cross-host"]);
+    expect(runtime.catalog().callable).toEqual([
+      expect.objectContaining({ name: "dynamic-cross-host", key: "dynamic_cross_host" }),
+    ]);
+    const execution = await runtime.execute(
+      'return await tools["dynamic-cross-host"]({ value: "ok" });',
+      process.cwd(),
+    );
+    expect(execution.output).toBe("ok:/dynamic-session");
 
-      harness.trigger("session_shutdown", { type: "session_shutdown" });
-      expect(runtime.catalog().callable).toEqual([]);
-      expect(runtime.catalog().unavailable).toEqual([
-        expect.objectContaining({ name: "dynamic-cross-host", class: "unavailable-tool" }),
-      ]);
-    },
-    15_000,
-  );
+    harness.trigger("session_shutdown", { type: "session_shutdown" });
+    expect(runtime.catalog().callable).toEqual([]);
+    expect(runtime.catalog().unavailable).toEqual([
+      expect.objectContaining({ name: "dynamic-cross-host", class: "unavailable-tool" }),
+    ]);
+  }, 15_000);
 });

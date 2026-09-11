@@ -1,23 +1,53 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it, vi } from "vitest";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SEARCH_TOOL_NAME, resolveConfig } from "../core";
-import { handleToolsCommand } from "../index";
+import { handleToolsCommand, type ToolManagerStateApi, type ToolsCommandContext } from "../index";
 
 function harness() {
   let active = ["read", SEARCH_TOOL_NAME];
   const entries: unknown[] = [];
-  const tools = ["read", "bash", SEARCH_TOOL_NAME, "analyze", "notes"].map((name) => ({ name, label: name, description: name, parameters: {}, sourceInfo: { source: "test" } as any }));
+  const tools = ["read", "bash", SEARCH_TOOL_NAME, "analyze", "notes"].map((name) => ({
+    name,
+    label: name,
+    description: name,
+    parameters: {},
+    sourceInfo: {
+      source: "extension" as const,
+      path: `/test/${name}`,
+      scope: "project" as const,
+      origin: "top-level" as const,
+    },
+  }));
   const pi = {
     getAllTools: () => tools,
     getActiveTools: () => active,
-    setActiveTools: (next: string[]) => { active = next; },
-    appendEntry: (_type: string, data: unknown) => { entries.push(data); },
-  } as unknown as ExtensionAPI;
+    setActiveTools: (next: string[]) => {
+      active = next;
+    },
+    appendEntry: (_type: string, data: unknown) => {
+      entries.push(data);
+    },
+  } satisfies ToolManagerStateApi;
   const notify = vi.fn();
-  const custom = vi.fn(async (factory: any) => factory({ requestRender: vi.fn() }, { fg: (_s: string, t: string) => t, bold: (t: string) => t }, {}, vi.fn()));
-  const ctx = { mode: "tui", ui: { notify, custom } } as unknown as ExtensionCommandContext;
-  return { pi, ctx, notify, custom, entries, get active() { return active; } };
+  const custom = vi.fn(async (factory: any) =>
+    factory(
+      { requestRender: vi.fn() },
+      { fg: (_s: string, t: string) => t, bold: (t: string) => t },
+      {},
+      vi.fn(),
+    ),
+  );
+  const ctx = { mode: "tui", ui: { notify, custom } } satisfies ToolsCommandContext;
+  return {
+    pi,
+    ctx,
+    notify,
+    custom,
+    entries,
+    get active() {
+      return active;
+    },
+  };
 }
 
 describe("/tools command", () => {
@@ -49,11 +79,17 @@ describe("/tools command", () => {
 
     await handleToolsCommand(h.pi, "on analyze missing", h.ctx, config);
     expect(h.active).toEqual(["read", SEARCH_TOOL_NAME, "analyze", "notes"]);
-    expect(h.notify).toHaveBeenLastCalledWith(expect.stringContaining("Unknown: missing"), "warning");
+    expect(h.notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("Unknown: missing"),
+      "warning",
+    );
 
     await handleToolsCommand(h.pi, "off analyze notes missing", h.ctx, config);
     expect(h.active).toEqual(["read", SEARCH_TOOL_NAME, "notes"]);
-    expect(h.notify).toHaveBeenLastCalledWith(expect.stringContaining("Disabled: analyze"), "warning");
+    expect(h.notify).toHaveBeenLastCalledWith(
+      expect.stringContaining("Disabled: analyze"),
+      "warning",
+    );
   });
 
   it("applies and persists profiles, then resets to the configured default", async () => {
