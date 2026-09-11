@@ -158,6 +158,7 @@ export type {
 export {
   DagSessionDefaultLimits,
   DagSessionEntryType,
+  DagSessionEvent,
   DagSessionAttemptInconsistent,
   DagSessionDuplicate,
   DagSessionFinalInconsistent,
@@ -182,7 +183,6 @@ export type {
   DagSessionAttempt,
   DagSessionAttemptStatus,
   DagSessionEntry,
-  DagSessionEvent,
   DagSessionFailure,
   DagSessionLimits,
   DagSessionStore,

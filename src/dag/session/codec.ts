@@ -240,19 +240,20 @@ function decodeEvent(raw: unknown, runId: string, entry: unknown): SessionContra
     throw new SessionContracts.DagSessionMalformed({ message: "malformed event", entry });
   switch (raw._tag) {
     case "graph":
-      return { _tag: "graph", graph: decodeGraph(raw.graph, entry) };
+      return SessionContracts.DagSessionEvent.graph({ graph: decodeGraph(raw.graph, entry) });
     case "transition":
       if (!("transition" in raw))
         throw new SessionContracts.DagSessionMalformed({ message: "malformed transition event", entry });
       return raw.attempt !== undefined
-        ? {
-            _tag: "transition",
+        ? SessionContracts.DagSessionEvent.transition({
             transition: decodeTransition(raw.transition, runId, entry),
             attempt: decodeAttempt(raw.attempt, runId, entry),
-          }
-        : { _tag: "transition", transition: decodeTransition(raw.transition, runId, entry) };
+          })
+        : SessionContracts.DagSessionEvent.transition({
+            transition: decodeTransition(raw.transition, runId, entry),
+          });
     case "final":
-      return { _tag: "final", outcome: decodeOutcome(raw.outcome, entry) };
+      return SessionContracts.DagSessionEvent.final({ outcome: decodeOutcome(raw.outcome, entry) });
     default:
       throw new SessionContracts.DagSessionMalformed({ message: "unknown event variant", entry });
   }

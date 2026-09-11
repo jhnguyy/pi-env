@@ -111,23 +111,24 @@ export type BackendStatusSnapshot = {
   tsconfigPath?: string;
 };
 
-type BackendLifecycle =
-  | { _tag: "idle"; generation: number }
-  | { _tag: "unavailable"; generation: number; message: string }
-  | {
-      _tag: "starting";
-      generation: number;
-      ready: Deferred.Deferred<void, LspBackendError>;
-      resource: BackendResource;
-    }
-  | { _tag: "running"; generation: number; resource: BackendResource }
-  | {
-      _tag: "stopping";
-      generation: number;
-      done: Deferred.Deferred<void>;
-      resource: BackendResource;
-      startup?: Deferred.Deferred<void, LspBackendError>;
-    };
+type BackendLifecycle = Data.TaggedEnum<{
+  idle: { generation: number };
+  unavailable: { generation: number; message: string };
+  starting: {
+    generation: number;
+    ready: Deferred.Deferred<void, LspBackendError>;
+    resource: BackendResource;
+  };
+  running: { generation: number; resource: BackendResource };
+  stopping: {
+    generation: number;
+    done: Deferred.Deferred<void>;
+    resource: BackendResource;
+    startup?: Deferred.Deferred<void, LspBackendError>;
+  };
+}>;
+
+const BackendLifecycle = Data.taggedEnum<BackendLifecycle>();
 
 export const LspBackendErrorKind = {
   Unavailable: "unavailable",
@@ -179,7 +180,7 @@ function emptyResource(): BackendResource {
 }
 
 export class LspBackend {
-  private lifecycle: BackendLifecycle = { _tag: "idle", generation: 0 };
+  private lifecycle: BackendLifecycle = BackendLifecycle.idle({ generation: 0 });
   private nextLspId = 1;
   private readonly pendingLsp = new Map<number, Pending>();
   private initialWorkspaceRoot: string | null = null;
@@ -360,12 +361,11 @@ export class LspBackend {
           this.resetSemanticState();
           const ready = Deferred.makeUnsafe<void, LspBackendError>();
           const generation = this.lifecycle.generation + 1;
-          this.lifecycle = {
-            _tag: "starting",
+          this.lifecycle = BackendLifecycle.starting({
             generation,
             ready,
             resource: emptyResource(),
-          };
+          });
           return withSafeDevToolsSpan(
             this.telemetry.diagnostics,
             DevToolsSpanName.BackendStartup,
@@ -504,11 +504,10 @@ export class LspBackend {
           backendError(LspBackendErrorKind.Cancelled, `${this.name} LSP startup cancelled`),
         );
       }
-      this.lifecycle = {
-        _tag: "running",
+      this.lifecycle = BackendLifecycle.running({
         generation,
         resource: this.lifecycle.resource,
-      };
+      });
       this.startupFailureDetail = undefined;
       return Deferred.succeed(ready, undefined).pipe(Effect.asVoid);
     });
@@ -533,13 +532,12 @@ export class LspBackend {
       if (this.lifecycle._tag === "starting" && this.lifecycle.generation === generation) {
         const done = Deferred.makeUnsafe<void>();
         const stoppingGeneration = generation + 1;
-        this.lifecycle = {
-          _tag: "stopping",
+        this.lifecycle = BackendLifecycle.stopping({
           generation: stoppingGeneration,
           done,
           resource: this.lifecycle.resource,
           startup: ready,
-        };
+        });
         ownedStopping = {
           done,
           stoppingGeneration,
@@ -557,12 +555,11 @@ export class LspBackend {
             this.lifecycle.done === ownedStopping.done
           ) {
             this.lifecycle = ownedStopping.unavailable
-              ? {
-                  _tag: "unavailable",
+              ? BackendLifecycle.unavailable({
                   generation: ownedStopping.stoppingGeneration,
                   message: error.message,
-                }
-              : { _tag: "idle", generation: ownedStopping.stoppingGeneration };
+                })
+              : BackendLifecycle.idle({ generation: ownedStopping.stoppingGeneration });
           }
         });
         yield* Deferred.succeed(ownedStopping.done, undefined).pipe(Effect.ignore);
@@ -987,13 +984,12 @@ export class LspBackend {
       }
       const done = Deferred.makeUnsafe<void>();
       const stoppingGeneration = generation + 1;
-      this.lifecycle = {
-        _tag: "stopping",
+      this.lifecycle = BackendLifecycle.stopping({
         generation: stoppingGeneration,
         done,
         resource: state.resource,
         startup: state._tag === "starting" ? state.ready : undefined,
-      };
+      });
       this.resetCaches();
       return Effect.gen({ self: this }, function* () {
         yield* this.failAllPendingEffect(error, generation);
@@ -1003,7 +999,7 @@ export class LspBackend {
         yield* this.cleanupResourceEffect(state.resource);
         yield* Effect.sync(() => {
           if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
-            this.lifecycle = { _tag: "idle", generation: stoppingGeneration };
+            this.lifecycle = BackendLifecycle.idle({ generation: stoppingGeneration });
           }
         });
         yield* Deferred.succeed(done, undefined).pipe(Effect.ignore);
@@ -1019,13 +1015,12 @@ export class LspBackend {
 
       const done = Deferred.makeUnsafe<void>();
       const wasRunning = state._tag === "running";
-      const stopping: Extract<BackendLifecycle, { _tag: "stopping" }> = {
-        _tag: "stopping",
+      const stopping = BackendLifecycle.stopping({
         generation: state.generation + 1,
         done,
         resource: state.resource,
         startup: state._tag === "starting" ? state.ready : undefined,
-      };
+      });
       this.lifecycle = stopping;
 
       const shutdown = Effect.gen({ self: this }, function* () {
@@ -1063,7 +1058,7 @@ export class LspBackend {
           this.resetCaches();
           this.resetSemanticState();
           if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
-            this.lifecycle = { _tag: "idle", generation: stopping.generation };
+            this.lifecycle = BackendLifecycle.idle({ generation: stopping.generation });
           }
         });
         yield* Deferred.succeed(done, undefined).pipe(Effect.ignore);

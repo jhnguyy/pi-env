@@ -83,21 +83,90 @@ export const propertyName = (
 	return undefined;
 };
 
-export const isMatchPatternObject = (node: ESTree.ObjectExpression): boolean => {
-	const call = node.parent;
+const memberName = (node: ESTree.MemberExpression): string | undefined => {
+	if (!node.computed && node.property.type === "Identifier") {
+		return node.property.name;
+	}
 
-	if (call?.type !== "CallExpression" || !call.arguments.includes(node)) {
+	if (node.computed && isStringLiteral(node.property)) {
+		return node.property.value;
+	}
+
+	return undefined;
+};
+
+const patternArgument = (node: ESTree.ObjectExpression): ESTree.Node => {
+	let current: ESTree.Node = node;
+
+	while (current.parent !== null && current.parent !== undefined) {
+		const parent = current.parent;
+
+		if (
+			(parent.type === "Property" && parent.value === current) ||
+			(parent.type === "SpreadElement" && parent.argument === current) ||
+			(parent.type === "ObjectExpression" && parent.properties.includes(current)) ||
+			(parent.type === "ArrayExpression" && parent.elements.includes(current))
+		) {
+			current = parent;
+			continue;
+		}
+
+		break;
+	}
+
+	return current;
+};
+
+const isExpectInvocation = (node: ESTree.Node): boolean =>
+	node.type === "CallExpression" &&
+	node.callee.type === "Identifier" &&
+	node.callee.name === "expect";
+
+const isExpectMatcher = (callee: ESTree.Node, matcherName: string): boolean => {
+	if (callee.type !== "MemberExpression" || memberName(callee) !== matcherName) {
+		return false;
+	}
+
+	let receiver: ESTree.Node = callee.object;
+
+	while (receiver.type === "MemberExpression") {
+		const modifier = memberName(receiver);
+
+		if (modifier !== "not" && modifier !== "rejects" && modifier !== "resolves") {
+			return false;
+		}
+
+		receiver = receiver.object;
+	}
+
+	return isExpectInvocation(receiver);
+};
+
+export const isTaggedPatternObject = (node: ESTree.ObjectExpression): boolean => {
+	const argument = patternArgument(node);
+	const call = argument.parent;
+
+	if (
+		call?.type !== "CallExpression" ||
+		!call.arguments.some((candidate) => candidate === argument)
+	) {
 		return false;
 	}
 
 	const callee = call.callee;
 
 	return (
-		callee.type === "MemberExpression" &&
-		callee.object.type === "Identifier" &&
-		callee.object.name === "Match" &&
-		!callee.computed &&
-		callee.property.type === "Identifier" &&
-		(callee.property.name === "when" || callee.property.name === "not")
+		(callee.type === "MemberExpression" &&
+			callee.object.type === "Identifier" &&
+			callee.object.name === "Match" &&
+			(memberName(callee) === "when" || memberName(callee) === "not")) ||
+		isExpectMatcher(callee, "toMatchObject") ||
+		isExpectMatcher(callee, "toEqual") ||
+		isExpectMatcher(callee, "toStrictEqual") ||
+		isExpectMatcher(callee, "toContainEqual") ||
+		(callee.type === "MemberExpression" &&
+			callee.object.type === "Identifier" &&
+			callee.object.name === "expect" &&
+			memberName(callee) === "objectContaining")
 	);
 };

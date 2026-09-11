@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Scope } from "effect";
+import { Cause, Data, Deferred, Effect, Exit, Fiber, Option, Queue, Ref, Scope } from "effect";
 import * as DagAttempt from "../attempt.js";
 import * as DagContracts from "../contracts.js";
 import * as DagKernel from "../kernel.js";
@@ -17,16 +17,17 @@ interface RuntimeMutable {
   readonly cancelRequested: boolean;
 }
 
-type Completion = {
-  readonly _tag: "complete";
-  readonly nodeId: string;
-  readonly result: DagContracts.DagNodeResult<unknown, RuntimeContracts.DagFailedNodePayload>;
-};
+type RuntimeEvent = Data.TaggedEnum<{
+  complete: {
+    readonly nodeId: string;
+    readonly result: DagContracts.DagNodeResult<unknown, RuntimeContracts.DagFailedNodePayload>;
+  };
+  cancel: { readonly reason: string };
+  shutdown: {};
+}>;
 
-type RuntimeEvent =
-  | Completion
-  | { readonly _tag: "cancel"; readonly reason: string }
-  | { readonly _tag: "shutdown" };
+const RuntimeEvent = Data.taggedEnum<RuntimeEvent>();
+type Completion = Extract<RuntimeEvent, { readonly _tag: "complete" }>;
 
 function freezeAttempt(attempt: RuntimeContracts.DagNodeAttempt): RuntimeContracts.DagNodeAttempt {
   return Object.freeze({ ...attempt, statuses: Object.freeze([...attempt.statuses]) });
@@ -223,7 +224,7 @@ function runNode<TPayload>(
               outputs: Object.freeze({ ...exit.value }),
             } as const)
           : completeForCause(exit.cause, latest.cancelRequested || latestBefore.cancelRequested);
-      yield* Queue.offer(events, { _tag: "complete", nodeId: node.id, result });
+      yield* Queue.offer(events, RuntimeEvent.complete({ nodeId: node.id, result }));
     }),
   );
 }
@@ -585,7 +586,7 @@ export const submitDagRunInternal = <TPayload>(
               }),
             );
           } else {
-            yield* Queue.offer(events, { _tag: "shutdown" });
+            yield* Queue.offer(events, RuntimeEvent.shutdown());
           }
           yield* Deferred.await(done).pipe(Effect.ignore);
         }
@@ -603,7 +604,10 @@ export const submitDagRunInternal = <TPayload>(
       cancel: Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           if (!(yield* Deferred.isDone(done))) {
-            yield* Queue.offer(events, { _tag: "cancel", reason: "explicit run cancellation" });
+            yield* Queue.offer(
+              events,
+              RuntimeEvent.cancel({ reason: "explicit run cancellation" }),
+            );
           }
           return yield* restore(awaitSnapshot);
         }),

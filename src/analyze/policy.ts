@@ -1,4 +1,5 @@
 import { isAbsolute } from "node:path";
+import { Data } from "effect";
 import { AnalyzerName, ScopeMode, type ScopeMode as Scope } from "./model.js";
 
 export const SAFE_CHECKS = [AnalyzerName.Complexity, AnalyzerName.AsyncRisk, AnalyzerName.Duplicates, AnalyzerName.TestDuplicates] as const;
@@ -51,15 +52,17 @@ export interface SafeAnalyzeRequest {
   readonly timeoutMs: number;
 }
 
-export type AnalyzePolicy =
-  | { readonly _tag: "safe"; readonly request: SafeAnalyzeRequest }
-  | { readonly _tag: "strict"; readonly reason: string }
-  | { readonly _tag: "invalid"; readonly reason: string };
+export type AnalyzePolicy = Data.TaggedEnum<{
+  safe: { readonly request: SafeAnalyzeRequest };
+  strict: { readonly reason: string };
+  invalid: { readonly reason: string };
+}>;
+export const AnalyzePolicy = Data.taggedEnum<AnalyzePolicy>();
 
 type RejectedPolicy = Exclude<AnalyzePolicy, { readonly _tag: "safe" }>;
 
-const invalid = (reason: string): RejectedPolicy => ({ _tag: "invalid", reason });
-const strict = (reason: string): RejectedPolicy => ({ _tag: "strict", reason });
+const invalid = (reason: string): RejectedPolicy => AnalyzePolicy.invalid({ reason });
+const strict = (reason: string): RejectedPolicy => AnalyzePolicy.strict({ reason });
 
 export function isBoundedWorkspaceRelativePath(path: string): boolean {
   return (
@@ -175,8 +178,7 @@ export function classifyAnalyzeRequest(input: PublicAnalyzeRequest): AnalyzePoli
     validateRef(input.ref);
   if (rejection !== undefined) return rejection;
 
-  return {
-    _tag: "safe",
+  return AnalyzePolicy.safe({
     request: {
       cwd: input.cwd,
       scope: scope as typeof ScopeMode.Diff | typeof ScopeMode.Paths,
@@ -192,5 +194,5 @@ export function classifyAnalyzeRequest(input: PublicAnalyzeRequest): AnalyzePoli
         Math.max(1_000, input.timeoutMs ?? ANALYZE_LIMITS.timeoutMs),
       ),
     },
-  };
+  });
 }

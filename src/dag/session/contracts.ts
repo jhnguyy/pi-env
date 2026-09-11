@@ -28,14 +28,16 @@ export type DagAttemptTerminalStatus = DagAttempts.DagAttemptTerminalStatus;
 export type DagSessionAttemptStatus = DagAttempts.DagAttemptStatus;
 export type DagSessionAttempt = DagAttempts.DagAttempt;
 
-export type DagSessionEvent =
-  | { readonly _tag: "graph"; readonly graph: DagContracts.DagDefinition<unknown> }
-  | {
-      readonly _tag: "transition";
-      readonly transition: DagContracts.DagTransition<unknown, unknown>;
-      readonly attempt?: DagSessionAttemptStatus;
-    }
-  | { readonly _tag: "final"; readonly outcome: DagContracts.DagRunOutcome };
+export type DagSessionEvent = Data.TaggedEnum<{
+  graph: { readonly graph: DagContracts.DagDefinition<unknown> };
+  transition: {
+    readonly transition: DagContracts.DagTransition<unknown, unknown>;
+    readonly attempt?: DagSessionAttemptStatus;
+  };
+  final: { readonly outcome: DagContracts.DagRunOutcome };
+}>;
+
+export const DagSessionEvent = Data.taggedEnum<DagSessionEvent>();
 
 export interface DagSessionEntry {
   readonly v: typeof DagSessionWireVersion;

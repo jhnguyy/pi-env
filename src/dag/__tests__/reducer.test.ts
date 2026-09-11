@@ -64,6 +64,7 @@ describe("DAG state reduction", () => {
     });
     expect(Object.isFrozen(started.transition)).toBe(true);
     for (const result of [
+      // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- This malformed tag tests rejection.
       { _tag: "unknown" },
       { _tag: DagNodeResultTag.Succeeded, outputs: null },
       { _tag: DagNodeResultTag.Cancelled, reason: 42 },

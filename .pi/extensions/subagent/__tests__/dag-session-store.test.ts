@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { DagSessionEntryType, type DagSessionEntry } from "../../../../src/dag/index.js";
+import {
+  DagSessionEntryType,
+  DagSessionEvent,
+  type DagSessionEntry,
+} from "../../../../src/dag/index.js";
 import { createDagSessionStore, persistedDagRunIds } from "../dag-session-store";
-
 const entry = {
   v: 1,
   runId: "run-1",
   graphId: "graph-1",
   seq: 0,
-  event: {
-    _tag: "graph",
+  event: DagSessionEvent.graph({
     graph: { runId: "run-1", concurrency: 1, nodes: [] },
-  },
+  }),
 } as const satisfies DagSessionEntry;
 
 describe("DAG parent session store", () => {
