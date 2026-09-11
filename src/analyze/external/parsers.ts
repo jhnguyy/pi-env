@@ -160,6 +160,3 @@ export function parseOxlintJson(text: string, cwd: string): Finding[] {
     }];
   });
 }
-
-/** @deprecated Oxlint replaced ESLint; retained for consumers of the analyzer module. */
-export const parseEslintJson = parseOxlintJson;

@@ -10,7 +10,6 @@ export {
 export {
   normalizeBundleMetafile,
   parseDependencyCruiserJson,
-  parseEslintJson,
   parseKnipOutput,
   parseOxlintJson,
 } from "./external/parsers.js";

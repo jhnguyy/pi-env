@@ -43,7 +43,7 @@ describe("resolvePrReviewModelPolicy", () => {
         { modelAnnotations: { "anthropic/claude": ["reviewer-extra"] } },
         models,
       ),
-    ).toThrowError(
+    ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "no_approved_models" }),
     );
   });
@@ -102,14 +102,14 @@ describe("resolvePrReviewModelPolicy", () => {
       resolvePrReviewModelPolicy(settings("anthropic/claude", "openai/gpt"), models, {
         invented: "openai/gpt",
       }),
-    ).toThrowError(
+    ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "invalid_pin" }),
     );
     expect(() =>
       resolvePrReviewModelPolicy(settings("anthropic/claude", "openai/gpt"), models, {
         security: "google/gemini",
       }),
-    ).toThrowError(
+    ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "invalid_pin" }),
     );
     expect(() =>
@@ -118,7 +118,7 @@ describe("resolvePrReviewModelPolicy", () => {
         [...models, model("google", "gemini")],
         { security: "google/gemini" },
       ),
-    ).toThrowError(
+    ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "unapproved_model" }),
     );
   });

@@ -147,8 +147,12 @@ describe("analyze contracts", () => {
     expect(intersectsHunks(1, 9, hunks)).toBe(false);
   });
 
-  it("expresses committed and unstaged diff hunks in current worktree lines", async () => {
-    const cwd = writeProject({ "src/a.ts": "export const first = 1;\nexport const second = 2;\nexport const third = 3;\n" });
+  it("expresses owned diff hunks in current worktree lines and excludes vendored plugin source", async () => {
+    const cwd = writeProject({
+      "src/a.ts": "export const first = 1;\nexport const second = 2;\nexport const third = 3;\n",
+      "tools/local.ts": "export const local = 1;\n",
+      "tools/oxlint/anti-slop/index.ts": "export const vendored = 1;\n",
+    });
     const git = (...args: string[]): void => { execFileSync("git", args, { cwd, stdio: "ignore" }); };
     git("init", "-b", "main");
     git("config", "user.email", "analyze@example.invalid");
@@ -157,11 +161,14 @@ describe("analyze contracts", () => {
     git("commit", "-m", "baseline");
     git("switch", "-c", "feature");
     writeFileSync(join(cwd, "src/a.ts"), "export const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
+    writeFileSync(join(cwd, "tools/local.ts"), "export const local = 2;\n");
+    writeFileSync(join(cwd, "tools/oxlint/anti-slop/index.ts"), "export const vendored = 2;\n");
     git("add", ".");
     git("commit", "-m", "change third");
     writeFileSync(join(cwd, "src/a.ts"), "// shifts committed hunk\nexport const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
 
     const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Diff, [], "main").pipe(Effect.provide(ProcessServiceLive)));
+    expect(scope.files).toEqual(["src/a.ts", "tools/local.ts"]);
     expect(scope.hunks.get("src/a.ts")).toEqual([
       { start: 1, end: 1 },
       { start: 4, end: 4 },
@@ -704,6 +711,7 @@ describe("external analyzers and parsers", () => {
   it("smoke tests the type-aware Oxlint backend", async () => {
     const cwd = writeProject({ "src/a.ts": "async function f() { Promise.resolve(1); }\nf();" });
     symlinkSync(join(process.cwd(), "node_modules"), join(cwd, "node_modules"), "junction");
+    symlinkSync(join(process.cwd(), "tools"), join(cwd, "tools"), "junction");
     mkdirSync(join(cwd, "scripts"), { recursive: true });
     writeFileSync(join(cwd, "scripts/tool-node-run.sh"), readFileSync(join(process.cwd(), "scripts/tool-node-run.sh")), { mode: 0o755 });
     writeFileSync(join(cwd, ".oxlintrc.json"), readFileSync(join(process.cwd(), ".oxlintrc.json")));
@@ -777,11 +785,13 @@ describe("bounded hardening", () => {
       "node_modules/pkg/index.ts": "ignored",
       ".git/config.ts": "ignored",
       ".analyze-bundle/out.ts": "ignored",
+      "tools/local.ts": "export const local = 1;",
+      "tools/oxlint/anti-slop/index.ts": "ignored",
       ".pi/extensions/demo/index.ts": "export const demo = 1;",
       "config/app.json": "{}",
     });
-    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]).pipe(Effect.provide(ProcessServiceLive)));
-    expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts"]);
+    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "tools", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]).pipe(Effect.provide(ProcessServiceLive)));
+    expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts", "tools/local.ts"]);
   });
 
   it("returns ScopeError when async explicit path walking exceeds limits", async () => {

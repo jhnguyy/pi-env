@@ -109,6 +109,7 @@
     "@earendil-works/pi-tui": "0.85.1",
     "@effect/language-service": "^0.86.6",
     "@effect/vitest": "4.0.0-beta.97",
+    "@oxlint/plugins": "1.73.0",
     "@types/node": "^24.0.0",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
