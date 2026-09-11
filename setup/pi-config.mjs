@@ -1,7 +1,7 @@
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { ok, section } from "./runtime-support.mjs";
+import { ok, section, skip } from "./runtime-support.mjs";
 import {
   appendOnceEffect,
   bootstrapFileEffect,
@@ -9,7 +9,22 @@ import {
   linkPathEffect,
   linked,
   managedBlockEffect,
+  pathExistsOrIsSymlink,
 } from "./file-ops.mjs";
+
+function removeLegacyRolesLinkEffect(ctx) {
+  const source = join(ctx.repo, ".agents/roles");
+  const target = join(ctx.agentsDir, "roles");
+  return fileEffect("remove obsolete roles link", target, () => {
+    if (!pathExistsOrIsSymlink(target)) return;
+    if (!lstatSync(target).isSymbolicLink() || readlinkSync(target) !== source) {
+      skip("~/.agents/roles");
+      return;
+    }
+    unlinkSync(target);
+    linked("~/.agents/roles (obsolete link removed)");
+  });
+}
 
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
@@ -21,16 +36,9 @@ export function configurePiEffect(ctx) {
       "settings.json ← setup/templates/settings.json (review and customize: defaultModel, permissionLevel)",
     );
     yield* applyManagedSettingsEffect(ctx);
-    yield* fileEffect("create directory", ctx.agentsDir, () =>
-      mkdirSync(ctx.agentsDir, { recursive: true }),
-    );
+    yield* removeLegacyRolesLinkEffect(ctx);
     yield* fileEffect("create directory", ctx.testUtilsDir, () =>
       mkdirSync(ctx.testUtilsDir, { recursive: true }),
-    );
-    yield* linkPathEffect(
-      join(ctx.repo, ".agents/roles"),
-      join(ctx.agentsDir, "roles"),
-      "~/.agents/roles",
     );
     yield* linkPathEffect(
       join(ctx.repo, ".pi/extensions/__tests__/test-utils.ts"),
