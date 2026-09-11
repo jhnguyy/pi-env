@@ -13,7 +13,15 @@ const mockTheme: RenderTheme = {
 };
 
 function text(rendered: unknown): string {
-  return (rendered as any).text as string;
+  if (
+    typeof rendered !== "object" ||
+    rendered === null ||
+    !("text" in rendered) ||
+    typeof rendered.text !== "string"
+  ) {
+    throw new TypeError("Expected a rendered text component");
+  }
+  return rendered.text;
 }
 
 describeIfEnabled("dev-tools", "Renderers", () => {

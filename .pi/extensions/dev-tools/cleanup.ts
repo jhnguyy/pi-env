@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { applyCleanupPlan, buildCleanupPlan, formatCleanupPlan, parseCleanupArgs } from "./cleanup-core";
 
-export function registerCleanupCommand(pi: ExtensionAPI) {
+export function registerCleanupCommand(pi: Pick<ExtensionAPI, "registerCommand">) {
   pi.registerCommand("cleanup", {
     description:
       "Plan or apply cleanup of merged local git worktrees and branches. Dry-run by default; runs git fetch --prune origin unless --no-fetch is passed. Pass a repo path directly (for example, `/cleanup /path/to/repo`) or with `--repo <path>`. Use `apply` for safe ancestry-proven cleanup and `apply --force` for remote-gone squash-merge cleanup.",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch } from "../index";
+import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch, type WebFetchResponse } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
@@ -23,6 +23,32 @@ function registeredWebFetchTool() {
 
 function componentText(component: unknown): string {
   return (component as { text: string }).text;
+}
+
+function pendingStreamResponse(onStart: () => void, onCancel: () => void): WebFetchResponse {
+  let rejectRead: ((reason?: unknown) => void) | undefined;
+  return {
+    headers: new Headers(),
+    status: 200,
+    url: "https://example.com/",
+    arrayBuffer: async () => new ArrayBuffer(0),
+    body: {
+      getReader: () => {
+        onStart();
+        return {
+          read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
+            rejectRead = reject;
+          }),
+          cancel: (reason?: unknown) => {
+            onCancel();
+            rejectRead?.(reason);
+            return Promise.resolve();
+          },
+          releaseLock: () => undefined,
+        };
+      },
+    },
+  } satisfies WebFetchResponse;
 }
 
 function webFetchToolResult() {
@@ -184,28 +210,7 @@ describe("web fetch", () => {
     const cancelled = new Promise<void>((resolve) => {
       bodyCancelled = resolve;
     });
-    let rejectRead: ((reason?: unknown) => void) | undefined;
-    const response = {
-      headers: new Headers(),
-      status: 200,
-      url: "https://example.com/",
-      body: {
-        getReader: () => {
-          bodyStarted();
-          return {
-            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
-              rejectRead = reject;
-            }),
-            cancel: (reason?: unknown) => {
-              bodyCancelled();
-              rejectRead?.(reason);
-              return Promise.resolve();
-            },
-            releaseLock: () => undefined,
-          };
-        },
-      },
-    } as unknown as Response;
+    const response = pendingStreamResponse(bodyStarted, bodyCancelled);
     const injectedFetch: WebFetch = async () => response;
     const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
     promise.catch(() => undefined);
@@ -225,28 +230,7 @@ describe("web fetch", () => {
     const cancelled = new Promise<void>((resolve) => {
       bodyCancelled = resolve;
     });
-    let rejectRead: ((reason?: unknown) => void) | undefined;
-    const response = {
-      headers: new Headers(),
-      status: 200,
-      url: "https://example.com/",
-      body: {
-        getReader: () => {
-          bodyStarted();
-          return {
-            read: () => new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
-              rejectRead = reject;
-            }),
-            cancel: (reason?: unknown) => {
-              bodyCancelled();
-              rejectRead?.(reason);
-              return Promise.resolve();
-            },
-            releaseLock: () => undefined,
-          };
-        },
-      },
-    } as unknown as Response;
+    const response = pendingStreamResponse(bodyStarted, bodyCancelled);
     const injectedFetch: WebFetch = async () => response;
     const fiber = Effect.runFork(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch }));
 

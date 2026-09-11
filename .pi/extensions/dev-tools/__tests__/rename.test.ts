@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { handleRename, type HandlerDeps } from "../handlers";
+import { handleRename, type RenameBackend, type RenameHandlerDeps } from "../handlers";
 import { pathToUri } from "../utils";
 import { applyWorkspaceEdit } from "../workspace-edit";
 
@@ -39,7 +39,7 @@ describeIfEnabled("dev-tools", "rename action", () => {
 
   function dependencies(workspaceEdit: unknown) {
     const ensureFile = vi.fn(async (path: string) => pathToUri(path));
-    const lspRequest = vi.fn(async () => ({ jsonrpc: "2.0", id: 1, result: workspaceEdit }));
+    const lspRequest = vi.fn(async () => ({ jsonrpc: "2.0" as const, id: 1, result: workspaceEdit }));
     const invalidate = vi.fn();
     const backend = {
       ensureFile,
@@ -50,16 +50,12 @@ describeIfEnabled("dev-tools", "rename action", () => {
       }),
       lspRequest,
       recordSemanticResult: vi.fn(),
-      didLastSemanticRequestFail: vi.fn(() => false),
       projectRoots: [root],
-    };
+    } satisfies RenameBackend;
     const deps = {
-      getBackend: () => backend,
-      getWorkspaceSymbolBackends: () => [],
-      backends: [],
+      getBackend: (_path: string) => backend,
       fileCache: { invalidate },
-      getIdleMs: () => 0,
-    } as unknown as HandlerDeps;
+    } satisfies RenameHandlerDeps;
     return { backend, deps, ensureFile, invalidate, lspRequest };
   }
 
@@ -384,10 +380,10 @@ describeIfEnabled("dev-tools", "rename action", () => {
       });
       backend.projectRoots = [root, secondRoot];
       const originalGetBackend = deps.getBackend;
-      deps.getBackend = ((path: string) => {
+      deps.getBackend = (path: string) => {
         if (path === realTarget) throw new Error("Unsupported file type: target.ts");
         return originalGetBackend(path);
-      });
+      };
 
       const response = await handleRename({
         id: 7,
@@ -451,10 +447,10 @@ describeIfEnabled("dev-tools", "rename action", () => {
       },
     });
     const originalGetBackend = deps.getBackend;
-    deps.getBackend = ((path: string) => {
+    deps.getBackend = (path: string) => {
       if (path === unsupportedPath) throw new Error("Unsupported file type: unsupported.py");
       return originalGetBackend(path);
-    });
+    };
 
     const response = await handleRename({
       id: 8,
@@ -496,11 +492,10 @@ describeIfEnabled("dev-tools", "rename action", () => {
         ...sourceBackend,
         getDocumentSnapshot: secondSnapshot,
         ensureFile: secondEnsureFile,
-      };
+      } satisfies RenameBackend;
       const originalGetBackend = deps.getBackend;
-      deps.getBackend = ((path: string) => (
-        path === secondPath ? secondBackend : originalGetBackend(path)
-      )) as HandlerDeps["getBackend"];
+      deps.getBackend = (path: string) =>
+        path === secondPath ? secondBackend : originalGetBackend(path);
 
       const response = await handleRename({
         id: 9,

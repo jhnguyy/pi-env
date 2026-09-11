@@ -28,7 +28,25 @@ export function parseWebUrl(rawUrl: string): URL {
   return parsed;
 }
 
-export type WebFetch = typeof globalThis.fetch;
+export interface WebFetchBodyReader {
+  read(): Promise<ReadableStreamReadResult<Uint8Array>>;
+  cancel(reason?: unknown): Promise<void>;
+  releaseLock(): void;
+}
+
+export interface WebFetchBody {
+  getReader(): WebFetchBodyReader;
+}
+
+export interface WebFetchResponse {
+  readonly headers: Pick<Headers, "get">;
+  readonly status: number;
+  readonly url: string;
+  readonly body: WebFetchBody | null;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+
+export type WebFetch = (input: URL, init?: RequestInit) => Promise<WebFetchResponse>;
 export interface WebFetchOptions {
   maxBytes?: number;
   mode?: WebFetchMode;
@@ -96,7 +114,7 @@ function combinedAbortSignal(effectSignal: AbortSignal, callerSignal?: AbortSign
   };
 }
 
-async function readResponseBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+async function readResponseBytes(response: WebFetchResponse, signal: AbortSignal): Promise<Uint8Array> {
   if (signal.aborted) throw signal.reason ?? new Error("Web fetch aborted");
   if (!response.body) return new Uint8Array(await response.arrayBuffer());
   const reader = response.body.getReader();
