@@ -9,6 +9,7 @@ import { parseGitHubPullRequestUrl } from "../_shared/github";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 import { txt } from "../_shared/result";
 import type { ToolContract } from "../_shared/tool-contract";
+import { renderCompactToolCall, renderTextToolResult } from "../_shared/tool-render";
 import { isProtectedBranch, parseWorktreePorcelain, type WorktreeEntry } from "./cleanup-core";
 
 type Exec = ExtensionAPI["exec"];
@@ -504,6 +505,10 @@ export function registerCloseout(pi: CloseoutRegistrationApi): void {
     piOptions: {
       promptSnippet: CLOSEOUT_PROMPT_SNIPPET,
       promptGuidelines: CLOSEOUT_PROMPT_GUIDELINES,
+      renderCall: (args, theme) =>
+        renderCompactToolCall("closeout", args.pr ?? args.repo ?? "current pull request", theme),
+      renderResult: (result, options, theme, context) =>
+        renderTextToolResult("closeout", result, options, theme, context),
     },
   });
 

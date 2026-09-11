@@ -1,5 +1,4 @@
 import {
-  defineTool,
   formatSize,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
@@ -9,7 +8,7 @@ import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
 import { registerPtcTools } from "../_shared/ptc-tools";
 import { txt } from "../_shared/result";
-import { toolExpandHint } from "../_shared/tool-render";
+import { definePublicTool, toolExpandHint } from "../_shared/tool-render";
 import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
 import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
 
@@ -365,7 +364,7 @@ export default function webContext(pi: ExtensionAPI) {
     return undefined;
   });
 
-  const webFetchTool = defineTool({
+  const webFetchTool = definePublicTool({
     name: "web_fetch",
     label: "Web Fetch",
     description: [

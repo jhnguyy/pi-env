@@ -63,7 +63,7 @@ async function execute(
   signal?: AbortSignal,
   ctx: any = {},
 ) {
-  return tool(fakeGateway).execute("tool-call", params, signal, undefined, ctx);
+  return tool(fakeGateway).execute("tool-call", params as never, signal, undefined, ctx);
 }
 
 describeIfEnabled("linear", "Linear tool", () => {

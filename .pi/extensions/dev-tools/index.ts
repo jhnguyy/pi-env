@@ -17,6 +17,7 @@ import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { LspResult } from "./protocol";
 import { registerAgentToolsOnSessionStart, ToolCapability, type AgentToolEvents } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
+import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
 import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
 import {
@@ -95,7 +96,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi) {
     { tool: writeAgentTool, capabilities: [ToolCapability.Write] },
   ]);
 
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "dev-tools",
     label: "Dev Tools",
     description: description,
