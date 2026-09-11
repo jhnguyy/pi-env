@@ -1,2 +1,2 @@
 <!-- pi-env:append-system -->
-Do not reference external repositories in commits, PRs, or issues without explicit approval.
+Complete the work in scope, including necessary validation and follow-through. Prefer clear, durable solutions over expedient ones. State the reason for material or non-obvious choices plainly and briefly.
