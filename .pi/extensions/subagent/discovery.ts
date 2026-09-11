@@ -37,7 +37,7 @@ const DESCRIPTION_INTRO = [
   "",
   "For run/start, agent files provide tools, capabilities, model, and prompt defaults.",
   "User and installed package agents are the default. Project agents require agent_scope and project trust.",
-  "The required name creates a persistent `sub-<name>` transcript beside the parent.",
+  "For a persistent parent, the required name creates a `sub-<name>` transcript below the parent's `_children` directory.",
   "If the agent file omits model, you MUST pass model explicitly.",
   'Inline run/start calls require tools and model. Example: subagent({ action: "run", name: "task", task: "...", tools: [...], model: "provider/id" }).',
   "Public runs have no turn-count limit. The configured run-time limit still applies.",

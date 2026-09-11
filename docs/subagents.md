@@ -2,6 +2,8 @@
 
 The subagent extension runs child agents in the parent Pi process. Each child has an isolated context and a linked persistent session transcript.
 
+By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive pi-env introspection can still list and read child transcripts. Use `pi --session <path>` to resume a child by its exact path.
+
 ## Actions
 
 The `subagent` tool uses one `action` parameter for blocking runs and background job management.
@@ -43,12 +45,15 @@ Configure limits in the `subagent` settings block:
     "maxRetainedJobs": 32,
     "maxResultBytes": 51200,
     "maxRunMs": 1800000,
-    "cancellationGraceMs": 500
+    "cancellationGraceMs": 500,
+    "sessionStorage": "nested"
   }
 }
 ```
 
 The supervisor bounds pending admission. Write-capable runs serialize by canonical Git workspace. Retention eviction removes the volatile job handle but does not delete its child session transcript.
+
+Set `sessionStorage` to `"sibling"` only when native Pi must discover child transcripts beside their parent. The default is `"nested"`.
 
 ## Cancellation states
 

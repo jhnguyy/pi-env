@@ -2,6 +2,13 @@ import { Schema } from "effect";
 
 import { decodeSettingsBlockSync } from "../_shared/settings";
 
+export const SubagentSessionStorage = {
+  Nested: "nested",
+  Sibling: "sibling",
+} as const;
+export type SubagentSessionStorage =
+  (typeof SubagentSessionStorage)[keyof typeof SubagentSessionStorage];
+
 export const DEFAULT_SUBAGENT_LIMITS = {
   maxConcurrentRuns: 4,
   maxPendingRuns: 16,
@@ -11,6 +18,11 @@ export const DEFAULT_SUBAGENT_LIMITS = {
   cancellationGraceMs: 500,
 } as const;
 
+export const DEFAULT_SUBAGENT_CONFIG = {
+  ...DEFAULT_SUBAGENT_LIMITS,
+  sessionStorage: SubagentSessionStorage.Nested,
+} as const;
+
 export const SubagentSettingsSchema = Schema.Struct({
   maxConcurrentRuns: Schema.optionalKey(Schema.Number),
   maxPendingRuns: Schema.optionalKey(Schema.Number),
@@ -18,6 +30,7 @@ export const SubagentSettingsSchema = Schema.Struct({
   maxResultBytes: Schema.optionalKey(Schema.Number),
   maxRunMs: Schema.optionalKey(Schema.Number),
   cancellationGraceMs: Schema.optionalKey(Schema.Number),
+  sessionStorage: Schema.optionalKey(Schema.Literals(["nested", "sibling"])),
 });
 
 export interface SubagentRuntimeConfig {
@@ -27,6 +40,7 @@ export interface SubagentRuntimeConfig {
   readonly maxResultBytes: number;
   readonly maxRunMs: number;
   readonly cancellationGraceMs: number;
+  readonly sessionStorage: SubagentSessionStorage;
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {
@@ -58,6 +72,7 @@ export function resolveSubagentRuntimeConfig(
       settings.cancellationGraceMs,
       DEFAULT_SUBAGENT_LIMITS.cancellationGraceMs,
     ),
+    sessionStorage: settings.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
   };
 }
 

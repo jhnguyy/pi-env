@@ -29,6 +29,10 @@ import {
   type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
+import {
+  DEFAULT_SUBAGENT_CONFIG,
+  type SubagentSessionStorage,
+} from "./config";
 import type { SubagentRunSupervisor } from "./control";
 import { makeDagSubagentExecutorRegistry } from "./dag-runtime";
 import { makeDagSessionStore, persistedDagRunIds } from "./dag-session-store";
@@ -39,6 +43,7 @@ interface DagSessionRuntimeDependencies {
   readonly supervisor: SubagentRunSupervisor;
   readonly telemetryRuntime: ToolingTelemetryRuntime;
   readonly ledger: SubagentUsageLedger;
+  readonly sessionStorage?: SubagentSessionStorage;
   readonly executorRegistry?: DagExecutorRegistryService;
 }
 
@@ -105,6 +110,7 @@ export class DagSessionRuntime {
           ledger: dependencies.ledger,
           supervisor: dependencies.supervisor,
           telemetryRuntime: dependencies.telemetryRuntime,
+          sessionStorage: dependencies.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
         },
       );
     const scope = await Effect.runPromise(Scope.make());
