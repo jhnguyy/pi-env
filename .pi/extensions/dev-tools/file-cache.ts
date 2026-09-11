@@ -1,6 +1,13 @@
 import { readFile, stat } from "node:fs/promises";
 import { Cache, Data, Duration, Effect, Exit } from "effect";
 
+export interface FileCacheFileSystem {
+  readonly stat: (path: string) => Promise<{ readonly size: number }>;
+  readonly readFile: (path: string, encoding: "utf8") => Promise<string>;
+}
+
+const nodeFileSystem: FileCacheFileSystem = { readFile, stat };
+
 /** Maximum file size to read. Larger files return null. */
 export const MAX_FILE_SIZE_BYTES = 512 * 1024;
 
@@ -16,18 +23,22 @@ class FileCacheReadError extends Data.TaggedError("FileCacheReadError")<{
   readonly cause: unknown;
 }> {}
 
-const loadEntry = (path: string): Effect.Effect<CacheEntry, FileCacheReadError> =>
-  Effect.tryPromise({
+function loadEntry(
+  fileSystem: FileCacheFileSystem,
+  path: string,
+): Effect.Effect<CacheEntry, FileCacheReadError> {
+  return Effect.tryPromise({
     try: async () => {
-      const file = await stat(path);
+      const file = await fileSystem.stat(path);
       if (file.size > MAX_FILE_SIZE_BYTES) {
         throw new Error(`File exceeds ${MAX_FILE_SIZE_BYTES} bytes`);
       }
-      const content = await readFile(path, "utf8");
+      const content = await fileSystem.readFile(path, "utf8");
       return { content, lines: content.split("\n") };
     },
     catch: (cause) => new FileCacheReadError({ cause }),
   });
+}
 
 /**
  * Async, size-bounded file reads shared across dev-tools handlers.
@@ -39,9 +50,9 @@ const loadEntry = (path: string): Effect.Effect<CacheEntry, FileCacheReadError> 
 export class FileCache {
   private readonly cache: Cache.Cache<string, CacheEntry, FileCacheReadError>;
 
-  constructor() {
+  constructor(fileSystem: FileCacheFileSystem = nodeFileSystem) {
     this.cache = Effect.runSync(
-      Cache.makeWith(loadEntry, {
+      Cache.makeWith((path) => loadEntry(fileSystem, path), {
         capacity: MAX_CACHE_ENTRIES,
         timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity),
       }),

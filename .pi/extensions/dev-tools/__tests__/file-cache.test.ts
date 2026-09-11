@@ -1,14 +1,16 @@
 import { it } from "@effect/vitest";
 import { Deferred, Effect, Ref } from "effect";
 import { beforeEach, describe, expect, vi } from "vitest";
-import { FileCache, MAX_FILE_SIZE_BYTES } from "../file-cache";
+import { FileCache, MAX_FILE_SIZE_BYTES, type FileCacheFileSystem } from "../file-cache";
 
-const fsMocks = vi.hoisted(() => ({
+const fsMocks = {
   stat: vi.fn<(path: string) => Promise<{ size: number }>>(),
-  readFile: vi.fn<(path: string, encoding: string) => Promise<string>>(),
-}));
+  readFile: vi.fn<(path: string, encoding: "utf8") => Promise<string>>(),
+} satisfies FileCacheFileSystem;
 
-vi.mock("node:fs/promises", () => fsMocks);
+function createCache(): FileCache {
+  return new FileCache(fsMocks);
+}
 
 beforeEach(() => {
   fsMocks.stat.mockReset().mockResolvedValue({ size: 1 });
@@ -18,7 +20,7 @@ beforeEach(() => {
 describe("FileCache", () => {
   it("keeps 64 least-recently-used entries", async () => {
     fsMocks.readFile.mockImplementation(async (path) => `content:${path}`);
-    const cache = new FileCache();
+    const cache = createCache();
     const paths = Array.from({ length: 65 }, (_, index) => `/file-${index}.ts`);
 
     for (const path of paths.slice(0, 64)) await cache.readFile(path);
@@ -38,7 +40,7 @@ describe("FileCache", () => {
       ["/b.ts", "b:one"],
     ]);
     fsMocks.readFile.mockImplementation(async (path) => contents.get(path) ?? "");
-    const cache = new FileCache();
+    const cache = createCache();
 
     expect(await cache.readFile("/a.ts")).toBe("a:one");
     expect(await cache.readFile("/b.ts")).toBe("b:one");
@@ -74,7 +76,7 @@ describe("FileCache", () => {
           }),
         ),
       );
-      const cache = new FileCache();
+      const cache = createCache();
 
       const first = cache.readFile("/shared.ts");
       yield* Deferred.await(lookupStarted);
@@ -95,7 +97,7 @@ describe("FileCache", () => {
       .mockResolvedValueOnce({ size: MAX_FILE_SIZE_BYTES + 1 })
       .mockResolvedValueOnce({ size: 1 });
     fsMocks.readFile.mockResolvedValue("now-small");
-    const cache = new FileCache();
+    const cache = createCache();
 
     await expect(cache.readFile("/changing.ts")).resolves.toBeNull();
     await expect(cache.readFile("/changing.ts")).resolves.toBe("now-small");
@@ -105,7 +107,7 @@ describe("FileCache", () => {
 
   it("retries a file after a read failure", async () => {
     fsMocks.readFile.mockRejectedValueOnce(new Error("unreadable")).mockResolvedValueOnce("ready");
-    const cache = new FileCache();
+    const cache = createCache();
 
     await expect(cache.readFile("/retry.ts")).resolves.toBeNull();
     await expect(cache.readFile("/retry.ts")).resolves.toBe("ready");
@@ -121,7 +123,7 @@ describe("FileCache", () => {
       ["/empty.ts", ""],
     ]);
     fsMocks.readFile.mockImplementation(async (path) => contents.get(path) ?? "");
-    const cache = new FileCache();
+    const cache = createCache();
 
     await expect(cache.getLine("/lines.ts", 1)).resolves.toBe("first");
     await expect(cache.getLine("/lines.ts", 99)).resolves.toBe("");
