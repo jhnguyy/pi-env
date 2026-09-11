@@ -108,12 +108,12 @@ export const VerificationPhase = Object.freeze({
     VerificationClass.Packaging,
     VerificationCapability.InstallIntegrity,
   ),
-  UnitTests: phase(
-    "unit-tests",
-    "unit tests",
+  RuntimeTests: phase(
+    "runtime-tests",
+    "runtime tests",
     "nub",
-    ["run", "test:unit"],
-    VerificationClass.Contract,
+    ["run", "test"],
+    VerificationClass.SafetyIntegration,
     VerificationCapability.RuntimeBehavior,
   ),
   RealWorkspaceSemanticCanary: phase(
@@ -124,9 +124,9 @@ export const VerificationPhase = Object.freeze({
     VerificationClass.SafetyIntegration,
     VerificationCapability.WorkspaceSemantics,
   ),
-  SafeUnitTests: phase(
-    "unit-tests",
-    "unit tests (one worker)",
+  SafeRuntimeTests: phase(
+    "runtime-tests-safe",
+    "runtime tests (one worker)",
     "nub",
     ["run", "test:safe"],
     VerificationClass.SafetyIntegration,
@@ -143,18 +143,19 @@ export const STANDARD_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.LicenseCompliance,
   VerificationPhase.Build,
   VerificationPhase.InstallReadiness,
-  VerificationPhase.UnitTests,
+  VerificationPhase.RuntimeTests,
 ]);
 
 export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.Format,
+  VerificationPhase.SetupTests,
   VerificationPhase.Typecheck,
   VerificationPhase.TypeAwareLint,
   VerificationPhase.PatternCheck,
   VerificationPhase.DependencyCheck,
   VerificationPhase.ChangedCodeQuality,
   VerificationPhase.LicenseCompliance,
-  VerificationPhase.SafeUnitTests,
+  VerificationPhase.SafeRuntimeTests,
   VerificationPhase.Build,
 ]);
 

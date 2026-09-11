@@ -28,7 +28,9 @@ function requireAllowBuildsContract(pkg, errors, root) {
   const allowBuilds = pkg.allowBuilds;
   if (allowBuilds === undefined) return;
   if (!isRecord(allowBuilds)) {
-    errors.push("package allowBuilds must be an object of package names mapped to boolean install-build decisions");
+    errors.push(
+      "package allowBuilds must be an object of package names mapped to boolean install-build decisions",
+    );
     return;
   }
 

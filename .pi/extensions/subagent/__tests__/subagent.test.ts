@@ -5,6 +5,7 @@
  * parameter validation. We do NOT invoke agentLoop (requires real API keys).
  */
 
+import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { Container, type Text } from "@earendil-works/pi-tui";

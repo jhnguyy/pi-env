@@ -5,7 +5,7 @@ import {
   STANDARD_VERIFICATION_PHASES,
   VerificationClass,
 } from "../verification-phases.mjs";
-import { runVerificationPhase } from "../verify-phase.mjs";
+import { main, runVerificationPhase } from "../verify-phase.mjs";
 
 describe("verification phase registry", () => {
   it("keeps standard verification order and capability classification explicit", () => {
@@ -18,7 +18,7 @@ describe("verification phase registry", () => {
       "license-compliance",
       "build",
       "install-readiness",
-      "unit-tests",
+      "runtime-tests",
     ]);
     expect(
       STANDARD_VERIFICATION_PHASES.every((phase) =>
@@ -32,17 +32,19 @@ describe("verification phase registry", () => {
       SAFE_VERIFICATION_PHASES.map((phase) => [phase.id, phase.command, ...phase.args]),
     ).toEqual([
       ["format-check", "nub", "run", "format:check"],
+      ["setup-tests", "nub", "run", "test:setup"],
       ["typecheck", "nub", "run", "typecheck"],
       ["type-aware-lint", "nub", "run", "lint:type"],
       ["pattern-check", "nub", "run", "check:patterns"],
       ["dependency-check", "nub", "run", "check:dependencies"],
       ["changed-code-quality", "nub", "run", "quality:changed"],
       ["license-compliance", "nub", "run", "licenses:check"],
-      ["unit-tests", "nub", "run", "test:safe"],
+      ["runtime-tests-safe", "nub", "run", "test:safe"],
       ["build", "nub", "run", "build"],
     ]);
 
     for (const id of [
+      "setup-tests",
       "typecheck",
       "pattern-check",
       "dependency-check",
@@ -64,6 +66,16 @@ describe("verification phase registry", () => {
     const logError = vi.fn();
     expect(runVerificationPhase("missing", { run, logError })).toBe(2);
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("unknown phase"));
+  });
+
+  it("lists every explicitly invocable phase", () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      expect(main(["--list"])).toBe(0);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining("real-workspace-semantic-canary"));
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("makes the slow real-workspace canary explicitly invocable only", () => {

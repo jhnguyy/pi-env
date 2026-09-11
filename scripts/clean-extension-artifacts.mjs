@@ -2,7 +2,11 @@
 // clean-extension-artifacts.mjs — remove generated extension bundles and empty stale extension dirs.
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { listExtensionDirs, loadExtensionManifest, relativeFromRepo } from "./extension-manifest.mjs";
+import {
+  listExtensionDirs,
+  loadExtensionManifest,
+  relativeFromRepo,
+} from "./extension-manifest.mjs";
 
 const { extensionsDir } = loadExtensionManifest();
 let removed = 0;
