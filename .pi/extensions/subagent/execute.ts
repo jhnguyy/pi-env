@@ -18,6 +18,8 @@ import { convertToLlm, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect } from "effect";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 import {
   withToolingTelemetryRuntime,
@@ -26,7 +28,12 @@ import {
 } from "../../../src/telemetry/tooling";
 import { slugify } from "../_shared/slug";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
-import { loadSubagentRuntimeConfig, resolveSubagentRuntimeConfig } from "./config";
+import {
+  loadSubagentRuntimeConfig,
+  resolveSubagentRuntimeConfig,
+  SubagentSessionStorage,
+  type SubagentSessionStorage as SubagentSessionStorageValue,
+} from "./config";
 import {
   getOrCreateSubagentRunSupervisor,
   WorkspaceAccess,
@@ -76,12 +83,29 @@ interface PersistentSubagentSession {
   name: string;
 }
 
+function childSessionDirectory(ctx: ExtensionContext): string | undefined {
+  const parentDirectory = ctx.sessionManager.getSessionDir();
+  if (!parentDirectory) return undefined;
+
+  const parentId = ctx.sessionManager.getSessionId();
+  const directoryName =
+    parentId.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parentId)
+      ? parentId
+      : `sha256-${createHash("sha256").update(parentId).digest("hex")}`;
+  return join(parentDirectory, "_children", directoryName);
+}
+
 export function createPersistentSubagentSession(
   name: string,
   ctx: ExtensionContext,
   cwd = ctx.cwd,
+  sessionStorage: SubagentSessionStorageValue = SubagentSessionStorage.Nested,
 ): PersistentSubagentSession {
-  const manager = SessionManager.create(cwd, ctx.sessionManager.getSessionDir(), {
+  const sessionDir =
+    sessionStorage === SubagentSessionStorage.Nested
+      ? childSessionDirectory(ctx)
+      : ctx.sessionManager.getSessionDir();
+  const manager = SessionManager.create(cwd, sessionDir, {
     parentSession: ctx.sessionManager.getSessionFile(),
   });
   const sessionName = getSubagentSessionName(name);
@@ -124,6 +148,7 @@ export interface RunSubagentOptions {
   executionMode?: SubagentUsageMode;
   supervisor?: SubagentRunSupervisor;
   workspaceAccess?: WorkspaceAccessValue;
+  sessionStorage?: SubagentSessionStorageValue;
   onAdmitted?: () => void;
 }
 
@@ -175,7 +200,12 @@ function runResolvedSubagentWorkflow(
       { operation: SubagentOperation.Session, mode },
       Effect.try({
         try: () => {
-          const session = createPersistentSubagentSession(name, ctx, effectiveCwd);
+          const session = createPersistentSubagentSession(
+            name,
+            ctx,
+            effectiveCwd,
+            options.sessionStorage ?? resolveSessionStorage(ctx),
+          );
           session.manager.appendModelChange(
             (resolvedModel as AgentLoopConfig["model"]).provider,
             (resolvedModel as AgentLoopConfig["model"]).id,
@@ -274,6 +304,14 @@ function runResolvedSubagentWorkflow(
     { operation: SubagentOperation.Run, mode },
     workflow,
   );
+}
+
+function resolveSessionStorage(ctx: ExtensionContext): SubagentSessionStorageValue {
+  try {
+    return loadSubagentRuntimeConfig(ctx.cwd).sessionStorage;
+  } catch {
+    return SubagentSessionStorage.Nested;
+  }
 }
 
 function resolveSupervisor(
