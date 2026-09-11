@@ -9,6 +9,7 @@ import {
   PtcToolFailureClass,
   type PtcToolFailure,
   type PtcToolFailureClass as FailureClass,
+  type RpcOutbound,
 } from "./types";
 
 interface RuntimeToolRecord {
@@ -51,7 +52,7 @@ class PtcToolCallError extends Error {
   }
 }
 
-function __rpc_send(message: object): void {
+function __rpc_send(message: Extract<RpcOutbound, { type: "tool_call" }>): void {
   writeFileSync(3, JSON.stringify(message) + "\n");
 }
 
@@ -163,8 +164,8 @@ export function __create_tools(
   }
 
   return new Proxy(target, {
-    get(current, property, receiver) {
-      if (typeof property !== "string") return Reflect.get(current, property, receiver);
+    get(current, property) {
+      if (typeof property !== "string") return undefined;
       if (Object.hasOwn(current, property)) return current[property];
       if (__nonToolProperties.has(property)) return undefined;
       return accessFailure(

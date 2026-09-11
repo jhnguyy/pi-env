@@ -73,16 +73,11 @@ export function resolvePrReviewModelPolicy(
   }
   const availableById = new Map(availableModels.map((model) => [fqid(model), model] as const));
   const approvedRoster = availableModels
-    .filter((model) =>
-      settings.modelAnnotations?.[fqid(model)]?.includes(PR_REVIEW_APPROVAL_ANNOTATION),
+    .flatMap((model) =>
+      settings.modelAnnotations?.[fqid(model)]?.includes(PR_REVIEW_APPROVAL_ANNOTATION)
+        ? [{ provider: model.provider, model: model.id, fqid: fqid(model), reasoning: highestReasoning(model), contextWindow: model.contextWindow }]
+        : [],
     )
-    .map((model) => ({
-      provider: model.provider,
-      model: model.id,
-      fqid: fqid(model),
-      reasoning: highestReasoning(model),
-      contextWindow: model.contextWindow,
-    }))
     .sort(compare);
   if (approvedRoster.length === 0)
     throw new ReviewModelPolicyError(

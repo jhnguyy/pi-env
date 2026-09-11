@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sleep } from "./e2e-fixture";
 import { LspClient } from "../client";
 import { LspDaemon } from "../daemon";
-import type { DefinitionResult, HoverResult, LspResult, ReferencesResult, SymbolsResult } from "../protocol";
+import type { DaemonRequest, DefinitionResult, HoverResult, LspResult, ReferencesResult, SymbolsResult } from "../protocol";
 
 const E2E = process.env["E2E"] === "1";
 const describeE2E = E2E ? describe : describe.skip;
@@ -17,7 +17,7 @@ const TEST_TIMEOUT_MS = 60_000;
 type Fixture = {
   readonly socketPath: string;
   readonly pidPath: string;
-  callDaemon(req: object): Promise<LspResult>;
+  callDaemon(req: Omit<DaemonRequest, "id">): Promise<LspResult>;
   restartDaemon(): Promise<void>;
   cleanup(): Promise<void>;
 };
@@ -37,14 +37,14 @@ async function createRealWorkspaceFixture(): Promise<Fixture> {
   return {
     socketPath,
     pidPath,
-    async callDaemon(req: object): Promise<LspResult> {
+    async callDaemon(req: Omit<DaemonRequest, "id">): Promise<LspResult> {
       const client = new LspClient(socketPath, undefined, {
         spawnDaemon: () => {
           throw new Error("real-workspace canary must use its fixture-owned daemon");
         },
       });
       try {
-        return await client.call(req as never);
+        return await client.call(req);
       } finally {
         client.close();
       }

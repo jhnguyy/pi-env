@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LspDaemon } from "../daemon";
+import type { DaemonRequest } from "../protocol";
 
 export interface TypeScriptE2EProject {
   tmpDir: string;
@@ -13,7 +14,7 @@ export interface TypeScriptE2EProject {
 }
 
 export interface LspE2EFixture extends TypeScriptE2EProject {
-  callDaemon(req: object): Promise<any>;
+  callDaemon(req: Omit<DaemonRequest, "id">): Promise<any>;
   writeFile(relativePath: string, lines: string[] | string): string;
   cleanup(): Promise<void>;
 }
@@ -82,12 +83,12 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
     mainFile,
     effectFile,
     writeFile,
-    async callDaemon(req: object): Promise<any> {
+    async callDaemon(req: Omit<DaemonRequest, "id">): Promise<any> {
       const { LspClient } = await import("../client");
       const client = new LspClient(socketPath);
       // Daemon is already fixture-owned; prevent client auto-spawn during tests.
       (client as any).spawnDaemon = async () => {};
-      const result = await client.call(req as any);
+      const result = await client.call(req);
       client.close();
       return result;
     },

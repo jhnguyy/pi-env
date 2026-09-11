@@ -1022,10 +1022,10 @@ function draftImplementationPlan(pi: ExtensionAPI): string {
 }
 function reviewBody(s: ReviewState, selected: Finding[], mark: string): string {
   const unanchored = selected
-    .filter((f) => !f.anchorValid)
-    .map(
-      (f) =>
-        `- ${f.file ? `${f.file}: ` : ""}${f.problem}\n  Consequence: ${f.consequence}\n  Suggested fix: ${f.suggestedFix}`,
+    .flatMap((f) =>
+      f.anchorValid
+        ? []
+        : [`- ${f.file ? `${f.file}: ` : ""}${f.problem}\n  Consequence: ${f.consequence}\n  Suggested fix: ${f.suggestedFix}`],
     )
     .join("\n");
   return [mark, Disclosure, s.preface ?? "", unanchored].filter(Boolean).join("\n\n");
@@ -1036,14 +1036,11 @@ function reviewPayload(s: ReviewState, event: ReviewEventValue, mark: string) {
     body: reviewBody(s, selected, mark),
     event,
     commit_id: s.snapshot.metadata.headOid,
-    comments: selected
-      .filter((f) => f.anchorValid && f.file && f.line && f.side)
-      .map((f) => ({
-        path: f.file!,
-        line: f.line!,
-        side: f.side!,
-        body: `${Disclosure}\n\n${f.problem}\n\nConsequence: ${f.consequence}\n\nSuggested fix: ${f.suggestedFix}`,
-      })),
+    comments: selected.flatMap((f) =>
+      f.anchorValid && f.file && f.line && f.side
+        ? [{ path: f.file, line: f.line, side: f.side, body: `${Disclosure}\n\n${f.problem}\n\nConsequence: ${f.consequence}\n\nSuggested fix: ${f.suggestedFix}` }]
+        : [],
+    ),
   };
 }
 function newAttempt(s: ReviewState, event: ReviewEventValue, contentHash: string): PostAttempt {

@@ -14,14 +14,18 @@ const REQUIRED_FILES = [
 const REQUIRED_DIRECTORIES = [".pi/extensions/dev-tools/dist"];
 
 function requiredOutputIssues(root) {
-  const missingFiles = REQUIRED_FILES.filter((path) => {
+  const missingFiles = REQUIRED_FILES.flatMap((path) => {
     const absolutePath = join(root, path);
-    return !existsSync(absolutePath) || !statSync(absolutePath).isFile();
-  }).map((path) => `required image file is missing: ${path}`);
-  const missingDirectories = REQUIRED_DIRECTORIES.filter((path) => {
+    return !existsSync(absolutePath) || !statSync(absolutePath).isFile()
+      ? [`required image file is missing: ${path}`]
+      : [];
+  });
+  const missingDirectories = REQUIRED_DIRECTORIES.flatMap((path) => {
     const absolutePath = join(root, path);
-    return !existsSync(absolutePath) || !statSync(absolutePath).isDirectory();
-  }).map((path) => `required image directory is missing: ${path}`);
+    return !existsSync(absolutePath) || !statSync(absolutePath).isDirectory()
+      ? [`required image directory is missing: ${path}`]
+      : [];
+  });
   return [...missingFiles, ...missingDirectories];
 }
 

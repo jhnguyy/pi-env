@@ -208,8 +208,7 @@ function extractMetadata(text: string, contentType: string): string {
   const description = firstMatch(text, /<meta\s+[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']*)["'][^>]*>/i);
   const headings = [...text.matchAll(/<h([1-3])[^>]*>([\s\S]*?)<\/h\1>/gi)]
     .slice(0, 40)
-    .map((match) => `${"#".repeat(Number(match[1]))} ${htmlToPlainText(match[2] ?? "")}`)
-    .filter(Boolean);
+    .map((match) => `${"#".repeat(Number(match[1]))} ${htmlToPlainText(match[2] ?? "")}`);
   const links = extractLinks(text).slice(0, 80).map((link) => `- ${link.text}${link.href ? ` — ${link.href}` : ""}`);
   return [title ? `# ${decodeEntities(title)}` : undefined, description ? decodeEntities(description) : undefined, headings.length ? `\n## Headings\n${headings.join("\n")}` : undefined, links.length ? `\n## Links\n${links.join("\n")}` : undefined]
     .filter(Boolean)
@@ -260,9 +259,10 @@ function compactJsonText(text: string): string {
 }
 
 function extractLinks(html: string): Array<{ text: string; href: string }> {
-  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)]
-    .map((match) => ({ href: decodeEntities(match[1] ?? ""), text: htmlToPlainText(match[2] ?? "").slice(0, 120) }))
-    .filter((link) => link.text || link.href);
+  return [...html.matchAll(/<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi)].flatMap((match) => {
+    const link = { href: decodeEntities(match[1] ?? ""), text: htmlToPlainText(match[2] ?? "").slice(0, 120) };
+    return link.text || link.href ? [link] : [];
+  });
 }
 
 function firstMatch(text: string, pattern: RegExp): string | undefined {
