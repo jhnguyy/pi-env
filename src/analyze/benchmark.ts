@@ -22,29 +22,39 @@ function benchmarkRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null) throw new BenchmarkError({ message: "Benchmark must be an object" });
   return value as Record<string, unknown>;
 }
-function validateCommand(value: Record<string, unknown>): void {
+function validateCommand(
+  value: Record<string, unknown>,
+): asserts value is Record<string, unknown> & Pick<BenchmarkConfig, "command" | "args"> {
   if (typeof value.command !== "string" || !Array.isArray(value.args) || !value.args.every((item) => typeof item === "string")) {
     throw new BenchmarkError({ message: "Benchmark requires command and string args" });
   }
 }
-function validateIntegerOption(
+function validateCwd(
   value: Record<string, unknown>,
-  key: "timeoutMs" | "warmups" | "runs",
+): asserts value is Record<string, unknown> & Pick<BenchmarkConfig, "cwd"> {
+  if (value.cwd !== undefined && typeof value.cwd !== "string") {
+    throw new BenchmarkError({ message: "cwd must be a string" });
+  }
+}
+function validateIntegerOption<Key extends "timeoutMs" | "warmups" | "runs">(
+  value: Record<string, unknown>,
+  key: Key,
   minimum: number,
   maximum: number,
-): void {
+): asserts value is Record<string, unknown> & { [Option in Key]?: number } {
   const option = value[key];
-  if (option !== undefined && (!Number.isInteger(option) || (option as number) < minimum || (option as number) > maximum)) {
+  if (option !== undefined && (typeof option !== "number" || !Number.isInteger(option) || option < minimum || option > maximum)) {
     throw new BenchmarkError({ message: `${key} must be an integer between ${minimum} and ${maximum}` });
   }
 }
 export function validateBenchmark(value: unknown): BenchmarkConfig {
   const record = benchmarkRecord(value);
   validateCommand(record);
+  validateCwd(record);
   validateIntegerOption(record, "timeoutMs", BENCHMARK_LIMITS.timeoutMs.min, BENCHMARK_LIMITS.timeoutMs.max);
   validateIntegerOption(record, "warmups", BENCHMARK_LIMITS.warmups.min, BENCHMARK_LIMITS.warmups.max);
   validateIntegerOption(record, "runs", BENCHMARK_LIMITS.runs.min, BENCHMARK_LIMITS.runs.max);
-  return record as unknown as BenchmarkConfig;
+  return record;
 }
 
 const commandLabel = (config: BenchmarkConfig): string => [config.command, ...config.args].join(" ");

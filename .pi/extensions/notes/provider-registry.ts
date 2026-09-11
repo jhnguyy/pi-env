@@ -42,16 +42,15 @@ export function resolveNotesProvider(id: string): NotesProvider {
   return provider;
 }
 
-function validateProvider(provider: NotesProvider): void {
-  const candidate = provider as unknown as Record<string, unknown>;
+function validateProvider(provider: unknown): asserts provider is NotesProvider {
   const methods = ["index", "list", "read", "search", "write", "delete"] as const;
   if (
-    typeof candidate !== "object" ||
-    candidate === null ||
-    typeof candidate.id !== "string" ||
-    candidate.id.length === 0 ||
-    methods.some((method) => typeof candidate[method] !== "function") ||
-    (candidate.resolve !== undefined && typeof candidate.resolve !== "function")
+    typeof provider !== "object" ||
+    provider === null ||
+    typeof Reflect.get(provider, "id") !== "string" ||
+    Reflect.get(provider, "id").length === 0 ||
+    methods.some((method) => typeof Reflect.get(provider, method) !== "function") ||
+    (Reflect.get(provider, "resolve") !== undefined && typeof Reflect.get(provider, "resolve") !== "function")
   ) {
     throw new NotesProviderError({
       code: "invalid-provider",
