@@ -13,6 +13,7 @@ import { SubagentSessionRuntime, type SubagentSessionRuntimeDependencies } from 
 import { toNestedToolUsage } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
+import { registerPublicTool } from "../_shared/tool-render";
 export {
   DagSubagentAdapterFailure,
   DagSubagentExecutorKey,
@@ -214,7 +215,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
   };
 
   const registerSubagentTool = (description: string) =>
-    pi.registerTool({
+    registerPublicTool(pi, {
       name: "subagent",
       label: "Subagent",
       description,

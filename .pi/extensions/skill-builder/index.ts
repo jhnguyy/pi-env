@@ -17,6 +17,11 @@ import { Data, Effect, Result } from "effect";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import {
+  registerPublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+} from "../_shared/tool-render";
 import { WorkspaceAccess } from "../subagent/control";
 import {
   runResolvedSubagentEffect,
@@ -747,7 +752,7 @@ export function runSkillBuild(
 }
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "reference_skill",
     label: "Reference Skill",
     description: REFERENCE_SKILL_TOOL_DESCRIPTION,
@@ -755,9 +760,13 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, params) {
       return executeReferenceSkill(params);
     },
+    renderCall: (params, theme) =>
+      renderCompactToolCall("reference_skill", params.name ?? "list", theme),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("reference_skill", result, options, theme, context),
   });
 
-  pi.registerTool({
+  registerPublicTool(pi, {
     name: "skill_build",
     label: "Skill Build",
     description:
@@ -774,6 +783,14 @@ export default function (pi: ExtensionAPI) {
         ctx,
       });
     },
+    renderCall: (params, theme) =>
+      renderCompactToolCall(
+        "skill_build",
+        [params.action, params.name, params.path].filter(Boolean).join(" ") || "create",
+        theme,
+      ),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("skill_build", result, options, theme, context),
   });
 
   const referenceSkillAgentTool: AgentTool<any, any> = {

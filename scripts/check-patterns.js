@@ -19,6 +19,14 @@ export const TERMINAL_EFFECT_OPERATIONS = [
 ];
 const GUARDED_EFFECT_COMBINATOR_SET = new Set(GUARDED_EFFECT_COMBINATORS);
 const TERMINAL_EFFECT_OPERATION_SET = new Set(TERMINAL_EFFECT_OPERATIONS);
+const ACTIVE_EXTENSION_ROOTS = (() => {
+  try {
+    const packageJson = JSON.parse(readFileSync(`${ROOT}/package.json`, "utf8"));
+    return new Set(packageJson.pi?.extensions ?? []);
+  } catch {
+    return new Set();
+  }
+})();
 
 function trackedFiles(pathspecs = []) {
   const result = spawnSync("git", ["ls-files", ...pathspecs], { encoding: "utf8" });
@@ -113,6 +121,27 @@ function localNamespaceImportFindings(file, sourceFile, node) {
   ];
 }
 
+function directPublicToolRegistrationFindings(file, sourceFile, node) {
+  const extensionRoot = [...ACTIVE_EXTENSION_ROOTS].find((root) => file.startsWith(`${root}/`));
+  if (
+    !extensionRoot ||
+    file.includes("/__tests__/") ||
+    !ts.isCallExpression(node) ||
+    !ts.isPropertyAccessExpression(node.expression) ||
+    node.expression.name.text !== "registerTool"
+  ) {
+    return [];
+  }
+  return [
+    {
+      file,
+      ...location(sourceFile, node.expression.name),
+      message:
+        "Active public Pi tools must use registerPublicTool or a shared registration helper that enforces renderCall and renderResult.",
+    },
+  ];
+}
+
 function terminalEffectFindings(file, sourceFile, node) {
   if (
     !ts.isYieldExpression(node) ||
@@ -184,6 +213,7 @@ export function analyzeText(file, text) {
 
     findings.push(...effectGenTryCatchFindings(file, sourceFile, node));
     findings.push(...localNamespaceImportFindings(file, sourceFile, node));
+    findings.push(...directPublicToolRegistrationFindings(file, sourceFile, node));
     findings.push(...terminalEffectFindings(file, sourceFile, node));
 
     ts.forEachChild(node, visit);

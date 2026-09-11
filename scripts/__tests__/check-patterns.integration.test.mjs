@@ -49,6 +49,25 @@ describe("check-patterns", () => {
     ).toEqual([]);
   });
 
+  it("requires active public tools to use the rendering registration boundary", () => {
+    expect(
+      analyzeText(
+        ".pi/extensions/review/index.ts",
+        "export default function extension(pi) { pi.registerTool({ name: 'review' }); }",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining("must use registerPublicTool"),
+      }),
+    ]);
+    expect(
+      analyzeText(
+        ".pi/extensions/review/index.ts",
+        "export default function extension(pi) { registerPublicTool(pi, reviewTool); }",
+      ),
+    ).toEqual([]);
+  });
+
   it("rejects actual flow composition calls without matching comments, strings, or unrelated property calls", () => {
     const findings = analyzeText(
       "src/example.ts",

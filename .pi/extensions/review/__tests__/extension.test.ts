@@ -136,6 +136,8 @@ describe("review extension pull request surface", () => {
     expect(review.promptGuidelines.join("\n")).toContain("existing pull request feedback");
     expect(review.promptGuidelines.join("\n")).toContain("new independent pull request review");
     expect(review.promptGuidelines.join("\n")).toContain("untrusted data");
+    expect(review.renderCall).toBeTypeOf("function");
+    expect(review.renderResult).toBeTypeOf("function");
     const promptText = [review.description, ...review.promptGuidelines].join("\n");
     expect(promptText).not.toContain("Do not inspect files");
     expect(promptText).not.toMatch(/\b(?:do not|must not|never)\b[^\n]*(?:\bgh\b|GitHub CLI)/i);

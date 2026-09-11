@@ -1,5 +1,4 @@
 import {
-  defineTool,
   getSettingsListTheme,
   type ExtensionAPI,
   type ExtensionCommandContext,
@@ -11,6 +10,11 @@ import { Type } from "typebox";
 import { Effect } from "effect";
 import { decodeSettingsBlockEffect } from "../_shared/settings";
 import { registerPtcTools } from "../_shared/ptc-tools";
+import {
+  definePublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+} from "../_shared/tool-render";
 import {
   CUSTOM_TYPE,
   SEARCH_TOOL_NAME,
@@ -218,7 +222,7 @@ function restoreBranch(pi: ExtensionAPI, ctx: ExtensionContext, config: Resolved
 export default function toolManager(pi: ExtensionAPI) {
   let config = loadConfig();
 
-  const searchTool = defineTool({
+  const searchTool = definePublicTool({
     name: SEARCH_TOOL_NAME,
     label: "Search Tools",
     description: "Find and activate inactive tools by exact name, capability group, or multiple strong terms. Additive only.",
@@ -233,6 +237,9 @@ export default function toolManager(pi: ExtensionAPI) {
       const text = [`loaded: ${result.loaded.join(", ") || "-"}`, `already-active: ${result.alreadyActive.join(", ") || "-"}`, `no-match: ${result.noMatch ? "true" : "false"}`, `groups: ${result.groups.join(", ") || "-"}`].join("\n");
       return { content: [{ type: "text", text }], details: result };
     },
+    renderCall: (params, theme) => renderCompactToolCall("search_tools", params.query, theme),
+    renderResult: (result, options, theme, context) =>
+      renderTextToolResult("search_tools", result, options, theme, context),
   });
   registerPtcTools(pi, searchTool);
 

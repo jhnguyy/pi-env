@@ -1,4 +1,8 @@
-import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
+import type {
+  AgentTool,
+  AgentToolResult,
+  AgentToolUpdateCallback,
+} from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
@@ -25,6 +29,9 @@ export type ToolContract<Params, Details = unknown, Schema extends TSchema = TSc
 export type PiToolUi<Schema extends TSchema, Details = unknown> = Pick<
   ToolDefinition<Schema, Details, any>,
   "renderCall" | "renderResult"
+>;
+export type PublicPiToolUi<Schema extends TSchema, Details = unknown> = Required<
+  PiToolUi<Schema, Details>
 >;
 
 function progressResult(message: string): AgentToolResult<{ phase: string }> {

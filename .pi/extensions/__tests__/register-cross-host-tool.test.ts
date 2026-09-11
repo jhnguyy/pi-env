@@ -20,6 +20,10 @@ import { registerCrossHostTool, type CrossHostToolRegistration } from "../_share
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
 type Details = { cwd: string };
+const PI_OPTIONS = {
+  renderCall: () => ({ kind: "call" }) as any,
+  renderResult: () => ({ kind: "result" }) as any,
+};
 
 function createContract(seen: Array<{ cwd: string; signal?: AbortSignal }>): ToolContract<Params, Details, typeof PARAMETERS> {
   return {
@@ -98,6 +102,7 @@ describe("registerCrossHostTool contract", () => {
     const registration = registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Write, ToolCapability.Execute],
+      piOptions: PI_OPTIONS,
     });
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
@@ -109,7 +114,7 @@ describe("registerCrossHostTool contract", () => {
   it("passes Pi-only prompt and render metadata to Pi registration", () => {
     const harness = createPiHarness();
     const promptSnippet = "snippet";
-    const promptGuidelines = "guidelines";
+    const promptGuidelines = ["guidelines"];
     const renderCall = () => ({ kind: "call" }) as any;
     const renderResult = () => ({ kind: "result" }) as any;
 
@@ -138,6 +143,7 @@ describe("registerCrossHostTool contract", () => {
     registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
 
     expect(added).toEqual([]);
@@ -152,6 +158,7 @@ describe("registerCrossHostTool contract", () => {
     const registration = registerCrossHostTool(createPiHarness().pi as any, {
       contract: createContract(seen),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
 
     await registration.createAgentTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
@@ -166,6 +173,7 @@ describe("registerCrossHostTool contract", () => {
     registerCrossHostTool(harness.pi as any, {
       contract: createContract(seen),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main-session" });
@@ -189,6 +197,7 @@ describe("registerCrossHostTool contract", () => {
     registerCrossHostTool(harness.pi as any, {
       contract: createContract(seen),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/agent" });
@@ -206,6 +215,7 @@ describe("registerCrossHostTool contract", () => {
     const registration: CrossHostToolRegistration<Params, Details, typeof PARAMETERS> = registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
 
     expect(registration).toMatchObject({
@@ -220,6 +230,7 @@ describe("registerCrossHostTool contract", () => {
     const registration: CrossHostToolRegistration<Params, Details, typeof PARAMETERS> = registerCrossHostTool(createPiHarness().pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Read],
+      piOptions: PI_OPTIONS,
     });
     const agentTool = registration.createAgentTool({ cwd: "/agent", sessionGeneration: "g1" });
 

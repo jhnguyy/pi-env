@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, test } from "vitest";
-import { defineTool, type ExtensionAPI, type ToolDefinition, type ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { registerAgentTools, resetAgentToolRegistryForTests, ToolCapability } from "../../_shared/agent-tools";
 import { registerPtcTools, resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
+import {
+  definePublicTool,
+  renderCompactToolCall,
+  renderTextToolResult,
+} from "../../_shared/tool-render";
 import toolManager from "../../tool-manager";
 import { ToolRegistry } from "../tool-registry";
 
@@ -52,12 +57,15 @@ function createHarness(activeNames: string[]) {
   return { api: createApi(), createApi, tools, bus, active, appended };
 }
 
-const externalTool: ToolDefinition<any, any, any> = defineTool({
+const externalTool = definePublicTool({
   name: "external",
   label: "external",
   description: "external",
   parameters: Type.Object({}),
   execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
+  renderCall: (_args, theme) => renderCompactToolCall("external", undefined, theme),
+  renderResult: (result, options, theme, context) =>
+    renderTextToolResult("external", result, options, theme, context),
 });
 
 describe("ToolRegistry active filtering", () => {
