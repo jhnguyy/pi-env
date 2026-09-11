@@ -7,6 +7,7 @@ import {
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
+  DagSessionEvent,
   DagTransitionType,
   computeDagSessionGraphId,
   createDagSessionWriter,
@@ -156,7 +157,7 @@ describe("DAG session replay", () => {
         runId: "sibling",
         graphId: "x",
         seq: 0,
-        event: { _tag: "graph", graph: { ...def, runId: "sibling" } },
+        event: DagSessionEvent.graph({ graph: { ...def, runId: "sibling" } }),
       },
     ]);
     const writer = createDagSessionWriter(store, dag, def);

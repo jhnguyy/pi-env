@@ -6,6 +6,7 @@ import {
   DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
+  DagSessionEvent,
   DagTransitionType,
   computeDagSessionGraphId,
   createDagRunState,
@@ -75,7 +76,7 @@ describe("DAG session codec", () => {
       runId: def.runId,
       graphId,
       seq: 0,
-      event: { _tag: "graph", graph: def },
+      event: DagSessionEvent.graph({ graph: def }),
     };
 
     expect(
@@ -84,13 +85,12 @@ describe("DAG session codec", () => {
           Fixtures.sessionStore([
             storedEntry({
               ...graphEntry,
-              event: {
-                _tag: "graph",
+              event: DagSessionEvent.graph({
                 graph: {
                   ...def,
                   nodes: [{ ...def.nodes[0], executor: { key: "missing-kind" } as never }],
                 },
-              },
+              }),
             }),
           ]),
           def.runId,
@@ -103,13 +103,12 @@ describe("DAG session codec", () => {
           Fixtures.sessionStore([
             storedEntry({
               ...graphEntry,
-              event: {
-                _tag: "graph",
+              event: DagSessionEvent.graph({
                 graph: {
                   ...def,
                   nodes: [{ ...def.nodes[0], dependencies: [{ nodeId: "a" }] as never }],
                 },
-              },
+              }),
             }),
           ]),
           def.runId,
@@ -126,20 +125,19 @@ describe("DAG session codec", () => {
       runId: def.runId,
       graphId,
       seq: 0,
-      event: { _tag: "graph", graph: def },
+      event: DagSessionEvent.graph({ graph: def }),
     };
     const malformedTransition = {
       ...graphEntry,
       seq: 1,
-      event: {
-        _tag: "transition",
+      event: DagSessionEvent.transition({
         transition: {
           runId: def.runId,
           nodeId: "a",
           type: DagTransitionType.Complete,
           result: { _tag: DagNodeResultTag.Succeeded, outputs: {} },
         },
-      },
+      }),
     } satisfies DagSessionEntry;
 
     const cases: readonly {
@@ -205,15 +203,14 @@ describe("DAG session codec", () => {
       runId: def.runId,
       graphId,
       seq: 0,
-      event: { _tag: "graph", graph: def },
+      event: DagSessionEvent.graph({ graph: def }),
     };
     const wrongRun: DagSessionEntry = {
       v: 1,
       runId: def.runId,
       graphId,
       seq: 1,
-      event: {
-        _tag: "transition",
+      event: DagSessionEvent.transition({
         transition: { runId: "wrong", nodeId: "a", type: DagTransitionType.Start },
         attempt: {
           nodeId: "a",
@@ -221,15 +218,14 @@ describe("DAG session codec", () => {
           ordinal: 1,
           status: DagNodeStatus.Running,
         },
-      },
+      }),
     };
     const start: DagSessionEntry = {
       v: 1,
       runId: def.runId,
       graphId,
       seq: 1,
-      event: {
-        _tag: "transition",
+      event: DagSessionEvent.transition({
         transition: { runId: def.runId, nodeId: "a", type: DagTransitionType.Start },
         attempt: {
           nodeId: "a",
@@ -237,7 +233,7 @@ describe("DAG session codec", () => {
           ordinal: 1,
           status: DagNodeStatus.Running,
         },
-      },
+      }),
     };
 
     expect(
@@ -247,7 +243,10 @@ describe("DAG session codec", () => {
       failureTag(
         reconstructDagSession(
           Fixtures.sessionStore([
-            storedEntry({ ...graphEntry, event: { _tag: "final", outcome: "nonsense" as never } }),
+            storedEntry({
+              ...graphEntry,
+              event: DagSessionEvent.final({ outcome: "nonsense" as never }),
+            }),
           ]),
           def.runId,
         ),
@@ -260,8 +259,7 @@ describe("DAG session codec", () => {
             storedEntry(graphEntry),
             storedEntry({
               ...start,
-              event: {
-                _tag: "transition",
+              event: DagSessionEvent.transition({
                 transition: { runId: def.runId, nodeId: "a", type: DagTransitionType.Start },
                 attempt: {
                   nodeId: "a",
@@ -269,7 +267,7 @@ describe("DAG session codec", () => {
                   ordinal: 1,
                   status: DagNodeStatus.Running,
                 },
-              },
+              }),
             }),
           ]),
           def.runId,
@@ -299,7 +297,7 @@ describe("DAG session codec", () => {
             storedEntry({
               ...graphEntry,
               seq: 1,
-              event: { _tag: "final", outcome: DagRunOutcome.Succeeded },
+              event: DagSessionEvent.final({ outcome: DagRunOutcome.Succeeded }),
             }),
           ]),
           def.runId,

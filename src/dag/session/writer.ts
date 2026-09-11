@@ -76,7 +76,7 @@ export function createDagSessionWriter(
             runId: graph.runId,
             graphId,
             seq,
-            event: { _tag: "graph", graph: definition },
+            event: SessionContracts.DagSessionEvent.graph({ graph: definition }),
           } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           seq += 1;
@@ -116,11 +116,10 @@ export function createDagSessionWriter(
             runId: graph.runId,
             graphId,
             seq,
-            event: {
-              _tag: "transition",
+            event: SessionContracts.DagSessionEvent.transition({
               transition: applied.transition,
               ...(attempt ? { attempt } : {}),
-            },
+            }),
           } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           state = applied.state;
@@ -146,7 +145,7 @@ export function createDagSessionWriter(
             runId: graph.runId,
             graphId,
             seq,
-            event: { _tag: "final", outcome },
+            event: SessionContracts.DagSessionEvent.final({ outcome }),
           } satisfies SessionContracts.DagSessionEntry;
           const persisted = append(entry);
           final = true;

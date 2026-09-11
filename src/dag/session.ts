@@ -1,6 +1,7 @@
 export {
   DagSessionDefaultLimits,
   DagSessionEntryType,
+  DagSessionEvent,
   DagSessionProcessLossReason,
   DagSessionWireVersion,
   DagSessionAttemptInconsistent,
@@ -22,7 +23,6 @@ export type {
   DagSessionAttempt,
   DagSessionAttemptStatus,
   DagSessionEntry,
-  DagSessionEvent,
   DagSessionFailure,
   DagSessionLimits,
   DagSessionStore,
