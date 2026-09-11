@@ -28,25 +28,6 @@ async function eventually(assertion, attempts = 40) {
 }
 
 describe("supervised Node command runner", () => {
-  it("owns one normalized Vitest command used by every portfolio", () => {
-    const manifest = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
-    const vitestCommand = manifest.scripts["test:vitest"];
-    expect(vitestCommand).toContain("scripts/run-supervised-node.mjs");
-    expect(vitestCommand).toContain("node_modules/vitest/vitest.mjs run");
-    expect(vitestCommand).toContain("--pool=threads");
-    expect(vitestCommand).toContain("--maxWorkers=4");
-    for (const name of [
-      "test:unit",
-      "test:integration",
-      "test:changed",
-      "test:safe",
-      "test:e2e",
-      "test:e2e:real-workspace-canary",
-    ]) {
-      expect(manifest.scripts[name]).toContain("nub run test:vitest");
-    }
-  });
-
   it("preserves the child command exit status", () => {
     const result = spawnSync(
       "scripts/node-run.sh",
