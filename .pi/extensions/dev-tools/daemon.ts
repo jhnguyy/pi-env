@@ -36,7 +36,7 @@ import { parseRequest, serializeResponse, errorResponse, okResponse, SOCKET_PATH
 import type { DaemonRequest, DaemonResponse, StatusResult } from "./protocol";
 import { removeStaleArtifact, removeStaleArtifacts } from "./socket-artifacts";
 import {
-  makeToolingTelemetryRuntime,
+  createToolingTelemetryRuntime,
   noopToolingTelemetryRuntime,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling.js";
@@ -280,7 +280,7 @@ if (isMain) {
   const main = async () => {
     const configured = await Effect.runPromise(
       Effect.result(
-        makeToolingTelemetryRuntime({
+        createToolingTelemetryRuntime({
           env: process.env,
           serviceName: "pi-env-dev-tools-daemon",
         }),

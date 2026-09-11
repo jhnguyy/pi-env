@@ -1,8 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import type * as AgentCore from "@earendil-works/pi-agent-core";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 const assistant = {
@@ -14,23 +13,18 @@ const assistant = {
   usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
 };
 
-vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof AgentCore>();
-  return {
-    ...actual,
-    agentLoop: () => ({
-      async *[Symbol.asyncIterator]() {
-        yield { type: "message_end", message: assistant };
-        yield { type: "turn_end" };
-      },
-      async result() {
-        return [];
-      },
-    }),
-  };
-});
+import { runSubagent, type RunSubagentOptions } from "../execute";
 
-const { runSubagent } = await import("../execute");
+const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = () =>
+  ({
+    async *[Symbol.asyncIterator]() {
+      yield { type: "message_end", message: assistant };
+      yield { type: "turn_end" };
+    },
+    async result() {
+      return [];
+    },
+  }) as any;
 
 let sessionDir: string | undefined;
 afterEach(() => {
@@ -54,18 +48,33 @@ describe("subagent live progress", () => {
           getApiKeyForProvider: async () => "key",
         },
       } as any,
-      new Map([["notes", {
-        capabilities: [],
-        tool: { name: "notes", label: "Notes", description: "", parameters: {}, execute: async () => ({ content: [], details: null }) },
-      }]]),
+      new Map([
+        [
+          "notes",
+          {
+            capabilities: [],
+            tool: {
+              name: "notes",
+              label: "Notes",
+              description: "",
+              parameters: {},
+              execute: async () => ({ content: [], details: null }),
+            },
+          },
+        ],
+      ]),
       {
-        onUpdate: (update) => updates.push(update.content[0]?.type === "text" ? update.content[0].text : ""),
+        onUpdate: (update) =>
+          updates.push(update.content[0]?.type === "text" ? update.content[0].text : ""),
         onUsage: (details) => usageUpdates.push(details.usage.input),
+        agentLoop,
       },
     );
 
     expect(updates.at(-1)).toBe("latest assistant text");
     expect(usageUpdates).toEqual([1]);
-    expect(result.content[0]?.type === "text" ? result.content[0].text : "").toBe("latest assistant text");
+    expect(result.content[0]?.type === "text" ? result.content[0].text : "").toBe(
+      "latest assistant text",
+    );
   });
 });

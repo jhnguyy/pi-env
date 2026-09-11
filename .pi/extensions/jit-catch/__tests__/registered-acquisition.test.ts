@@ -1,22 +1,24 @@
 import { Effect } from "effect";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import jitCatchExtension from "../index";
-import type * as runner from "../runner";
+import { createJitCatchExtension } from "../index";
+import {
+  captureDiffEffect,
+  phaseErrorToRunResult,
+  resolveGitRootEffect,
+  type JitRunner,
+} from "../runner";
+import type { JitCatchOperations } from "../contract";
 
-const processRunner = vi.hoisted(() => vi.fn());
-const extensionRunner = vi.hoisted(() => vi.fn());
-
-vi.mock("../runner", async () => {
-  const actual = await vi.importActual<typeof runner>("../runner");
-  return {
-    ...actual,
-    platformJitRunner: (...args: Parameters<typeof actual.platformJitRunner>) =>
-      processRunner(...args),
-    runForExtensionEffect: (...args: Parameters<typeof actual.runForExtensionEffect>) =>
-      extensionRunner(...args),
-  };
-});
+const processRunner = vi.fn<JitRunner>();
+const extensionRunner = vi.fn<JitCatchOperations["runForExtension"]>();
+const testOperations: JitCatchOperations = {
+  resolveGitRoot: resolveGitRootEffect,
+  captureDiff: captureDiffEffect,
+  runForExtension: extensionRunner,
+  phaseErrorToRunResult,
+};
+const jitCatchExtension = createJitCatchExtension(processRunner, testOperations);
 
 const pathCases = [
   {
@@ -126,13 +128,7 @@ function registeredTool() {
 }
 
 function execute(params: Record<string, unknown>, cwd = "/context") {
-  return registeredTool().execute(
-    "call-id",
-    params,
-    undefined,
-    undefined,
-    { cwd },
-  );
+  return registeredTool().execute("call-id", params, undefined, undefined, { cwd });
 }
 
 it.each(pathCases)(
@@ -160,10 +156,7 @@ it("groups and admits source files from a mixed raw diff", async () => {
   expect(extensionRunner.mock.calls.map((call) => call[0])).toEqual([
     {
       name: "alpha",
-      changedFiles: [
-        ".pi/extensions/alpha/index.ts",
-        ".pi/extensions/alpha/types.ts",
-      ],
+      changedFiles: [".pi/extensions/alpha/index.ts", ".pi/extensions/alpha/types.ts"],
     },
     {
       name: "beta",
@@ -211,12 +204,9 @@ it.each(acquisitionCases)(
 
     await execute(params);
 
-    expect(processRunner).toHaveBeenNthCalledWith(
-      1,
-      "git",
-      ["rev-parse", "--show-toplevel"],
-      { cwd },
-    );
+    expect(processRunner).toHaveBeenNthCalledWith(1, "git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+    });
     expect(processRunner).toHaveBeenNthCalledWith(2, "git", gitArgs, { cwd });
     expect(extensionRunner.mock.calls[0][3]).toBe("/repo/root");
   },

@@ -16,7 +16,7 @@ import {
   ReviewEvidenceCoverageOutput,
   ReviewEvidenceOutputs,
   ReviewEvidenceResolverKey,
-  makeReviewEvidenceResolverExecutor,
+  reviewEvidenceResolverExecutor,
 } from "../evidence-resolver";
 import type { ReviewPlan } from "../schema";
 
@@ -100,7 +100,7 @@ async function execute(input: {
     },
     dependencies: [{ nodeId: "reading-plan", mode: DagDependencyMode.Required }],
   };
-  const executor = makeReviewEvidenceResolverExecutor({
+  const executor = reviewEvidenceResolverExecutor({
     artifactRoot: input.fixture.dagArtifacts,
   });
   return Effect.runPromise(

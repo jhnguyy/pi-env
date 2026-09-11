@@ -12,6 +12,7 @@ import {
   legacyExecJitRunner,
   platformJitRunner,
   type ExecFn,
+  type JitCatchPhaseError,
   type JitRunner,
 } from "./runner";
 import { err } from "../_shared/result";
@@ -34,8 +35,7 @@ export const JIT_CATCH_PARAMETERS = Type.Object({
   ),
   diff: Type.Optional(
     Type.String({
-      description:
-        "Raw unified diff text. When provided, skips git entirely.",
+      description: "Raw unified diff text. When provided, skips git entirely.",
     }),
   ),
   ext_name: Type.Optional(
@@ -80,17 +80,43 @@ export const JIT_CATCH_DESCRIPTION = [
   "for promoting criteria.",
 ].join("\n");
 
-export function createJitCatchContract(exec?: ExecFn): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
+export interface JitCatchOperations {
+  readonly resolveGitRoot: typeof resolveGitRootEffect;
+  readonly captureDiff: typeof captureDiffEffect;
+  readonly runForExtension: typeof runForExtensionEffect;
+  readonly phaseErrorToRunResult: (
+    extension: Parameters<typeof phaseErrorToRunResult>[0],
+    error: JitCatchPhaseError,
+    workspaceRoot: string,
+  ) => ReturnType<typeof phaseErrorToRunResult>;
+}
+
+export const jitCatchOperations: JitCatchOperations = {
+  resolveGitRoot: resolveGitRootEffect,
+  captureDiff: captureDiffEffect,
+  runForExtension: runForExtensionEffect,
+  phaseErrorToRunResult,
+};
+
+export function createJitCatchContract(
+  exec?: ExecFn,
+): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
   return createJitCatchContractWithRunner(exec ? legacyExecJitRunner(exec) : platformJitRunner);
 }
 
-export function createJitCatchContractWithRunner(runner: JitRunner): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
+export function createJitCatchContractWithRunner(
+  runner: JitRunner,
+  operations: JitCatchOperations = jitCatchOperations,
+): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
   return {
     name: "jit_catch",
     label: "JiT-Catch",
     description: JIT_CATCH_DESCRIPTION,
     parameters: JIT_CATCH_PARAMETERS,
-    execute: (params, context) => Effect.runPromise(executeJitCatchEffect(params, runner, context), { signal: context.signal }),
+    execute: (params, context) =>
+      Effect.runPromise(executeJitCatchEffect(params, runner, context, operations), {
+        signal: context.signal,
+      }),
   };
 }
 
@@ -98,24 +124,27 @@ export function executeJitCatchEffect(
   params: JitCatchParams,
   runner: JitRunner,
   context: DomainToolContext,
+  operations: JitCatchOperations = jitCatchOperations,
 ) {
   const progress = context.progress ?? (() => {});
 
-  return Effect.gen(function*() {
+  return Effect.gen(function* () {
     let diffText: string;
     let workspaceRoot = params.git_cwd ?? context.cwd;
     progress("Acquiring diff…");
 
-    const acquisition = yield* Effect.result(Effect.gen(function* () {
-      if (params.diff !== undefined) {
-        return params.diff;
-      }
+    const acquisition = yield* Effect.result(
+      Effect.gen(function* () {
+        if (params.diff !== undefined) {
+          return params.diff;
+        }
 
-      const source = params.diff_source ?? "unstaged";
-      const gitCwd = params.git_cwd ?? context.cwd;
-      workspaceRoot = yield* resolveGitRootEffect(runner, gitCwd);
-      return yield* captureDiffEffect(source, runner, gitCwd, params.commit);
-    }));
+        const source = params.diff_source ?? "unstaged";
+        const gitCwd = params.git_cwd ?? context.cwd;
+        workspaceRoot = yield* operations.resolveGitRoot(runner, gitCwd);
+        return yield* operations.captureDiff(source, runner, gitCwd, params.commit);
+      }),
+    );
 
     if (Result.isFailure(acquisition)) return err(formatRunnerError(acquisition.failure));
     diffText = acquisition.success;
@@ -136,7 +165,7 @@ export function executeJitCatchEffect(
     if (targets.length === 0) {
       return err(
         `Extension '${params.ext_name}' not found in diff. ` +
-        `Extensions present: ${extensions.map((e) => e.name).join(", ")}`,
+          `Extensions present: ${extensions.map((e) => e.name).join(", ")}`,
       );
     }
 
@@ -145,10 +174,16 @@ export function executeJitCatchEffect(
     const results = [];
     for (const ext of targets) {
       progress(`${ext.name}: generating tests…`);
-      const result = yield* Effect.result(runForExtensionEffect(ext, diffText, runner, workspaceRoot, (phase: string) => {
-        progress(`${ext.name}: ${phase}`);
-      }));
-      results.push(Result.isSuccess(result) ? result.success : phaseErrorToRunResult(ext, result.failure, workspaceRoot));
+      const result = yield* Effect.result(
+        operations.runForExtension(ext, diffText, runner, workspaceRoot, (phase: string) => {
+          progress(`${ext.name}: ${phase}`);
+        }),
+      );
+      results.push(
+        Result.isSuccess(result)
+          ? result.success
+          : operations.phaseErrorToRunResult(ext, result.failure, workspaceRoot),
+      );
     }
 
     const lines: string[] = [];
@@ -164,7 +199,12 @@ export function executeJitCatchEffect(
         anyFailed = true;
         lines.push(`✗ ${r.extName} — tests FAILED.`);
         if (r.testPath) lines.push(`  Test file kept at: ${r.testPath}`);
-        lines.push(`  Output:\n${r.testOutput.split("\n").map((l: string) => "  " + l).join("\n")}`);
+        lines.push(
+          `  Output:\n${r.testOutput
+            .split("\n")
+            .map((l: string) => "  " + l)
+            .join("\n")}`,
+        );
       }
     }
 

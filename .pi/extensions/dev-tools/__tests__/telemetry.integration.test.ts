@@ -7,7 +7,7 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveNodeCommand } from "../../../../src/process/platform";
-import { makeToolingTelemetryRuntime } from "../../../../src/telemetry/tooling";
+import { createToolingTelemetryRuntime } from "../../../../src/telemetry/tooling";
 import { LspBackend } from "../backend";
 import { LspDaemon } from "../daemon";
 import { parseResponse, serializeRequest } from "../protocol";
@@ -58,7 +58,7 @@ function inMemoryExporter(finished: ReadableSpan[]): SpanExporter {
 
 async function telemetryRuntime(finished: ReadableSpan[]) {
   return Effect.runPromise(
-    makeToolingTelemetryRuntime({
+    createToolingTelemetryRuntime({
       env: {
         PI_ENV_TOOLING_OTEL_ENABLED: "true",
         PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318",

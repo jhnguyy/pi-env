@@ -9,7 +9,7 @@ import {
   DagTransitionType,
   computeDagSessionGraphId,
   createDagRunState,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
   type DagCompletionGuardKind,

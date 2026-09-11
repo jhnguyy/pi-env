@@ -18,6 +18,27 @@ function positiveInteger(value, fallback, name) {
 }
 
 const [script, ...args] = process.argv.slice(2);
+
+function normalizeVitestWorkerArgs(scriptPath, commandArgs) {
+  if (!scriptPath.endsWith("/vitest.mjs")) return commandArgs;
+
+  const normalized = [];
+  let maxWorkers;
+  for (let index = 0; index < commandArgs.length; index++) {
+    const argument = commandArgs[index];
+    if (argument.startsWith("--maxWorkers=")) {
+      maxWorkers = argument;
+      continue;
+    }
+    if (argument === "--maxWorkers" && index + 1 < commandArgs.length) {
+      maxWorkers = `--maxWorkers=${commandArgs[++index]}`;
+      continue;
+    }
+    normalized.push(argument);
+  }
+  return maxWorkers === undefined ? normalized : [...normalized, maxWorkers];
+}
+
 if (!script) {
   console.error("usage: scripts/run-supervised-node.mjs <script> [args...]");
   process.exitCode = 2;
@@ -48,10 +69,14 @@ if (!script) {
     try {
       const result = await Effect.runPromise(
         Effect.result(
-          runInheritedProcess(resolveNodeCommand(), [script, ...args], {
-            ...(timeoutMs === undefined ? {} : { timeoutMs }),
-            killGraceMs,
-          }),
+          runInheritedProcess(
+            resolveNodeCommand(),
+            [script, ...normalizeVitestWorkerArgs(script, args)],
+            {
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
+              killGraceMs,
+            },
+          ),
         ),
         { signal: controller.signal },
       );

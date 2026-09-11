@@ -5,7 +5,7 @@ import {
 } from "../../../src/analyze/protocol.js";
 import {
   AnalyzeDiagnosticEventType,
-  makeEffectAnalysisDiagnostics,
+  createEffectAnalysisDiagnostics,
   type AnalysisDiagnosticEvent,
 } from "../../../src/analyze/diagnostics.js";
 import { ANALYZE_LIMITS } from "../../../src/analyze/policy.js";
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     // This literal dynamic import is bundled into the isolated worker sidecar.
     // Public parent bundles never import the engine, program builder, or TypeScript.
     const { analyze } = await import("../../../src/analyze/engine.js");
-    const diagnostics = makeEffectAnalysisDiagnostics({
+    const diagnostics = createEffectAnalysisDiagnostics({
       telemetryEnabled: false,
       sink: (event: AnalysisDiagnosticEvent) => {
         if (event.terminal || event.type === AnalyzeDiagnosticEventType.RunStarted) {

@@ -102,7 +102,7 @@ export function boundedChangedFileContext(state: ReviewState): string {
   );
 }
 
-export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
+export function buildReviewReadToolContracts(store: ReviewRunStore): Array<ToolContract<any, any>> {
   const root = store.state.snapshot.worktree;
   const snapshot = store.state.snapshot;
   let diffText: string | undefined;
@@ -264,7 +264,7 @@ export function makeReviewReadToolContracts(store: ReviewRunStore): Array<ToolCo
 }
 
 export function makeReviewReadTools(store: ReviewRunStore) {
-  return makeReviewReadToolContracts(store).map((contract) =>
+  return buildReviewReadToolContracts(store).map((contract) =>
     toAgentTool(contract, () => ({ cwd: store.state.snapshot.worktree })),
   );
 }

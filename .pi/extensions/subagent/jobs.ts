@@ -149,6 +149,7 @@ export class SubagentJobManager {
     private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_CONFIG },
     supervisor?: SubagentRunSupervisor,
     private readonly onJobsChanged?: SubagentJobsChanged,
+    private readonly agentLoop?: RunSubagentOptions["agentLoop"],
   ) {
     this.supervisor =
       supervisor ?? getOrCreateSubagentRunSupervisor(`jobs-${randomUUID()}`, this.config);
@@ -297,6 +298,7 @@ export class SubagentJobManager {
       sessionStorage: this.config.sessionStorage,
       onAdmitted,
       onUsage,
+      agentLoop: this.agentLoop,
     };
     const run = (
       this.runJob === runSubagentEffect

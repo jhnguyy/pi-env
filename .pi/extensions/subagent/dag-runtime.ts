@@ -11,7 +11,7 @@ import {
   DagSubagentPromptMaxBytes,
   DagSubagentReservedOutputTokens,
   DagSubagentRuntimeFailure,
-  makeDagSubagentExecutor,
+  createDagSubagentExecutor,
   type DagExecutorRegistryService,
   type DagSubagentRuntime,
   type DagSubagentRuntimeRequest,
@@ -204,6 +204,7 @@ function resolveRun(
 
 interface DagSubagentRuntimeOptions extends RunSubagentOptions {
   readonly workspaceRootForRun?: (runId: string) => string | undefined;
+  readonly executeResolved?: typeof runResolvedSubagentEffect;
 }
 export function makeDagSubagentRuntime(
   ctx: ExtensionContext,
@@ -232,7 +233,8 @@ export function makeDagSubagentRuntime(
                   }),
             ),
         });
-        const result = yield* runResolvedSubagentEffect(run, ctx, {
+        const executeResolved = options.executeResolved ?? runResolvedSubagentEffect;
+        const result = yield* executeResolved(run, ctx, {
           ...options,
           runId: `${dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
           workspaceAccess: run.workspaceAccess,
@@ -267,14 +269,14 @@ export function makeDagSubagentRuntime(
   };
 }
 
-export function makeDagSubagentExecutorRegistry(
+export function createDagSubagentExecutorRegistry(
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
   artifactRoot: string,
   sessionGeneration: string,
   options: DagSubagentRuntimeOptions,
 ): DagExecutorRegistryService {
-  const executor = makeDagSubagentExecutor({
+  const executor = createDagSubagentExecutor({
     artifactRoot,
     runtime: makeDagSubagentRuntime(ctx, registeredExtTools, options),
   });

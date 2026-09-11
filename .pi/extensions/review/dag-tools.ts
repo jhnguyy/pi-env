@@ -19,7 +19,7 @@ import {
   ReviewEvidenceResolutionFailure,
   type ReviewEvidenceResolverPayloadV1,
 } from "./evidence-resolver";
-import { makeReviewReadToolContracts, type ReviewRunStore } from "./runtime";
+import { buildReviewReadToolContracts, type ReviewRunStore } from "./runtime";
 import {
   ConsolidationReviewV2Schema,
   PlanSchema,
@@ -83,7 +83,7 @@ export function registerReviewDagTools(options: {
   readonly evidence: ReviewEvidenceResolverPayloadV1;
 }): ReviewDagTools {
   const suffix = suffixFor(options.reviewId);
-  const base = makeReviewReadToolContracts(options.store).map((contract) =>
+  const base = buildReviewReadToolContracts(options.store).map((contract) =>
     renamed(customTool(contract, options.store.state.snapshot.worktree), suffix),
   );
   const deckName = `review_deck_${suffix}`;

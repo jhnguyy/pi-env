@@ -30,7 +30,7 @@ function appendEntry(
   }
 }
 
-export function makeDagSessionWriter(
+export function createDagSessionWriter(
   store: SessionContracts.DagSessionStore,
   graph: DagValidation.ValidatedDagDefinition<unknown>,
   graphDefinition: DagContracts.DagDefinition<unknown>,

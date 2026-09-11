@@ -1,6 +1,7 @@
 import initSubagent from "../index";
+import type { SubagentSessionRuntimeDependencies } from "../session-runtime";
 
-export function createSubagentHarness() {
+export function createSubagentHarness(dependencies: SubagentSessionRuntimeDependencies = {}) {
   const tools = new Map<string, any>();
   const handlers = new Map<string, (...args: any[]) => any>();
   const pi = {
@@ -12,6 +13,6 @@ export function createSubagentHarness() {
       on: () => {},
     },
   };
-  initSubagent(pi as any);
+  initSubagent(pi as any, dependencies);
   return { tools, handlers };
 }

@@ -7,7 +7,7 @@ import {
   DagRuntimeLive,
   DagRuntimeNotAccepting,
   DagRuntimeRunAlreadyExists,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
   submitDagRun,
   type DagExecutorRegistry,
@@ -34,9 +34,12 @@ import {
   type SubagentSessionStorage,
 } from "./config";
 import type { SubagentRunSupervisor } from "./control";
-import { makeDagSubagentExecutorRegistry } from "./dag-runtime";
-import { makeDagSessionStore, persistedDagRunIds } from "./dag-session-store";
+import { createDagSubagentExecutorRegistry } from "./dag-runtime";
+import { createDagSessionStore, persistedDagRunIds } from "./dag-session-store";
+import type { RunSubagentOptions } from "./execute";
 import type { SubagentUsageLedger } from "./usage";
+
+export type DagSubagentExecutorRegistryFactory = typeof createDagSubagentExecutorRegistry;
 
 interface DagSessionRuntimeDependencies {
   readonly sessionGeneration: string;
@@ -45,6 +48,8 @@ interface DagSessionRuntimeDependencies {
   readonly ledger: SubagentUsageLedger;
   readonly sessionStorage?: SubagentSessionStorage;
   readonly executorRegistry?: DagExecutorRegistryService;
+  readonly executorRegistryFactory?: DagSubagentExecutorRegistryFactory;
+  readonly agentLoop?: RunSubagentOptions["agentLoop"];
 }
 
 export class DagSessionRuntime {
@@ -100,7 +105,7 @@ export class DagSessionRuntime {
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
     const registry =
       dependencies.executorRegistry ??
-      makeDagSubagentExecutorRegistry(
+      (dependencies.executorRegistryFactory ?? createDagSubagentExecutorRegistry)(
         ctx,
         registeredExtTools,
         artifactRoot,
@@ -111,13 +116,14 @@ export class DagSessionRuntime {
           supervisor: dependencies.supervisor,
           telemetryRuntime: dependencies.telemetryRuntime,
           sessionStorage: dependencies.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
+          agentLoop: dependencies.agentLoop,
         },
       );
     const scope = await Effect.runPromise(Scope.make());
     const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
       appendCustomEntry(customType: string, data?: unknown): string;
     };
-    const store = makeDagSessionStore(writableSessionManager);
+    const store = createDagSessionStore(writableSessionManager);
     try {
       return new DagSessionRuntime(
         pi,
@@ -197,7 +203,7 @@ export class DagSessionRuntime {
         this.pendingSubmissions.delete(pendingSubmission);
         resolveSubmission();
       });
-      const writer = makeDagSessionWriter(this.store, graph, graph);
+      const writer = createDagSessionWriter(this.store, graph, graph);
       let graphPersisted = false;
       const journal: DagRuntimeJournal = {
         beforeRun: (definition) =>

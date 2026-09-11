@@ -9,7 +9,7 @@ import {
   DagRunOutcome,
   DagTransitionType,
   computeDagSessionGraphId,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
   type DagDefinition,
@@ -50,7 +50,7 @@ describe("DAG session replay", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = Fixtures.sessionStore();
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
 
     Effect.runSync(writer.appendGraph(def));
     Effect.runSync(
@@ -91,7 +91,7 @@ describe("DAG session replay", () => {
     const def = Fixtures.definition([node("a")], 1);
     const dag = valid(def);
     const store = Fixtures.sessionStore();
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     Effect.runSync(
       writer.appendTransition(
@@ -121,7 +121,7 @@ describe("DAG session replay", () => {
     );
     const dag = valid(def);
     const store = Fixtures.sessionStore();
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     Effect.runSync(
       writer.appendTransition(
@@ -159,7 +159,7 @@ describe("DAG session replay", () => {
         event: { _tag: "graph", graph: { ...def, runId: "sibling" } },
       },
     ]);
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
 
     const recovered = Effect.runSync(reconstructDagSession(store, def.runId));
@@ -189,7 +189,7 @@ describe("DAG session replay", () => {
     );
     const dag = valid(def);
     const store = Fixtures.sessionStore();
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
     Effect.runSync(writer.appendGraph(def));
     for (const id of ["review-a", "review-b"] as const) {
       Effect.runSync(

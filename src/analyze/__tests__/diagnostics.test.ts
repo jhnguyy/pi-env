@@ -12,14 +12,14 @@ import {
   AnalyzeSpanName,
   AnalyzeTerminationReason,
   MAX_DIAGNOSTIC_STRING_LENGTH,
-  makeDiagnosticEvent,
-  makeEffectAnalysisDiagnostics,
+  createAnalysisDiagnosticEvent,
+  createEffectAnalysisDiagnostics,
   sanitizeDiagnosticAttributes,
 } from "../diagnostics.js";
 import { analyzeEffect } from "../engine.js";
 import { AnalysisJournal, readJournalEvents } from "../journal.js";
 import { ScopeMode } from "../model.js";
-import { ANALYZE_OTEL_BOUNDS, makeAnalyzeOtelLayer, resolveAnalyzeOtelConfig } from "../otel.js";
+import { ANALYZE_OTEL_BOUNDS, analyzeOtelLayer, resolveAnalyzeOtelConfig } from "../otel.js";
 import { ANALYZE_LIMITS } from "../policy.js";
 import {
   ANALYZE_WORKER_PROTOCOL_VERSION,
@@ -40,7 +40,7 @@ function event(
   type: AnalyzeDiagnosticEventType,
   extra: Record<string, unknown> = {},
 ) {
-  return makeDiagnosticEvent(runId, timestampMs, type, extra);
+  return createAnalysisDiagnosticEvent(runId, timestampMs, type, extra);
 }
 
 async function leftKind(
@@ -80,7 +80,7 @@ describe("analyze diagnostic contracts", () => {
       forceFlush: async () => {},
       shutdown: async () => {},
     };
-    const diagnostics = makeEffectAnalysisDiagnostics({ telemetryEnabled: true });
+    const diagnostics = createEffectAnalysisDiagnostics({ telemetryEnabled: true });
     const runId = "run-otel";
     const program = diagnostics
       .span(
@@ -90,7 +90,7 @@ describe("analyze diagnostic contracts", () => {
           event(runId, 1, AnalyzeDiagnosticEventType.StageStarted, { stage: "preflight" }),
         ),
       )
-      .pipe(Effect.provide(makeAnalyzeOtelLayer({ enabled: true }, exporter)));
+      .pipe(Effect.provide(analyzeOtelLayer({ enabled: true }, exporter)));
 
     await Effect.runPromise(program);
 

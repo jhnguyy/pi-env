@@ -2,7 +2,7 @@
  * Core execution for persistent in-process subagents.
  */
 
-import { agentLoop } from "@earendil-works/pi-agent-core";
+import { agentLoop as defaultAgentLoop } from "@earendil-works/pi-agent-core";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type {
@@ -150,6 +150,8 @@ export interface RunSubagentOptions {
   workspaceAccess?: WorkspaceAccessValue;
   sessionStorage?: SubagentSessionStorageValue;
   onAdmitted?: () => void;
+  /** Injectable agent-loop boundary for deterministic runtimes and tests. */
+  agentLoop?: typeof defaultAgentLoop;
 }
 
 export interface ResolvedSubagentRun {
@@ -263,7 +265,13 @@ function runResolvedSubagentWorkflow(
           const signal = options.signal
             ? AbortSignal.any([options.signal, effectSignal])
             : effectSignal;
-          const stream = agentLoop(prompts, agentContext, config, signal, streamSimple);
+          const stream = (options.agentLoop ?? defaultAgentLoop)(
+            prompts,
+            agentContext,
+            config,
+            signal,
+            streamSimple,
+          );
           for await (const event of stream) {
             const ev = event;
             const appended = accumulator.acceptEvent(ev);

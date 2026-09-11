@@ -10,7 +10,7 @@ import {
 import type { DagRuntimeServiceRegistration } from "../_shared/dag-runtime-service";
 import type { ReviewState } from "./core";
 import {
-  makeReviewEvidenceResolverExecutor,
+  reviewEvidenceResolverExecutor,
   ReviewEvidenceExecutorKind,
   ReviewEvidenceResolverKey,
 } from "./evidence-resolver";
@@ -224,7 +224,7 @@ export class ReviewCoordinator {
       sessionGeneration: registration.sessionGeneration,
       kind: ReviewEvidenceExecutorKind,
       key: ReviewEvidenceResolverKey,
-      executor: makeReviewEvidenceResolverExecutor({
+      executor: reviewEvidenceResolverExecutor({
         artifactRoot: join(
           ctx.sessionManager.getSessionDir(),
           "dag-artifacts",

@@ -27,6 +27,11 @@ import { LinearErrorCode, LinearExtensionError, linearError } from "./domain";
 
 type IssueLike = Issue | IssueSearchResult;
 
+export type LinearSdkClientOptions = ConstructorParameters<typeof LinearClient>[0];
+export type LinearSdkClientFactory = (options: LinearSdkClientOptions) => LinearClient;
+
+const createSdkClient: LinearSdkClientFactory = (options) => new LinearClient(options);
+
 type StringFilter = { containsIgnoreCase: string };
 
 type ResourceQueryFilter = {
@@ -192,8 +197,12 @@ function resourcePage<T>(
 export class LinearSdkApi implements LinearApi {
   readonly #client: LinearClient;
 
-  constructor(apiKey: string, signal?: AbortSignal) {
-    this.#client = new LinearClient({ apiKey, signal });
+  constructor(
+    apiKey: string,
+    signal?: AbortSignal,
+    createClient: LinearSdkClientFactory = createSdkClient,
+  ) {
+    this.#client = createClient({ apiKey, signal });
   }
 
   identity(): Promise<LinearIdentity> {

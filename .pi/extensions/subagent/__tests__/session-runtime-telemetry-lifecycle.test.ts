@@ -1,40 +1,42 @@
-import { Effect } from "effect";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
+import { beforeEach, describe, expect, it } from "vitest";
+import { noopToolingDiagnostics } from "../../../../src/telemetry/tooling";
+import {
+  SubagentSessionRuntime,
+  type SubagentSessionRuntimeDependencies,
+} from "../session-runtime";
 
-const runtimeState = vi.hoisted(() => ({
+const runtimeState = {
   blocked: false,
   release: undefined as (() => void) | undefined,
   onBlockedStart: undefined as (() => void) | undefined,
   created: 0,
   disposed: new Map<number, number>(),
-}));
+};
 
-vi.mock("../../../../src/telemetry/tooling", () => ({
-  makeToolingTelemetryRuntime: vi.fn(() =>
-    Effect.promise(async () => {
-      const id = ++runtimeState.created;
-      runtimeState.disposed.set(id, 0);
+const telemetryRuntimeFactory: NonNullable<
+  SubagentSessionRuntimeDependencies["telemetryRuntimeFactory"]
+> = () =>
+  Effect.promise(async () => {
+    const id = ++runtimeState.created;
+    runtimeState.disposed.set(id, 0);
 
-      if (runtimeState.blocked) {
-        runtimeState.onBlockedStart?.();
-        await new Promise<void>((resolve) => {
-          runtimeState.release = resolve;
-        });
-      }
+    if (runtimeState.blocked) {
+      runtimeState.onBlockedStart?.();
+      await new Promise<void>((resolve) => {
+        runtimeState.release = resolve;
+      });
+    }
 
-      return {
-        diagnostics: { span: (_n: string, _a: unknown, effect: unknown) => effect, annotate: () => Effect.void },
-        provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
-        disposeEffect: Effect.sync(() => {
-          runtimeState.disposed.set(id, (runtimeState.disposed.get(id) ?? 0) + 1);
-        }),
-      };
-    }),
-  ),
-}));
-
-import { SubagentSessionRuntime } from "../session-runtime";
+    return {
+      diagnostics: noopToolingDiagnostics,
+      provide: <A, E>(effect: Effect.Effect<A, E>) => effect,
+      disposeEffect: Effect.sync(() => {
+        runtimeState.disposed.set(id, (runtimeState.disposed.get(id) ?? 0) + 1);
+      }),
+    };
+  });
 
 describe("SubagentSessionRuntime telemetry lifecycle", () => {
   beforeEach(() => {
@@ -45,10 +47,6 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     runtimeState.disposed.clear();
   });
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
-
   function makeRuntime() {
     const pi = {
       appendEntry: () => {},
@@ -56,7 +54,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       on: () => {},
       events: { emit: () => {}, on: () => {} },
     };
-    return new SubagentSessionRuntime(pi as any, new Map());
+    return new SubagentSessionRuntime(pi as any, new Map(), { telemetryRuntimeFactory });
   }
 
   function sessionContext() {
@@ -108,6 +106,8 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
 
     const job = runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any);
     expect(job.details.status).toBe("inactive");
-    expect(job.content[0]?.type === "text" ? job.content[0].text : "").toContain("Cannot start a subagent job");
+    expect(job.content[0]?.type === "text" ? job.content[0].text : "").toContain(
+      "Cannot start a subagent job",
+    );
   });
 });

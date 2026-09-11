@@ -25,7 +25,7 @@ import {
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import { buildReviewDeck } from "../../deck";
 import {
-  makeReviewEvidenceResolverExecutor,
+  reviewEvidenceResolverExecutor,
   ReviewEvidenceCoverageOutput,
   ReviewEvidenceExecutorKind,
   ReviewEvidenceResolverKey,
@@ -222,7 +222,7 @@ export async function runRealReviewFlow(
     sessionGeneration: generation,
     kind: ReviewEvidenceExecutorKind,
     key: ReviewEvidenceResolverKey,
-    executor: makeReviewEvidenceResolverExecutor({ artifactRoot }),
+    executor: reviewEvidenceResolverExecutor({ artifactRoot }),
   });
   const findTool = (prefix: string) => {
     const tool = [...pi.tools.values()].find((candidate) => candidate.name.startsWith(prefix));

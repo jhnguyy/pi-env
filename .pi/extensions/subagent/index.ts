@@ -9,14 +9,14 @@ import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
 import { renderSubagentToolCall, renderSubagentToolResult } from "./render";
 import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
-import { SubagentSessionRuntime } from "./session-runtime";
+import { SubagentSessionRuntime, type SubagentSessionRuntimeDependencies } from "./session-runtime";
 import { toNestedToolUsage } from "./usage";
 import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
 import { readOptionalAgentSettings } from "../_shared/agent-settings";
 export {
   DagSubagentAdapterFailure,
   DagSubagentExecutorKey,
-  makeDagSubagentExecutorRegistry,
+  createDagSubagentExecutorRegistry,
   makeDagSubagentRuntime,
 } from "./dag-runtime";
 
@@ -135,7 +135,7 @@ function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
   };
 }
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeDependencies = {}) {
   const registeredExtTools = new Map<string, ExtToolRegistration>();
   const stopListeningForAgentTools = listenForAgentTools(
     pi,
@@ -149,7 +149,7 @@ export default function (pi: ExtensionAPI) {
     },
   );
 
-  const runtime = new SubagentSessionRuntime(pi, registeredExtTools);
+  const runtime = new SubagentSessionRuntime(pi, registeredExtTools, dependencies);
   const reportedJobUsage = new Set<string>();
 
   const executeJobAction = async (

@@ -3,68 +3,68 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type * as AgentCore from "@earendil-works/pi-agent-core";
 import type { Text } from "@earendil-works/pi-tui";
 import { Container } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
+import type { RunSubagentOptions } from "../execute";
 import { createSubagentHarness as createHarness } from "./harness";
 
-const state = vi.hoisted(() => ({
+const state = {
   mode: "complete",
   startCount: 0,
   abortCount: 0,
   onBlockedStart: undefined as (() => void) | undefined,
-}));
+};
 
-vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => {
-  const actual = await importOriginal<typeof AgentCore>();
-  return {
-    ...actual,
-    agentLoop: (_prompts: unknown, _context: unknown, _config: unknown, signal: AbortSignal) => ({
-      async *[Symbol.asyncIterator]() {
-        state.startCount += 1;
-        if (state.mode === "blockUntilAbort") {
-          state.onBlockedStart?.();
-          await new Promise<void>((_resolve, reject) => {
-            signal.addEventListener(
-              "abort",
-              () => {
-                state.abortCount += 1;
-                reject(new Error("cancelled"));
-              },
-              { once: true },
-            );
-          });
-          return;
-        }
-        if (state.mode === "fail") throw new Error("test failure");
-        yield {
-          type: "message_end",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: `done-${state.startCount}` }],
-            timestamp: Date.now(),
-            model: "test-model",
-            stopReason: "stop",
-            usage: {
-              input: 2,
-              output: 3,
-              cacheRead: 0,
-              cacheWrite: 0,
-              cost: { total: 1 },
+const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (
+  _prompts,
+  _context,
+  _config,
+  signal,
+) =>
+  ({
+    async *[Symbol.asyncIterator]() {
+      state.startCount += 1;
+      if (state.mode === "blockUntilAbort") {
+        state.onBlockedStart?.();
+        await new Promise<void>((_resolve, reject) => {
+          signal!.addEventListener(
+            "abort",
+            () => {
+              state.abortCount += 1;
+              reject(new Error("cancelled"));
             },
+            { once: true },
+          );
+        });
+        return;
+      }
+      if (state.mode === "fail") throw new Error("test failure");
+      yield {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `done-${state.startCount}` }],
+          timestamp: Date.now(),
+          model: "test-model",
+          stopReason: "stop",
+          usage: {
+            input: 2,
+            output: 3,
+            cacheRead: 0,
+            cacheWrite: 0,
+            cost: { total: 1 },
           },
-        };
-        yield { type: "turn_end" };
-      },
-      async result() {
-        return [];
-      },
-    }),
-  };
-});
+        },
+      };
+      yield { type: "turn_end" };
+    },
+    async result() {
+      return [];
+    },
+  }) as any;
 
 const tempDirs: string[] = [];
 
@@ -107,7 +107,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
   it("labels wait calls with the child name and moves the job ID to a muted footer", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-wait-render-"));
     tempDirs.push(cwd);
-    const { tools, handlers } = createHarness();
+    const { tools, handlers } = createHarness({ agentLoop });
     const ctx = createContext(cwd);
     const subagent = tools.get("subagent");
 
@@ -153,7 +153,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
   it("runs blocking work before session_start and resets background jobs and usage across session lifecycle", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-session-runtime-"));
     tempDirs.push(cwd);
-    const { tools, handlers } = createHarness();
+    const { tools, handlers } = createHarness({ agentLoop });
     const ctx = createContext(cwd);
     const subagent = tools.get("subagent");
     const startTool = subagent;

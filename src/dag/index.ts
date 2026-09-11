@@ -24,7 +24,7 @@ export {
   DagSubagentPayloadMaxBytes,
   DagSubagentReservedOutputTokens,
   buildDagSubagentPrompt,
-  makeDagSubagentExecutor,
+  createDagSubagentExecutor,
   parseDagSubagentPayload,
   publishDagSubagentTextResult,
 } from "./subagent.js";
@@ -175,7 +175,7 @@ export {
   DagSessionUnsupportedVersion,
   DagSessionWireVersion,
   computeDagSessionGraphId,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
 } from "./session.js";
 export type {

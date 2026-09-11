@@ -8,7 +8,6 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,18 +19,14 @@ import {
   resolvePrUrl,
 } from "../snapshot";
 
-const mocked = vi.hoisted(() => ({ agentDir: "" }));
-vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
-  ...(await orig<typeof CodingAgent>()),
-  getAgentDir: () => mocked.agentDir,
-}));
+let agentDir = "";
 const temps: string[] = [];
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 function roots() {
-  mocked.agentDir = mkdtempSync(join(tmpdir(), "pi-pr-review-agent-"));
-  temps.push(mocked.agentDir);
+  agentDir = mkdtempSync(join(tmpdir(), "pi-pr-review-agent-"));
+  temps.push(agentDir);
   const cwd = mkdtempSync(join(tmpdir(), "pi-pr-review-cwd-"));
   temps.push(cwd);
   return cwd;
@@ -92,7 +87,13 @@ describe("review pull request snapshot", () => {
       baseRefOid: base,
       headRefOid: head,
     });
-    const snap = await prepareSnapshot(exec as any, cwd, "https://github.com/acme/widgets/pull/7");
+    const snap = await prepareSnapshot(
+      exec as any,
+      cwd,
+      "https://github.com/acme/widgets/pull/7",
+      undefined,
+      agentDir,
+    );
     expect(snap.metadata.changedFiles).toEqual([
       { path: "new name.ts" },
       { path: "space path.ts" },
@@ -119,7 +120,7 @@ describe("review pull request snapshot", () => {
   it("repairs restrictive permissions on reused artifact paths", async () => {
     const cwd = roots();
     const reviewId = "acme-widgets-7-fixed";
-    const artifactDir = join(mocked.agentDir, "pr-review", "artifacts", reviewId);
+    const artifactDir = join(agentDir, "pr-review", "artifacts", reviewId);
     const diffPath = join(artifactDir, "diff.patch");
     mkdirSync(artifactDir, { recursive: true, mode: 0o777 });
     chmodSync(artifactDir, 0o777);
@@ -143,6 +144,7 @@ describe("review pull request snapshot", () => {
       },
       undefined,
       reviewId,
+      agentDir,
     );
     expect(statSync(snap.artifactDir).mode & 0o777).toBe(0o700);
     expect(statSync(snap.diffPath).mode & 0o777).toBe(0o600);
@@ -156,6 +158,8 @@ describe("review pull request snapshot", () => {
           .exec as any,
         cwd,
         "https://github.com/acme/widgets/pull/7",
+        undefined,
+        agentDir,
       ),
     ).rejects.toThrow(/base branch/);
     await expect(
@@ -171,6 +175,8 @@ describe("review pull request snapshot", () => {
         ).exec as any,
         cwd,
         "https://github.com/acme/widgets/pull/7",
+        undefined,
+        agentDir,
       ),
     ).rejects.toThrow(/did not match/);
   });
@@ -207,11 +213,19 @@ describe("review pull request snapshot", () => {
       }
       return exec(cmd, args, opts);
     };
-    const first = prepareSnapshot(lockedExec as any, cwd, "https://github.com/acme/widgets/pull/7");
+    const first = prepareSnapshot(
+      lockedExec as any,
+      cwd,
+      "https://github.com/acme/widgets/pull/7",
+      undefined,
+      agentDir,
+    );
     const second = prepareSnapshot(
       lockedExec as any,
       cwd,
       "https://github.com/acme/widgets/pull/7",
+      undefined,
+      agentDir,
     );
     await firstFetchEntered;
     expect(active).toBe(1);
@@ -235,10 +249,15 @@ describe("review pull request snapshot", () => {
     };
     await expect(
       Effect.runPromise(
-        prepareSnapshotEffect(failingExec as any, cwd, "https://github.com/acme/widgets/pull/7"),
+        prepareSnapshotEffect(
+          failingExec as any,
+          cwd,
+          "https://github.com/acme/widgets/pull/7",
+          agentDir,
+        ),
       ),
     ).rejects.toThrow(/worktree/);
-    expect(readdirSync(join(mocked.agentDir, "pr-review", "artifacts"))).toEqual([]);
-    expect(existsSync(join(mocked.agentDir, "pr-review", "worktrees"))).toBe(false);
+    expect(readdirSync(join(agentDir, "pr-review", "artifacts"))).toEqual([]);
+    expect(existsSync(join(agentDir, "pr-review", "worktrees"))).toBe(false);
   });
 });

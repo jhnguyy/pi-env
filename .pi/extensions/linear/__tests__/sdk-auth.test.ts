@@ -1,34 +1,24 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { LinearClient } from "@linear/sdk";
+import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-
-const linearClient = vi.hoisted(() => vi.fn());
-
-vi.mock("@linear/sdk", () => ({
-  LinearClient: linearClient,
-  LinearError: class LinearError extends Error {},
-  LinearErrorType: {
-    AuthenticationError: "AuthenticationError",
-    Ratelimited: "Ratelimited",
-    NetworkError: "NetworkError",
-    Forbidden: "Forbidden",
-    InvalidInput: "InvalidInput",
-    UserError: "UserError",
-  },
-}));
-
-import { LinearSdkApi } from "../sdk-adapter";
+import {
+  LinearSdkApi,
+  type LinearSdkClientFactory,
+  type LinearSdkClientOptions,
+} from "../sdk-adapter";
 
 describeIfEnabled("linear", "Linear SDK authentication adapter", () => {
-  beforeEach(() => linearClient.mockClear());
-
   it("initializes the SDK with an API key instead of an OAuth access token", () => {
     const signal = new AbortController().signal;
+    let clientOptions: LinearSdkClientOptions | undefined;
+    const createClient: LinearSdkClientFactory = (options) => {
+      clientOptions = options;
+      return Object.create(LinearClient.prototype);
+    };
 
-    new LinearSdkApi("linear-api-key", signal);
+    new LinearSdkApi("linear-api-key", signal, createClient);
 
-    expect(linearClient).toHaveBeenCalledWith({ apiKey: "linear-api-key", signal });
-    expect(linearClient).not.toHaveBeenCalledWith(
-      expect.objectContaining({ accessToken: expect.anything() }),
-    );
+    expect(clientOptions).toEqual({ apiKey: "linear-api-key", signal });
+    expect(clientOptions).not.toHaveProperty("accessToken");
   });
 });
