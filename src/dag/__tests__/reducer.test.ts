@@ -1,4 +1,3 @@
-import { Data } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   DagBlockedReason,
@@ -65,7 +64,8 @@ describe("DAG state reduction", () => {
     });
     expect(Object.isFrozen(started.transition)).toBe(true);
     for (const result of [
-      Data.taggedEnum<Data.TaggedEnum<{ unknown: {} }>>().unknown(),
+      // oxlint-disable-next-line anti-slop-effect/no-manual-tagged-construction -- This malformed tag tests rejection.
+      { _tag: "unknown" },
       { _tag: DagNodeResultTag.Succeeded, outputs: null },
       { _tag: DagNodeResultTag.Cancelled, reason: 42 },
     ]) {

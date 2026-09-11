@@ -4,12 +4,7 @@ import { join } from "node:path";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
-import {
-  ANALYZE_LIMITS,
-  AnalyzePolicy,
-  classifyAnalyzeRequest,
-  type SafeAnalyzeRequest,
-} from "../policy.js";
+import { ANALYZE_LIMITS, classifyAnalyzeRequest, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
 import { readJournalEvents } from "../journal.js";
 import { analyzeWorkerPath, superviseAnalyze } from "../supervisor.js";
@@ -31,13 +26,6 @@ function safeRequest(cwd: string, overrides: Partial<SafeAnalyzeRequest> = {}): 
     timeoutMs: 5_000,
     ...overrides,
   };
-}
-
-function expectPolicyTag<Tag extends AnalyzePolicy["_tag"]>(
-  policy: AnalyzePolicy,
-  tag: Tag,
-): asserts policy is Extract<AnalyzePolicy, { readonly _tag: Tag }> {
-  expect(AnalyzePolicy.$is(tag)(policy)).toBe(true);
 }
 
 function writeWorker(directory: string, body: string): string {
@@ -123,115 +111,94 @@ setInterval(() => {}, 1000);`,
 describe("safe analyze policy", () => {
   it("allows only explicit safe checks on diff or bounded relative paths", () => {
     const cwd = fixtureRoot();
-    const diffPolicy = classifyAnalyzeRequest({
-      cwd,
-      scope: ScopeMode.Diff,
-      checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk],
-      maxMemoryMb: 8_192,
+    expect(
+      classifyAnalyzeRequest({
+        cwd,
+        scope: ScopeMode.Diff,
+        checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk],
+        maxMemoryMb: 8_192,
+      }),
+    ).toMatchObject({
+      _tag: "safe",
+      request: { maxMemoryMb: 512, checks: ["complexity", "async-risk"] },
     });
-    expectPolicyTag(diffPolicy, "safe");
-    expect(diffPolicy.request).toMatchObject({
-      maxMemoryMb: 512,
-      checks: ["complexity", "async-risk"],
-    });
-
-    expectPolicyTag(
+    expect(
       classifyAnalyzeRequest({
         cwd,
         scope: ScopeMode.Paths,
         paths: ["src/a.ts"],
         checks: [AnalyzerName.AsyncRisk],
       }),
-      "safe",
-    );
-
-    const boundedPolicy = classifyAnalyzeRequest({
-      cwd,
-      scope: ScopeMode.Paths,
-      paths: ["src/a.ts"],
-      checks: [AnalyzerName.Duplicates],
-      maxMemoryMb: 8_192,
+    ).toMatchObject({ _tag: "safe" });
+    expect(
+      classifyAnalyzeRequest({
+        cwd,
+        scope: ScopeMode.Paths,
+        paths: ["src/a.ts"],
+        checks: [AnalyzerName.Duplicates],
+        maxMemoryMb: 8_192,
+      }),
+    ).toMatchObject({
+      _tag: "safe",
+      request: {
+        maxMemoryMb: 512,
+        maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
+        maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
+        maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
+      },
     });
-    expectPolicyTag(boundedPolicy, "safe");
-    expect(boundedPolicy.request).toMatchObject({
-      maxMemoryMb: 512,
-      maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
-      maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
-      maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
-    });
-
-    expectPolicyTag(
+    expect(
       classifyAnalyzeRequest({
         cwd,
         scope: ScopeMode.Diff,
         checks: [AnalyzerName.TestDuplicates],
       }),
-      "safe",
-    );
-    expectPolicyTag(
+    ).toMatchObject({ _tag: "safe" });
+    expect(
       classifyAnalyzeRequest({
         cwd,
         scope: ScopeMode.Paths,
         paths: ["src/a.test.ts"],
         checks: [AnalyzerName.TestDuplicates],
       }),
-      "safe",
-    );
+    ).toMatchObject({ _tag: "safe" });
     for (const path of ["../outside.ts", "src/../../outside.ts", "src\\..\\outside.ts"]) {
-      expectPolicyTag(
+      expect(
         classifyAnalyzeRequest({
           cwd,
           scope: ScopeMode.Paths,
           paths: [path],
           checks: [AnalyzerName.AsyncRisk],
         }),
-        "invalid",
-      );
+      ).toMatchObject({ _tag: "invalid" });
     }
   });
 
   it("fails closed for omitted/invalid checks and classifies heavy work as strict", () => {
     const cwd = fixtureRoot();
-    expectPolicyTag(classifyAnalyzeRequest({ cwd }), "invalid");
-    expectPolicyTag(
-      classifyAnalyzeRequest({
-        cwd,
-        checks: [AnalyzerName.Complexity, AnalyzerName.Complexity],
-      }),
-      "invalid",
-    );
-    expectPolicyTag(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.All,
-        checks: [AnalyzerName.Complexity],
-      }),
-      "strict",
-    );
-    expectPolicyTag(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.All,
-        checks: [AnalyzerName.Duplicates],
-      }),
-      "strict",
-    );
-    expectPolicyTag(
-      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Types] }),
-      "strict",
-    );
-    expectPolicyTag(
+    expect(classifyAnalyzeRequest({ cwd })).toMatchObject({ _tag: "invalid" });
+    expect(
+      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity, AnalyzerName.Complexity] }),
+    ).toMatchObject({ _tag: "invalid" });
+    expect(
+      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] }),
+    ).toMatchObject({ _tag: "strict" });
+    expect(
+      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Duplicates] }),
+    ).toMatchObject({ _tag: "strict" });
+    expect(classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Types] })).toMatchObject({
+      _tag: "strict",
+    });
+    expect(
       classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity], profile: true }),
-      "strict",
-    );
-    expectPolicyTag(
+    ).toMatchObject({ _tag: "strict" });
+    expect(
       classifyAnalyzeRequest({
         cwd,
         checks: [AnalyzerName.Complexity],
         ref: "--upload-pack=malicious",
       }),
-      "invalid",
-    );
+    ).toMatchObject({ _tag: "invalid" });
   });
 });
 

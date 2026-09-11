@@ -1,11 +1,7 @@
 import { Result } from "effect";
 import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import {
-  buildClientRequest,
-  buildClientRequestResult,
-  DevToolsAction,
-} from "../request";
+import { buildClientRequest, buildClientRequestResult, DevToolsAction } from "../request";
 
 describeIfEnabled("dev-tools", "request builder", () => {
   const positionActions = [
@@ -160,12 +156,10 @@ describeIfEnabled("dev-tools", "request builder", () => {
     });
 
     expect(Result.isFailure(result)).toBe(true);
-    const failure = Result.isFailure(result) ? result.failure : null;
-    expect(failure).toHaveProperty("_tag", "RequestBuildError");
-    expect(failure).toHaveProperty(
-      "message",
-      "references requires one path. 2 paths were provided.",
-    );
+    expect(Result.isFailure(result) ? result.failure : null).toEqual({
+      _tag: "RequestBuildError",
+      message: "references requires one path. 2 paths were provided.",
+    });
     expect(() => buildClientRequest({
       action: DevToolsAction.References,
       path: ["/repo/a.ts", "/repo/b.ts"],

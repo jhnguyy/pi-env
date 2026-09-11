@@ -1,7 +1,7 @@
 import { defineRule } from "@oxlint/plugins";
 
 import {
-	isMatchPatternObject,
+	isTaggedPatternObject,
 	isStringLiteral,
 	propertyName,
 } from "../shared/tagged-values.ts";
@@ -21,7 +21,7 @@ export const noManualTaggedConstructionRule = defineRule({
 	createOnce(context) {
 		return {
 			ObjectExpression(node) {
-				if (isMatchPatternObject(node)) return;
+				if (isTaggedPatternObject(node)) return;
 
 				const tag = node.properties.find(
 					(property) =>
