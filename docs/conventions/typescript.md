@@ -76,4 +76,4 @@ For algebraic data types or error/result variants, prefer tagged objects/classes
 
 ## Lint
 
-Run `nub run lint:type`. See [`tools/oxlint/anti-slop/UPSTREAM.md`](../../tools/oxlint/anti-slop/UPSTREAM.md) for the vendored rule source and upstream reference.
+Run `nub run lint:type`.

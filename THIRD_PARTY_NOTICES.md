@@ -5,8 +5,7 @@ The generated container license bundle covers installed packages and system comp
 
 ## Anti-slop Oxlint plugins
 
-`tools/oxlint/anti-slop/` is derived from the anti-slop Oxlint plugins.
-The source revision and local selection are recorded in that directory.
+`tools/oxlint/anti-slop/` is derived from the [anti-slop Oxlint plugins](https://github.com/dmmulroy/anti-slop/tree/c44ef22ca116d0ba62a3ff663a0bd13a3f3fa40b).
 The anti-slop source is licensed under the following terms.
 
 MIT License
