@@ -66,8 +66,10 @@ import {
   readVerifiedPinnedDiff,
   existingReviewWithMarker,
   prepareResolvedSnapshot,
+  reviewGitExec,
   resolvePrUrl,
   resolveReviewMetadata,
+  SnapshotError,
 } from "./snapshot";
 
 type CreateReviewParams = Pick<PrReviewParams, "url">;
@@ -107,6 +109,7 @@ function reviewIdentityKey(parentSessionId: string, metadata: ReviewMetadata): s
     metadata.owner.toLowerCase(),
     metadata.repo.toLowerCase(),
     metadata.number,
+    metadata.baseOid,
     metadata.headOid,
   ].join(":");
 }
@@ -363,6 +366,9 @@ function reviewActionResult(state: ReviewState, reused = false): ReviewActionRes
         error: failure.message,
         actual: failure.actual,
         limit: failure.limit,
+        command: failure.command,
+        stdout: failure.stdout,
+        stderr: failure.stderr,
         worktreeCleaned: failure.worktreeCleaned,
         nextAction: `/review pr walkthrough ${state.snapshot.id}`,
         reused,
@@ -493,6 +499,17 @@ function preparationFailure(
       worktreeCleaned,
     };
   const message = cause instanceof Error ? cause.message : String(cause);
+  if (cause instanceof SnapshotError)
+    return {
+      status: "failed",
+      stage,
+      code: cause.code,
+      message,
+      command: cause.command,
+      stdout: cause.stdout,
+      stderr: cause.stderr,
+      worktreeCleaned,
+    };
   return {
     status: "failed",
     stage,
@@ -509,8 +526,9 @@ async function createReviewAttempt(
   ctx: ExtensionContext,
   coordinatorScope: ReviewCoordinatorScope,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
+  requestedReviewId?: string,
 ): Promise<ReviewActionResult> {
-  const reviewId = makeReviewId(metadata);
+  const reviewId = requestedReviewId ?? makeReviewId(metadata);
   coordinator.beginPreparation(reviewId);
   const agentDir = getAgentDir();
   let state: ReviewState = {
@@ -539,6 +557,7 @@ async function createReviewAttempt(
       metadata,
       signal,
       reviewId,
+      reviewGitExec,
     );
     await assertActivePreparationScope(pi, state, coordinatorScope);
     state = { ...state, snapshot };
@@ -737,11 +756,25 @@ async function startReview(
   assertActiveCoordinatorScope(coordinatorScope);
   const parentSessionId = ctx.sessionManager.getSessionId();
   const identityKey = reviewIdentityKey(parentSessionId, metadata);
+  let retryReviewId: string | undefined;
   if (!forceRerun) {
     const active = coordinator.createOperation(identityKey);
     if (active) return active.then(withoutNestedUsage);
     const existing = matchingReview(identityKey, parentSessionId);
-    if (existing) {
+    if (existing?.preparation?.status === "failed" && existing.preparation.stage === "snapshot") {
+      const worktreeCleaned = await removeManagedWorktree(pi, existing, operationSignal).catch(
+        () => false,
+      );
+      assertActiveCoordinatorScope(coordinatorScope);
+      if (!worktreeCleaned)
+        throw new Error("Snapshot retry stopped because managed worktree cleanup failed.");
+      if (existsSync(existing.snapshot.artifactDir))
+        assertContainedResolved(join(getAgentDir(), "pr-review"), existing.snapshot.artifactDir);
+      rmSync(existing.snapshot.artifactDir, { recursive: true, force: true });
+      pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...existing, cleaned: true }));
+      coordinator.deleteReview(existing.snapshot.id);
+      retryReviewId = existing.snapshot.id;
+    } else if (existing) {
       coordinator.remember(existing);
       return reviewActionResult(existing, true);
     }
@@ -753,6 +786,7 @@ async function startReview(
     ctx,
     coordinatorScope,
     onProgress,
+    retryReviewId,
   );
   if (!forceRerun) coordinator.trackCreateOperation(identityKey, operation);
   try {
