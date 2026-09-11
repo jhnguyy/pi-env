@@ -437,7 +437,7 @@ export function publishDagSubagentTextResult(
   );
 }
 
-export function makeDagSubagentExecutor(options: {
+export function createDagSubagentExecutor(options: {
   readonly artifactRoot: string;
   readonly runtime: DagSubagentRuntime;
 }): DagRuntimeContracts.DagEffectExecutor {

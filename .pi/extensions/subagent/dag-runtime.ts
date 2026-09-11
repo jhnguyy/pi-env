@@ -11,7 +11,7 @@ import {
   DagSubagentPromptMaxBytes,
   DagSubagentReservedOutputTokens,
   DagSubagentRuntimeFailure,
-  makeDagSubagentExecutor,
+  createDagSubagentExecutor,
   type DagExecutorRegistryService,
   type DagSubagentRuntime,
   type DagSubagentRuntimeRequest,
@@ -276,7 +276,7 @@ export function createDagSubagentExecutorRegistry(
   sessionGeneration: string,
   options: DagSubagentRuntimeOptions,
 ): DagExecutorRegistryService {
-  const executor = makeDagSubagentExecutor({
+  const executor = createDagSubagentExecutor({
     artifactRoot,
     runtime: makeDagSubagentRuntime(ctx, registeredExtTools, options),
   });

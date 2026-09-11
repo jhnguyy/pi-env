@@ -9,7 +9,7 @@ import {
   DagTransitionType,
   computeDagSessionGraphId,
   createDagRunState,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
   validateDagDefinition,
   type DagCompletionGuardKind,
@@ -63,18 +63,18 @@ describe("DAG session writer", () => {
         entries.push(entry);
       },
     };
-    const writer = makeDagSessionWriter(store, dag, def);
+    const writer = createDagSessionWriter(store, dag, def);
 
     expect(failureTag(writer.appendGraph(def))).toBe("seam-failed");
     Effect.runSync(writer.appendGraph(def));
     expect(Effect.runSync(reconstructDagSession(store, def.runId)).persistedEntryCount).toBe(1);
 
     const mismatchedDefinition = Fixtures.definition([node("other")], 1);
-    const mismatchWriter = makeDagSessionWriter(Fixtures.sessionStore(), dag, mismatchedDefinition);
+    const mismatchWriter = createDagSessionWriter(Fixtures.sessionStore(), dag, mismatchedDefinition);
     expect(failureTag(mismatchWriter.appendGraph(mismatchedDefinition))).toBe("graph-mismatch");
 
     const boundedStore = Fixtures.sessionStore();
-    const boundedWriter = makeDagSessionWriter(boundedStore, dag, def, {
+    const boundedWriter = createDagSessionWriter(boundedStore, dag, def, {
       limits: { totalMatchingEntries: 1 },
     });
     Effect.runSync(boundedWriter.appendGraph(def));

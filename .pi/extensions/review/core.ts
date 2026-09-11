@@ -56,7 +56,7 @@ export function parsePrUrl(url: string): Pick<ReviewMetadata, "owner" | "repo" |
 export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
-export function makeReviewId(
+export function reviewIdFromMetadata(
   meta: Pick<ReviewMetadata, "owner" | "repo" | "number" | "headOid">,
 ): string {
   return `${meta.owner}-${meta.repo}-${meta.number}-${meta.headOid.slice(0, 12)}-${randomUUID().slice(0, 8)}`.replace(

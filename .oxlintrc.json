@@ -52,6 +52,7 @@
   ],
   "rules": {
     "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-module-mocking": "error",
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-reduce-accumulator-copy": "error",
     "anti-slop/no-reflect-apply": "error",
@@ -59,6 +60,7 @@
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop-effect/no-manual-effect-error-tag": "error",
+    "anti-slop-effect/no-service-constructor-imports": "error",
     "import/no-duplicates": "error",
     "import/no-empty-named-blocks": "error",
     "import/no-self-import": "error",

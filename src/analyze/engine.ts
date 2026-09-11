@@ -7,7 +7,7 @@ import {
   AnalyzeTerminationReason,
   analysisRunAttributes,
   analyzerAttributes,
-  makeDiagnosticEvent,
+  createAnalysisDiagnosticEvent,
   noopAnalysisDiagnostics,
   type AnalysisDiagnostics,
 } from "./diagnostics.js";
@@ -127,7 +127,7 @@ function recordDiagnostic(
   type: AnalyzeDiagnosticEventType,
   attributes: Readonly<Record<string, unknown>> = {},
 ): Effect.Effect<void> {
-  return diagnostics.record(makeDiagnosticEvent(runId, diagnosticTime(runtime), type, attributes));
+  return diagnostics.record(createAnalysisDiagnosticEvent(runId, diagnosticTime(runtime), type, attributes));
 }
 
 export function capFindings(

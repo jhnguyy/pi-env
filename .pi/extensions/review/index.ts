@@ -28,7 +28,7 @@ import {
   assertContainedResolved,
   bound,
   extractPrUrl,
-  makeReviewId,
+  reviewIdFromMetadata,
   marker,
   persistJson,
   sha256,
@@ -521,7 +521,7 @@ async function createReviewAttempt(
   coordinatorScope: ReviewCoordinatorScope,
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ): Promise<ReviewActionResult> {
-  const reviewId = makeReviewId(metadata);
+  const reviewId = reviewIdFromMetadata(metadata);
   coordinator.beginPreparation(reviewId);
   const agentDir = agentDirFor(pi);
   let state: ReviewState = {

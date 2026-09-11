@@ -104,7 +104,7 @@ export function sanitizeDiagnosticAttributes(
   return output;
 }
 
-export function makeDiagnosticEvent(
+export function createAnalysisDiagnosticEvent(
   runId: string,
   timestampMs: number,
   type: AnalyzeDiagnosticEventType,
@@ -201,7 +201,7 @@ function logEvent(event: AnalysisDiagnosticEvent): Effect.Effect<void> {
   return log.pipe(Effect.annotateLogs(annotations));
 }
 
-export function makeEffectAnalysisDiagnostics(options: {
+export function createEffectAnalysisDiagnostics(options: {
   readonly telemetryEnabled: boolean;
   readonly sink?: DiagnosticEventSink;
 }): AnalysisDiagnostics {

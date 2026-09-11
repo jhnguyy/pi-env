@@ -15,7 +15,7 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import { Data, Effect, Exit, PartitionedSemaphore } from "effect";
 import { execEffect } from "../_shared/exec";
 import {
-  makeReviewId,
+  reviewIdFromMetadata,
   parseChangedFilesFromDiff,
   parsePrUrl,
   persistJson,
@@ -280,7 +280,7 @@ function prepareSnapshotWorkflow(
       )).stdout;
       metadata.changedFiles = parseNameStatusZ(manifestRaw);
       if (!metadata.changedFiles.length) metadata.changedFiles = parseChangedFilesFromDiff(diff);
-      const id = reviewId ?? makeReviewId(metadata);
+      const id = reviewId ?? reviewIdFromMetadata(metadata);
       const artifactDir = join(agentDir, "pr-review", "artifacts", id);
       const worktree = join(agentDir, "pr-review", "worktrees", id);
       const diffPath = join(artifactDir, "diff.patch");

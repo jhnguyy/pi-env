@@ -30,5 +30,5 @@ export type {
 } from "./session/contracts.js";
 export { computeDagSessionGraphId } from "./session/codec.js";
 export { reconstructDagSession } from "./session/replay.js";
-export { makeDagSessionWriter } from "./session/writer.js";
+export { createDagSessionWriter } from "./session/writer.js";
 export type { DagSessionWriter } from "./session/writer.js";

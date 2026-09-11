@@ -4,7 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Effect, Result } from "effect";
 
 import {
-  makeToolingTelemetryRuntime,
+  createToolingTelemetryRuntime,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
@@ -40,7 +40,7 @@ import { formatUsageCompact, SubagentUsageLedger } from "./usage";
 
 export interface SubagentSessionRuntimeDependencies {
   readonly agentLoop?: RunSubagentOptions["agentLoop"];
-  readonly telemetryRuntimeFactory?: typeof makeToolingTelemetryRuntime;
+  readonly telemetryRuntimeFactory?: typeof createToolingTelemetryRuntime;
   readonly dagExecutorRegistryFactory?: DagSubagentExecutorRegistryFactory;
 }
 
@@ -149,7 +149,7 @@ export class SubagentSessionRuntime {
       if (generation !== this.lifecycleGeneration) return false;
 
       const nextRuntime = await Effect.runPromise(
-        (this.dependencies.telemetryRuntimeFactory ?? makeToolingTelemetryRuntime)({
+        (this.dependencies.telemetryRuntimeFactory ?? createToolingTelemetryRuntime)({
           env: process.env,
           serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
         }),

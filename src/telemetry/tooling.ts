@@ -4,7 +4,7 @@ import {
   type BoundedOtelConfig,
   type BoundedOtelConfigError,
   DEFAULT_BOUNDED_OTEL_BOUNDS,
-  makeBoundedOtelLayer,
+  createBoundedOtelLayer,
   resolveBoundedOtelConfig,
 } from "./otel.js";
 
@@ -126,7 +126,7 @@ export function makeToolingOtelLayer(options: {
   readonly serviceVersion?: string;
   readonly exporter?: SpanExporter;
 }) {
-  return makeBoundedOtelLayer({
+  return createBoundedOtelLayer({
     config: options.config,
     exporter: options.exporter,
     bounds: TOOLING_OTEL_BOUNDS,
@@ -154,7 +154,7 @@ export interface ToolingTelemetryRuntimeOptions {
   readonly exporter?: SpanExporter;
 }
 
-export function makeToolingTelemetryRuntime(
+export function createToolingTelemetryRuntime(
   options: ToolingTelemetryRuntimeOptions,
 ): Effect.Effect<ToolingTelemetryRuntime, ToolingOtelConfigError> {
   return resolveToolingOtelConfig(options.env).pipe(
@@ -184,7 +184,7 @@ export function withToolingTelemetryRuntime<A, E>(
   use: (runtime: ToolingTelemetryRuntime) => Effect.Effect<A, E>,
 ): Effect.Effect<A, E | ToolingOtelConfigError> {
   return Effect.acquireUseRelease(
-    makeToolingTelemetryRuntime(options),
+    createToolingTelemetryRuntime(options),
     (runtime) => runtime.provide(use(runtime)),
     (runtime) => runtime.disposeEffect,
   );

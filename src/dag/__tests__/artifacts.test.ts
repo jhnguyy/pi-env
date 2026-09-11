@@ -24,7 +24,7 @@ import {
   DagRunOutcome,
   DagTransitionResultTag,
   DagTransitionType,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   materializeDagTextArtifact,
   materializeDagTextContext,
   parseDagTextArtifactReference,
@@ -272,7 +272,7 @@ describe("DAG text artifact contract", () => {
           entries.push(entry);
         },
       };
-      const writer = makeDagSessionWriter(store, dag, dagDefinition);
+      const writer = createDagSessionWriter(store, dag, dagDefinition);
       yield* writer.appendGraph(dagDefinition);
       const start = { runId: "run-test", nodeId: "producer", type: DagTransitionType.Start } as const;
       yield* writer.appendTransition(start, { nodeId: "producer", attemptId: "run-test:producer:1", ordinal: 1, status: DagNodeStatus.Running });

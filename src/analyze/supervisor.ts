@@ -21,8 +21,8 @@ import {
   AnalyzeSpanName,
   AnalyzeTerminationReason,
   analysisRunAttributes,
-  makeDiagnosticEvent,
-  makeEffectAnalysisDiagnostics,
+  createAnalysisDiagnosticEvent,
+  createEffectAnalysisDiagnostics,
 } from "./diagnostics.js";
 import { AnalysisJournal, journalSink } from "./journal.js";
 import { analyzeOtelLayer, resolveAnalyzeOtelConfig } from "./otel.js";
@@ -124,7 +124,7 @@ export async function superviseAnalyze(
         })
       : undefined;
   const journal = options.journal ?? ownedJournal;
-  const diagnostics = makeEffectAnalysisDiagnostics({
+  const diagnostics = createEffectAnalysisDiagnostics({
     telemetryEnabled: configured.success.enabled,
     sink: journal === undefined ? undefined : journalSink(journal),
   });
@@ -136,7 +136,7 @@ export async function superviseAnalyze(
     type: AnalyzeDiagnosticEventType,
     attributes: Readonly<Record<string, unknown>> = {},
   ): Promise<void> =>
-    Effect.runPromise(diagnostics.record(makeDiagnosticEvent(runId, Date.now(), type, attributes)));
+    Effect.runPromise(diagnostics.record(createAnalysisDiagnosticEvent(runId, Date.now(), type, attributes)));
 
   const finish = async (
     type:

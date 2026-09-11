@@ -20,7 +20,7 @@ import {
   buildDagSubagentPrompt,
   createDagRunState,
   getDagNodeState,
-  makeDagSubagentExecutor,
+  createDagSubagentExecutor,
   materializeDagTextContext,
   parseDagSubagentPayload,
   publishDagSubagentTextResult,
@@ -220,7 +220,7 @@ describe("DAG subagent executor", () => {
           outputs,
         });
         const calls = yield* Ref.make<readonly DagSubagentRuntimeRequest[]>([]);
-        const executor = makeDagSubagentExecutor({
+        const executor = createDagSubagentExecutor({
           artifactRoot: root,
           runtime: {
             run: (request) => Ref.update(calls, (all) => [...all, request]).pipe(Effect.as("")),
@@ -250,7 +250,7 @@ describe("DAG subagent executor", () => {
       const dag = Shared.graph([target], 1);
       const started = yield* Deferred.make<void>();
       const never = yield* Deferred.make<void>();
-      const executor = makeDagSubagentExecutor({
+      const executor = createDagSubagentExecutor({
         artifactRoot: root,
         runtime: {
           run: () =>
@@ -279,7 +279,7 @@ describe("DAG subagent executor", () => {
       const target = subagentNode("child", root);
       const dag = Shared.graph([target], 1);
       const calls = yield* Ref.make(0);
-      const executor = makeDagSubagentExecutor({
+      const executor = createDagSubagentExecutor({
         artifactRoot: root,
         runtime: {
           run: () => Ref.update(calls, (count) => count + 1).pipe(Effect.as("complete")),

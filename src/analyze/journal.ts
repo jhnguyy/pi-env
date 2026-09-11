@@ -6,7 +6,7 @@ import {
   ANALYZE_DIAGNOSTIC_VERSION,
   AnalyzeDiagnosticEventType,
   AnalyzeTerminationReason,
-  makeDiagnosticEvent,
+  createAnalysisDiagnosticEvent,
   type AnalysisDiagnosticEvent,
   type DiagnosticEventSink,
 } from "./diagnostics.js";
@@ -91,7 +91,7 @@ async function listJournalFiles(directory: string): Promise<JournalFile[]> {
 function encodeEvent(event: AnalysisDiagnosticEvent, maxLineBytes: number): Buffer {
   const encoded = Buffer.from(`${JSON.stringify(event)}\n`, "utf8");
   if (encoded.byteLength <= maxLineBytes) return encoded;
-  const fallback = makeDiagnosticEvent(
+  const fallback = createAnalysisDiagnosticEvent(
     event.runId,
     event.timestampMs,
     AnalyzeDiagnosticEventType.Failure,
@@ -278,7 +278,7 @@ function parseJournalLine(line: string): AnalysisDiagnosticEvent | undefined {
     ) {
       return undefined;
     }
-    const sanitized = makeDiagnosticEvent(
+    const sanitized = createAnalysisDiagnosticEvent(
       value.runId,
       value.timestampMs,
       value.type as AnalyzeDiagnosticEventType,

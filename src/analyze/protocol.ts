@@ -13,7 +13,7 @@ import {
 import {
   ANALYZE_DIAGNOSTIC_VERSION,
   AnalyzeDiagnosticEventType,
-  makeDiagnosticEvent,
+  createAnalysisDiagnosticEvent,
   type AnalysisDiagnosticEvent,
 } from "./diagnostics.js";
 import {
@@ -511,7 +511,7 @@ function parseWorkerDiagnostic(value: unknown, runId: string): AnalysisDiagnosti
   ) {
     return undefined;
   }
-  return makeDiagnosticEvent(
+  return createAnalysisDiagnosticEvent(
     runId,
     event.timestampMs,
     event.type as AnalyzeDiagnosticEventType,

@@ -7,7 +7,7 @@ import {
   DagRuntimeLive,
   DagRuntimeNotAccepting,
   DagRuntimeRunAlreadyExists,
-  makeDagSessionWriter,
+  createDagSessionWriter,
   reconstructDagSession,
   submitDagRun,
   type DagExecutorRegistry,
@@ -197,7 +197,7 @@ export class DagSessionRuntime {
         this.pendingSubmissions.delete(pendingSubmission);
         resolveSubmission();
       });
-      const writer = makeDagSessionWriter(this.store, graph, graph);
+      const writer = createDagSessionWriter(this.store, graph, graph);
       let graphPersisted = false;
       const journal: DagRuntimeJournal = {
         beforeRun: (definition) =>

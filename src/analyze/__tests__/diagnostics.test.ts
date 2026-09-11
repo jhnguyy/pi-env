@@ -12,8 +12,8 @@ import {
   AnalyzeSpanName,
   AnalyzeTerminationReason,
   MAX_DIAGNOSTIC_STRING_LENGTH,
-  makeDiagnosticEvent,
-  makeEffectAnalysisDiagnostics,
+  createAnalysisDiagnosticEvent,
+  createEffectAnalysisDiagnostics,
   sanitizeDiagnosticAttributes,
 } from "../diagnostics.js";
 import { analyzeEffect } from "../engine.js";
@@ -40,7 +40,7 @@ function event(
   type: AnalyzeDiagnosticEventType,
   extra: Record<string, unknown> = {},
 ) {
-  return makeDiagnosticEvent(runId, timestampMs, type, extra);
+  return createAnalysisDiagnosticEvent(runId, timestampMs, type, extra);
 }
 
 async function leftKind(
@@ -80,7 +80,7 @@ describe("analyze diagnostic contracts", () => {
       forceFlush: async () => {},
       shutdown: async () => {},
     };
-    const diagnostics = makeEffectAnalysisDiagnostics({ telemetryEnabled: true });
+    const diagnostics = createEffectAnalysisDiagnostics({ telemetryEnabled: true });
     const runId = "run-otel";
     const program = diagnostics
       .span(

@@ -123,7 +123,7 @@ function extensionPi() {
 
 describe("review extension pull request surface", () => {
   it("registers the suite tool with intent-specific routing", () => {
-    tempRoot();
+    agentDir = join(tmpdir(), "pi-pr-review-unused");
     const pi = extensionPi();
     const review = pi.tools.find((tool: any) => tool.name === "review");
     expect(review).toBeTruthy();

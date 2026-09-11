@@ -82,7 +82,7 @@ export function boundedOtelTracesUrl(endpoint: string): string {
   return endpoint.endsWith("/v1/traces") ? endpoint : `${endpoint}/v1/traces`;
 }
 
-export function makeBoundedOtelLayer(options: {
+export function createBoundedOtelLayer(options: {
   readonly config: BoundedOtelConfig;
   readonly serviceName: string;
   readonly serviceVersion: string;

@@ -488,7 +488,7 @@ export async function preflightReviewEvidence(
   return { coverage, chunks: Object.freeze(padded) };
 }
 
-export function makeReviewEvidenceResolverExecutor(options: {
+export function reviewEvidenceResolverExecutor(options: {
   readonly artifactRoot: string;
 }): DagEffectExecutor {
   return (request) =>

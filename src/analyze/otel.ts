@@ -4,7 +4,7 @@ import {
   type BoundedOtelConfig,
   type BoundedOtelConfigError,
   DEFAULT_BOUNDED_OTEL_BOUNDS,
-  makeBoundedOtelLayer,
+  createBoundedOtelLayer,
   resolveBoundedOtelConfig,
 } from "../telemetry/otel.js";
 
@@ -32,7 +32,7 @@ export function resolveAnalyzeOtelConfig(
 }
 
 export function analyzeOtelLayer(config: AnalyzeOtelConfig, exporter?: SpanExporter) {
-  return makeBoundedOtelLayer({
+  return createBoundedOtelLayer({
     config,
     exporter,
     bounds: ANALYZE_OTEL_BOUNDS,

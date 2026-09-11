@@ -13,7 +13,7 @@ describeIfEnabled("linear", "Linear SDK authentication adapter", () => {
     let clientOptions: LinearSdkClientOptions | undefined;
     const createClient: LinearSdkClientFactory = (options) => {
       clientOptions = options;
-      return new LinearClient(options);
+      return Object.create(LinearClient.prototype);
     };
 
     new LinearSdkApi("linear-api-key", signal, createClient);
