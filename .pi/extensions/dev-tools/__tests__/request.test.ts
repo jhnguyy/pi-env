@@ -5,7 +5,6 @@ import {
   buildClientRequest,
   buildClientRequestResult,
   DevToolsAction,
-  RequestBuildError,
 } from "../request";
 
 describeIfEnabled("dev-tools", "request builder", () => {
@@ -161,10 +160,11 @@ describeIfEnabled("dev-tools", "request builder", () => {
     });
 
     expect(Result.isFailure(result)).toBe(true);
-    expect(Result.isFailure(result) ? result.failure : null).toEqual(
-      RequestBuildError({
-        message: "references requires one path. 2 paths were provided.",
-      }),
+    const failure = Result.isFailure(result) ? result.failure : null;
+    expect(failure).toHaveProperty("_tag", "RequestBuildError");
+    expect(failure).toHaveProperty(
+      "message",
+      "references requires one path. 2 paths were provided.",
     );
     expect(() => buildClientRequest({
       action: DevToolsAction.References,

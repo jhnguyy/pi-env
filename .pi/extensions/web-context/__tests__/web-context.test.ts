@@ -145,6 +145,7 @@ describe("web fetch", () => {
 
     const request = fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch });
     await expect(request).rejects.toBeInstanceOf(WebFetchFailure);
+    await expect(request).rejects.toHaveProperty("_tag", "WebFetchFailure");
     await expect(request).rejects.toMatchObject({
       kind: WebFetchFailureKind.Body,
       message: "Web fetch body read failed: body stream reset",
@@ -169,6 +170,7 @@ describe("web fetch", () => {
     await ready;
     controller.abort(new Error("caller aborted"));
     await expect(promise).rejects.toBeInstanceOf(WebFetchFailure);
+    await expect(promise).rejects.toHaveProperty("_tag", "WebFetchFailure");
     await expect(promise).rejects.toMatchObject({
       kind: WebFetchFailureKind.Request,
       message: "Web fetch request failed: caller aborted",

@@ -21,6 +21,7 @@ const roots: string[] = [];
 
 async function expectPathEscape(operation: Promise<unknown>): Promise<void> {
   await expect(operation).rejects.toBeInstanceOf(NotesProviderError);
+  await expect(operation).rejects.toHaveProperty("_tag", "NotesProviderError");
   await expect(operation).rejects.toMatchObject({ code: "path-escape" });
 }
 

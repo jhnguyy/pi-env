@@ -1,19 +1,16 @@
-import { Data } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {
   DagSessionEntryType,
+  DagSessionEvent,
   type DagSessionEntry,
-  type DagSessionEvent,
 } from "../../../../src/dag/index.js";
 import { createDagSessionStore, persistedDagRunIds } from "../dag-session-store";
-
-const DagSessionEventVariant = Data.taggedEnum<DagSessionEvent>();
 const entry = {
   v: 1,
   runId: "run-1",
   graphId: "graph-1",
   seq: 0,
-  event: DagSessionEventVariant.graph({
+  event: DagSessionEvent.graph({
     graph: { runId: "run-1", concurrency: 1, nodes: [] },
   }),
 } as const satisfies DagSessionEntry;

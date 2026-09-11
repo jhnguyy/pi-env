@@ -243,6 +243,7 @@ describe("persistent subagent sessions", () => {
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) {
       expect(outcome.failure).toBeInstanceOf(SubagentJobWaitInterrupted);
+      expect(outcome.failure).toHaveProperty("_tag", "SubagentJobWaitInterrupted");
       expect(outcome.failure).toMatchObject({ jobId: job.id });
     }
     expect(job.status === "queued" || job.status === "running").toBe(true);

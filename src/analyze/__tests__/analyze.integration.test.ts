@@ -370,6 +370,7 @@ describe("analyze contracts", () => {
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag === "Failure") {
       expect(outcome.failure).toBeInstanceOf(AnalyzerRunError);
+      expect(outcome.failure).toHaveProperty("_tag", "AnalyzerRunError");
       expect(outcome.failure.analyzer).toBe(AnalyzerName.Complexity);
     }
   });
@@ -767,6 +768,7 @@ describe("bundle entrypoints", () => {
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag === "Failure") {
       expect(outcome.failure).toBeInstanceOf(AnalyzerRunError);
+      expect(outcome.failure).toHaveProperty("_tag", "AnalyzerRunError");
       expect(outcome.failure).toMatchObject({
         analyzer: AnalyzerName.Bundle,
         message: "timed out",

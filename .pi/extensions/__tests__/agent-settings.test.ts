@@ -92,11 +92,13 @@ describe("agent settings", () => {
       expect(malformed._tag).toBe("Failure");
       if (malformed._tag === "Failure") {
         expect(malformed.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(malformed.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(malformed.failure).toMatchObject({ path: "/global/settings.json", source: "global" });
       }
       expect(invalid._tag).toBe("Failure");
       if (invalid._tag === "Failure") {
         expect(invalid.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(invalid.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(invalid.failure).toMatchObject({ source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
       }
     }),

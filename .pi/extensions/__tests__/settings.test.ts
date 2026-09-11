@@ -64,11 +64,13 @@ describe("settings boundary", () => {
       expect(global._tag).toBe("Failure");
       if (global._tag === "Failure") {
         expect(global.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(global.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(global.failure).toMatchObject({ source: SettingsSource.Global, path: "/global/settings.json" });
       }
       expect(project._tag).toBe("Failure");
       if (project._tag === "Failure") {
         expect(project.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(project.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(project.failure).toMatchObject({ source: SettingsSource.Project, path: "/repo/.pi/settings.json" });
       }
     }),
@@ -109,6 +111,7 @@ describe("settings boundary", () => {
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
         expect(result.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(result.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(result.failure).toMatchObject({
           source: SettingsSource.Project,
           path: "/repo/.pi/settings.json",
@@ -128,6 +131,7 @@ describe("settings boundary", () => {
       expect(result._tag).toBe("Failure");
       if (result._tag === "Failure") {
         expect(result.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(result.failure).toHaveProperty("_tag", "SettingsDecodeError");
         expect(result.failure).toMatchObject({
           source: SettingsSource.Overlay,
           key: "tool",
