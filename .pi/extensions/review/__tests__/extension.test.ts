@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import type * as CodingAgent from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
@@ -16,11 +15,7 @@ import {
   resetDagRuntimeServiceRegistryForTests,
 } from "../../_shared/dag-runtime-service";
 
-const mocked = vi.hoisted(() => ({ agentDir: "" }));
-vi.mock("@earendil-works/pi-coding-agent", async (orig) => ({
-  ...(await orig<typeof CodingAgent>()),
-  getAgentDir: () => mocked.agentDir,
-}));
+let agentDir = "";
 const temps: string[] = [];
 afterEach(() => {
   clearInMemoryStateForTests();
@@ -31,11 +26,11 @@ afterEach(() => {
 function tempRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-pr-review-agent-"));
   temps.push(dir);
-  mocked.agentDir = dir;
+  agentDir = dir;
   return dir;
 }
 function sampleState(id: string, selected: string[]): ReviewState {
-  const root = mocked.agentDir || tempRoot();
+  const root = agentDir || tempRoot();
   return {
     snapshot: {
       id,
@@ -122,7 +117,7 @@ function extensionPi() {
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
-  reviewExtension(pi);
+  reviewExtension(pi, { agentDir: () => agentDir });
   return pi;
 }
 
@@ -693,7 +688,7 @@ describe("review extension pull request surface", () => {
     const runtime = (sessionId: string, state: ReviewState) => ({
       sessionManager: {
         getSessionId: () => sessionId,
-        getSessionDir: () => mocked.agentDir,
+        getSessionDir: () => agentDir,
         getBranch: () => [custom(state)],
       },
       ui: { notify: (message: string) => notes.push(message) },
@@ -733,7 +728,7 @@ describe("review extension pull request surface", () => {
     const pi = extensionPi();
     const notes: string[] = [];
     const runtime = {
-      cwd: mocked.agentDir,
+      cwd: agentDir,
       hasUI: true,
       sessionManager: { getSessionId: () => "parent", getBranch: () => [custom(state)] },
       ui: { notify: (m: string) => notes.push(m), editor: async () => undefined },

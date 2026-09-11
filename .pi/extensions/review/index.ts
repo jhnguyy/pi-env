@@ -77,6 +77,17 @@ const PrReviewSettingsSchema = Schema.Struct({
 });
 const coordinator = new ReviewCoordinator();
 
+export interface ReviewExtensionDependencies {
+  readonly agentDir: () => string;
+}
+
+const defaultDependencies: ReviewExtensionDependencies = { agentDir: getAgentDir };
+const dependenciesByExtension = new WeakMap<ExtensionAPI, ReviewExtensionDependencies>();
+
+function agentDirFor(pi: ExtensionAPI): string {
+  return (dependenciesByExtension.get(pi) ?? defaultDependencies).agentDir();
+}
+
 function nestedReviewUsage(state: ReviewState): Usage | undefined {
   const usage = state.metrics?.usage;
   if (!usage) return undefined;
@@ -120,8 +131,8 @@ function matchingReview(identityKey: string, parentSessionId: string): ReviewSta
 function stateById(reviewId?: string): ReviewState | undefined {
   return reviewId ? coordinator.review(reviewId) : coordinator.latestState();
 }
-function statePath(id: string): string {
-  return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
+function statePath(pi: ExtensionAPI, id: string): string {
+  return join(agentDirFor(pi), "pr-review", "artifacts", id, "state.json");
 }
 function customData(entry: any): any {
   if (entry?.type === "custom" && entry?.customType === REVIEW_ENTRY_TYPE) return entry.data;
@@ -136,7 +147,7 @@ function stateEntry(state: ReviewState) {
 }
 function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
   if (!coordinator.remember(state, scope)) return false;
-  persistJson(statePath(state.snapshot.id), state);
+  persistJson(statePath(pi, state.snapshot.id), state);
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
   return true;
 }
@@ -407,7 +418,7 @@ async function removeManagedWorktree(
   state: ReviewState,
   signal?: AbortSignal,
 ): Promise<boolean> {
-  const root = join(getAgentDir(), "pr-review");
+  const root = join(agentDirFor(pi), "pr-review");
   const repoDir = state.snapshot.cache?.repoDir;
   const worktree = state.snapshot.cache?.worktree ?? state.snapshot.worktree;
   if (!repoDir || !existsSync(repoDir)) {
@@ -512,7 +523,7 @@ async function createReviewAttempt(
 ): Promise<ReviewActionResult> {
   const reviewId = makeReviewId(metadata);
   coordinator.beginPreparation(reviewId);
-  const agentDir = getAgentDir();
+  const agentDir = agentDirFor(pi);
   let state: ReviewState = {
     snapshot: {
       id: reviewId,
@@ -539,6 +550,7 @@ async function createReviewAttempt(
       metadata,
       signal,
       reviewId,
+      agentDir,
     );
     await assertActivePreparationScope(pi, state, coordinatorScope);
     state = { ...state, snapshot };
@@ -1025,7 +1037,9 @@ function reviewBody(s: ReviewState, selected: Finding[], mark: string): string {
     .flatMap((f) =>
       f.anchorValid
         ? []
-        : [`- ${f.file ? `${f.file}: ` : ""}${f.problem}\n  Consequence: ${f.consequence}\n  Suggested fix: ${f.suggestedFix}`],
+        : [
+            `- ${f.file ? `${f.file}: ` : ""}${f.problem}\n  Consequence: ${f.consequence}\n  Suggested fix: ${f.suggestedFix}`,
+          ],
     )
     .join("\n");
   return [mark, Disclosure, s.preface ?? "", unanchored].filter(Boolean).join("\n\n");
@@ -1038,7 +1052,14 @@ function reviewPayload(s: ReviewState, event: ReviewEventValue, mark: string) {
     commit_id: s.snapshot.metadata.headOid,
     comments: selected.flatMap((f) =>
       f.anchorValid && f.file && f.line && f.side
-        ? [{ path: f.file, line: f.line, side: f.side, body: `${Disclosure}\n\n${f.problem}\n\nConsequence: ${f.consequence}\n\nSuggested fix: ${f.suggestedFix}` }]
+        ? [
+            {
+              path: f.file,
+              line: f.line,
+              side: f.side,
+              body: `${Disclosure}\n\n${f.problem}\n\nConsequence: ${f.consequence}\n\nSuggested fix: ${f.suggestedFix}`,
+            },
+          ]
         : [],
     ),
   };
@@ -1385,7 +1406,7 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const signal = coordinator.operationSignal(scope);
   const worktreeCleaned = await removeManagedWorktree(pi, state, signal);
   if (!worktreeCleaned) throw new Error("git worktree prune failed.");
-  const root = join(getAgentDir(), "pr-review");
+  const root = join(agentDirFor(pi), "pr-review");
   if (existsSync(state.snapshot.artifactDir))
     assertContainedResolved(root, state.snapshot.artifactDir);
   rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
@@ -1467,7 +1488,11 @@ async function command(
   }
 }
 
-export default function reviewExtension(pi: ExtensionAPI) {
+export default function reviewExtension(
+  pi: ExtensionAPI,
+  dependencies: ReviewExtensionDependencies = defaultDependencies,
+) {
+  dependenciesByExtension.set(pi, dependencies);
   if ((pi as { events?: unknown }).events)
     listenForDagRuntimeService(
       pi,

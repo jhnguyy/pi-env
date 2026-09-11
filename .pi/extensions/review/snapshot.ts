@@ -204,13 +204,13 @@ function prepareSnapshotWorkflow(
   cwd: string,
   resolvedMetadata: ReviewMetadata,
   reviewId?: string,
+  agentDir = getAgentDir(),
 ): Effect.Effect<ReviewSnapshot, SnapshotError> {
   const parsed = parsePrUrl(resolvedMetadata.url);
   const key = `${parsed.owner}/${parsed.repo}`;
   return snapshotSemaphore.withPermit(key)(
     Effect.gen(function* () {
       const metadata = structuredClone(resolvedMetadata);
-      const agentDir = getAgentDir();
       const repoDir = join(agentDir, "pr-review", "repos", parsed.owner, parsed.repo);
       yield* Effect.sync(() => {
         mkdirSync(repoDir, { recursive: true, mode: 0o700 });
@@ -349,8 +349,10 @@ export function prepareSnapshotEffect(
   exec: Exec,
   cwd: string,
   metadataOrUrl: ReviewMetadata | string,
+  agentDir = getAgentDir(),
 ): Effect.Effect<ReviewSnapshot, SnapshotError> {
-  if (typeof metadataOrUrl !== "string") return prepareSnapshotWorkflow(exec, cwd, metadataOrUrl);
+  if (typeof metadataOrUrl !== "string")
+    return prepareSnapshotWorkflow(exec, cwd, metadataOrUrl, undefined, agentDir);
   const parsed = parsePrUrl(metadataOrUrl);
   return runEffect(
     exec,
@@ -365,7 +367,7 @@ export function prepareSnapshotEffect(
     { cwd },
   ).pipe(
     Effect.map((result) => parseGhJson(result.stdout, parsed)),
-    Effect.flatMap((metadata) => prepareSnapshotWorkflow(exec, cwd, metadata)),
+    Effect.flatMap((metadata) => prepareSnapshotWorkflow(exec, cwd, metadata, undefined, agentDir)),
   );
 }
 
@@ -375,8 +377,9 @@ export async function prepareResolvedSnapshot(
   metadata: ReviewMetadata,
   signal?: AbortSignal,
   reviewId?: string,
+  agentDir = getAgentDir(),
 ): Promise<ReviewSnapshot> {
-  const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId);
+  const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId, agentDir);
   return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
 }
 
@@ -385,9 +388,10 @@ export async function prepareSnapshot(
   cwd: string,
   url: string,
   signal?: AbortSignal,
+  agentDir = getAgentDir(),
 ): Promise<ReviewSnapshot> {
   const metadata = await resolveReviewMetadata(exec, cwd, url, signal);
-  return prepareResolvedSnapshot(exec, cwd, metadata, signal);
+  return prepareResolvedSnapshot(exec, cwd, metadata, signal, undefined, agentDir);
 }
 
 export async function currentRemoteHead(
