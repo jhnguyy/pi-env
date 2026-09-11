@@ -196,7 +196,9 @@ describe("multiple tool calls", () => {
       m.send({ type: "tool_call", id: `c_${index}`, tool: "read", params: {} });
     }
 
-    await expect(bridge.completion).rejects.toThrow(`exceeded ${MAX_TOOL_CALLS} tool call limit`);
+    await expect(bridge.completion).rejects.toThrow(
+      `exceeded ${MAX_TOOL_CALLS} tool call limit`,
+    );
   });
 });
 

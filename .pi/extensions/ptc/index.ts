@@ -24,7 +24,7 @@ import { toolExpandHint, toolExpandKeyHint } from "../_shared/tool-render";
 const DESCRIPTION = [
   "Inspect the current PTC runtime contract or run a TypeScript/JavaScript batch script.",
   "When action is omitted, PTC uses run and requires code. Use inspect after dynamic tool activation or when availability is uncertain.",
-  'Canonical calls use tools.read({ ... }) or tools["dev-tools"]({ ... }). Global underscore aliases remain compatible.',
+  "Canonical calls use tools.read({ ... }) or tools[\"dev-tools\"]({ ... }). Global underscore aliases remain compatible.",
   "Nested tools return Promise<string>. Only selected console.log() output and explicit return values enter model context.",
   "Limits: timeout 120 s, max output 50 KB, max tool calls per run 100.",
   "Blocked tools must be called directly, not inside ptc: " + [...BLOCKED_TOOLS].join(", "),
@@ -247,7 +247,9 @@ function finalResultMetadata(
   const failedSuffix = details?.failedNestedCallCount
     ? theme.fg("warning", ` · ${details.failedNestedCallCount} failed`)
     : "";
-  const truncatedSuffix = details?.outputTruncated ? theme.fg("warning", " · [truncated]") : "";
+  const truncatedSuffix = details?.outputTruncated
+    ? theme.fg("warning", " · [truncated]")
+    : "";
   return { outputLines, countLabel, callSuffix, failedSuffix, truncatedSuffix };
 }
 

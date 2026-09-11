@@ -10,7 +10,11 @@ import type { AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
 import { Schema } from "effect";
 import { formatParamsPreview } from "../_shared/code-frame";
 import { formatError } from "../_shared/errors";
-import { PtcCancellationError, PtcProtocolError, PtcSubprocessError } from "./node-runtime";
+import {
+  PtcCancellationError,
+  PtcProtocolError,
+  PtcSubprocessError,
+} from "./node-runtime";
 import { PtcExecutionTracker } from "./execution-details";
 import {
   MAX_STDERR_BYTES,

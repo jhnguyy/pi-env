@@ -117,7 +117,9 @@ describe("PTC live transport", () => {
       "return second;",
     ].join("\n");
 
-    await expect(executionOutput(executor, code)).resolves.toBe("before\necho-tool:a\n2fa-tool:b");
+    await expect(executionOutput(executor, code)).resolves.toBe(
+      "before\necho-tool:a\n2fa-tool:b",
+    );
     expect(dispatch).toHaveBeenNthCalledWith(
       1,
       "echo-tool",
@@ -145,7 +147,9 @@ describe("PTC live transport", () => {
       "return [namespaced, exact].join('|');",
     ].join("\n");
 
-    await expect(executionOutput(executor, code)).resolves.toBe("dev-tools:text|dev-tools:text");
+    await expect(executionOutput(executor, code)).resolves.toBe(
+      "dev-tools:text|dev-tools:text",
+    );
     expect(dispatch.mock.calls.map(([name]) => name)).toEqual(["dev-tools", "dev-tools"]);
   });
 
@@ -213,7 +217,10 @@ describe("PTC live transport", () => {
       nestedCallCount: 2,
       completedNestedCallCount: 2,
       failedNestedCallCount: 1,
-      toolCallCounts: [expect.objectContaining({ count: 1 }), { tool: "fail-tool", count: 1 }],
+      toolCallCounts: [
+        expect.objectContaining({ count: 1 }),
+        { tool: "fail-tool", count: 1 },
+      ],
       lastNestedCall: {
         tool: "fail-tool",
         ordinal: 2,
@@ -251,9 +258,7 @@ describe("PTC live transport", () => {
         status: PtcNestedCallStatus.Failed,
       },
     });
-    expect(JSON.stringify(error.details)).not.toMatch(
-      /private|secret-path|nested boom|partial output/,
-    );
+    expect(JSON.stringify(error.details)).not.toMatch(/private|secret-path|nested boom|partial output/);
   });
 
   it("marks output truncation without storing output content in details", async () => {
@@ -371,9 +376,12 @@ describe("PTC live transport", () => {
   it("does not create global compatibility aliases for blocked tools", async () => {
     const blocked = ["ptc", "subagent", "jit_catch", "skill_build"];
     expect([...BLOCKED_TOOLS]).toEqual(blocked);
-    const code = ["typeof ptc", "typeof subagent", "typeof jit_catch", "typeof skill_build"].join(
-      ", ",
-    );
+    const code = [
+      "typeof ptc",
+      "typeof subagent",
+      "typeof jit_catch",
+      "typeof skill_build",
+    ].join(", ");
 
     await expect(
       executionOutput(makeExecutor(blocked), `return [${code}].join(",");`),
