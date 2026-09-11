@@ -6,20 +6,26 @@ import type { DownloadLike, LocatorParams, PageLike, WaitParams } from "./locato
 import { downloadTrigger, hasLocatorParams, LoadState, LocatorWaitState, locate } from "./locators";
 export type { LocatorParams, WaitParams } from "./locators";
 
-type BrowserLike = {
-  contexts(): ContextLike[];
+export type BrowserLike = {
+  contexts(): BrowserContextLike[];
   close(): Promise<void>;
   isConnected?(): boolean;
   on?(event: "disconnected", handler: () => void): void;
 };
-type ContextLike = {
+export type BrowserContextLike = {
   pages(): PageLike[];
   newPage(): Promise<PageLike>;
 };
-type PlaywrightModule = {
+export type PlaywrightModule = {
   chromium: {
     connectOverCDP(endpointURL: string): Promise<BrowserLike>;
   };
+};
+export type PlaywrightLoader = () => Promise<PlaywrightModule>;
+
+const loadPlaywright: PlaywrightLoader = async () => {
+  // @ts-ignore - the extension-level inferred LSP project does not see root dependencies; root tsc resolves playwright.
+  return await import("playwright") as PlaywrightModule;
 };
 export type ControlState = "agent" | "human" | "unlocked";
 export interface PageSummary {
@@ -59,7 +65,10 @@ export class BrowserClient {
   private readonly history: BrowserActionHistoryEntry[] = [];
   private controlState: ControlState = "agent";
   private readonly artifacts: BrowserArtifacts;
-  constructor(private readonly config: BrowserClientConfig) {
+  constructor(
+    private readonly config: BrowserClientConfig,
+    private readonly playwrightLoader: PlaywrightLoader = loadPlaywright,
+  ) {
     this.artifacts = new BrowserArtifacts(config.artifactDir);
   }
   setControlState(state: ControlState): void {
@@ -271,8 +280,7 @@ export class BrowserClient {
     }
     let mod: PlaywrightModule;
     try {
-      // @ts-ignore - the extension-level inferred LSP project does not see root dependencies; root tsc resolves playwright.
-      mod = await import("playwright") as PlaywrightModule;
+      mod = await this.playwrightLoader();
     } catch (error) {
       throw new Error(`Playwright is not installed for playwright-client extension: ${formatError(error)}`, { cause: error });
     }

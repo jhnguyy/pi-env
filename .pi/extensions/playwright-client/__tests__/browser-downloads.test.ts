@@ -1,30 +1,23 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // @ts-ignore - the extension-level inferred LSP project does not see root devDependencies; root tsc resolves vitest.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BrowserClient } from "../browser";
+import { BrowserClient, type BrowserLike, type PlaywrightLoader } from "../browser";
 import type { BrowserClientConfig } from "../config";
-
-const mockState = vi.hoisted(() => ({
-  connectOverCDP: vi.fn(),
-  page: undefined as FakePage | undefined,
-}));
-
-vi.mock("playwright", () => ({
-  chromium: {
-    connectOverCDP: mockState.connectOverCDP,
-  },
-}));
+import type { LocatorLike, PageLike } from "../locators";
 
 describe("BrowserClient downloads", () => {
   let artifactDir: string;
+  let page: FakePage;
+  let connectOverCDP: ReturnType<typeof vi.fn<(endpointURL: string) => Promise<BrowserLike>>>;
+  let loadPlaywright: PlaywrightLoader;
 
   beforeEach(async () => {
     artifactDir = await mkdtemp(join(tmpdir(), "pi-browser-test-"));
-    mockState.page = fakePage();
-    mockState.connectOverCDP.mockReset();
-    mockState.connectOverCDP.mockResolvedValue(fakeBrowser(mockState.page));
+    page = fakePage();
+    connectOverCDP = vi.fn(async () => fakeBrowser(page));
+    loadPlaywright = async () => ({ chromium: { connectOverCDP } });
   });
 
   afterEach(async () => {
@@ -32,11 +25,11 @@ describe("BrowserClient downloads", () => {
   });
 
   it("clicks a locator, waits for a download, and saves it under the artifact dir", async () => {
-    const client = new BrowserClient(config(artifactDir));
+    const client = new BrowserClient(config(artifactDir), loadPlaywright);
 
     const result = await client.download("local", { text: "Export" });
 
-    expect(mockState.page?.downloadRequested).toBe(true);
+    expect(page.downloadRequested).toBe(true);
     expect(result.suggestedFilename).toBe("report.csv");
     expect(result.path).toContain(join(artifactDir, "downloads"));
     expect(result.path).toMatch(/report\.csv$/);
@@ -49,53 +42,70 @@ function config(artifactDir: string): BrowserClientConfig {
     artifactDir,
     profileName: "test-profile",
     profilePath: "/tmp/test-profile",
-    targets: [{ name: "local", host: "127.0.0.1", port: 9222, protocol: "http", path: "", cdpUrl: "http://127.0.0.1:9222" }],
+    targets: [
+      {
+        name: "local",
+        host: "127.0.0.1",
+        port: 9222,
+        protocol: "http",
+        path: "",
+        cdpUrl: "http://127.0.0.1:9222",
+      },
+    ],
   };
 }
 
-type FakePage = ReturnType<typeof fakePage>;
+type FakePage = PageLike & { downloadRequested: boolean };
 
-function fakeBrowser(page: FakePage) {
+function fakeBrowser(page: PageLike): BrowserLike {
   return {
-    contexts: () => [{ pages: () => [page] }],
+    contexts: () => [{ pages: () => [page], newPage: async () => page }],
     close: async () => undefined,
     isConnected: () => true,
-    on: vi.fn(),
+    on: () => undefined,
   };
 }
 
-function fakePage() {
-  const page = {
+function fakePage(): FakePage {
+  const passiveLocator: LocatorLike = {
+    click: async () => undefined,
+    fill: async () => undefined,
+    type: async () => undefined,
+    waitFor: async () => undefined,
+    innerText: async () => "",
+    ariaSnapshot: async () => "",
+  };
+  const page: FakePage = {
     downloadRequested: false,
     title: async () => "Reports",
     url: () => "https://example.test/reports",
-    waitForEvent: vi.fn(async (event: "download") => {
+    goto: async () => undefined,
+    goBack: async () => undefined,
+    goForward: async () => undefined,
+    reload: async () => undefined,
+    waitForLoadState: async () => undefined,
+    waitForURL: async () => undefined,
+    waitForEvent: async (event) => {
       expect(event).toBe("download");
       return {
         suggestedFilename: () => "report.csv",
         failure: async () => null,
-        saveAs: async (path: string) => {
-          await import("node:fs/promises").then(({ writeFile }) => writeFile(path, "a,b\n1,2\n"));
-        },
+        saveAs: async (path) => writeFile(path, "a,b\n1,2\n"),
       };
+    },
+    screenshot: async () => new Uint8Array(),
+    locator: (selector) => ({
+      ...passiveLocator,
+      click: async () => expect(selector).toBe("body"),
     }),
-    locator: vi.fn((selector: string) => ({
-      click: async () => {
-        expect(selector).toBe("body");
-      },
-      innerText: async () => "",
-      ariaSnapshot: async () => "",
-    })),
-    getByText: vi.fn((text: string) => ({
+    getByText: (text) => ({
+      ...passiveLocator,
       click: async () => {
         expect(text).toBe("Export");
         page.downloadRequested = true;
       },
-      fill: async () => undefined,
-      type: async () => undefined,
-      waitFor: async () => undefined,
-      innerText: async () => "",
-    })),
+    }),
+    keyboard: { type: async () => undefined },
   };
   return page;
 }
