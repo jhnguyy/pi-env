@@ -1,10 +1,6 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
-import {
-  EXPLICIT_VERIFICATION_PHASES,
-  STANDARD_VERIFICATION_PHASES,
-  verificationPhaseById,
-} from "./verification-phases.mjs";
+import { EXPLICIT_VERIFICATION_PHASES, verificationPhaseById } from "./verification-phases.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
 export function runVerificationPhase(id, options = {}) {
@@ -22,7 +18,7 @@ export function runVerificationPhase(id, options = {}) {
 
 export function main(args = process.argv.slice(2)) {
   if (args.includes("--list")) {
-    console.log(listPlan(STANDARD_VERIFICATION_PHASES).join("\n"));
+    console.log(listPlan(EXPLICIT_VERIFICATION_PHASES).join("\n"));
     return 0;
   }
   if (args.length !== 1) {

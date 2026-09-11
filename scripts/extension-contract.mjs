@@ -26,15 +26,22 @@ function requireUniqueActiveExtensions(manifest, errors) {
 function rejectDefaultDisabledActiveExtensions(manifest, errors) {
   for (const ext of manifest.extensions) {
     if (ext.defaultDisabled) {
-      errors.push(`${ext.name}: extension must stay disabled by default; do not register it in package pi.extensions`);
+      errors.push(
+        `${ext.name}: extension must stay disabled by default; do not register it in package pi.extensions`,
+      );
     }
   }
 }
 
 function requireBuiltExtension(ext, errors, root) {
   if (ext.hasPackageJson) {
-    if (!Array.isArray(ext.runtimeEntries) || !ext.runtimeEntries.includes(ExtensionRuntime.PackageRuntimeEntry)) {
-      errors.push(`${ext.name}: package.json pi.extensions must include ${ExtensionRuntime.PackageRuntimeEntry}`);
+    if (
+      !Array.isArray(ext.runtimeEntries) ||
+      !ext.runtimeEntries.includes(ExtensionRuntime.PackageRuntimeEntry)
+    ) {
+      errors.push(
+        `${ext.name}: package.json pi.extensions must include ${ExtensionRuntime.PackageRuntimeEntry}`,
+      );
     }
   }
   if (!ext.hasSourceEntry) {
@@ -45,7 +52,9 @@ function requireBuiltExtension(ext, errors, root) {
   }
   for (const sidecar of ext.sidecars) {
     if (!existsSync(sidecar.absOutfile)) {
-      errors.push(`${ext.name}: missing built sidecar ${relativeFromRepo(sidecar.absOutfile, root)}`);
+      errors.push(
+        `${ext.name}: missing built sidecar ${relativeFromRepo(sidecar.absOutfile, root)}`,
+      );
     }
   }
 }
@@ -62,7 +71,10 @@ function requireRegisteredPackageFiles(manifest, errors) {
 
 function requireWorkspaceParity(manifest, errors) {
   for (const normalized of manifest.workspacePaths) {
-    if (normalized.startsWith(`${manifest.extensionsDir}/`) && !manifest.activePackagePaths.has(normalized)) {
+    if (
+      normalized.startsWith(`${manifest.extensionsDir}/`) &&
+      !manifest.activePackagePaths.has(normalized)
+    ) {
       errors.push(`workspace extension is not registered in package pi.extensions: ${normalized}`);
     }
   }
@@ -86,7 +98,9 @@ function rejectStaleIgnoredArtifacts(manifest, errors) {
     if (dir.name.startsWith("_") || manifest.activeNames.has(dir.name)) continue;
     const entries = readdirSync(dir.absPath);
     if (entries.includes("dist") && !entries.includes(ExtensionRuntime.SourceEntry)) {
-      errors.push(`stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath, manifest.repoRoot)} (run \`nub run clean:extensions\`)`);
+      errors.push(
+        `stale ignored extension artifact directory: ${relativeFromRepo(dir.absPath, manifest.repoRoot)} (run \`nub run clean:extensions\`)`,
+      );
     }
   }
 }

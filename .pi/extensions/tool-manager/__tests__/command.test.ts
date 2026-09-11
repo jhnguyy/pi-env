@@ -1,3 +1,4 @@
+import "../../__tests__/tui-setup";
 import { describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SEARCH_TOOL_NAME, resolveConfig } from "../core";

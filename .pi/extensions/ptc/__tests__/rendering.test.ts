@@ -1,3 +1,4 @@
+import "../../__tests__/tui-setup";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ptcExtension from "../index";
