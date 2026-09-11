@@ -1,3 +1,4 @@
+import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";

@@ -1,8 +1,20 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+
+const fixtureRoots = [];
+
+async function fixtureRoot(prefix) {
+  const root = await mkdtemp(join(tmpdir(), prefix));
+  fixtureRoots.push(root);
+  return root;
+}
+
+afterEach(async () => {
+  await Promise.all(fixtureRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
 const script = join(process.cwd(), "scripts", "check-changed-quality.mjs");
 
@@ -29,13 +41,13 @@ async function fakeNub(cwd) {
 
 describe("changed-code quality wrapper", () => {
   it("skips a packaged source tree without git metadata", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "quality-no-git-"));
+    const cwd = await fixtureRoot("quality-no-git-");
     expect(run(cwd)).toMatchObject({ status: 0 });
     expect(run(cwd).stdout).toContain("no git metadata");
   });
 
   it("skips a packaged git snapshot without a base ref", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "quality-no-base-"));
+    const cwd = await fixtureRoot("quality-no-base-");
     execFileSync("git", ["init", "-b", "feature"], { cwd });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
     execFileSync("git", ["config", "user.name", "Test"], { cwd });
@@ -49,7 +61,7 @@ describe("changed-code quality wrapper", () => {
   });
 
   it("uses an available base ref", async () => {
-    const cwd = await mkdtemp(join(tmpdir(), "quality-git-"));
+    const cwd = await fixtureRoot("quality-git-");
     execFileSync("git", ["init", "-b", "main"], { cwd });
     execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
     execFileSync("git", ["config", "user.name", "Test"], { cwd });

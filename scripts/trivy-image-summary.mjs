@@ -1,26 +1,26 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { readFileSync } from "node:fs";
 
 const [jsonPath] = process.argv.slice(2);
 if (!jsonPath) {
-  console.error('usage: scripts/trivy-image-summary.mjs <trivy-results.json>');
+  console.error("usage: scripts/trivy-image-summary.mjs <trivy-results.json>");
   process.exit(2);
 }
 
 let report;
 try {
-  report = JSON.parse(readFileSync(jsonPath, 'utf8'));
+  report = JSON.parse(readFileSync(jsonPath, "utf8"));
 } catch {
-  console.error('Trivy image scan returned invalid JSON.');
+  console.error("Trivy image scan returned invalid JSON.");
   process.exit(2);
 }
 
 if (!Array.isArray(report?.Results) || report.Results.length === 0) {
-  console.error('Trivy image scan did not report any targets.');
+  console.error("Trivy image scan did not report any targets.");
   process.exit(2);
 }
 
-const severityOrder = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+const severityOrder = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
 const severityCounts = Object.fromEntries(severityOrder.map((severity) => [severity, 0]));
 const policyFindings = [];
 let vulnerabilityCount = 0;
@@ -33,12 +33,12 @@ for (const result of report.Results ?? []) {
   targetCount += 1;
   for (const vuln of result.Vulnerabilities ?? []) {
     vulnerabilityCount += 1;
-    const severity = String(vuln.Severity ?? 'UNKNOWN').toUpperCase();
+    const severity = String(vuln.Severity ?? "UNKNOWN").toUpperCase();
     severityCounts[severity] = (severityCounts[severity] ?? 0) + 1;
-    if (severity === 'HIGH' || severity === 'CRITICAL') {
+    if (severity === "HIGH" || severity === "CRITICAL") {
       if (vuln.FixedVersion) {
         policyFindings.push({
-          kind: 'vuln',
+          kind: "vuln",
           severity,
           id: vuln.VulnerabilityID,
           package: vuln.PkgName,
@@ -54,15 +54,15 @@ for (const result of report.Results ?? []) {
 
   for (const secret of result.Secrets ?? []) {
     secretCount += 1;
-    const severity = String(secret.Severity ?? 'UNKNOWN').toUpperCase();
-    if (severity === 'HIGH' || severity === 'CRITICAL') {
+    const severity = String(secret.Severity ?? "UNKNOWN").toUpperCase();
+    if (severity === "HIGH" || severity === "CRITICAL") {
       policyFindings.push({
-        kind: 'secret',
+        kind: "secret",
         severity,
         id: secret.RuleID,
-        package: secret.Category ?? 'secret',
-        installed: '-',
-        fixed: '-',
+        package: secret.Category ?? "secret",
+        installed: "-",
+        fixed: "-",
         target: result.Target,
       });
     }
@@ -70,22 +70,22 @@ for (const result of report.Results ?? []) {
 
   for (const misconfig of result.Misconfigurations ?? []) {
     misconfigCount += 1;
-    const severity = String(misconfig.Severity ?? 'UNKNOWN').toUpperCase();
-    if (severity === 'HIGH' || severity === 'CRITICAL') {
+    const severity = String(misconfig.Severity ?? "UNKNOWN").toUpperCase();
+    if (severity === "HIGH" || severity === "CRITICAL") {
       policyFindings.push({
-        kind: 'misconfig',
+        kind: "misconfig",
         severity,
         id: misconfig.ID,
-        package: misconfig.Type ?? 'misconfig',
-        installed: '-',
-        fixed: '-',
+        package: misconfig.Type ?? "misconfig",
+        installed: "-",
+        fixed: "-",
         target: result.Target,
       });
     }
   }
 }
 
-console.log('Trivy built-image scan summary');
+console.log("Trivy built-image scan summary");
 console.log(`Targets scanned: ${targetCount}`);
 console.log(`HIGH/CRITICAL vulnerabilities: ${vulnerabilityCount}`);
 console.log(`  Critical: ${severityCounts.CRITICAL ?? 0}`);
@@ -99,9 +99,11 @@ console.log(`Ignored unfixed HIGH/CRITICAL vulnerabilities: ${ignoredUnfixedHigh
 console.log(`Policy findings: ${policyFindings.length}`);
 
 if (policyFindings.length > 0) {
-  console.log('\nPolicy findings (first 50):');
+  console.log("\nPolicy findings (first 50):");
   for (const finding of policyFindings.slice(0, 50)) {
-    console.log(`${finding.kind.toUpperCase()} ${finding.severity} ${finding.id} ${finding.package} ${finding.installed} -> ${finding.fixed} (${finding.target})`);
+    console.log(
+      `${finding.kind.toUpperCase()} ${finding.severity} ${finding.id} ${finding.package} ${finding.installed} -> ${finding.fixed} (${finding.target})`,
+    );
   }
   process.exit(1);
 }

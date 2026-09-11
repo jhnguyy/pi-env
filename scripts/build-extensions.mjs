@@ -8,14 +8,15 @@ import { esbuildNodeTarget } from "./node-policy.mjs";
 
 const { config, extensions } = loadExtensionManifest();
 const requestedNames = new Set(process.argv.slice(2));
-const unknownNames = [...requestedNames].filter((name) => !extensions.some((ext) => ext.name === name));
+const unknownNames = [...requestedNames].filter(
+  (name) => !extensions.some((ext) => ext.name === name),
+);
 if (unknownNames.length > 0) {
   console.error(`Unknown extension name(s): ${unknownNames.join(", ")}`);
   process.exit(2);
 }
-const selectedExtensions = requestedNames.size === 0
-  ? extensions
-  : extensions.filter((ext) => requestedNames.has(ext.name));
+const selectedExtensions =
+  requestedNames.size === 0 ? extensions : extensions.filter((ext) => requestedNames.has(ext.name));
 const common = {
   bundle: true,
   format: "esm",
@@ -52,11 +53,9 @@ for (const ext of selectedExtensions) {
   try {
     await buildFile(ext.sourceEntry, ext.bundleEntry);
     for (const sidecar of ext.sidecars) {
-      await buildFile(
-        sidecar.absEntry,
-        sidecar.absOutfile,
-        { banner: sidecar.banner === false ? undefined : common.banner },
-      );
+      await buildFile(sidecar.absEntry, sidecar.absOutfile, {
+        banner: sidecar.banner === false ? undefined : common.banner,
+      });
     }
     console.log(`  built ${ext.name}`);
     ok += 1;
