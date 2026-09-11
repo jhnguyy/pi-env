@@ -17,13 +17,15 @@ function unwrapParenthesizedExpression(expression: ESTree.Expression): ESTree.Ex
   return current;
 }
 
-function isConstAssertion(node: TypeAssertionExpression): boolean {
-  const { typeAnnotation } = node;
+function directlyErasesEvidence(type: ESTree.TSType): boolean {
+  let current = type;
+
+  while (current.type === "TSParenthesizedType") current = current.typeAnnotation;
 
   return (
-    typeAnnotation.type === "TSTypeReference" &&
-    typeAnnotation.typeName.type === "Identifier" &&
-    typeAnnotation.typeName.name === "const"
+    current.type === "TSUnknownKeyword" ||
+    current.type === "TSAnyKeyword" ||
+    current.type === "TSNeverKeyword"
   );
 }
 
@@ -40,30 +42,27 @@ function isOutermostAssertionInChain(node: TypeAssertionExpression): boolean {
 }
 
 function isForbiddenAssertionChain(node: TypeAssertionExpression): boolean {
-  let assertionCount = 0;
-  let hasNonConstAssertion = false;
-  let current: ESTree.Expression = node;
+  let current: ESTree.Expression = unwrapParenthesizedExpression(node.expression);
 
   while (isTypeAssertionExpression(current)) {
-    assertionCount += 1;
-    hasNonConstAssertion ||= !isConstAssertion(current);
+    if (directlyErasesEvidence(current.typeAnnotation)) return true;
     current = unwrapParenthesizedExpression(current.expression);
   }
 
-  return assertionCount > 1 && hasNonConstAssertion;
+  return false;
 }
 
-/** Disallow nested TypeScript type assertions, while permitting chains made only of const assertions. */
+/** Disallow assertion chains whose intermediate targets directly erase type evidence. */
 export const noChainedTypeAssertionsRule = defineRule({
   meta: {
     type: "problem",
     docs: {
       description:
-        "Disallow chained TypeScript as and angle-bracket assertions, including parenthesized chains.",
+        "Disallow TypeScript assertion chains with an unknown, any, or never intermediate target, including parenthesized expressions and types.",
     },
     messages: {
       chained:
-        "This assertion chain discards type evidence. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
+        "This assertion chain directly erases type evidence through an intermediate unknown, any, or never target. Keep the original precise type, or parse untrusted input at its boundary before narrowing it.",
     },
   },
   createOnce(context) {

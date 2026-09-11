@@ -48,10 +48,17 @@
         "anti-slop-effect/no-service-constructor-imports": "error",
         "anti-slop-effect/prefer-effect-match": "error"
       }
+    },
+    {
+      "files": ["**/__tests__/**", "**/*.test.*"],
+      "rules": {
+        "anti-slop/no-chained-type-assertions": "off"
+      }
     }
   ],
   "rules": {
     "anti-slop/no-array-filter-map": "error",
+    "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-module-mocking": "error",
     "anti-slop/no-object-parameters": "error",
     "anti-slop/no-reduce-accumulator-copy": "error",
