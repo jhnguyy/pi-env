@@ -19,6 +19,7 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
+    maxWorkers: 4,
     testTimeout: e2e ? 30_000 : 5_000,
     include: e2e
       ? [
