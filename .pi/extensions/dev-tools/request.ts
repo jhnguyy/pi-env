@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { Result } from "effect";
+import { Data, Result } from "effect";
 import type { DaemonRequest } from "./protocol";
 import { DevToolsAction, DevToolsPathMode, getActionContract } from "./action-contract";
 export { DevToolsAction, DEV_TOOLS_ACTIONS } from "./action-contract";
@@ -15,13 +15,14 @@ export interface DevToolsParams {
 
 type ClientRequest = Omit<DaemonRequest, "id">;
 
-export interface RequestBuildError {
-  readonly _tag: "RequestBuildError";
-  readonly message: string;
-}
+export type RequestBuildError = Data.TaggedEnum<{
+  RequestBuildError: { readonly message: string };
+}>;
+
+export const RequestBuildError = Data.taggedEnum<RequestBuildError>().RequestBuildError;
 
 function requestBuildError(message: string): RequestBuildError {
-  return { _tag: "RequestBuildError", message };
+  return RequestBuildError({ message });
 }
 
 function isPositiveInteger(value: number | undefined): value is number {
