@@ -363,14 +363,16 @@ interface TypeShape {
   bucket: string;
 }
 
+const booleanType = (type: ts.Type): string => {
+  if (!(type.flags & ts.TypeFlags.BooleanLiteral)) return "boolean";
+  const intrinsicName = "intrinsicName" in type ? type.intrinsicName : undefined;
+  return `boolean:${String(intrinsicName)}`;
+};
+
 const primitiveType = (type: ts.Type): string | undefined => {
   if (type.flags & ts.TypeFlags.StringLike) return type.isStringLiteral() ? `string:${type.value}` : "string";
   if (type.flags & ts.TypeFlags.NumberLike) return type.isNumberLiteral() ? `number:${type.value}` : "number";
-  if (type.flags & ts.TypeFlags.BooleanLike) {
-    if (!(type.flags & ts.TypeFlags.BooleanLiteral)) return "boolean";
-    const intrinsicName = "intrinsicName" in type ? type.intrinsicName : undefined;
-    return `boolean:${String(intrinsicName)}`;
-  }
+  if (type.flags & ts.TypeFlags.BooleanLike) return booleanType(type);
   if (type.flags & ts.TypeFlags.BigIntLike) return "bigint";
   if (type.flags & ts.TypeFlags.Null) return "null";
   if (type.flags & ts.TypeFlags.Undefined) return "undefined";
