@@ -1,202 +1,112 @@
 ---
 name: orchestration
-description: Subagent spawning, scoping, and context gathering. Use when decomposing tasks into scoped subagent work, gathering project context before implementation, or coordinating multi-step workflows across subagents.
+description: Coordinate focused subagents for parallel research, implementation, review, and staged workflows. Use when work benefits from isolated child contexts or independent execution.
 ---
 
 # Orchestration
 
-## Mental Model
+## Goal
 
-**Goal:** Route context to scoped workers, wait for completion signals, and synthesize results. Workers report back. Workers can coordinate directly when the scope is clear. Route through the orchestrator when its output determines what gets spawned next, or when you need to filter before forwarding.
+Route bounded context to focused subagents. Let each child complete one owned task. Synthesize child results in the parent session.
 
-`gather context → dispatch workers (parallel or coordinating) → wait → synthesize → cleanup → commit`
+```text
+gather context → dispatch independent work → wait → synthesize → verify
+```
 
-**Tool guidance:**
+The parent session owns scope, sequencing, integration, and completion. Subagents do not coordinate with each other.
 
-| Situation | Tool |
+## Select the execution path
+
+| Need | Path |
 |---|---|
-| Multi-agent orchestration with code changes | `orch` — handles ORCH_DIR, bus session, worktrees, env injection, cleanup, receipts |
-| Multi-agent orchestration without code changes | `orch` (omit `repo`) — same lifecycle guarantees, no worktrees |
-| Single persistent service or long-running pane | `tmux` directly (set `PI_BUS_SESSION` and `PI_AGENT_ID` manually) |
-| Single standalone pane (not part of a run) | `tmux` directly |
-| Completion signaling | `bus wait` — event-driven, no polling |
-| Debugging a stalled pane | `tmux read` |
+| One focused result before other work can continue | `subagent` with `action: "run"` |
+| Two or more independent tasks | Start all jobs, then wait for each job |
+| Read-only repository orientation | Use an available `scout`, `gatherer`, or `workspace-init` agent |
+| Parallel code changes | Create one Git worktree per writer, then pass each worktree as `cwd` |
+| Work derived from an earlier result | Wait, distill the result, then dispatch the next stage |
+| Fixed domain DAG, such as PR review | Use the domain tool that owns that DAG |
 
-> **Anti-pattern:** `sleep 30 && tmux read ...` — polling. Use `bus wait` instead.
+Inspect the live `subagent` tool description before dispatch. It is the source of truth for available agents, models, actions, and tools. Always pass an explicit model when the selected agent does not define one.
 
-> When you find a better pattern — update this.
+## Workflow
 
----
+1. **Establish scope.** Define the goal, completion evidence, constraints, and non-goals.
+2. **Gather once.** Use a read-only child when repository context is not already available.
+3. **Form briefs.** Give each child one goal, its allowed scope, required evidence, and expected output.
+4. **Isolate writers.** Follow the `git` skill before code changes. Create a dedicated branch and worktree for each writer.
+5. **Dispatch in parallel.** Start all independent jobs before waiting for one.
+6. **Wait without polling.** Use `action: "wait"`. Do not repeatedly call `status`.
+7. **Distill results.** Extract decisions, evidence, changed files, validation, and unresolved problems. Do not relay child output without review.
+8. **Integrate and verify.** The parent owns conflict resolution, repository checks, final review, and cleanup.
 
-## Orch Flow
+## Scoping
 
-```
-orch start { repo: "/path/to/repo" }   // → runId, orchDir, busSession (PI_BUS_SESSION set)
+Use least privilege:
 
-orch spawn { label: "scout-a", command: "pi --no-session ...", busChannel: "scouts:a" }
-orch spawn { label: "scout-b", command: "pi --no-session ...", busChannel: "scouts:b" }
-// Each worker gets: isolated worktree, own branch (orch/<runId>/<label>),
-// PI_BUS_SESSION, PI_AGENT_ID, and ORCH_DIR injected into env,
-// bus exit shim for crash-safe signaling.
+- Prefer a named read-only agent for reconnaissance.
+- For an inline child, provide only the tools required by the brief.
+- Use an existing absolute directory for `cwd`.
+- Set `agent_scope: "project"` only when the project is trusted and the project agent is required.
+- Do not give a child the parent transcript. Put required facts in the brief or in referenced files.
+- Do not ask multiple children to inspect the same scope unless independent review is the goal.
 
-bus wait { channels: ["scouts:a", "scouts:b"] }
-bus read { channel: "scouts:a" }         // wakes on first; re-wait if second not yet
-bus read { channel: "scouts:b" }
+A subagent `cwd` does not create a worktree. Write-capable runs in one canonical Git workspace serialize. Use separate worktrees when parallel writers are necessary.
 
-read { path: "<orchDir>/scout-a.json" }  // workers write results to $ORCH_DIR
-read { path: "<orchDir>/scout-b.json" }
-// distill before passing to builders
+## Dispatch pattern
 
-// Phase 2 — builders (parallel, using scout output)
-orch spawn { label: "builder-a", command: "pi --no-session @<orchDir>/scout-a.json ...", busChannel: "builders:a" }
-orch spawn { label: "builder-b", command: "pi --no-session @<orchDir>/scout-b.json ...", busChannel: "builders:b" }
-
-bus wait { channels: ["builders:a", "builders:b"] }
-bus read { channel: "builders:a" }
-bus read { channel: "builders:b" }
-
-// verify → merge branches → orch cleanup
-orch cleanup {}
-// → kills panes, removes worktrees, deletes ORCH_DIR, writes run receipt.
-// Branches are preserved: git branch --list 'orch/*' to review.
-// Run receipt in /tmp/orch-runs/ for retrospectives.
+```text
+start scout-a
+start scout-b
+wait scout-a
+wait scout-b
+synthesize
 ```
 
-**Cleanup is required.** `orch cleanup` is the final step of every orchestration. Always run it. If the session ends before cleanup, the shutdown hook logs a warning in the TUI. `orch status` also shows the uncleaned run. Clean up in the next session.
+Use sequential dispatch only when one result determines the next task:
 
----
-
-## Scoping Workers
-
-**Least privilege** — give each worker only the tools, skills, and context its task requires. Instruct workers to report findings and changes only. Do not ask for reasoning or summaries.
-
-| Flag | Effect |
-|---|---|
-| `--tools read,bash` | Restrict to specific tools |
-| `--no-skills` | No skill injection — clean context |
-| `--no-extensions` | No extension hooks — no permission gates |
-| `--skills a,b` | Specific skills only |
-| `--append-system-prompt "..."` | Add constraints, keep defaults |
-
-**Role contracts** are behavioral specifications in `~/.agents/roles/` injected via `--append-system-prompt @~/.agents/roles/scout.md`. Available: `orchestrator.md`, `scout.md`, `worker.md`, `reviewer.md`. Use to specify what the agent reports, its scope, and what it doesn't do.
-
-**Prompt framing** — lead with the goal and what good output looks like. Give each worker different context emphasis rather than a different persona. For complex tasks, write a brief (`write { path: '$ORCH_DIR/brief-a.md' }`) and pass via `@file` — keeps prompts short, lets multiple workers share context.
-
-**Model selection** — pass the full `provider/model-id`, not an alias. The **`subagent` tool description** is the live source for available models and their tags. Pi regenerates it during each `session_start`. Its underlying source is `~/.pi/agent/settings.json` → `modelAnnotations`. Route by tag intent:
-
-| Intent | Tag query | Typical pick |
-|---|---|---|
-| Cheap gathering / mechanical edits | `preferred` | `github-copilot/gpt-5-mini`, `anthropic/claude-haiku-4-5` |
-| Fast read-only scout | `fast` | `github-copilot/claude-haiku-4.5` |
-| Code-shaped reasoning | `codex` | `openai-codex/gpt-5.4-mini` (cheap), `openai-codex/gpt-5.5` (hard) |
-| Heavy judgment / adversarial review | `heavy` | `anthropic/claude-opus-4-7`, `github-copilot/gpt-5.5` |
-| Offline / no-cost iteration | `local` + `free` | `llama-cpp/Qwen3-Coder-Next-Q2_K.gguf` |
-
-**Tag axes** (defined in `settings.json`): *tier* (`preferred` / `pro` / `heavy`) · *family* (`claude` / `gpt` / `codex`) · *backend* (`paid` / `copilot` / `local` / `free`) · *form* (`fast` / `mini`). Combine to filter — e.g. "a fast claude" → `[claude, fast]`. Run `pi --list-models` only when you need a model not currently enabled. To change available models or tags, edit `settings.json` — the table above is illustrative, not authoritative.
-
-**Env vars:** `orch spawn` auto-injects `PI_BUS_SESSION`, `PI_AGENT_ID`, and `ORCH_DIR`. If spawning via `tmux` directly (outside an `orch` run), you must set `PI_BUS_SESSION` and `PI_AGENT_ID` manually or `bus publish` will silently fail.
-
-**Subagent cwd:** The `subagent` `run` and `start` actions accept an optional `cwd` for intentional cross-worktree execution. Pass an existing absolute directory. The tool resolves it to a canonical real path and uses it for agent discovery, built-in tools, execution metadata, and the child session working directory. Use absolute paths in task packets. Keep integration and shutdown ownership in the parent session.
-
----
-
-## Dispatch
-
-Spawn all independent workers before waiting on any. Use sequential dispatch only when a worker's output is required to form the next worker's prompt.
-
-```
-orch spawn worker-a
-orch spawn worker-b
-bus wait for both → synthesize → orch spawn worker-c if needed
+```text
+run scout
+→ distill findings
+→ start worker-a and worker-b
+→ wait for both
+→ run focused reviewer
+→ verify in parent
 ```
 
----
+Subagent job IDs are session-scoped and do not survive a restart. Child session transcripts persist. Read a transcript only when the bounded result is insufficient or a failure needs diagnosis.
 
-## Completion Signaling
+## Handoffs
 
-Pass `busChannel` to `orch spawn` — the exit shim auto-publishes `{"message": "process exited"}` when the pane exits, regardless of how (clean exit, crash, timeout). Per-worker channels enable partial-failure recovery.
+A child final answer is its handoff. Require only information that the parent needs:
 
-```
-// Wait for both; re-wait if only one arrives
-bus wait { channels: ["scouts:a", "scouts:b"], timeout: 300 }
-msgs_a = bus read { channel: "scouts:a" }
-msgs_b = bus read { channel: "scouts:b" }
-// if msgs_b is empty → bus wait again on ["scouts:b"]
-```
+- result or files changed;
+- commands and checks run;
+- errors or incomplete work;
+- deviations that affect the goal.
 
-Workers also publish from inside their prompt: `"When done, publish to channel 'scouts:a' with a summary."` This message carries the structured result. The exit shim is the crash-safe fallback.
+For large shared context, write one bounded brief and pass its path to each child. Keep implementation details in the owning repository or worktree.
 
----
+## Failure handling
 
-## Data Flow
+- Cancel jobs that are no longer useful.
+- If waiting is interrupted, the job can continue. Wait again or retrieve the result later.
+- Do not assume an interrupted or failed job retries automatically.
+- Before retrying, change the brief, context, tools, model, or scope.
+- Retry only the failed slice.
+- Treat partial child changes as untrusted until the parent inspects and verifies them.
 
-**Files carry data. Bus carries signals.** Workers write results to `$ORCH_DIR/<label>.json` and publish completion to their bus channel. Read files for content. Wait on bus for timing. Synthesize. Do not relay verbatim.
+## Multi-agent review
 
----
+For independent judgment, give children the same evidence and different, explicit review scopes. Keep them isolated. The parent compares findings and resolves disagreements.
 
-## Debugging Stalled Workers
+If repeated exchanges do not resolve a disagreement, bring the decision to the user. Persistent disagreement often depends on values or product intent.
 
-`tmux read` is for diagnosis only — not completion detection.
+## DAG boundary
 
-When `bus wait` times out:
-1. `tmux read { paneId: "..." }` — see what's on screen
-2. Common causes: permission gate (approve with `tmux send`), silent crash, wrong `PI_BUS_SESSION`
-3. Use `--no-extensions` in worker command to prevent permission gates entirely
-4. Fix and re-spawn only the failed worker. Do not run the full pipeline again.
+The repository DAG runtime is an internal execution primitive for code-owned domain workflows. It is not a generic model-facing orchestration tool. Do not describe ordinary subagent dispatch as a DAG run.
 
-**Note:** Labels are unique within a run — to re-spawn a crashed worker with the same label, use a suffix (e.g., `scout-a-retry`).
-
----
-
-## Tmux Scenarios (outside orch)
-
-For single panes that aren't part of a multi-agent orchestration:
-
-| Scenario | Flag |
-|---|---|
-| User wants real-time visibility | `interactive: true` — full TUI |
-| Persistent service | `interactive: true` |
-| Keep output visible after exit | `waitOnExit: true` |
-| Crash-safe completion signal | `busChannel: "channel-name"` |
-| Quick ephemeral worker | `pi -p` directly (no tmux) |
-
----
-
-## Context Gathering
-
-Before implementation, gather with a cheap read-only scout (does not need `orch`):
-
-```bash
-pi --no-session --tools read,bash,dev-tools --no-skills --model anthropic/claude-haiku-4-5 \
-  "Analyze this repo for: [TASK]. For any language with LSP support, use dev-tools (symbols, definition, references) to trace structure — reserve read for config/prose and languages dev-tools doesn't cover. Report only:
-   1. Stack and toolchain  2. Exact build/test/lint commands
-   3. Files relevant to the task  4. Conventions that constrain implementation
-   No summaries. Structured output only. Write to /tmp/scout-context.json."
-```
-
-Extract the stack to select skills. Pass commands verbatim to workers. Convert paths to `@file` arguments. Pass conventions through `--append-system-prompt`.
-
----
-
-## Error Handling
-
-- **Before retrying:** adjust prompt, scoping, or file args — identical retries produce identical failures.
-- **Broken tests:** spawn a focused fix worker with test output + relevant files, not a full re-run.
-- **Stalled pane:** use `tmux read` to diagnose the problem. Use `--no-extensions` to prevent permission gates.
-- **Crashed worker:** re-spawn with a new label suffix (e.g., `scout-a-retry`). Labels must be unique within a run.
-
----
-
-## Multi-Agent Dialogue
-
-For design decisions requiring genuine back-and-forth. Spawn agents on a shared bus channel and let them exchange positions. No persona prompts — give each agent the same material and different context emphasis.
-
-What makes it work: agents reason with evidence, stay on one topic until resolved, state disagreement directly. If two exchanges don't produce movement, bring both positions to the human — persistent disagreement is usually about values, not facts.
-
-**Model selection:** use the same tier on both sides for a known solution space. Examples include `claude-sonnet-4-6` ↔ itself and `gpt-5.5` ↔ itself. For genuine uncertainty, mix `heavy` with a same-family non-heavy model. An example is `claude-opus-4-7` ↔ `claude-sonnet-4-6`. Tag definitions live in `~/.pi/agent/settings.json`.
-
----
+A future skill can combine this orchestration method with a generic DAG run interface after that interface exists. Until then, use the current `subagent` actions or a domain tool that already owns a fixed DAG.
 
 ## Boundaries
 
-Invocation mechanics, orchestration patterns, multi-agent dialogue. Not covered: domain skill content, safety enforcement, session handoffs (see handoff skill).
+This skill owns subagent routing, staging, and result synthesis. The `git` skill owns branches, worktrees, commits, pull requests, and cleanup. Domain skills own implementation and safety policy.

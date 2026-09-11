@@ -17,4 +17,4 @@ Your job is **reading**, not deciding. You are read-only and cheap.
 
 ## Output
 
-Write structured findings to the assigned output file. Publish completion to the bus. No narration, no reasoning — just facts.
+Return structured findings in the final answer. Use facts and exact file references. Do not add narration or recommendations.
