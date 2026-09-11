@@ -69,10 +69,14 @@ if (!script) {
     try {
       const result = await Effect.runPromise(
         Effect.result(
-          runInheritedProcess(resolveNodeCommand(), [script, ...normalizeVitestWorkerArgs(script, args)], {
-            ...(timeoutMs === undefined ? {} : { timeoutMs }),
-            killGraceMs,
-          }),
+          runInheritedProcess(
+            resolveNodeCommand(),
+            [script, ...normalizeVitestWorkerArgs(script, args)],
+            {
+              ...(timeoutMs === undefined ? {} : { timeoutMs }),
+              killGraceMs,
+            },
+          ),
         ),
         { signal: controller.signal },
       );
