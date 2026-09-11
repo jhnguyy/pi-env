@@ -48,12 +48,6 @@
         "anti-slop-effect/no-service-constructor-imports": "error",
         "anti-slop-effect/prefer-effect-match": "error"
       }
-    },
-    {
-      "files": ["**/__tests__/**", "**/*.test.*"],
-      "rules": {
-        "anti-slop/no-chained-type-assertions": "off"
-      }
     }
   ],
   "rules": {
