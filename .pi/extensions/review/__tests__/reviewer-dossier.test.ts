@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DagNodeStatus,
   publishDagSubagentTextResult,
-  type DagSessionReconstruction,
+  type DagNodeState,
 } from "../../../../src/dag/index.js";
 import {
   admitReviewerDossier,
@@ -86,7 +86,7 @@ async function fixture(
   const root = mkdtempSync(path.join(tmpdir(), "reviewer-dossier-"));
   roots.push(root);
   const compiled = graph(root);
-  const states: any[] = [];
+  const states: DagNodeState<unknown, unknown>[] = [];
   for (const node of ReviewerNodes) {
     const override = overrides[node.nodeId];
     if (override?.status === "failed") {
@@ -137,8 +137,8 @@ async function fixture(
     root,
     reconstruction: {
       graph: compiled,
-      state: { runId: compiled.runId, nodes: states },
-    } as unknown as DagSessionReconstruction,
+      state: { nodes: states },
+    },
   };
 }
 

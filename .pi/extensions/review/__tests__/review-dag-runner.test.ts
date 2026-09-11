@@ -3,11 +3,19 @@ import path from "node:path";
 import { Data, Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
+  DagNodeResultTag,
   DagNodeStatus,
   DagRunOutcome,
+  DagTransitionResultTag,
+  DagTransitionType,
+  createDagRunState,
   publishDagSubagentTextResult,
+  reduceDagRunState,
+  type DagNodeResult,
+  type DagRunState,
   type DagSessionReconstruction,
   type DagTextArtifactReference,
+  type DagTransition,
   type ValidatedDagDefinition,
 } from "../../../../src/dag/index.js";
 import { reconstructReviewDagState, runReviewDag } from "../review-dag-runner";
@@ -126,9 +134,39 @@ function dismissedSynthesis(): string {
   });
 }
 
+function applyTransition(
+  graph: ValidatedDagDefinition<unknown>,
+  state: DagRunState<unknown, { readonly message: string }>,
+  transition: DagTransition<unknown, { readonly message: string }>,
+): DagRunState<unknown, { readonly message: string }> {
+  const reduced = reduceDagRunState(graph, state, transition);
+  if (reduced._tag !== DagTransitionResultTag.Applied)
+    throw new Error(`Invalid test DAG transition: ${JSON.stringify(reduced.error)}`);
+  return reduced.state;
+}
+
+function completeNode(
+  graph: ValidatedDagDefinition<unknown>,
+  state: DagRunState<unknown, { readonly message: string }>,
+  nodeId: string,
+  result: DagNodeResult<unknown, { readonly message: string }>,
+): DagRunState<unknown, { readonly message: string }> {
+  const running = applyTransition(graph, state, {
+    runId: graph.runId,
+    type: DagTransitionType.Start,
+    nodeId,
+  });
+  return applyTransition(graph, running, {
+    runId: graph.runId,
+    type: DagTransitionType.Complete,
+    nodeId,
+    result,
+  });
+}
+
 async function reconstructionFor(
   artifactRoot: string,
-  graph: ValidatedDagDefinition<any>,
+  graph: ValidatedDagDefinition<unknown>,
   overrides: Readonly<Record<string, string | "failed">>,
 ): Promise<DagSessionReconstruction> {
   const defaults: Record<string, string> = {
@@ -141,11 +179,14 @@ async function reconstructionFor(
     "review-whole-change": reviewer("whole-change"),
     synthesis: synthesis(),
   };
-  const nodes = [] as any[];
+  let state = createDagRunState<unknown, unknown, { readonly message: string }>(graph);
   for (const node of graph.nodes) {
     const value = overrides[node.id] ?? defaults[node.id];
     if (value === "failed") {
-      nodes.push({ nodeId: node.id, status: DagNodeStatus.Failed, failure: { message: "failed" } });
+      state = completeNode(graph, state, node.id, {
+        _tag: DagNodeResultTag.Failed,
+        failure: { message: "failed" },
+      });
       continue;
     }
     if (node.id === EvidenceResolverNode.nodeId) {
@@ -181,7 +222,10 @@ async function reconstructionFor(
           ),
         );
       }
-      nodes.push({ nodeId: node.id, status: DagNodeStatus.Succeeded, outputs });
+      state = completeNode(graph, state, node.id, {
+        _tag: DagNodeResultTag.Succeeded,
+        outputs,
+      });
       continue;
     }
     const outputName = (node.executor.payload as { output: { name: string } }).output.name;
@@ -195,12 +239,15 @@ async function reconstructionFor(
         value,
       ),
     );
-    nodes.push({ nodeId: node.id, status: DagNodeStatus.Succeeded, outputs });
+    state = completeNode(graph, state, node.id, {
+      _tag: DagNodeResultTag.Succeeded,
+      outputs,
+    });
   }
   return {
     graph,
     graphId: "graph-id",
-    state: { runId: graph.runId, nodes },
+    state,
     terminalOutcome: Object.values(overrides).includes("failed")
       ? DagRunOutcome.Failed
       : DagRunOutcome.Succeeded,
@@ -208,7 +255,7 @@ async function reconstructionFor(
     attempts: [],
     persistedEntryCount: 1,
     recoveredFromProcessLoss: false,
-  } as unknown as DagSessionReconstruction;
+  } satisfies DagSessionReconstruction;
 }
 
 function serviceFor(
@@ -762,26 +809,27 @@ describe("DAG-backed pull request review runner", () => {
           };
         }),
       reconstruct: () =>
-        Effect.sync(
-          () =>
-            ({
-              graph,
-              graphId: "graph-id",
-              state: {
-                runId: graph.runId,
-                nodes: graph.nodes.map((node) => ({
-                  nodeId: node.id,
-                  status: DagNodeStatus.Cancelled,
-                  reason: "cancelled",
-                })),
-              },
-              terminalOutcome: DagRunOutcome.Cancelled,
-              transitions: [],
-              attempts: [],
-              persistedEntryCount: 1,
-              recoveredFromProcessLoss: false,
-            }) as unknown as DagSessionReconstruction,
-        ),
+        Effect.sync(() => {
+          let state = createDagRunState<unknown, unknown, { readonly message: string }>(graph);
+          for (const node of graph.nodes) {
+            state = applyTransition(graph, state, {
+              runId: graph.runId,
+              type: DagTransitionType.Cancel,
+              nodeId: node.id,
+              reason: "cancelled",
+            });
+          }
+          return {
+            graph,
+            graphId: "graph-id",
+            state,
+            terminalOutcome: DagRunOutcome.Cancelled,
+            transitions: [],
+            attempts: [],
+            persistedEntryCount: 1,
+            recoveredFromProcessLoss: false,
+          } satisfies DagSessionReconstruction;
+        }),
     };
     const controller = new AbortController();
     controller.abort();

@@ -33,7 +33,12 @@ describe("DAG state reduction", () => {
       _tag: DagTransitionResultTag.Rejected,
       error: { _tag: DagTransitionErrorTag.InvalidTransition },
     });
-    const succeeded = Fixtures.finish(dag, initial, "source", Fixtures.terminalResult(DagNodeResultTag.Succeeded));
+    const succeeded = Fixtures.finish(
+      dag,
+      initial,
+      "source",
+      Fixtures.terminalResult(DagNodeResultTag.Succeeded),
+    );
     expect(
       reduceDagRunState(dag, succeeded, {
         runId: dag.runId,
@@ -70,6 +75,7 @@ describe("DAG state reduction", () => {
       { _tag: DagNodeResultTag.Cancelled, reason: 42 },
     ]) {
       expect(
+        // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Deliberately malformed result literals must cross the transition boundary to test runtime rejection.
         reduceDagRunState(dag, started.state, {
           runId: dag.runId,
           type: DagTransitionType.Complete,
@@ -94,7 +100,12 @@ describe("DAG state reduction", () => {
     ]);
     const failed = Fixtures.finish(
       dag,
-      Fixtures.finish(dag, createDagRunState(dag), "a", Fixtures.terminalResult(DagNodeResultTag.Failed)),
+      Fixtures.finish(
+        dag,
+        createDagRunState(dag),
+        "a",
+        Fixtures.terminalResult(DagNodeResultTag.Failed),
+      ),
       "b",
       Fixtures.terminalResult(DagNodeResultTag.Failed),
     );
@@ -121,23 +132,13 @@ describe("DAG state reduction", () => {
     });
     const failedThenCancelled = Fixtures.finish(
       dag,
-      Fixtures.finish(
-        dag,
-        initial,
-        "first",
-        Fixtures.terminalResult(DagNodeResultTag.Failed),
-      ),
+      Fixtures.finish(dag, initial, "first", Fixtures.terminalResult(DagNodeResultTag.Failed)),
       "second",
       Fixtures.terminalResult(DagNodeResultTag.Cancelled),
     );
     const cancelledThenFailed = Fixtures.finish(
       dag,
-      Fixtures.finish(
-        dag,
-        initial,
-        "second",
-        Fixtures.terminalResult(DagNodeResultTag.Cancelled),
-      ),
+      Fixtures.finish(dag, initial, "second", Fixtures.terminalResult(DagNodeResultTag.Cancelled)),
       "first",
       Fixtures.terminalResult(DagNodeResultTag.Failed),
     );

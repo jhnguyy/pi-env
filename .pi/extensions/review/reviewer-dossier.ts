@@ -17,6 +17,10 @@ import { buildRawFindingRecords } from "./synthesis-provenance";
 
 export const MaxReviewerDossierBytes = 1_750_000;
 
+type ReviewerDossierReconstruction = Pick<DagSessionReconstruction, "graph"> & {
+  readonly state: Pick<DagSessionReconstruction["state"], "nodes">;
+};
+
 export interface ReviewAdmission {
   readonly evidence: ReviewEvidenceBundle;
   readonly reviewers: ReviewerDossier;
@@ -101,7 +105,7 @@ export async function readVerifiedReviewArtifact(
 }
 
 function reviewerTopologyOrder(
-  reconstruction: DagSessionReconstruction,
+  reconstruction: ReviewerDossierReconstruction,
 ): readonly ReviewerTopologyNode[] {
   const representedNodeIds = reconstruction.graph
     ? new Set(reconstruction.graph.nodes.map((node) => node.id))
@@ -153,7 +157,7 @@ export async function readVerifiedRawFinding(
 
 export async function admitReviewerDossier(options: {
   readonly artifactRoot: string;
-  readonly reconstruction: DagSessionReconstruction;
+  readonly reconstruction: ReviewerDossierReconstruction;
   readonly expectedEvidenceDigest: string | undefined;
 }): Promise<ReviewerDossier> {
   const admitted: AdmittedReviewerArtifact[] = [];
