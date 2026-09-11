@@ -19,7 +19,7 @@ import {
 import { analyzeEffect } from "../engine.js";
 import { AnalysisJournal, readJournalEvents } from "../journal.js";
 import { ScopeMode } from "../model.js";
-import { ANALYZE_OTEL_BOUNDS, makeAnalyzeOtelLayer, resolveAnalyzeOtelConfig } from "../otel.js";
+import { ANALYZE_OTEL_BOUNDS, analyzeOtelLayer, resolveAnalyzeOtelConfig } from "../otel.js";
 import { ANALYZE_LIMITS } from "../policy.js";
 import {
   ANALYZE_WORKER_PROTOCOL_VERSION,
@@ -90,7 +90,7 @@ describe("analyze diagnostic contracts", () => {
           event(runId, 1, AnalyzeDiagnosticEventType.StageStarted, { stage: "preflight" }),
         ),
       )
-      .pipe(Effect.provide(makeAnalyzeOtelLayer({ enabled: true }, exporter)));
+      .pipe(Effect.provide(analyzeOtelLayer({ enabled: true }, exporter)));
 
     await Effect.runPromise(program);
 

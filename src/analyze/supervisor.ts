@@ -25,7 +25,7 @@ import {
   makeEffectAnalysisDiagnostics,
 } from "./diagnostics.js";
 import { AnalysisJournal, journalSink } from "./journal.js";
-import { makeAnalyzeOtelLayer, resolveAnalyzeOtelConfig } from "./otel.js";
+import { analyzeOtelLayer, resolveAnalyzeOtelConfig } from "./otel.js";
 import { scopedChildProcess } from "../process/platform.js";
 
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -332,7 +332,7 @@ export async function superviseAnalyze(
     return await Effect.runPromise(
       diagnostics
         .span(AnalyzeSpanName.Run, analysisRunAttributes(request), Effect.promise(lifecycle))
-        .pipe(Effect.provide(makeAnalyzeOtelLayer(configured.success, options.otelExporter))),
+        .pipe(Effect.provide(analyzeOtelLayer(configured.success, options.otelExporter))),
     );
   } finally {
     if (ownedJournal !== undefined) await ownedJournal.close();

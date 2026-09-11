@@ -31,7 +31,7 @@ export function resolveAnalyzeOtelConfig(
   );
 }
 
-export function makeAnalyzeOtelLayer(config: AnalyzeOtelConfig, exporter?: SpanExporter) {
+export function analyzeOtelLayer(config: AnalyzeOtelConfig, exporter?: SpanExporter) {
   return makeBoundedOtelLayer({
     config,
     exporter,
