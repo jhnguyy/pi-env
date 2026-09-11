@@ -30,7 +30,7 @@ import { registerCloseout } from "./closeout";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
-export type DevToolsRegistrationApi = Pick<
+type DevToolsRegistrationApi = Pick<
   ExtensionAPI,
   "exec" | "registerCommand" | "registerTool"
 > & AgentToolEvents;

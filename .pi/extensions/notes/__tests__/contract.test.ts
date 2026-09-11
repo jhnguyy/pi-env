@@ -232,11 +232,11 @@ describe("notes tool contract", () => {
       details: { notes: [{ path: "wiki/oversized.md", size: MAX_NOTE_BYTES + 1 }] },
     });
 
-    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- The literal extra field independently proves provider output sanitization at the runtime boundary.
-    vi.mocked(fake.search).mockResolvedValue([
+    const searchResults = [
       { path: "wiki/one.md", extra: "must not escape" },
       { path: "wiki/two.md" },
-    ] as unknown as readonly NoteSearchResult[]);
+    ] satisfies readonly (NoteSearchResult & { readonly extra?: string })[];
+    vi.mocked(fake.search).mockResolvedValue(searchResults);
     const search = await contract.execute(
       { action: "search", query: "topic", limit: 1 },
       { cwd: "/repo" },

@@ -1,7 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import agentNotificationExtension, { type AgentSettledApi } from "../index";
+import agentNotificationExtension from "../index";
 import * as AgentTools from "../../_shared/agent-tools";
+
+type AgentSettledApi = Parameters<typeof agentNotificationExtension>[0];
 
 type SettledHandler = (
   event: { type: typeof AgentTools.PiEvent.AgentSettled },

@@ -489,7 +489,7 @@ export function createCloseoutToolContract(
   };
 }
 
-export type CloseoutRegistrationApi = Pick<
+type CloseoutRegistrationApi = Pick<
   ExtensionAPI,
   "exec" | "registerCommand" | "registerTool"
 > & AgentToolEvents;

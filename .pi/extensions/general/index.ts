@@ -5,7 +5,7 @@ const TerminalBell = "\u0007";
 
 type AgentSettledHandler = (event: AgentSettledEvent, context: ExtensionContext) => unknown;
 
-export interface AgentSettledApi {
+interface AgentSettledApi {
   on(event: typeof AgentTools.PiEvent.AgentSettled, handler: AgentSettledHandler): void;
 }
 

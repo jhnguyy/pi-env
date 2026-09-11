@@ -228,7 +228,10 @@ function validRequestChecks(value: Record<string, unknown>): value is Record<str
     value.checks.length > 0 &&
     value.checks.length <= SAFE_CHECKS.length &&
     new Set(value.checks).size === value.checks.length &&
-    value.checks.every((check) => SAFE_CHECKS.includes(check as SafeAnalyzerName))
+    value.checks.every(
+      (check): check is SafeAnalyzerName =>
+        typeof check === "string" && SAFE_CHECKS.some((safeCheck) => safeCheck === check),
+    )
   );
 }
 
