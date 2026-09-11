@@ -19,6 +19,11 @@ import { createObsidianProvider, type ObsidianProviderOptions } from "../obsidia
 
 const roots: string[] = [];
 
+async function expectPathEscape(operation: Promise<unknown>): Promise<void> {
+  await expect(operation).rejects.toBeInstanceOf(NotesProviderError);
+  await expect(operation).rejects.toMatchObject({ code: "path-escape" });
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -172,18 +177,12 @@ describe("Obsidian notes provider", () => {
     await symlink(path.join(vault, ".obsidian"), path.join(vault, "metadata"));
     await symlink(path.join(vault, ".obsidian", "plugins", "main.js"), path.join(vault, "safe.md"));
 
-    await expect(provider.read("../outside/secret.md")).rejects.toMatchObject({
-      _tag: "NotesProviderError",
-      code: "path-escape",
-    });
-    await expect(provider.read("escape/secret.md")).rejects.toMatchObject({
-      _tag: "NotesProviderError",
-      code: "path-escape",
-    });
+    await expectPathEscape(provider.read("../outside/secret.md"));
+    await expectPathEscape(provider.read("escape/secret.md"));
     await expect(provider.read("safe.md")).rejects.toMatchObject({ code: "path-escape" });
-    await expect(
+    await expectPathEscape(
       provider.write({ path: "escape/new.md", content: "unsafe", expectedRevision: null }),
-    ).rejects.toMatchObject({ _tag: "NotesProviderError", code: "path-escape" });
+    );
     await expect(
       provider.write({ path: "metadata/new/note.md", content: "unsafe", expectedRevision: null }),
     ).rejects.toMatchObject({ code: "path-escape" });

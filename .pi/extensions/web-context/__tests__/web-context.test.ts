@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch } from "../index";
+import webContextExtension, { WebFetchFailure, WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
@@ -143,8 +143,9 @@ describe("web fetch", () => {
     };
     const injectedFetch: WebFetch = async () => response;
 
-    await expect(fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch })).rejects.toMatchObject({
-      _tag: "WebFetchFailure",
+    const request = fetchWebText("https://example.com", {}, undefined, { fetch: injectedFetch });
+    await expect(request).rejects.toBeInstanceOf(WebFetchFailure);
+    await expect(request).rejects.toMatchObject({
       kind: WebFetchFailureKind.Body,
       message: "Web fetch body read failed: body stream reset",
       cause: expect.any(Error),
@@ -167,8 +168,8 @@ describe("web fetch", () => {
 
     await ready;
     controller.abort(new Error("caller aborted"));
+    await expect(promise).rejects.toBeInstanceOf(WebFetchFailure);
     await expect(promise).rejects.toMatchObject({
-      _tag: "WebFetchFailure",
       kind: WebFetchFailureKind.Request,
       message: "Web fetch request failed: caller aborted",
     });

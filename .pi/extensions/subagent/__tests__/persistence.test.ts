@@ -11,6 +11,7 @@ import {
   hasReachedTurnLimit,
 } from "../execute";
 import { DEFAULT_SUBAGENT_CONFIG, SubagentSessionStorage } from "../config";
+import { SubagentJobWaitInterrupted } from "../errors";
 import { SubagentJobManager } from "../jobs";
 import { SubagentUsageLedger, zeroUsage } from "../usage";
 
@@ -241,7 +242,8 @@ describe("persistent subagent sessions", () => {
     );
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) {
-      expect(outcome.failure).toMatchObject({ _tag: "SubagentJobWaitInterrupted", jobId: job.id });
+      expect(outcome.failure).toBeInstanceOf(SubagentJobWaitInterrupted);
+      expect(outcome.failure).toMatchObject({ jobId: job.id });
     }
     expect(job.status === "queued" || job.status === "running").toBe(true);
     await jobs.shutdown();

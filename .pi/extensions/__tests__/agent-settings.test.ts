@@ -8,7 +8,7 @@ import {
   readOptionalAgentSettings,
   type AgentSettingsEnv,
 } from "../_shared/agent-settings";
-import { loadSettingsSnapshotEffect } from "../_shared/settings";
+import { SettingsDecodeError, loadSettingsSnapshotEffect } from "../_shared/settings";
 
 function envWith(files: Record<string, string>, onRead?: (path: string) => void): AgentSettingsEnv {
   return {
@@ -90,9 +90,15 @@ describe("agent settings", () => {
       const invalid = yield* Effect.result(readAgentSettingsEffect(envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }), "/repo"));
 
       expect(malformed._tag).toBe("Failure");
-      if (malformed._tag === "Failure") expect(malformed.failure).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });
+      if (malformed._tag === "Failure") {
+        expect(malformed.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(malformed.failure).toMatchObject({ path: "/global/settings.json", source: "global" });
+      }
       expect(invalid._tag).toBe("Failure");
-      if (invalid._tag === "Failure") expect(invalid.failure).toMatchObject({ _tag: "SettingsDecodeError", source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
+      if (invalid._tag === "Failure") {
+        expect(invalid.failure).toBeInstanceOf(SettingsDecodeError);
+        expect(invalid.failure).toMatchObject({ source: "overlay", paths: { global: "/global/settings.json", project: "/repo/.pi/settings.json" } });
+      }
     }),
   );
 

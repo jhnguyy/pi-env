@@ -197,10 +197,12 @@ type SkillBuildMode =
       path: string;
       goal: string;
     };
+const SkillBuildModeVariant = Data.taggedEnum<SkillBuildMode>();
 
 type SkillBuildModeResolution =
   | { _tag: "valid"; mode: SkillBuildMode }
   | { _tag: "invalid"; message: string };
+const SkillBuildModeResolutionVariant = Data.taggedEnum<SkillBuildModeResolution>();
 
 const REFERENCE_SKILL_PARAMETERS = Type.Object({
   name: Type.Optional(
@@ -283,7 +285,7 @@ export function executeReferenceSkill(params: ReferenceSkillParams): TextResult 
 }
 
 function invalidMode(message: string): SkillBuildModeResolution {
-  return { _tag: "invalid", message: `✗ ${message}` };
+  return SkillBuildModeResolutionVariant.invalid({ message: `✗ ${message}` });
 }
 
 function resolveCreateMode(params: SkillBuildParams): SkillBuildModeResolution {
@@ -293,16 +295,14 @@ function resolveCreateMode(params: SkillBuildParams): SkillBuildModeResolution {
   if (params.action || params.goal) {
     return invalidMode("Create mode does not accept action or goal.");
   }
-  return {
-    _tag: "valid",
-    mode: {
-      _tag: SkillBuildMode.Create,
+  return SkillBuildModeResolutionVariant.valid({
+    mode: SkillBuildModeVariant.create({
       name: params.name,
       description: params.description,
       template: params.template,
       targetDir: params.targetDir,
-    },
-  };
+    }),
+  });
 }
 
 function resolveExistingMode(params: SkillBuildParams): SkillBuildModeResolution {
@@ -310,12 +310,16 @@ function resolveExistingMode(params: SkillBuildParams): SkillBuildModeResolution
   if (action === SkillBuildMode.Evaluate) {
     const goal = params.goal?.trim();
     return goal
-      ? { _tag: "valid", mode: { _tag: SkillBuildMode.Evaluate, path: params.path!, goal } }
+      ? SkillBuildModeResolutionVariant.valid({
+          mode: SkillBuildModeVariant.evaluate({ path: params.path!, goal }),
+        })
       : invalidMode("Evaluate mode requires the user's goal.");
   }
   return params.goal
     ? invalidMode("Goal applies only to evaluate mode.")
-    : { _tag: "valid", mode: { _tag: SkillBuildMode.Validate, path: params.path! } };
+    : SkillBuildModeResolutionVariant.valid({
+        mode: SkillBuildModeVariant.validate({ path: params.path! }),
+      });
 }
 
 function resolveSkillBuildMode(params: SkillBuildParams): SkillBuildModeResolution {

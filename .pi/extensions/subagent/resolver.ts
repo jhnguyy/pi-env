@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Data } from "effect";
 
 import { discoverAgents, type AgentScope } from "./agents";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
@@ -164,6 +165,7 @@ export function resolveAgentConfig(
 type ToolCatalogEntry =
   | { _tag: "built-in"; definition: ToolDef }
   | { _tag: "extension"; registration: ExtToolRegistration };
+const ToolCatalogEntryVariant = Data.taggedEnum<ToolCatalogEntry>();
 
 type ToolCatalog = {
   byName: Map<string, ToolCatalogEntry>;
@@ -175,10 +177,12 @@ function buildToolCatalog(
 ): ToolCatalog {
   const byName = new Map<string, ToolCatalogEntry>();
   for (const [name, definition] of Object.entries(BUILT_IN_TOOLS)) {
-    byName.set(name, { _tag: "built-in", definition });
+    byName.set(name, ToolCatalogEntryVariant["built-in"]({ definition }));
   }
   for (const [name, registration] of registeredExtTools) {
-    if (!byName.has(name)) byName.set(name, { _tag: "extension", registration });
+    if (!byName.has(name)) {
+      byName.set(name, ToolCatalogEntryVariant.extension({ registration }));
+    }
   }
   return {
     byName,
