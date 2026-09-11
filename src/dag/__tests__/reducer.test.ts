@@ -70,6 +70,7 @@ describe("DAG state reduction", () => {
       { _tag: DagNodeResultTag.Cancelled, reason: 42 },
     ]) {
       expect(
+        // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- Deliberately malformed result literals must cross the transition boundary to test runtime rejection.
         reduceDagRunState(dag, started.state, {
           runId: dag.runId,
           type: DagTransitionType.Complete,

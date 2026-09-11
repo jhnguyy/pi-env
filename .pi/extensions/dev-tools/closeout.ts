@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
 import { Type, type Static } from "typebox";
-import { ToolCapability } from "../_shared/agent-tools";
+import { ToolCapability, type AgentToolEvents } from "../_shared/agent-tools";
 import { execEffect } from "../_shared/exec";
 import { parseGitHubPullRequestUrl } from "../_shared/github";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
@@ -490,7 +490,12 @@ export function createCloseoutToolContract(
   };
 }
 
-export function registerCloseout(pi: ExtensionAPI): void {
+type CloseoutRegistrationApi = Pick<
+  ExtensionAPI,
+  "exec" | "registerCommand" | "registerTool"
+> & AgentToolEvents;
+
+export function registerCloseout(pi: CloseoutRegistrationApi): void {
   const contract = createCloseoutToolContract((command, args, options) =>
     pi.exec(command, args, options),
   );

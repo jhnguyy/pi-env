@@ -24,6 +24,8 @@ beforeEach(() => {
 function registeredPtcTool() {
   const registerTool = vi.fn();
   const listeners = new Map<string, Array<(value: unknown) => void>>();
+  // The public extension entrypoint requires the external host's full ExtensionAPI; this rendering harness implements only the exercised surface.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   const pi = {
     registerTool,
     getActiveTools: () => [],

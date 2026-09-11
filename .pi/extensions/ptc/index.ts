@@ -77,7 +77,7 @@ interface PtcActionResult {
 export async function executePtcAction(
   input: PtcInput,
   runtime: PtcExecutionRuntime,
-  registry: ToolRegistry,
+  registry: Pick<ToolRegistry, "getRuntimeSnapshot">,
   cwd: string,
   signal?: AbortSignal,
   onUpdate?: AgentToolUpdateCallback<unknown>,

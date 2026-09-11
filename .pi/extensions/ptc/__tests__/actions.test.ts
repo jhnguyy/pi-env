@@ -21,14 +21,14 @@ function tool(name: string): ToolInfo {
   } as ToolInfo;
 }
 
-function registrySnapshot(callable: string[], unavailable: string[] = []): ToolRegistry {
+function registrySnapshot(callable: string[], unavailable: string[] = []): Pick<ToolRegistry, "getRuntimeSnapshot"> {
   const availableTools = callable.map(tool);
   return {
     getRuntimeSnapshot: () => ({
       availableTools,
       catalog: createPtcToolCatalog(availableTools, unavailable),
     }),
-  } as unknown as ToolRegistry;
+  };
 }
 
 describe("PTC actions", () => {

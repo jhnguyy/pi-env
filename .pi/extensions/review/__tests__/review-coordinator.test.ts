@@ -21,10 +21,26 @@ function context(sessionId: string): ExtensionContext {
 
 function state(id: string): ReviewState {
   return {
-    snapshot: { id },
+    snapshot: {
+      id,
+      metadata: {
+        owner: "owner",
+        repo: "repo",
+        number: 1,
+        url: "https://github.com/owner/repo/pull/1",
+        baseOid: "base",
+        headOid: "head",
+        changedFiles: [],
+      },
+      artifactDir: `/tmp/${id}/artifacts`,
+      worktree: `/tmp/${id}/worktree`,
+      diffPath: `/tmp/${id}/diff.patch`,
+      diffHash: "a".repeat(64),
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
     selectedFindingIds: [],
     posts: [],
-  } as unknown as ReviewState;
+  } satisfies ReviewState;
 }
 
 describe("ReviewCoordinator", () => {

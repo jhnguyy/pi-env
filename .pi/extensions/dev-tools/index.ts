@@ -15,7 +15,7 @@ import { formatResult } from "./formatters";
 import { registerDevToolsLifecycle } from "./lifecycle";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import type { LspResult } from "./protocol";
-import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import { registerAgentToolsOnSessionStart, ToolCapability, type AgentToolEvents } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
@@ -31,7 +31,12 @@ import { registerCloseout } from "./closeout";
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
-export default function (pi: ExtensionAPI) {
+type DevToolsRegistrationApi = Pick<
+  ExtensionAPI,
+  "exec" | "registerCommand" | "registerTool"
+> & AgentToolEvents;
+
+export function registerDevTools(pi: DevToolsRegistrationApi) {
   const client = new LspClient();
 
   registerCleanupCommand(pi);
@@ -117,7 +122,10 @@ export default function (pi: ExtensionAPI) {
       return renderDevToolsResult(result, opts, theme);
     },
   });
+}
 
+export default function initDevTools(pi: ExtensionAPI): void {
+  registerDevTools(pi);
   // ─── post-edit lifecycle ─────────────────────────────────────────────────
   registerDevToolsLifecycle(pi);
 }

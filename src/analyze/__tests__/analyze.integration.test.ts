@@ -664,6 +664,10 @@ describe("external analyzers and parsers", () => {
     expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: 0 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
   });
 
+  it("rejects a non-string benchmark cwd", () => {
+    expect(() => validateBenchmark({ command: "echo", args: [], cwd: 42 })).toThrow(/cwd must be a string/);
+  });
+
   it("rejects benchmark values above bounded limits", () => {
     expect(() => validateBenchmark({ command: "echo", args: [], warmups: BENCHMARK_LIMITS.warmups.max + 1 })).toThrow(/warmups must be an integer between 0 and 10/);
     expect(() => validateBenchmark({ command: "echo", args: [], runs: BENCHMARK_LIMITS.runs.max + 1 })).toThrow(/runs must be an integer between 1 and 100/);

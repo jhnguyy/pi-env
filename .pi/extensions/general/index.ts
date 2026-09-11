@@ -1,9 +1,15 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentSettledEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as AgentTools from "../_shared/agent-tools";
 
 const TerminalBell = "\u0007";
 
-export default function (pi: ExtensionAPI): void {
+type AgentSettledHandler = (event: AgentSettledEvent, context: ExtensionContext) => unknown;
+
+interface AgentSettledApi {
+  on(event: typeof AgentTools.PiEvent.AgentSettled, handler: AgentSettledHandler): void;
+}
+
+export default function (pi: AgentSettledApi): void {
   pi.on(AgentTools.PiEvent.AgentSettled, (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     process.stdout.write(TerminalBell);

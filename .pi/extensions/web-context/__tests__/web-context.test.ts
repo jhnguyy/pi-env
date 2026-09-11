@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch } from "../index";
+import webContextExtension, { WebFetchFailureKind, WebFetchMode, fetchWebText, fetchWebTextEffect, parseWebUrl, type WebFetch, type WebFetchResponse } from "../index";
 import { AnthropicHostedToolName, injectAnthropicHostedWebTools, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "../anthropic-tools";
 import { OpenAISearchContextSize, injectOpenAIHostedWebTools, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "../openai-tools";
 
@@ -189,6 +189,7 @@ describe("web fetch", () => {
       headers: new Headers(),
       status: 200,
       url: "https://example.com/",
+      arrayBuffer: async () => new ArrayBuffer(0),
       body: {
         getReader: () => {
           bodyStarted();
@@ -205,7 +206,7 @@ describe("web fetch", () => {
           };
         },
       },
-    } as unknown as Response;
+    } satisfies WebFetchResponse;
     const injectedFetch: WebFetch = async () => response;
     const promise = fetchWebText("https://example.com", {}, controller.signal, { fetch: injectedFetch });
     promise.catch(() => undefined);
@@ -230,6 +231,7 @@ describe("web fetch", () => {
       headers: new Headers(),
       status: 200,
       url: "https://example.com/",
+      arrayBuffer: async () => new ArrayBuffer(0),
       body: {
         getReader: () => {
           bodyStarted();
@@ -246,7 +248,7 @@ describe("web fetch", () => {
           };
         },
       },
-    } as unknown as Response;
+    } satisfies WebFetchResponse;
     const injectedFetch: WebFetch = async () => response;
     const fiber = Effect.runFork(fetchWebTextEffect("https://example.com", {}, { fetch: injectedFetch }));
 

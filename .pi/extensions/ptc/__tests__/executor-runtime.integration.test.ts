@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
 import { createPtcToolCatalog } from "../catalog";
-import { PtcExecutor } from "../executor";
+import { PtcExecutor, type PtcExecutorRegistry } from "../executor";
 import {
   PtcCompletion,
   PtcFailureClass,
@@ -14,7 +14,6 @@ import {
   PtcRunDetailsSchema,
 } from "../execution-details";
 import { PtcExecutionError, PtcExecutionPhase } from "../node-runtime";
-import type { ToolRegistry } from "../tool-registry";
 import { BLOCKED_TOOLS, MAX_OUTPUT_BYTES } from "../types";
 import { Schema } from "effect";
 
@@ -73,7 +72,7 @@ function makeExecutor(
       catalog: createPtcToolCatalog(availableTools, unavailableNames),
     }),
     dispatch,
-  } as unknown as ToolRegistry;
+  } satisfies PtcExecutorRegistry;
   return new PtcExecutor(registry, preamblePath, timeoutMs);
 }
 

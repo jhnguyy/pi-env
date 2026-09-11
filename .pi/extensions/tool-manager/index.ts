@@ -38,11 +38,21 @@ function loadConfig(cwd = process.cwd()): ResolvedConfig {
   }
 }
 
-function all(pi: ExtensionAPI): ToolInfo[] {
+export type ToolManagerStateApi = Pick<
+  ExtensionAPI,
+  "getAllTools" | "getActiveTools" | "setActiveTools" | "appendEntry"
+>;
+
+export interface ToolsCommandContext {
+  readonly mode: ExtensionCommandContext["mode"];
+  readonly ui: Pick<ExtensionCommandContext["ui"], "notify" | "custom">;
+}
+
+function all(pi: ToolManagerStateApi): ToolInfo[] {
   return pi.getAllTools().sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function persist(pi: ExtensionAPI, active: string[], reason: "profile" | "toggle" | "auto" | "search" | "reset", profile?: string): void {
+function persist(pi: ToolManagerStateApi, active: string[], reason: "profile" | "toggle" | "auto" | "search" | "reset", profile?: string): void {
   pi.appendEntry(CUSTOM_TYPE, { active, reason, profile, at: new Date().toISOString() });
 }
 
@@ -55,7 +65,7 @@ interface ToolTransition {
   onlyIfAdded?: boolean;
 }
 
-function commitTools(pi: ExtensionAPI, config: ResolvedConfig, transition: ToolTransition): string[] {
+function commitTools(pi: ToolManagerStateApi, config: ResolvedConfig, transition: ToolTransition): string[] {
   const tools = all(pi);
   const base = transition.profile ? profileTools(transition.profile, config, tools) : transition.base ?? pi.getActiveTools();
   const additions = expandRequestedEntries(transition.add ?? [], config, tools);
@@ -76,17 +86,17 @@ function branchEntries(ctx: ExtensionContext): unknown[] {
   return ctx.sessionManager.getBranch();
 }
 
-function status(pi: ExtensionAPI, config: ResolvedConfig): string {
+function status(pi: ToolManagerStateApi, config: ResolvedConfig): string {
   const active = pi.getActiveTools().sort();
   return [`Active tools (${active.length}): ${active.join(", ")}`, `Default profile: ${config.defaultProfile}`].join("\n");
 }
 
-function notify(ctx: ExtensionCommandContext, message: string, type: "info" | "warning" | "error" = "info"): void {
+function notify(ctx: ToolsCommandContext, message: string, type: "info" | "warning" | "error" = "info"): void {
   ctx.ui.notify(message, type);
 }
 
 function notifyChanges(
-  ctx: ExtensionCommandContext,
+  ctx: ToolsCommandContext,
   verb: "Enabled" | "Disabled",
   changed: readonly string[],
   unknown: readonly string[],
@@ -101,8 +111,8 @@ function notifyChanges(
 }
 
 function enableTools(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
+  pi: ToolManagerStateApi,
+  ctx: ToolsCommandContext,
   config: ResolvedConfig,
   names: readonly string[],
 ): void {
@@ -113,8 +123,8 @@ function enableTools(
 }
 
 function disableTools(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
+  pi: ToolManagerStateApi,
+  ctx: ToolsCommandContext,
   config: ResolvedConfig,
   names: readonly string[],
 ): void {
@@ -125,8 +135,8 @@ function disableTools(
 }
 
 function applyProfile(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
+  pi: ToolManagerStateApi,
+  ctx: ToolsCommandContext,
   config: ResolvedConfig,
   profile: string,
   reason: "profile" | "reset",
@@ -140,9 +150,9 @@ function applyProfile(
 }
 
 export async function handleToolsCommand(
-  pi: ExtensionAPI,
+  pi: ToolManagerStateApi,
   args: string,
-  ctx: ExtensionCommandContext,
+  ctx: ToolsCommandContext,
   config: ResolvedConfig,
 ): Promise<void> {
   const parts = args.trim().split(/\s+/).filter(Boolean);
@@ -177,7 +187,7 @@ export async function handleToolsCommand(
   }
 }
 
-async function openToolsTui(pi: ExtensionAPI, ctx: ExtensionCommandContext, config: ResolvedConfig): Promise<void> {
+async function openToolsTui(pi: ToolManagerStateApi, ctx: ToolsCommandContext, config: ResolvedConfig): Promise<void> {
   await ctx.ui.custom((tui, _theme, _kb, done) => {
     const locked = new Set(config.alwaysActive);
     const items: SettingItem[] = all(pi).map((tool) => {

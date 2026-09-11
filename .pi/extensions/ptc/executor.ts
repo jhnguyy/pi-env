@@ -50,9 +50,11 @@ export interface PtcExecutionResult {
   readonly details: PtcRunDetails;
 }
 
+export type PtcExecutorRegistry = Pick<ToolRegistry, "getRuntimeSnapshot" | "dispatch">;
+
 export class PtcExecutor {
   constructor(
-    private registry: ToolRegistry,
+    private registry: PtcExecutorRegistry,
     private preamblePath = PREAMBLE_PATH,
     private timeoutMs = MAX_TIMEOUT_MS,
   ) {}

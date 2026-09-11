@@ -135,8 +135,13 @@ function validateParameters(params: LinearParameters): void {
   }
 }
 
+export type LinearToolGateway = Pick<
+  LinearGateway,
+  "viewer" | "listResources" | "listIssues" | "searchIssues" | "issue"
+>;
+
 async function dispatchLinear(
-  gateway: LinearGateway,
+  gateway: LinearToolGateway,
   params: LinearParameters,
   signal?: AbortSignal,
 ) {
@@ -204,7 +209,7 @@ async function dispatchLinear(
 }
 
 export function createLinearTool(
-  gateway: LinearGateway,
+  gateway: LinearToolGateway,
 ): PublicPiToolDefinition<typeof LinearParameters, unknown> {
   return definePublicTool<typeof LinearParameters, unknown>({
     name: "linear",

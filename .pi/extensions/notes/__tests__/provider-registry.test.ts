@@ -35,6 +35,7 @@ describe("notes provider registry", () => {
     registerNotesProvider(same);
     expect(() => registerNotesProvider(same)).toThrow("already registered");
     expect(() => registerNotesProvider(provider("same"))).toThrow("already registered");
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- The incomplete literal independently proves registry validation rejects missing provider methods.
     expect(() => registerNotesProvider({ id: "incomplete" } as unknown as NotesProvider)).toThrow(
       "baseline interface",
     );

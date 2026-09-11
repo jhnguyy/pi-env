@@ -49,7 +49,10 @@ describe("shared compact tool rendering", () => {
       theme,
       { isError: true },
     );
-    expect((rendered as unknown as { text: string }).text).toContain("<error>✗</error>");
+    if (!("text" in rendered) || typeof rendered.text !== "string") {
+      throw new TypeError("Expected a rendered text component");
+    }
+    expect(rendered.text).toContain("<error>✗</error>");
   });
 
   it("requires both render hooks at the public registration boundary", () => {

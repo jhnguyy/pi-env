@@ -41,7 +41,10 @@ function createHarness(activeNames: string[]) {
   ];
   const appended: Array<{ type: string; data: unknown }> = [];
 
-  const createApi = (): ExtensionAPI => ({
+  const createApi = (): ExtensionAPI =>
+    // The shared registration APIs require the external host's full ExtensionAPI; this harness implements only the exercised host surface.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
+    ({
     registerTool(tool: ToolDefinition<any, any, any>) {
       tools.push({ ...tool, sourceInfo: sourceInfo("extension") });
     },
@@ -52,7 +55,7 @@ function createHarness(activeNames: string[]) {
     getAllTools: () => tools,
     on() {},
     events: bus.events,
-  } as unknown as ExtensionAPI);
+    }) as unknown as ExtensionAPI;
 
   return { api: createApi(), createApi, tools, bus, active, appended };
 }

@@ -42,12 +42,16 @@ export function resolveNotesProvider(id: string): NotesProvider {
   return provider;
 }
 
-function validateProvider(provider: NotesProvider): void {
-  const candidate = provider as unknown as Record<string, unknown>;
+function validateProvider(provider: unknown): asserts provider is NotesProvider {
+  if (typeof provider !== "object" || provider === null) {
+    throw new NotesProviderError({
+      code: "invalid-provider",
+      message: "Notes provider does not implement the baseline interface.",
+    });
+  }
+  const candidate = provider as Record<string, unknown>;
   const methods = ["index", "list", "read", "search", "write", "delete"] as const;
   if (
-    typeof candidate !== "object" ||
-    candidate === null ||
     typeof candidate.id !== "string" ||
     candidate.id.length === 0 ||
     methods.some((method) => typeof candidate[method] !== "function") ||

@@ -16,9 +16,9 @@ const itemId = "12345678-1234-1234-1234-123456789abc";
 
 describe("credential providers", () => {
   it("uses a constrained 1Password CLI read with a fixed secret reference", async () => {
-    const runner = vi.fn((_command, _args, _options) =>
+    const runner = vi.fn<CredentialProcessRunner>((_command, _args, _options) =>
       Effect.succeed({ stdout: SENTINEL, stderr: "" }),
-    ) as unknown as CredentialProcessRunner;
+    );
     const provider = createOnePasswordProvider(runner, () => "/trusted/op");
     const wrapped = await Effect.runPromise(
       provider.resolve(
@@ -31,7 +31,7 @@ describe("credential providers", () => {
       ),
     );
 
-    const [command, args, options] = (runner as any).mock.calls[0];
+    const [command, args, options] = runner.mock.calls[0];
     expect(command).toBe("/trusted/op");
     expect(args).toEqual(["read", "--no-newline", "op://Private/Linear/credential"]);
     expect(options.env).not.toHaveProperty("PI_ENV_NODE_BIN");
@@ -41,9 +41,9 @@ describe("credential providers", () => {
   });
 
   it("passes the Bitwarden session through runner stdin, not arguments or environment", async () => {
-    const runner = vi.fn((_command, _args, _options) =>
+    const runner = vi.fn<CredentialProcessRunner>((_command, _args, _options) =>
       Effect.succeed({ stdout: `${SENTINEL}\n`, stderr: "" }),
-    ) as unknown as CredentialProcessRunner;
+    );
     const sessionSource: BitwardenSessionSource = {
       use: (consume) => consume(Redacted.make("SESSION_SENTINEL")),
     };
@@ -60,7 +60,7 @@ describe("credential providers", () => {
       ),
     );
 
-    const [command, args, options] = (runner as any).mock.calls[0];
+    const [command, args, options] = runner.mock.calls[0];
     expect(command).not.toContain("SESSION_SENTINEL");
     expect(args).toEqual(["/trusted/bitwarden-runner.js", "/trusted/bw", "password", itemId]);
     expect(JSON.stringify(args)).not.toContain("SESSION_SENTINEL");
@@ -68,7 +68,7 @@ describe("credential providers", () => {
     expect(options.env).not.toHaveProperty("PI_ENV_NODE_BIN");
     expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
     expect(Buffer.isBuffer(options.stdin)).toBe(true);
-    expect(options.stdin.toString("utf8")).toBe("SESSION_SENTINEL\n");
+    expect(Buffer.from(options.stdin ?? "").toString("utf8")).toBe("SESSION_SENTINEL\n");
     expect(options.stdoutLimitBytes).toBe(CREDENTIAL_STDOUT_LIMIT_BYTES);
     expect(options.stderrLimitBytes).toBe(CREDENTIAL_STDERR_LIMIT_BYTES);
     expect(Redacted.value(wrapped)).toBe(SENTINEL);

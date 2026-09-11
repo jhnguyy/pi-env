@@ -2,9 +2,8 @@ import { Check } from "typebox/value";
 import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import type { IssueSummary, LinearResourceSummary } from "../api";
-import type { LinearGateway } from "../client";
 import { LinearErrorCode, linearError, type LinearToolError } from "../domain";
-import { createLinearTool, LinearAction } from "../tools";
+import { createLinearTool, LinearAction, type LinearToolGateway } from "../tools";
 
 function issue(number: number): IssueSummary {
   return {
@@ -51,11 +50,11 @@ function gateway() {
       totalCount: 100,
     })),
     issue: vi.fn(async () => issue(1)),
-  };
+  } satisfies LinearToolGateway;
 }
 
 function tool(fakeGateway: ReturnType<typeof gateway>) {
-  return createLinearTool(fakeGateway as unknown as LinearGateway);
+  return createLinearTool(fakeGateway);
 }
 
 async function execute(

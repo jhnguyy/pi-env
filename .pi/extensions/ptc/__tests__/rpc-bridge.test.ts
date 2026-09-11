@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
-import { RpcBridge } from "../rpc-bridge";
+import { RpcBridge, type RpcChildProcess } from "../rpc-bridge";
 import {
   MAX_OUTPUT_BYTES,
   MAX_STDERR_BYTES,
@@ -19,7 +19,7 @@ import {
 } from "../types";
 
 interface MockProc {
-  proc: ChildProcess;
+  proc: RpcChildProcess;
   send: (msg: RpcOutbound) => void;
   stdout: (text: string) => void;
   exit: (code: number) => void;
@@ -38,15 +38,13 @@ function makeMock(): MockProc {
   const stdinChunks: Buffer[] = [];
   stdin.on("data", (chunk: Buffer) => stdinChunks.push(chunk));
 
+  const stdio: ChildProcess["stdio"] = [stdin, stdout, stderr, rpc, undefined];
   const proc = Object.assign(ee, {
     stdout,
     stderr,
     stdin,
-    stdio: [stdin, stdout, stderr, rpc],
-    exitCode: null as number | null,
-    signalCode: null as NodeJS.Signals | null,
-    kill: (_signal?: string) => {},
-  }) as unknown as ChildProcess;
+    stdio,
+  }) satisfies RpcChildProcess;
 
   const closeStreams = (): void => {
     stdout.end();
@@ -58,17 +56,14 @@ function makeMock(): MockProc {
     send: (msg) => rpc.write(JSON.stringify(msg) + "\n"),
     stdout: (text) => stdout.write(text),
     exit: (code) => {
-      (proc as any).exitCode = code;
       closeStreams();
       ee.emit("exit", code, null);
     },
     exitThenClose: (code) => {
-      (proc as any).exitCode = code;
       ee.emit("exit", code, null);
       closeStreams();
     },
     terminate: (signal) => {
-      (proc as any).signalCode = signal;
       closeStreams();
       ee.emit("exit", null, signal);
     },

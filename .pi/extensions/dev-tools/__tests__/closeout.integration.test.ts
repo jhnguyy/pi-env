@@ -175,16 +175,24 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
   it("registers closeout as both a slash command and an authorized LLM tool", async () => {
     const commands: Array<{ name: string; description: string }> = [];
     const tools: Array<{ name: string; description: string; promptGuidelines?: string[] }> = [];
-    const { default: initDevTools } = await import("../index");
-    initDevTools({
-      registerCommand(name: string, options: { description: string }) {
-        commands.push({ name, description: options.description });
-      },
-      registerTool(tool: { name: string; description: string; promptGuidelines?: string[] }) {
-        tools.push(tool);
-      },
+    const { registerDevTools } = await import("../index");
+    const registerCommand: Parameters<typeof registerDevTools>[0]["registerCommand"] = (name, options) => {
+      commands.push({ name, description: options.description ?? "" });
+    };
+    const registerTool: Parameters<typeof registerDevTools>[0]["registerTool"] = (tool) => {
+      tools.push({
+        name: tool.name,
+        description: tool.description,
+        promptGuidelines: Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : undefined,
+      });
+    };
+    registerDevTools({
+      exec: async () => ok(),
+      events: { emit() {} },
+      registerCommand,
+      registerTool,
       on() {},
-    } as unknown as ExtensionAPI);
+    });
 
     expect(commands).toContainEqual({
       name: "closeout",
@@ -203,15 +211,17 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     const fixture = createCloseoutFixture();
     const { exec } = createExec(fixture);
     const tools: Array<{ name: string; execute: (...args: any[]) => Promise<any> }> = [];
-    const { default: initDevTools } = await import("../index");
-    initDevTools({
+    const { registerDevTools } = await import("../index");
+    const registerTool: Parameters<typeof registerDevTools>[0]["registerTool"] = (tool) => {
+      tools.push({ name: tool.name, execute: tool.execute });
+    };
+    registerDevTools({
       exec,
+      events: { emit() {} },
       registerCommand() {},
-      registerTool(tool: { name: string; execute: (...args: any[]) => Promise<any> }) {
-        tools.push(tool);
-      },
+      registerTool,
       on() {},
-    } as unknown as ExtensionAPI);
+    });
     const tool = tools.find(({ name }) => name === "closeout");
     expect(tool).toBeDefined();
     await expect(
@@ -270,8 +280,8 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
         started();
       });
     };
-    const { default: initDevTools } = await import("../index");
-    initDevTools({
+    const { registerDevTools } = await import("../index");
+    registerDevTools({
       exec,
       events: {
         emit(event: string, registration: unknown) {
@@ -283,7 +293,7 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
       on(event: string, handler: (...args: any[]) => void) {
         if (event === PiEvent.SessionStart) sessionStartHandlers.push(handler);
       },
-    } as unknown as ExtensionAPI);
+    });
     for (const handler of sessionStartHandlers) handler(undefined, { cwd: "/session" });
     const registration = registrations.find(({ tool }) => tool.name === "closeout");
     expect(registration.capabilities).toEqual([

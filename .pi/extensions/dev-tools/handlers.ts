@@ -16,6 +16,7 @@ import type {
   SymbolItem, SymbolsResult, StatusResult,
 } from "./protocol";
 import type { LspBackend } from "./backend";
+import type { LspMessage } from "./lsp-transport";
 import { applyWorkspaceEdit } from "./workspace-edit";
 
 export interface HandlerDeps {
@@ -27,14 +28,32 @@ export interface HandlerDeps {
   getIdleMs: () => number;
 }
 
-interface RequestContext {
-  backend: LspBackend;
+export interface RenameBackend {
+  readonly projectRoots: string[];
+  ensureFile(filePath: string): Promise<string>;
+  getProjectRoot(filePath: string): string;
+  getDocumentSnapshot(filePath: string): { version: number; content: string } | undefined;
+  lspRequest(method: string, params: unknown): Promise<LspMessage | null>;
+  recordSemanticResult(method: string, itemCount: number): void;
+}
+
+export interface RenameHandlerDeps {
+  getBackend(filePath: string): RenameBackend;
+  fileCache: Pick<FileCache, "invalidate">;
+}
+
+interface RequestContext<Backend extends RenameBackend = LspBackend> {
+  backend: Backend;
   uri: string;
   pos: { line: number; character: number };
   projectRoot: string;
 }
 
-async function prepareRequest(req: DaemonRequest, deps: HandlerDeps, action: string): Promise<RequestContext> {
+async function prepareRequest<Backend extends RenameBackend>(
+  req: DaemonRequest,
+  deps: { getBackend(filePath: string): Backend },
+  action: string,
+): Promise<RequestContext<Backend>> {
   if (!req.path || req.line == null || req.character == null) {
     throw new Error(`path, line, and character required for ${action}`);
   }
@@ -357,9 +376,9 @@ export async function handleReferences(req: DaemonRequest, deps: HandlerDeps): P
   } as ReferencesResult);
 }
 
-export async function handleRename(req: DaemonRequest, deps: HandlerDeps): Promise<DaemonResponse> {
+export async function handleRename(req: DaemonRequest, deps: RenameHandlerDeps): Promise<DaemonResponse> {
   if (!req.newName?.trim()) return errorResponse(req.id, "newName required for rename");
-  let ctx: RequestContext;
+  let ctx: RequestContext<RenameBackend>;
   try {
     ctx = await prepareRequest(req, deps, "rename");
   } catch (e) {
@@ -375,7 +394,7 @@ export async function handleRename(req: DaemonRequest, deps: HandlerDeps): Promi
 
   try {
     const allowedRoots = [...new Set([ctx.projectRoot, ...ctx.backend.projectRoots])];
-    const authorizedBackends = new Map<string, LspBackend>();
+    const authorizedBackends = new Map<string, RenameBackend>();
     const applied = await applyWorkspaceEdit(lspRes.result, {
       allowedRoots,
       authorizeTarget: (requestedPath, realPath) => {

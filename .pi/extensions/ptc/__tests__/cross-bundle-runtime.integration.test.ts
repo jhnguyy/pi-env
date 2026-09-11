@@ -68,6 +68,8 @@ function createHarness() {
   const listeners = new Map<string, Array<(...args: any[]) => void>>();
 
   const createApi = (): ExtensionAPI =>
+    // Both dynamically loaded public entrypoints require the external host's full ExtensionAPI; this cross-bundle harness implements only their exercised surface.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     ({
       registerTool(tool: ToolDefinition<any, any, any>) {
         tools.push({
