@@ -14,6 +14,8 @@ Every committed test should have one primary intent:
 
 Delete or avoid assertions that only mirror private field layout, function arity, incidental rendering details, or lifecycle checks already enforced by build/install verification.
 
+Do not test test wiring. Do not pin package scripts, verification registry arrays, workflow text, dependency waiver snapshots, or validator invocation details in tests. Running the canonical validation is the authority for that wiring. Test a validation helper only when it owns a durable parsing, exit-status, or fail-safe contract that a successful repository run cannot prove.
+
 ## Test file boundaries
 
 Name Vitest files that require real processes, sockets, Git repositories, or analyzers `*.integration.test.ts` or `*.integration.test.mjs`. Keep pure contract and policy tests in `*.test.ts` or `*.test.mjs` files. Split mixed files when the split improves focused execution without duplicating the fixture or public claim.

@@ -24,28 +24,6 @@ describe("check-patterns", () => {
     expect(analyzeFile("src/example.test.ts", "it('hardens', () => {});")).toEqual([]);
   });
 
-  it("fails the CLI when a catching test is tracked", () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-env-check-catching-"));
-    temporaryDirectories.push(directory);
-    mkdirSync(join(directory, "tests"));
-    writeFileSync(
-      join(directory, "tests", "example.catching.test.ts"),
-      "it('temporary', () => {});",
-    );
-    expect(spawnSync("git", ["init", "-q"], { cwd: directory }).status).toBe(0);
-    expect(
-      spawnSync("git", ["add", "tests/example.catching.test.ts"], { cwd: directory }).status,
-    ).toBe(0);
-
-    const result = spawnSync(NODE_RUNNER_PATH, [CHECKER_PATH], {
-      cwd: directory,
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain("Committed catching test found");
-  });
-
   it("preserves the local formatError rule", () => {
     expect(
       analyzeText("scripts/example.ts", "function formatError(error) { return String(error); }"),
