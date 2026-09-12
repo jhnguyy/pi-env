@@ -157,6 +157,7 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.LicenseCompliance,
   VerificationPhase.SafeRuntimeTests,
   VerificationPhase.Build,
+  VerificationPhase.InstallReadiness,
 ]);
 
 export const EXPLICIT_VERIFICATION_PHASES = Object.freeze([

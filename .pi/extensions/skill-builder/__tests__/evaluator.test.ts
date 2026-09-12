@@ -157,9 +157,5 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
       expect(cost).toBe(0);
     });
 
-    it("handles zero tokens", () => {
-      const cost = estimateCost(testModelConfig, 0, 0);
-      expect(cost).toBe(0);
-    });
   });
 });

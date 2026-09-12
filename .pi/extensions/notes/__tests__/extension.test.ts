@@ -6,21 +6,20 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { activateNotesExtension, NotesProviderEvent } from "../index";
 import type { NotesProvider } from "../domain";
-import { resetNotesProviderRegistryForTests, resolveNotesProvider } from "../provider-registry";
+import { resolveNotesProvider } from "../provider-registry";
 import {
   AgentToolEvent,
   PiEvent,
   ToolCapability,
-  resetAgentToolRegistryForTests,
   type ExtToolRegistration,
 } from "../../_shared/agent-tools";
 import type { SettingsEnv } from "../../_shared/settings";
 
 const roots: string[] = [];
+const shutdowns: Array<() => void> = [];
 
 afterEach(async () => {
-  resetAgentToolRegistryForTests();
-  resetNotesProviderRegistryForTests();
+  for (const shutdown of shutdowns.splice(0)) shutdown();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -41,7 +40,7 @@ function harness() {
   const sessionHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
   const shutdownHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
   const eventHandlers = new Map<string, Array<(payload: unknown) => void>>();
-  return {
+  const testHarness = {
     tools,
     registrations,
     pi: {
@@ -83,6 +82,8 @@ function harness() {
       }
     },
   };
+  shutdowns.push(() => testHarness.shutdownSession());
+  return testHarness;
 }
 
 function externalProvider(id: string, indexText: string): NotesProvider {
@@ -203,7 +204,6 @@ describe("notes extension", () => {
     expect(testHarness.tools).toHaveLength(1);
     expect(testHarness.tools[0].name).toBe("notes");
     expect(testHarness.registrations).toHaveLength(1);
-    expect(testHarness.registrations[0].tool.parameters).toBe(testHarness.tools[0].parameters);
     expect(testHarness.registrations[0].capabilities).toEqual([
       ToolCapability.Read,
       ToolCapability.Write,

@@ -1,9 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   CredentialErrorCode,
   getCredentialSource,
   registerCredentialSource,
-  resetCredentialSourceRegistryForTests,
   type CredentialSource,
 } from "../../_shared/credential-source";
 
@@ -13,8 +12,6 @@ const source: CredentialSource = {
 };
 
 describe("credential source registry", () => {
-  beforeEach(() => resetCredentialSourceRegistryForTests());
-
   it("replays one source across bundle-local imports", async () => {
     const secondImport = await import("../../_shared/credential-source");
     const unregister = registerCredentialSource(source);

@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, test } from "vitest";
+import { describe, expect, it, onTestFinished, test } from "vitest";
 import type { ExtensionAPI, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { registerAgentTools, resetAgentToolRegistryForTests, ToolCapability } from "../../_shared/agent-tools";
-import { registerPtcTools, resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
+import {
+  registerAgentTools,
+  ToolCapability,
+  unregisterAgentTools,
+} from "../../_shared/agent-tools";
+import { registerPtcTools } from "../../_shared/ptc-tools";
 import {
   definePublicTool,
   renderCompactToolCall,
@@ -40,6 +44,10 @@ function createHarness(activeNames: string[]) {
     { name: "read", description: "read", parameters: {}, sourceInfo: sourceInfo("builtin") },
   ];
   const appended: Array<{ type: string; data: unknown }> = [];
+  const shutdownHandlers: Array<() => void> = [];
+  onTestFinished(() => {
+    for (const handler of shutdownHandlers) handler();
+  });
 
   const createApi = (): ExtensionAPI =>
     // The shared registration APIs require the external host's full ExtensionAPI; this harness implements only the exercised host surface.
@@ -53,7 +61,9 @@ function createHarness(activeNames: string[]) {
     getActiveTools: () => active,
     setActiveTools: (next: string[]) => active.splice(0, active.length, ...next),
     getAllTools: () => tools,
-    on() {},
+    on(event: string, handler: () => void) {
+      if (event === "session_shutdown") shutdownHandlers.push(handler);
+    },
     events: bus.events,
     }) as unknown as ExtensionAPI;
 
@@ -71,16 +81,17 @@ const externalTool = definePublicTool({
     renderTextToolResult("external", result, options, theme, context),
 });
 
-describe("ToolRegistry active filtering", () => {
-  beforeEach(() => {
-    resetAgentToolRegistryForTests();
-    resetPtcToolRegistryForTests();
-  });
+function createRegistry(pi: ExtensionAPI): ToolRegistry {
+  const registry = new ToolRegistry(pi);
+  onTestFinished(() => registry.dispose());
+  return registry;
+}
 
+describe("ToolRegistry active filtering", () => {
   it("excludes inactive tools from ptc availability and dispatch", async () => {
     const harness = createHarness([]);
     registerPtcTools(harness.api, externalTool);
-    const registry = new ToolRegistry(harness.api);
+    const registry = createRegistry(harness.api);
 
     expect(registry.getAvailableTools().map((tool) => tool.name)).toEqual([]);
     await expect(
@@ -96,8 +107,8 @@ describe("ToolRegistry active filtering", () => {
     ["after", (register: () => void, registry: () => ToolRegistry) => { registry(); register(); }],
   ] as const)("%s-construction PTC registrations are available", async (_label, arrange) => {
     const harness = createHarness(["external"]);
-    let registry: ToolRegistry | undefined;
-    const getRegistry = () => (registry ??= new ToolRegistry(harness.createApi()));
+    let activeRegistry: ToolRegistry | undefined;
+    const getRegistry = () => (activeRegistry ??= createRegistry(harness.createApi()));
 
     arrange(() => registerPtcTools(harness.createApi(), externalTool), getRegistry);
 
@@ -107,9 +118,10 @@ describe("ToolRegistry active filtering", () => {
 
   it("executes agent-tool registrations", async () => {
     const harness = createHarness(["external"]);
-    const registry = new ToolRegistry(harness.api);
+    const registry = createRegistry(harness.api);
+    const agentApi = harness.createApi();
 
-    registerAgentTools(harness.createApi(), {
+    const registrations = registerAgentTools(agentApi, {
       tool: {
         name: "external",
         label: "external",
@@ -119,6 +131,7 @@ describe("ToolRegistry active filtering", () => {
       },
       capabilities: [ToolCapability.Read],
     });
+    onTestFinished(() => unregisterAgentTools(agentApi, registrations));
 
     await expect(
       registry.dispatch("external", {}, process.cwd(), undefined, { cwd: process.cwd() }),
@@ -127,8 +140,9 @@ describe("ToolRegistry active filtering", () => {
 
   it("does not expose DAG-only agent tools through PTC", async () => {
     const harness = createHarness(["review_private"]);
-    const registry = new ToolRegistry(harness.api);
-    registerAgentTools(harness.createApi(), {
+    const registry = createRegistry(harness.api);
+    const agentApi = harness.createApi();
+    const registrations = registerAgentTools(agentApi, {
       tool: {
         name: "review_private",
         label: "private review",
@@ -139,6 +153,7 @@ describe("ToolRegistry active filtering", () => {
       capabilities: [ToolCapability.Read],
       audience: "dag",
     });
+    onTestFinished(() => unregisterAgentTools(agentApi, registrations));
     await expect(registry.dispatch("review_private", {}, process.cwd(), undefined)).rejects.toThrow("not available");
   });
 
@@ -151,7 +166,7 @@ describe("ToolRegistry active filtering", () => {
     const ptcApi = harness.createApi();
     const managerApi = harness.createApi();
     const originalRegisterTool = managerApi.registerTool;
-    const registry = new ToolRegistry(ptcApi);
+    const registry = createRegistry(ptcApi);
     toolManager(managerApi);
 
     expect(ptcApi.registerTool).not.toBe(managerApi.registerTool);

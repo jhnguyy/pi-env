@@ -12,7 +12,7 @@ export interface BenchmarkConfig {
   runs?: number;
 }
 
-export const BENCHMARK_LIMITS = {
+const BENCHMARK_LIMITS = {
   timeoutMs: { min: 1, max: 300_000 },
   warmups: { min: 0, max: 10 },
   runs: { min: 1, max: 100 },
@@ -47,7 +47,7 @@ function validateIntegerOption<Key extends "timeoutMs" | "warmups" | "runs">(
     throw new BenchmarkError({ message: `${key} must be an integer between ${minimum} and ${maximum}` });
   }
 }
-export function validateBenchmark(value: unknown): BenchmarkConfig {
+function validateBenchmark(value: unknown): BenchmarkConfig {
   const record = benchmarkRecord(value);
   validateCommand(record);
   validateCwd(record);
@@ -65,6 +65,15 @@ const execute = (config: BenchmarkConfig) => Effect.flatMap(ProcessService, ({ r
 
 export function runBenchmarkEffect(config: BenchmarkConfig): Effect.Effect<BenchmarkResult, BenchmarkError, ProcessService> {
   return Effect.suspend(() => {
+    try {
+      config = validateBenchmark(config);
+    } catch (cause) {
+      return Effect.fail(
+        cause instanceof BenchmarkError
+          ? cause
+          : new BenchmarkError({ message: cause instanceof Error ? cause.message : String(cause) }),
+      );
+    }
     const runs: number[] = [];
     return Effect.gen(function* () {
       // Sequential execution is required for stable measurements and bounded memory.

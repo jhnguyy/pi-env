@@ -31,8 +31,7 @@ import {
 import {
   dagUsagePrefix,
   DagRuntimeServiceEvent,
-  listenForDagRuntimeService,
-  resetDagRuntimeServiceRegistryForTests,
+  listenForDagRuntimeService as subscribeToDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../../_shared/dag-runtime-service";
 import { SubagentJobManager } from "../jobs";
@@ -127,8 +126,14 @@ function graph(runId: string) {
   return result.graph;
 }
 
+const subscriptions: Array<() => void> = [];
+function listenForDagRuntimeService(...args: Parameters<typeof subscribeToDagRuntimeService>) {
+  const stop = subscribeToDagRuntimeService(...args);
+  subscriptions.push(stop);
+  return stop;
+}
+
 beforeEach(() => {
-  resetDagRuntimeServiceRegistryForTests();
   state.adapterCalls = [];
   state.executor = () => Effect.succeed({ artifact: "ref" });
   state.telemetry = undefined;
@@ -136,7 +141,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  resetDagRuntimeServiceRegistryForTests();
+  for (const stop of subscriptions.splice(0)) stop();
   vi.clearAllMocks();
   for (const directory of tempDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });

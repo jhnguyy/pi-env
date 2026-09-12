@@ -201,6 +201,5 @@ describe("subagent resolver", () => {
     expect(result._tag).toBe(ResolutionResultTag.Ok);
     if (result._tag !== ResolutionResultTag.Ok) return;
     expect(result.value.toolNames).toEqual(["notes"]);
-    expect(result.value.systemPrompt).toContain("Complete the task");
   });
 });

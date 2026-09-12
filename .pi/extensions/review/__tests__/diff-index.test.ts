@@ -60,18 +60,21 @@ describe("canonical diff index", () => {
     expect([...createDiffIndex(diff).keys()]).toEqual(["src/gone.ts"]);
   });
 
-  it("decodes quoted paths and preserves unquoted paths containing spaces", () => {
+  it("decodes Git C-style paths and preserves unquoted paths containing spaces", () => {
     const quoted = [
-      'diff --git "a/src/quoted name.ts" "b/src/quoted name.ts"',
-      '--- "a/src/quoted name.ts"',
-      '+++ "b/src/quoted name.ts"',
+      'diff --git "a/src/old name.ts" "b/src/sp\\303\\244ce\\tquote\\" name.ts"',
+      '--- "a/src/old name.ts"',
+      '+++ "b/src/sp\\303\\244ce\\tquote\\" name.ts"',
       "@@ -1 +1 @@",
       "-old",
       "+new",
     ].join("\n");
     const spaced = section("dir with space/a.ts", "dir with space/a.ts");
     const index = createDiffIndex(`${quoted}\n${spaced}`);
-    expect([...index.keys()]).toEqual(["src/quoted name.ts", "dir with space/a.ts"]);
+    expect([...index.keys()]).toEqual([
+      'src/späce\tquote" name.ts',
+      "dir with space/a.ts",
+    ]);
   });
 
   it("uses rename metadata when an unquoted source contains a b/ separator", () => {

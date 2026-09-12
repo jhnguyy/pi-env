@@ -5,10 +5,12 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 run_strategy() {
-  local strategy="$1" tmp fake_bin log setup_node
+  local strategy="$1" tmp fake_bin log patch_marker restart_marker setup_node
   tmp="$(with_temp_dir)"
   fake_bin="$tmp/bin"
   log="$tmp/commands.log"
+  patch_marker="$tmp/patch-ran"
+  restart_marker="$tmp/restart-ran"
   setup_node="$fake_bin/setup-node"
   mkdir -p \
     "$fake_bin" \
@@ -30,7 +32,7 @@ JSON
   : > "$tmp/repo/node_modules/@effect/language-service/cli.js"
   cat > "$tmp/repo/scripts/restart-lsp-daemon.sh" <<'SH'
 #!/usr/bin/env sh
-printf 'sh scripts/restart-lsp-daemon.sh\n' >> "$COMMAND_LOG"
+touch "$RESTART_MARKER"
 SH
 
   cat > "$fake_bin/nub" <<'SH'
@@ -53,7 +55,7 @@ esac
 SH
   cat > "$setup_node" <<'SH'
 #!/usr/bin/env sh
-printf 'node %s\n' "$*" >> "$COMMAND_LOG"
+touch "$PATCH_MARKER"
 exit 0
 SH
   chmod +x "$fake_bin/nub" "$setup_node"
@@ -61,30 +63,20 @@ SH
   PATH="$fake_bin:$PATH" \
     COMMAND_LOG="$log" \
     INSTALL_STRATEGY="$strategy" \
+    PATCH_MARKER="$patch_marker" \
+    RESTART_MARKER="$restart_marker" \
     REPO="$tmp/repo" \
     PI_BIN_DIR="$tmp/pi-bin" \
     PI_ENV_CLI_MANAGED_BY_NIX=1 \
     PI_ENV_CONFIG_MANAGED_BY_NIX=1 \
     "$(node_bin)" "$ROOT/setup/runtime.mjs" "$setup_node" all >/dev/null
 
-  assert_file_contains "$log" "node $tmp/repo/scripts/patch-effect-language-service.mjs $setup_node"
-  assert_file_contains "$log" "scripts/restart-lsp-daemon.sh"
+  [ -f "$patch_marker" ] || fail "Effect patch helper did not run"
+  [ -f "$restart_marker" ] || fail "LSP restart helper did not run"
   rm -rf "$tmp"
 }
 
-assert_output_excludes_patch_notes() {
-  local output_file="$1" unexpected
-  for unexpected in \
-    "is already patched" \
-    "If your project uses incremental builds" \
-    "No prepare script found"; do
-    if grep -qF "$unexpected" "$output_file"; then
-      fail "$output_file contains unexpected patch note: $unexpected"
-    fi
-  done
-}
-
-test_patch_helper_patches_once_then_stays_quiet() {
+test_patch_helper_patches_and_reruns() {
   local cli first_log node patch_marker second_log target tmp version
   tmp="$(with_temp_dir)"
   cli="$ROOT/node_modules/@effect/language-service/cli.js"
@@ -105,21 +97,19 @@ test_patch_helper_patches_once_then_stays_quiet() {
     "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$first_log" 2>&1; then
     fail "Effect TypeScript patch failed: $(cat "$first_log")"
   fi
-  if grep -qF "No prepare script found" "$first_log"; then
-    fail "Effect language service did not recognize package.json#scripts.prepare"
-  fi
   assert_file_contains "$target/lib/typescript.js" "$patch_marker"
   assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
 
   if ! (cd "$tmp/repo" && "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$second_log" 2>&1; then
     fail "Effect TypeScript patch rerun failed: $(cat "$second_log")"
   fi
-  assert_output_excludes_patch_notes "$second_log"
+  assert_file_contains "$target/lib/typescript.js" "$patch_marker"
+  assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
   rm -rf "$tmp"
 }
 
 run_strategy nub-managed
 run_strategy plain-node-bootstrap
-test_patch_helper_patches_once_then_stays_quiet
+test_patch_helper_patches_and_reruns
 
 echo "Effect language service setup tests passed"

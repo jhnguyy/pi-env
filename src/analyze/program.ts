@@ -224,12 +224,6 @@ const createTypeProject = (
   };
 };
 
-export const createProjectEffect = (cwd: string): Effect.Effect<TypeProject, ProgramError> =>
-  Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
-    try: () => createTypeProject(cwd, parsed),
-    catch: toProgramError,
-  }));
-
 /** Loads only the project data that the selected analyzers require. */
 export const createAnalysisProjectEffect = (
   cwd: string,

@@ -1,21 +1,19 @@
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { DagExecutorKind } from "../../../src/dag/index.js";
 import {
   lookupRegisteredDagExecutor,
   registerDagExecutor,
   removeDagExecutorsForSessionGeneration,
-  resetDagExecutorRegistrationsForTests,
   unregisterDagExecutor,
 } from "../_shared/dag-executor-registration";
 
 const executor = () => Effect.succeed({});
 
-beforeEach(resetDagExecutorRegistrationsForTests);
 
 describe("session-generation DAG executor registration", () => {
   it("makes a deterministic executor available to a late generation lookup", () => {
-    registerDagExecutor({
+    const active = registerDagExecutor({
       parentSessionId: "parent",
       sessionGeneration: "generation",
       kind: DagExecutorKind.Materialize,
@@ -30,6 +28,7 @@ describe("session-generation DAG executor registration", () => {
         "domain/materialize-v1",
       ),
     ).toBe(executor);
+    unregisterDagExecutor(active);
   });
 
   it("rejects duplicate keys without replacing the active executor", () => {
@@ -69,7 +68,7 @@ describe("session-generation DAG executor registration", () => {
       executor,
     });
     const replacementExecutor = () => Effect.succeed({ replacement: true });
-    registerDagExecutor({
+    const replacement = registerDagExecutor({
       parentSessionId: "parent",
       sessionGeneration: "new",
       kind: DagExecutorKind.Materialize,
@@ -94,5 +93,6 @@ describe("session-generation DAG executor registration", () => {
         "domain/materialize-v1",
       ),
     ).toBe(replacementExecutor);
+    unregisterDagExecutor(replacement);
   });
 });

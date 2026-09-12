@@ -86,14 +86,14 @@ const DUPLICATE_CANONICAL_CAPS = {
   minimumTokenCount: 40,
 } as const;
 
-export interface DuplicateCanonicalCaps {
+interface DuplicateCanonicalCaps {
   nodesPerFunction: number;
   bytesPerFunction: number;
   minimumNodeCount: number;
   minimumTokenCount: number;
 }
 
-export function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLICATE_CANONICAL_CAPS): CanonicalizationResult {
+function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLICATE_CANONICAL_CAPS): CanonicalizationResult {
   const parts: string[] = [];
   let nodeCount = 0;
   let tokenCount = 0;

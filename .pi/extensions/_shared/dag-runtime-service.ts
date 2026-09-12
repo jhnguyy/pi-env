@@ -92,7 +92,3 @@ export function listenForDagRuntimeService(
 ): () => void {
   return channel.subscribe(events.events, handler, removalHandler);
 }
-
-export function resetDagRuntimeServiceRegistryForTests(): void {
-  channel.reset();
-}

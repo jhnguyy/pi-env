@@ -107,7 +107,7 @@ function requireRunParams(params: SubagentToolParams): SubagentParams {
   };
 }
 
-export function completedJobUsageOnce(reportedJobUsage: Set<string>, job: SubagentJob) {
+function completedJobUsageOnce(reportedJobUsage: Set<string>, job: SubagentJob) {
   if (
     job.status === SubagentJobStatus.Queued ||
     job.status === SubagentJobStatus.Running ||

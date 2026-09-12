@@ -517,7 +517,6 @@ export function generateLicenseBundle({
   outputPath = join(repoRoot, "THIRD_PARTY_LICENSES"),
   policyPath = join(repoRoot, "compliance", "license-policy.json"),
   systemLicenses = [],
-  validateRepository = false,
 } = {}) {
   const policy = loadPolicy(policyPath);
   const discoveredRoots = [
@@ -526,7 +525,7 @@ export function generateLicenseBundle({
     ...packageRoots.flatMap((path) => discoverStandardPackages(path)),
   ];
   const packages = loadPackages(discoveredRoots);
-  const errors = validateRepository ? validateRepositoryLicense(repoRoot) : [];
+  const errors = validateRepositoryLicense(repoRoot);
   validatePackages(packages, policy, errors);
   const resolved = resolvePackageLicenses(packages, policy, repoRoot, errors);
   if (errors.length > 0) throw new Error(errors.join("\n"));
@@ -607,7 +606,7 @@ function main() {
     options.outputPath = join(checkDirectory, "THIRD_PARTY_LICENSES");
   }
   try {
-    const manifest = generateLicenseBundle({ ...options, validateRepository: true });
+    const manifest = generateLicenseBundle(options);
     const action = options.check ? "License compliance check passed" : "Generated license bundle";
     console.log(`${action} for ${manifest.javascriptPackages.length} JavaScript packages.`);
   } finally {

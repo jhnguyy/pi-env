@@ -157,9 +157,5 @@ export function createRememberedRegistrationChannel<
         stopBridge();
       };
     },
-    reset(): void {
-      delete root[storeKey];
-      if (legacyStoreKey) delete root[legacyStoreKey];
-    },
   };
 }

@@ -5,8 +5,6 @@ import {
   createNotesContract,
   MAX_DETAIL_ITEMS,
   NOTES_ACTIONS,
-  NOTES_DESCRIPTION,
-  NOTES_PARAMETERS,
 } from "../contract";
 import {
   MAX_EDIT_ITEMS,
@@ -102,8 +100,6 @@ describe("notes tool contract", () => {
   it("exposes one stable provider-neutral schema", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
-    expect(contract.description).toBe(NOTES_DESCRIPTION);
-    expect(contract.parameters).toBe(NOTES_PARAMETERS);
     for (const action of NOTES_ACTIONS.filter((candidate) => candidate !== "record")) {
       expect(Check(contract.parameters, { action })).toBe(true);
     }

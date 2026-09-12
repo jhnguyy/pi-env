@@ -1,12 +1,11 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   AgentToolEvent,
   PiEvent,
   ToolCapability,
   listenForAgentTools,
-  resetAgentToolRegistryForTests,
-  registerAgentTools,
+  registerAgentTools as registerTools,
   registerAgentToolsOnSessionStart,
   unregisterAgentTools,
   type AgentToolEvent as AgentToolEventValue,
@@ -53,11 +52,25 @@ function tool(name: string): AgentTool<any, any> {
   };
 }
 
-describe("agent tool registration", () => {
-  beforeEach(() => {
-    resetAgentToolRegistryForTests();
-  });
+const activeRegistrations: Array<{
+  pi: AgentToolEvents;
+  registrations: ExtToolRegistration[];
+}> = [];
+function registerAgentTools(
+  pi: AgentToolEvents,
+  registrations: Parameters<typeof registerTools>[1],
+): ExtToolRegistration[] {
+  const active = registerTools(pi, registrations);
+  activeRegistrations.push({ pi, registrations: active });
+  return active;
+}
+afterEach(() => {
+  for (const { pi, registrations } of activeRegistrations.splice(0).reverse()) {
+    unregisterAgentTools(pi, registrations);
+  }
+});
 
+describe("agent tool registration", () => {
   it("replays registrations to late listeners", () => {
     const pi = createPi();
     registerAgentTools(pi, { tool: tool("early"), capabilities: [ToolCapability.Read] });

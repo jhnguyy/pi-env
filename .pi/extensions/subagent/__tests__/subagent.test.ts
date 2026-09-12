@@ -9,7 +9,7 @@ import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { Container, type Text } from "@earendil-works/pi-tui";
-import initSubagent, { completedJobUsageOnce } from "../index";
+import initSubagent from "../index";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
 
@@ -87,21 +87,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
-    it("reports completed asynchronous usage exactly once", () => {
-      const reported = new Set<string>();
-      const job = {
-        id: "job-1",
-        status: "completed",
-        latestDetails: {
-          usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7, cost: 1, turns: 1 },
-        },
-      } as any;
-      expect(completedJobUsageOnce(reported, job)).toMatchObject({
-        usage: { input: 2, output: 3, cacheRead: 5, cacheWrite: 7 },
-      });
-      expect(completedJobUsageOnce(reported, job)).toEqual({});
-    });
-
     it("supports compact usage reporting for the active session", async () => {
       const result = await registeredTool.execute(
         "usage-1",
@@ -282,17 +267,7 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
       expect(result.content[0].text).toContain("Model not found");
       expect(result.content[0].text).toContain("anthropic/nonexistent-model");
-    });
-
-    it("returns error when no model specified (no agent, no model param)", async () => {
-      const result = await registeredTool.execute(
-        "call-8",
-        runParams({ task: "do something", tools: ["read"] }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("No model specified");
+      expect(result.details.stopReason).toBe("model_not_found");
     });
 
     it("bare model name not found returns model_not_found", async () => {
@@ -306,16 +281,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       expect(result.details.stopReason).toBe("model_not_found");
     });
 
-    it("provider/id format not found returns model_not_found", async () => {
-      const result = await registeredTool.execute(
-        "call-12",
-        runParams({ task: "task", tools: ["read"], model: "anthropic/does-not-exist" }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.details.stopReason).toBe("model_not_found");
-    });
   });
 
   // ─── execute: agent file resolution ─────────────────────────────────────

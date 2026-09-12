@@ -17,6 +17,9 @@ const temporaryDirectories = [];
 function temporaryDirectory() {
   const path = mkdtempSync(join(tmpdir(), "pi-env-license-bundle-"));
   temporaryDirectories.push(path);
+  write(join(path, "package.json"), '{"license":"MIT"}\n');
+  write(join(path, "LICENSE"), "MIT License\n");
+  write(join(path, "THIRD_PARTY_NOTICES.md"), "# Third-party notices\n");
   return path;
 }
 
@@ -97,6 +100,7 @@ describe("license bundle generation", () => {
   it("uses the installed Nub package tree instead of declared dependencies", () => {
     const repoRoot = temporaryDirectory();
     write(join(repoRoot, "package.json"), `${JSON.stringify({
+      license: "MIT",
       dependencies: { "declared-only": "1.0.0" },
     })}\n`);
     addPackage(repoRoot, { name: "installed-package" });
@@ -134,7 +138,10 @@ describe("license bundle generation", () => {
     const repoRoot = temporaryDirectory();
     const workspaceRoot = join(repoRoot, "packages", "worker");
     const dependencyRoot = join(repoRoot, "workspace-store", "workspace-package");
-    write(join(repoRoot, "package.json"), `${JSON.stringify({ workspaces: ["packages/worker"] })}\n`);
+    write(
+      join(repoRoot, "package.json"),
+      `${JSON.stringify({ license: "MIT", workspaces: ["packages/worker"] })}\n`,
+    );
     write(join(workspaceRoot, "package.json"), `${JSON.stringify({ name: "worker", private: true })}\n`);
     write(join(dependencyRoot, "package.json"), `${JSON.stringify({
       name: "workspace-package",

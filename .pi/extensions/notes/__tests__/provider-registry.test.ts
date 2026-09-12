@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import type { NotesProvider } from "../domain";
-import {
-  registerNotesProvider,
-  resetNotesProviderRegistryForTests,
-  resolveNotesProvider,
-} from "../provider-registry";
+import { registerNotesProvider, resolveNotesProvider } from "../provider-registry";
 
 function provider(id: string): NotesProvider {
   return {
@@ -19,12 +15,12 @@ function provider(id: string): NotesProvider {
   };
 }
 
-afterEach(resetNotesProviderRegistryForTests);
 
 describe("notes provider registry", () => {
   it("resolves a provider registered by another extension bundle", () => {
     const external = provider("notes-assistant");
     const unregister = registerNotesProvider(external);
+    onTestFinished(unregister);
     expect(resolveNotesProvider("notes-assistant")).toBe(external);
     unregister();
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
@@ -32,7 +28,7 @@ describe("notes provider registry", () => {
 
   it("rejects duplicate and incomplete providers", () => {
     const same = provider("same");
-    registerNotesProvider(same);
+    onTestFinished(registerNotesProvider(same));
     expect(() => registerNotesProvider(same)).toThrow("already registered");
     expect(() => registerNotesProvider(provider("same"))).toThrow("already registered");
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- The incomplete literal independently proves registry validation rejects missing provider methods.

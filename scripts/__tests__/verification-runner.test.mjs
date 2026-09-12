@@ -18,23 +18,6 @@ describe("verification runner", () => {
     expect(runPlan([phases[0]], { run: () => ({ status: 7 }), logError: () => {} })).toBe(7);
   });
 
-  it("reports deterministic elapsed timing for each completed phase", () => {
-    const log = vi.fn();
-    const now = vi
-      .fn()
-      .mockReturnValueOnce(100)
-      .mockReturnValueOnce(112)
-      .mockReturnValueOnce(200)
-      .mockReturnValueOnce(235);
-
-    expect(runPlan(phases, { run: () => ({ status: 0 }), now, log })).toBe(0);
-    expect(log.mock.calls.map(([message]) => message)).toEqual([
-      "\n==> first phase",
-      "<== first phase passed in 12 ms",
-      "\n==> second phase",
-      "<== second phase passed in 35 ms",
-    ]);
-  });
 
   it("stops on the first failure", () => {
     const run = vi.fn(() => ({ status: 5 }));

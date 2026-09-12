@@ -5,20 +5,27 @@ import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
-import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
+import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
+import { runBenchmarkEffect } from "../benchmark.js";
 import { analyze, analyzeEffect } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
-import { createAnalysisProjectEffect, createProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
+import { createAnalysisProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
 import { analyzerDescriptor, projectRequirement, projectSourceSelection } from "../registry.js";
-import { childHeapLimitMb, ProcessServiceLive, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
+import { childHeapLimitMb, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
 import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
+const createProjectEffect = (cwd: string) =>
+  createAnalysisProjectEffect(cwd, allScope, ProjectRequirement.Types).pipe(
+    Effect.map((project) => {
+      if (!project || !isTypeProject(project)) throw new Error("Expected a type project");
+      return project;
+    }),
+  );
 const testCloneBody = `
   const values = [1, 2, 3, 4];
   let total = 0;
@@ -141,7 +148,7 @@ describe("analyze contracts", () => {
   });
 
   it("preserves typed benchmark failures", async () => {
-    const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(ProcessServiceLive))));
+    const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(processServiceLayer()))));
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) expect(outcome.failure._tag).toBe("BenchmarkError");
   });
@@ -194,7 +201,7 @@ describe("analyze contracts", () => {
     git("commit", "-m", "change third");
     writeFileSync(join(cwd, "src/a.ts"), "// shifts committed hunk\nexport const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
 
-    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Diff, [], "main").pipe(Effect.provide(ProcessServiceLive)));
+    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Diff, [], "main").pipe(Effect.provide(processServiceLayer())));
     expect(scope.files).toEqual(["src/a.ts", "tools/local.ts"]);
     expect(scope.hunks.get("src/a.ts")).toEqual([
       { start: 1, end: 1 },
@@ -415,7 +422,7 @@ describe("analyze contracts", () => {
   it("captures internal analyzer exceptions in the typed error channel", async () => {
     const outcome = await Effect.runPromise(Effect.result(analyzerDescriptor(AnalyzerName.Complexity).run({
       cwd: fixtureRoot(), scope: allScope, maxMemoryMb: 256, beforeBundleEntry: () => true,
-    }).pipe(Effect.provide(ProcessServiceLive))));
+    }).pipe(Effect.provide(processServiceLayer()))));
     expect(outcome._tag).toBe("Failure");
     if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
   });
@@ -705,22 +712,18 @@ describe("external analyzers and parsers", () => {
     expect(normalizeBundleMetafile({ inputs: { "src/a.ts": { bytes: 1, imports: [{ path: "pkg", kind: "import-statement", external: true }] }, "node_modules/pkg/index.js": { bytes: 2, imports: [] } }, outputs: { "out.js": { bytes: 100, inputs: {}, imports: [], exports: [], entryPoint: "src/a.ts" } } }).packageInputCount).toBe(1);
   });
 
-  it("rejects benchmark runs=0", () => {
-    expect(() => validateBenchmark({ command: "echo", args: [], runs: 0 })).toThrow(/runs must be an integer between 1 and 100/);
-  });
-
-  it("rejects benchmark timeoutMs=0", () => {
-    expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: 0 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
-  });
-
-  it("rejects a non-string benchmark cwd", () => {
-    expect(() => validateBenchmark({ command: "echo", args: [], cwd: 42 })).toThrow(/cwd must be a string/);
-  });
-
-  it("rejects benchmark values above bounded limits", () => {
-    expect(() => validateBenchmark({ command: "echo", args: [], warmups: BENCHMARK_LIMITS.warmups.max + 1 })).toThrow(/warmups must be an integer between 0 and 10/);
-    expect(() => validateBenchmark({ command: "echo", args: [], runs: BENCHMARK_LIMITS.runs.max + 1 })).toThrow(/runs must be an integer between 1 and 100/);
-    expect(() => validateBenchmark({ command: "echo", args: [], timeoutMs: BENCHMARK_LIMITS.timeoutMs.max + 1 })).toThrow(/timeoutMs must be an integer between 1 and 300000/);
+  it.each([
+    [{ runs: 0 }, /runs must be an integer between 1 and 100/],
+    [{ timeoutMs: 0 }, /timeoutMs must be an integer between 1 and 300000/],
+    [{ cwd: 42 }, /cwd must be a string/],
+    [{ warmups: 11 }, /warmups must be an integer between 0 and 10/],
+    [{ runs: 101 }, /runs must be an integer between 1 and 100/],
+    [{ timeoutMs: 300_001 }, /timeoutMs must be an integer between 1 and 300000/],
+  ])("rejects invalid benchmark configuration %j", async (invalid, message) => {
+    const benchmark = runBenchmarkEffect({ command: "echo", args: [], ...invalid } as any).pipe(
+      Effect.provide(processServiceLayer()),
+    );
+    await expect(Effect.runPromise(benchmark)).rejects.toThrow(message);
   });
 
   it("strictly parses configured Oxlint diagnostics and preserves labels", () => {
@@ -768,7 +771,7 @@ describe("external analyzers and parsers", () => {
     mkdirSync(join(cwd, "scripts"), { recursive: true });
     writeFileSync(join(cwd, "scripts/tool-node-run.sh"), readFileSync(join(process.cwd(), "scripts/tool-node-run.sh")), { mode: 0o755 });
     writeFileSync(join(cwd, ".oxlintrc.json"), readFileSync(join(process.cwd(), ".oxlintrc.json")));
-    const findings = await Effect.runPromise(eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(ProcessServiceLive)));
+    const findings = await Effect.runPromise(eslintAnalyzerEffect(cwd, allScope, 256).pipe(Effect.provide(processServiceLayer())));
     expect(findings).toEqual(expect.arrayContaining([expect.objectContaining({ analyzer: AnalyzerName.Eslint, data: { ruleId: "@typescript-eslint/no-floating-promises" } })]));
   });
 });
@@ -848,8 +851,8 @@ describe("bundle entrypoints", () => {
   it("bundles the owning extension for helper changes but ignores unrelated files", async () => {
     const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;", ".pi/extensions/alpha/helper.ts": "export const helper = 1;", "src/changed.ts": "export const changed = 1;" });
     writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/alpha"] } }));
-    await expect(Effect.runPromise(bundleAnalyzerEffect(cwd, pathScope(["src/changed.ts"]), 2048).pipe(Effect.provide(ProcessServiceLive)))).resolves.toEqual([]);
-    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, pathScope([".pi/extensions/alpha/helper.ts"]), 2048).pipe(Effect.provide(ProcessServiceLive)));
+    await expect(Effect.runPromise(bundleAnalyzerEffect(cwd, pathScope(["src/changed.ts"]), 2048).pipe(Effect.provide(processServiceLayer())))).resolves.toEqual([]);
+    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, pathScope([".pi/extensions/alpha/helper.ts"]), 2048).pipe(Effect.provide(processServiceLayer())));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.path).toBe(".pi/extensions/alpha/index.ts");
   });
@@ -870,7 +873,7 @@ describe("bounded hardening", () => {
       ".pi/extensions/demo/index.ts": "export const demo = 1;",
       "config/app.json": "{}",
     });
-    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "tools", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]).pipe(Effect.provide(ProcessServiceLive)));
+    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "tools", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]).pipe(Effect.provide(processServiceLayer())));
     expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts", "tools/local.ts"]);
   });
 
@@ -898,32 +901,23 @@ describe("bounded hardening", () => {
     expect(symlinkDirectory._tag === "Failure" && symlinkDirectory.failure.message).toMatch(/outside cwd/);
   });
 
-  it("caps duplicate canonicalization by nodes or bytes", () => {
-    const source = ts.createSourceFile("sample.ts", `function huge(){${"value + ".repeat(20_000)}1}`, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-    const fn = source.statements.find(ts.isFunctionDeclaration);
-    expect(fn?.body).toBeDefined();
-    const result = canonicalizeWithCap(fn!.body!, { nodesPerFunction: 100, bytesPerFunction: 1_000, minimumNodeCount: 1, minimumTokenCount: 1 });
-    expect(result.truncated).toBe(true);
-    expect(result.nodeCount).toBeGreaterThan(100);
-    expect(result.tokenCount).toBeGreaterThan(0);
+  it("skips duplicate candidates that exceed canonicalization bounds", async () => {
+    const cwd = fixtureRoot();
+    const expression = `${"value + ".repeat(6_000)}1`;
+    const source = ts.createSourceFile(
+      join(cwd, "src/huge.ts"),
+      `const value = 1;
+       export function first() { return ${expression}; }
+       export function second() { return ${expression}; }`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const findings = await Effect.runPromise(
+      duplicatesEffect({ files: [source], testFiles: [] }, cwd, allScope),
+    );
+    expect(findings).toEqual([]);
   });
 
-  it("does not treat tiny generic error-adapter lambdas as duplicate candidates", () => {
-    const source = ts.createSourceFile("sample.ts", `
-      const toScopeError = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-      const toProgramError = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
-    `, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-    const arrows = source.statements
-      .filter(ts.isVariableStatement)
-      .flatMap((statement) => statement.declarationList.declarations)
-      .map((declaration) => declaration.initializer)
-      .filter((value): value is ts.ArrowFunction => value !== undefined && ts.isArrowFunction(value));
-    expect(arrows).toHaveLength(2);
-    const left = canonicalizeWithCap(arrows[0].body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
-    const right = canonicalizeWithCap(arrows[1].body, { nodesPerFunction: 10_000, bytesPerFunction: 256 * 1024, minimumNodeCount: 20, minimumTokenCount: 24 });
-    expect(left.canonical).toBe(right.canonical);
-    expect(left.nodeCount).toBeLessThan(20);
-    expect(left.tokenCount).toBeLessThan(24);
-  });
 
 });

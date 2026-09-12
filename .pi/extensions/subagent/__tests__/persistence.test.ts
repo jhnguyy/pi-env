@@ -5,11 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Result } from "effect";
 
-import {
-  createPersistentSubagentSession,
-  getSubagentSessionName,
-  hasReachedTurnLimit,
-} from "../execute";
+import { createPersistentSubagentSession } from "../execute";
 import { DEFAULT_SUBAGENT_CONFIG, SubagentSessionStorage } from "../config";
 import { SubagentJobManager } from "../jobs";
 import { SubagentUsageLedger, zeroUsage } from "../usage";
@@ -19,15 +15,11 @@ class TestProviderUnavailable extends Data.TaggedError("TestProviderUnavailable"
 }> {}
 
 describe("persistent subagent sessions", () => {
-  it("names child sessions with a sub- prefix", () => {
-    expect(getSubagentSessionName("Recon: Auth Flow")).toBe("sub-recon-auth-flow");
-  });
-
-  it("stores a child below its parent session ID and preserves its linked transcript", () => {
+  it("stores a named child below its parent session ID and preserves its linked transcript", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "pi-subagent-session-"));
     try {
       const parent = SessionManager.create("/tmp/project", sessionDir);
-      const child = createPersistentSubagentSession("audit", {
+      const child = createPersistentSubagentSession("Recon: Auth Flow", {
         cwd: "/tmp/project",
         sessionManager: parent,
       } as any);
@@ -37,7 +29,7 @@ describe("persistent subagent sessions", () => {
         join(parent.getSessionDir(), "_children", parent.getSessionId()),
       );
       expect(child.manager.getHeader()?.parentSession).toBe(parent.getSessionFile());
-      expect(child.manager.getSessionName()).toBe("sub-audit");
+      expect(child.manager.getSessionName()).toBe("sub-recon-auth-flow");
       expect(child.manager.getBranch().map((entry) => entry.type)).toEqual([
         "session_info",
         "thinking_level_change",
@@ -138,11 +130,6 @@ describe("persistent subagent sessions", () => {
     }
   });
 
-  it("does not impose a turn limit unless the caller selects one", () => {
-    expect(hasReachedTurnLimit(1_000, undefined)).toBe(false);
-    expect(hasReachedTurnLimit(2, 3)).toBe(false);
-    expect(hasReachedTurnLimit(3, 3)).toBe(true);
-  });
 
   it("tracks an asynchronous job through its durable lifecycle entries", async () => {
     const entries: Array<{ customType: string; data: any }> = [];

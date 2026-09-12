@@ -46,10 +46,10 @@ export function registerPtcTools<Schema extends TSchema, Details = unknown, Stat
   }
 }
 
-export function listenForPtcTools(pi: PtcToolEvents, handler: PtcToolHandler): void {
-  ptcToolChannel.subscribe(pi.events, handler);
-}
-
-export function resetPtcToolRegistryForTests(): void {
-  ptcToolChannel.reset();
+export function listenForPtcTools(
+  pi: PtcToolEvents,
+  handler: PtcToolHandler,
+  removalHandler?: PtcToolHandler,
+): () => void {
+  return ptcToolChannel.subscribe(pi.events, handler, removalHandler);
 }
