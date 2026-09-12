@@ -31,19 +31,18 @@ Use for repository changes from initial scope through post-merge cleanup.
 - Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.
 - Do not reorganize code only to reduce file size, line count, or a static metric. Use measured end-to-end behavior as the authority for performance changes.
 
-## Prepare the Worktree
+## Isolate the Work
 
-- Determine the base branch from repository instructions or the remote default branch. Ask if neither source identifies it.
-- Reserve the base worktree for the base branch. Do not create, switch to, or edit a feature branch there.
-- Before new work, confirm that the base worktree is on the base branch and clean. If the base branch has an upstream, fetch it. Stop if the branch is ahead of its upstream or has diverged. Fast-forward it if it is behind.
-- Create each new branch from the updated base branch in a dedicated worktree outside the base worktree.
-- Before resuming a branch, inspect `git worktree list`. If another worktree has the branch, ask whether that worktree is free before use. If the branch has no worktree, attach one to the local branch. If it exists only on a remote, fetch it and create the local branch and worktree from the remote-tracking branch.
+Perform agentic repository changes in a dedicated worktree. Keep the base worktree on the base branch and do not modify it for contribution work.
+
+Follow repository policy for branch names, base synchronization, worktree placement, initialization, and resuming existing work. Before using a branch or worktree, inspect current Git state and avoid any location another session can own. Preserve local work and stop when safe synchronization requires a decision that local policy does not resolve.
 
 ## Implement and Validate
 
 - Run focused checks while implementing. Use failures to revise the implementation or its assumptions.
 - Add tests when the outcome, a known regression, or a material risk requires new evidence. Do not add tests only to restate established behavior.
 - Follow specialized testing practice and repository validation policy. Run the required integration portfolio before review or integration.
+- Broaden or repeat checks only when new changes, failures, unresolved concerns, or repository policy justify more evidence.
 
 ## Commit and Publish
 
