@@ -25,6 +25,7 @@ ENV PI_ENV_HOME=/opt/pi-env \
 
 USER root
 RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
