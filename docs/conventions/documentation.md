@@ -6,8 +6,9 @@ This file owns repository documentation policy. Other files can point here. Do n
 
 - `README.md` states project purpose, setup choices, and the documentation directory.
 - A directory `README.md` states only the directory purpose or entry condition.
-- `CONTRIBUTING.md` owns branch, pull-request, worktree, reviewer, and test workflow.
-- `AGENTS.md` owns coding-agent navigation and workflow.
+- The [`code-contribution` skill](../../.agents/skills/code-contribution/SKILL.md) owns the portable contribution method.
+- `CONTRIBUTING.md` owns pi-env-specific contribution requirements.
+- `AGENTS.md` owns coding-agent navigation.
 - Area-specific contracts and durable decisions belong under `docs/`.
 
 ## Navigation and cross-links

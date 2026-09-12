@@ -4,7 +4,7 @@
 
 ## Decisions and risks
 
-<!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? For new responsibilities or module boundaries, include the reuse decision required by docs/conventions/change-discipline.md. -->
+<!-- Why this approach? What constraints, tradeoffs, and reviewer attention areas matter? For new responsibilities or module boundaries, include the reuse decision. -->
 
 ## Test evidence
 
