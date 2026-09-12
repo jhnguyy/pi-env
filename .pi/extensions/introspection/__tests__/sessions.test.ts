@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, expect, it } from "vitest";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,21 +7,34 @@ import { tmpdir } from "node:os";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   assertUnderSessionDir,
-  digestLines,
   formatDigestList,
   formatSessionView,
   inspectLines,
   listSessionDigests,
-  parseTimestamp,
 } from "../sessions";
 
 function lines(...entries: object[]): string[] {
   return entries.map((entry) => JSON.stringify(entry));
 }
 
+function digestLines(entries: string[], filename: string, _bytes = 0) {
+  const root = join(tmpdir(), `introspection-digest-${randomUUID()}`);
+  mkdirSync(root);
+  try {
+    writeFileSync(join(root, filename), `${entries.join("\n")}\n`);
+    return listSessionDigests({ sessionDir: root })[0];
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describeIfEnabled("introspection", "session timestamp parsing", () => {
   it("converts pi session filenames to readable ISO timestamps", () => {
-    expect(parseTimestamp("2026-03-06T23-15-17-780Z_abc123.jsonl")).toBe("2026-03-06T23:15:17Z");
+    const result = digestLines(
+      lines({ type: "session", id: "s1", cwd: "/repo" }),
+      "2026-03-06T23-15-17-780Z_abc123.jsonl",
+    );
+    expect(result.timestamp).toBe("2026-03-06T23:15:17Z");
   });
 });
 

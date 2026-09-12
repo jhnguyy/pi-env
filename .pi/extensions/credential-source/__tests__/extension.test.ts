@@ -1,13 +1,9 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import credentialSourceExtension from "../index";
-import { resetCredentialSourceRegistryForTests } from "../../_shared/credential-source";
-
 describe("credential source extension boundary", () => {
-  beforeEach(() => resetCredentialSourceRegistryForTests());
-
   it("fails session startup when settings cannot establish the credential boundary", async () => {
     const handlers = new Map<string, (...args: any[]) => unknown>();
     const pi = {

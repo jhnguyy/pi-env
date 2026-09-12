@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
 import { ANALYZE_LIMITS, classifyAnalyzeRequest, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
-import { readJournalEvents } from "../journal.js";
 import { superviseAnalyze } from "../supervisor.js";
 import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
 
@@ -334,7 +333,10 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     });
 
     expect(spans.filter((span) => span.name === AnalyzeSpanName.Run)).toHaveLength(1);
-    const events = await readJournalEvents(journalDirectory);
+    const events = readFileSync(join(journalDirectory, "current.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
     expect(events.filter((event) => event.terminal)).toHaveLength(1);
     expect(events.at(-1)?.type).toBe(AnalyzeDiagnosticEventType.RunCompleted);
     expect(JSON.stringify(events)).not.toContain("secret");

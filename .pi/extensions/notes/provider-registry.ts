@@ -63,7 +63,3 @@ function validateProvider(provider: unknown): asserts provider is NotesProvider 
     });
   }
 }
-
-export function resetNotesProviderRegistryForTests(): void {
-  delete (globalThis as RegistryGlobal)[REGISTRY_KEY];
-}

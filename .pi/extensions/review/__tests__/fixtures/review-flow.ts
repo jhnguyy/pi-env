@@ -18,10 +18,7 @@ import {
   registerDagExecutor,
   unregisterDagExecutor,
 } from "../../../_shared/dag-executor-registration";
-import {
-  listenForDagRuntimeService,
-  resetDagRuntimeServiceRegistryForTests,
-} from "../../../_shared/dag-runtime-service";
+import { listenForDagRuntimeService } from "../../../_shared/dag-runtime-service";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import { buildReviewDeck } from "../../deck";
 import {
@@ -208,8 +205,7 @@ export async function runRealReviewFlow(
   let serviceDisposals = 0;
   let registeredTools = 0;
   let unregisteredTools = 0;
-  resetDagRuntimeServiceRegistryForTests();
-  listenForDagRuntimeService(
+  const stopRuntimeListener = listenForDagRuntimeService(
     pi,
     (service) => services.push(service),
     () => serviceDisposals++,
@@ -364,8 +360,8 @@ export async function runRealReviewFlow(
     });
   } finally {
     await runtime.dispose();
+    stopRuntimeListener();
     unregisterDagExecutor(evidenceRegistration);
-    resetDagRuntimeServiceRegistryForTests();
   }
   return {
     root,

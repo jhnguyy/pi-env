@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
@@ -8,7 +8,6 @@ import {
   PiEvent,
   ToolCapability,
   listenForAgentTools,
-  resetAgentToolRegistryForTests,
   type AgentToolEvents,
   type ExtToolRegistration,
 } from "../_shared/agent-tools";
@@ -75,14 +74,11 @@ function createPiHarness() {
     },
   };
 
+  onTestFinished(() => pi.trigger(PiEvent.SessionShutdown, { type: PiEvent.SessionShutdown }));
   return { pi, tools, registrations };
 }
 
 describe("registerCrossHostTool contract", () => {
-  beforeEach(() => {
-    resetAgentToolRegistryForTests();
-  });
-
   it("requires non-empty capability classification and preserves it", () => {
     const harness = createPiHarness();
     registerCrossHostTool(harness.pi as any, {
@@ -119,7 +115,12 @@ describe("registerCrossHostTool contract", () => {
     const harness = createPiHarness();
     const added: string[] = [];
     const removed: string[] = [];
-    listenForAgentTools(harness.pi, (entry) => added.push(entry.tool.name), (entry) => removed.push(entry.tool.name));
+    const stopListening = listenForAgentTools(
+      harness.pi,
+      (entry) => added.push(entry.tool.name),
+      (entry) => removed.push(entry.tool.name),
+    );
+    onTestFinished(stopListening);
 
     registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),

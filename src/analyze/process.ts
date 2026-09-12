@@ -42,8 +42,6 @@ export class ProcessService extends Context.Service<ProcessService, {
   readonly run: typeof streamProcessEffect;
 }>()("pi/analyze/ProcessService") {}
 
-export const ProcessServiceLive = Layer.succeed(ProcessService, { run: streamProcessEffect });
-
 /** Builds the service layer used by engine compatibility seams and tests. */
 export const processServiceLayer = (run: typeof streamProcessEffect = streamProcessEffect) =>
   Layer.succeed(ProcessService, { run });

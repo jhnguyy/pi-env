@@ -61,27 +61,6 @@ else
   echo 'missing Effect TypeScript patch failure' >&2
   exit 1
 fi
-write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": ["./dist/index.js"] } }'
-"$NODE_RUN" - "$ROOT_DIR" "$TMP_DIR" <<'JS'
-const { join } = await import('node:path');
-const { pathToFileURL } = await import('node:url');
-const rootDir = process.argv[2];
-const tmpDir = process.argv[3];
-const { loadExtensionManifest } = await import(pathToFileURL(join(rootDir, 'scripts/extension-manifest.mjs')).href);
-const { validateExtensionInstall } = await import(pathToFileURL(join(rootDir, 'scripts/extension-contract.mjs')).href);
-const manifest = loadExtensionManifest(tmpDir);
-if (manifest.repoRoot !== tmpDir) throw new Error('custom repo root was not preserved');
-const [active] = manifest.extensions;
-if (active.name !== 'active') throw new Error('extension name was not normalized');
-if (active.packagePath !== '.pi/extensions/active') throw new Error('extension package path was not normalized');
-if (!active.hasPackageJson || !active.hasSourceEntry || !active.hasBundleEntry) throw new Error('extension artifact flags were not derived');
-if (!active.runtimeEntries.includes('./dist/index.js')) throw new Error('runtime entries were not loaded from extension package');
-if (!manifest.activeNames.has('active') || !manifest.activePackagePaths.has('.pi/extensions/active')) throw new Error('active extension sets were not derived');
-const errors = validateExtensionInstall(manifest);
-if (errors.length > 0) throw new Error(errors.join('\n'));
-JS
-echo 'ok: extension contract can validate an explicit repo root'
-
 write_repo '{ "name": "@test/active", "type": "module", "private": true, "pi": { "extensions": [] } }'
 output="$(run_verify || true)"
 if grep -q 'active: package.json pi.extensions must include ./dist/index.js' <<<"$output"; then

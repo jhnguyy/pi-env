@@ -24,8 +24,10 @@ ENV PI_ENV_HOME=/opt/pi-env \
   NPM_CONFIG_UPDATE_NOTIFIER=false
 
 USER root
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+RUN export DEBIAN_FRONTEND=noninteractive \
+  && apt-get update \
+  && apt-get upgrade -y \
+  && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
     tini \

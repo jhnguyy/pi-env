@@ -74,7 +74,8 @@ export function createExtensionRecord(root, config, packagePath) {
   };
 }
 
-export function loadExtensionManifest(root = repoRoot) {
+export function loadExtensionManifest() {
+  const root = repoRoot;
   const packagePath = join(root, "package.json");
   const configPath = join(root, "pi-build.config.json");
   const pkg = loadJson(packagePath);

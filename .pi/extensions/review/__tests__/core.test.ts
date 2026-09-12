@@ -9,7 +9,6 @@ import {
   extractPrUrl,
   marker,
   parseChangedFilesFromDiff,
-  parseGitPathList,
   parsePrUrl,
   validateFindingAnchors,
   validatePlan,
@@ -115,7 +114,7 @@ describe("review pull request deterministic contracts", () => {
     expect(bad.message).toContain("Invented: c.ts");
   });
 
-  it("validates GitHub PR URLs and decodes Git C-style quoted paths", () => {
+  it("validates GitHub PR URLs", () => {
     expect(parsePrUrl("https://github.com/acme/widgets/pull/123")).toMatchObject({
       owner: "acme",
       repo: "widgets",
@@ -126,10 +125,6 @@ describe("review pull request deterministic contracts", () => {
     expect(() => parsePrUrl("https://github.com/%2e%2e/widgets/pull/1")).toThrow(/valid/);
     expect(() => parsePrUrl("https://github.com/acme/widgets/pull/0")).toThrow(/valid/);
     expect(() => parsePrUrl("https://github.com/acme/widgets/pull/12345678901")).toThrow(/valid/);
-    expect(parseGitPathList('"a/sp\\303\\244ce\\tname.ts" "b/quote\\" path.ts"')).toEqual([
-      "a/späce\tname.ts",
-      'b/quote" path.ts',
-    ]);
   });
 
   it("validates RIGHT additions/context and LEFT deletions/context across files and hunks", () => {

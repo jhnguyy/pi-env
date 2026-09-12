@@ -85,8 +85,3 @@ export function getCredentialSource(): CredentialSource {
     recovery: "Enable the credential-source extension and reload Pi.",
   });
 }
-
-export function resetCredentialSourceRegistryForTests(): void {
-  const root = globalThis as typeof globalThis & Record<string, unknown>;
-  delete root[REGISTRY_KEY];
-}

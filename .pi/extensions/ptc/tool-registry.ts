@@ -49,12 +49,18 @@ const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 export class ToolRegistry {
   private readonly pi: ExtensionAPI;
   private extensionTools = new Map<string, RememberedTool>();
-  private builtinCache = new Map<string, ToolDefinition<any, any, any>>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  private builtinCache = new Map<string, ToolDefinition<any, any, any>>();
+  private readonly stopListening: Array<() => void> = [];
 
   constructor(pi: ExtensionAPI) {
     this.pi = pi;
-    this.installAgentToolsListener(pi);
-    this.installPtcToolsListener(pi);
+    this.start();
+  }
+
+  start(): void {
+    if (this.stopListening.length > 0) return;
+    this.installAgentToolsListener(this.pi);
+    this.installPtcToolsListener(this.pi);
   }
 
   private rememberTool(registration: RememberedRegistration, tool: { name: string; execute: ExecuteFn }): void {
@@ -68,7 +74,7 @@ export class ToolRegistry {
   }
 
   private installAgentToolsListener(pi: ExtensionAPI): void {
-    listenForAgentTools(
+    const stop = listenForAgentTools(
       pi,
       (registration) => {
         if (registration.audience === "dag") return;
@@ -80,12 +86,22 @@ export class ToolRegistry {
       },
       (registration) => this.forgetTool(registration, registration.tool.name),
     );
+    this.stopListening.push(stop);
   }
 
   private installPtcToolsListener(pi: ExtensionAPI): void {
-    listenForPtcTools(pi, (registration) =>
-      this.rememberTool(registration, registration.tool),
+    this.stopListening.push(
+      listenForPtcTools(
+        pi,
+        (registration) => this.rememberTool(registration, registration.tool),
+        (registration) => this.forgetTool(registration, registration.tool.name),
+      ),
     );
+  }
+
+  dispose(): void {
+    for (const stop of this.stopListening.splice(0)) stop();
+    this.extensionTools.clear();
   }
 
   getRuntimeSnapshot(): PtcRuntimeSnapshot {

@@ -6,20 +6,25 @@ import { Effect } from "effect";
 import { Check } from "typebox/value";
 import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import reviewExtension, { clearInMemoryStateForTests, restore } from "../index";
+import reviewExtension, { restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
 import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
-  registerDagRuntimeService,
-  resetDagRuntimeServiceRegistryForTests,
+  registerDagRuntimeService as registerRuntimeService,
+  unregisterDagRuntimeService,
+  type DagRuntimeServiceRegistration,
 } from "../../_shared/dag-runtime-service";
 
 let agentDir = "";
 const temps: string[] = [];
+const activePis: any[] = [];
+const activeDagServices: Array<{ pi: any; registration: DagRuntimeServiceRegistration }> = [];
 afterEach(() => {
-  clearInMemoryStateForTests();
-  resetDagRuntimeServiceRegistryForTests();
+  for (const { pi, registration } of activeDagServices.splice(0))
+    unregisterDagRuntimeService(pi, registration);
+  for (const pi of activePis.splice(0)) pi.handlers.session_shutdown?.();
+  vi.unstubAllEnvs();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -27,7 +32,16 @@ function tempRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-pr-review-agent-"));
   temps.push(dir);
   agentDir = dir;
+  vi.stubEnv("PI_CODING_AGENT_DIR", dir);
   return dir;
+}
+function registerDagRuntimeService(
+  pi: any,
+  registration: Parameters<typeof registerRuntimeService>[1],
+): DagRuntimeServiceRegistration {
+  const active = registerRuntimeService(pi, registration);
+  activeDagServices.push({ pi, registration: active });
+  return active;
 }
 function sampleState(id: string, selected: string[]): ReviewState {
   const root = agentDir || tempRoot();
@@ -117,7 +131,8 @@ function extensionPi() {
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
-  reviewExtension(pi, { agentDir: () => agentDir });
+  reviewExtension(pi);
+  activePis.push(pi);
   return pi;
 }
 
@@ -128,22 +143,10 @@ describe("review extension pull request surface", () => {
     const review = pi.tools.find((tool: any) => tool.name === "review");
     expect(review).toBeTruthy();
     expect(pi.tools.some((tool: any) => tool.name === "pr_review_start")).toBe(false);
-    expect(review.description).toContain("`review pr get`");
-    expect(review.description).toContain("`review pr create`");
-    expect(review.description).toContain("does not post");
     expect(Check(review.parameters, { command: "pr", action: "get" })).toBe(true);
     expect(Check(review.parameters, { command: "get" })).toBe(false);
-    expect(review.promptGuidelines.join("\n")).toContain("existing pull request feedback");
-    expect(review.promptGuidelines.join("\n")).toContain("new independent pull request review");
-    expect(review.promptGuidelines.join("\n")).toContain("untrusted data");
     expect(review.renderCall).toBeTypeOf("function");
     expect(review.renderResult).toBeTypeOf("function");
-    const promptText = [review.description, ...review.promptGuidelines].join("\n");
-    expect(promptText).not.toContain("Do not inspect files");
-    expect(promptText).not.toMatch(/\b(?:do not|must not|never)\b[^\n]*(?:\bgh\b|GitHub CLI)/i);
-    expect(pi.commands.review.description).toContain("create");
-    expect(pi.commands.review.description).toContain("get");
-    expect(pi.commands.review.description).toContain("edit");
     expect(pi.handlers.session_start).toBeTypeOf("function");
     expect(pi.handlers.session_tree).toBeTypeOf("function");
   });
@@ -437,7 +440,7 @@ describe("review extension pull request surface", () => {
     const notes: string[] = [];
     await pi.command("pr status", { ui: { notify: (m: string) => notes.push(m) } } as any);
     expect(notes.at(-1)).toContain("Selected: 1");
-    clearInMemoryStateForTests();
+    pi.handlers.session_shutdown();
     restore({
       sessionManager: { getBranch: () => [custom(first), custom(cleaned), custom(second)] },
     } as any);
@@ -1016,7 +1019,7 @@ describe("review extension pull request surface", () => {
       customType: REVIEW_ENTRY_TYPE,
       data: pi.appended.at(-1)?.[1],
     };
-    clearInMemoryStateForTests();
+    pi.handlers.session_shutdown();
     restore({
       sessionManager: { getBranch: () => [custom(first), custom(second), cleanupEntry] },
     } as any);

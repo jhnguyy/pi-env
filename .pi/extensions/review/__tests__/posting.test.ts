@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { ReviewEvent, type ReviewState } from "../core";
-import { clearInMemoryStateForTests, postReview, restore } from "../index";
+import { postReview, restore } from "../index";
 import {
   githubStub,
   registeredReview,
@@ -12,7 +12,6 @@ import {
   useReviewAgentDir,
 } from "./fixtures/review-ui";
 
-afterEach(clearInMemoryStateForTests);
 function root() {
   const dir = mkdtempSync(join(tmpdir(), "pi-pr-review-agent-"));
   onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
@@ -471,7 +470,7 @@ describe("review pull request posting", () => {
     });
     expect(appended.some((entry) => entry.session === "replacement")).toBe(false);
 
-    clearInMemoryStateForTests();
+    h.handlers.session_shutdown();
     appended.length = 0;
     activeSession = "original";
     rotateOnPending = false;

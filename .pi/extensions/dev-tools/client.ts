@@ -32,7 +32,6 @@ const SPAWN_RETRY_INTERVAL_MS = 200;
 const SPAWN_RETRY_MAX_MS = 10_000;
 const SPAWN_RETRY_MAX_INTERVAL_MS = 1_000;
 const REQUEST_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
-const SOCKET_LISTENER_COUNT = 3;
 
 export class ClientClosedError extends Data.TaggedError("ClientClosedError")<{
   readonly message: string;
@@ -134,7 +133,6 @@ export class LspClient {
   private connectionAttempt: ConnectionAttempt | null = null;
   private connectionWaiters = 0;
   private activeRequestTimers = 0;
-  private activeSocketListeners = 0;
   private closed = false;
   private readonly dependencies: LspClientDependencies;
 
@@ -161,10 +159,6 @@ export class LspClient {
     return this.activeRequestTimers;
   }
 
-  /** Number of listeners owned by the active daemon socket. */
-  get socketListenerCount(): number {
-    return this.activeSocketListeners;
-  }
 
   /** Send a request to the daemon, auto-spawning if needed. */
   requestEffect(req: Omit<DaemonRequest, "id">): Effect.Effect<DaemonResponse, LspClientError> {
@@ -544,12 +538,10 @@ export class LspClient {
     socket.on("data", onData);
     socket.on("error", onError);
     socket.on("close", onClose);
-    this.activeSocketListeners = SOCKET_LISTENER_COUNT;
     this.socketCleanup = () => {
       socket.off("data", onData);
       socket.off("error", onError);
       socket.off("close", onClose);
-      this.activeSocketListeners = 0;
     };
   }
 

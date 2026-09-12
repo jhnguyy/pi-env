@@ -35,11 +35,6 @@ export function packageNamesResult(packageJsonPath: string, targetPackage: (name
   }
 }
 
-export function packageNames(packageJsonPath: string, targetPackage: (name: string) => boolean): string[] {
-  const result = packageNamesResult(packageJsonPath, targetPackage);
-  if (Result.isFailure(result)) throw result.failure;
-  return result.success;
-}
 
 export function packageManagerName(packageJsonPath: string): string | undefined {
   try {
@@ -50,7 +45,7 @@ export function packageManagerName(packageJsonPath: string): string | undefined 
   }
 }
 
-export function installCommandPrefix(packageManager?: string): string {
+function installCommandPrefix(packageManager?: string): string {
   return packageManager === "nub" ? "nub install -W --save-dev --save-exact" : "npm install --save-dev --save-exact";
 }
 

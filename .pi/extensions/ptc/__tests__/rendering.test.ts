@@ -1,5 +1,5 @@
 import "../../__tests__/tui-setup";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import ptcExtension from "../index";
 import {
@@ -8,22 +8,17 @@ import {
   type PtcRunDetails,
 } from "../execution-details";
 import { PtcAction } from "../types";
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
-import { resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 
 const theme = {
   fg: (_style: string, text: string) => text,
   bold: (text: string) => text,
 };
 
-beforeEach(() => {
-  resetAgentToolRegistryForTests();
-  resetPtcToolRegistryForTests();
-});
 
 function registeredPtcTool() {
   const registerTool = vi.fn();
   const listeners = new Map<string, Array<(value: unknown) => void>>();
+  const lifecycleHandlers = new Map<string, Array<() => void>>();
   // The public extension entrypoint requires the external host's full ExtensionAPI; this rendering harness implements only the exercised surface.
   // oxlint-disable-next-line anti-slop/no-chained-type-assertions
   const pi = {
@@ -39,10 +34,15 @@ function registeredPtcTool() {
         return () => undefined;
       },
     },
-    on: vi.fn(),
+    on(event: string, handler: () => void) {
+      lifecycleHandlers.set(event, [...(lifecycleHandlers.get(event) ?? []), handler]);
+    },
   } as unknown as ExtensionAPI;
 
   ptcExtension(pi);
+  onTestFinished(() => {
+    for (const handler of lifecycleHandlers.get("session_shutdown") ?? []) handler();
+  });
   return registerTool.mock.calls[0][0];
 }
 

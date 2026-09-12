@@ -98,7 +98,7 @@ function quotedGitPathEnd(text: string, start: number): number {
   throw new Error("Unterminated Git quoted path.");
 }
 
-export function parseGitPathList(text: string): string[] {
+function parseGitPathList(text: string): string[] {
   const paths: string[] = [];
   let index = 0;
   while (index < text.length) {
@@ -124,7 +124,7 @@ function stripGitPrefix(path: string, prefix: "a" | "b"): string | undefined {
   return path.startsWith(`${prefix}/`) ? path.slice(2) : undefined;
 }
 
-export function parseDiffGitPath(line: string): string | undefined {
+function parseDiffGitPath(line: string): string | undefined {
   if (!line.startsWith("diff --git ")) return undefined;
   const rest = line.slice("diff --git ".length);
   if (!rest.startsWith('"') && rest.startsWith("a/")) {
@@ -145,14 +145,14 @@ export function parseDiffGitPath(line: string): string | undefined {
   return stripGitPrefix(parts[1] ?? "", "b");
 }
 
-export function parsePatchFilePath(line: string): string | undefined {
+function parsePatchFilePath(line: string): string | undefined {
   const match = line.match(/^(---|\+\+\+) (.+?)(?:\t.*)?$/u);
   if (!match) return undefined;
   const path = match[2]?.startsWith('"') ? parseGitPathList(match[2]).at(0) : match[2];
   return stripGitPrefix(path ?? "", match[1] === "---" ? "a" : "b");
 }
 
-export function diffHunkRanges(section: string): DiffHunkRange[] {
+function diffHunkRanges(section: string): DiffHunkRange[] {
   const lines = section.split(/\r?\n/u);
   if (lines.at(-1) === "") lines.pop();
   const starts = lines.flatMap((line, index) =>

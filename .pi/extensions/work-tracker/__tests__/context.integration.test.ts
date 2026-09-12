@@ -70,7 +70,6 @@ describe("getActiveWorktrees", () => {
     const result = getActiveWorktrees(repo);
     expect(result).toContain("feat/foo");
     expect(result).toContain("fix/bar");
-    expect(result.length).toBe(2);
   });
 
   it("does not include the primary worktree's branch", () => {

@@ -160,7 +160,3 @@ export function listenForAgentTools(
 ): () => void {
   return agentToolChannel.subscribe(pi.events, handler, removalHandler);
 }
-
-export function resetAgentToolRegistryForTests(): void {
-  agentToolChannel.reset();
-}

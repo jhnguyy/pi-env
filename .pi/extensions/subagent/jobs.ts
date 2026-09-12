@@ -437,6 +437,3 @@ export function formatJobResult(job: SubagentJob): string {
   if (job.status === SubagentJobStatus.Completed) return job.resultText ?? "";
   return formatJobMetadata(job);
 }
-
-/** Compatibility alias. Metadata-only callers should use formatJobMetadata. */
-export const formatJobToolContent = formatJobResult;

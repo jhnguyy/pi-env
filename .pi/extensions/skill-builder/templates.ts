@@ -20,9 +20,6 @@ export interface TemplateOutput {
   files: Record<string, string>;
 }
 
-export function getTemplateTypes(): TemplateType[] {
-  return ["basic", "with-scripts", "with-index"];
-}
 
 function renderFrontmatter(name: string, description: string): string {
   return `---

@@ -8,10 +8,8 @@ export type { PiUpdateOptions, PiUpdatePrep } from "./contract";
 export {
   buildDecisionPrompt,
   extractChangelogSection,
-  installCommandPrefix,
   isPiPackageName,
   packageManagerName,
-  packageNames,
   packageNamesResult,
   writeInstallCommand,
   writeReport,

@@ -1,10 +1,8 @@
 import { writeFileSync } from "node:fs";
-import { afterEach, describe, expect, it } from "vitest";
-import { clearInMemoryStateForTests } from "../index";
+import { describe, expect, it } from "vitest";
 import { runRealReviewFlow } from "./fixtures/review-flow";
 import { persistedReviewEntries, registeredReview, reviewContext } from "./fixtures/review-ui";
 
-afterEach(clearInMemoryStateForTests);
 
 async function harness() {
   const flow = await runRealReviewFlow();
