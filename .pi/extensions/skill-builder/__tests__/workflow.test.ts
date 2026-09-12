@@ -13,12 +13,7 @@ import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 
-import registerSkillBuilder, {
-  modelConfigFromModel,
-  resetSkillEvaluationRunnerForTests,
-  runSkillBuild,
-  setSkillEvaluationRunnerForTests,
-} from "../index";
+import registerSkillBuilder, { modelConfigFromModel, runSkillBuild } from "../index";
 
 const roots: string[] = [];
 
@@ -46,7 +41,6 @@ const templateCases = [
 ] as const;
 
 afterEach(() => {
-  resetSkillEvaluationRunnerForTests();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -211,12 +205,11 @@ it("defaults an existing path to deterministic validation", async () => {
   writeSkill(root);
   const exec = vi.fn();
   const runner = vi.fn();
-  setSkillEvaluationRunnerForTests(runner as any);
 
   const result = await runSkillBuild(
     { exec } as any,
     { path: "review-skill" },
-    { cwd: root, ctx: context(root), env: {} },
+    { cwd: root, ctx: context(root), env: {}, evaluationRunner: runner as any },
   );
 
   expect(result.content[0]?.text).toContain("✓ Validate: passed");
@@ -229,12 +222,11 @@ it("requires a user goal for advisory evaluation", async () => {
   const root = tempRoot();
   writeSkill(root);
   const runner = vi.fn();
-  setSkillEvaluationRunnerForTests(runner as any);
 
   const result = await runSkillBuild(
     { exec: vi.fn() } as any,
     { path: "review-skill", action: "evaluate" },
-    { cwd: root, ctx: context(root), env: {} },
+    { cwd: root, ctx: context(root), env: {}, evaluationRunner: runner as any },
   );
 
   expect(result.content[0]?.text).toContain("Evaluate mode requires the user's goal");
@@ -244,8 +236,6 @@ it("requires a user goal for advisory evaluation", async () => {
 it("blocks advisory evaluation after registered deterministic validation fails", async () => {
   const root = tempRoot();
   writeSkill(root, "---\ndescription: Missing name.\n---\n\n# Invalid\n");
-  const runner = vi.fn();
-  setSkillEvaluationRunnerForTests(runner as any);
   const tool = registeredSkillBuild(root);
 
   const result = await tool.execute({
@@ -257,7 +247,6 @@ it("blocks advisory evaluation after registered deterministic validation fails",
   expect(result.content[0]?.text).toContain("✗ Validate:");
   expect(result.content[0]?.text).not.toContain("Advisory evaluation");
   expect(tool.exec).not.toHaveBeenCalled();
-  expect(runner).not.toHaveBeenCalled();
 });
 
 it("uses the in-process subagent with the user goal and automatic Git diff", async () => {
@@ -280,13 +269,12 @@ it("uses the in-process subagent with the user goal and automatic Git diff", asy
       return successfulChild();
     }),
   );
-  setSkillEvaluationRunnerForTests(runner as any);
   const controller = new AbortController();
 
   const result = await runSkillBuild(
     { exec } as any,
     { path: "review-skill", action: "evaluate", goal: "Reduce recurring context." },
-    { cwd: root, ctx: context(root), signal: controller.signal, env: {} },
+    { cwd: root, ctx: context(root), signal: controller.signal, env: {}, evaluationRunner: runner as any },
   );
 
   expect(runner).toHaveBeenCalledOnce();
@@ -323,7 +311,7 @@ it("returns subagent failure as unavailable advisory review", async () => {
   const root = tempRoot();
   writeSkill(root);
   const exec = vi.fn(async () => ({ code: 0, stdout: "+ change\n", stderr: "" }));
-  setSkillEvaluationRunnerForTests((() =>
+  const runner = (() =>
     Effect.succeed({
       ...successfulChild(),
       details: {
@@ -331,12 +319,12 @@ it("returns subagent failure as unavailable advisory review", async () => {
         isError: true,
         errorMessage: "provider unavailable",
       },
-    })) as any);
+    })) as any;
 
   const result = await runSkillBuild(
     { exec } as any,
     { path: "review-skill", action: "evaluate", goal: "Check the focused change." },
-    { cwd: root, ctx: context(root), env: {} },
+    { cwd: root, ctx: context(root), env: {}, evaluationRunner: runner },
   );
 
   expect(result.content[0]?.text).toContain(
@@ -351,13 +339,12 @@ it("returns validation when advisory evaluation has no available model", async (
   writeSkill(root);
   const exec = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
   const runner = vi.fn();
-  setSkillEvaluationRunnerForTests(runner as any);
   const ctx = { cwd: root, modelRegistry: { getAvailable: () => [] } } as any;
 
   const result = await runSkillBuild(
     { exec } as any,
     { path: "review-skill", action: "evaluate", goal: "Review the skill." },
-    { cwd: root, ctx, env: {} },
+    { cwd: root, ctx, env: {}, evaluationRunner: runner as any },
   );
 
   expect(result.content[0]?.text).toContain("✓ Validate: passed");
@@ -369,12 +356,11 @@ it("does not start nested advisory evaluation from a subagent tool", async () =>
   const root = tempRoot();
   writeSkill(root);
   const runner = vi.fn();
-  setSkillEvaluationRunnerForTests(runner as any);
 
   const result = await runSkillBuild(
     { exec: vi.fn() } as any,
     { path: "review-skill", action: "evaluate", goal: "Review the skill." },
-    { cwd: root, ctx: context(root), allowEvaluation: false, env: {} },
+    { cwd: root, ctx: context(root), allowEvaluation: false, env: {}, evaluationRunner: runner as any },
   );
 
   expect(result.content[0]?.text).toContain("must run from the parent session");

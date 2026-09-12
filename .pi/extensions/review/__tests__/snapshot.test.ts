@@ -11,12 +11,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Effect } from "effect";
 import {
   prepareResolvedSnapshot,
-  prepareSnapshot,
-  prepareSnapshotEffect,
   resolvePrUrl,
+  resolveReviewMetadata,
 } from "../snapshot";
 
 let agentDir = "";
@@ -65,6 +63,17 @@ function execFor(meta: any, mismatch = false) {
     return { code: 0, stdout: "", stderr: "" } as any;
   };
   return { exec, calls };
+}
+
+async function prepareSnapshot(
+  exec: Parameters<typeof resolveReviewMetadata>[0],
+  cwd: string,
+  url: string,
+  signal?: AbortSignal,
+  directory = agentDir,
+) {
+  const metadata = await resolveReviewMetadata(exec, cwd, url, signal);
+  return prepareResolvedSnapshot(exec, cwd, metadata, signal, undefined, directory);
 }
 
 describe("review pull request snapshot", () => {
@@ -248,13 +257,12 @@ describe("review pull request snapshot", () => {
       return exec(cmd, args, opts);
     };
     await expect(
-      Effect.runPromise(
-        prepareSnapshotEffect(
-          failingExec as any,
-          cwd,
-          "https://github.com/acme/widgets/pull/7",
-          agentDir,
-        ),
+      prepareSnapshot(
+        failingExec as any,
+        cwd,
+        "https://github.com/acme/widgets/pull/7",
+        undefined,
+        agentDir,
       ),
     ).rejects.toThrow(/worktree/);
     expect(readdirSync(join(agentDir, "pr-review", "artifacts"))).toEqual([]);

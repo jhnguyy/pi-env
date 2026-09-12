@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { runSubagent, type RunSubagentOptions } from "../execute";
+import { runSubagentEffect, type RunSubagentOptions } from "../execute";
 
 const state = {
   output: "",
@@ -110,7 +111,7 @@ describe("subagent tooling telemetry", () => {
     const finished: ReadableSpan[] = [];
     const { context, tools } = harness(root);
 
-    const result = await runSubagent(
+    const result = await Effect.runPromise(runSubagentEffect(
       {
         name: "telemetry-check",
         task: taskSentinel,
@@ -127,7 +128,7 @@ describe("subagent tooling telemetry", () => {
         telemetryExporter: inMemoryExporter(finished),
         agentLoop,
       },
-    );
+    ));
 
     expect(result.content[0]?.type === "text" ? result.content[0].text : "").toBe(outputSentinel);
     expect(finished.map((span) => span.name)).toEqual(
@@ -182,7 +183,7 @@ describe("subagent tooling telemetry", () => {
     const controller = new AbortController();
     const { context, tools } = harness(root);
 
-    const pending = runSubagent(
+    const pending = Effect.runPromise(runSubagentEffect(
       {
         name: "cancel-check",
         task: "wait until cancelled",
@@ -192,7 +193,7 @@ describe("subagent tooling telemetry", () => {
       context,
       tools,
       { env: {}, signal: controller.signal, agentLoop },
-    );
+    ));
     await agentLoopStarted;
     controller.abort();
     const result = await pending;
@@ -207,7 +208,7 @@ describe("subagent tooling telemetry", () => {
     const finished: ReadableSpan[] = [];
     const { context, tools } = harness(root);
 
-    await runSubagent(
+    await Effect.runPromise(runSubagentEffect(
       {
         name: "disabled-check",
         task: "ordinary task",
@@ -217,7 +218,7 @@ describe("subagent tooling telemetry", () => {
       context,
       tools,
       { env: {}, telemetryExporter: inMemoryExporter(finished), agentLoop },
-    );
+    ));
 
     expect(finished).toEqual([]);
   });

@@ -4,10 +4,24 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform.js";
-import { platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
+import {
+  platformJitRunner,
+  readSourceFiles,
+  resolveExtensionDir,
+  resolveGitRootEffect,
+  runForExtensionEffect,
+} from "../runner";
 import type { ExecResult, JitRunner } from "../runner";
 
 const tempDirs: string[] = [];
+
+const runForExtension = (
+  ext: Parameters<typeof runForExtensionEffect>[0],
+  diffText: string,
+  runner: JitRunner,
+  signal: AbortSignal | undefined,
+  workspaceRoot: string,
+) => Effect.runPromise(runForExtensionEffect(ext, diffText, runner, workspaceRoot), { signal });
 
 function tempRoot(): string {
   const dir = join(tmpdir(), `jit-catch-runner-${process.pid}-${tempDirs.length}`);
@@ -58,16 +72,13 @@ describe("readSourceFiles", () => {
 });
 
 describe("resolveGitRoot", () => {
-  it("uses git rev-parse output when available", async () => {
-    const exec: JitRunner = () => Effect.succeed({ code: 0, stdout: "/repo/root\n", stderr: "" });
+  it.each([
+    ["uses git rev-parse output when available", { code: 0, stdout: "/repo/root\n", stderr: "" }, "/repo/root/subdir", "/repo/root"],
+    ["falls back to gitCwd when rev-parse fails", { code: 128, stdout: "", stderr: "not a repo" }, "/not/repo", "/not/repo"],
+  ] as const)("%s", async (_claim, result, cwd, expected) => {
+    const exec: JitRunner = () => Effect.succeed(result);
 
-    await expect(resolveGitRoot(exec, "/repo/root/subdir")).resolves.toBe("/repo/root");
-  });
-
-  it("falls back to gitCwd when rev-parse fails", async () => {
-    const exec: JitRunner = () => Effect.succeed({ code: 128, stdout: "", stderr: "not a repo" });
-
-    await expect(resolveGitRoot(exec, "/not/repo")).resolves.toBe("/not/repo");
+    await expect(Effect.runPromise(resolveGitRootEffect(exec, cwd))).resolves.toBe(expected);
   });
 });
 
@@ -216,18 +227,18 @@ describe("runForExtension", () => {
       return Effect.fail(new ProcessFailure({ kind: ProcessFailureKind.Spawn, command: "npm test", message: "spawn ENOENT" }));
     };
 
-    const result = await runForExtension(
+    const result = await Effect.runPromise(Effect.result(runForExtensionEffect(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
       "diff",
       exec,
-      undefined,
       root,
-    );
+    )));
 
-    expect(result.passed).toBe(false);
-    expect(result.testPath).toBe(testPath);
-    expect(result.testOutput).toContain("Operational subprocess failure during run catching tests");
-    expect(result.testOutput).toContain("spawn ENOENT");
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.phase).toBe("run catching tests");
+      expect(result.failure.cause).toMatchObject({ message: "spawn ENOENT" });
+    }
     expect(existsSync(testPath)).toBe(true);
   });
 });

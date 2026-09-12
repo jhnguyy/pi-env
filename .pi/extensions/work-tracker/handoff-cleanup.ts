@@ -44,19 +44,6 @@ export function isGitPull(command: string): boolean {
 }
 
 /**
- * Parses the output of `git branch --merged HEAD` into a Set of branch names.
- * Strips the current-branch `*` prefix and surrounding whitespace.
- */
-export function parseMergedBranches(output: string): Set<string> {
-	const branches = new Set<string>();
-	for (const line of output.split("\n")) {
-		const branch = line.replace(/^\*?\s+/, "").trim();
-		if (branch) branches.add(branch);
-	}
-	return branches;
-}
-
-/**
  * Scans the handoffs directory for files whose `branch` frontmatter field
  * appears in the given branch set, deletes them, and returns the deleted filenames.
  *

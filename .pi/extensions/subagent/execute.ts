@@ -486,13 +486,3 @@ export function runResolvedSubagentEffect(
     runControlledResolvedSubagentWorkflow(run, ctx, options, runtime.diagnostics),
   );
 }
-
-/** Promise compatibility boundary for callers outside the Effect workflow. */
-export function runSubagent(
-  params: SubagentParams,
-  ctx: ExtensionContext,
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  options: RunSubagentOptions = {},
-): Promise<AgentToolResult<SubagentDetails>> {
-  return Effect.runPromise(runSubagentEffect(params, ctx, registeredExtTools, options));
-}

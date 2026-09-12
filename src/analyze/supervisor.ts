@@ -50,7 +50,7 @@ export interface SupervisorOptions {
   readonly otelExporter?: SpanExporter;
 }
 
-export function analyzeWorkerPath(
+function analyzeWorkerPath(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
   if (env.PI_ENV_ANALYZE_WORKER !== undefined) return env.PI_ENV_ANALYZE_WORKER;

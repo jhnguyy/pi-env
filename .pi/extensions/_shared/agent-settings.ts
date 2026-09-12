@@ -5,7 +5,6 @@ import {
   defaultSettingsEnv,
   loadSettingsSnapshotEffect,
   type SettingsEnv,
-  type SettingsError,
   type SettingsSnapshot,
 } from "./settings";
 
@@ -26,14 +25,7 @@ export const AgentSettingsSchema = Schema.Struct({
 export type AgentSettings = typeof AgentSettingsSchema.Type;
 export type WorkTrackerSettings = typeof WorkTrackerSettingsSchema.Type;
 export type AgentSettingsEnv = SettingsEnv;
-export type AgentSettingsReadError = SettingsError;
 
-export function readAgentSettingsEffect(
-  env: AgentSettingsEnv = defaultSettingsEnv,
-  cwd = process.cwd(),
-): Effect.Effect<AgentSettings, AgentSettingsReadError> {
-  return Effect.flatMap(loadSettingsSnapshotEffect(cwd, env), decodeAgentSettingsSnapshotEffect);
-}
 
 function readOptionalAgentSettingsEffect(
   env: AgentSettingsEnv = defaultSettingsEnv,

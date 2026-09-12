@@ -116,9 +116,6 @@ function withLockedTools(names: readonly string[], config: ResolvedConfig, allTo
   return unique([...names, SEARCH_TOOL_NAME, ...config.alwaysActive]).filter((name) => all.has(name));
 }
 
-export function expandEntries(entries: readonly string[], config: ResolvedConfig, allTools: readonly Pick<ToolInfo, "name">[]): string[] {
-  return withLockedTools(expandRequestedEntries(entries, config, allTools), config, allTools);
-}
 
 export function profileTools(profile: string, config: ResolvedConfig, allTools: readonly Pick<ToolInfo, "name">[]): string[] {
   if (!(profile in config.profiles)) return [];

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
 
 const assistant = {
   role: "assistant",
@@ -13,7 +14,7 @@ const assistant = {
   usage: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
 };
 
-import { runSubagent, type RunSubagentOptions } from "../execute";
+import { runSubagentEffect, type RunSubagentOptions } from "../execute";
 
 const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = () =>
   ({
@@ -38,7 +39,7 @@ describe("subagent live progress", () => {
     const updates: string[] = [];
     const usageUpdates: number[] = [];
     const parent = SessionManager.create("/tmp", sessionDir);
-    const result = await runSubagent(
+    const result = await Effect.runPromise(runSubagentEffect(
       { name: "progress", task: "x", tools: ["notes"], model: "test/model" },
       {
         cwd: "/tmp",
@@ -69,7 +70,7 @@ describe("subagent live progress", () => {
         onUsage: (details) => usageUpdates.push(details.usage.input),
         agentLoop,
       },
-    );
+    ));
 
     expect(updates.at(-1)).toBe("latest assistant text");
     expect(usageUpdates).toEqual([1]);

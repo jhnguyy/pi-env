@@ -1,7 +1,7 @@
 import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { txt } from "../_shared/result";
-import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
+import type { ToolContract } from "../_shared/tool-contract";
 import { bound, confined } from "./core";
 import { readVerifiedPinnedDiff } from "./snapshot";
 import { createDiffIndex, type DiffIndex } from "./diff-index";
@@ -261,10 +261,4 @@ export function buildReviewReadToolContracts(store: ReviewRunStore): Array<ToolC
       },
     },
   ];
-}
-
-export function makeReviewReadTools(store: ReviewRunStore) {
-  return buildReviewReadToolContracts(store).map((contract) =>
-    toAgentTool(contract, () => ({ cwd: store.state.snapshot.worktree })),
-  );
 }

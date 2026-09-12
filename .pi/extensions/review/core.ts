@@ -33,7 +33,6 @@ export {
 } from "./schema";
 
 export {
-  changedLineAnchors,
   diffAnchors,
   diffHunkRanges,
   parseChangedFilesFromDiff,

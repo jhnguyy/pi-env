@@ -345,32 +345,6 @@ export async function resolveReviewMetadata(
   return parseGhJson(result.stdout, parsed);
 }
 
-export function prepareSnapshotEffect(
-  exec: Exec,
-  cwd: string,
-  metadataOrUrl: ReviewMetadata | string,
-  agentDir = getAgentDir(),
-): Effect.Effect<ReviewSnapshot, SnapshotError> {
-  if (typeof metadataOrUrl !== "string")
-    return prepareSnapshotWorkflow(exec, cwd, metadataOrUrl, undefined, agentDir);
-  const parsed = parsePrUrl(metadataOrUrl);
-  return runEffect(
-    exec,
-    "gh",
-    [
-      "pr",
-      "view",
-      metadataOrUrl,
-      "--json",
-      "url,title,body,baseRefName,baseRefOid,headRefName,headRefOid",
-    ],
-    { cwd },
-  ).pipe(
-    Effect.map((result) => parseGhJson(result.stdout, parsed)),
-    Effect.flatMap((metadata) => prepareSnapshotWorkflow(exec, cwd, metadata, undefined, agentDir)),
-  );
-}
-
 export async function prepareResolvedSnapshot(
   exec: Exec,
   cwd: string,
@@ -381,17 +355,6 @@ export async function prepareResolvedSnapshot(
 ): Promise<ReviewSnapshot> {
   const effect = prepareSnapshotWorkflow(exec, cwd, metadata, reviewId, agentDir);
   return signal ? Effect.runPromise(effect, { signal }) : Effect.runPromise(effect);
-}
-
-export async function prepareSnapshot(
-  exec: Exec,
-  cwd: string,
-  url: string,
-  signal?: AbortSignal,
-  agentDir = getAgentDir(),
-): Promise<ReviewSnapshot> {
-  const metadata = await resolveReviewMetadata(exec, cwd, url, signal);
-  return prepareResolvedSnapshot(exec, cwd, metadata, signal, undefined, agentDir);
 }
 
 export async function currentRemoteHead(

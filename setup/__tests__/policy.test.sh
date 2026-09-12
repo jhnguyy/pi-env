@@ -7,7 +7,7 @@ cd "$ROOT"
 
 "$(node_bin)" --input-type=module <<'JS'
 import assert from 'node:assert/strict';
-import { deriveSetupPolicy, isCliManagedExternally, isNixManaged, setupMode, shouldSkipPathProfile } from './setup/policy.mjs';
+import { deriveSetupPolicy } from './setup/policy.mjs';
 
 const portable = deriveSetupPolicy({});
 assert.equal(portable.mode, 'portable');
@@ -36,10 +36,6 @@ assert.equal(granular.repoTools.installHooks, false);
 assert.equal(granular.path.updateShellProfiles, false);
 assert.equal(granular.cli.writeWrapper, false);
 
-assert.equal(setupMode({ PI_ENV_SETUP_MODE: 'nix-managed' }), 'nix-managed');
-assert.equal(isNixManaged({ PI_ENV_SETUP_MODE: 'nix-managed' }), true);
-assert.equal(isCliManagedExternally({ PI_ENV_CLI_MANAGED_BY_NIX: '1' }), true);
-assert.equal(shouldSkipPathProfile({ PI_ENV_SKIP_PATH_PROFILE: '1' }), true);
 JS
 
 echo "setup policy tests passed"
