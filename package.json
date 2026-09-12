@@ -24,6 +24,7 @@
     ".pi/extensions/review",
     ".pi/extensions/ptc",
     ".pi/extensions/security",
+    ".pi/extensions/session-manager",
     ".pi/extensions/skill-builder",
     ".pi/extensions/subagent",
     ".pi/extensions/tool-manager"
@@ -43,6 +44,7 @@
       ".pi/extensions/review",
       ".pi/extensions/ptc",
       ".pi/extensions/security",
+      ".pi/extensions/session-manager",
       ".pi/extensions/skill-builder",
       ".pi/extensions/subagent",
       ".pi/extensions/tool-manager"
@@ -113,6 +115,7 @@
     "@effect/vitest": "4.0.0-beta.97",
     "@oxlint/plugins": "1.73.0",
     "@types/node": "^24.0.0",
+    "@types/proper-lockfile": "^4.1.4",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
     "knip": "^6.24.0",
