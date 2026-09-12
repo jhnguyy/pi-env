@@ -22,7 +22,7 @@ Each permanent test must justify its maintenance cost with a durable behavioral 
 
 When a test is the only caller of a production export, getter, injection option, return value, or helper, review both items together. Remove the production seam when it has no runtime owner or non-test design purpose. Do not preserve production complexity only to support direct unit inspection.
 
-During a test sweep, review the complete test case instead of only duplicate code. Remove assertions that restate arrangement data or another assertion. Prefer one test at the public boundary over parallel tests of each internal step. Preserve narrower tests only when they improve safety evidence, failure diagnosis, or counterfactual strength.
+Before you merge any contribution that adds or changes tests, review each changed test and nearby tests at the same boundary. Remove assertions that restate arrangement data, source structure, or another assertion. Remove existing low-value evidence in the same change. Prefer one test at the public boundary over parallel tests of each internal step. Preserve narrower tests only when they improve safety evidence, failure diagnosis, or counterfactual strength.
 
 ## Test file boundaries
 
