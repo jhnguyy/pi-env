@@ -49,7 +49,7 @@ Canonical standard and safe verification phases live in [`scripts/verification-p
 
 ## Worktree requirements
 
-Keep the primary working tree at `/mnt/tank/code/pi-env` on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.
+Keep the primary working tree on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.
 
 After creating a worktree, run:
 
