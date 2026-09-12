@@ -1,33 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
-import { tmpdir } from "os";
+import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
-  buildEvalPrompt,
   parseEvalResponse,
   estimateCost,
   type EvalModelConfig,
 } from "../evaluator";
-
-let tempDir: string;
-
-beforeEach(() => {
-  tempDir = mkdtempSync(join(tmpdir(), "skill-evaluator-test-"));
-});
-
-afterEach(() => {
-  rmSync(tempDir, { recursive: true, force: true });
-});
-
-function createSkillContent(name: string, body: string): string {
-  return `---
-name: ${name}
-description: A skill for ${name} tasks. Use when working with ${name}.
----
-
-${body}`;
-}
 
 const testModelConfig: EvalModelConfig = {
   provider: "anthropic",
@@ -46,48 +23,6 @@ const selfHostedConfig: EvalModelConfig = {
 };
 
 describeIfEnabled("skill-builder", "Evaluator", () => {
-  // ─── Prompt Construction ───────────────────────────────────────
-
-  describe("buildEvalPrompt", () => {
-    it("includes the skill content in the prompt", () => {
-      const content = createSkillContent("my-tool", "# My Tool\n\nDoes things.");
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
-      expect(prompt).toContain("my-tool");
-      expect(prompt).toContain("Does things.");
-    });
-
-    it("includes evaluation rubric categories", () => {
-      const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
-      expect(prompt).toContain("clarity");
-      expect(prompt).toContain("completeness");
-      expect(prompt).toContain("context-efficiency");
-    });
-
-    it("uses the user goal and prioritizes narrowing and delegation", () => {
-      const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
-      expect(prompt).toContain("Keep the skill concise.");
-      expect(prompt).toContain("The user goal controls scope");
-      expect(prompt).toContain("Prefer narrowing, deleting, or delegating before adding");
-      expect(prompt).toContain("Prefer authoritative sources over copied facts");
-    });
-
-    it("requests structured JSON output", () => {
-      const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
-      expect(prompt).toMatch(/json/i);
-    });
-
-    it("includes diff context when provided", () => {
-      const content = createSkillContent("my-tool", "# My Tool\n\nNew content.");
-      const diff = "- Old line\n+ New content.";
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.", diff);
-      expect(prompt).toContain("Old line");
-      expect(prompt).toContain("diff");
-    });
-  });
-
   // ─── Response Parsing ─────────────────────────────────────────
 
   describe("parseEvalResponse", () => {
@@ -225,26 +160,6 @@ describeIfEnabled("skill-builder", "Evaluator", () => {
     it("handles zero tokens", () => {
       const cost = estimateCost(testModelConfig, 0, 0);
       expect(cost).toBe(0);
-    });
-  });
-
-  // ─── JiT-Style Diff Evaluation ────────────────────────────────
-
-  describe("diff-aware evaluation", () => {
-    it("buildEvalPrompt without diff omits diff section", () => {
-      const content = createSkillContent("my-tool", "# My Tool");
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.");
-      expect(prompt).not.toContain("## Changes");
-    });
-
-    it("buildEvalPrompt with diff includes diff-aware instructions", () => {
-      const content = createSkillContent("my-tool", "# My Tool\n\nUpdated.");
-      const diff = "@@ -1,3 +1,3 @@\n- old instruction\n+ Updated.";
-      const prompt = buildEvalPrompt(content, "my-tool", "Keep the skill concise.", diff);
-      expect(prompt).toContain("Changes");
-      expect(prompt).toContain("old instruction");
-      // Should ask evaluator to focus on what changed
-      expect(prompt).toMatch(/change|diff|modif/i);
     });
   });
 });

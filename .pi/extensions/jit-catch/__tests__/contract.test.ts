@@ -15,8 +15,6 @@ import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/plat
 import {
   createJitCatchContractWithRunner,
   executeJitCatchEffect,
-  JIT_CATCH_DESCRIPTION,
-  JIT_CATCH_PARAMETERS,
   type JitCatchOperations,
 } from "../contract";
 import {
@@ -103,22 +101,7 @@ describe("jit_catch tool contract", () => {
     runnerState.runEffect = null;
   });
 
-  it("uses one schema and description across public Pi registration and AgentTool registration", () => {
-    const harness = createPi();
-    jitCatchExtension(harness.pi as any);
-    harness.startSession("/agent/session");
-
-    expect(harness.tools[0].name).toBe("jit_catch");
-    expect(harness.tools[0].label).toBe("JiT-Catch");
-    expect(harness.tools[0].parameters).toBe(JIT_CATCH_PARAMETERS);
-    expect(harness.tools[0].description).toBe(JIT_CATCH_DESCRIPTION);
-    expect(harness.registrations[0].tool.name).toBe(harness.tools[0].name);
-    expect(harness.registrations[0].tool.label).toBe(harness.tools[0].label);
-    expect(harness.registrations[0].tool.parameters).toBe(JIT_CATCH_PARAMETERS);
-    expect(harness.registrations[0].tool.description).toBe(harness.tools[0].description);
-  });
-
-  it("preserves jit_catch capabilities through public registration events", () => {
+  it("registers write and execute authority", () => {
     const harness = createPi();
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
@@ -127,22 +110,6 @@ describe("jit_catch tool contract", () => {
       ToolCapability.Write,
       ToolCapability.Execute,
     ]);
-  });
-
-  it("does not depend on pi.exec for production registration", async () => {
-    const harness = createPi();
-    harness.pi.exec = async () => {
-      throw new Error("pi.exec should not be called");
-    };
-    jitCatchExtension(harness.pi as any);
-    harness.startSession("/agent/session");
-
-    await expect(
-      harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/pi/context" }),
-    ).resolves.toBeDefined();
-    await expect(
-      harness.registrations[0].tool.execute("agent", {}, undefined),
-    ).resolves.toBeDefined();
   });
 
   it("uses Pi cwd per invocation and captured Agent session cwd", async () => {

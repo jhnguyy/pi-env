@@ -63,7 +63,7 @@ function findPackageReferenceDir(): string | null {
   return null;
 }
 
-export function getReferenceDirs(): string[] {
+function getReferenceDirs(): string[] {
   const dirs = [USER_REFERENCE_DIR, findPackageReferenceDir()].filter((dir): dir is string =>
     Boolean(dir && existsSync(dir)),
   );
@@ -76,7 +76,7 @@ function readReferenceSkillName(filePath: string, fallback: string): string {
   return nameMatch ? nameMatch[1].trim() : fallback;
 }
 
-export function listReferenceSkillNames(): string[] {
+function listReferenceSkillNames(): string[] {
   const names = new Set<string>();
   for (const dir of getReferenceDirs()) {
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
@@ -86,7 +86,7 @@ export function listReferenceSkillNames(): string[] {
   return Array.from(names).sort();
 }
 
-export function getReferenceSkillIndex(): Map<string, ReferenceSkillEntry> {
+function getReferenceSkillIndex(): Map<string, ReferenceSkillEntry> {
   if (_referenceSkillIndex !== null) return _referenceSkillIndex;
   const index = new Map<string, ReferenceSkillEntry>();
 

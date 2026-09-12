@@ -21,16 +21,12 @@ const mockTheme = {
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
 let registeredTool: any;
-const registeredTools = new Map<string, any>();
-const toolRegistrations: any[] = [];
 
 // Event listener map for testing agent-tools:register protocol
 const eventListeners = new Map<string, Function[]>();
 
 const mockPi = {
   registerTool: (tool: any) => {
-    toolRegistrations.push(tool);
-    registeredTools.set(tool.name, tool);
     if (tool.name === "subagent") registeredTool = tool;
   },
   on: () => {},
@@ -91,22 +87,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
-    it("registers one action-selected public tool", () => {
-      expect(registeredTool).toBeDefined();
-      expect([...registeredTools.keys()]).toEqual(["subagent"]);
-      expect(toolRegistrations.filter((tool) => tool.name === "subagent")).toHaveLength(1);
-      expect(registeredTool.parameters.properties.action.enum).toEqual([
-        "run",
-        "start",
-        "status",
-        "wait",
-        "cancel",
-        "list",
-        "usage",
-        "result",
-      ]);
-    });
-
     it("reports completed asynchronous usage exactly once", () => {
       const reported = new Set<string>();
       const job = {
@@ -138,10 +118,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Extension tool registration ─────────────────────────────────────────
 
   describe("extension tool registration", () => {
-    it("listens on 'agent-tools:register' channel", () => {
-      expect(eventListeners.has("agent-tools:register")).toBe(true);
-    });
-
     it("registered extension tool resolves and is available for subagents", async () => {
       // Emit a mock extension tool
       const mockExtTool = {

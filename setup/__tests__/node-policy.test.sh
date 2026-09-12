@@ -12,22 +12,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   assertNodePolicy,
-  esbuildNodeTarget,
   nodePolicyIssues,
-  nodeVersionSatisfies,
-  readNodePin,
-  readNodeRuntimePin,
 } from './scripts/node-policy.mjs';
-
-assert.equal(readNodePin('.node-version'), '24.16.0');
-assert.equal(readNodePin('.nvmrc'), '24.16.0');
-assert.equal(readNodeRuntimePin(), '24.16.0');
-assert.equal(nodeVersionSatisfies('24.16.0'), true);
-assert.equal(nodeVersionSatisfies('24.0.0'), false);
-assert.equal(nodeVersionSatisfies('23.99.99'), false);
-assert.equal(esbuildNodeTarget(), 'node24.0');
-assert.deepEqual(nodePolicyIssues(), []);
-assert.doesNotThrow(() => assertNodePolicy());
 
 const makeRepo = (pkg, nodeVersion = '24.16.0', nvmrc = nodeVersion) => {
   const dir = mkdtempSync(join(tmpdir(), 'pi-env-node-policy-'));

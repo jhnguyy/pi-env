@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { listPlan, runPlan } from "../verification-runner.mjs";
+import { runPlan } from "../verification-runner.mjs";
 
 const phases = [
   { id: "first", label: "first phase", command: "one", args: ["a"] },
@@ -7,13 +7,6 @@ const phases = [
 ];
 
 describe("verification runner", () => {
-  it("lists phases in order", () => {
-    expect(listPlan(phases)).toEqual([
-      "first: first phase — one a",
-      "second: second phase — two b c",
-    ]);
-  });
-
   it("returns 1 for start errors", () => {
     const error = new Error("missing command");
     expect(

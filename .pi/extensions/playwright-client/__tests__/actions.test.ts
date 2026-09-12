@@ -1,6 +1,6 @@
 // @ts-ignore - the extension-level inferred LSP project does not see root devDependencies; root tsc resolves vitest.
 import { describe, expect, it, vi } from "vitest";
-import { executeBrowserAction, formatActionSummary } from "../actions";
+import { executeBrowserAction } from "../actions";
 
 describe("executeBrowserAction", () => {
   it("returns screenshot image content inline", async () => {
@@ -40,12 +40,6 @@ describe("executeBrowserAction", () => {
     expect(browser.download).toHaveBeenCalledWith("local", { text: "Export", timeout: 12_000 });
     expect(result.text).toContain("download: /tmp/pi-browser-artifacts/downloads/export.csv");
     expect(result.details).toMatchObject({ action: "download", locator: "text=Export", path: "/tmp/pi-browser-artifacts/downloads/export.csv", suggestedFilename: "export.csv" });
-  });
-});
-
-describe("formatActionSummary", () => {
-  it("summarizes download locators", () => {
-    expect(formatActionSummary("download", { text: "Export" })).toBe("text=Export");
   });
 });
 

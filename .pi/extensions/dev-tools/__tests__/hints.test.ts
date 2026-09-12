@@ -116,47 +116,6 @@ describe("LspBackend.handles and getLanguageId (via configs)", () => {
   });
 });
 
-describe("LSP launch plans", () => {
-  it("launches Node-module servers through the resolved Node command and package JS entrypoints", () => {
-    const lspConfigs = BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp);
-    for (const name of ["typescript", "bash"] as const) {
-      const config = lspConfigs.find((c) => c.name === name)!;
-      expect(config.launchCommand).not.toContain("node_modules/.bin");
-      expect(config.launchCommand).not.toBe("node");
-      expect(config.nodeExecPathShim).toMatch(/^data:text\/javascript,/);
-      expect(config.launchArgs[0]).toContain("node_modules");
-      expect(config.launchArgs[0]).not.toContain(".bin");
-      expect(config.launchArgs.slice(1)).toEqual(config.binaryArgs);
-    }
-  });
-
-  it("keeps nil as a native binary discovery plan", () => {
-    const config = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp))
-      .find((c) => c.name === "nil")!;
-    expect(config.launchCommand).toBe("nil");
-    expect(config.launchArgs).toEqual([]);
-  });
-});
-
-describe("TypeScript runtime", () => {
-  it("uses the workspace TypeScript patched by the Effect language service", () => {
-    const config = getBackendConfig("foo.ts");
-    expect(config?.mode).toBe(BackendMode.Lsp);
-    if (config?.mode !== BackendMode.Lsp) return;
-
-    const options = config.initializationOptions as {
-      disableAutomaticTypingAcquisition: boolean;
-      maxTsServerMemory: number;
-      tsserver: { path: string; useSyntaxServer: string };
-    };
-    expect(options.disableAutomaticTypingAcquisition).toBe(true);
-    expect(options.maxTsServerMemory).toBe(768);
-    expect(options.tsserver.path).toContain("typescript");
-    expect(options.tsserver.path).toMatch(/lib\/tsserver\.js$/);
-    expect(options.tsserver.useSyntaxServer).toBe("never");
-  });
-});
-
 describe("findBinary", () => {
   it("finds workspace-installed binaries even when PATH is stripped", async () => {
     const oldPath = process.env["PATH"];

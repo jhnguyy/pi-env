@@ -1,17 +1,13 @@
 import { expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { getReferenceDirs, getReferenceSkillIndex, listReferenceSkillNames } from "../index";
+import { executeReferenceSkill } from "../index";
 
-describeIfEnabled("skill-builder", "reference skills", () => {
-  it("discovers package reference skills", () => {
-    expect(getReferenceDirs().some((dir) => dir.endsWith(".agents/skills/reference"))).toBe(true);
-    expect(listReferenceSkillNames()).toContain("planning");
-  });
+describeIfEnabled("skill-builder", "reference_skill", () => {
+  it("lists and reads packaged reference skills", () => {
+    const listed = executeReferenceSkill({});
+    expect(listed.content[0]?.text).toContain("planning");
 
-  it("indexes reference skills by filename", () => {
-    const byFile = getReferenceSkillIndex().get("planning");
-
-    expect(byFile?.name).toBe("planning");
-    expect(byFile?.filePath.endsWith(".agents/skills/reference/planning.md")).toBe(true);
+    const loaded = executeReferenceSkill({ name: "planning" });
+    expect(loaded.content[0]?.text).toContain("# Planning");
   });
 });

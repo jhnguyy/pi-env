@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 
-export function formatPhase(phase) {
+function formatPhase(phase) {
   return phase.skip
     ? `${phase.id}: ${phase.label} — skipped (${phase.skip})`
     : `${phase.id}: ${phase.label} — ${[phase.command, ...phase.args].join(" ")}`;

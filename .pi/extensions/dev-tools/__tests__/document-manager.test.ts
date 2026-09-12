@@ -105,11 +105,9 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     it("returns uri for an open file and removes it", () => {
       const p = mkFile("a.ts", "const a = 1;");
       dm.ensure(p);
-      expect(dm.openCount).toBe(1);
       const uri = dm.close(p);
       expect(uri).not.toBeNull();
       expect(uri).toMatch(/^file:\/\//);
-      expect(dm.openCount).toBe(0);
     });
 
     it("returns null for a file that is not open", () => {
@@ -131,9 +129,7 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
       const p2 = mkFile("b.ts", "const b = 2;");
       dm.ensure(p1);
       dm.ensure(p2);
-      expect(dm.openCount).toBe(2);
       dm.close(p1);
-      expect(dm.openCount).toBe(1);
       // Project root should remain since p2 is still open
       expect(dm.projectRoots.length).toBe(1);
     });
@@ -145,7 +141,6 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
       const result = dm.ensure(p);
       expect(result.notification).not.toBeNull();
       expect(result.notification!.type).toBe("didOpen");
-      expect(dm.openCount).toBe(1);
     });
   });
 

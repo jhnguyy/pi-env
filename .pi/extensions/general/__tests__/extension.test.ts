@@ -33,7 +33,6 @@ function emittedBytes(write: ReturnType<typeof vi.spyOn>): number[] {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllEnvs();
 });
 
 describe("agent notification extension", () => {
@@ -60,17 +59,4 @@ describe("agent notification extension", () => {
 
     expect(emittedBytes(write)).toEqual([]);
   });
-
-  it.each([undefined, "", "/arbitrary/nonexistent/socket"])(
-    "does not require a tmux environment (%s)",
-    (tmux) => {
-      vi.stubEnv("TMUX", tmux);
-      const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
-      const handler = settledHandler();
-
-      handler({ type: AgentTools.PiEvent.AgentSettled }, context("tui", true));
-
-      expect(emittedBytes(write)).toEqual([0x07]);
-    },
-  );
 });

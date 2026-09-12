@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
@@ -10,13 +9,6 @@ import {
 } from "./agent-tools";
 import { toAgentTool, toPiTool, type PublicPiToolUi, type ToolContract } from "./tool-contract";
 import { registerPublicTool, type PublicPiToolDefinition } from "./tool-render";
-
-export interface CrossHostToolRegistration<Params, Details, Schema extends TSchema> {
-  readonly contract: ToolContract<Params, Details, Schema>;
-  readonly capabilities: readonly [ToolCapability, ...ToolCapability[]];
-  readonly piTool: PublicPiToolDefinition<Schema, Details, any>;
-  readonly createAgentTool: (context: AgentToolFactoryContext) => AgentTool<any, any>;
-}
 
 interface PiRegistrationHost {
   registerTool(tool: ToolDefinition<any, any, any>): void;
@@ -38,7 +30,7 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
     capabilities: readonly [ToolCapability, ...ToolCapability[]];
     piOptions: PiOnlyOptions<Schema, Details>;
   },
-): CrossHostToolRegistration<Params, Details, Schema> {
+): void {
   const { contract, capabilities, piOptions } = options;
   const piTool: PublicPiToolDefinition<Schema, Details, any> = {
     ...toPiTool(contract, piOptions),
@@ -48,7 +40,7 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
     renderResult: piOptions.renderResult,
   };
 
-  const createAgentTool = (context: AgentToolFactoryContext): AgentTool<any, any> =>
+  const createAgentTool = (context: AgentToolFactoryContext) =>
     toAgentTool(contract, () => context.parentContext ?? { cwd: context.cwd });
 
   registerPublicTool(pi, piTool);
@@ -57,11 +49,4 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
     capabilities: [...capabilities],
     createTool: createAgentTool,
   }));
-
-  return {
-    contract,
-    capabilities,
-    piTool,
-    createAgentTool,
-  };
 }

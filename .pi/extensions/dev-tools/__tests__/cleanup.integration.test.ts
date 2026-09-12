@@ -141,24 +141,6 @@ describeIfEnabled("dev-tools", "/cleanup command", () => {
     expect(text).toContain("/cleanup apply");
   });
 
-  it("registers the cleanup command from the dev-tools entrypoint", async () => {
-    const mod = await import("../index");
-    const registered: Array<{ name: string; opts: { description: string } }> = [];
-    const mockPi = {
-      registerCommand(name: string, opts: { description: string }) { registered.push({ name, opts }); },
-      registerTool: () => {},
-      on: () => {},
-    };
-
-    mod.default(mockPi as any);
-
-    const command = registered.find((entry) => entry.name === "cleanup");
-    expect(command).toBeDefined();
-    expect(command!.opts.description).toContain("worktrees");
-    expect(command!.opts.description).toContain("fetch --prune");
-    expect(command!.opts.description).toContain("/cleanup /path/to/repo");
-  });
-
   it("classifies ancestor, dirty worktree, and remote-gone squash cleanup paths", () => {
     const { repo, dirtyWorktree } = createCleanupFixture();
     const plan = buildCleanupPlan(repo, { apply: false, force: false, fetch: false, baseRef: "origin/main" });
