@@ -12,11 +12,11 @@ import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   ClientTransportError,
   LspClient,
-  REQUEST_TIMEOUT_MS,
   RequestTimeoutError,
   resolveDaemonNodeBinary,
   type LspClientDependencies,
 } from "../client";
+import { CLIENT_REQUEST_TIMEOUT_MS as REQUEST_TIMEOUT_MS } from "../timeouts";
 import {
   errorResponse,
   okResponse,

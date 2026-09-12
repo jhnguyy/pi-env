@@ -3,19 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { LspBackend, LspBackendError, lspRequestTimeoutMs } from "../backend";
+import type { LspBackendConfig } from "../backend-configs";
 import {
+  CLIENT_REQUEST_TIMEOUT_MS,
   LSP_INIT_TIMEOUT_MS,
   LSP_REQUEST_TIMEOUT_MS,
   LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
-  LspBackend,
-  LspBackendError,
-  lspRequestTimeoutMs,
-} from "../backend";
-import { REQUEST_TIMEOUT_MS as CLIENT_REQUEST_TIMEOUT_MS } from "../client";
-import { BackendMode, type LspBackendConfig } from "../backend-configs";
+} from "../timeouts";
 
 const baseConfig: LspBackendConfig = {
-  mode: BackendMode.Lsp,
   name: "typescript",
   binaryName: "typescript-language-server",
   binaryArgs: [],

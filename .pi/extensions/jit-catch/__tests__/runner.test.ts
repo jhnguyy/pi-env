@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Fiber } from "effect";
+import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform.js";
-import { legacyExecJitRunner, platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
+import { platformJitRunner, readSourceFiles, resolveExtensionDir, resolveGitRoot, runForExtension } from "../runner";
 import type { ExecResult, JitRunner } from "../runner";
 
 const tempDirs: string[] = [];
@@ -68,24 +68,6 @@ describe("resolveGitRoot", () => {
     const exec: JitRunner = () => Effect.succeed({ code: 128, stdout: "", stderr: "not a repo" });
 
     await expect(resolveGitRoot(exec, "/not/repo")).resolves.toBe("/not/repo");
-  });
-});
-
-describe("legacyExecJitRunner", () => {
-  it("adapts promise exec and propagates Effect interruption through AbortSignal", async () => {
-    let observedSignal: AbortSignal | undefined;
-    const aborted = new Promise<void>((resolve) => {
-      const runner = legacyExecJitRunner((_cmd, _args, opts) => {
-        observedSignal = opts?.signal;
-        opts?.signal?.addEventListener("abort", () => resolve(), { once: true });
-        return new Promise(() => {});
-      });
-      const fiber = Effect.runFork(runner("cmd", [], {}));
-      void Effect.runPromise(Fiber.interrupt(fiber));
-    });
-
-    await expect(aborted).resolves.toBeUndefined();
-    expect(observedSignal?.aborted).toBe(true);
   });
 });
 

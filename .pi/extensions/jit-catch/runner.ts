@@ -16,17 +16,10 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Data, Effect, Result } from "effect";
-import { ProcessFailure, ProcessFailureKind, runProcess } from "../../../src/process/platform.js";
+import { runProcess, type ProcessFailure } from "../../../src/process/platform.js";
 import type { ExtensionDiff, ExtensionRunResult } from "./types";
 
 export type ExecResult = { code: number; stdout: string; stderr: string };
-
-/** Compatibility edge for legacy pi.exec-like callers. Prefer JitRunner internally. */
-export type ExecFn = (
-  cmd: string,
-  args: string[],
-  opts?: { cwd?: string; timeout?: number; signal?: AbortSignal },
-) => Promise<ExecResult>;
 
 export type JitRunner = (
   cmd: string,
@@ -65,19 +58,6 @@ function runWithPhase(
   return runner(cmd, args, opts).pipe(
     Effect.mapError((error) => new ExecPhaseError({ phase, command: [cmd, ...args].join(" "), cause: error })),
   );
-}
-
-export function legacyExecJitRunner(exec: ExecFn): JitRunner {
-  return (cmd, args, opts = {}) => Effect.tryPromise({
-    try: (signal) => exec(cmd, [...args], { ...opts, signal }),
-    catch: (cause) => cause instanceof ProcessFailure
-      ? cause
-      : new ProcessFailure({
-        kind: ProcessFailureKind.Spawn,
-        command: [cmd, ...args].join(" "),
-        message: cause instanceof Error ? cause.message : String(cause),
-      }),
-  });
 }
 
 export const platformJitRunner: JitRunner = (cmd, args, opts = {}) =>

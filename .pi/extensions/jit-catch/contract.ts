@@ -9,9 +9,6 @@ import {
   phaseErrorToRunResult,
   resolveGitRootEffect,
   runForExtensionEffect,
-  legacyExecJitRunner,
-  platformJitRunner,
-  type ExecFn,
   type JitCatchPhaseError,
   type JitRunner,
 } from "./runner";
@@ -98,12 +95,6 @@ export const jitCatchOperations: JitCatchOperations = {
   phaseErrorToRunResult,
 };
 
-export function createJitCatchContract(
-  exec?: ExecFn,
-): ToolContract<JitCatchParams, unknown, typeof JIT_CATCH_PARAMETERS> {
-  return createJitCatchContractWithRunner(exec ? legacyExecJitRunner(exec) : platformJitRunner);
-}
-
 export function createJitCatchContractWithRunner(
   runner: JitRunner,
   operations: JitCatchOperations = jitCatchOperations,
@@ -120,7 +111,7 @@ export function createJitCatchContractWithRunner(
   };
 }
 
-export function executeJitCatchEffect(
+function executeJitCatchEffect(
   params: JitCatchParams,
   runner: JitRunner,
   context: DomainToolContext,

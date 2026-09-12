@@ -31,7 +31,7 @@ import { CLIENT_REQUEST_TIMEOUT_MS } from "./timeouts";
 const SPAWN_RETRY_INTERVAL_MS = 200;
 const SPAWN_RETRY_MAX_MS = 10_000;
 const SPAWN_RETRY_MAX_INTERVAL_MS = 1_000;
-export const REQUEST_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
+const REQUEST_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const SOCKET_LISTENER_COUNT = 3;
 
 export class ClientClosedError extends Data.TaggedError("ClientClosedError")<{

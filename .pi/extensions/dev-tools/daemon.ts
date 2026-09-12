@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { Data, Effect, Result } from "effect";
 
 import { LspBackend } from "./backend";
-import { BACKEND_CONFIGS, BackendMode, type LspBackendConfig } from "./backend-configs";
+import { BACKEND_CONFIGS } from "./backend-configs";
 import { FileCache } from "./file-cache";
 import type { HandlerDeps } from "./handlers";
 import { getAction } from "./action-registry";
@@ -92,9 +92,7 @@ export class LspDaemon {
     private idleTimeoutMs = lspIdleTimeoutMs(),
     private readonly telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
   ) {
-    this.backends = (
-      BACKEND_CONFIGS.filter((config) => config.mode === BackendMode.Lsp)
-    ).map((config) => new LspBackend(config, telemetry));
+    this.backends = BACKEND_CONFIGS.map((config) => new LspBackend(config, telemetry));
   }
 
   /** Return the backend that handles this file. Throws if no backend matches. */

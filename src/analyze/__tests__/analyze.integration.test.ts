@@ -71,8 +71,6 @@ describe("analyze contracts", () => {
     await expect(Effect.runPromise(streamProcessEffect("/bin/echo", ["ok"]))).resolves.toMatchObject({ stdout: "ok\n" });
     const exited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/false", [])));
     expect(Result.isFailure(exited) && exited.failure.kind).toBe("exit");
-    const timed = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
-    expect(Result.isFailure(timed) && timed.failure.kind).toBe("timeout");
     const streamTimed = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
     expect(Result.isFailure(streamTimed) && streamTimed.failure.kind).toBe(ProcessErrorKind.Timeout);
     const limited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/echo", ["x".repeat(10_000)], { stdoutLimitBytes: 100 })));
@@ -735,28 +733,55 @@ describe("bundle entrypoints", () => {
     await expect(Effect.runPromise(discoverExtensionEntrypointsEffect(cwd))).resolves.toEqual([".pi/extensions/alpha/index.ts", ".pi/extensions/beta/index.ts"]);
   });
 
-  it("falls back to discovered entries and empty externals for malformed optional JSON", async () => {
-    const cwd = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
-    writeFileSync(join(cwd, "package.json"), "{");
-    writeFileSync(join(cwd, "pi-build.config.json"), "{");
-    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, allScope, 2048, undefined, {
-      build: async (options) => {
-        const entry = (options.entryPoints as string[])[0];
-        return { metafile: { inputs: { [entry]: { bytes: 1, imports: [] } }, outputs: {} } };
-      },
-    }).pipe(Effect.provide(ProcessServiceLive)));
-    expect(findings[0]).toMatchObject({ location: { path: ".pi/extensions/alpha/index.ts" }, data: { externals: [], externalsConfigured: false } });
-  });
+  it("applies configured externals and falls back for malformed optional JSON", async () => {
+    const requests: Array<{ entryPoint: string; externals: string[] }> = [];
+    const bundleProcess = processServiceLayer((_command, _args, options) => {
+      const stdin = options?.stdin;
+      const input = typeof stdin === "string" ? stdin : Buffer.from(stdin ?? []).toString("utf8");
+      const request = JSON.parse(input) as { entryPoint: string; externals: string[] };
+      requests.push(request);
+      return Effect.succeed({
+        stdout: JSON.stringify({
+          version: 1,
+          ok: true,
+          metafile: {
+            inputs: { [request.entryPoint]: { bytes: 1, imports: [] } },
+            outputs: {},
+          },
+        }),
+        stderr: "",
+      });
+    });
+    const configured = writeProject({
+      ".pi/extensions/configured/index.ts": 'import "external-package"; export const value = 1;',
+    });
+    writeFileSync(
+      join(configured, "package.json"),
+      JSON.stringify({ pi: { extensions: [".pi/extensions/configured"] } }),
+    );
+    writeFileSync(
+      join(configured, "pi-build.config.json"),
+      JSON.stringify({ externals: ["external-package"] }),
+    );
+    const configuredFindings = await Effect.runPromise(
+      bundleAnalyzerEffect(configured, allScope, 2048).pipe(Effect.provide(bundleProcess)),
+    );
+    expect(configuredFindings[0]).toMatchObject({
+      data: { externals: ["external-package"], externalsConfigured: true },
+    });
+    expect(requests[0]?.externals).toEqual(["external-package"]);
 
-  it("builds one entrypoint at a time with configured externals", async () => {
-    const cwd = writeProject({ ".pi/extensions/a/index.ts": "export const a=1", ".pi/extensions/b/index.ts": "export const b=1" });
-    writeFileSync(join(cwd, "package.json"), JSON.stringify({ pi: { extensions: [".pi/extensions/a", ".pi/extensions/b"] } }));
-    writeFileSync(join(cwd, "pi-build.config.json"), JSON.stringify({ externals: ["pkg-a", "pkg-b"] }));
-    const calls: Array<{ entryPoints: readonly string[]; external?: readonly string[] }> = [];
-    const findings = await Effect.runPromise(bundleAnalyzerEffect(cwd, allScope, 2048, undefined, { build: async (options) => { calls.push({ entryPoints: options.entryPoints as readonly string[], external: options.external }); const entry = (options.entryPoints as string[])[0]; return { errors: [], warnings: [], metafile: { inputs: { [entry]: { bytes: 1, imports: [] } }, outputs: { "out.js": { bytes: 2, inputs: {}, imports: [], exports: [], entryPoint: entry } } } }; } }).pipe(Effect.provide(ProcessServiceLive)));
-    expect(calls).toEqual([{ entryPoints: [".pi/extensions/a/index.ts"], external: ["pkg-a", "pkg-b"] }, { entryPoints: [".pi/extensions/b/index.ts"], external: ["pkg-a", "pkg-b"] }]);
-    expect(findings).toHaveLength(2);
-    expect(findings.map(item => item.location.path)).toEqual([".pi/extensions/a/index.ts", ".pi/extensions/b/index.ts"]);
+    const malformed = writeProject({ ".pi/extensions/alpha/index.ts": "export const alpha = 1;" });
+    writeFileSync(join(malformed, "package.json"), "{");
+    writeFileSync(join(malformed, "pi-build.config.json"), "{");
+    const fallbackFindings = await Effect.runPromise(
+      bundleAnalyzerEffect(malformed, allScope, 2048).pipe(Effect.provide(bundleProcess)),
+    );
+    expect(fallbackFindings[0]).toMatchObject({
+      location: { path: ".pi/extensions/alpha/index.ts" },
+      data: { externals: [], externalsConfigured: false },
+    });
+    expect(requests[1]?.externals).toEqual([]);
   });
 
   it("maps bundle worker timeouts into typed analyzer failures", async () => {

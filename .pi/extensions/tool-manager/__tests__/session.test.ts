@@ -47,13 +47,14 @@ describe("tool manager branch restore", () => {
     expect(h.entries).toEqual([]);
   });
 
-  it("auto-activates only the consolidated Linear tool", () => {
+  it("applies and persists automatic activation from user input", () => {
     const h = extensionHarness();
     toolManager(h.pi);
 
     h.handlers.get("input")?.({ text: "find the Linear issue for this work", source: "user" });
 
     expect(h.active.filter((name) => name.startsWith("linear"))).toEqual(["linear"]);
+    expect(h.entries).toHaveLength(1);
   });
 
   it("search_tools adds matches without removing active tools and persists the addition", async () => {

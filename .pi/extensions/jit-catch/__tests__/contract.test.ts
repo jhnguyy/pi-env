@@ -14,7 +14,6 @@ import { createJitCatchExtension } from "../index";
 import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
 import {
   createJitCatchContractWithRunner,
-  executeJitCatchEffect,
   type JitCatchOperations,
 } from "../contract";
 import {
@@ -196,18 +195,6 @@ describe("jit_catch tool contract", () => {
     expect(runnerState.runCalls).toHaveLength(1);
   });
 
-  it("exposes an Effect-native execution seam without using Promise runner wrappers", async () => {
-    const result = await Effect.runPromise(
-      executeJitCatchEffect({}, testRunner, { cwd: "/effect" }, testOperations),
-    );
-
-    expect(result.details).toEqual({
-      results: [{ extName: "demo", passed: true, testOutput: "ok", testPath: null }],
-      anyFailed: false,
-    });
-    expect(runnerState.runCalls).toHaveLength(1);
-  });
-
   it("returns operational acquisition throws with phase/command/cause details", async () => {
     const acquisitionFailure = new ExecPhaseError({
       phase: "capture diff",
@@ -223,9 +210,10 @@ describe("jit_catch tool contract", () => {
       captureDiff: () => Effect.fail(acquisitionFailure),
     };
 
-    const result = await Effect.runPromise(
-      executeJitCatchEffect({}, testRunner, { cwd: "/same" }, failingOperations),
-    );
+    const result = await createJitCatchContractWithRunner(
+      testRunner,
+      failingOperations,
+    ).execute({}, { cwd: "/same" });
 
     expect(result).toEqual(
       err("Operational subprocess failure during capture diff: git diff: spawn ENOENT"),

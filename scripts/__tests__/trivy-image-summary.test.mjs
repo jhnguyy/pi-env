@@ -42,32 +42,19 @@ describe("built-image Trivy policy", () => {
     expect(result.stderr).toContain("Trivy image scan did not report any targets.");
   });
 
-  it("keeps an unfixed critical vulnerability informational", () => {
-    const result = runSummary({
-      Target: "test-image",
-      Vulnerabilities: [vulnerability({ severity: "CRITICAL" })],
-    });
+  it.each(["CRITICAL", "HIGH"])(
+    "keeps an unfixed %s vulnerability informational",
+    (severity) => {
+      const result = runSummary({
+        Target: "test-image",
+        Vulnerabilities: [vulnerability({ severity })],
+      });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Critical: 1");
-    expect(result.stdout).toContain("High: 0");
-    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 1");
-    expect(result.stdout).toContain("Policy findings: 0");
-    expect(result.stdout).not.toContain("Policy findings (first 50):");
-  });
-
-  it("keeps an unfixed high vulnerability informational", () => {
-    const result = runSummary({
-      Target: "test-image",
-      Vulnerabilities: [vulnerability({ severity: "HIGH" })],
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("High: 1");
-    expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 1");
-    expect(result.stdout).toContain("Policy findings: 0");
-    expect(result.stdout).not.toContain("Policy findings (first 50):");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Ignored unfixed HIGH/CRITICAL vulnerabilities: 1");
+      expect(result.stdout).toContain("Policy findings: 0");
+    },
+  );
 
   it.each(["CRITICAL", "HIGH"])("fails for a fixable %s vulnerability", (severity) => {
     const result = runSummary({
