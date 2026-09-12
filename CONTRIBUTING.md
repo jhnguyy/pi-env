@@ -1,6 +1,8 @@
 # Contributing
 
-Solo project — these conventions exist so `git log --graph` stays readable and the work-tracker extension has a stable contract to enforce.
+Before contributing, read and follow [the `code-contribution` skill](.agents/skills/code-contribution/SKILL.md). It owns the portable contribution method used for all repository work. This file defines pi-env-specific requirements.
+
+Solo project — these requirements keep `git log --graph` readable and give the work-tracker extension a stable contract to enforce.
 
 ## Branch and PR convention
 
@@ -29,7 +31,7 @@ Before assuming a toolchain problem is a code problem, verify whether the host c
 
 ## Extension development
 
-Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules. Follow [change discipline](docs/conventions/change-discipline.md) for scope and prior-art reuse decisions.
+Extension implementation conventions live in [`docs/conventions/extensions.md`](docs/conventions/extensions.md). Use that page for runtime shape, lifecycle manifest, tool output, and cross-bundle singleton rules.
 
 Source-owned contracts:
 
@@ -37,39 +39,22 @@ Source-owned contracts:
 - lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
 - scripts: [`package.json#scripts`](package.json)
 
-Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. `test:changed` uses Vitest's dependency graph relative to the optional Git ref. TypeScript checking remains repository-wide for soundness. Run the safe verification portfolio before integration when the full workspace contract is required.
+Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. TypeScript checking remains repository-wide for soundness.
 
 ## Testing and review
 
-Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, independent hardening-test design, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed.
+Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, evidence requirements, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed.
 
-Risk-triggered changes must record test intent and independent requirement-derived scenarios in the pull request. Before implementation, map each risk to its owning boundary and existing evidence. The pull request records added, reused, and removed portfolio evidence. Reviewers should verify that the chosen tests match the risk and that source-owned scripts/config remain the authority.
+Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Run the safe verification portfolio before integration when the full workspace contract is required.
 
-Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs).
+## Worktree requirements
 
-## Worktree isolation
+Keep the primary working tree on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.
 
-**Always use a worktree for branch work.** The main working tree (`/mnt/tank/code/pi-env`) stays on `main`. Never `git checkout -b` there. Concurrent sessions share the index and working tree, so any checkout in the main tree risks colliding with another session's uncommitted work.
+After creating a worktree, run:
 
 ```bash
-# Start work — always from a worktree
-git worktree add /tmp/pi-env-<branch> -b <branch>
-cd /tmp/pi-env-<branch>
 nub run worktree:init
-
-# Do work, commit, push, open PR ...
-
-# After squash merge
-cd <repo-root>
-git fetch --prune origin
-git switch main
-git pull --ff-only
-
-# Clean up after confirming the PR is merged
-git worktree remove /tmp/pi-env-<branch>
-git branch -D <branch>
 ```
 
-Concurrent sessions, editors, and the LSP daemon all share the working tree — a checkout changes HEAD for all of them simultaneously. Worktrees give each session its own HEAD and index.
-
-Nub reuses its content-addressed package store, but each worktree needs its own dependency links and extension build artifacts. `nub run worktree:init` installs the locked dependency tree, builds extensions through `postinstall`, and verifies install readiness. Do not symlink `node_modules` or extension `dist` directories between worktrees.
+Each worktree requires its own dependency links and extension build artifacts. Do not share `node_modules` or extension `dist` directories between worktrees.

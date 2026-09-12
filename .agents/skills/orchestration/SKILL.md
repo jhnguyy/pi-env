@@ -16,7 +16,7 @@ gather once → dispatch independent work → wait → synthesize → verify
 1. Define the goal, constraints, non-goals, and completion evidence.
 2. Use an available read-only agent when repository context is not already available.
 3. Give each child one goal, a bounded scope, required evidence, and an output contract.
-4. Follow the `git` skill before code changes. Create a dedicated branch and worktree for each writer.
+4. Follow the `code-contribution` skill before code changes. Create a dedicated branch and worktree for each writer.
 5. Start all independent jobs before waiting for one. Dispatch dependent work only after its inputs settle.
 6. Review and distill each child handoff. Do not relay child output without review.
 7. Resolve conflicts and run the required repository checks in the parent session.
@@ -32,7 +32,7 @@ Inspect the live `subagent` tool description before dispatch. It is the source o
 - For independent review, give children the same evidence and distinct review scopes.
 - Retry only the failed slice. Change its brief, context, tools, model, or scope before retrying.
 
-A subagent `cwd` does not create a worktree. Use the `git` skill to prepare and clean worktrees. The parent remains responsible for inspecting and integrating child changes.
+A subagent `cwd` does not create a worktree. Use the `code-contribution` skill to prepare and clean worktrees. The parent remains responsible for inspecting and integrating child changes.
 
 ## DAG boundary
 
@@ -42,4 +42,4 @@ A future skill can combine this method with a generic DAG run interface after th
 
 ## Boundaries
 
-This skill owns subagent decomposition, routing, and synthesis. The `git` skill owns repository workflow. Domain skills own implementation and safety policy.
+This skill owns subagent decomposition, routing, and synthesis. The `code-contribution` skill owns repository contribution workflow. Domain skills own implementation and safety policy.
