@@ -178,6 +178,12 @@ importers:
 
   .pi/extensions/session-manager:
     dependencies:
+      '@earendil-works/pi-coding-agent':
+        specifier: 0.85.1
+        version: 0.85.1
+      '@earendil-works/pi-tui':
+        specifier: 0.85.1
+        version: 0.85.1
       effect:
         specifier: 4.0.0-beta.97
         version: 4.0.0-beta.97
