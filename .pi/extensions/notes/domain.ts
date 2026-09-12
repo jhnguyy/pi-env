@@ -6,6 +6,7 @@ export const MAX_INDEX_BYTES = 16_384;
 export const MAX_INDEX_ENTRIES = 200;
 export const MAX_SEARCH_QUERY_LENGTH = 1_000;
 export const MAX_SEARCH_RESULTS = 100;
+export const MAX_LIST_CURSOR_LENGTH = 4_096;
 export const MAX_REVISION_LENGTH = 256;
 export const MAX_EDIT_ITEMS = 8;
 export const MAX_EDIT_TEXT_LENGTH = 8_192;
@@ -43,7 +44,16 @@ export interface ExactEdit {
 export interface NotesListRequest {
   readonly prefix?: string;
   readonly limit?: number;
+  readonly cursor?: string;
 }
+
+export interface NotesListResult {
+  readonly entries: readonly NoteEntry[];
+  readonly nextCursor?: string;
+}
+
+/** Legacy providers can return a terminal array until they adopt provider pagination. */
+export type NotesListResponse = NotesListResult | readonly NoteEntry[];
 
 export interface NotesSearchRequest {
   readonly query: string;
@@ -71,7 +81,7 @@ export interface NotesMutationResult {
 export interface NotesProvider {
   readonly id: string;
   index(signal?: AbortSignal): Promise<NotesIndex>;
-  list(request: NotesListRequest, signal?: AbortSignal): Promise<readonly NoteEntry[]>;
+  list(request: NotesListRequest, signal?: AbortSignal): Promise<NotesListResponse>;
   read(path: string, signal?: AbortSignal): Promise<NoteDocument>;
   search(request: NotesSearchRequest, signal?: AbortSignal): Promise<readonly NoteSearchResult[]>;
   resolve?(reference: string, signal?: AbortSignal): Promise<NoteDocument>;

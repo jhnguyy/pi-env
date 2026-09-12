@@ -14,10 +14,20 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_NOTE_BYTES, NotesProviderError } from "../domain";
+import {
+  MAX_NOTE_BYTES,
+  NotesProviderError,
+  type NotesListResponse,
+  type NotesListResult,
+} from "../domain";
 import { createObsidianProvider, type ObsidianProviderOptions } from "../obsidian-provider";
 
 const roots: string[] = [];
+
+function paginated(result: NotesListResponse): NotesListResult {
+  if (Array.isArray(result)) throw new Error("Expected paginated provider output");
+  return result as NotesListResult;
+}
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -44,14 +54,36 @@ describe("Obsidian notes provider", () => {
     await writeFile(path.join(vault, "ignored.txt"), "search target");
 
     const index = await provider.index();
-    const projects = await provider.list({ prefix: "projects", limit: 1 });
+    const projects = paginated(await provider.list({ prefix: "projects", limit: 1 }));
     const results = await provider.search({ query: "search target", limit: 1 });
 
     expect(index.text).toContain("projects(1)");
     expect(index.text).toContain("knowledge(1)");
     expect(index.text).not.toContain(".obsidian");
-    expect(projects.map((note) => note.path)).toEqual(["projects/topic.md"]);
+    expect(projects.entries.map((note) => note.path)).toEqual(["projects/topic.md"]);
     expect(results).toHaveLength(1);
+  });
+
+  it("continues bounded inventory without duplicate entries", async () => {
+    const { vault, provider } = await fixture();
+    await writeFile(path.join(vault, "a.md"), "a");
+    await writeFile(path.join(vault, "b.md"), "b");
+    await writeFile(path.join(vault, "c.md"), "c");
+
+    const first = paginated(await provider.list({ limit: 2 }));
+    expect(first.entries.map((note) => note.path)).toEqual(["a.md", "b.md"]);
+    expect(first.nextCursor).toEqual(expect.any(String));
+    if (first.nextCursor === undefined) throw new Error("Expected a continuation cursor");
+    const second = paginated(await provider.list({ limit: 2, cursor: first.nextCursor }));
+    expect(second).toEqual({ entries: [expect.objectContaining({ path: "c.md" })] });
+    await expect(provider.list({ cursor: "not-a-cursor" })).rejects.toMatchObject({
+      code: "invalid-path",
+    });
+    await expect(provider.list({ prefix: "wiki", cursor: first.nextCursor })).rejects.toMatchObject(
+      {
+        code: "invalid-path",
+      },
+    );
   });
 
   it("omits filesystem names that cannot round-trip through portable paths", async () => {
@@ -61,9 +93,9 @@ describe("Obsidian notes provider", () => {
     await writeFile(path.join(vault, "line\nbreak.md"), "unsafe name");
     await writeFile(path.join(vault, "normal.md"), "normal");
 
-    await expect(provider.list({})).resolves.toEqual([
-      expect.objectContaining({ path: "normal.md" }),
-    ]);
+    await expect(provider.list({})).resolves.toEqual({
+      entries: [expect.objectContaining({ path: "normal.md" })],
+    });
   });
 
   it("bounds vault traversal depth", async () => {
@@ -158,7 +190,7 @@ describe("Obsidian notes provider", () => {
     await link(outside, path.join(vault, "linked.md"));
 
     await expect(provider.read("linked.md")).rejects.toMatchObject({ code: "path-escape" });
-    await expect(provider.list({})).resolves.toEqual([]);
+    await expect(provider.list({})).resolves.toEqual({ entries: [] });
   });
 
   it("rejects traversal, symbolic-link notes, and canonical hidden targets", async () => {

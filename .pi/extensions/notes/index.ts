@@ -22,6 +22,8 @@ export type {
   NotesDeleteRequest,
   NotesIndex,
   NotesListRequest,
+  NotesListResponse,
+  NotesListResult,
   NotesMutationResult,
   NotesProvider,
   NotesProviderErrorCode,
@@ -53,22 +55,29 @@ export async function activateNotesExtension(
     contract,
     capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: {
-      promptSnippet: "Discover, read, and maintain Markdown notes in the configured store",
+      promptSnippet: "Read and maintain Inbox, Worklog, Wiki, and other Markdown notes",
       promptGuidelines: [
-        "Use notes index before the first store interaction in a task. Follow the provider-owned conventions that it returns.",
-        "Use notes list with a prefix for authoritative inventory. Do not invent note paths or storage conventions.",
-        "Use notes read before changing an existing note. Pass its revision to edit, write, or delete so concurrent changes fail safely.",
-        "Use notes edit for small exact changes. Use notes write for a coherent rewrite when the note structure or meaning changes.",
-        "Create durable notes only when future retrieval is expected and the destination is clear from the store index or nearby notes.",
-        "Preserve unclassified capture in the store-designated capture location. Do not require it to match a destination schema or silently promote it to canonical knowledge.",
-        "When routing capture to destinations the user did not specify, show the proposed mutations and obtain approval before applying them.",
+        "Use the Inbox, Worklog, and Wiki collection actions for their defined behaviors. Pi-env owns their canonical paths and lifecycle semantics.",
+        "Use Store index before the first general store interaction in a task. Use Store list for authoritative legacy or adapter-owned inventory and Store search for global retrieval.",
+        "Inbox reads are non-destructive. Inbox writes capture text without classifying, routing, promoting, rewriting, or deleting it.",
+        "Record only brief completed-work outcomes in Worklog. Do not use Worklog for plans, current project state, or session narrative.",
+        "Use Wiki for maintained current knowledge. Integrate coherent updates instead of appending session logs.",
+        "Use the revision returned by a Wiki or Store read for updates so concurrent changes fail safely. Use a null revision only for explicit creation.",
+        "Use transitional Store mutation only for bounded maintenance and migration work.",
         "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
       ],
       renderCall(args, theme) {
         let text = theme.fg("toolTitle", theme.bold("notes"));
+        if (args.collection) text += ` ${theme.fg("accent", String(args.collection))}`;
         text += ` ${theme.fg("accent", String(args.action))}`;
-        if (args.path) text += ` ${theme.fg("muted", String(args.path))}`;
-        if (args.query) text += ` ${theme.fg("muted", `q=${String(args.query)}`)}`;
+        const subject =
+          ("target" in args ? args.target : undefined) ??
+          ("path" in args ? args.path : undefined) ??
+          ("selector" in args ? args.selector : undefined) ??
+          ("date" in args ? args.date : undefined);
+        if (subject) text += ` ${theme.fg("muted", String(subject))}`;
+        const query = "query" in args ? args.query : undefined;
+        if (query) text += ` ${theme.fg("muted", `q=${String(query)}`)}`;
         return new Text(text, 0, 0);
       },
       renderResult(result, { expanded }, theme, context) {
@@ -79,10 +88,11 @@ export async function activateNotesExtension(
         if (expanded) return new Text(rawText, 0, 0);
 
         const details = result.details as NotesToolDetails | undefined;
-        const count = details?.notes?.length ?? details?.results?.length;
+        const count = details?.items?.length ?? details?.notes?.length ?? details?.results?.length;
         const suffix = count === undefined ? "" : ` (${count})`;
+        const collection = context.args.collection ? ` ${String(context.args.collection)}` : "";
         return new Text(
-          theme.fg("success", `✓ notes ${String(context.args.action)}${suffix}`),
+          theme.fg("success", `✓ notes${collection} ${String(context.args.action)}${suffix}`),
           0,
           0,
         );
