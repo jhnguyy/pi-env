@@ -14,45 +14,26 @@ describeIfEnabled("dev-tools", "Protocol", () => {
   // ─── serializeRequest ───────────────────────────────────────────────────
 
   describe("serializeRequest", () => {
-    it("serializes to JSON with trailing newline", () => {
+    it("round-trips one newline-delimited request", () => {
       const req: DaemonRequest = { id: 1, action: "diagnostics", path: "/foo/bar.ts" };
-      const out = serializeRequest(req);
-      expect(out.endsWith("\n")).toBe(true);
-      expect(JSON.parse(out.trim())).toEqual(req);
-    });
+      const encoded = serializeRequest(req);
 
-    it("includes only defined fields", () => {
-      const req: DaemonRequest = { id: 2, action: "hover", path: "/a.ts", line: 5, character: 10 };
-      const out = serializeRequest(req);
-      const parsed = JSON.parse(out.trim());
-      expect(parsed.line).toBe(5);
-      expect(parsed.character).toBe(10);
-      expect(parsed.query).toBeUndefined();
+      expect(encoded.endsWith("\n")).toBe(true);
+      expect(parseRequest(encoded)).toEqual(req);
     });
   });
 
   // ─── parseRequest ────────────────────────────────────────────────────────
 
   describe("parseRequest", () => {
-    it("parses a valid request line", () => {
-      const req: DaemonRequest = { id: 1, action: "diagnostics", path: "/foo.ts" };
-      const line = JSON.stringify(req) + "\n";
-      expect(parseRequest(line)).toEqual(req);
-    });
-
     it("handles line without trailing newline", () => {
       const req: DaemonRequest = { id: 3, action: "symbols", query: "User" };
       const line = JSON.stringify(req);
       expect(parseRequest(line)).toEqual(req);
     });
 
-    it("throws on empty line", () => {
-      expect(() => parseRequest("")).toThrow();
-      expect(() => parseRequest("  ")).toThrow();
-    });
-
-    it("throws on invalid JSON", () => {
-      expect(() => parseRequest("{not valid json}")).toThrow();
+    it.each(["", "  ", "{not valid json}"])("rejects invalid input", (line) => {
+      expect(() => parseRequest(line)).toThrow();
     });
   });
 

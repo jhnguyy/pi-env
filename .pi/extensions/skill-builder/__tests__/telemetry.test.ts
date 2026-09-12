@@ -5,11 +5,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  resetSkillEvaluationRunnerForTests,
-  runSkillBuild,
-  setSkillEvaluationRunnerForTests,
-} from "../index";
+import { runSkillBuild } from "../index";
 import {
   MAX_TOOLING_STRING_LENGTH,
   TOOLING_OTEL_BOUNDS,
@@ -21,7 +17,6 @@ import { DEFAULT_BOUNDED_OTEL_BOUNDS } from "../../../../src/telemetry/otel.js";
 const roots: string[] = [];
 
 afterEach(() => {
-  resetSkillEvaluationRunnerForTests();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -131,14 +126,14 @@ describe("skill-builder tooling telemetry", () => {
 
     const finished: ReadableSpan[] = [];
     const exec = vi.fn(async () => ({ code: 0, stdout: diffSentinel, stderr: "" }));
-    setSkillEvaluationRunnerForTests(((run: any) =>
+    const evaluationRunner = ((run: any) =>
       Effect.sync(() => {
         expect(run.task).toContain(goalSentinel);
         expect(run.task).toContain(diffSentinel);
         return childResult(
           JSON.stringify({ verdict: "pass", findings: [], ignored: outputSentinel }),
         );
-      })) as any);
+      })) as any;
 
     const result = await runSkillBuild(
       { exec } as any,
@@ -151,6 +146,7 @@ describe("skill-builder tooling telemetry", () => {
           PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318/",
         },
         telemetryExporter: inMemoryExporter(finished),
+        evaluationRunner,
       },
     );
 
@@ -190,7 +186,7 @@ describe("skill-builder tooling telemetry", () => {
     const errorSentinel = "raw-error-secret-sentinel";
     const finished: ReadableSpan[] = [];
     const exec = vi.fn(async () => ({ code: 0, stdout: "+ change", stderr: "" }));
-    setSkillEvaluationRunnerForTests((() => Effect.fail(errorSentinel)) as any);
+    const evaluationRunner = (() => Effect.fail(errorSentinel)) as any;
 
     const result = await runSkillBuild(
       { exec } as any,
@@ -203,6 +199,7 @@ describe("skill-builder tooling telemetry", () => {
           PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318",
         },
         telemetryExporter: inMemoryExporter(finished),
+        evaluationRunner,
       },
     );
 

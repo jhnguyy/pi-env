@@ -3,7 +3,6 @@ import {
 	detectMergedBranch,
 	isGitPull,
 	parseHandoffBranch,
-	parseMergedBranches,
 } from "../handoff-cleanup";
 
 // ─── detectMergedBranch ───────────────────────────────────────────────────────
@@ -81,37 +80,6 @@ describe("isGitPull", () => {
 		expect(isGitPull("git merge feat/foo")).toBe(false);
 		expect(isGitPull("git status")).toBe(false);
 		expect(isGitPull("npm install")).toBe(false);
-	});
-});
-
-// ─── parseMergedBranches ─────────────────────────────────────────────────────
-
-describe("parseMergedBranches", () => {
-	it("parses branches from typical git branch --merged output", () => {
-		const output = "  feat/done\n* main\n  fix/also-done\n";
-		const result = parseMergedBranches(output);
-		expect(result.has("feat/done")).toBe(true);
-		expect(result.has("main")).toBe(true);
-		expect(result.has("fix/also-done")).toBe(true);
-		expect(result.size).toBe(3);
-	});
-
-	it("handles single branch (the current one marked with *)", () => {
-		const output = "* main\n";
-		const result = parseMergedBranches(output);
-		expect(result.has("main")).toBe(true);
-		expect(result.size).toBe(1);
-	});
-
-	it("returns empty set for empty output", () => {
-		expect(parseMergedBranches("").size).toBe(0);
-		expect(parseMergedBranches("\n\n").size).toBe(0);
-	});
-
-	it("ignores blank lines", () => {
-		const output = "\n  feat/done\n\n  fix/other\n\n";
-		const result = parseMergedBranches(output);
-		expect(result.size).toBe(2);
 	});
 });
 

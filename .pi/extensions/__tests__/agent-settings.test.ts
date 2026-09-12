@@ -3,8 +3,8 @@ import { Effect, Result, Schema } from "effect";
 import { describe, expect, it as vitestIt } from "vitest";
 import {
   AgentSettingsSchema,
+  decodeAgentSettingsSnapshotEffect,
   decodeGlobalAgentSettingsSnapshotEffect,
-  readAgentSettingsEffect,
   readOptionalAgentSettings,
   type AgentSettingsEnv,
 } from "../_shared/agent-settings";
@@ -25,14 +25,15 @@ function envWith(files: Record<string, string>, onRead?: (path: string) => void)
 describe("agent settings", () => {
   it.effect("parses shared settings from overlaid settings.json files", () =>
     Effect.gen(function* () {
-      const settings = yield* readAgentSettingsEffect(envWith({
+      const snapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({
         "/global/settings.json": JSON.stringify({
           enabledModels: ["global/model"],
           modelAnnotations: { "provider/model": ["preferred"] },
           workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         }),
         "/repo/.pi/settings.json": JSON.stringify({ enabledModels: ["project/model"], extensions: ["web-context"] }),
-      }), "/repo");
+      }));
+      const settings = yield* decodeAgentSettingsSnapshotEffect(snapshot);
 
       expect(settings).toEqual({
         enabledModels: ["project/model"],
@@ -86,8 +87,9 @@ describe("agent settings", () => {
 
   it.effect("reports typed errors for required settings", () =>
     Effect.gen(function* () {
-      const malformed = yield* Effect.result(readAgentSettingsEffect(envWith({ "/global/settings.json": "not json" }), "/repo"));
-      const invalid = yield* Effect.result(readAgentSettingsEffect(envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }), "/repo"));
+      const malformed = yield* Effect.result(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "not json" })));
+      const invalidSnapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }));
+      const invalid = yield* Effect.result(decodeAgentSettingsSnapshotEffect(invalidSnapshot));
 
       expect(malformed._tag).toBe("Failure");
       if (malformed._tag === "Failure") expect(malformed.failure).toMatchObject({ _tag: "SettingsDecodeError", path: "/global/settings.json", source: "global" });

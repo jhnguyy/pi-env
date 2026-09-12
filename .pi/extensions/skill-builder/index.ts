@@ -140,18 +140,8 @@ type SkillBuildOptions = {
   allowEvaluation?: boolean;
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;
+  evaluationRunner?: typeof runResolvedSubagentEffect;
 };
-
-type EvaluationRunner = typeof runResolvedSubagentEffect;
-let evaluationRunner: EvaluationRunner = runResolvedSubagentEffect;
-
-export function setSkillEvaluationRunnerForTests(runner: EvaluationRunner): void {
-  evaluationRunner = runner;
-}
-
-export function resetSkillEvaluationRunnerForTests(): void {
-  evaluationRunner = runResolvedSubagentEffect;
-}
 
 const SkillBuildOperation = {
   Scaffold: "scaffold",
@@ -658,7 +648,7 @@ function runExistingSkillWorkflowEffect(
             model: model.id,
             cost_model: "subagent",
           },
-          evaluationRunner(
+          (options.evaluationRunner ?? runResolvedSubagentEffect)(
             evaluationRun(skillName, prompt, skillDir, model),
             options.ctx,
             evaluationOptions(options),

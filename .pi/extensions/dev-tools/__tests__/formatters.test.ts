@@ -4,7 +4,6 @@ import "../register-actions"; // populate action registry for formatResult
 import {
   formatResult,
   formatDiagnostics,
-  formatDiagnosticsSummary,
   formatHover,
   formatDefinition,
   formatImplementation,
@@ -13,12 +12,11 @@ import {
   formatIncomingCalls,
   formatOutgoingCalls,
   formatSymbols,
-  formatStatus,
 } from "../formatters";
 import type {
   DiagnosticsResult, HoverResult, DefinitionResult, ImplementationResult,
   ReferencesResult, RenameResult, IncomingCallsResult, OutgoingCallsResult,
-  SymbolsResult, StatusResult,
+  SymbolsResult,
 } from "../protocol";
 
 describeIfEnabled("dev-tools", "Formatters", () => {
@@ -135,56 +133,6 @@ describeIfEnabled("dev-tools", "Formatters", () => {
         items: [], files: [cleanFile],
       };
       expect(formatResult(r)).toBe("no errors across 1 file");
-    });
-  });
-
-  // ─── formatDiagnosticsSummary ──────────────────────────────────────────────
-
-  describe("formatDiagnosticsSummary", () => {
-    it("returns empty string when no errors or warnings", () => {
-      const r: DiagnosticsResult = { action: "diagnostics", path: "/a.ts", errorCount: 0, warnCount: 0, items: [] };
-      expect(formatDiagnosticsSummary(r)).toBe("");
-    });
-
-    it("shows ⚠ TS header with count", () => {
-      const r: DiagnosticsResult = {
-        action: "diagnostics", path: "/a.ts", errorCount: 2, warnCount: 0,
-        items: [
-          { line: 1, character: 1, severity: "error", code: "TS2339", message: "Error A." },
-          { line: 2, character: 1, severity: "error", code: "TS2322", message: "Error B." },
-        ],
-      };
-      const text = formatDiagnosticsSummary(r);
-      expect(text).toContain("⚠ TS (2 errors)");
-    });
-
-    it("shows ⚠ Bash header for bash language", () => {
-      const r: DiagnosticsResult = {
-        action: "diagnostics", path: "/a.sh", errorCount: 1, warnCount: 0, language: "bash",
-        items: [{ line: 3, character: 1, severity: "error", code: "SC2034", message: "Unused variable." }],
-      };
-      expect(formatDiagnosticsSummary(r)).toContain("⚠ Bash (1 error)");
-    });
-
-    it("shows ⚠ Nix header for nil language", () => {
-      const r: DiagnosticsResult = {
-        action: "diagnostics", path: "/a.nix", errorCount: 1, warnCount: 0, language: "nil",
-        items: [{ line: 5, character: 1, severity: "error", code: "", message: "undefined variable 'pkgs'." }],
-      };
-      const text = formatDiagnosticsSummary(r);
-      expect(text).toContain("⚠ Nix (1 error)");
-      expect(text).not.toContain("⚠ TS");
-    });
-
-        it("truncates to maxItems and shows '... N more' suffix", () => {
-      const items = Array.from({ length: 8 }, (_, i) => ({
-        line: i + 1, character: 1, severity: "error" as const, code: `TS${i}`, message: `Error ${i}.`,
-      }));
-      const r: DiagnosticsResult = { action: "diagnostics", path: "/a.ts", errorCount: 8, warnCount: 0, items };
-      const text = formatDiagnosticsSummary(r, 5);
-      expect(text).toContain("... 3 more — use dev-tools diagnostics for full list");
-      const lineCount = text.split("\n").length;
-      expect(lineCount).toBe(7); // header + 5 items + truncation line
     });
   });
 
@@ -387,43 +335,6 @@ describeIfEnabled("dev-tools", "Formatters", () => {
       expect(text).toContain("2 symbols");
       expect(text).toContain("src/types.ts:1 interface User");
       expect(text).toContain("src/forms.ts:15 type parameter UserInput");
-    });
-  });
-
-  // ─── formatStatus ──────────────────────────────────────────────────────────
-
-  describe("formatStatus", () => {
-    it("formats running daemon status", () => {
-      const r: StatusResult = {
-        action: "status", state: "ready", running: true, pid: 12345,
-        backend: { name: "typescript", running: true },
-        project: { mode: "configured", root: "/project/a", tsconfigPath: "/project/a/tsconfig.json" },
-        initialization: { state: "initialized" },
-        semantic: { available: true, lastRequest: { method: "textDocument/references", itemCount: 0 } },
-        projects: ["/project/a", "/project/b"],
-        openFiles: ["/project/a/src/index.ts", "/project/a/src/client.ts"],
-        watchedFiles: 2, idleMs: 5000,
-      };
-      const text = formatStatus(r);
-      expect(text).toContain("daemon: running");
-      expect(text).toContain("pid: 12345");
-      expect(text).toContain("projects: /project/a, /project/b");
-      expect(text).toContain("open files: 2");
-      expect(text).toContain("idle: 5s");
-    });
-
-    it("formats stopped daemon status", () => {
-      const r: StatusResult = {
-        action: "status", state: "initializing", running: false,
-        backend: { name: "unknown", running: false },
-        project: { mode: "unknown" },
-        initialization: { state: "initializing" },
-        semantic: { available: false },
-        projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
-      };
-      const text = formatStatus(r);
-      expect(text).toContain("daemon: stopped");
-      expect(text).toContain("open files: none");
     });
   });
 

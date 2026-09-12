@@ -73,7 +73,3 @@ export function severityLabel(severity: number): "error" | "warning" | "info" | 
 export function truncateMessage(msg: string): string {
   return msg.length > 200 ? msg.slice(0, 200) + "…" : msg;
 }
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}

@@ -296,9 +296,6 @@ export function diffAnchors(diff: string): Map<string, { LEFT: Set<number>; RIGH
   );
 }
 
-export function changedLineAnchors(diff: string): Map<string, Set<number>> {
-  return new Map([...diffAnchors(diff)].map(([path, anchors]) => [path, anchors.RIGHT]));
-}
 
 export function parseChangedFilesFromDiff(diff: string): Array<{ path: string }> {
   return [...createDiffIndex(diff).keys()].map((path) => ({ path }));

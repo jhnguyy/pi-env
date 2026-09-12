@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   SEARCH_TOOL_NAME,
-  expandEntries,
   expandRequestedEntries,
   latestStateFromEntries,
   profileTools,
@@ -22,7 +21,6 @@ describe("tool manager core", () => {
   it("expands requested names without forcing alwaysActive into removal inputs", () => {
     const cfg = resolveConfig({ alwaysActive: ["notes"] });
     expect(expandRequestedEntries(["analysis"], cfg, tools)).toEqual(["analyze"]);
-    expect(expandEntries(["analysis"], cfg, tools)).toEqual(["analyze", SEARCH_TOOL_NAME, "notes"]);
     expect(setAdditive(["read"], expandRequestedEntries(["analysis"], cfg, tools), cfg, tools)).toContain("notes");
     expect(setAdditive(["read", SEARCH_TOOL_NAME, "notes"], [], cfg, tools)).toEqual(["read", SEARCH_TOOL_NAME, "notes"]);
   });

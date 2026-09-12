@@ -108,7 +108,7 @@ interface AnalysisPlan extends PreflightPlan {
 
 const DEFAULT_MEMORY_MB = 2048;
 const BYTES_PER_MIB = 1024 * 1024;
-export const MAX_TOTAL_FINDINGS = 2_000 as const;
+const MAX_TOTAL_FINDINGS = 2_000 as const;
 
 const diagnosticTime = (runtime: AnalysisRuntime): number => runtime.wallTime?.() ?? Date.now();
 
@@ -130,7 +130,7 @@ function recordDiagnostic(
   return diagnostics.record(createAnalysisDiagnosticEvent(runId, diagnosticTime(runtime), type, attributes));
 }
 
-export function capFindings(
+function capFindings(
   findings: readonly Finding[],
   max: number,
 ): { kept: Finding[]; truncated: boolean; truncatedCount: number } {
@@ -151,7 +151,7 @@ const stable = (value: unknown): string =>
       : item,
   );
 
-export const findingId = (finding: Finding): string =>
+const findingId = (finding: Finding): string =>
   createHash("sha256")
     .update(
       stable({
@@ -165,9 +165,9 @@ export const findingId = (finding: Finding): string =>
     .digest("hex")
     .slice(0, 20);
 
-export const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean =>
+const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean =>
   rssBytes > maxMemoryMb * 1024 * 1024;
-export const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
+const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
   projectRequirement(checks) !== ProjectRequirement.None;
 
 const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0;

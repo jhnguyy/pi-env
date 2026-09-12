@@ -124,10 +124,6 @@ export function resolveGitRootEffect(runner: JitRunner, gitCwd: string): Effect.
   );
 }
 
-export async function resolveGitRoot(runner: JitRunner, gitCwd: string): Promise<string> {
-  return await Effect.runPromise(resolveGitRootEffect(runner, gitCwd));
-}
-
 /**
  * Resolve an extension directory from parsed diff paths.
  *
@@ -203,15 +199,6 @@ export function captureDiffEffect(
       return Effect.succeed(result.stdout);
     },
   );
-}
-
-export async function captureDiff(
-  source: "unstaged" | "staged" | "commit",
-  runner: JitRunner,
-  gitCwd: string,
-  commit?: string,
-): Promise<string> {
-  return await Effect.runPromise(captureDiffEffect(source, runner, gitCwd, commit));
 }
 
 // ─── Environment prep ─────────────────────────────────────────────────────────
@@ -360,14 +347,6 @@ export function generateTestContentEffect(
   );
 }
 
-export async function generateTestContent(
-  prompt: string,
-  runner: JitRunner,
-  signal: AbortSignal | undefined,
-): Promise<string> {
-  return await Effect.runPromise(generateTestContentEffect(prompt, runner), { signal });
-}
-
 // ─── Test execution ───────────────────────────────────────────────────────────
 
 /**
@@ -391,14 +370,6 @@ export function runCatchingTestsEffect(
       return { passed: result.code === 0, output };
     },
   );
-}
-
-export async function runCatchingTests(
-  extDir: string,
-  extName: string,
-  runner: JitRunner,
-): Promise<{ passed: boolean; output: string }> {
-  return await Effect.runPromise(runCatchingTestsEffect(extDir, extName, runner));
 }
 
 // ─── High-level orchestrator ──────────────────────────────────────────────────
@@ -463,21 +434,4 @@ export function runForExtensionEffect(
 
     return { extName: ext.name, passed: false, testOutput: output, testPath };
   });
-}
-
-export async function runForExtension(
-  ext: ExtensionDiff,
-  diffText: string,
-  runner: JitRunner,
-  signal: AbortSignal | undefined,
-  workspaceRoot: string,
-  onProgress?: (phase: string) => void,
-): Promise<ExtensionRunResult> {
-  const result = await Effect.runPromise(
-    Effect.result(runForExtensionEffect(ext, diffText, runner, workspaceRoot, onProgress)),
-    { signal },
-  );
-
-  if (Result.isSuccess(result)) return result.success;
-  return phaseErrorToRunResult(ext, result.failure, workspaceRoot);
 }

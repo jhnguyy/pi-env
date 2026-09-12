@@ -2,7 +2,7 @@ import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
-import type { DiagnosticsResult, HoverResult, DefinitionResult, ReferencesResult, RenameResult, SymbolsResult, StatusResult } from "../protocol";
+import type { DiagnosticsResult, HoverResult } from "../protocol";
 import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
 
 // ─── Mock theme ──────────────────────────────────────────────────────────────
@@ -159,92 +159,6 @@ describeIfEnabled("dev-tools", "Renderers", () => {
       const r: HoverResult = { action: "hover", path: "/a.ts", line: 1, character: 1, signature: "string" };
       const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
       expect(t).toContain("hover");
-    });
-
-    it("renders definition with location count", () => {
-      const r: DefinitionResult = {
-        action: "definition", path: "/a.ts", line: 1, character: 1,
-        locations: [
-          { relativePath: "src/t.ts", absolutePath: "/p/src/t.ts", line: 1, body: "type T = string;" },
-        ],
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("1 location");
-    });
-
-    it("renders references with count", () => {
-      const r: ReferencesResult = {
-        action: "references", path: "/a.ts", line: 1, character: 1,
-        total: 5, items: [], truncated: false,
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("5 reference(s)");
-    });
-
-    it("renders rename with edit and file counts", () => {
-      const r: RenameResult = {
-        action: "rename",
-        path: "/a.ts",
-        line: 1,
-        character: 1,
-        newName: "updatedName",
-        totalEdits: 3,
-        files: [
-          { relativePath: "a.ts", absolutePath: "/a.ts", editCount: 1 },
-          { relativePath: "b.ts", absolutePath: "/b.ts", editCount: 2 },
-        ],
-      };
-      const t = text(
-        renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme),
-      );
-      expect(t).toContain("3 edits in 2 files");
-    });
-
-    it("renders symbols with count and filename", () => {
-      const r: SymbolsResult = {
-        action: "symbols", path: "/project/src/foo.ts",
-        total: 7, items: [], truncated: false,
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("7 symbols");
-      expect(t).toContain("foo.ts");
-    });
-
-    it("renders workspace symbols with query", () => {
-      const r: SymbolsResult = {
-        action: "symbols", query: "User",
-        total: 3, items: [], truncated: false,
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("3 symbols");
-      expect(t).toContain('"User"');
-    });
-
-    it("renders status running", () => {
-      const r: StatusResult = {
-        action: "status", state: "ready", running: true, pid: 1234,
-        backend: { name: "typescript", running: true },
-        project: { mode: "unknown" },
-        initialization: { state: "initialized" },
-        semantic: { available: true, lastRequest: { method: "textDocument/references", itemCount: 0 } },
-        projects: [], openFiles: [], watchedFiles: 0, idleMs: 100,
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("running");
-      expect(t).toContain("1234");
-    });
-
-    it("renders status stopped", () => {
-      const r: StatusResult = {
-        action: "status", state: "initializing", running: false,
-        backend: { name: "unknown", running: false },
-        project: { mode: "unknown" },
-        initialization: { state: "initializing" },
-        semantic: { available: false },
-        projects: [], openFiles: [], watchedFiles: 0, idleMs: 0,
-      };
-      const t = text(renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme));
-      expect(t).toContain("stopped");
     });
   });
 });

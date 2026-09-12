@@ -95,36 +95,6 @@ function formatBulkDiagnostics(r: DiagnosticsResult): string {
   return parts.join("\n");
 }
 
-/** Compact diagnostic summary for auto-append on edit/write. */
-export function formatDiagnosticsSummary(r: DiagnosticsResult, maxItems = 5): string {
-  if (r.errorCount === 0 && r.warnCount === 0) return "";
-
-  let lang: string;
-  switch (r.language) {
-    case "bash": lang = "Bash"; break;
-    case "nil":  lang = "Nix";  break;
-    default:     lang = "TS";   break;
-  }
-  const label = r.errorCount > 0
-    ? `⚠ ${lang} (${r.errorCount} error${r.errorCount !== 1 ? "s" : ""}${r.warnCount ? `, ${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""}` : ""})`
-    : `⚠ ${lang} (${r.warnCount} warning${r.warnCount !== 1 ? "s" : ""})`;
-
-  const lines = [label];
-  const shown = r.items.slice(0, maxItems);
-
-  for (const item of shown) {
-    const code = item.code ? ` ${item.code}` : "";
-    lines.push(`L${item.line}:${item.character}${code} ${item.message}`);
-  }
-
-  const remaining = r.items.length - shown.length;
-  if (remaining > 0) {
-    lines.push(`... ${remaining} more — use dev-tools diagnostics for full list`);
-  }
-
-  return lines.join("\n");
-}
-
 // ─── Hover ──────────────────────────────────────────────────────────────────
 
 export function formatHover(r: HoverResult): string {

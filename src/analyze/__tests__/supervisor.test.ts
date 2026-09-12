@@ -7,7 +7,7 @@ import { AnalyzerName, ScopeMode } from "../model.js";
 import { ANALYZE_LIMITS, classifyAnalyzeRequest, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
 import { readJournalEvents } from "../journal.js";
-import { analyzeWorkerPath, superviseAnalyze } from "../supervisor.js";
+import { superviseAnalyze } from "../supervisor.js";
 import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
 
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-supervisor-"));
@@ -342,7 +342,6 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
 
   it("runs the real isolated worker for safe scoped syntax checks", async () => {
     const cwd = process.cwd();
-    expect(existsSync(analyzeWorkerPath())).toBe(true);
     const result = await superviseAnalyze(
       safeRequest(cwd, {
         paths: ["src/analyze"],

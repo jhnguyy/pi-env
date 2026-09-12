@@ -314,8 +314,3 @@ export async function disposeSubagentRunSupervisor(sessionId: string): Promise<v
   store.delete(sessionId);
   await supervisor.shutdown();
 }
-
-export function resetSubagentRunSupervisorsForTests(): void {
-  const root = globalThis as typeof globalThis & Record<string, unknown>;
-  delete root[SUPERVISOR_REGISTRY_KEY];
-}

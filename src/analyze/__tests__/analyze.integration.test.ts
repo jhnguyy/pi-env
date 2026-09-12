@@ -7,7 +7,7 @@ import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { asyncRisksEffect, canonicalizeWithCap, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { BENCHMARK_LIMITS, runBenchmarkEffect, validateBenchmark } from "../benchmark.js";
-import { MAX_TOTAL_FINDINGS, analyze, analyzeEffect, capFindings, findingId, isMemoryBudgetExceeded, needsInternalProject } from "../engine.js";
+import { analyze, analyzeEffect } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
@@ -55,7 +55,7 @@ function writeProject(files: Record<string, string>): string {
 }
 
 const finding: Finding = { id: "", analyzer: AnalyzerName.Complexity, kind: FindingKind.Complexity, severity: Severity.Warning, message: "x", location: { path: "a.ts", line: 2, column: 1 }, related: [{ path: "b.ts", line: 3, column: 1 }] };
-const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ ...finding, id: findingId(finding) }], analyzerFailures: [], benchmarks: [] };
+const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ ...finding, id: "finding-id" }], analyzerFailures: [], benchmarks: [] };
 
 describe("analyze contracts", () => {
   it("keeps missing tsconfig typed in analyzeEffect and reports it in analyze", async () => {
@@ -110,6 +110,36 @@ describe("analyze contracts", () => {
     expect(result.analyzerFailures).toEqual([]);
   });
 
+  it("caps aggregate findings and reports dropped results", async () => {
+    const diagnostics = Array.from({ length: 2_001 }, (_, index) => ({
+      code: "typescript(no-floating-promises)",
+      severity: "error",
+      message: `promise-${index}`,
+      filename: "src/a.ts",
+      labels: [{ span: { line: index + 1, column: 1 } }],
+      related: [],
+    }));
+    const options = {
+      cwd: writeProject({ "src/a.ts": "export const value = 1;" }),
+      scope: ScopeMode.All,
+      maxMemoryMb: 1536,
+      checks: [AnalyzerName.Eslint],
+    } as const;
+    const seams = {
+      processRunner: () => Effect.succeed({ stdout: JSON.stringify({ diagnostics }), stderr: "" }),
+    };
+    const [result, repeated] = await Promise.all([
+      Effect.runPromise(analyzeEffect(options, seams)),
+      Effect.runPromise(analyzeEffect(options, seams)),
+    ]);
+
+    expect(result.findings).toHaveLength(2_000);
+    expect(repeated.findings.map(({ id }) => id)).toEqual(result.findings.map(({ id }) => id));
+    expect(result.analyzerFailures).toEqual([
+      expect.objectContaining({ analyzer: AnalyzerName.Eslint, message: expect.stringContaining("dropped 1") }),
+    ]);
+  });
+
   it("preserves typed benchmark failures", async () => {
     const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(ProcessServiceLive))));
     expect(Result.isFailure(outcome)).toBe(true);
@@ -126,8 +156,7 @@ describe("analyze contracts", () => {
     expect(first.runs).toHaveLength(1);
     expect(second.runs).toHaveLength(1);
   });
-  it("creates deterministic related-location IDs and stable formats", () => {
-    expect(findingId(finding)).toBe(findingId({ ...finding }));
+  it("formats related locations in each output mode", () => {
     expect(formatResult(result, OutputMode.Compact)).toContain("warning\tcomplexity\ta.ts:2:1");
     expect(formatResult(result, OutputMode.Pretty)).toContain("related: b.ts:3:1");
     expect(JSON.parse(formatResult(result, OutputMode.Json)).version).toBe(1);
@@ -213,6 +242,31 @@ describe("analyze contracts", () => {
     ]));
   });
 
+  it("stops before project creation when runtime memory exceeds the budget", async () => {
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    let creations = 0;
+    const result = await Effect.runPromise(analyzeEffect({
+      cwd,
+      scope: ScopeMode.All,
+      maxMemoryMb: 512,
+      checks: [AnalyzerName.Complexity],
+    }, {
+      createAnalysisProject: () => {
+        creations += 1;
+        return undefined;
+      },
+      runtime: {
+        now: () => 0,
+        memory: () => ({ rssBytes: 513 * 1024 * 1024, heapUsedBytes: 0, externalBytes: 0 }),
+      },
+    }));
+
+    expect(creations).toBe(0);
+    expect(result.analyzerFailures).toEqual([
+      expect.objectContaining({ analyzer: AnalyzerName.Complexity, message: expect.stringContaining("Memory budget exceeded") }),
+    ]);
+  });
+
   it("returns all-rejected preflight results before resolving a non-Git scope", async () => {
     const cwd = fixtureRoot();
     const rejected = await Effect.runPromise(analyze({
@@ -250,12 +304,9 @@ describe("analyze contracts", () => {
     expect(profiled.profile?.peak.rssBytes).toBeGreaterThan(0);
     expect(profiled.profile?.timings.scope).toBeGreaterThanOrEqual(0);
     expect(profiled.profile?.memory["after:scope"]?.rssBytes).toBeGreaterThan(0);
-    expect(needsInternalProject([AnalyzerName.Eslint, AnalyzerName.Bundle])).toBe(false);
   });
 
-  it("makes deterministic memory and child heap decisions", () => {
-    expect(isMemoryBudgetExceeded(101 * 1024 * 1024, 100)).toBe(true);
-    expect(isMemoryBudgetExceeded(100 * 1024 * 1024, 100)).toBe(false);
+  it("reserves parent memory when it sets the child heap limit", () => {
     expect(childHeapLimitMb(2048, 512 * 1024 * 1024)).toBe(1024);
     expect(childHeapLimitMb(1024, 400 * 1024 * 1024)).toBe(112);
   });
@@ -875,15 +926,4 @@ describe("bounded hardening", () => {
     expect(left.tokenCount).toBeLessThan(24);
   });
 
-  it("caps total findings with explicit truncation metadata", () => {
-    const findings: Finding[] = [
-      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-0", location: { path: "src/0.ts", line: 1, column: 1 } },
-      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-1", location: { path: "src/1.ts", line: 1, column: 1 } },
-      { id: "", analyzer: AnalyzerName.AsyncRisk, kind: FindingKind.AsyncRisk, severity: Severity.Info, message: "finding-2", location: { path: "src/2.ts", line: 1, column: 1 } },
-    ];
-    const capped = capFindings(findings, 2);
-    expect(capped.kept.map((item) => item.message)).toEqual(["finding-0", "finding-1"]);
-    expect(capped.truncated).toBe(true);
-    expect(capped.truncatedCount).toBe(1);
-  });
 });

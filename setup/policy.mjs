@@ -57,19 +57,3 @@ export function deriveSetupPolicy(env = process.env) {
     }),
   });
 }
-
-export function setupMode(env = process.env) {
-  return deriveSetupPolicy(env).mode;
-}
-
-export function isNixManaged(env = process.env) {
-  return deriveSetupPolicy(env).nixManaged;
-}
-
-export function isCliManagedExternally(env = process.env) {
-  return deriveSetupPolicy(env).cli.owner === Ownership.External;
-}
-
-export function shouldSkipPathProfile(env = process.env) {
-  return deriveSetupPolicy(env).path.owner === Ownership.External;
-}

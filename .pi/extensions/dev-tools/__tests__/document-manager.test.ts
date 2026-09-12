@@ -29,73 +29,55 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
     return p;
   }
 
-  // ─── open / ensure ─────────────────────────────────────────────────────────
-
-  describe("open", () => {
-    it("returns didOpen for a new file", () => {
-      const p = mkFile("a.ts", "const x = 1;");
-      const result = (dm as any).open(p);
-      expect(result).not.toBeNull();
-      expect(result!.notification).toBe("didOpen");
-      expect(result!.params).toMatchObject({
-        textDocument: { languageId: "typescript", version: 1, text: "const x = 1;" },
-      });
-    });
-
-    it("returns null for unchanged file", () => {
-      const p = mkFile("a.ts", "const x = 1;");
-      (dm as any).open(p);
-      const result2 = (dm as any).open(p);
-      expect(result2).toBeNull();
-    });
-
-    it("returns didChange after content update", () => {
-      const p = mkFile("a.ts", "const x = 1;");
-      (dm as any).open(p);
-      writeFileSync(p, "const x = 2;", "utf8");
-      const result = (dm as any).open(p);
-      expect(result).not.toBeNull();
-      expect(result!.notification).toBe("didChange");
-      expect(result!.params).toMatchObject({
-        textDocument: { version: 2 },
-        contentChanges: [{ text: "const x = 2;" }],
-      });
-    });
-
-    it("returns null for non-existent file", () => {
-      const result = (dm as any).open("/nonexistent/path/foo.ts");
-      expect(result).toBeNull();
-    });
-
-    it("marks isNewRoot=true for first file in a project", () => {
-      const p = mkFile("a.ts", "const x = 1;");
-      const result = (dm as any).open(p);
-      expect(result!.isNewRoot).toBe(true);
-    });
-
-    it("marks isNewRoot=false for subsequent files in same project", () => {
-      const p1 = mkFile("a.ts", "const x = 1;");
-      const p2 = mkFile("b.ts", "const y = 2;");
-      (dm as any).open(p1);
-      const result = (dm as any).open(p2);
-      expect(result!.isNewRoot).toBe(false);
-    });
-  });
+  // ─── ensure ────────────────────────────────────────────────────────────────
 
   describe("ensure", () => {
-    it("returns uri and notification for new file", () => {
+    it("opens a new file with its language, version, and content", () => {
       const p = mkFile("a.ts", "export type T = string;");
       const result = dm.ensure(p);
+
       expect(result.uri).toMatch(/^file:\/\//);
-      expect(result.notification).not.toBeNull();
-      expect(result.notification!.type).toBe("didOpen");
+      expect(result.notification).toMatchObject({
+        type: "didOpen",
+        params: {
+          textDocument: { languageId: "typescript", version: 1, text: "export type T = string;" },
+        },
+      });
     });
 
-    it("returns null notification for unchanged file", () => {
+    it("does not track or notify for a missing file", () => {
+      expect(dm.ensure(join(tmpDir, "missing.ts")).notification).toBeNull();
+      expect(dm.openUris).toEqual([]);
+      expect(dm.projectRoots).toEqual([]);
+    });
+
+    it("does not notify for unchanged content", () => {
       const p = mkFile("a.ts", "export type T = string;");
       dm.ensure(p);
-      const result = dm.ensure(p);
-      expect(result.notification).toBeNull();
+
+      expect(dm.ensure(p).notification).toBeNull();
+    });
+
+    it("sends changed content with a new version", () => {
+      const p = mkFile("a.ts", "const x = 1;");
+      dm.ensure(p);
+      writeFileSync(p, "const x = 2;", "utf8");
+
+      expect(dm.ensure(p).notification).toMatchObject({
+        type: "didChange",
+        params: {
+          textDocument: { version: 2 },
+          contentChanges: [{ text: "const x = 2;" }],
+        },
+      });
+    });
+
+    it("identifies only the first file in a project as a new root", () => {
+      const first = mkFile("a.ts", "const x = 1;");
+      const second = mkFile("b.ts", "const y = 2;");
+
+      expect(dm.ensure(first).isNewRoot).toBe(true);
+      expect(dm.ensure(second).isNewRoot).toBe(false);
     });
   });
 
@@ -149,13 +131,13 @@ describeIfEnabled("dev-tools", "DocumentManager", () => {
   describe("state tracking", () => {
     it("tracks open URIs", () => {
       const p = mkFile("a.ts", "const a = 1;");
-      (dm as any).open(p);
+      dm.ensure(p);
       expect(dm.openUris.length).toBe(1);
     });
 
     it("clear() resets state", () => {
       const p = mkFile("a.ts", "const a = 1;");
-      (dm as any).open(p);
+      dm.ensure(p);
       dm.clear();
       expect(dm.openUris.length).toBe(0);
       expect(dm.projectRoots.length).toBe(0);

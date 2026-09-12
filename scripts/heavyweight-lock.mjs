@@ -132,5 +132,3 @@ export async function withHeavyweightLock(operation, options) {
     await lease.release();
   }
 }
-
-export const heavyweightLockName = LOCK_NAME;

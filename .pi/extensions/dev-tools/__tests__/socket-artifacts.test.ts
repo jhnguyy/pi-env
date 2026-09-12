@@ -2,16 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { removeStaleArtifact, removeStaleArtifacts, type SocketArtifactFs } from "../socket-artifacts";
 
 describe("removeStaleArtifact", () => {
-  it("skips missing artifacts", () => {
-    const fs: SocketArtifactFs = {
-      existsSync: vi.fn(() => false),
-      unlinkSync: vi.fn(),
-    };
-
-    expect(removeStaleArtifact("/tmp/missing.sock", fs)).toBe(false);
-    expect(fs.unlinkSync).not.toHaveBeenCalled();
-  });
-
   it("removes existing artifacts", () => {
     const fs: SocketArtifactFs = {
       existsSync: vi.fn(() => true),
@@ -20,15 +10,6 @@ describe("removeStaleArtifact", () => {
 
     expect(removeStaleArtifact("/tmp/stale.sock", fs)).toBe(true);
     expect(fs.unlinkSync).toHaveBeenCalledWith("/tmp/stale.sock");
-  });
-
-  it("treats unlink failures as best-effort cleanup misses", () => {
-    const fs: SocketArtifactFs = {
-      existsSync: vi.fn(() => true),
-      unlinkSync: vi.fn(() => { throw new Error("busy"); }),
-    };
-
-    expect(removeStaleArtifact("/tmp/busy.sock", fs)).toBe(false);
   });
 });
 

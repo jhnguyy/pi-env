@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireHeavyweightLock, heavyweightLockName, withHeavyweightLock } from "../heavyweight-lock.mjs";
+import { acquireHeavyweightLock, withHeavyweightLock } from "../heavyweight-lock.mjs";
 
 const temporaryDirs = [];
 
@@ -20,6 +20,12 @@ async function exists(path) {
   } catch {
     return false;
   }
+}
+
+async function lockPathFor(commonDir) {
+  const lease = await acquireHeavyweightLock({ commonDir });
+  await lease.release();
+  return lease.lockPath;
 }
 
 afterEach(async () => {
@@ -49,7 +55,7 @@ describe("heavyweight lock", () => {
 
   it("recovers a lock whose owner PID is stale", async () => {
     const directory = await commonDir();
-    const lockPath = resolve(directory, heavyweightLockName);
+    const lockPath = await lockPathFor(directory);
     await mkdir(lockPath);
     await writeFile(resolve(lockPath, "owner.json"), JSON.stringify({ token: "dead", pid: 999_999_999, acquiredAt: "now" }));
 
@@ -60,7 +66,7 @@ describe("heavyweight lock", () => {
 
   it("does not recover an ownerless directory by age", async () => {
     const directory = await commonDir();
-    const lockPath = resolve(directory, heavyweightLockName);
+    const lockPath = await lockPathFor(directory);
     await mkdir(lockPath);
 
     await expect(acquireHeavyweightLock({
@@ -101,8 +107,9 @@ describe("heavyweight lock", () => {
 
   it("cleans up when the protected operation throws", async () => {
     const directory = await commonDir();
+    const lockPath = await lockPathFor(directory);
     await expect(withHeavyweightLock(async () => { throw new Error("boom"); }, { commonDir: directory })).rejects.toThrow("boom");
-    expect(await exists(resolve(directory, heavyweightLockName))).toBe(false);
+    expect(await exists(lockPath)).toBe(false);
   });
 
   it("allows a child carrying the owner token to reenter without releasing", async () => {
@@ -115,7 +122,7 @@ describe("heavyweight lock", () => {
     });
     expect(inner.inherited).toBe(true);
     await inner.release();
-    expect(await exists(resolve(directory, heavyweightLockName))).toBe(true);
+    expect(await exists(outer.lockPath)).toBe(true);
     await outer.release();
   });
 });

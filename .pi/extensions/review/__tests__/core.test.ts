@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   bound,
-  changedLineAnchors,
   confined,
   diffAnchors,
   extractPrUrl,
@@ -181,7 +180,6 @@ describe("review pull request deterministic contracts", () => {
   it("preserves invalid anchors unanchored and selects high-impact/blocking/serious only", () => {
     const diff =
       "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,2 +1,3 @@\n one\n+two\n three\n";
-    expect(changedLineAnchors(diff).get("a.ts")?.has(2)).toBe(true);
     const result = validateFindingAnchors(
       {
         verdict: "comment",
