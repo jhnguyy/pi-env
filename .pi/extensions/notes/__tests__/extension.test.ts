@@ -90,7 +90,7 @@ function externalProvider(id: string, indexText: string): NotesProvider {
   return {
     id,
     index: async () => ({ text: indexText }),
-    list: async () => [],
+    list: async () => ({ entries: [] }),
     read: async (notePath) => ({ path: notePath, content: "", revision: "revision" }),
     search: async () => [],
     write: async (request) => ({ path: request.path, revision: "next" }),
@@ -141,7 +141,7 @@ describe("notes extension", () => {
     const external: NotesProvider = {
       id: "notes-assistant",
       index: async () => ({ text: "Remote store conventions" }),
-      list: async () => [],
+      list: async () => ({ entries: [] }),
       read: async (notePath) => ({ path: notePath, content: "", revision: "revision" }),
       search: async () => [],
       write: async (request) => ({ path: request.path, revision: "next" }),

@@ -82,29 +82,46 @@ class ObsidianProvider implements NotesProvider {
   ) {}
 
   async index(signal?: AbortSignal) {
-    const notes = await this.list({}, signal);
+    const { entries, nextCursor } = await this.list({ limit: MAX_NOTE_COUNT }, signal);
+    if (nextCursor !== undefined) {
+      throw resourceLimit(`Notes index inventory exceeds ${MAX_NOTE_COUNT} notes.`);
+    }
     return {
-      text: formatObsidianIndex(notes),
-      entries: notes.slice(0, MAX_INDEX_ENTRIES),
+      text: formatObsidianIndex(entries),
+      entries: entries.slice(0, MAX_INDEX_ENTRIES),
     };
   }
 
-  async list(request: NotesListRequest, signal?: AbortSignal): Promise<readonly NoteEntry[]> {
+  async list(request: NotesListRequest, signal?: AbortSignal) {
     try {
       signal?.throwIfAborted();
       const explicitPrefix =
         request.prefix === undefined ? undefined : normalizePrefix(request.prefix);
+      const cursor = decodeListCursor(request.cursor, explicitPrefix);
       const limit = Math.min(request.limit ?? MAX_NOTE_COUNT, MAX_NOTE_COUNT);
-      const paths = await walkMarkdownFiles(this.root, this.root, signal);
+      const paths = (await walkMarkdownFiles(this.root, this.root, signal)).sort((left, right) =>
+        left.localeCompare(right),
+      );
       const entries: NoteEntry[] = [];
+      let hasMore = false;
       for (const notePath of paths) {
         signal?.throwIfAborted();
         if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
+        if (cursor !== undefined && notePath.localeCompare(cursor) <= 0) continue;
+        if (entries.length === limit) {
+          hasMore = true;
+          break;
+        }
         const metadata = await lstat(path.join(this.root, ...notePath.split("/")));
         if (!metadata.isFile() || metadata.nlink !== 1) continue;
         entries.push({ path: notePath, size: metadata.size, modifiedAt: metadata.mtimeMs });
       }
-      return entries.sort((left, right) => left.path.localeCompare(right.path)).slice(0, limit);
+      return {
+        entries,
+        ...(hasMore && entries.length > 0
+          ? { nextCursor: encodeListCursor(entries[entries.length - 1].path, explicitPrefix) }
+          : {}),
+      };
     } catch (cause) {
       throw providerError(cause, "Cannot list Obsidian notes");
     }
@@ -136,7 +153,10 @@ class ObsidianProvider implements NotesProvider {
       throw resourceLimit(`Notes search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters.`);
     }
     try {
-      const notes = await this.list({}, signal);
+      const { entries: notes, nextCursor } = await this.list({ limit: MAX_NOTE_COUNT }, signal);
+      if (nextCursor !== undefined) {
+        throw resourceLimit(`Notes search inventory exceeds ${MAX_NOTE_COUNT} notes.`);
+      }
       const needle = request.query.toLocaleLowerCase();
       const limit = Math.min(request.limit ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS);
       const results: NoteSearchResult[] = [];
@@ -567,6 +587,40 @@ function normalizePrefix(input: string): string {
     });
   }
   return normalized;
+}
+
+function encodeListCursor(notePath: string, prefix: string | undefined): string {
+  return Buffer.from(JSON.stringify({ v: 1, path: notePath, prefix: prefix ?? null })).toString(
+    "base64url",
+  );
+}
+
+function decodeListCursor(
+  cursor: string | undefined,
+  prefix: string | undefined,
+): string | undefined {
+  if (cursor === undefined) return undefined;
+  try {
+    const decoded = Buffer.from(cursor, "base64url").toString("utf8");
+    const payload = JSON.parse(decoded) as {
+      readonly v?: unknown;
+      readonly path?: unknown;
+      readonly prefix?: unknown;
+    };
+    const expectedPrefix = prefix ?? null;
+    if (
+      payload.v !== 1 ||
+      typeof payload.path !== "string" ||
+      payload.prefix !== expectedPrefix ||
+      encodeListCursor(payload.path, prefix) !== cursor ||
+      normalizeNotePath(payload.path) !== payload.path
+    ) {
+      throw new Error("noncanonical cursor");
+    }
+    return payload.path;
+  } catch {
+    throw new NotesProviderError({ code: "invalid-path", message: "Invalid notes list cursor." });
+  }
 }
 
 function assertCanonicalParentAllowed(root: string, candidate: string, source: string): void {

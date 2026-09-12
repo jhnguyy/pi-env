@@ -25,19 +25,39 @@ An external extension can register a provider such as `notes-assistant`, then se
 
 Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project can override it through `.pi/settings.json`.
 
-## Progressive guidance
+## Collection behavior
 
-The active tool contributes model guidance through `promptGuidelines`. The guidance tells agents to orient with `index`, use `list` for authoritative inventory, read before mutation, choose exact edits or coherent rewrites deliberately, preserve unclassified capture, obtain approval before semantic routing, create durable notes only with a clear retrieval path, and keep secrets out of notes.
+Pi-env owns the portable Inbox, Worklog, and Wiki lifecycle. Providers remain storage-neutral and own storage, transport, credentials, revisions, conflicts, and commit behavior.
 
-Each provider owns its bounded `index` response. The response explains store-specific organization and retrieval conventions only when an agent first needs them. The shared tool does not hard-code a vault taxonomy. Paths do not assign an information category. The selected store can keep that category in each note.
+### Inbox
 
-## Shared contract
+Inbox notes use `inbox/YYYY/MM/DD.md`. An Inbox read without a date returns the earliest nonblank item. A dated read returns Notes and Follow-ups from that date. Results include Follow-up checked state. Reads never mutate note content.
 
-Every provider implements the Promise-based interface in `domain.ts`. The public entry point exports provider types, registration, and canonical provider errors. The interface has no filesystem root, mutation queue, Effect type, artifact lifecycle, or provider-specific configuration.
+An Inbox write records one Note or unchecked Follow-up for the Pi process system-local date. It creates the daily note or exact level-two section when needed and preserves unrelated content.
 
-`provider-registry.ts` owns the process-wide provider registry. It uses `Symbol.for("@pi-env/notes-providers")` so separate extension bundles share registrations. Providers in the same package can call `registerNotesProvider`. Independently bundled providers can emit `notes:provider:register` with `{ provider }` and respond to `notes:provider:discover`. The discovery handshake supports either extension load order without a runtime package import. The selected provider is resolved when each tool call starts. Registration validates the baseline interface and rejects duplicate IDs.
+### Worklog
 
-The required provider operations are bounded index, list, read, search, guarded write, and guarded delete. A provider can also implement reference resolution. The tool owns portable path validation, formatting, exact-edit behavior, revision preconditions, and output limits. Providers own storage or transport, store orientation, cancellation, mutation serialization, and commit-boundary conflict checks.
+Worklog items are brief completed-work bullets under `## Worklog` in `records/YYYY/MM/DD.md`. Recording always uses the Pi process system-local date. Reads support today, an exact ISO date, an inclusive `start..end` range, or `all`. They default to newest-date-first order and can request chronological order.
+
+### Wiki
+
+Wiki targets are relative to `wiki/`. A read without a target lists immediate root children. A folder target lists immediate child folders and Markdown files. A Markdown file target returns its content and revision. Wiki writes require a null revision for explicit creation or the revision returned by a prior read for update.
+
+All collection list results are bounded. A returned opaque cursor continues the same selection. Do not reuse a cursor with a different collection, selector, target, or order.
+
+## Store compatibility
+
+Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These actions remain available for orientation, global search, legacy and adapter-owned notes, and bounded migration work. Use collection actions for new Inbox, Worklog, and Wiki writes.
+
+Each provider supplies a bounded index response for store-specific orientation. Use list as the authoritative inventory when working outside the core collections.
+
+## Shared provider contract
+
+Every provider implements the Promise-based interface in `domain.ts`. List results carry bounded entries and an opaque provider continuation cursor. Existing providers that return one terminal entry array remain compatible while they adopt pagination. The public entry point exports provider types, registration, and canonical provider errors. The interface has no filesystem root, mutation queue, Effect type, note taxonomy, or provider-specific configuration.
+
+`provider-registry.ts` owns the process-wide provider registry. It uses `Symbol.for("@pi-env/notes-providers")` so separate extension bundles share registrations. Providers in the same package can call `registerNotesProvider`. Independently bundled providers can emit `notes:provider:register` with `{ provider }` and respond to `notes:provider:discover`. The discovery handshake supports either extension load order without a runtime package import. The selected provider is resolved when each tool call starts.
+
+The required provider operations are bounded index, list, read, search, guarded write, and guarded delete. A provider can also implement reference resolution. The tool owns portable collection behavior, path validation, formatting, exact edits, revision preconditions, provider-result validation, and output limits. Providers own storage or transport, cancellation, mutation serialization, and commit-boundary conflict checks.
 
 Reads return a revision. Creating a note requires a null revision precondition. Replacing, editing, or deleting a note requires the revision returned by read. The tool applies exact edits before a revision-guarded write. Exact edits fail without changing the note when text is absent or occurs more than once.
 
