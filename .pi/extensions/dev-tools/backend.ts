@@ -32,11 +32,6 @@ import {
   LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
 } from "./timeouts";
 
-export {
-  LSP_INIT_TIMEOUT_MS,
-  LSP_REQUEST_TIMEOUT_MS,
-  LSP_SEMANTIC_REQUEST_TIMEOUT_MS,
-} from "./timeouts";
 
 const COLD_SEMANTIC_METHODS = new Set([
   "textDocument/documentSymbol",

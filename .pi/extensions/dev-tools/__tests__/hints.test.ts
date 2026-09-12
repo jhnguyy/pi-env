@@ -1,118 +1,35 @@
-/**
- * Tests for backend-configs (isSupported, getBackendConfig) and
- * LspBackend (handles, getLanguageId).
- */
-
 import { describe, expect, it } from "vitest";
-import {
-  isSupported,
-  getBackendConfig,
-  BACKEND_CONFIGS,
-  BackendMode,
-  type LspBackendConfig,
-} from "../backend-configs";
+
 import { LspBackend, findBinary } from "../backend";
+import { BACKEND_CONFIGS } from "../backend-configs";
 
-// ─── isSupported ──────────────────────────────────────────────────────────────
+const backends = BACKEND_CONFIGS.map((config) => new LspBackend(config));
+const backendFor = (path: string) => backends.find((backend) => backend.handles(path));
 
-describe("isSupported", () => {
-  // Representative LSP and format-backed extensions; config and backend tests cover families.
-  it("returns true for .ts files", () => expect(isSupported("foo.ts")).toBe(true));
-  it("returns true for .hcl files", () => expect(isSupported("foo.hcl")).toBe(true));
-  it("returns false for unsupported extensions", () => expect(isSupported("foo.md")).toBe(false));
-  it("works with absolute paths", () => expect(isSupported("/home/user/project/src/index.ts")).toBe(true));
-});
+describe("advertised language support", () => {
+  it.each([
+    ["example.ts", "typescript", "typescript"],
+    ["example.tsx", "typescript", "typescriptreact"],
+    ["example.js", "typescript", "javascript"],
+    ["example.jsx", "typescript", "javascriptreact"],
+    ["example.mts", "typescript", "typescript"],
+    ["example.cts", "typescript", "typescript"],
+    ["example.mjs", "typescript", "javascript"],
+    ["example.cjs", "typescript", "javascript"],
+    ["example.sh", "bash", "shellscript"],
+    ["example.bash", "bash", "shellscript"],
+    ["example.zsh", "bash", "shellscript"],
+    ["example.ksh", "bash", "shellscript"],
+    ["example.nix", "nil", "nix"],
+  ])("routes %s to %s", (path, backendName, languageId) => {
+    const backend = backendFor(path);
 
-// ─── getBackendConfig ─────────────────────────────────────────────────────────
+    expect(backend?.name).toBe(backendName);
+    expect(backend?.getLanguageId(path)).toBe(languageId);
+  });
 
-describe("getBackendConfig", () => {
-  it("returns the hcl format backend for .hcl files", () => {
-    const c = getBackendConfig("foo.hcl");
-    expect(c?.mode).toBe(BackendMode.Format);
-    expect(c?.name).toBe("hcl");
-  });
-  it("returns the terraform format backend for .tf files", () => {
-    const c = getBackendConfig("foo.tf");
-    expect(c?.mode).toBe(BackendMode.Format);
-    expect(c?.name).toBe("terraform");
-  });
-  it("returns the terraform format backend for .tfvars files", () => {
-    const c = getBackendConfig("foo.tfvars");
-    expect(c?.mode).toBe(BackendMode.Format);
-    expect(c?.name).toBe("terraform");
-  });
-  it("returns an lsp backend for .ts files", () => {
-    const c = getBackendConfig("foo.ts");
-    expect(c?.mode).toBe(BackendMode.Lsp);
-    expect(c?.name).toBe("typescript");
-  });
-  it("returns null for unsupported extensions", () => {
-    expect(getBackendConfig("foo.md")).toBeNull();
-  });
-  it("hcl formatArgs build the expected terragrunt command", () => {
-    const c = getBackendConfig("path/to/main.hcl");
-    expect(c?.mode).toBe(BackendMode.Format);
-    if (c?.mode === BackendMode.Format) {
-      expect(c.formatArgs("path/to/main.hcl")).toEqual([
-        "hclfmt", "--terragrunt-hclfmt-file", "path/to/main.hcl",
-      ]);
-    }
-  });
-  it("tf formatArgs build the expected terraform command", () => {
-    const c = getBackendConfig("main.tf");
-    expect(c?.mode).toBe(BackendMode.Format);
-    if (c?.mode === BackendMode.Format) {
-      expect(c.formatArgs("main.tf")).toEqual(["fmt", "main.tf"]);
-    }
-  });
-});
-
-// ─── LspBackend handles + getLanguageId ───────────────────────────────────────
-
-describe("LspBackend.handles and getLanguageId (via configs)", () => {
-  // LspBackend only consumes LSP-mode configs — mirror the daemon's filter.
-  const backends = (BACKEND_CONFIGS.filter((c) => c.mode === BackendMode.Lsp))
-    .map((c) => new LspBackend(c));
-  const getBackend = (path: string) => backends.find((b) => b.handles(path));
-
-  it("typescript backend handles .ts", () => {
-    const b = getBackend("foo.ts");
-    expect(b?.name).toBe("typescript");
-    expect(b?.getLanguageId("foo.ts")).toBe("typescript");
-  });
-  it("typescript backend returns typescriptreact for .tsx", () => {
-    expect(getBackend("foo.tsx")?.getLanguageId("foo.tsx")).toBe("typescriptreact");
-  });
-  it("typescript backend returns javascript for .js", () => {
-    expect(getBackend("foo.js")?.getLanguageId("foo.js")).toBe("javascript");
-  });
-  it("typescript backend returns javascriptreact for .jsx", () => {
-    expect(getBackend("foo.jsx")?.getLanguageId("foo.jsx")).toBe("javascriptreact");
-  });
-  it("bash backend handles .sh", () => {
-    const b = getBackend("foo.sh");
-    expect(b?.name).toBe("bash");
-    expect(b?.getLanguageId("foo.sh")).toBe("shellscript");
-  });
-  it("bash backend handles .bash", () => {
-    expect(getBackend("foo.bash")?.name).toBe("bash");
-  });
-  it("nil backend handles .nix", () => {
-    const b = getBackend("foo.nix");
-    expect(b?.name).toBe("nil");
-    expect(b?.getLanguageId("foo.nix")).toBe("nix");
-  });
-  it("no backend handles .md", () => {
-    expect(getBackend("foo.md")).toBeUndefined();
-  });
-  it("no backend handles .py", () => {
-    expect(getBackend("foo.py")).toBeUndefined();
-  });
-  it("no backend handles .hcl (format-only, not LSP)", () => {
-    expect(getBackend("foo.hcl")).toBeUndefined();
-  });
-  it("no backend handles .tf (format-only, not LSP)", () => {
-    expect(getBackend("foo.tf")).toBeUndefined();
+  it("does not route unsupported files", () => {
+    expect(backendFor("example.md")).toBeUndefined();
   });
 });
 

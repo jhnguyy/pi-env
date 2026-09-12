@@ -2,7 +2,7 @@ import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { BuildOptions, Metafile } from "esbuild";
+import type { Metafile } from "esbuild";
 import { Effect } from "effect";
 import { AnalyzerName, AnalyzerRunError, FindingKind, Severity, type Finding } from "../model.js";
 import { DEFAULT_EXTERNAL_TIMEOUT_MS, nodeAnalyzerEnvironment, ProcessService, type StreamProcessOptions } from "../process.js";
@@ -92,10 +92,7 @@ function scopedExtensionEntrypoints(cwd: string, scope: Scope, allEntrypoints: r
   return [...scoped].sort();
 }
 
-type BundleBuild = (options: BuildOptions) => Promise<{ metafile?: Metafile }>;
 export interface BundleControls {
-  /** Test-only seam; production bundles always execute in a cancellable child. */
-  build?: BundleBuild;
   beforeEntry?: (entrypoint: string) => boolean;
 }
 
@@ -135,12 +132,13 @@ export function bundleAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
     // analyze: allow-sequential
     for (const entryPoint of entryPoints) {
       if (controls.beforeEntry?.(entryPoint) === false) break;
-      const metafile = controls.build === undefined
-        ? yield* workerMetafileEffect(cwd, entryPoint, externals, maxMemoryMb, timeoutMs)
-        : yield* Effect.tryPromise({
-          try: () => controls.build!({ absWorkingDir: cwd, entryPoints: [entryPoint], bundle: true, write: false, metafile: true, platform: "node", format: "esm", external: [...externals] }).then((result) => result.metafile!),
-          catch: bundleError,
-        });
+      const metafile = yield* workerMetafileEffect(
+        cwd,
+        entryPoint,
+        externals,
+        maxMemoryMb,
+        timeoutMs,
+      );
       const summary = normalizeBundleMetafile(metafile);
       const sideEffects = yield* packageSideEffectsEffect(cwd, entryPoint);
       findings.push({

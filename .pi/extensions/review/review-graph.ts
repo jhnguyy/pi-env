@@ -21,7 +21,6 @@ import {
 import {
   EvidenceResolverNode,
   ReadingPlanNode,
-  ReviewFanoutNodes,
   ReviewerNodes,
   SynthesisNode,
   type ReviewNode,
@@ -32,8 +31,6 @@ export {
   EvidenceResolverNode,
   FocusedReviewRoles,
   ReadingPlanNode,
-  ReviewDimension,
-  ReviewFanoutNodes,
   ReviewerNodes,
   ReviewNodes,
   ReviewRoles,

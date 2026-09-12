@@ -5,8 +5,6 @@ import {
   serializeResponse,
   parseRequest,
   parseResponse,
-  errorResponse,
-  okResponse,
   type DaemonRequest,
   type DaemonResponse,
   type DiagnosticsResult,
@@ -84,29 +82,6 @@ describeIfEnabled("dev-tools", "Protocol", () => {
 
     it("parseResponse throws on empty line", () => {
       expect(() => parseResponse("")).toThrow();
-    });
-  });
-
-  // ─── errorResponse / okResponse ─────────────────────────────────────────
-
-  describe("errorResponse", () => {
-    it("creates error response with correct shape", () => {
-      const res = errorResponse(42, "something went wrong");
-      expect(res).toEqual({ id: 42, ok: false, error: "something went wrong" });
-    });
-  });
-
-  describe("okResponse", () => {
-    it("creates success response with correct shape", () => {
-      const result: DiagnosticsResult = {
-        action: "diagnostics",
-        path: "/b.ts",
-        errorCount: 0,
-        warnCount: 0,
-        items: [],
-      };
-      const res = okResponse(10, result);
-      expect(res).toEqual({ id: 10, ok: true, result });
     });
   });
 });

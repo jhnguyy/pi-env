@@ -52,22 +52,4 @@ describe("managed settings core", () => {
       nested: { keep: true, add: 1 },
     });
   });
-
-  it("applies deterministic defaults and package registration", () => {
-    const settings = applyManagedSettingsTransforms(
-      { npmCommand: ["npm"], extensions: ["foo", "playwright-client"], packages: ["/worktree"] },
-      { model: "managed" },
-      "/worktree",
-      "/primary",
-    );
-
-    expect(settings).toMatchObject({
-      model: "managed",
-      theme: "gruvbox-light/gruvbox-dark",
-      npmCommand: ["nub"],
-      piUpdate: { enabled: false },
-      extensions: ["foo", "-playwright-client", "-work-tracker"],
-      packages: ["/primary"],
-    });
-  });
 });

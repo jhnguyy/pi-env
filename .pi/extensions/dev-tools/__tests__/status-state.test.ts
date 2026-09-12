@@ -4,12 +4,11 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { LspBackend } from "../backend";
-import { BackendMode, type LspBackendConfig } from "../backend-configs";
+import type { LspBackendConfig } from "../backend-configs";
 import { handleStatus } from "../handlers";
 import type { HandlerDeps } from "../handlers";
 
 const backendConfig: LspBackendConfig = {
-  mode: BackendMode.Lsp,
   name: "typescript",
   binaryName: "typescript-language-server",
   binaryArgs: [],

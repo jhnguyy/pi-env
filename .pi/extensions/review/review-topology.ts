@@ -1,40 +1,31 @@
-export const ReviewDimension = {
-  Correctness: "correctness",
-  Intent: "intent",
-  Maintainability: "maintainability",
-  Tests: "tests",
-  Security: "security",
-} as const;
-export type ReviewDimension = (typeof ReviewDimension)[keyof typeof ReviewDimension];
-
 export const ReviewNodes = Object.freeze([
   { role: "reading-plan", nodeId: "reading-plan", outputName: "reading_plan", kind: "plan" },
   {
-    role: ReviewDimension.Correctness,
+    role: "correctness",
     nodeId: "review-correctness",
     outputName: "correctness_review",
     kind: "focused-reviewer",
   },
   {
-    role: ReviewDimension.Intent,
+    role: "intent",
     nodeId: "review-intent",
     outputName: "intent_review",
     kind: "focused-reviewer",
   },
   {
-    role: ReviewDimension.Maintainability,
+    role: "maintainability",
     nodeId: "review-maintainability",
     outputName: "maintainability_review",
     kind: "focused-reviewer",
   },
   {
-    role: ReviewDimension.Tests,
+    role: "tests",
     nodeId: "review-tests",
     outputName: "tests_review",
     kind: "focused-reviewer",
   },
   {
-    role: ReviewDimension.Security,
+    role: "security",
     nodeId: "review-security",
     outputName: "security_review",
     kind: "focused-reviewer",
@@ -66,9 +57,6 @@ export const EvidenceResolverNode = Object.freeze({
   kind: "evidence-resolver",
 } as const);
 export const SynthesisNode = requiredReviewNode("synthesis");
-export const ReviewFanoutNodes = Object.freeze(
-  ReviewNodes.filter((node) => node.kind !== "synthesis"),
-);
 export const ReviewerNodes = Object.freeze(
   ReviewNodes.filter(
     (node) => node.kind === "focused-reviewer" || node.kind === "whole-change-reviewer",

@@ -19,10 +19,7 @@ export const TERMINAL_EFFECT_OPERATIONS = [
 ];
 const GUARDED_EFFECT_COMBINATOR_SET = new Set(GUARDED_EFFECT_COMBINATORS);
 const TERMINAL_EFFECT_OPERATION_SET = new Set(TERMINAL_EFFECT_OPERATIONS);
-const PREINSTALL_BOOTSTRAP_FILES = new Set([
-  "setup/runtime.mjs",
-  "scripts/check-node-version.mjs",
-]);
+const PREINSTALL_BOOTSTRAP_FILES = new Set(["setup/runtime.mjs", "scripts/check-node-version.mjs"]);
 const ACTIVE_EXTENSION_ROOTS = (() => {
   try {
     const packageJson = JSON.parse(readFileSync(`${ROOT}/package.json`, "utf8"));
