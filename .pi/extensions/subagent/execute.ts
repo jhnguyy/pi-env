@@ -68,11 +68,11 @@ const SubagentSpanName = {
   Run: "tooling.subagent.run",
 } as const;
 
-export function getSubagentSessionName(name: string): string {
+function getSubagentSessionName(name: string): string {
   return `sub-${slugify(name, { fallback: "agent" })}`;
 }
 
-export function hasReachedTurnLimit(turns: number, maxTurns: number | undefined): boolean {
+function hasReachedTurnLimit(turns: number, maxTurns: number | undefined): boolean {
   return maxTurns !== undefined && turns >= maxTurns;
 }
 

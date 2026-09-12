@@ -1,10 +1,9 @@
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   DagRuntimeServiceEvent,
-  listenForDagRuntimeService,
+  listenForDagRuntimeService as subscribeToDagRuntimeService,
   registerDagRuntimeService,
-  resetDagRuntimeServiceRegistryForTests,
   unregisterDagRuntimeService,
   type ActiveDagRuntimeService,
   type DagRuntimeServiceEvent as DagRuntimeServiceEventValue,
@@ -37,11 +36,17 @@ const service: ActiveDagRuntimeService = {
   reconstruct: () => Effect.die("unused"),
 };
 
-describe("DAG runtime service registration", () => {
-  beforeEach(() => {
-    resetDagRuntimeServiceRegistryForTests();
-  });
+const subscriptions: Array<() => void> = [];
+function listenForDagRuntimeService(...args: Parameters<typeof subscribeToDagRuntimeService>) {
+  const stop = subscribeToDagRuntimeService(...args);
+  subscriptions.push(stop);
+  return stop;
+}
+afterEach(() => {
+  for (const stop of subscriptions.splice(0)) stop();
+});
 
+describe("DAG runtime service registration", () => {
   it("rolls back remembered state when registration publication fails", () => {
     const events = createEvents();
     const throwingEvents: DagRuntimeServiceEvents = {
@@ -101,8 +106,8 @@ describe("DAG runtime service registration", () => {
       afterReplacementFailure.push(registration),
     );
     expect(afterReplacementFailure).toEqual([stable]);
+    unregisterDagRuntimeService(events, stable);
 
-    resetDagRuntimeServiceRegistryForTests();
     const replacementEvents = createEvents();
     const added: DagRuntimeServiceRegistration[] = [];
     const removed: DagRuntimeServiceRegistration[] = [];
@@ -132,6 +137,7 @@ describe("DAG runtime service registration", () => {
     expect(added[0]).toBe(previous);
     expect(added[2]).toBe(previous);
     expect(removed).toEqual([added[1]]);
+    unregisterDagRuntimeService(replacementEvents, previous);
   });
 
   it("delivers a raw current unregister once to every subscriber", () => {

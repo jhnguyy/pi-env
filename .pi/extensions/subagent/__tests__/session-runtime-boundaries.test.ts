@@ -7,7 +7,6 @@ import type { Text } from "@earendil-works/pi-tui";
 import { Container } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import type { RunSubagentOptions } from "../execute";
 import { createSubagentHarness as createHarness } from "./harness";
 
@@ -69,7 +68,6 @@ const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (
 const tempDirs: string[] = [];
 
 beforeEach(() => {
-  resetAgentToolRegistryForTests();
   state.mode = "complete";
   state.startCount = 0;
   state.abortCount = 0;
@@ -77,7 +75,6 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
-  resetAgentToolRegistryForTests();
   for (const directory of tempDirs.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -220,6 +217,7 @@ describe("SubagentSessionRuntime public boundaries", () => {
     );
     expect(resultA.content).toEqual([{ type: "text", text: "done-2" }]);
     expect(resultA.details).toMatchObject({ jobId: asyncA.details.jobId, status: "completed" });
+    expect(resultA.usage).toBeUndefined();
 
     const renderedResult = extractText(
       jobTool.renderResult(

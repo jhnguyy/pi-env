@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildSync } from "esbuild";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -8,8 +8,6 @@ import type {
   ToolDefinition,
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
-import { resetPtcToolRegistryForTests } from "../../_shared/ptc-tools";
 import type { PtcToolCatalog } from "../catalog";
 import type { PtcExecutionResult } from "../executor";
 
@@ -52,14 +50,7 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  resetAgentToolRegistryForTests();
-  resetPtcToolRegistryForTests();
   rmSync(fixtureDirectory, { recursive: true, force: true });
-});
-
-beforeEach(() => {
-  resetAgentToolRegistryForTests();
-  resetPtcToolRegistryForTests();
 });
 
 function createHarness() {

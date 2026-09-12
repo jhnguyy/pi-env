@@ -1,19 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-import { resetAgentToolRegistryForTests } from "../../_shared/agent-tools";
 import { createSubagentHarness as createHarness } from "./harness";
 import { SubagentJobManager } from "../jobs";
 
 const temporaryDirectories: string[] = [];
 
-beforeEach(() => resetAgentToolRegistryForTests());
 afterEach(() => {
   vi.restoreAllMocks();
-  resetAgentToolRegistryForTests();
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }

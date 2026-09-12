@@ -3,7 +3,6 @@ import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect } from "effect";
 import {
-  ANALYZE_DIAGNOSTIC_VERSION,
   AnalyzeDiagnosticEventType,
   AnalyzeTerminationReason,
   createAnalysisDiagnosticEvent,
@@ -120,9 +119,6 @@ export class AnalysisJournal {
     return journal;
   }
 
-  get disabled(): boolean {
-    return this.#disabled;
-  }
 
   append(event: AnalysisDiagnosticEvent): Promise<void> {
     this.#pending = this.#pending
@@ -256,64 +252,4 @@ export class AnalysisJournal {
 
 export function journalSink(journal: AnalysisJournal): DiagnosticEventSink {
   return (event) => Effect.promise(() => journal.append(event));
-}
-
-function parseJournalLine(line: string): AnalysisDiagnosticEvent | undefined {
-  if (line.length === 0) return undefined;
-  try {
-    const value = JSON.parse(line) as Partial<AnalysisDiagnosticEvent>;
-    if (value.version !== ANALYZE_DIAGNOSTIC_VERSION) return undefined;
-    if (typeof value.runId !== "string" || typeof value.timestampMs !== "number") {
-      return undefined;
-    }
-    if (
-      !Object.values(AnalyzeDiagnosticEventType).includes(value.type as AnalyzeDiagnosticEventType)
-    ) {
-      return undefined;
-    }
-    if (
-      typeof value.attributes !== "object" ||
-      value.attributes === null ||
-      typeof value.terminal !== "boolean"
-    ) {
-      return undefined;
-    }
-    const sanitized = createAnalysisDiagnosticEvent(
-      value.runId,
-      value.timestampMs,
-      value.type as AnalyzeDiagnosticEventType,
-      value.attributes,
-    );
-    return sanitized.terminal === value.terminal ? sanitized : undefined;
-  } catch {
-    // A crash can leave one partial trailing line; retain all complete records.
-    return undefined;
-  }
-}
-
-async function readJournalFile(file: JournalFile): Promise<AnalysisDiagnosticEvent[]> {
-  const handle = await open(file.path, "r");
-  try {
-    const text = await handle.readFile({ encoding: "utf8" });
-    return text
-      .split("\n")
-      .map(parseJournalLine)
-      .filter((event): event is AnalysisDiagnosticEvent => event !== undefined);
-  } finally {
-    await handle.close();
-  }
-}
-
-export async function readJournalEvents(directory: string): Promise<AnalysisDiagnosticEvent[]> {
-  let files: JournalFile[];
-  try {
-    files = await listJournalFiles(directory);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw cause;
-  }
-  const events: AnalysisDiagnosticEvent[] = [];
-  // analyze: allow-sequential
-  for (const file of files) events.push(...(await readJournalFile(file)));
-  return events.sort((left, right) => left.timestampMs - right.timestampMs);
 }

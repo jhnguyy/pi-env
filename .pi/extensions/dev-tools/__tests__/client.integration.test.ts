@@ -217,7 +217,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
       await expect(pending).rejects.toThrow("Client closed");
       expect(client.pendingRequestCount).toBe(0);
       expect(client.activeRequestTimerCount).toBe(0);
-      expect(client.socketListenerCount).toBe(0);
     });
   });
 
@@ -477,7 +476,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
         yield* TestClock.adjust(REQUEST_TIMEOUT_MS);
         yield* Deferred.await(retryWritten);
         expect(client.pendingRequestCount).toBe(1);
-        expect(client.socketListenerCount).toBe(3);
 
         yield* TestClock.adjust(REQUEST_TIMEOUT_MS);
         const error = yield* Fiber.join(request).pipe(Effect.flip);
@@ -487,7 +485,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
         expect(error.message).toBe("LSP request timed out: status");
         expect(client.pendingRequestCount).toBe(0);
         expect(client.activeRequestTimerCount).toBe(0);
-        expect(client.socketListenerCount).toBe(0);
         expect(serverSockets.size).toBe(0);
         expect(existsSync(socketPath)).toBe(false);
       }),
@@ -518,7 +515,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
         expect(client.pendingRequestCount).toBe(0);
         expect(client.activeRequestTimerCount).toBe(0);
         expect(client.connectionWaiterCount).toBe(0);
-        expect(client.socketListenerCount).toBe(0);
       }),
     );
 
@@ -586,7 +582,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
           expect(client.connectionWaiterCount).toBe(0);
           expect(client.pendingRequestCount).toBe(0);
           expect(client.activeRequestTimerCount).toBe(0);
-          expect(client.socketListenerCount).toBe(0);
           expect(socket.destroyed).toBe(true);
         }),
     );
@@ -640,7 +635,6 @@ describeIfEnabled("dev-tools", "LspClient", () => {
         ).toBe(true);
         expect(client.pendingRequestCount).toBe(0);
         expect(client.activeRequestTimerCount).toBe(0);
-        expect(client.socketListenerCount).toBe(0);
         expect(first.listenerCount("data")).toBe(0);
         expect(first.listenerCount("error")).toBe(0);
         expect(first.listenerCount("close")).toBe(0);

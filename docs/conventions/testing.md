@@ -31,7 +31,7 @@ Name Vitest files that require real processes, sockets, Git repositories, or ana
 - `nub run test:unit` runs the unit files.
 - `nub run test:integration` runs the integration files.
 - `nub run test` and the standard verification portfolio run both groups.
-- `nub run test:safe` runs both groups with one worker.
+- `nub run test:safe` runs bounded unit and integration batches in separate one-worker processes. Each process boundary releases module and worker state before the next batch. Integration batches are smaller because these tests use more processes and external resources.
 - `nub run test:setup` runs setup safety integration tests in their dedicated shell harness.
 
 Setup tests are permanent when they protect idempotence, portability, managed-file ownership, or preservation of user files. Remove assertions that only mirror script structure or command spelling.
@@ -86,7 +86,7 @@ Promoting a generated catching test means independently re-deriving the hardenin
 - `nub run test:changed main` is early feedback only. It is not merge authority.
 - `nub run test:e2e` remains explicit for hosted or environment-dependent behavior.
 
-Canonical Vitest scripts share one supervised Node command. Tests have no repository wall-clock limit by default. On `SIGINT` or `SIGTERM`, the supervisor terminates the owned process group and escalates after `PI_ENV_TEST_KILL_GRACE_MS`, which defaults to one second. Set `PI_ENV_TEST_TIMEOUT_MS` to a positive millisecond value only when a caller or environment requires a command limit. Vitest continues to use thread workers because fork workers cannot relaunch a Nub-managed Node binary that requires a Nix dynamic-loader wrapper. The standard command caps the pool at four workers to prevent import-heavy test files from oversubscribing the runtime.
+Standard Vitest scripts use one supervised Node command. The safe portfolio uses separate supervised batches to bound retained worker state. Tests have no repository wall-clock limit by default. On `SIGINT` or `SIGTERM`, the supervisor terminates the owned process group and escalates after `PI_ENV_TEST_KILL_GRACE_MS`, which defaults to one second. Set `PI_ENV_TEST_TIMEOUT_MS` to a positive millisecond value only when a caller or environment requires a command limit. Vitest continues to use thread workers because fork workers cannot relaunch a Nub-managed Node binary that requires a Nix dynamic-loader wrapper. The standard command caps the pool at four workers to prevent import-heavy test files from oversubscribing the runtime.
 
 The safe and standard portfolios must preserve blocking setup, type, packaging, policy, and runtime checks. Analyze stays outside aggregate verification until strict containment exists. CI may run only the documented bounded Analyze canary.
 

@@ -86,12 +86,12 @@ interface SessionEntry {
   };
 }
 
-export function parseTimestamp(filename: string): string {
+function parseTimestamp(filename: string): string {
   const base = filename.replace(/\.jsonl$/, "").split("_")[0];
   return base.replace(/T(\d{2})-(\d{2})-(\d{2})-\d+Z$/, "T$1:$2:$3Z");
 }
 
-export function textFromContent(content: string | TextBlock[] | undefined): string {
+function textFromContent(content: string | TextBlock[] | undefined): string {
   if (!content) return "";
   if (typeof content === "string") return content.trim();
   return content
@@ -101,7 +101,7 @@ export function textFromContent(content: string | TextBlock[] | undefined): stri
     .trim();
 }
 
-export function oneLine(text: string, max = 220): string {
+function oneLine(text: string, max = 220): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= max) return normalized;
   return `${normalized.slice(0, Math.max(0, max - 1))}…`;
@@ -115,80 +115,89 @@ function parseLine(line: string): SessionEntry | undefined {
   }
 }
 
-export function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
+interface DigestState {
+  sessionId?: string;
+  cwd?: string;
+  name?: string;
+  firstUserPrompt?: string;
+  lastUserPrompt?: string;
+  userTurns: number;
+  assistantTurns: number;
+  toolResults: number;
+  toolErrors: number;
+  compacted: boolean;
+  toolCounts: Record<string, number>;
+  labels: Array<{ targetId: string; label: string }>;
+}
+
+function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState): void {
+  switch (message.role) {
+    case MessageRole.User: {
+      state.userTurns += 1;
+      const text = oneLine(textFromContent(message.content));
+      if (text) {
+        state.firstUserPrompt ??= text;
+        state.lastUserPrompt = text;
+      }
+      break;
+    }
+    case MessageRole.Assistant:
+      state.assistantTurns += 1;
+      break;
+    case MessageRole.ToolResult: {
+      state.toolResults += 1;
+      const tool = message.toolName ?? "unknown";
+      state.toolCounts[tool] = (state.toolCounts[tool] ?? 0) + 1;
+      if (message.isError) state.toolErrors += 1;
+      break;
+    }
+  }
+}
+
+function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
+  switch (entry.type) {
+    case SessionEntryType.Session:
+      state.sessionId = entry.id;
+      state.cwd = entry.cwd;
+      break;
+    case SessionEntryType.SessionInfo:
+      state.name = entry.name;
+      break;
+    case SessionEntryType.Label:
+      if (entry.targetId && entry.label) {
+        state.labels.push({ targetId: entry.targetId, label: entry.label });
+      }
+      break;
+    case SessionEntryType.Compaction:
+      state.compacted = true;
+      break;
+    case SessionEntryType.Message:
+      if (entry.message) applyMessageToDigest(entry.message, state);
+      break;
+  }
+}
+
+function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
   const filename = basename(file);
   const timestamp = parseTimestamp(filename);
-  const toolCounts: Record<string, number> = {};
-  const labels: Array<{ targetId: string; label: string }> = [];
+  const state: DigestState = {
+    userTurns: 0,
+    assistantTurns: 0,
+    toolResults: 0,
+    toolErrors: 0,
+    compacted: false,
+    toolCounts: {},
+    labels: [],
+  };
   const childCounts = new Map<string | null, number>();
-
-  let sessionId: string | undefined;
-  let cwd: string | undefined;
-  let name: string | undefined;
-  let firstUserPrompt: string | undefined;
-  let lastUserPrompt: string | undefined;
-  let userTurns = 0;
-  let assistantTurns = 0;
-  let toolResults = 0;
-  let toolErrors = 0;
-  let compacted = false;
 
   for (const line of lines) {
     const entry = parseLine(line);
     if (!entry) continue;
-
     if (entry.id && entry.parentId !== undefined) {
       childCounts.set(entry.parentId ?? null, (childCounts.get(entry.parentId ?? null) ?? 0) + 1);
     }
-
-    switch (entry.type) {
-      case SessionEntryType.Session:
-        sessionId = entry.id;
-        cwd = entry.cwd;
-        break;
-
-      case SessionEntryType.SessionInfo:
-        name = entry.name;
-        break;
-
-      case SessionEntryType.Label:
-        if (entry.targetId && entry.label) labels.push({ targetId: entry.targetId, label: entry.label });
-        break;
-
-      case SessionEntryType.Compaction:
-        compacted = true;
-        break;
-
-      case SessionEntryType.Message: {
-        const message = entry.message;
-        if (!message) break;
-
-        switch (message.role) {
-          case MessageRole.User: {
-            userTurns += 1;
-            const text = oneLine(textFromContent(message.content));
-            if (text) {
-              firstUserPrompt ??= text;
-              lastUserPrompt = text;
-            }
-            break;
-          }
-
-          case MessageRole.Assistant:
-            assistantTurns += 1;
-            break;
-
-          case MessageRole.ToolResult: {
-            toolResults += 1;
-            const tool = message.toolName ?? "unknown";
-            toolCounts[tool] = (toolCounts[tool] ?? 0) + 1;
-            if (message.isError) toolErrors += 1;
-            break;
-          }
-        }
-        break;
-      }
-    }
+    applyEntryToDigest(entry, state);
   }
 
   let branches = 0;
@@ -198,19 +207,19 @@ export function digestLines(lines: string[], file: string, bytes = 0): SessionDi
 
   return {
     file,
-    sessionId,
-    cwd,
+    sessionId: state.sessionId,
+    cwd: state.cwd,
     timestamp,
-    name,
-    firstUserPrompt,
-    lastUserPrompt,
-    userTurns,
-    assistantTurns,
-    toolResults,
-    toolErrors,
-    toolCounts,
-    labels,
-    compacted,
+    name: state.name,
+    firstUserPrompt: state.firstUserPrompt,
+    lastUserPrompt: state.lastUserPrompt,
+    userTurns: state.userTurns,
+    assistantTurns: state.assistantTurns,
+    toolResults: state.toolResults,
+    toolErrors: state.toolErrors,
+    toolCounts: state.toolCounts,
+    labels: state.labels,
+    compacted: state.compacted,
     branches,
     bytes,
   };
@@ -283,7 +292,7 @@ export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION
   return file;
 }
 
-export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
   const root = resolve(sessionDir);
   if (!existsSync(root)) return [];
   const out: string[] = [];

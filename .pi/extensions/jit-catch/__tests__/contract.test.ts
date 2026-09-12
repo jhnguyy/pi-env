@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 
@@ -6,7 +6,6 @@ import {
   AgentToolEvent,
   PiEvent,
   ToolCapability,
-  resetAgentToolRegistryForTests,
   type ExtToolRegistration,
 } from "../../_shared/agent-tools";
 import { err } from "../../_shared/result";
@@ -63,8 +62,9 @@ function createPi() {
   const tools: any[] = [];
   const registrations: ExtToolRegistration[] = [];
   const sessionHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
+  const shutdownHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
   const execCwds: string[] = [];
-  return {
+  const harness = {
     tools,
     registrations,
     execCwds,
@@ -83,18 +83,24 @@ function createPi() {
       },
       on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void) {
         if (event === PiEvent.SessionStart) sessionHandlers.push(handler);
+        if (event === PiEvent.SessionShutdown) shutdownHandlers.push(handler);
       },
     },
     startSession(cwd: string) {
       for (const handler of sessionHandlers)
         handler({ type: PiEvent.SessionStart, reason: "startup" }, { cwd } as ExtensionContext);
     },
+    shutdownSession() {
+      for (const handler of shutdownHandlers)
+        handler({ type: PiEvent.SessionShutdown, reason: "reload" }, {} as ExtensionContext);
+    },
   };
+  onTestFinished(() => harness.shutdownSession());
+  return harness;
 }
 
 describe("jit_catch tool contract", () => {
   beforeEach(() => {
-    resetAgentToolRegistryForTests();
     runnerState.runResult = { extName: "demo", passed: true, testOutput: "ok", testPath: null };
     runnerState.runCalls = [];
     runnerState.runEffect = null;

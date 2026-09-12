@@ -80,8 +80,3 @@ export function lookupRegisteredDagExecutor(
     registrationKey({ parentSessionId, sessionGeneration, kind, key }),
   )?.executor;
 }
-
-export function resetDagExecutorRegistrationsForTests(): void {
-  const root = globalThis as typeof globalThis & { [StoreKey]?: RegistryState };
-  delete root[StoreKey];
-}

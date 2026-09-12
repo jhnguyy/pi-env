@@ -34,11 +34,7 @@ export {
 
 export {
   diffAnchors,
-  diffHunkRanges,
   parseChangedFilesFromDiff,
-  parseDiffGitPath,
-  parseGitPathList,
-  parsePatchFilePath,
   type DiffHunkRange,
 } from "./diff-index";
 export const REVIEW_ENTRY_TYPE = "pr-review" as const;

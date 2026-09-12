@@ -14,7 +14,6 @@ export function listPlan(phases) {
 export function runPlan(phases, options = {}) {
   const run = options.run ?? spawnSync;
   const name = options.name ?? "verify";
-  const now = options.now ?? performance.now.bind(performance);
   const log = options.log ?? console.log;
   const logError = options.logError ?? console.error;
   for (const phase of phases) {
@@ -23,9 +22,9 @@ export function runPlan(phases, options = {}) {
       continue;
     }
     log(`\n==> ${phase.label}`);
-    const startedAt = now();
+    const startedAt = performance.now();
     const result = run(phase.command, phase.args, { stdio: "inherit" });
-    const elapsedMs = Math.max(0, Math.round(now() - startedAt));
+    const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
     if (result.error) {
       logError(
         `${name}: ${phase.label} failed to start after ${elapsedMs} ms: ${result.error.message}`,

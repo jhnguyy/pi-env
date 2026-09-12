@@ -1,14 +1,10 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
-import {
-  lookupRegisteredDagExecutor,
-  resetDagExecutorRegistrationsForTests,
-} from "../../_shared/dag-executor-registration";
+import { describe, expect, it } from "vitest";
+import { lookupRegisteredDagExecutor } from "../../_shared/dag-executor-registration";
 import type { ReviewState } from "../core";
 import { ReviewEvidenceExecutorKind, ReviewEvidenceResolverKey } from "../evidence-resolver";
 import { ReviewCoordinator } from "../review-coordinator";
 
-afterEach(() => resetDagExecutorRegistrationsForTests());
 
 function context(sessionId: string): ExtensionContext {
   return {

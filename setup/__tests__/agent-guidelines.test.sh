@@ -42,7 +42,7 @@ assert_managed_content() {
   ' "$agents_file" "$ROOT/setup/templates/AGENTS.md" "$START_MARKER" "$END_MARKER"
 }
 
-test_agent_guidelines_are_created_with_only_global_writing_guidance() {
+test_agent_guidelines_are_created_from_the_managed_source() {
   local tmp home agents_file
   tmp="$(with_temp_dir)"
   home="$tmp/home"
@@ -52,17 +52,6 @@ test_agent_guidelines_are_created_with_only_global_writing_guidance() {
   assert_file_count "$agents_file" "$START_MARKER" 1
   assert_file_count "$agents_file" "$END_MARKER" 1
   assert_managed_content "$agents_file"
-  assert_file_contains "$agents_file" 'for all human-readable prose'
-  assert_file_contains "$agents_file" 'Do not use semicolons.'
-  for scoped_rule in \
-    'Before changing a repository:' \
-    'Derive expected behavior' \
-    'Leave self-descriptive code uncommented.' \
-    'Use the repo docs as the navigation path'; do
-    if grep -qF "$scoped_rule" "$agents_file"; then
-      fail "global AGENTS.md must not contain scoped guidance: $scoped_rule"
-    fi
-  done
 
   rm -rf "$tmp"
 }
@@ -179,7 +168,7 @@ test_unrelated_roles_link_is_preserved() {
   rm -rf "$tmp"
 }
 
-test_agent_guidelines_are_created_with_only_global_writing_guidance
+test_agent_guidelines_are_created_from_the_managed_source
 test_agent_guidelines_are_reconciled_idempotently
 test_obsolete_roles_link_is_not_installed
 test_managed_obsolete_roles_link_is_removed

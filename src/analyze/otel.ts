@@ -13,7 +13,7 @@ export const ANALYZE_OTEL_ENV = {
   Endpoint: "PI_ENV_ANALYZE_OTEL_ENDPOINT",
 } as const;
 
-export const ANALYZE_OTEL_BOUNDS = DEFAULT_BOUNDED_OTEL_BOUNDS;
+const ANALYZE_OTEL_BOUNDS = DEFAULT_BOUNDED_OTEL_BOUNDS;
 
 export interface AnalyzeOtelConfig extends BoundedOtelConfig {}
 

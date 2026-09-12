@@ -101,6 +101,8 @@ export async function executePtcAction(
 export default function ptcExtension(pi: ExtensionAPI) {
   const registry = new ToolRegistry(pi);
   const executor = new PtcExecutor(registry);
+  pi.on("session_start", () => registry.start());
+  pi.on("session_shutdown", () => registry.dispose());
 
   registerPublicTool(pi, {
     name: "ptc",

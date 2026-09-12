@@ -75,6 +75,7 @@ export function registeredReview(options: {
     },
   };
   reviewExtension(pi as never);
+  onTestFinished(() => handlers.session_shutdown?.());
   const session = (entries = options.entries, id = options.sessionId ?? "session") => ({
     cwd: options.root,
     hasUI: true,

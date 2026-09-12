@@ -288,11 +288,12 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 6, action: "hover", path: tsFile, line: 1, character: 1 });
+      const status = await send(sock, { id: 7, action: "status" });
       sock.destroy();
 
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/No hover information/);
-      expect((daemon as any).backends[0].getStatusSnapshot().lastSemanticRequest).toEqual({
+      expect((status.result as any).semantic.lastRequest).toEqual({
         method: "textDocument/hover",
         itemCount: 0,
       });
@@ -342,11 +343,12 @@ describeIfEnabled("dev-tools", "LspDaemon", () => {
 
       const sock = await startAndConnect(daemon);
       const res = await send(sock, { id: 9, action: "definition", path: tsFile, line: 1, character: 1 });
+      const status = await send(sock, { id: 10, action: "status" });
       sock.destroy();
 
       expect(res.ok).toBe(false);
       expect(res.error).toMatch(/No definition found/);
-      expect((daemon as any).backends[0].getStatusSnapshot().lastSemanticRequest).toEqual({
+      expect((status.result as any).semantic.lastRequest).toEqual({
         method: "textDocument/definition",
         itemCount: 0,
       });
