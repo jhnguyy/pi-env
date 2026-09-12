@@ -33,11 +33,11 @@ description: Compress verbose design docs, worklogs, and notes into dense, curre
 
 ---
 
-## Primary Artifact: Index, Not Summary
+## Choose the Artifact
 
-The best distillation output is an **index** — a dense navigational map — not a prose summary. Test: can someone locate a specific fact without reading the original? If they'd need the original anyway, the summary lost too much.
+Use an **index** when navigation and fact retrieval are the primary goals. Use concise prose when the relationships or reasoning matter more than source location. Test an index by asking whether a reader can locate a specific fact without reading the original.
 
-Extract key facts and patterns, not narrative. Detailed examples and full specs belong in reference files the index points to.
+Extract key facts and patterns, not narrative. Keep detailed examples and full specifications in references when that separation improves retrieval.
 
 ---
 

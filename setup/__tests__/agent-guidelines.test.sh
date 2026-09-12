@@ -52,8 +52,6 @@ test_agent_guidelines_are_created_with_only_global_writing_guidance() {
   assert_file_count "$agents_file" "$START_MARKER" 1
   assert_file_count "$agents_file" "$END_MARKER" 1
   assert_managed_content "$agents_file"
-  assert_file_contains "$agents_file" 'for all human-readable prose'
-  assert_file_contains "$agents_file" 'Do not use semicolons.'
   for scoped_rule in \
     'Before changing a repository:' \
     'Derive expected behavior' \

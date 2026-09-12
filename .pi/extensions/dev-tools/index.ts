@@ -104,12 +104,12 @@ export function registerDevTools(pi: DevToolsRegistrationApi) {
       "Language-server-backed code intelligence — diagnostics, hover, definitions, " +
       "implementations, references, symbol rename, call hierarchy, and symbols for supported coding languages.",
     promptGuidelines: [
-      "Use dev-tools symbols to orient in files and search workspace symbols for supported coding languages.",
-      "Use dev-tools definition to locate declarations, implementation to find concrete implementations, and hover to inspect types and documentation.",
-      "Use dev-tools rename to rename symbols across supported files. Use edit for non-symbol text changes.",
-      "Use dev-tools incoming-calls before changing a callable signature and outgoing-calls to map dependencies before refactoring.",
-      "Use dev-tools diagnostics to validate changed code before commit or review.",
-      "Use rg only for text or pattern searches in strings, comments, config values, generated files, and unsupported file types.",
+      "Prefer dev-tools symbols for file orientation and workspace symbol searches in supported languages.",
+      "Use definition, implementation, references, and hover when semantic results can answer the code question efficiently.",
+      "Use dev-tools rename for semantic symbol renames across supported files. Use edit for non-symbol text changes.",
+      "Use call hierarchy when a signature change or refactor has caller or dependency impact that is not already clear.",
+      "Use diagnostics for supported changed code when they add relevant validation evidence.",
+      "Use rg for text and pattern searches, or when semantic tools do not cover or answer the question.",
     ],
     parameters: toolParameters,
     async execute(toolCallId, params, _signal) {

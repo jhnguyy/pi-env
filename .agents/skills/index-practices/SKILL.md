@@ -23,7 +23,7 @@ Lead with the most distinctive fact. File names, format names, numbers, decision
 
 ## Format
 
-Pipe-delimited, one line per group. Use for structural indices where the file is meant to be a navigational map.
+Follow the existing local format when one exists. For a compact structural index, prefer a pipe-delimited line for each group.
 
 ```
 [Domain Index]|context line
