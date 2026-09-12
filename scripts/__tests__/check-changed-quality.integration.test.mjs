@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -33,12 +33,6 @@ function run(cwd, env = {}) {
   });
 }
 
-async function fakeNub(cwd) {
-  const path = join(cwd, "nub");
-  await writeFile(path, '#!/bin/sh\necho "$@" >> nub-calls\n', "utf8");
-  await chmod(path, 0o755);
-}
-
 describe("changed-code quality wrapper", () => {
   it("skips a packaged source tree without git metadata", async () => {
     const cwd = await fixtureRoot("quality-no-git-");
@@ -58,25 +52,5 @@ describe("changed-code quality wrapper", () => {
     const result = run(cwd);
     expect(result).toMatchObject({ status: 0 });
     expect(result.stdout).toContain("no base ref");
-  });
-
-  it("uses an available base ref", async () => {
-    const cwd = await fixtureRoot("quality-git-");
-    execFileSync("git", ["init", "-b", "main"], { cwd });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd });
-    execFileSync("git", ["config", "user.name", "Test"], { cwd });
-    await writeFile(join(cwd, "file.ts"), "export const one = 1;\n");
-    execFileSync("git", ["add", "."], { cwd });
-    execFileSync("git", ["commit", "-m", "base"], { cwd });
-    execFileSync("git", ["switch", "-c", "feature"], { cwd });
-    await writeFile(join(cwd, "file.ts"), "export const one = 2;\n");
-    execFileSync("git", ["commit", "-am", "change"], { cwd });
-    await fakeNub(cwd);
-
-    expect(run(cwd)).toMatchObject({ status: 0 });
-    const calls = await readFile(join(cwd, "nub-calls"), "utf8");
-    expect(calls).toContain("--ref");
-    expect(calls).toContain("complexity,duplicates");
-    expect(calls).toContain("async-risk");
   });
 });

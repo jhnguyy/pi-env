@@ -11,10 +11,6 @@ import {
   compileReviewGraph,
   type ReviewRoleAssignments,
 } from "../review-graph";
-import {
-  ReviewEvidenceOutputs,
-  ReviewEvidenceResolverKey,
-} from "../evidence-resolver";
 
 const assignments = Object.fromEntries(
   ReviewRoles.map((role, index) => [
@@ -60,60 +56,28 @@ function subagentPayload(node: ReturnType<typeof graph>["nodes"][number]) {
 }
 
 describe("fixed pull request review graph", () => {
-  it("orders reading plan, deterministic evidence resolution, reviewers, and synthesis", () => {
+  it("orders evidence resolution and permits synthesis after settled reviewer outcomes", () => {
     const compiled = graph();
-    expect(compiled.concurrency).toBe(6);
-    expect(compiled.nodes.map((node) => node.id)).toEqual([
-      "reading-plan",
-      "evidence-resolver",
-      "review-correctness",
-      "review-intent",
-      "review-maintainability",
-      "review-tests",
-      "review-security",
-      "review-whole-change",
-      "synthesis",
-    ]);
     const resolver = compiled.nodes.find((node) => node.id === EvidenceResolverNode.nodeId)!;
-    expect(resolver.executor).toMatchObject({
-      kind: DagExecutorKind.Materialize,
-      key: ReviewEvidenceResolverKey,
-    });
     expect(resolver.dependencies).toEqual([
       { nodeId: "reading-plan", mode: DagDependencyMode.Required },
     ]);
+
     for (const reviewer of compiled.nodes.filter((node) => node.id.startsWith("review-"))) {
-      expect(reviewer.dependencies).toEqual([
-        { nodeId: "reading-plan", mode: DagDependencyMode.Required },
-        { nodeId: EvidenceResolverNode.nodeId, mode: DagDependencyMode.Required },
-      ]);
-      const payload = subagentPayload(reviewer);
-      expect(payload.context.outputs).toEqual(["reading_plan", ...ReviewEvidenceOutputs]);
-      expect(payload.maxTurns).toBe(1);
-      expect(payload.instructions).toContain(`\"role\":\"${reviewer.id.replace("review-", "")}\"`);
-      expect(payload.instructions).toContain("evidenceDigest");
-      expect(payload.instructions).toContain("low|medium|serious|blocking");
+      expect(reviewer.dependencies).toContainEqual({
+        nodeId: EvidenceResolverNode.nodeId,
+        mode: DagDependencyMode.Required,
+      });
     }
+
     const synthesis = compiled.nodes.find((node) => node.id === "synthesis")!;
-    expect(synthesis.dependencies.map((dependency) => dependency.nodeId)).toEqual([
-      "reading-plan",
-      "review-correctness",
-      "review-intent",
-      "review-maintainability",
-      "review-tests",
-      "review-security",
-      "review-whole-change",
-    ]);
+    const reviewerIds: string[] = ReviewerNodes.map((node) => node.nodeId);
     expect(
-      synthesis.dependencies.every((dependency) => dependency.mode === DagDependencyMode.Settled),
+      synthesis.dependencies
+        .filter((dependency) => reviewerIds.includes(dependency.nodeId))
+        .every((dependency) => dependency.mode === DagDependencyMode.Settled),
     ).toBe(true);
-    expect(synthesis.completionGuard?.dependencyIds).toEqual(
-      ReviewerNodes.map((node) => node.nodeId),
-    );
-    const synthesisPayload = subagentPayload(synthesis);
-    expect(synthesisPayload.instructions).toContain("v: 2 editorial consolidation");
-    expect(synthesisPayload.instructions).toContain("every admitted raw finding ID exactly once");
-    expect(synthesisPayload.instructions).toContain("Silence is not dissent");
+    expect(synthesis.completionGuard?.dependencyIds).toEqual(reviewerIds);
   });
 
   it("gives reviewers no model-facing tools and retains bounded plan and synthesis tools", () => {

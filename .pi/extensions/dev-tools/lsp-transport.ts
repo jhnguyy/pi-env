@@ -31,10 +31,6 @@ export class LspParser {
     this.drain();
   }
 
-  get buffered(): number {
-    return this.buffer.length;
-  }
-
   private drain(): void {
     while (true) {
       const headerEnd = this.buffer.indexOf(HEADER_SEPARATOR);

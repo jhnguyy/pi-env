@@ -83,7 +83,7 @@ describe("ReviewCoordinator", () => {
     expect(coordinator.review("late")).toBeUndefined();
   });
 
-  it("owns evidence executor registration for the active runtime generation", () => {
+  it("registers and removes the evidence executor with its runtime generation", () => {
     const coordinator = new ReviewCoordinator();
     coordinator.activate(context("session"));
     coordinator.setDagRegistration({

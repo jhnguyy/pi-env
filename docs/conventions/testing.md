@@ -12,9 +12,17 @@ Every committed test should have one primary intent:
 - **Integration/e2e** — requires a real process, socket, git repository, analyzer, browser, or language server. This is a cost classification in addition to one of the intents above.
 - **Catching** — temporary, diff-aware evidence for one implementation. Files named `*.catching.test.ts` are never committed.
 
-Delete or avoid assertions that only mirror private field layout, function arity, incidental rendering details, or lifecycle checks already enforced by build/install verification.
+Delete or avoid assertions that only mirror source constants, private field layout, function arity, exact prompt prose, incidental rendering details, or lifecycle checks already enforced by build/install verification. A behavior-preserving source change must not require a test change. If a test fails after such a change, treat the test as a removal candidate.
 
-Do not test test wiring. Do not pin package scripts, verification registry arrays, workflow text, dependency waiver snapshots, or validator invocation details in tests. Running the canonical validation is the authority for that wiring. Test a validation helper only when it owns a durable parsing, exit-status, or fail-safe contract that a successful repository run cannot prove.
+Do not test test wiring. Do not pin package scripts, verification registry arrays, workflow text, dependency versions, generated dependency declarations, dependency waiver snapshots, source import placement, or validator invocation details in tests. Running the canonical validation is the authority for that wiring. Use a static policy check when source structure is a necessary constraint. Test a validation helper only when it owns a durable parsing, exit-status, or fail-safe contract that a successful repository run cannot prove.
+
+## Test maintenance
+
+Each permanent test must justify its maintenance cost with a durable behavioral claim. Delete a test when no requirement, known regression, safety invariant, or cross-boundary interaction explains why a failure matters.
+
+When a test is the only caller of a production export, getter, injection option, return value, or helper, review both items together. Remove the production seam when it has no runtime owner or non-test design purpose. Do not preserve production complexity only to support direct unit inspection.
+
+During a test sweep, review the complete test case instead of only duplicate code. Remove assertions that restate arrangement data or another assertion. Prefer one test at the public boundary over parallel tests of each internal step. Preserve narrower tests only when they improve safety evidence, failure diagnosis, or counterfactual strength.
 
 ## Test file boundaries
 

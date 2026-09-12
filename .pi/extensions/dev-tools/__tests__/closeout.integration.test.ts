@@ -6,10 +6,8 @@ import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import { AgentToolEvent, PiEvent, ToolCapability } from "../../_shared/agent-tools";
-import { toAgentTool, toPiTool } from "../../_shared/tool-contract";
 import {
   closeoutPullRequest,
-  createCloseoutToolContract,
   parseCloseoutArgs,
   type CloseoutRequest,
 } from "../closeout";
@@ -159,52 +157,6 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     });
     expect(() => parseCloseoutArgs("not-a-pr --repo /repo")).toThrow("PR number or GitHub PR URL");
     expect(() => parseCloseoutArgs("41 42 --repo /repo")).toThrow("one PR");
-  });
-
-  it("exposes one host-independent contract through the shared adapters", () => {
-    const contract = createCloseoutToolContract(async () => ok());
-    const piTool = toPiTool(contract);
-    const agentTool = toAgentTool(contract, () => ({ cwd: "/session" }));
-
-    expect(agentTool.name).toBe(piTool.name);
-    expect(agentTool.label).toBe(piTool.label);
-    expect(agentTool.description).toBe(piTool.description);
-    expect(agentTool.parameters).toBe(piTool.parameters);
-  });
-
-  it("registers closeout as both a slash command and an authorized LLM tool", async () => {
-    const commands: Array<{ name: string; description: string }> = [];
-    const tools: Array<{ name: string; description: string; promptGuidelines?: string[] }> = [];
-    const { registerDevTools } = await import("../index");
-    const registerCommand: Parameters<typeof registerDevTools>[0]["registerCommand"] = (name, options) => {
-      commands.push({ name, description: options.description ?? "" });
-    };
-    const registerTool: Parameters<typeof registerDevTools>[0]["registerTool"] = (tool) => {
-      tools.push({
-        name: tool.name,
-        description: tool.description,
-        promptGuidelines: Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : undefined,
-      });
-    };
-    registerDevTools({
-      exec: async () => ok(),
-      events: { emit() {} },
-      registerCommand,
-      registerTool,
-      on() {},
-    });
-
-    expect(commands).toContainEqual({
-      name: "closeout",
-      description: expect.stringContaining("merged GitHub pull request"),
-    });
-    expect(tools).toContainEqual(
-      expect.objectContaining({
-        name: "closeout",
-        description: expect.stringContaining("merged GitHub pull request"),
-        promptGuidelines: [expect.stringContaining("explicitly")],
-      }),
-    );
   });
 
   it("returns compact text and structured details from the closeout tool", async () => {

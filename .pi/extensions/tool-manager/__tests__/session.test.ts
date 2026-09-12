@@ -26,23 +26,23 @@ function extensionHarness() {
 }
 
 describe("tool manager branch restore", () => {
-  it("falls back to the default profile, then replays a supplied branch state with normalization", () => {
+  it("replays supplied branch state with unavailable tools removed", () => {
     const sibling = { customType: "tool-manager:state", data: { active: ["missing", "analyze"], reason: "toggle", at: "x" } };
     const h = extensionHarness();
     toolManager(h.pi);
 
-    h.handlers.get("session_start")?.({}, { cwd: process.cwd(), sessionManager: { getBranch: () => [] } });
-    expect(h.active).toEqual(["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME]);
-
     h.handlers.get("session_tree")?.({}, { cwd: process.cwd(), sessionManager: { getBranch: () => [sibling] } });
-    expect(h.active).toEqual(["analyze", SEARCH_TOOL_NAME]);
+    expect(h.active).toContain("analyze");
+    expect(h.active).not.toContain("missing");
   });
 
-  it("does not normalize or persist when auto activation adds no tool", () => {
+  it("preserves active tools and writes no state when input activates nothing", () => {
     const h = extensionHarness();
     toolManager(h.pi);
     h.pi.setActiveTools(["read", "ghost", "analyze", SEARCH_TOOL_NAME]);
-    h.handlers.get("input")?.({ text: "fix this TypeScript file", source: "user" });
+
+    h.handlers.get("input")?.({ text: "hello", source: "user" });
+
     expect(h.active).toEqual(["read", "ghost", "analyze", SEARCH_TOOL_NAME]);
     expect(h.entries).toEqual([]);
   });

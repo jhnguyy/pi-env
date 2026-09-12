@@ -162,13 +162,6 @@ export const FindingInputSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export const ReviewSchema = Type.Object(
-  {
-    verdict: NonEmptyString,
-    findings: Type.Array(FindingInputSchema, { maxItems: 1000 }),
-  },
-  { additionalProperties: false },
-);
 export const ReviewerRoles = [
   "correctness",
   "intent",
@@ -502,9 +495,6 @@ export function coherentFindingAnchor(f: FindingInput): boolean {
 
 export function validatePlanShape(plan: unknown): plan is ReviewPlan {
   return Check(PlanSchema, plan);
-}
-export function validateReviewShape(result: unknown): result is ReviewResult {
-  return Check(ReviewSchema, result) && result.findings.every(coherentFindingAnchor);
 }
 export function validateReviewerOutputShape(result: unknown): result is ReviewerOutput {
   return Check(ReviewerOutputSchema, result) && result.findings.every(coherentFindingAnchor);

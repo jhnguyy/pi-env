@@ -56,10 +56,6 @@ test_pi_cli_wrapper_uses_repo_locked_package() {
   run_pi_cli_setup
 
   [ -x "$PI_BIN_DIR/pi" ] || fail "pi wrapper should be executable"
-  grep -qF "DEFAULT_PI_PACKAGE_DIR='$REPO/node_modules/@earendil-works/pi-coding-agent'" "$PI_BIN_DIR/pi" || fail "wrapper should point at repo node_modules pi package"
-  if grep -qF 'PI_CLI_ROOT' "$PI_BIN_DIR/pi"; then
-    fail "wrapper should no longer depend on separate PI_CLI_ROOT npm install"
-  fi
   PI_PACKAGE_DIR="$tmp/missing/@earendil-works/pi-coding-agent" "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "wrapper should ignore stale invalid PI_PACKAGE_DIR and use repo package"
 
   PATH="$old_path"
@@ -98,18 +94,17 @@ if [ "$1" = "-e" ]; then
   exit 0
 fi
 echo "fake node: $*"
+echo "PI_ENV_NODE_BIN=$PI_ENV_NODE_BIN"
 SH
   chmod +x "$fake_node"
 
   PI_ENV_NODE_BIN="$fake_node"
   run_pi_cli_setup
 
-  grep -qF "NODE_BIN='$fake_node'" "$PI_BIN_DIR/pi" || fail "wrapper should pin configured node path"
-  grep -qF 'export PI_ENV_NODE_BIN="$NODE_BIN"' "$PI_BIN_DIR/pi" || fail "wrapper should expose the selected Node runtime to sidecars"
-  grep -qF "PI_NODE_ARGV0=pi exec \"\$NODE_BIN\" \"\$PI_ENTRY\" \"\$@\"" "$PI_BIN_DIR/pi" || fail "wrapper should request pi argv0 for title detection"
   local wrapper_output
   wrapper_output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")
   printf '%s' "$wrapper_output" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node (got: $wrapper_output)"
+  printf '%s' "$wrapper_output" | grep -qF "PI_ENV_NODE_BIN=$fake_node" || fail "wrapper should expose the configured node to sidecars"
 
   unset PI_ENV_NODE_BIN
   rm -rf "$tmp"

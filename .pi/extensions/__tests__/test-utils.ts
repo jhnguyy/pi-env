@@ -6,13 +6,10 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { describe } from "vitest";
 
-const EXTENSIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const REPO_ROOT = resolve(EXTENSIONS_DIR, "..", "..");
 const SETTINGS_PATH = join(homedir(), ".pi", "agent", "settings.json");
 
 interface Settings {
@@ -52,25 +49,10 @@ function getDisabledExtensions(): Set<string> {
 /**
  * Check if an extension is enabled.
  *
- * An extension is enabled if:
- * - It exists as a directory with index.ts
- * - It is NOT listed with a `-` prefix in settings.json
+ * An extension is enabled if it is not listed with a `-` prefix in settings.json.
  */
 export function isExtensionEnabled(name: string): boolean {
   return !getDisabledExtensions().has(name);
-}
-
-/**
- * Returns the list of enabled extension directory names.
- */
-export function getEnabledExtensions(): string[] {
-  const disabled = getDisabledExtensions();
-  const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { pi?: { extensions?: string[] } };
-
-  return (packageJson.pi?.extensions ?? [])
-    .map((entry) => entry.replace(/^\.pi\/extensions\//, ""))
-    .filter((name) => name && !disabled.has(name))
-    .filter((name) => existsSync(join(EXTENSIONS_DIR, name, "index.ts")));
 }
 
 /**

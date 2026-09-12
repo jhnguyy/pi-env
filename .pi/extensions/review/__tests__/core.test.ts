@@ -15,7 +15,6 @@ import {
   validateFindingAnchors,
   validatePlan,
   validatePlanShape,
-  validateReviewShape,
 } from "../core";
 
 const temps: string[] = [];
@@ -33,7 +32,7 @@ describe("review pull request deterministic contracts", () => {
     ).toBeUndefined();
   });
 
-  it("validates strict plan and review shapes", () => {
+  it("validates strict plan shapes", () => {
     expect(
       validatePlanShape({
         goal: "g",
@@ -68,100 +67,6 @@ describe("review pull request deterministic contracts", () => {
         files: [{ path: "a.ts", attention: "normal", role: "a" }],
       }),
     ).toBe(false);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [
-          {
-            severity: "serious",
-            impact: "high",
-            file: "a.ts",
-            side: "RIGHT",
-            line: 1,
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-          },
-        ],
-      }),
-    ).toBe(true);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [
-          {
-            severity: "low",
-            impact: "low",
-            file: "a.ts",
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-          },
-        ],
-      }),
-    ).toBe(true);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [
-          {
-            id: "F9",
-            severity: "low",
-            impact: "low",
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-          },
-        ],
-      }),
-    ).toBe(false);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [
-          {
-            severity: "low",
-            impact: "low",
-            side: "RIGHT",
-            line: 1,
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-          },
-        ],
-      }),
-    ).toBe(false);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [
-          {
-            severity: "low",
-            impact: "low",
-            file: "a.ts",
-            side: "RIGHT",
-            problem: "p",
-            consequence: "c",
-            suggestedFix: "f",
-          },
-        ],
-      }),
-    ).toBe(false);
-    expect(
-      validateReviewShape({
-        verdict: "v",
-        findings: [{ severity: "critical", impact: "nit", problem: "p" }],
-      }),
-    ).toBe(false);
-    const finding = {
-      severity: "low",
-      impact: "low",
-      problem: "p",
-      consequence: "c",
-      suggestedFix: "f",
-    };
-    expect(validateReviewShape({ verdict: "v", findings: Array(1000).fill(finding) })).toBe(true);
-    expect(validateReviewShape({ verdict: "v", findings: Array(1001).fill(finding) })).toBe(false);
   });
 
   it("validates plan coverage exactly once per changed path", () => {

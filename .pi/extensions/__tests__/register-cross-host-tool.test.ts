@@ -8,14 +8,12 @@ import {
   PiEvent,
   ToolCapability,
   listenForAgentTools,
-  registerAgentToolsOnSessionStart,
   resetAgentToolRegistryForTests,
   type AgentToolEvents,
   type ExtToolRegistration,
 } from "../_shared/agent-tools";
 import type { ToolContract } from "../_shared/tool-contract";
-import { toAgentTool, toPiTool } from "../_shared/tool-contract";
-import { registerCrossHostTool, type CrossHostToolRegistration } from "../_shared/register-cross-host-tool";
+import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
@@ -85,21 +83,9 @@ describe("registerCrossHostTool contract", () => {
     resetAgentToolRegistryForTests();
   });
 
-  it("supplies identical name, label, description, and parameter schema to both host adapters", () => {
-    const contract = createContract([]);
-
-    const piTool = toPiTool(contract);
-    const agentTool = toAgentTool(contract, () => ({ cwd: "/session" }));
-
-    expect(agentTool.name).toBe(piTool.name);
-    expect(agentTool.label).toBe(piTool.label);
-    expect(agentTool.description).toBe(piTool.description);
-    expect(agentTool.parameters).toBe(piTool.parameters);
-  });
-
   it("requires non-empty capability classification and preserves it", () => {
     const harness = createPiHarness();
-    const registration = registerCrossHostTool(harness.pi as any, {
+    registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Write, ToolCapability.Execute],
       piOptions: PI_OPTIONS,
@@ -107,7 +93,6 @@ describe("registerCrossHostTool contract", () => {
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
 
-    expect(registration.capabilities).toEqual([ToolCapability.Write, ToolCapability.Execute]);
     expect(harness.registrations[0]?.capabilities).toEqual([ToolCapability.Write, ToolCapability.Execute]);
   });
 
@@ -118,16 +103,12 @@ describe("registerCrossHostTool contract", () => {
     const renderCall = () => ({ kind: "call" }) as any;
     const renderResult = () => ({ kind: "result" }) as any;
 
-    const registration = registerCrossHostTool(harness.pi as any, {
+    registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Read],
       piOptions: { promptSnippet, promptGuidelines, renderCall, renderResult },
     });
 
-    expect(registration.piTool.promptSnippet).toBe(promptSnippet);
-    expect(registration.piTool.promptGuidelines).toBe(promptGuidelines);
-    expect(registration.piTool.renderCall).toBe(renderCall);
-    expect(registration.piTool.renderResult).toBe(renderResult);
     expect(harness.tools[0]?.promptSnippet).toBe(promptSnippet);
     expect(harness.tools[0]?.promptGuidelines).toBe(promptGuidelines);
     expect(harness.tools[0]?.renderCall).toBe(renderCall);
@@ -153,16 +134,19 @@ describe("registerCrossHostTool contract", () => {
     expect(removed).toEqual(["cross_host_sample"]);
   });
 
-  it("uses parentContext ?? { cwd } in the child factory", async () => {
+  it("uses the parent context when a child tool has one", async () => {
     const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
-    const registration = registerCrossHostTool(createPiHarness().pi as any, {
+    const harness = createPiHarness();
+    registerCrossHostTool(harness.pi as any, {
       contract: createContract(seen),
       capabilities: [ToolCapability.Read],
       piOptions: PI_OPTIONS,
     });
+    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
+    const createTool = harness.registrations[0].createTool!;
 
-    await registration.createAgentTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
-    await registration.createAgentTool({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
+    await createTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
+    await createTool({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
 
     expect(seen.map((entry) => entry.cwd)).toEqual(["/child", "/parent"]);
   });
@@ -208,41 +192,5 @@ describe("registerCrossHostTool contract", () => {
     expect(seen.map((entry) => entry.signal)).toEqual([signal, signal]);
     expect(piUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/pi" }], details: { phase: "cwd:/pi" } }]);
     expect(agentUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/agent" }], details: { phase: "cwd:/agent" } }]);
-  });
-
-  it("returns minimal registration data sufficient for shared tests and lifecycle inspection", () => {
-    const harness = createPiHarness();
-    const registration: CrossHostToolRegistration<Params, Details, typeof PARAMETERS> = registerCrossHostTool(harness.pi as any, {
-      contract: createContract([]),
-      capabilities: [ToolCapability.Read],
-      piOptions: PI_OPTIONS,
-    });
-
-    expect(registration).toMatchObject({
-      capabilities: [ToolCapability.Read],
-      contract: { name: "cross_host_sample" },
-    });
-    expect(registration.piTool.name).toBe("cross_host_sample");
-    expect(typeof registration.createAgentTool).toBe("function");
-  });
-
-  it("proves identical metadata and schema across piTool and createAgentTool output", () => {
-    const registration: CrossHostToolRegistration<Params, Details, typeof PARAMETERS> = registerCrossHostTool(createPiHarness().pi as any, {
-      contract: createContract([]),
-      capabilities: [ToolCapability.Read],
-      piOptions: PI_OPTIONS,
-    });
-    const agentTool = registration.createAgentTool({ cwd: "/agent", sessionGeneration: "g1" });
-
-    expect(agentTool.name).toBe(registration.piTool.name);
-    expect(agentTool.label).toBe(registration.piTool.label);
-    expect(agentTool.description).toBe(registration.piTool.description);
-    expect(agentTool.parameters).toBe(registration.piTool.parameters);
-  });
-
-  it("keeps low-level adapter helpers available from their direct modules", () => {
-    expect(toPiTool).toBeTypeOf("function");
-    expect(toAgentTool).toBeTypeOf("function");
-    expect(registerAgentToolsOnSessionStart).toBeTypeOf("function");
   });
 });

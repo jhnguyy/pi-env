@@ -103,13 +103,6 @@ describeIfEnabled("dev-tools", "LspTransport", () => {
       expect(msgs.length).toBe(1);
       expect(msgs[0]).toEqual(good);
     });
-
-    it("leaves no residual bytes after consuming messages", () => {
-      const msg: LspMessage = { jsonrpc: "2.0", id: 1, method: "test" };
-      const parser = new LspParser(() => {});
-      parser.push(serializeMessage(msg));
-      expect(parser.buffered).toBe(0);
-    });
   });
 
 });

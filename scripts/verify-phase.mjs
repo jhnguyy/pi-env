@@ -3,20 +3,19 @@ import { fileURLToPath } from "node:url";
 import { EXPLICIT_VERIFICATION_PHASES, verificationPhaseById } from "./verification-phases.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
-export function runVerificationPhase(id, options = {}) {
-  const phases = options.phases ?? EXPLICIT_VERIFICATION_PHASES;
-  const phase = verificationPhaseById(id, phases);
+function runVerificationPhase(id) {
+  const phase = verificationPhaseById(id, EXPLICIT_VERIFICATION_PHASES);
   if (phase === undefined) {
-    const expected = phases.map((candidate) => candidate.id).join(", ");
-    (options.logError ?? console.error)(
+    const expected = EXPLICIT_VERIFICATION_PHASES.map((candidate) => candidate.id).join(", ");
+    console.error(
       `verify:phase: unknown phase ${JSON.stringify(id)}; expected one of: ${expected}`,
     );
     return 2;
   }
-  return runPlan([phase], { ...options, name: "verify:phase" });
+  return runPlan([phase], { name: "verify:phase" });
 }
 
-export function main(args = process.argv.slice(2)) {
+function main(args = process.argv.slice(2)) {
   if (args.includes("--list")) {
     console.log(listPlan(EXPLICIT_VERIFICATION_PHASES).join("\n"));
     return 0;

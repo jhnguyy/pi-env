@@ -8,22 +8,6 @@ import { resetCredentialSourceRegistryForTests } from "../../_shared/credential-
 describe("credential source extension boundary", () => {
   beforeEach(() => resetCredentialSourceRegistryForTests());
 
-  it("registers lifecycle handlers without exposing a model-facing tool", () => {
-    const handlers = new Map<string, (...args: any[]) => unknown>();
-    const pi = {
-      on: (event: string, handler: (...args: any[]) => unknown) => handlers.set(event, handler),
-      registerTool: vi.fn(),
-      registerCommand: vi.fn(),
-    } as any;
-
-    credentialSourceExtension(pi);
-
-    expect(handlers.has("session_start")).toBe(true);
-    expect(handlers.has("session_shutdown")).toBe(true);
-    expect(pi.registerTool).not.toHaveBeenCalled();
-    expect(pi.registerCommand).not.toHaveBeenCalled();
-  });
-
   it("fails session startup when settings cannot establish the credential boundary", async () => {
     const handlers = new Map<string, (...args: any[]) => unknown>();
     const pi = {

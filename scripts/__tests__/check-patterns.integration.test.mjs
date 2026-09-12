@@ -49,6 +49,13 @@ describe("check-patterns", () => {
     ).toEqual([]);
   });
 
+  it("keeps preinstall bootstrap files independent from Effect runtimes", () => {
+    expect(analyzeText("setup/runtime.mjs", 'import { Effect } from "effect";')).toEqual([
+      expect.objectContaining({ message: expect.stringContaining("Preinstall bootstrap") }),
+    ]);
+    expect(analyzeText("src/runtime.mjs", 'import { Effect } from "effect";')).toEqual([]);
+  });
+
   it("requires active public tools to use the rendering registration boundary", () => {
     expect(
       analyzeText(

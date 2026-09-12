@@ -163,9 +163,4 @@ if ! grep -q '^cleanup:ok$' "$cleanup_marker"; then
   exit 1
 fi
 
-if grep -R "from 'effect'\|from \"effect\"\|@effect/platform" setup.sh setup/main.sh setup/install.sh setup/runtime.mjs scripts/check-node-version.mjs >/dev/null; then
-  echo "FAIL: preinstall/bootstrap boundary must remain Effect/platform-free" >&2
-  exit 1
-fi
-
 echo "effect runtime tests passed"

@@ -19,7 +19,6 @@ export {
   Severity,
   Side,
   validatePlanShape,
-  validateReviewShape,
   type AnchorSide,
   type ChangedFile,
   type Finding,

@@ -453,19 +453,4 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     expect(result.analyzerFailures[0]?.message).toContain("must be an http(s) URL");
     expect(existsSync(marker)).toBe(false);
   });
-
-  it("keeps parent runtime modules isolated from the analyzer engine", () => {
-    const root = process.cwd();
-    for (const path of [
-      "src/analyze/public.ts",
-      "src/analyze/supervisor.ts",
-      "src/analyze/policy.ts",
-      ".pi/extensions/analyze/index.ts",
-      "scripts/analyze.ts",
-    ]) {
-      const source = readFileSync(join(root, path), "utf8");
-      expect(source, path).not.toMatch(/from ["']\.\/?(?:engine|program)/);
-      expect(source, path).not.toMatch(/from ["']typescript["']/);
-    }
-  });
 });

@@ -177,11 +177,6 @@ export class DocumentManager {
     return this.openDocs.get(uri);
   }
 
-  /** Number of currently open documents. */
-  get openCount(): number {
-    return this.openDocs.size;
-  }
-
   /**
    * Evict the least-recently-used documents down to the limit.
    * Returns the URIs that were evicted (caller should send didClose).

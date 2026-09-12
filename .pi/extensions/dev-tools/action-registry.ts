@@ -50,8 +50,3 @@ export function formatResult(result: LspResult): string {
   if (!entry) return JSON.stringify(result);
   return entry.formatter(result);
 }
-
-/** Get all registered action names (for building tool parameter enums). */
-export function getRegisteredActions(): PublicLspAction[] {
-  return [...registry.keys()];
-}

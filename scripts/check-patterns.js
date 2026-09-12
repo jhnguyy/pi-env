@@ -19,6 +19,10 @@ export const TERMINAL_EFFECT_OPERATIONS = [
 ];
 const GUARDED_EFFECT_COMBINATOR_SET = new Set(GUARDED_EFFECT_COMBINATORS);
 const TERMINAL_EFFECT_OPERATION_SET = new Set(TERMINAL_EFFECT_OPERATIONS);
+const PREINSTALL_BOOTSTRAP_FILES = new Set([
+  "setup/runtime.mjs",
+  "scripts/check-node-version.mjs",
+]);
 const ACTIVE_EXTENSION_ROOTS = (() => {
   try {
     const packageJson = JSON.parse(readFileSync(`${ROOT}/package.json`, "utf8"));
@@ -121,6 +125,25 @@ function localNamespaceImportFindings(file, sourceFile, node) {
   ];
 }
 
+function preinstallDependencyFindings(file, sourceFile, node) {
+  if (
+    !PREINSTALL_BOOTSTRAP_FILES.has(file) ||
+    !ts.isImportDeclaration(node) ||
+    !ts.isStringLiteral(node.moduleSpecifier) ||
+    (node.moduleSpecifier.text !== "effect" &&
+      !node.moduleSpecifier.text.startsWith("@effect/platform"))
+  ) {
+    return [];
+  }
+  return [
+    {
+      file,
+      ...location(sourceFile, node.moduleSpecifier),
+      message: "Preinstall bootstrap files must not import Effect runtime packages.",
+    },
+  ];
+}
+
 function directPublicToolRegistrationFindings(file, sourceFile, node) {
   const extensionRoot = [...ACTIVE_EXTENSION_ROOTS].find((root) => file.startsWith(`${root}/`));
   if (
@@ -212,6 +235,7 @@ export function analyzeText(file, text) {
     }
 
     findings.push(...effectGenTryCatchFindings(file, sourceFile, node));
+    findings.push(...preinstallDependencyFindings(file, sourceFile, node));
     findings.push(...localNamespaceImportFindings(file, sourceFile, node));
     findings.push(...directPublicToolRegistrationFindings(file, sourceFile, node));
     findings.push(...terminalEffectFindings(file, sourceFile, node));
