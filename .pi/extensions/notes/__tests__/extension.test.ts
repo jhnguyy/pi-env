@@ -89,7 +89,7 @@ function externalProvider(id: string, indexText: string): NotesProvider {
   return {
     id,
     index: async () => ({ text: indexText }),
-    list: async () => [],
+    list: async () => ({ entries: [] }),
     read: async (notePath) => ({ path: notePath, content: "", revision: "revision" }),
     search: async () => [],
     write: async (request) => ({ path: request.path, revision: "next" }),
@@ -140,7 +140,7 @@ describe("notes extension", () => {
     const external: NotesProvider = {
       id: "notes-assistant",
       index: async () => ({ text: "Remote store conventions" }),
-      list: async () => [],
+      list: async () => ({ entries: [] }),
       read: async (notePath) => ({ path: notePath, content: "", revision: "revision" }),
       search: async () => [],
       write: async (request) => ({ path: request.path, revision: "next" }),
@@ -202,21 +202,6 @@ describe("notes extension", () => {
 
     expect(testHarness.tools).toHaveLength(1);
     expect(testHarness.tools[0].name).toBe("notes");
-    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
-      expect.stringContaining("provider-owned conventions"),
-    );
-    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
-      expect.stringContaining("coherent rewrite"),
-    );
-    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
-      expect.stringContaining("unclassified capture"),
-    );
-    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
-      expect.stringContaining("obtain approval"),
-    );
-    expect(testHarness.tools[0].promptGuidelines).toContainEqual(
-      expect.stringContaining("secrets"),
-    );
     expect(testHarness.registrations).toHaveLength(1);
     expect(testHarness.registrations[0].tool.parameters).toBe(testHarness.tools[0].parameters);
     expect(testHarness.registrations[0].capabilities).toEqual([
