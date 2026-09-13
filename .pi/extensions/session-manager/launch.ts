@@ -221,7 +221,7 @@ type ExpectedStartupClaim = {
   readonly now: number;
 };
 
-export function isCurrentStartupClaim(
+function isCurrentStartupClaim(
   claim: StartupClaim,
   expected: ExpectedStartupClaim,
 ): boolean {

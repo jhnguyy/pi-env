@@ -3,7 +3,6 @@ import { Result } from "effect";
 import {
   LaunchParseFailure,
   classifyStartupClaim,
-  isCurrentStartupClaim,
   parseLaunchIntent,
   parseRuntimeMetadata,
   parseStartupClaim,
@@ -97,7 +96,27 @@ describe("session launch protocol", () => {
     }
   });
 
-  it("parses exact startup claims and classifies only fresh matching claims as current", () => {
+  it("parses only exact startup claim artifacts", () => {
+    const claim = successOf(
+      parseStartupClaim(
+        JSON.stringify({
+          version: 1,
+          workspaceId,
+          coordinatorSessionId: "coordinator-a",
+          launchId,
+          pid: 42,
+          createdAt: 10_000,
+        }),
+      ),
+    );
+
+    expect(claim).toMatchObject({ coordinatorSessionId: "coordinator-a", pid: 42 });
+    expect(
+      failureOf(parseStartupClaim(JSON.stringify({ ...claim, unexpected: true }))),
+    ).toBeInstanceOf(LaunchParseFailure);
+  });
+
+  it("keeps every matching live claim authoritative", () => {
     const createdAt = 10_000;
     const claim = successOf(
       parseStartupClaim(
@@ -111,20 +130,18 @@ describe("session launch protocol", () => {
         }),
       ),
     );
+
     expect(
-      isCurrentStartupClaim(claim, {
-        workspaceId,
-        coordinatorSessionId: "coordinator-a",
-        now: createdAt + 30_000,
-      }),
-    ).toBe(true);
-    expect(
-      isCurrentStartupClaim(claim, {
-        workspaceId,
-        coordinatorSessionId: "coordinator-a",
-        now: createdAt + 30_001,
-      }),
-    ).toBe(false);
+      classifyStartupClaim(
+        claim,
+        {
+          workspaceId,
+          coordinatorSessionId: "coordinator-a",
+          now: createdAt + 30_000,
+        },
+        () => true,
+      ),
+    ).toBe("starting");
     expect(
       classifyStartupClaim(
         claim,
@@ -143,12 +160,9 @@ describe("session launch protocol", () => {
         () => false,
       ),
     ).toBe("replaceable");
-    expect(
-      failureOf(parseStartupClaim(JSON.stringify({ ...claim, unexpected: true }))),
-    ).toBeInstanceOf(LaunchParseFailure);
   });
 
-  it("parses exact runtime metadata and rejects reduced or invalid identities", () => {
+  it("parses exact runtime metadata and rejects reduced artifacts", () => {
     expect(
       successOf(
         parseRuntimeMetadata(

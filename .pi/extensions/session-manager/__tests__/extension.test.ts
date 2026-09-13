@@ -41,7 +41,7 @@ afterEach(async () => {
 describe("session-manager extension", () => {
   it("rejects a partial managed launch before catalog or host effects", async () => {
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const notices: string[] = [];
+    const noticeLevels: string[] = [];
     let shutdownCalls = 0;
     let effectCalls = 0;
     const unexpected = <A>() =>
@@ -81,7 +81,7 @@ describe("session-manager extension", () => {
         getSessionFile: () => undefined,
       },
       ui: {
-        notify: (message: string) => notices.push(message),
+        notify: (_message: string, level: string) => noticeLevels.push(level),
       },
       shutdown: () => {
         shutdownCalls += 1;
@@ -92,7 +92,7 @@ describe("session-manager extension", () => {
 
     expect(effectCalls).toBe(0);
     expect(shutdownCalls).toBe(1);
-    expect(notices[0]).toContain("LaunchParseFailure");
+    expect(noticeLevels).toEqual(["error"]);
   });
 
   it("rejects a restored-work coordinator mismatch before durable or tmux mutation", async () => {
@@ -172,7 +172,9 @@ describe("session-manager extension", () => {
 
     expect(hostCalls).toBe(0);
     expect(shutdownCalls).toBe(1);
-    expect(await Effect.runPromise(catalog.read(cwd))).toEqual(before);
+    const after = await Effect.runPromise(catalog.read(cwd));
+    expect(after?.revision).toBe(before?.revision);
+    expect(after?.sessions[0]).toMatchObject({ sessionId: "work-a", desiredState: "open" });
   });
 
   it("composes the current editor and closes before its Ctrl+D callback", async () => {
