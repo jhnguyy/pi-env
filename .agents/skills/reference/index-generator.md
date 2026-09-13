@@ -1,5 +1,6 @@
 ---
 name: index-generator
+disable-model-invocation: true
 description: Produce a compressed navigational index for any set of files or notes. Use when asked to index a folder, a codebase section, or any collection where an agent or human needs to orient quickly without reading everything.
 ---
 

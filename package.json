@@ -50,7 +50,8 @@
       ".pi/extensions/tool-manager"
     ],
     "skills": [
-      ".agents/skills"
+      ".agents/skills",
+      ".agents/skills/reference"
     ],
     "themes": [
       "themes"

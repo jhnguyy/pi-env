@@ -9,13 +9,11 @@
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum, type Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readFileSync, readdirSync, existsSync } from "fs";
-import { basename, dirname, join, resolve } from "path";
+import { readFileSync } from "fs";
+import { basename, join, resolve } from "path";
 import { Type } from "typebox";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect, Result } from "effect";
-import { homedir } from "os";
-import { fileURLToPath } from "url";
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
   registerPublicTool,
@@ -29,84 +27,6 @@ import {
   type RunSubagentOptions,
 } from "../subagent/execute";
 
-const USER_REFERENCE_DIR = join(homedir(), ".agents", "skills", "reference");
-const REFERENCE_SKILL_TOOL_DESCRIPTION =
-  "Load a named reference skill only when the user explicitly asks for that skill. For example, the user can ask you to reference the teach skill to help with a topic. Call without a name only when the user asks which reference skills are available.";
-
-interface ReferenceSkillEntry {
-  readonly name: string;
-  readonly filePath: string;
-  readonly sourceDir: string;
-}
-
-/**
- * Lazy per-process index: skillName (lowercased) → reference skill entry.
- * Built on first reference_skill lookup; avoids re-reading all markdown files
- * on every invocation. Null = not yet built.
- */
-let _referenceSkillIndex: Map<string, ReferenceSkillEntry> | null = null;
-
-function findPackageReferenceDir(): string | null {
-  let current = dirname(fileURLToPath(import.meta.url));
-
-  for (let i = 0; i < 8; i += 1) {
-    const packageJson = join(current, "package.json");
-    const referenceDir = join(current, ".agents", "skills", "reference");
-    if (existsSync(packageJson) && existsSync(referenceDir)) {
-      return referenceDir;
-    }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-
-  return null;
-}
-
-function getReferenceDirs(): string[] {
-  const dirs = [USER_REFERENCE_DIR, findPackageReferenceDir()].filter((dir): dir is string =>
-    Boolean(dir && existsSync(dir)),
-  );
-  return Array.from(new Set(dirs.map((dir) => resolve(dir))));
-}
-
-function readReferenceSkillName(filePath: string, fallback: string): string {
-  const content = readFileSync(filePath, "utf-8");
-  const nameMatch = content.match(/^---[\s\S]*?^name:\s*(.+?)\s*$/m);
-  return nameMatch ? nameMatch[1].trim() : fallback;
-}
-
-function listReferenceSkillNames(): string[] {
-  const names = new Set<string>();
-  for (const dir of getReferenceDirs()) {
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
-      names.add(file.replace(/\.md$/, ""));
-    }
-  }
-  return Array.from(names).sort();
-}
-
-function getReferenceSkillIndex(): Map<string, ReferenceSkillEntry> {
-  if (_referenceSkillIndex !== null) return _referenceSkillIndex;
-  const index = new Map<string, ReferenceSkillEntry>();
-
-  for (const dir of getReferenceDirs()) {
-    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
-      const filePath = join(dir, file);
-      const filenameKey = file.replace(/\.md$/, "");
-      const skillName = readReferenceSkillName(filePath, filenameKey);
-      const entry = { name: skillName, filePath, sourceDir: dir };
-
-      // First directory wins so user-level reference skills can override package defaults.
-      if (!index.has(skillName.toLowerCase())) index.set(skillName.toLowerCase(), entry);
-      if (!index.has(filenameKey.toLowerCase())) index.set(filenameKey.toLowerCase(), entry);
-    }
-  }
-
-  _referenceSkillIndex = index;
-  return index;
-}
-
 import { buildEvalPrompt, parseEvalResponse, type EvalModelConfig } from "./evaluator";
 import { resolveSkillDiff, type ExecFn } from "./git-diff";
 import { scaffoldSkill, DEFAULT_SKILLS_DIR } from "./scaffolder";
@@ -118,7 +38,6 @@ import {
   type ToolingDiagnostics,
 } from "../../../src/telemetry/tooling.js";
 
-type ReferenceSkillParams = { name?: string };
 type SkillBuildParams = {
   name?: string;
   description?: string;
@@ -199,12 +118,6 @@ type SkillBuildModeResolution =
   | { _tag: "invalid"; message: string };
 const SkillBuildModeResolutionVariant = Data.taggedEnum<SkillBuildModeResolution>();
 
-const REFERENCE_SKILL_PARAMETERS = Type.Object({
-  name: Type.Optional(
-    Type.String({ description: "Skill name to load. Omit to list available skills." }),
-  ),
-});
-
 const SKILL_BUILD_PARAMETERS = Type.Object({
   name: Type.Optional(
     Type.String({
@@ -249,34 +162,6 @@ const SKILL_BUILD_PARAMETERS = Type.Object({
 
 function textResult(text: string, details: unknown = null, usage?: Usage): TextResult {
   return { content: [{ type: "text", text }], details, usage };
-}
-
-export function executeReferenceSkill(params: ReferenceSkillParams): TextResult {
-  const referenceDirs = getReferenceDirs();
-  if (referenceDirs.length === 0) {
-    return textResult(`No reference skill directories found. Checked: ${USER_REFERENCE_DIR}`, {
-      referenceDirs,
-    });
-  }
-
-  if (!params.name) {
-    const names = listReferenceSkillNames();
-    return textResult(
-      `Available reference skills:\n${names.map((n: string) => `  - ${n}`).join("\n")}`,
-      { referenceDirs },
-    );
-  }
-
-  const index = getReferenceSkillIndex();
-  const matched = index.get(params.name.toLowerCase()) ?? null;
-  if (!matched) {
-    const names = listReferenceSkillNames();
-    return textResult(`No reference skill named "${params.name}". Available: ${names.join(", ")}`, {
-      referenceDirs,
-    });
-  }
-
-  return textResult(readFileSync(matched.filePath, "utf-8"), matched);
 }
 
 function invalidMode(message: string): SkillBuildModeResolution {
@@ -743,20 +628,6 @@ export function runSkillBuild(
 
 export default function (pi: ExtensionAPI) {
   registerPublicTool(pi, {
-    name: "reference_skill",
-    label: "Reference Skill",
-    description: REFERENCE_SKILL_TOOL_DESCRIPTION,
-    parameters: REFERENCE_SKILL_PARAMETERS,
-    async execute(_toolCallId, params) {
-      return executeReferenceSkill(params);
-    },
-    renderCall: (params, theme) =>
-      renderCompactToolCall("reference_skill", params.name ?? "list", theme),
-    renderResult: (result, options, theme, context) =>
-      renderTextToolResult("reference_skill", result, options, theme, context),
-  });
-
-  registerPublicTool(pi, {
     name: "skill_build",
     label: "Skill Build",
     description:
@@ -783,13 +654,6 @@ export default function (pi: ExtensionAPI) {
       renderTextToolResult("skill_build", result, options, theme, context),
   });
 
-  const referenceSkillAgentTool: AgentTool<any, any> = {
-    name: "reference_skill",
-    label: "Reference Skill",
-    description: REFERENCE_SKILL_TOOL_DESCRIPTION,
-    parameters: REFERENCE_SKILL_PARAMETERS,
-    execute: async (_toolCallId, params) => executeReferenceSkill(params as ReferenceSkillParams),
-  };
   const createSkillBuildAgentTool = (
     cwd: string,
     parentContext?: ExtensionContext,
@@ -808,7 +672,6 @@ export default function (pi: ExtensionAPI) {
       }),
   });
   registerAgentToolsOnSessionStart(pi, [
-    { tool: referenceSkillAgentTool, capabilities: [ToolCapability.Read] },
     {
       tool: createSkillBuildAgentTool(process.cwd()),
       createTool: ({ cwd, parentContext }) => createSkillBuildAgentTool(cwd, parentContext),
