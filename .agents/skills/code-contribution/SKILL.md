@@ -31,6 +31,10 @@ Use for repository changes from initial scope through post-merge cleanup.
 - Add an interface, service, layer, or helper only for a current ownership, lifecycle, protocol, substitution, repeated-change, or test-leverage need.
 - Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.
 - Do not reorganize code only to reduce file size, line count, or a static metric. Use measured end-to-end behavior as the authority for performance changes.
+- Before a contribution removes or replaces implementation, changes structure without an intended behavior change, or promises reduced complexity, record one conceptual-surface ledger. List the affected owners, representations, control paths, validation sites, adapters, and test seams. List expected removals, proposed additions, and the condition that stops or redesigns the change. Scale the ledger to the change. A short list is sufficient for a small refactor. Do not reduce it to one score.
+- For each added item, cite its authority in the user-approved outcome, a public contract, or repository policy. State why an existing owner cannot absorb it and what existing item it replaces. Compare smaller designs through caller inspection, tests, or a prototype as appropriate. Prefer the design that removes the most duplicated authority and indirection with the fewest additions.
+- Stronger types, moved code, and deleted lines do not establish simplification when the change adds more owners or execution paths.
+- Stop and redesign when the expected removals do not occur. Do not present net conceptual growth as simplification. Split or cancel the refactor unless a cited requirement needs each addition and documented smaller designs fail to preserve the contract.
 
 ## Isolate the Work
 
@@ -44,6 +48,8 @@ Follow repository policy for branch names, base synchronization, worktree placem
 - Add tests when the outcome, a known regression, or a material risk requires new evidence. Do not add tests only to restate established behavior.
 - Follow specialized testing practice and repository validation policy. Run the required integration portfolio before review or integration.
 - Broaden or repeat checks only when new changes, failures, unresolved concerns, or repository policy justify more evidence.
+- Reconcile each required conceptual-surface ledger with the diff. Record what the change added, removed, and left behind. Treat unexpected wrappers, fallback paths, compatibility layers, and production growth as design findings rather than documentation details.
+- Run an independent simplicity review before integration when the reconciled ledger has net production growth or adds an owner or control path without replacing one. Use a separate agent context or a human who did not design the implementation. The reviewer must inspect the base and branch, challenge each addition, and test whether a smaller design can meet the same contract. A finding is material when an addition has no cited authority or a smaller design preserves the cited contract. Resolve each material finding or redesign the contribution.
 
 ## Commit and Publish
 
@@ -51,6 +57,7 @@ Follow repository policy for branch names, base synchronization, worktree placem
 - Resolve the push remote from repository instructions or Git configuration. Ask if it is ambiguous. Set the upstream on the first push. Do not force-push or change remote configuration unless the user explicitly requests it.
 - Before preparing a pull request, inspect repository contribution guidance and applicable pull request templates.
 - Explain the behavioral outcome and rationale. Record important decisions, validation, risks, and follow-up work. Do not narrate the diff or list every changed file.
+- Include each required conceptual-surface ledger in the pull request. Include the independent simplicity-review result when the review trigger applies. Cite the authority and rejected smaller designs for any retained net growth.
 - If the repository uses pull-request-only merges, do not merge locally unless the user explicitly requests it.
 
 ## Clean Up
