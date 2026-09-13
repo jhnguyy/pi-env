@@ -1,5 +1,11 @@
 # TypeScript conventions
 
+## Domain-first types
+
+Follow [`domain-modeling.md`](domain-modeling.md) for boundary parsing and invariant-preserving types. Prefer functions that consume discriminated, canonical, or opaque domain values over functions that repeatedly validate broad primitives.
+
+Do not use a type assertion as a substitute for parsing. When a schema establishes only structural validity, parse any additional semantic invariant before the value enters the workflow.
+
 ## Const objects for named value sets
 
 Prefer `as const` objects plus derived value types for named sets of string or number values, especially when the values cross module boundaries:

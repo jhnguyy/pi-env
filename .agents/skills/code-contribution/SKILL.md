@@ -26,6 +26,7 @@ Use for repository changes from initial scope through post-merge cleanup.
 - Prefer a small conceptual surface over a small line count. Give each concept one owner and one stable term.
 - Use narrow interfaces that hide internal sequencing and data. Keep authority and data flow explicit.
 - Keep deterministic transforms plain, and put IO, cancellation, resources, and operational failure behind clear boundaries.
+- Parse weak or untrusted inputs into invariant-preserving domain values before the workflow causes effects. Do not discard established information and repeat validation downstream.
 - Bound work before allocation. Prefer simple representations, one-pass data flow, and reuse of values derived from immutable inputs.
 - Add an interface, service, layer, or helper only for a current ownership, lifecycle, protocol, substitution, repeated-change, or test-leverage need.
 - Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.

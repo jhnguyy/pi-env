@@ -15,7 +15,8 @@ description: Use for TypeScript work where Effect is in use or proposed for use.
 ## Apply
 
 - Start from the workflow's success, expected-failure, and dependency shape.
-- Decode untrusted input at the edge and model expected failures explicitly.
+- Parse untrusted input at the edge into the refined domain type that the workflow needs. Do not validate and continue with the broad input type.
+- Model expected parse failures explicitly. Complete required parsing before durable or external effects begin.
 - Use Effect for IO, interruption, scoped resources, concurrency policy, or dependency substitution.
 - Keep deterministic transforms plain TypeScript.
 - Add services or layers only for meaningful substitution or lifecycle ownership.
