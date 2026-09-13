@@ -47,6 +47,13 @@
         "outfile": "dist/subprocess-preamble.js",
         "banner": false
       }
+    ],
+    "session-manager": [
+      {
+        "entry": "start.ts",
+        "outfile": "dist/start.js",
+        "banner": false
+      }
     ]
   }
 }

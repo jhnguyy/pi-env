@@ -19,7 +19,11 @@ import {
   type SessionHostShape,
 } from "../index.js";
 
-type EditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
+type EditorFactory = (
+  tui: TUI,
+  theme: EditorTheme,
+  keybindings: KeybindingsManager,
+) => EditorComponent;
 type CompatibleEditor = ReturnType<EditorFactory> & {
   actionHandlers: Map<string, () => void>;
   onCtrlD(): void;
@@ -216,7 +220,7 @@ describe("session-manager extension", () => {
       "Session manager cannot compose Ctrl+D with the configured editor. Use /session-done to finalize this session.",
     );
 
-    await handlers.get("session_shutdown")?.(cast<never>({ reason: "new" }), ctx);
+    await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
     expect(releaseCalls).toBe(1);
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
       desiredState: "open",
