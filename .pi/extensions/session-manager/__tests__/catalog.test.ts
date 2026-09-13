@@ -85,6 +85,15 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
+  it("rejects whitespace-only names without forbidding embedded spaces", () => {
+    expect(() =>
+      validateManifest(manifest({ sessions: [openRecord({ name: "\u2003" })] })),
+    ).toThrow(ManifestSemanticFailure);
+    expect(
+      validateManifest(manifest({ sessions: [openRecord({ name: "quiet pine" })] })),
+    ).toBeDefined();
+  });
+
   it("rejects invalid identities, nested task references, and stale manifest timestamps", () => {
     expect(() =>
       validateManifest(manifest({ sessions: [openRecord({ sessionId: "bad\nidentity" })] })),

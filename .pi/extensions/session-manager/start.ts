@@ -4,13 +4,18 @@ import { randomInt, randomUUID } from "node:crypto";
 import { access, lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import lockfile from "proper-lockfile";
 import type { CoordinatorRecord } from "./contracts.js";
 import { ensureCoordinator, renderRestoreSummary } from "./coordinator.js";
 import { createTmuxSessionHost } from "./host.js";
-import { RuntimeMethod, runtimeRequest, type RestoreSummary } from "./runtime-bus.js";
+import { RuntimeMethod, runtimeRequest } from "./runtime-bus.js";
 import { resolveRuntimePaths, workspaceId, type RuntimePaths } from "./runtime-path.js";
+import {
+  classifyStartupClaim,
+  parseRuntimeMetadata,
+  parseStartupClaim,
+} from "./launch.js";
 import { SessionCatalog, sessionCatalogLayer, type SessionCatalogShape } from "./storage.js";
 
 const env = process.env;
@@ -45,7 +50,7 @@ async function probeCoordinator(
 ): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const alive = await Effect.runPromise(
-      runtimeRequest<{ alive: boolean }>({
+      runtimeRequest({
         socketPath: paths.socketPath,
         workspaceId: id,
         coordinatorSessionId: coordinator.sessionId,
@@ -61,25 +66,26 @@ async function probeCoordinator(
   return false;
 }
 
-async function hasLiveClaim(
+async function classifyLiveClaim(
   paths: RuntimePaths,
   id: string,
   coordinator: CoordinatorRecord,
-): Promise<boolean> {
+): Promise<"none" | "starting" | "unresponsive"> {
   try {
-    const claim = JSON.parse(await readFile(paths.claimPath, "utf8")) as {
-      workspaceId: string;
-      coordinatorSessionId: string;
-      pid: number;
-      createdAt: number;
-    };
-    return (
-      claim.workspaceId === id &&
-      claim.coordinatorSessionId === coordinator.sessionId &&
-      processAlive(claim.pid)
+    const parsed = parseStartupClaim(await readFile(paths.claimPath, "utf8"));
+    if (Result.isFailure(parsed)) throw parsed.failure;
+    const state = classifyStartupClaim(
+      parsed.success,
+      {
+        workspaceId: id,
+        coordinatorSessionId: coordinator.sessionId,
+        now: Date.now(),
+      },
+      processAlive,
     );
+    return state === "replaceable" ? "none" : state;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "none";
     throw error;
   }
 }
@@ -91,17 +97,17 @@ async function assertCoordinatorOffline(
   paneId: string,
 ): Promise<void> {
   try {
-    const metadata = JSON.parse(await readFile(paths.metadataPath, "utf8")) as {
-      workspaceId?: string;
-      coordinatorSessionId?: string;
-      pid?: number;
-    };
-    const matchingProcess =
-      metadata.workspaceId === id &&
-      metadata.coordinatorSessionId === coordinator.sessionId &&
-      typeof metadata.pid === "number" &&
-      processAlive(metadata.pid);
-    if (matchingProcess) {
+    const parsed = parseRuntimeMetadata(await readFile(paths.metadataPath, "utf8"));
+    if (Result.isFailure(parsed)) throw parsed.failure;
+    const metadata = parsed.success;
+    if (
+      metadata.workspaceId !== id ||
+      metadata.coordinatorSessionId !== coordinator.sessionId ||
+      metadata.socketPath !== paths.socketPath
+    ) {
+      throw new Error("RuntimeMetadataMismatch: runtime metadata identity does not match");
+    }
+    if (processAlive(metadata.pid)) {
       throw new Error(
         `CoordinatorUnresponsive: ${coordinator.name} process ${metadata.pid} is still alive at ${paths.socketPath}`,
       );
@@ -178,8 +184,16 @@ async function selectCoordinator(options: {
       : false;
     if (active) return { active, coordinator, launchId };
     if (current?.coordinator) {
-      if (await hasLiveClaim(options.paths, options.workspaceId, coordinator)) {
+      const claimState = await classifyLiveClaim(
+        options.paths,
+        options.workspaceId,
+        coordinator,
+      );
+      if (claimState === "starting") {
         throw new Error("WorkspaceStartInProgress: the coordinator is still starting");
+      }
+      if (claimState === "unresponsive") {
+        throw new Error("CoordinatorUnresponsive: the claimed coordinator process is still alive");
       }
       await assertCoordinatorOffline(
         options.paths,
@@ -218,7 +232,7 @@ async function reconcileActive(
   id: string,
 ): Promise<void> {
   const summary = await Effect.runPromise(
-    runtimeRequest<RestoreSummary>({
+    runtimeRequest({
       socketPath: paths.socketPath,
       workspaceId: id,
       coordinatorSessionId: selection.coordinator.sessionId,

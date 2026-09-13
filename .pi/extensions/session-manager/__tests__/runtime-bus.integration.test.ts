@@ -1,5 +1,5 @@
 import { chmod, lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createConnection } from "node:net";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,7 +61,7 @@ describe("session runtime bus", () => {
       };
       await expect(
         Effect.runPromise(
-          runtimeRequest<{ alive: boolean }>({
+          runtimeRequest({
             ...identity,
             method: RuntimeMethod.Ping,
             timeoutMs: 2_000,
@@ -149,6 +149,94 @@ describe("session runtime bus", () => {
       });
     } finally {
       await server.close();
+    }
+  });
+
+  it("rejects method-invalid requests before invoking handlers", async () => {
+    const { paths, server, publications } = await fixture();
+    try {
+      const response = await new Promise<string>((resolve, reject) => {
+        const socket = createConnection(paths.socketPath);
+        let received = "";
+        socket.setEncoding("utf8");
+        socket.once("connect", () =>
+          socket.write(
+            `${JSON.stringify({
+              version: 1,
+              type: "request",
+              workspaceId: "a".repeat(64),
+              coordinatorSessionId: "coordinator-a",
+              requestId: "123e4567-e89b-42d3-a456-426614174000",
+              deadline: Date.now() + 2_000,
+              method: "publish-ready",
+              params: {
+                sessionId: "work-a",
+                runtimeId: "runtime-a",
+                launchId: "launch-a",
+                windowId: "@2",
+              },
+            })}\n`,
+          ),
+        );
+        socket.on("data", (chunk) => (received += chunk));
+        socket.once("end", () => resolve(received));
+        socket.once("error", reject);
+      });
+
+      expect(JSON.parse(response.trim())).toMatchObject({
+        ok: false,
+        error: { code: "InvalidRequest" },
+      });
+      expect(publications).toEqual([]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects a successful response whose result belongs to another method", async () => {
+    const root = await mkdtemp(join(tmpdir(), "session-runtime-response-"));
+    roots.push(root);
+    const socketPath = join(root, "peer.sock");
+    const peer = createServer((socket) => {
+      let request = "";
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => {
+        request += chunk;
+        const newline = request.indexOf("\n");
+        if (newline < 0) return;
+        const frame = JSON.parse(request.slice(0, newline)) as { requestId: string };
+        socket.end(
+          `${JSON.stringify({
+            version: 1,
+            type: "response",
+            requestId: frame.requestId,
+            coordinatorRuntimeId: "123e4567-e89b-42d3-a456-426614174001",
+            ok: true,
+            result: { accepted: true },
+          })}\n`,
+        );
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      peer.once("error", reject);
+      peer.listen(socketPath, resolve);
+    });
+    try {
+      expect(
+        await failureOf(
+          runtimeRequest({
+            socketPath,
+            workspaceId: "a".repeat(64),
+            coordinatorSessionId: "coordinator-a",
+            method: RuntimeMethod.Ping,
+            timeoutMs: 2_000,
+          }),
+        ),
+      ).toBeInstanceOf(RuntimeBusFailure);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        peer.close((error) => (error ? reject(error) : resolve())),
+      );
     }
   });
 

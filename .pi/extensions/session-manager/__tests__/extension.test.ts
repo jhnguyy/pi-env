@@ -11,8 +11,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import {
   ManifestCommitFailure,
+  ensureCoordinator,
   makeSessionCatalog,
   registerSessionManager,
+  workspaceId as workspaceIdFor,
   type CurrentWindow,
   type SessionCatalogShape,
   type SessionFileProbe,
@@ -37,6 +39,144 @@ afterEach(async () => {
 });
 
 describe("session-manager extension", () => {
+  it("rejects a partial managed launch before catalog or host effects", async () => {
+    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+    const noticeLevels: string[] = [];
+    let shutdownCalls = 0;
+    let effectCalls = 0;
+    const unexpected = <A>() =>
+      Effect.sync(() => {
+        effectCalls += 1;
+        return {} as A;
+      });
+    const pi = cast<ExtensionAPI>({
+      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
+        handlers.set(event, handler),
+      registerCommand: () => {},
+      getSessionName: () => undefined,
+      setSessionName: () => {},
+    });
+    registerSessionManager(pi, {
+      catalog: {
+        identity: () => unexpected(),
+        read: () => unexpected(),
+        update: () => unexpected(),
+      },
+      host: {
+        inspectCurrent: () => unexpected(),
+        bindCurrent: () => unexpected(),
+        renameCurrent: () => unexpected(),
+        releaseCurrent: () => unexpected(),
+      },
+      environment: {
+        TMUX_PANE: "%1",
+        PI_ENV_SESSION_MANAGER_EXPECTED: "1",
+      },
+    });
+    const ctx = cast<ExtensionContext>({
+      mode: "tui",
+      cwd: "/workspace",
+      sessionManager: {
+        getSessionId: () => "work-a",
+        getSessionFile: () => undefined,
+      },
+      ui: {
+        notify: (_message: string, level: string) => noticeLevels.push(level),
+      },
+      shutdown: () => {
+        shutdownCalls += 1;
+      },
+    });
+
+    await handlers.get("session_start")?.({} as never, ctx);
+
+    expect(effectCalls).toBe(0);
+    expect(shutdownCalls).toBe(1);
+    expect(noticeLevels).toEqual(["error"]);
+  });
+
+  it("rejects a restored-work coordinator mismatch before durable or tmux mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "session-extension-preflight-"));
+    roots.push(root);
+    const cwd = join(root, "workspace");
+    await mkdir(cwd);
+    const catalog = makeSessionCatalog(join(root, "agent"));
+    await Effect.runPromise(
+      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+    );
+    const timestamp = new Date().toISOString();
+    await Effect.runPromise(
+      catalog.update(cwd, (manifest) => ({
+        ...manifest,
+        sessions: [
+          {
+            version: 1,
+            sessionId: "work-a",
+            cwd,
+            name: "quiet-pine",
+            persistence: { state: "pending" },
+            createdAt: timestamp,
+            lastOpenedAt: timestamp,
+            role: "work",
+            desiredState: "open",
+          },
+        ],
+      })),
+    );
+    const before = await Effect.runPromise(catalog.read(cwd));
+    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+    let hostCalls = 0;
+    let shutdownCalls = 0;
+    const pi = cast<ExtensionAPI>({
+      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
+        handlers.set(event, handler),
+      registerCommand: () => {},
+      getSessionName: () => "quiet-pine",
+      setSessionName: () => {},
+    });
+    const noHostEffect = <A>() =>
+      Effect.sync(() => {
+        hostCalls += 1;
+        return {} as A;
+      });
+    registerSessionManager(pi, {
+      catalog,
+      host: {
+        inspectCurrent: () => noHostEffect(),
+        bindCurrent: () => noHostEffect(),
+        renameCurrent: () => noHostEffect(),
+        releaseCurrent: () => noHostEffect(),
+      },
+      environment: {
+        TMUX_PANE: "%1",
+        PI_ENV_SESSION_MANAGER_EXPECTED: "1",
+        PI_ENV_SESSION_MANAGER_ROLE: "work",
+        PI_ENV_SESSION_MANAGER_WORKSPACE_ID: workspaceIdFor(before!.canonicalCwd),
+        PI_ENV_SESSION_MANAGER_COORDINATOR_ID: "coordinator-wrong",
+        PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID: "work-a",
+        PI_ENV_SESSION_MANAGER_LAUNCH_ID: "123e4567-e89b-42d3-a456-426614174000",
+        PI_ENV_SESSION_MANAGER_EXTENSION: "/extension.js",
+      },
+    });
+    const ctx = cast<ExtensionContext>({
+      mode: "tui",
+      cwd,
+      sessionManager: { getSessionId: () => "work-a", getSessionFile: () => undefined },
+      ui: { notify: () => {} },
+      shutdown: () => {
+        shutdownCalls += 1;
+      },
+    });
+
+    await handlers.get("session_start")?.({} as never, ctx);
+
+    expect(hostCalls).toBe(0);
+    expect(shutdownCalls).toBe(1);
+    const after = await Effect.runPromise(catalog.read(cwd));
+    expect(after?.revision).toBe(before?.revision);
+    expect(after?.sessions[0]).toMatchObject({ sessionId: "work-a", desiredState: "open" });
+  });
+
   it("composes the current editor and closes before its Ctrl+D callback", async () => {
     const root = await mkdtemp(join(tmpdir(), "session-extension-"));
     roots.push(root);
