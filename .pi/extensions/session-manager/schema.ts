@@ -82,7 +82,9 @@ function validateRecordBase(record: SessionRecord, canonicalCwd: string, path: s
     bytes(record.sessionId) <= 256 &&
     !/[\0\r\n]/.test(record.sessionId);
   const validName =
-    bytes(record.name) >= 1 && bytes(record.name) <= 128 && !/[\p{Cc}\p{Cf}]/u.test(record.name);
+    record.name.trim().length > 0 &&
+    bytes(record.name) <= 128 &&
+    !/[\p{Cc}\p{Cf}]/u.test(record.name);
   const validTimes =
     timestamp(record.createdAt) &&
     timestamp(record.lastOpenedAt) &&

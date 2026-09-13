@@ -7,10 +7,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { readFile, unlink } from "node:fs/promises";
-import { Effect, Exit, Layer, Schedule, Scope } from "effect";
+import { Effect, Exit, Layer, Result, Schedule, Scope } from "effect";
 import { createWorkspaceReconciler, renderRestoreSummary } from "./coordinator.js";
-import { CloseSource, secureNameEntropy, type NameEntropy } from "./domain.js";
+import { CloseSource, findRecord, secureNameEntropy, type NameEntropy } from "./domain.js";
 import { SessionHost, tmuxSessionHostLayer, type SessionHostShape } from "./host.js";
+import {
+  type CoordinatorLaunch,
+  type Environment,
+  type LaunchIntent,
+  type RestoredWorkLaunch,
+  parseLaunchIntent,
+  parseStartupClaim,
+} from "./launch.js";
 import {
   SessionBindingFailed,
   SessionWindowSyncFailed,
@@ -30,7 +38,6 @@ import { resolveRuntimePaths, workspaceId } from "./runtime-path.js";
 import { nodeSessionFileProbe, type SessionFileProbe } from "./session-file.js";
 import { SessionCatalog, sessionCatalogLayer, type SessionCatalogShape } from "./storage.js";
 
-type Environment = Readonly<Record<string, string | undefined>>;
 type EditorFactory = (
   tui: TUI,
   theme: EditorTheme,
@@ -52,12 +59,12 @@ function errorMessage(error: unknown): string {
 function startInput(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  environment: Environment,
+  paneId: string | undefined,
 ): SessionStartInput {
   return {
     mode: ctx.mode,
     cwd: ctx.cwd,
-    paneId: environment.TMUX_PANE,
+    paneId,
     sessionId: ctx.sessionManager.getSessionId(),
     sessionFile: ctx.sessionManager.getSessionFile(),
     sessionName: pi.getSessionName(),
@@ -66,29 +73,6 @@ function startInput(
 
 function isEditorWithCtrlD(editor: ReturnType<EditorFactory>): editor is EditorWithCtrlD {
   return "actionHandlers" in editor && editor.actionHandlers instanceof Map;
-}
-
-type StartupClaim = {
-  readonly workspaceId?: string;
-  readonly coordinatorSessionId?: string;
-  readonly launchId?: string;
-  readonly pid?: number;
-};
-
-function validateStartupClaim(
-  claim: StartupClaim,
-  workspaceId: string,
-  coordinatorSessionId: string,
-  launchId: string,
-): void {
-  if (
-    claim.workspaceId !== workspaceId ||
-    claim.coordinatorSessionId !== coordinatorSessionId ||
-    claim.launchId !== launchId ||
-    claim.pid !== process.pid
-  ) {
-    throw new Error("startup claim does not match the coordinator runtime");
-  }
 }
 
 function restoreNoticeLevel(summary: {
@@ -127,6 +111,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   let runtimeBus: RuntimeBusServer | undefined;
   let readinessScope: Scope.Closeable | undefined;
   let coordinatorBinding: { readonly paneId: string; readonly sessionId: string } | undefined;
+  let launchIntent: LaunchIntent | undefined;
 
   const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
   const queue = <A>(operation: () => Promise<A>): Promise<A> => {
@@ -195,36 +180,33 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     ctx.ui.setEditorComponent(installedFactory);
   };
 
-  const coordinatorLaunch = (ctx: ExtensionContext, expectedWorkspace: string) => {
-    const paneId = environment.TMUX_PANE;
-    const expectedSessionId = environment.PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID;
-    if (ctx.mode !== "tui" || !paneId) {
-      throw new Error("managed coordinator requires an interactive tmux session");
-    }
-    if (
-      environment.PI_ENV_SESSION_MANAGER_EXPECTED !== "1" ||
-      environment.PI_ENV_SESSION_MANAGER_WORKSPACE_ID !== expectedWorkspace ||
-      expectedSessionId !== ctx.sessionManager.getSessionId()
-    ) {
-      throw new Error("managed coordinator launch identity does not match");
-    }
-    const extensionPath = environment.PI_ENV_SESSION_MANAGER_EXTENSION;
-    const wrapperPath = environment.PI_ENV_PI_WRAPPER;
-    if (!extensionPath || !wrapperPath) throw new Error("managed launch paths are missing");
-    return { paneId, expectedSessionId, extensionPath, wrapperPath };
-  };
-
-  const startCoordinatorSession = async (ctx: ExtensionContext) => {
+  const startCoordinatorSession = async (ctx: ExtensionContext, launch: CoordinatorLaunch) => {
     try {
       const identity = await run(options.catalog.identity(ctx.cwd));
       const expectedWorkspace = workspaceId(identity.canonicalCwd);
-      const { paneId, expectedSessionId, extensionPath, wrapperPath } = coordinatorLaunch(
-        ctx,
-        expectedWorkspace,
-      );
+      if (
+        ctx.mode !== "tui" ||
+        launch.workspaceId !== expectedWorkspace ||
+        launch.expectedSessionId !== ctx.sessionManager.getSessionId()
+      ) {
+        throw new Error("managed coordinator launch identity does not match");
+      }
+      const { paneId, expectedSessionId, extensionPath, wrapperPath } = launch;
       const manifest = await run(options.catalog.read(identity.canonicalCwd));
       if (!manifest?.coordinator || manifest.coordinator.sessionId !== expectedSessionId) {
         throw new Error("durable coordinator identity does not match");
+      }
+      const paths = await run(resolveRuntimePaths(identity.canonicalCwd, environment));
+      const parsedClaim = parseStartupClaim(await readFile(paths.claimPath, "utf8"));
+      if (Result.isFailure(parsedClaim)) throw parsedClaim.failure;
+      const claim = parsedClaim.success;
+      if (
+        claim.workspaceId !== expectedWorkspace ||
+        claim.coordinatorSessionId !== manifest.coordinator.sessionId ||
+        claim.launchId !== launch.launchId ||
+        claim.pid !== process.pid
+      ) {
+        throw new Error("startup claim does not match the coordinator runtime");
       }
       if (host.prepareWorkspace) {
         await run(host.prepareWorkspace(paneId, identity.canonicalCwd));
@@ -236,7 +218,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       if (pi.getSessionName() !== manifest.coordinator.name) {
         pi.setSessionName(manifest.coordinator.name);
       }
-      const paths = await run(resolveRuntimePaths(identity.canonicalCwd, environment));
       const reconciler = createWorkspaceReconciler({
         catalog: options.catalog,
         host,
@@ -256,12 +237,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
           handlers: reconciler,
         }),
       );
-      const launchId = environment.PI_ENV_SESSION_MANAGER_LAUNCH_ID;
-      if (launchId) {
-        const claim = JSON.parse(await readFile(paths.claimPath, "utf8")) as StartupClaim;
-        validateStartupClaim(claim, expectedWorkspace, manifest.coordinator.sessionId, launchId);
-        await unlink(paths.claimPath);
-      }
+      await unlink(paths.claimPath);
       installEditor(ctx, true);
       const summary = await reconciler.reconcile();
       ctx.ui.notify(renderRestoreSummary(summary), restoreNoticeLevel(summary));
@@ -273,20 +249,16 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     }
   };
 
-  const publishChildReady = async (session: ManagedSession, role?: string) => {
-    if (environment.PI_ENV_SESSION_MANAGER_EXPECTED !== "1") return;
+  const publishChildReady = async (session: ManagedSession, launch: RestoredWorkLaunch) => {
     const expectedWorkspace = workspaceId(session.record.cwd);
-    const coordinatorId = environment.PI_ENV_SESSION_MANAGER_COORDINATOR_ID;
-    const launchId = environment.PI_ENV_SESSION_MANAGER_LAUNCH_ID;
     if (
-      role !== "work" ||
-      environment.PI_ENV_SESSION_MANAGER_WORKSPACE_ID !== expectedWorkspace ||
-      environment.PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID !== session.record.sessionId ||
-      !coordinatorId ||
-      !launchId
+      launch.workspaceId !== expectedWorkspace ||
+      launch.expectedSessionId !== session.record.sessionId
     ) {
       throw new Error("managed child launch identity does not match");
     }
+    const coordinatorId = launch.coordinatorSessionId;
+    const launchId = launch.launchId;
     const paths = await run(resolveRuntimePaths(session.record.cwd, environment));
     const windowId = (await run(host.inspectCurrent(session.paneId))).windowId;
     await run(
@@ -307,75 +279,130 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     );
   };
 
-  pi.on("session_start", async (_event, ctx) => {
-    const startGeneration = ++generation;
-    const role = environment.PI_ENV_SESSION_MANAGER_ROLE;
-    if (role === "coordinator") {
-      await startCoordinatorSession(ctx);
+  type WorkLaunch = Exclude<LaunchIntent, CoordinatorLaunch>;
+
+  const verifyRestoredWorkLaunch = async (
+    ctx: ExtensionContext,
+    launch: RestoredWorkLaunch,
+  ): Promise<void> => {
+    const identity = await run(options.catalog.identity(ctx.cwd));
+    if (
+      ctx.mode !== "tui" ||
+      launch.workspaceId !== workspaceId(identity.canonicalCwd) ||
+      launch.expectedSessionId !== ctx.sessionManager.getSessionId()
+    ) {
+      throw new Error("managed child launch identity does not match");
+    }
+    const manifest = await run(options.catalog.read(identity.canonicalCwd));
+    const expectedRecord = manifest ? findRecord(manifest, launch.expectedSessionId) : undefined;
+    if (
+      manifest?.coordinator?.sessionId !== launch.coordinatorSessionId ||
+      expectedRecord?.role !== "work" ||
+      expectedRecord.desiredState !== "open"
+    ) {
+      throw new Error("managed child durable identity does not match");
+    }
+  };
+
+  const activateManagedSession = (ctx: ExtensionContext, session: ManagedSession): void => {
+    managed = session;
+    if (pi.getSessionName() !== session.record.name) {
+      syncingName = true;
+      pi.setSessionName(session.record.name);
+      syncingName = false;
+    }
+    installEditor(ctx, false);
+    ctx.ui.setStatus("session-manager", `session: ${session.record.name}`);
+  };
+
+  const startReadinessPublisher = async (launch: RestoredWorkLaunch): Promise<void> => {
+    if (readinessScope) return;
+    readinessScope = await run(Scope.make());
+    const publisher = Effect.tryPromise({
+      try: async () => {
+        if (managed) await publishChildReady(managed, launch);
+      },
+      catch: (error) =>
+        new RuntimeBusFailure({
+          operation: "repeat publish-ready",
+          reason: errorMessage(error),
+        }),
+    }).pipe(
+      Effect.catch(() => Effect.void),
+      Effect.repeat(Schedule.spaced("5 seconds")),
+      Effect.asVoid,
+    );
+    await run(publisher.pipe(Effect.forkIn(readinessScope)));
+  };
+
+  const releaseInterruptedBinding = async (error: unknown): Promise<void> => {
+    if (!(error instanceof SessionBindingFailed)) return;
+    await queue(() =>
+      run(host.releaseCurrent(error.session.paneId, error.session.record.sessionId)),
+    ).catch(() => undefined);
+  };
+
+  const handleEnrollmentFailure = async (
+    ctx: ExtensionContext,
+    launch: WorkLaunch,
+    startGeneration: number,
+    error: unknown,
+  ): Promise<void> => {
+    if (startGeneration !== generation) {
+      await releaseInterruptedBinding(error);
       return;
     }
+    if (error instanceof SessionBindingFailed) activateManagedSession(ctx, error.session);
+    notifyError(ctx, "Session enrollment", error);
+    if (launch.kind === "restored-work") ctx.shutdown();
+  };
+
+  const startWorkSession = async (
+    ctx: ExtensionContext,
+    launch: WorkLaunch,
+    startGeneration: number,
+  ): Promise<void> => {
     try {
-      const result = await queue(() => run(lifecycle.start(startInput(pi, ctx, environment))));
-      if (result.state === "unmanaged") return;
+      if (launch.kind === "restored-work") await verifyRestoredWorkLaunch(ctx, launch);
+      const result = await queue(() => run(lifecycle.start(startInput(pi, ctx, launch.paneId))));
+      if (result.state === "unmanaged") {
+        if (launch.kind === "restored-work") {
+          throw new Error(`managed child became unmanaged: ${result.reason}`);
+        }
+        return;
+      }
       if (startGeneration !== generation) {
         await queue(() =>
           run(host.releaseCurrent(result.session.paneId, result.session.record.sessionId)),
         );
         return;
       }
-      managed = result.session;
-      if (pi.getSessionName() !== result.session.record.name) {
-        syncingName = true;
-        pi.setSessionName(result.session.record.name);
-        syncingName = false;
-      }
-      installEditor(ctx, false);
-      ctx.ui.setStatus("session-manager", `session: ${result.session.record.name}`);
-      await publishChildReady(result.session, role);
-      if (environment.PI_ENV_SESSION_MANAGER_EXPECTED === "1" && !readinessScope) {
-        readinessScope = await run(Scope.make());
-        const scope = readinessScope;
-        const publisher = Effect.tryPromise({
-          try: async () => {
-            if (managed) await publishChildReady(managed, role);
-          },
-          catch: (error) =>
-            new RuntimeBusFailure({
-              operation: "repeat publish-ready",
-              reason: errorMessage(error),
-            }),
-        }).pipe(
-          Effect.catch(() => Effect.void),
-          Effect.repeat(Schedule.spaced("5 seconds")),
-          Effect.asVoid,
-        );
-        await run(publisher.pipe(Effect.forkIn(scope)));
-      }
+      activateManagedSession(ctx, result.session);
+      if (launch.kind !== "restored-work") return;
+      await publishChildReady(result.session, launch);
+      await startReadinessPublisher(launch);
     } catch (error) {
-      if (startGeneration !== generation) {
-        if (error instanceof SessionBindingFailed) {
-          await queue(() =>
-            run(host.releaseCurrent(error.session.paneId, error.session.record.sessionId)),
-          ).catch(() => undefined);
-        }
-        return;
-      }
-      if (error instanceof SessionBindingFailed) {
-        managed = error.session;
-        if (pi.getSessionName() !== managed.record.name) {
-          syncingName = true;
-          pi.setSessionName(managed.record.name);
-          syncingName = false;
-        }
-        installEditor(ctx, false);
-      }
-      notifyError(ctx, "Session enrollment", error);
-      if (environment.PI_ENV_SESSION_MANAGER_EXPECTED === "1") ctx.shutdown();
+      await handleEnrollmentFailure(ctx, launch, startGeneration, error);
     }
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    const startGeneration = ++generation;
+    launchIntent = undefined;
+    const parsedLaunch = parseLaunchIntent(environment);
+    if (Result.isFailure(parsedLaunch)) {
+      notifyError(ctx, "Session launch", parsedLaunch.failure);
+      ctx.shutdown();
+      return;
+    }
+    const launch = parsedLaunch.success;
+    launchIntent = launch;
+    if (launch.kind === "coordinator") await startCoordinatorSession(ctx, launch);
+    else await startWorkSession(ctx, launch, startGeneration);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
-    if (environment.PI_ENV_SESSION_MANAGER_ROLE === "coordinator") {
+    if (launchIntent?.kind === "coordinator") {
       const sessionFile = ctx.sessionManager.getSessionFile();
       if (!sessionFile) return;
       try {
@@ -464,7 +491,9 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     description: "Adopt the current materialized Pi session into this workspace",
     handler: async (_args, ctx) => {
       try {
-        managed = await queue(() => run(lifecycle.adopt(startInput(pi, ctx, environment))));
+        managed = await queue(() =>
+          run(lifecycle.adopt(startInput(pi, ctx, environment.TMUX_PANE))),
+        );
         if (pi.getSessionName() !== managed.record.name) {
           syncingName = true;
           pi.setSessionName(managed.record.name);
@@ -555,6 +584,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     installedFactory = undefined;
     previousFactory = undefined;
     managed = undefined;
+    launchIntent = undefined;
   });
 }
 
@@ -585,6 +615,7 @@ export * from "./contracts.js";
 export * from "./coordinator.js";
 export * from "./domain.js";
 export * from "./host.js";
+export * from "./launch.js";
 export * from "./lifecycle.js";
 export * from "./runtime-bus.js";
 export * from "./runtime-path.js";

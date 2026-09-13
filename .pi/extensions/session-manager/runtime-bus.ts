@@ -33,25 +33,51 @@ export type RestoreOutcome = {
 export type RestoreSummary = {
   readonly outcomes: readonly RestoreOutcome[];
 };
-export type RuntimeRequest = {
+type RuntimeRequestBase = {
   readonly version: 1;
   readonly type: "request";
   readonly workspaceId: string;
   readonly coordinatorSessionId: string;
   readonly requestId: string;
   readonly deadline: number;
-  readonly method: RuntimeMethod;
-  readonly idempotencyKey?: string;
-  readonly params: unknown;
 };
-export type RuntimeResponse = {
-  readonly version: 1;
-  readonly type: "response";
-  readonly requestId: string;
-  readonly coordinatorRuntimeId: string;
-  readonly ok: boolean;
-  readonly result?: unknown;
-  readonly error?: { readonly code: string; readonly message: string };
+export type RuntimeRequest =
+  | (RuntimeRequestBase & {
+      readonly method: "ping";
+      readonly params: Readonly<Record<string, never>>;
+    })
+  | (RuntimeRequestBase & {
+      readonly method: "reconcile";
+      readonly idempotencyKey: string;
+      readonly params: Readonly<Record<string, never>>;
+    })
+  | (RuntimeRequestBase & {
+      readonly method: "publish-ready";
+      readonly idempotencyKey: string;
+      readonly params: ReadyPublication;
+    });
+export type RuntimeResponse =
+  | {
+      readonly version: 1;
+      readonly type: "response";
+      readonly requestId: string;
+      readonly coordinatorRuntimeId: string;
+      readonly ok: true;
+      readonly result: unknown;
+    }
+  | {
+      readonly version: 1;
+      readonly type: "response";
+      readonly requestId: string;
+      readonly coordinatorRuntimeId: string;
+      readonly ok: false;
+      readonly error: { readonly code: string; readonly message: string };
+    };
+
+export type RuntimeResultByMethod = {
+  readonly ping: { readonly alive: true };
+  readonly reconcile: RestoreSummary;
+  readonly "publish-ready": { readonly accepted: true };
 };
 
 export class RuntimeBusFailure extends Data.TaggedError("RuntimeBusFailure")<{
@@ -70,17 +96,56 @@ const requestSchema = Schema.Struct({
   idempotencyKey: Schema.optionalKey(Schema.String),
   params: Schema.Unknown,
 });
-const responseSchema = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("response"),
-  requestId: Schema.String,
-  coordinatorRuntimeId: Schema.String,
-  ok: Schema.Boolean,
-  result: Schema.optionalKey(Schema.Unknown),
-  error: Schema.optionalKey(Schema.Struct({ code: Schema.String, message: Schema.String })),
+const responseSchema = Schema.Union([
+  Schema.Struct({
+    version: Schema.Literal(1),
+    type: Schema.Literal("response"),
+    requestId: Schema.String,
+    coordinatorRuntimeId: Schema.String,
+    ok: Schema.Literal(true),
+    result: Schema.Unknown,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    type: Schema.Literal("response"),
+    requestId: Schema.String,
+    coordinatorRuntimeId: Schema.String,
+    ok: Schema.Literal(false),
+    error: Schema.Struct({ code: Schema.String, message: Schema.String }),
+  }),
+]);
+const readyPublicationSchema = Schema.Struct({
+  sessionId: Schema.String,
+  runtimeId: Schema.String,
+  launchId: Schema.String,
+  windowId: Schema.String,
+});
+const restoreSummarySchema = Schema.Struct({
+  outcomes: Schema.Array(
+    Schema.Struct({
+      sessionId: Schema.String,
+      name: Schema.String,
+      state: Schema.Literals(["restored", "active", "timed-out", "failed"]),
+      reason: Schema.optionalKey(Schema.String),
+    }),
+  ),
 });
 const decodeRequest = Schema.decodeUnknownSync(requestSchema, { onExcessProperty: "error" });
 const decodeResponse = Schema.decodeUnknownSync(responseSchema, { onExcessProperty: "error" });
+const decodeReadyPublication = Schema.decodeUnknownSync(readyPublicationSchema, {
+  onExcessProperty: "error",
+});
+const decodeRestoreSummary = Schema.decodeUnknownSync(restoreSummarySchema, {
+  onExcessProperty: "error",
+});
+const decodePingResult = Schema.decodeUnknownSync(
+  Schema.Struct({ alive: Schema.Literal(true) }),
+  { onExcessProperty: "error" },
+);
+const decodePublishReadyResult = Schema.decodeUnknownSync(
+  Schema.Struct({ accepted: Schema.Literal(true) }),
+  { onExcessProperty: "error" },
+);
 
 const uuid = (value: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -90,22 +155,20 @@ const safeText = (value: unknown, maximum: number): value is string =>
   Buffer.byteLength(value, "utf8") <= maximum &&
   !/[\0\r\n]/.test(value);
 
-function validateReadyPublication(value: unknown): void {
-  const publication = value as Partial<ReadyPublication> | null;
-  const validKeys = ["sessionId", "runtimeId", "launchId", "windowId"];
+function parseReadyPublication(value: unknown): ReadyPublication {
+  const publication = decodeReadyPublication(value);
   if (
-    !publication ||
     !safeText(publication.sessionId, 256) ||
     !safeText(publication.runtimeId, 256) ||
     !safeText(publication.launchId, 256) ||
-    !safeText(publication.windowId, 256) ||
-    Object.keys(publication).some((key) => !validKeys.includes(key))
+    !safeText(publication.windowId, 256)
   ) {
     throw new Error("invalid readiness publication");
   }
+  return publication;
 }
 
-function validateEmptyParams(value: unknown): void {
+function parseEmptyParams(value: unknown): Readonly<Record<string, never>> {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -114,18 +177,44 @@ function validateEmptyParams(value: unknown): void {
   ) {
     throw new Error("method parameters must be an empty object");
   }
+  return {};
 }
 
-function validateRequest(request: RuntimeRequest): void {
+function parseRequest(value: unknown): RuntimeRequest {
+  const request = decodeRequest(value);
   if (!/^[0-9a-f]{64}$/.test(request.workspaceId)) throw new Error("invalid workspace ID");
   if (!safeText(request.coordinatorSessionId, 256) || !uuid(request.requestId)) {
     throw new Error("invalid request identity");
   }
-  if (request.method !== RuntimeMethod.Ping && !safeText(request.idempotencyKey, 256)) {
+  const base = {
+    version: request.version,
+    type: request.type,
+    workspaceId: request.workspaceId,
+    coordinatorSessionId: request.coordinatorSessionId,
+    requestId: request.requestId,
+    deadline: request.deadline,
+  } as const;
+  if (request.method === RuntimeMethod.Ping) {
+    if (request.idempotencyKey !== undefined) throw new Error("ping does not accept idempotency");
+    return { ...base, method: RuntimeMethod.Ping, params: parseEmptyParams(request.params) };
+  }
+  if (!safeText(request.idempotencyKey, 256)) {
     throw new Error("mutating request requires a valid idempotency key");
   }
-  if (request.method === RuntimeMethod.PublishReady) validateReadyPublication(request.params);
-  else validateEmptyParams(request.params);
+  if (request.method === RuntimeMethod.PublishReady) {
+    return {
+      ...base,
+      method: RuntimeMethod.PublishReady,
+      idempotencyKey: request.idempotencyKey,
+      params: parseReadyPublication(request.params),
+    };
+  }
+  return {
+    ...base,
+    method: RuntimeMethod.Reconcile,
+    idempotencyKey: request.idempotencyKey,
+    params: parseEmptyParams(request.params),
+  };
 }
 
 function boundedReason(error: unknown): string {
@@ -155,7 +244,7 @@ async function executeRequest(
     case RuntimeMethod.Reconcile:
       return handlers.reconcile();
     case RuntimeMethod.PublishReady:
-      await handlers.publishReady(request.params as ReadyPublication);
+      await handlers.publishReady(request.params);
       return { accepted: true };
   }
 }
@@ -168,7 +257,7 @@ function invokeRequest(
 ): Promise<unknown> {
   if (request.method === RuntimeMethod.Ping) return executeRequest(request, handlers);
   for (const [key, entry] of cache) if (entry.expiresAt <= now) cache.delete(key);
-  const idempotencyKey = request.idempotencyKey!;
+  const idempotencyKey = request.idempotencyKey;
   const digest = JSON.stringify({ method: request.method, params: request.params });
   const existing = cache.get(idempotencyKey);
   if (existing?.digest !== undefined && existing.digest !== digest) {
@@ -311,8 +400,7 @@ export function startRuntimeBus(options: {
             let request: RuntimeRequest;
             try {
               const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-              request = decodeRequest(JSON.parse(text));
-              validateRequest(request);
+              request = parseRequest(JSON.parse(text));
             } catch {
               void protocolError("unknown", "InvalidRequest", "request is not strict v1 NDJSON");
               return;
@@ -388,18 +476,85 @@ function closeServer(server: Server): Promise<void> {
   );
 }
 
-export function runtimeRequest<A>(options: {
+type RuntimeRequestCommon = {
   readonly socketPath: string;
   readonly workspaceId: string;
   readonly coordinatorSessionId: string;
-  readonly method: RuntimeMethod;
-  readonly params?: unknown;
-  readonly idempotencyKey?: string;
   readonly timeoutMs: number;
-}): Effect.Effect<A, RuntimeBusFailure> {
+};
+type PingRequestOptions = RuntimeRequestCommon & { readonly method: "ping" };
+type ReconcileRequestOptions = RuntimeRequestCommon & {
+  readonly method: "reconcile";
+  readonly idempotencyKey: string;
+};
+type PublishReadyRequestOptions = RuntimeRequestCommon & {
+  readonly method: "publish-ready";
+  readonly idempotencyKey: string;
+  readonly params: ReadyPublication;
+};
+type RuntimeRequestOptions =
+  | PingRequestOptions
+  | ReconcileRequestOptions
+  | PublishReadyRequestOptions;
+
+function requestFor(options: RuntimeRequestOptions, requestId: string): RuntimeRequest {
+  const base = {
+    version: 1,
+    type: "request",
+    workspaceId: options.workspaceId,
+    coordinatorSessionId: options.coordinatorSessionId,
+    requestId,
+    deadline: Date.now() + options.timeoutMs,
+  } as const;
+  switch (options.method) {
+    case RuntimeMethod.Ping:
+      return { ...base, method: RuntimeMethod.Ping, params: {} };
+    case RuntimeMethod.Reconcile:
+      return {
+        ...base,
+        method: RuntimeMethod.Reconcile,
+        idempotencyKey: options.idempotencyKey,
+        params: {},
+      };
+    case RuntimeMethod.PublishReady:
+      return {
+        ...base,
+        method: RuntimeMethod.PublishReady,
+        idempotencyKey: options.idempotencyKey,
+        params: options.params,
+      };
+  }
+}
+
+function parseRuntimeResult(
+  method: RuntimeMethod,
+  value: unknown,
+): RuntimeResultByMethod[RuntimeMethod] {
+  switch (method) {
+    case RuntimeMethod.Ping:
+      return decodePingResult(value);
+    case RuntimeMethod.Reconcile:
+      return decodeRestoreSummary(value);
+    case RuntimeMethod.PublishReady:
+      return decodePublishReadyResult(value);
+  }
+}
+
+export function runtimeRequest(
+  options: PingRequestOptions,
+): Effect.Effect<RuntimeResultByMethod["ping"], RuntimeBusFailure>;
+export function runtimeRequest(
+  options: ReconcileRequestOptions,
+): Effect.Effect<RuntimeResultByMethod["reconcile"], RuntimeBusFailure>;
+export function runtimeRequest(
+  options: PublishReadyRequestOptions,
+): Effect.Effect<RuntimeResultByMethod["publish-ready"], RuntimeBusFailure>;
+export function runtimeRequest(
+  options: RuntimeRequestOptions,
+): Effect.Effect<RuntimeResultByMethod[RuntimeMethod], RuntimeBusFailure> {
   return Effect.tryPromise({
     try: () =>
-      new Promise<A>((resolve, reject) => {
+      new Promise<RuntimeResultByMethod[RuntimeMethod]>((resolve, reject) => {
         const requestId = randomUUID();
         const socket = createConnection(options.socketPath);
         const timer = setTimeout(
@@ -407,24 +562,18 @@ export function runtimeRequest<A>(options: {
           options.timeoutMs,
         );
         let buffer = Buffer.alloc(0);
-        const finish = (error?: unknown, value?: A) => {
+        let finished = false;
+        const finish = (error?: unknown, value?: RuntimeResultByMethod[RuntimeMethod]) => {
+          if (finished) return;
+          finished = true;
           clearTimeout(timer);
           socket.destroy();
           if (error) reject(error);
-          else resolve(value as A);
+          else if (value !== undefined) resolve(value);
+          else reject(new Error("response did not contain a result"));
         };
         socket.once("connect", () => {
-          void writeFrame(socket, {
-            version: 1,
-            type: "request",
-            workspaceId: options.workspaceId,
-            coordinatorSessionId: options.coordinatorSessionId,
-            requestId,
-            deadline: Date.now() + options.timeoutMs,
-            method: options.method,
-            ...(options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
-            params: options.params ?? {},
-          } satisfies RuntimeRequest).catch(finish);
+          void writeFrame(socket, requestFor(options, requestId)).catch(finish);
         });
         socket.on("data", (chunk: Buffer) => {
           buffer = Buffer.concat([buffer, chunk]);
@@ -434,17 +583,22 @@ export function runtimeRequest<A>(options: {
             return;
           }
           try {
-            const text = new TextDecoder("utf-8", { fatal: true }).decode(
-              buffer.subarray(0, newline),
-            );
+            const bytes = buffer.subarray(0, newline);
+            if (bytes.length === 0 || bytes.length > MAX_FRAME_BYTES || bytes.includes(0)) {
+              throw new Error("invalid response frame");
+            }
+            const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
             const response = decodeResponse(JSON.parse(text));
-            if (response.requestId !== requestId)
+            if (!uuid(response.coordinatorRuntimeId)) {
+              throw new Error("response runtime ID is invalid");
+            }
+            if (response.requestId !== requestId) {
               throw new Error("response request ID does not match");
-            if (!response.ok)
-              throw new Error(
-                `${response.error?.code ?? "RequestFailed"}: ${response.error?.message ?? "request failed"}`,
-              );
-            finish(undefined, response.result as A);
+            }
+            if (!response.ok) {
+              throw new Error(`${response.error.code}: ${response.error.message}`);
+            }
+            finish(undefined, parseRuntimeResult(options.method, response.result));
           } catch (error) {
             finish(error);
           }

@@ -75,6 +75,12 @@ describe("session manifest v1", () => {
       validateManifest(manifest({ sessions: [openRecord({ name: "é".repeat(65) })] })),
     ).toThrow(ManifestSemanticFailure);
     expect(() =>
+      validateManifest(manifest({ sessions: [openRecord({ name: "\u2003" })] })),
+    ).toThrow(ManifestSemanticFailure);
+    expect(
+      validateManifest(manifest({ sessions: [openRecord({ name: "quiet pine" })] })),
+    ).toBeDefined();
+    expect(() =>
       validateManifest(
         manifest({
           sessions: [
