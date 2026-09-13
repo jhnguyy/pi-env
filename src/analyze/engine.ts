@@ -15,6 +15,7 @@ import { runBenchmarkEffect, type BenchmarkConfig } from "./benchmark.js";
 import {
   AnalyzerName,
   ConfigError,
+  type AnalyzerRunError,
   ProgramError,
   ScopeError,
   type AnalyzeError,
@@ -26,14 +27,15 @@ import {
   type MemorySnapshot,
   type ScopeSelection,
 } from "./model.js";
-import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget, type SyntaxSourceSelection } from "./program.js";
+import { createSyntaxProjectEffect, createTypeProjectEffect, SyntaxSourceSelection, type SyntaxProject, type SyntaxSourceBudget, type TypeProject } from "./program.js";
 import { processServiceLayer, type ProcessService, type streamProcessEffect } from "./process.js";
 import {
-  analyzerDescriptor,
   defaultAnalyzerNames,
-  projectRequirement,
-  projectSourceSelection,
-  runAnalyzer,
+  resolveAnalyzerDescriptors,
+  type AnalyzerDescriptor,
+  type ExternalAnalyzerDescriptor,
+  type SyntaxAnalyzerDescriptor,
+  type TypeAnalyzerDescriptor,
 } from "./registry.js";
 import { resolveScopeEffect, type Scope } from "./scope.js";
 
@@ -69,18 +71,8 @@ const liveAnalysisRuntime: AnalysisRuntime = {
   wallTime: () => Date.now(),
 };
 
-type ProjectFactoryResult = Project | undefined | Effect.Effect<Project | undefined, ProgramError>;
-
 export interface EngineSeams {
-  /** Supports both the current Effect seam and the original synchronous factory. */
-  createAnalysisProject?: (
-    cwd: string,
-    scope: Scope,
-    requirement: ProjectRequirement,
-    sourceSelection: SyntaxSourceSelection,
-  ) => ProjectFactoryResult;
   processRunner?: typeof streamProcessEffect;
-  /** Additive seams; existing project and process seams remain supported. */
   runtime?: AnalysisRuntime;
   diagnostics?: AnalysisDiagnostics;
   runId?: string;
@@ -96,7 +88,7 @@ interface AnalysisState {
 
 interface PreflightPlan {
   budget: number;
-  checks: readonly AnalyzerName[];
+  descriptors: readonly AnalyzerDescriptor[];
   started: number;
   state: AnalysisState;
 }
@@ -166,8 +158,6 @@ const findingId = (finding: Finding): string =>
 
 const isMemoryBudgetExceeded = (rssBytes: number, maxMemoryMb: number): boolean =>
   rssBytes > maxMemoryMb * 1024 * 1024;
-const needsInternalProject = (checks: readonly AnalyzerName[]): boolean =>
-  projectRequirement(checks) !== ProjectRequirement.None;
 
 const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0;
 
@@ -265,6 +255,25 @@ function timing(
     : state;
 }
 
+function accumulateTiming(
+  state: AnalysisState,
+  enabled: boolean,
+  name: string,
+  duration: number,
+): AnalysisState {
+  if (!enabled) return state;
+  return {
+    ...state,
+    profile: {
+      ...state.profile,
+      timings: {
+        ...state.profile.timings,
+        [name]: (state.profile.timings[name] ?? 0) + duration,
+      },
+    },
+  };
+}
+
 function addFailure(
   state: AnalysisState,
   analyzer: AnalyzerFailure["analyzer"],
@@ -341,23 +350,22 @@ function setupAnalysis(
     const runtime = yield* AnalysisRuntime;
     const started = runtime.now();
     const budget = yield* validateOptionsEffect(options);
-    const selected = selectedChecks(options);
-    // This preflight is deliberately before scope/project capability loading and analyzer dispatch.
-    // A rejected check must not raise the shared project's capability for checks that can run.
+    const selected = resolveAnalyzerDescriptors(selectedChecks(options));
+    // This preflight is deliberately before scope and capability loading.
     let state = initialState();
-    const checks = selected.filter((name) => {
-      const minimum = analyzerDescriptor(name).minimumTotalMemoryMb;
+    const descriptors = selected.filter((descriptor) => {
+      const minimum = descriptor.minimumTotalMemoryMb;
       if (budget >= minimum) return true;
       state = addFailure(
         state,
-        name,
+        descriptor.name,
         `Insufficient memory budget: maxMemoryMb ${budget} MiB is below this analyzer's ${minimum} MiB minimum`,
       );
       return false;
     });
     // If every requested check was rejected, preserve that structured
     // preflight result without requiring the cwd to be a Git worktree.
-    if (selected.length > 0 && checks.length === 0) return { budget, checks, started, state };
+    if (selected.length > 0 && descriptors.length === 0) return { budget, descriptors, started, state };
     const scopeStarted = runtime.now();
     yield* recordDiagnostic(diagnostics, runtime, runId, AnalyzeDiagnosticEventType.StageStarted, {
       stage: "scope",
@@ -386,23 +394,23 @@ function setupAnalysis(
       stage: "scope",
       ...memoryAttributes(scopeMemory),
     });
-    return { budget, checks, scope, started, state };
+    return { budget, descriptors, scope, started, state };
   });
 }
 
-function loadProjectIfNeeded(
+type ProjectLoadResult<Project> =
+  | { readonly _tag: "stopped"; readonly state: AnalysisState }
+  | { readonly _tag: "loaded"; readonly project: Project; readonly state: AnalysisState };
+
+function loadProject<Project>(
   options: AnalyzeOptions,
-  seams: EngineSeams,
   plan: AnalysisPlan,
+  first: AnalyzerName,
+  capability: "scoped-syntax" | "types",
+  create: Effect.Effect<Project, ProgramError>,
   diagnostics: AnalysisDiagnostics,
   runId: string,
-): Effect.Effect<{ project?: Project; state: AnalysisState }, ProgramError, AnalysisRuntime> {
-  const requirement = projectRequirement(plan.checks);
-  if (requirement === ProjectRequirement.None) return Effect.succeed({ state: plan.state });
-  const sourceSelection = projectSourceSelection(plan.checks);
-  const first = plan.checks.find(
-    (name) => analyzerDescriptor(name).project !== ProjectRequirement.None,
-  )!;
+): Effect.Effect<ProjectLoadResult<Project>, ProgramError, AnalysisRuntime> {
   return Effect.gen(function* () {
     const runtime = yield* AnalysisRuntime;
     let state = memoryGuard(
@@ -412,35 +420,22 @@ function loadProjectIfNeeded(
       first,
       runtime.memory(),
     );
-    if (state.stopped) return { state };
+    if (state.stopped) return { _tag: "stopped" as const, state };
     const started = runtime.now();
     yield* recordDiagnostic(diagnostics, runtime, runId, AnalyzeDiagnosticEventType.StageStarted, {
       stage: "project-load",
-      project_requirement: requirement,
+      project_requirement: capability,
     });
     const project = yield* diagnostics.span(
       AnalyzeSpanName.ProjectLoad,
-      { project_requirement: requirement },
-      Effect.gen(function* () {
-        const created = yield* Effect.try({
-          try: () =>
-            seams.createAnalysisProject !== undefined
-              ? seams.createAnalysisProject(options.cwd, plan.scope, requirement, sourceSelection)
-              : createAnalysisProjectEffect(
-                options.cwd,
-                plan.scope,
-                requirement,
-                options.sourceBudget,
-                sourceSelection,
-              ),
-          catch: toProgramError,
-        });
-        return yield* Effect.isEffect(created) ? created : Effect.succeed(created);
-      }),
+      { project_requirement: capability },
+      create,
     );
     const ended = runtime.now();
-    state = timing(state, options.profile === true, "program", started, ended);
+    state = timing(state, options.profile === true, `program:${capability}`, started, ended);
+    state = accumulateTiming(state, options.profile === true, "program", ended - started);
     const projectMemory = runtime.memory();
+    state = snapshot(state, options.profile === true, `after:program:${capability}`, projectMemory);
     state = snapshot(state, options.profile === true, "after:program", projectMemory);
     yield* recordDiagnostic(
       diagnostics,
@@ -449,7 +444,7 @@ function loadProjectIfNeeded(
       AnalyzeDiagnosticEventType.StageCompleted,
       {
         stage: "project-load",
-        project_requirement: requirement,
+        project_requirement: capability,
         duration_ms: ended - started,
       },
     );
@@ -457,7 +452,7 @@ function loadProjectIfNeeded(
       stage: "project-load",
       ...memoryAttributes(projectMemory),
     });
-    return { project, state };
+    return { _tag: "loaded" as const, project, state };
   });
 }
 
@@ -490,8 +485,7 @@ function bundleGate(
 function runAnalyzerStage(
   options: AnalyzeOptions,
   name: AnalyzerName,
-  scope: Scope,
-  project: Project | undefined,
+  run: (beforeBundleEntry: () => boolean) => Effect.Effect<Finding[], AnalyzerRunError, ProcessService>,
   budget: number,
   initial: AnalysisState,
   diagnostics: AnalysisDiagnostics,
@@ -510,17 +504,7 @@ function runAnalyzerStage(
     const outcome = yield* diagnostics.span(
       AnalyzeSpanName.Check,
       analyzerAttributes(name),
-      Effect.result(
-        runAnalyzer(name, {
-          cwd: options.cwd,
-          scope,
-          project,
-          typeSimilarityThreshold: options.typeSimilarityThreshold,
-          maxMemoryMb: budget,
-          externalTimeoutMs: options.externalTimeoutMs,
-          beforeBundleEntry: gate?.beforeEntry ?? (() => true),
-        }),
-      ),
+      Effect.result(run(gate?.beforeEntry ?? (() => true))),
     );
     for (const sample of gate?.samples ?? [])
       state = snapshot(state, options.profile === true, `before:${name}`, sample);
@@ -580,11 +564,11 @@ function runAnalyzerStage(
   });
 }
 
-function runStage(
+function runSyntaxStage(
   options: AnalyzeOptions,
-  checks: readonly AnalyzerName[],
+  descriptors: readonly SyntaxAnalyzerDescriptor[],
   scope: Scope,
-  project: Project | undefined,
+  project: SyntaxProject,
   budget: number,
   initial: AnalysisState,
   diagnostics: AnalysisDiagnostics,
@@ -592,13 +576,12 @@ function runStage(
 ): Effect.Effect<AnalysisState, never, ProcessService | AnalysisRuntime> {
   return Effect.gen(function* () {
     let state = initial;
-    for (const name of checks) {
+    for (const descriptor of descriptors) {
       if (state.stopped) break;
       state = yield* runAnalyzerStage(
         options,
-        name,
-        scope,
-        project,
+        descriptor.name,
+        () => descriptor.run({ cwd: options.cwd, scope, project }),
         budget,
         state,
         diagnostics,
@@ -609,26 +592,110 @@ function runStage(
   });
 }
 
-function runInternalStages(
+function runTypeStage(
   options: AnalyzeOptions,
-  seams: EngineSeams,
+  descriptors: readonly TypeAnalyzerDescriptor[],
+  scope: Scope,
+  project: TypeProject,
+  budget: number,
+  initial: AnalysisState,
+  diagnostics: AnalysisDiagnostics,
+  runId: string,
+): Effect.Effect<AnalysisState, never, ProcessService | AnalysisRuntime> {
+  return Effect.gen(function* () {
+    let state = initial;
+    for (const descriptor of descriptors) {
+      if (state.stopped) break;
+      state = yield* runAnalyzerStage(
+        options,
+        descriptor.name,
+        () => descriptor.run({
+          cwd: options.cwd,
+          scope,
+          project,
+          typeSimilarityThreshold: options.typeSimilarityThreshold,
+        }),
+        budget,
+        state,
+        diagnostics,
+        runId,
+      );
+    }
+    return state;
+  });
+}
+
+function runExternalStage(
+  options: AnalyzeOptions,
+  descriptors: readonly ExternalAnalyzerDescriptor[],
+  scope: Scope,
+  budget: number,
+  initial: AnalysisState,
+  diagnostics: AnalysisDiagnostics,
+  runId: string,
+): Effect.Effect<AnalysisState, never, ProcessService | AnalysisRuntime> {
+  return Effect.gen(function* () {
+    let state = initial;
+    for (const descriptor of descriptors) {
+      if (state.stopped) break;
+      state = yield* runAnalyzerStage(
+        options,
+        descriptor.name,
+        (beforeBundleEntry) => descriptor.run({
+          cwd: options.cwd,
+          scope,
+          maxMemoryMb: budget,
+          externalTimeoutMs: options.externalTimeoutMs,
+          beforeBundleEntry,
+        }),
+        budget,
+        state,
+        diagnostics,
+        runId,
+      );
+    }
+    return state;
+  });
+}
+
+function syntaxSourceSelection(descriptors: readonly SyntaxAnalyzerDescriptor[]): SyntaxSourceSelection {
+  const tests = descriptors.some((descriptor) => descriptor.sourceSelection === SyntaxSourceSelection.Tests);
+  const production = descriptors.some((descriptor) => descriptor.sourceSelection === SyntaxSourceSelection.Production);
+  return tests && production
+    ? SyntaxSourceSelection.ProductionAndTests
+    : tests
+      ? SyntaxSourceSelection.Tests
+      : SyntaxSourceSelection.Production;
+}
+
+function runSyntaxCapability(
+  options: AnalyzeOptions,
   plan: AnalysisPlan,
-  checks: readonly AnalyzerName[],
+  descriptors: readonly SyntaxAnalyzerDescriptor[],
+  initial: AnalysisState,
   diagnostics: AnalysisDiagnostics,
   runId: string,
 ): Effect.Effect<AnalysisState, ProgramError, ProcessService | AnalysisRuntime> {
+  if (descriptors.length === 0) return Effect.succeed(initial);
   return Effect.gen(function* () {
-    const loaded = yield* loadProjectIfNeeded(
+    const loaded = yield* loadProject(
       options,
-      seams,
-      { ...plan, checks },
+      { ...plan, state: initial },
+      descriptors[0].name,
+      "scoped-syntax",
+      createSyntaxProjectEffect(
+        options.cwd,
+        plan.scope,
+        options.sourceBudget,
+        syntaxSourceSelection(descriptors),
+      ),
       diagnostics,
       runId,
     );
-    // Keep the Project inside this scope so it is releasable before external tools start.
-    return yield* runStage(
+    if (loaded._tag === "stopped") return loaded.state;
+    return yield* runSyntaxStage(
       options,
-      checks,
+      descriptors,
       plan.scope,
       loaded.project,
       plan.budget,
@@ -637,6 +704,96 @@ function runInternalStages(
       runId,
     );
   });
+}
+
+function runTypeCapability(
+  options: AnalyzeOptions,
+  plan: AnalysisPlan,
+  descriptors: readonly TypeAnalyzerDescriptor[],
+  initial: AnalysisState,
+  diagnostics: AnalysisDiagnostics,
+  runId: string,
+): Effect.Effect<AnalysisState, ProgramError, ProcessService | AnalysisRuntime> {
+  if (descriptors.length === 0) return Effect.succeed(initial);
+  return Effect.gen(function* () {
+    const loaded = yield* loadProject(
+      options,
+      { ...plan, state: initial },
+      descriptors[0].name,
+      "types",
+      createTypeProjectEffect(options.cwd),
+      diagnostics,
+      runId,
+    );
+    if (loaded._tag === "stopped") return loaded.state;
+    return yield* runTypeStage(
+      options,
+      descriptors,
+      plan.scope,
+      loaded.project,
+      plan.budget,
+      loaded.state,
+      diagnostics,
+      runId,
+    );
+  });
+}
+
+function runCapabilityStages(
+  options: AnalyzeOptions,
+  plan: AnalysisPlan,
+  syntax: readonly SyntaxAnalyzerDescriptor[],
+  types: readonly TypeAnalyzerDescriptor[],
+  external: readonly ExternalAnalyzerDescriptor[],
+  diagnostics: AnalysisDiagnostics,
+  runId: string,
+): Effect.Effect<AnalysisState, ProgramError, ProcessService | AnalysisRuntime> {
+  return Effect.gen(function* () {
+    const afterSyntax = yield* runSyntaxCapability(
+      options,
+      plan,
+      syntax,
+      plan.state,
+      diagnostics,
+      runId,
+    );
+    const afterTypes = afterSyntax.stopped
+      ? afterSyntax
+      : yield* runTypeCapability(options, plan, types, afterSyntax, diagnostics, runId);
+    return yield* runExternalStage(
+      options,
+      external,
+      plan.scope,
+      plan.budget,
+      afterTypes,
+      diagnostics,
+      runId,
+    );
+  });
+}
+
+function partitionDescriptors(descriptors: readonly AnalyzerDescriptor[]): {
+  syntax: SyntaxAnalyzerDescriptor[];
+  types: TypeAnalyzerDescriptor[];
+  external: ExternalAnalyzerDescriptor[];
+} {
+  const syntax: SyntaxAnalyzerDescriptor[] = [];
+  const types: TypeAnalyzerDescriptor[] = [];
+  const external: ExternalAnalyzerDescriptor[] = [];
+  for (const descriptor of descriptors) {
+    switch (descriptor.capability) {
+      case "syntax":
+        syntax.push(descriptor);
+        break;
+      case "type":
+        types.push(descriptor);
+        break;
+      case "external":
+        external.push(descriptor);
+        break;
+    }
+  }
+  return { syntax, types, external };
 }
 
 function runBenchmarks(
@@ -716,27 +873,13 @@ export function analyzeEffect(
       );
       return result;
     }
-    const internal = plan.checks.filter(
-      (name) => analyzerDescriptor(name).project !== ProjectRequirement.None,
-    );
-    const external = plan.checks.filter(
-      (name) => analyzerDescriptor(name).project === ProjectRequirement.None,
-    );
-    const afterInternal = yield* runInternalStages(
+    const descriptors = partitionDescriptors(plan.descriptors);
+    const afterExternal = yield* runCapabilityStages(
       options,
-      seams,
       plan,
-      internal,
-      diagnostics,
-      runId,
-    );
-    const afterExternal = yield* runStage(
-      options,
-      external,
-      plan.scope,
-      undefined,
-      plan.budget,
-      afterInternal,
+      descriptors.syntax,
+      descriptors.types,
+      descriptors.external,
       diagnostics,
       runId,
     );

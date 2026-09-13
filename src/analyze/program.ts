@@ -6,14 +6,6 @@ import { ProgramError, ScopeMode } from "./model.js";
 import type { Scope } from "./scope.js";
 import { isOutsideWorkspace, normalizeWorkspacePath } from "./workspace-path.js";
 
-export const ProjectRequirement = {
-  None: "none",
-  ScopedSyntax: "scoped-syntax",
-  CorpusSyntax: "corpus-syntax",
-  Types: "types",
-} as const;
-export type ProjectRequirement = typeof ProjectRequirement[keyof typeof ProjectRequirement];
-
 export const SyntaxSourceSelection = {
   Production: "production",
   Tests: "tests",
@@ -26,7 +18,6 @@ export interface SyntaxProject {
   testFiles: readonly ts.SourceFile[];
 }
 export interface TypeProject extends SyntaxProject { program: ts.Program; checker: ts.TypeChecker }
-export type Project = SyntaxProject | TypeProject;
 
 export interface SyntaxSourceBudget {
   readonly maxFiles: number;
@@ -225,34 +216,25 @@ const createTypeProject = (
   };
 };
 
-/** Loads only the project data that the selected analyzers require. */
-export const createAnalysisProjectEffect = (
+/** Loads the bounded syntax corpus selected for syntax-only analyzers. */
+export const createSyntaxProjectEffect = (
   cwd: string,
   scope: Scope,
-  requirement: ProjectRequirement,
   sourceBudget?: SyntaxSourceBudget,
   selection: SyntaxSourceSelection = SyntaxSourceSelection.Production,
-): Effect.Effect<Project | undefined, ProgramError> => requirement === ProjectRequirement.None
-  ? Effect.as(Effect.void, undefined as Project | undefined)
-  : requirement === ProjectRequirement.ScopedSyntax && scope.mode !== ScopeMode.All
-    ? Effect.try({
-      try: () => createExplicitSyntaxProject(cwd, scope, sourceBudget, selection),
-      catch: toProgramError,
-    })
-    : Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
-      try: () => {
-        switch (requirement) {
-          case ProjectRequirement.ScopedSyntax:
-            return createSyntaxProject(cwd, scope, true, parsed, sourceBudget, selection);
-          case ProjectRequirement.CorpusSyntax:
-            return createSyntaxProject(cwd, scope, false, parsed, sourceBudget, selection);
-          case ProjectRequirement.Types:
-            return createTypeProject(cwd, parsed, selection);
-        }
-      },
-      catch: toProgramError,
-    }));
+): Effect.Effect<SyntaxProject, ProgramError> => scope.mode !== ScopeMode.All
+  ? Effect.try({
+    try: () => createExplicitSyntaxProject(cwd, scope, sourceBudget, selection),
+    catch: toProgramError,
+  })
+  : Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
+    try: () => createSyntaxProject(cwd, scope, true, parsed, sourceBudget, selection),
+    catch: toProgramError,
+  }));
 
-export function isTypeProject(project: Project): project is TypeProject {
-  return "checker" in project;
-}
+/** Loads the semantic TypeScript project used by type analyzers. */
+export const createTypeProjectEffect = (cwd: string): Effect.Effect<TypeProject, ProgramError> =>
+  Effect.flatMap(parseTsconfigEffect(cwd), (parsed) => Effect.try({
+    try: () => createTypeProject(cwd, parsed),
+    catch: toProgramError,
+  }));
