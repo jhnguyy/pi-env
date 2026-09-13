@@ -20,7 +20,7 @@ Output:
 Exact paths with line ranges and one-line descriptions.
 
 ## Key Code
-Critical types, interfaces, or functions — verbatim from source.
+Critical types, interfaces, or functions. Include verbatim source only when exact declarations improve the handoff.
 
 ## Structure
 How the pieces connect. Entry points, data flow, dependency direction.

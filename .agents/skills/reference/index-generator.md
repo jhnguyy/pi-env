@@ -5,7 +5,7 @@ description: Produce a compressed navigational index for any set of files or not
 
 # Index Generator
 
-Agents miss retrieval tool calls roughly half the time — a compressed index in passive context consistently outperforms on-demand retrieval at the same quality. 8KB compressed ≈ 40KB full embed.
+Use a compressed index when passive navigation helps an agent find relevant sources without loading the full collection.
 
 ## What a Good Index Is
 

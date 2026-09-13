@@ -1,29 +1,17 @@
 ---
 name: handoff
-description: Write or read a session handoff. Use when the user says "handoff", "new session", or "fresh context", when context window exceeds 50% and the task is incomplete, or when switching models mid-task.
+description: Write or read a session handoff. Use when the user explicitly asks for a handoff, new session, fresh context, or continuation from a handoff.
 ---
 
 # Handoff
 
 ## When to Write
 
-Write a handoff when **any** of these apply:
-
-- Context window is estimated >50% full and the task is incomplete
-- User says "handoff", "write a handoff", "new session", or "fresh start"
-- Switching models or providers mid-task
-- Session has degraded — compaction has run, or artifact tracking feels unreliable
-
-Do not wait to be asked. Propose writing one when context pressure is visible.
+Write a handoff when the user requests one. You can suggest a handoff when context pressure, compaction, unreliable state tracking, or a model switch threatens continuity.
 
 ## Where Handoffs Live
 
-| Scope | Path |
-|---|---|
-| Global (default) | `~/.pi/agent/handoffs/<slug>.md` |
-| Project-scoped | `<project-root>/.pi/handoffs/<slug>.md` |
-
-Use global by default. Use project-scoped only when the task is tightly bound to one repo. Handoff files are **never committed to git**.
+Use the location and lifecycle from the local storage adapter or user instruction. If neither identifies a destination, ask before storing the handoff. Return the handoff as text when durable storage is not required.
 
 ## Format
 
@@ -42,7 +30,7 @@ model-used: provider/model-name
 
 **Goal** — One paragraph. What are we trying to accomplish? What does done look like?
 
-**Context** — File paths and note paths the receiving agent must read. No embedded content — paths only.
+**Context** — File paths and note paths the receiving agent must read. Include small, indispensable facts that the sources do not preserve.
 
 ```
 Files:
@@ -60,27 +48,28 @@ Notes:
 
 **Key Constraints** — Rules the receiving agent must not violate.
 
-**Prompt** — One line for the user to paste into a new session:
+**Prompt** — One line for the user to paste into a new session. Use the actual handoff location:
 ```
-Read ~/.pi/agent/handoffs/<slug>.md then continue the task.
+Read <handoff-path> then continue the task.
 ```
 
 ## Writing Rules
 
-- **No embedded content.** File paths only — the receiving agent reads them directly.
-- **No provider-specific syntax.** Must work across Claude, GPT-4, Gemini, and local models.
-- **No session transcripts.** Distill, don't dump.
-- **Status must be accurate.** A handoff marked `complete` that isn't is worse than no handoff.
-- **Prompt section is required.** It is the only entry point for the next agent.
+- Prefer source paths over copied content that can drift.
+- Include enough context to resume when a material fact exists only in the session.
+- Use provider-neutral language.
+- Distill the work. Do not include session transcripts.
+- Keep the status accurate.
+- Include a short prompt that gives the receiving agent an entry point.
 
 ## Naming
 
-`YYYYMMDD-<slug>.md` — short kebab-case, date prefix. Example: `20260302-auth-refactor.md`.
+Follow the local storage convention. If none exists, use `YYYYMMDD-<short-kebab-case-slug>.md`.
 
 ## Reading a Handoff
 
-Read the file, gather everything listed under Context, then present a summary of what you found and the planned next steps for confirmation before acting.
+Read the file and gather the sources listed under Context. Continue within the authority already given by the handoff and current request. Ask for confirmation only when intent, authority, or a consequential choice remains unclear.
 
 ## Lifecycle
 
-Delete once `status: complete` and the following session confirms done. Review `~/.pi/agent/handoffs/` periodically — stale handoffs accumulate quickly.
+Follow the local storage adapter or user instruction for retention and cleanup.

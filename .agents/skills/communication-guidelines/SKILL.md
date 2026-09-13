@@ -7,7 +7,7 @@ description: Drafts, rewrites, and reviews substantial human-facing prose under 
 
 ## Rule
 
-Use the core principles of ASD-STE100 Simplified Technical English, Issue 9. This is a house style, not a claim of formal compliance. A request for a different tone or style does not disable it.
+Use the core principles of ASD-STE100 Simplified Technical English, Issue 9, as the default. This is a house style, not a claim of formal compliance. Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning.
 
 Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
 

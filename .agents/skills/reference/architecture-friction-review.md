@@ -40,11 +40,11 @@ Look for:
    - **Remote but owned**: use ports/adapters to isolate protocol and deployment concerns.
    - **True external**: isolate behind a mockable adapter and keep external assumptions explicit.
 5. **Present candidates**
-   - Produce 3-5 candidates unless the user asks for a narrow review.
+   - Report only candidates supported by material evidence. Do not fill a quota.
    - Use visual reports when they improve comprehension.
    - Store durable summaries and sidecars using local adapter conventions.
-6. **Grill the selected candidate**
-   - Switch to the `grill` technique for seam placement, interface shape, adapters, tests, migration, rollback, and deletion plan.
+6. **Pressure-test a selected candidate**
+   - When the user asks for an interactive challenge, use the `grill` technique for seam placement, interface shape, adapters, tests, migration, rollback, and deletion plan.
 7. **Capture outcome**
    - Durable outputs should be decisions, task breakdowns, design notes, or implementation plans according to local convention.
    - If the destination is unclear, ask where the outcome should go.

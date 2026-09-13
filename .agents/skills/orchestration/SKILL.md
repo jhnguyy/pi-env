@@ -11,15 +11,15 @@ Route bounded context to focused subagents. The parent owns scope, sequencing, i
 gather once → dispatch independent work → wait → synthesize → verify
 ```
 
-## Method
+## Guidance
 
-1. Define the goal, constraints, non-goals, and completion evidence.
-2. Use an available read-only agent when repository context is not already available.
-3. Give each child one goal, a bounded scope, required evidence, and an output contract.
-4. Follow the `code-contribution` skill before code changes. Create a dedicated branch and worktree for each writer.
-5. Start all independent jobs before waiting for one. Dispatch dependent work only after its inputs settle.
-6. Review and distill each child handoff. Do not relay child output without review.
-7. Resolve conflicts and run the required repository checks in the parent session.
+- Define the goal, constraints, non-goals, and completion evidence.
+- Delegate when parallel work, isolated context, or independent review can improve speed or quality. Work directly when delegation would add overhead without a useful boundary.
+- Give each child one goal, a bounded scope, required evidence, and an output contract.
+- Follow the `code-contribution` skill before code changes. Isolate each writer in a dedicated worktree.
+- Start independent jobs before waiting. Dispatch dependent work after their inputs settle.
+- Review and distill each child handoff. Do not relay child output without review.
+- Resolve conflicts and run the required repository checks in the parent session.
 
 Inspect the live `subagent` tool description before dispatch. It is the source of truth for agents, models, actions, tools, job lifecycle, and runtime limits.
 
@@ -34,11 +34,7 @@ Inspect the live `subagent` tool description before dispatch. It is the source o
 
 A subagent `cwd` does not create a worktree. Use the `code-contribution` skill to prepare and clean worktrees. The parent remains responsible for inspecting and integrating child changes.
 
-## DAG boundary
-
-The repository DAG runtime is an internal primitive for code-owned domain workflows. It is not a generic model-facing orchestration tool. Do not describe ordinary subagent dispatch as a DAG run.
-
-A future skill can combine this method with a generic DAG run interface after that interface exists. Until then, use the current `subagent` actions or a domain tool that owns a fixed DAG.
+Do not describe ordinary subagent dispatch as a DAG run. The repository DAG runtime belongs to code-owned domain workflows.
 
 ## Boundaries
 
