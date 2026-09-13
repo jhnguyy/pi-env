@@ -3,15 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import {
-  createWorkspaceReconciler,
-  ensureCoordinator,
-  makeSessionCatalog,
-  SessionHostFailure,
-  type CurrentWindow,
-  type OpenSessionRecord,
-  type SessionHostShape,
-} from "../index.js";
+import type { OpenSessionRecord } from "../contracts.js";
+import { createWorkspaceReconciler, ensureCoordinator } from "../coordinator.js";
+import { SessionHostFailure, type CurrentWindow, type SessionHostShape } from "../host.js";
+import { createFileSessionCatalog } from "../storage.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -23,7 +18,7 @@ async function fixture() {
   roots.push(root);
   const cwd = join(root, "workspace");
   await mkdir(cwd);
-  return { root, cwd, catalog: makeSessionCatalog(join(root, "agent")) };
+  return { root, cwd, catalog: createFileSessionCatalog(join(root, "agent")) };
 }
 
 const window: CurrentWindow = {
@@ -34,29 +29,25 @@ const window: CurrentWindow = {
 };
 
 describe("workspace coordinator", () => {
-  it("creates one stable durable coordinator and collects old tombstones", async () => {
+  it("creates one stable durable coordinator", async () => {
     const { cwd, catalog } = await fixture();
 
     const first = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
     );
     const second = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 99, sessionId: "coordinator-b" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 99 }),
     );
 
-    expect(first).toMatchObject({
-      sessionId: "coordinator-a",
-      name: "coordinator-amber-cedar",
-      role: "coordinator",
-    });
+    expect(first.role).toBe("coordinator");
     expect(second).toEqual(first);
     expect((await Effect.runPromise(catalog.read(cwd)))?.coordinator).toEqual(first);
   });
 
-  it("restores independent sessions and reports a missing directory without failing the workspace", async () => {
+  it("restores independent sessions and reports one failure without failing the workspace", async () => {
     const { root, cwd, catalog } = await fixture();
     const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
     );
     const timestamp = new Date().toISOString();
     const sessionFile = join(root, "work-a.jsonl");
@@ -135,7 +126,7 @@ describe("workspace coordinator", () => {
   it("accepts a fresh readiness announcement from a surviving existing window", async () => {
     const { cwd, catalog } = await fixture();
     const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
     );
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
@@ -195,7 +186,7 @@ describe("workspace coordinator", () => {
   it("leaves an unready restored window running and reports its timeout", async () => {
     const { cwd, catalog } = await fixture();
     const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
     );
     const timestamp = new Date().toISOString();
     await Effect.runPromise(

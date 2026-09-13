@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile, realpath, readdir, rename, lstat, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Clock, Context, Effect, Layer } from "effect";
+import { Clock, Effect } from "effect";
 import lockfile from "proper-lockfile";
 import {
   ManifestCommitFailure,
@@ -65,7 +65,7 @@ const errno = (x: unknown, code: string) =>
   typeof x === "object" && x !== null && (x as NodeJS.ErrnoException).code === code;
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-export function manifestPathForCanonicalCwd(agentDir: string, canonicalCwd: string): string {
+function manifestPathForCanonicalCwd(agentDir: string, canonicalCwd: string): string {
   const digest = createHash("sha256").update(canonicalCwd, "utf8").digest("hex");
   return join(agentDir, "session-manager", "workspaces", `${digest}.json`);
 }
@@ -338,20 +338,9 @@ export interface SessionCatalogShape {
   ) => Effect.Effect<SessionManifest, SessionCatalogFailure>;
 }
 
-export class SessionCatalog extends Context.Service<SessionCatalog, SessionCatalogShape>()(
-  "pi/session-manager/SessionCatalog",
-) {}
-
-export function makeSessionCatalog(
+export function createFileSessionCatalog(
   agentDir: string,
   storage: StorageAdapter = nodeStorage,
 ): SessionCatalogShape {
   return new FileSessionCatalog(agentDir, storage);
-}
-
-export function sessionCatalogLayer(
-  agentDir: string,
-  storage: StorageAdapter = nodeStorage,
-): Layer.Layer<SessionCatalog> {
-  return Layer.succeed(SessionCatalog, makeSessionCatalog(agentDir, storage));
 }

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
-import { Context, Data, Effect, Layer } from "effect";
+import { Data, Effect } from "effect";
 
 export type ExecResult = {
   readonly stdout: string;
@@ -86,7 +86,7 @@ export interface SessionHostShape {
 
 const text = (result: ExecResult) => (result.stderr || result.stdout).trim();
 
-export function workspaceSessionName(canonicalCwd: string): string {
+function workspaceSessionName(canonicalCwd: string): string {
   const hash = createHash("sha256").update(canonicalCwd, "utf8").digest("hex").slice(0, 8);
   const slug =
     basename(canonicalCwd)
@@ -96,10 +96,6 @@ export function workspaceSessionName(canonicalCwd: string): string {
   const suffix = `-${hash}`;
   return `pi-${slug.slice(0, 80 - Buffer.byteLength(`pi-${suffix}`, "ascii"))}${suffix}`;
 }
-
-export class SessionHost extends Context.Service<SessionHost, SessionHostShape>()(
-  "pi/session-manager/SessionHost",
-) {}
 
 export function createTmuxSessionHost(exec: Exec): SessionHostShape {
   const run = (operation: string, args: string[]) =>
@@ -443,8 +439,4 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
     releaseCurrent,
     restoreWindow,
   };
-}
-
-export function tmuxSessionHostLayer(exec: Exec): Layer.Layer<SessionHost> {
-  return Layer.succeed(SessionHost, createTmuxSessionHost(exec));
 }

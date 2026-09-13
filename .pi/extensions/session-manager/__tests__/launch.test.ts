@@ -6,7 +6,7 @@ import {
   parseLaunchIntent,
   parseRuntimeMetadata,
   parseStartupClaim,
-} from "../index.js";
+} from "../launch.js";
 
 const workspaceId = "a".repeat(64);
 const launchId = "123e4567-e89b-42d3-a456-426614174000";

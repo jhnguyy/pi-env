@@ -3,14 +3,11 @@ import {
   ManifestMalformed,
   ManifestSemanticFailure,
   ManifestUnsupportedVersion,
-  canonicalJson,
-  gcTombstones,
-  manifestPathForCanonicalCwd,
-  validateManifest,
   type ClosedSessionRecord,
   type OpenSessionRecord,
   type SessionManifest,
-} from "../index.js";
+} from "../contracts.js";
+import { canonicalJson, gcTombstones, validateManifest } from "../schema.js";
 
 const cwd = "/tmp/workspace";
 const createdAt = "2025-01-01T00:00:00.000Z";
@@ -178,12 +175,6 @@ describe("session manifest v1", () => {
 });
 
 describe("session manifest transforms", () => {
-  it("derives the manifest path from the full lowercase SHA-256 digest", () => {
-    expect(manifestPathForCanonicalCwd("/agent", "/tmp/example")).toBe(
-      "/agent/session-manager/workspaces/f33aa9244af53b8803b7c0c7ac454809a7703655c68e42db6392c721deef250e.json",
-    );
-  });
-
   it("serializes object keys deterministically", () => {
     expect(canonicalJson({ z: 1, a: { y: 2, b: 3 } })).toBe('{"a":{"b":3,"y":2},"z":1}');
   });

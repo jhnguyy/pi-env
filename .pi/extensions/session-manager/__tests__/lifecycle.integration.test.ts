@@ -3,17 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
+import { CloseSource } from "../domain.js";
+import type { CurrentWindow, SessionHostShape } from "../host.js";
 import {
-  CloseSource,
   SessionAlreadyClosed,
-  SessionFileInvalid,
-  makeSessionCatalog,
   createSessionLifecycle,
-  nodeSessionFileProbe,
-  type CurrentWindow,
-  type SessionHostShape,
   type SessionStartInput,
-} from "../index.js";
+} from "../lifecycle.js";
+import { SessionFileInvalid, nodeSessionFileProbe } from "../session-file.js";
+import { createFileSessionCatalog } from "../storage.js";
 
 const roots: string[] = [];
 const window: CurrentWindow = {
@@ -34,7 +32,7 @@ async function fixture() {
   roots.push(root);
   const cwd = join(root, "workspace");
   await mkdir(cwd);
-  const catalog = makeSessionCatalog(join(root, "agent"));
+  const catalog = createFileSessionCatalog(join(root, "agent"));
   const lifecycle = createSessionLifecycle({
     catalog,
     host,

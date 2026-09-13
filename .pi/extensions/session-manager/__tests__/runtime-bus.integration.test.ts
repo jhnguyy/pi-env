@@ -7,10 +7,10 @@ import { Effect } from "effect";
 import {
   RuntimeBusFailure,
   RuntimeMethod,
-  resolveRuntimePaths,
   runtimeRequest,
   startRuntimeBus,
-} from "../index.js";
+} from "../runtime-bus.js";
+import { resolveRuntimePaths } from "../runtime-path.js";
 
 const roots: string[] = [];
 afterEach(async () => {

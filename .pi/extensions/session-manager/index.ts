@@ -7,10 +7,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { readFile, unlink } from "node:fs/promises";
-import { Effect, Exit, Layer, Result, Schedule, Scope } from "effect";
+import { Effect, Exit, Result, Schedule, Scope } from "effect";
 import { createWorkspaceReconciler, renderRestoreSummary } from "./coordinator.js";
 import { CloseSource, findRecord, secureNameEntropy, type NameEntropy } from "./domain.js";
-import { SessionHost, tmuxSessionHostLayer, type SessionHostShape } from "./host.js";
+import { createTmuxSessionHost, type SessionHostShape } from "./host.js";
 import {
   type CoordinatorLaunch,
   type Environment,
@@ -36,7 +36,7 @@ import {
 } from "./runtime-bus.js";
 import { resolveRuntimePaths, workspaceId } from "./runtime-path.js";
 import { nodeSessionFileProbe, type SessionFileProbe } from "./session-file.js";
-import { SessionCatalog, sessionCatalogLayer, type SessionCatalogShape } from "./storage.js";
+import { createFileSessionCatalog, type SessionCatalogShape } from "./storage.js";
 
 type EditorFactory = (
   tui: TUI,
@@ -589,35 +589,8 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 }
 
 export default async function sessionManager(pi: ExtensionAPI): Promise<void> {
-  const runtimeLayer = Layer.merge(
-    sessionCatalogLayer(getAgentDir()),
-    tmuxSessionHostLayer((command, args) => pi.exec(command, args)),
-  );
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      registerSessionManager(pi, {
-        catalog: yield* SessionCatalog,
-        host: yield* SessionHost,
-      });
-    }).pipe(Effect.provide(runtimeLayer)),
-  );
+  registerSessionManager(pi, {
+    catalog: createFileSessionCatalog(getAgentDir()),
+    host: createTmuxSessionHost((command, args) => pi.exec(command, args)),
+  });
 }
-
-export {
-  SessionCatalog,
-  makeSessionCatalog,
-  manifestPathForCanonicalCwd,
-  nodeStorage,
-  sessionCatalogLayer,
-} from "./storage.js";
-export { SessionManifestSchema, canonicalJson, gcTombstones, validateManifest } from "./schema.js";
-export * from "./contracts.js";
-export * from "./coordinator.js";
-export * from "./domain.js";
-export * from "./host.js";
-export * from "./launch.js";
-export * from "./lifecycle.js";
-export * from "./runtime-bus.js";
-export * from "./runtime-path.js";
-export * from "./session-file.js";
-export type { SessionCatalogShape, StorageAdapter } from "./storage.js";
