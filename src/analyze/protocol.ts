@@ -599,28 +599,58 @@ export const AnalyzeProtocolPhase = {
 } as const;
 export type AnalyzeProtocolPhase = (typeof AnalyzeProtocolPhase)[keyof typeof AnalyzeProtocolPhase];
 
-export interface AnalyzeProtocolBudget {
+interface AnalyzeProtocolInitial {
   readonly bytes: number;
   readonly runId: string;
-  readonly phase: AnalyzeProtocolPhase;
-  readonly event?: AnalyzeWorkerEvent;
+  readonly phase: typeof AnalyzeProtocolPhase.Initial;
 }
 
-export function initialProtocolBudget(runId: string): AnalyzeProtocolBudget {
+interface AnalyzeProtocolStarted {
+  readonly bytes: number;
+  readonly runId: string;
+  readonly phase: typeof AnalyzeProtocolPhase.Started;
+}
+
+interface AnalyzeProtocolResult {
+  readonly bytes: number;
+  readonly runId: string;
+  readonly phase: typeof AnalyzeProtocolPhase.Result;
+  readonly result: AnalysisResult;
+}
+
+interface AnalyzeProtocolComplete {
+  readonly bytes: number;
+  readonly runId: string;
+  readonly phase: typeof AnalyzeProtocolPhase.Complete;
+  readonly result: AnalysisResult;
+}
+
+export type AnalyzeProtocolState =
+  | AnalyzeProtocolInitial
+  | AnalyzeProtocolStarted
+  | AnalyzeProtocolResult
+  | AnalyzeProtocolComplete;
+
+export interface AnalyzeProtocolTransition {
+  readonly state: AnalyzeProtocolState;
+  readonly event: AnalyzeWorkerEvent;
+}
+
+export function initialProtocolState(runId: string): AnalyzeProtocolInitial {
   return { bytes: 0, runId, phase: AnalyzeProtocolPhase.Initial };
 }
 
 export function acceptProtocolLine(
-  budget: AnalyzeProtocolBudget,
+  state: AnalyzeProtocolState,
   line: string,
-): Effect.Effect<AnalyzeProtocolBudget, AnalyzeProtocolError> {
-  if (budget.phase === AnalyzeProtocolPhase.Complete) {
+): Effect.Effect<AnalyzeProtocolTransition, AnalyzeProtocolError> {
+  if (state.phase === AnalyzeProtocolPhase.Complete) {
     return protocolFailure(
       AnalyzeProtocolErrorKind.State,
       "Analyze worker emitted data after terminal completion",
     );
   }
-  const bytes = budget.bytes + Buffer.byteLength(line, "utf8") + 1;
+  const bytes = state.bytes + Buffer.byteLength(line, "utf8") + 1;
   if (bytes > MAX_PROTOCOL_TOTAL_BYTES) {
     return protocolFailure(
       AnalyzeProtocolErrorKind.TotalLimit,
@@ -629,11 +659,10 @@ export function acceptProtocolLine(
   }
   return parseAnalyzeWorkerEvent(line).pipe(
     Effect.flatMap((event) => {
-      if (event.runId !== budget.runId) {
+      if (event.runId !== state.runId) {
         return protocolFailure(AnalyzeProtocolErrorKind.State, "Analyze worker changed runId");
       }
-      let phase: AnalyzeProtocolPhase;
-      switch (budget.phase) {
+      switch (state.phase) {
         case AnalyzeProtocolPhase.Initial:
           if (event.type !== AnalyzeWorkerMessageType.Started) {
             return protocolFailure(
@@ -641,20 +670,32 @@ export function acceptProtocolLine(
               "Analyze worker must start before emitting events",
             );
           }
-          phase = AnalyzeProtocolPhase.Started;
-          break;
+          return Effect.succeed<AnalyzeProtocolTransition>({
+            state: { bytes, runId: state.runId, phase: AnalyzeProtocolPhase.Started },
+            event,
+          });
         case AnalyzeProtocolPhase.Started:
           if (event.type === AnalyzeWorkerMessageType.Diagnostic) {
-            phase = AnalyzeProtocolPhase.Started;
-          } else if (event.type === AnalyzeWorkerMessageType.Result) {
-            phase = AnalyzeProtocolPhase.Result;
-          } else {
-            return protocolFailure(
-              AnalyzeProtocolErrorKind.State,
-              "Analyze worker emitted an out-of-order event",
-            );
+            return Effect.succeed<AnalyzeProtocolTransition>({
+              state: { ...state, bytes },
+              event,
+            });
           }
-          break;
+          if (event.type === AnalyzeWorkerMessageType.Result) {
+            return Effect.succeed<AnalyzeProtocolTransition>({
+              state: {
+                bytes,
+                runId: state.runId,
+                phase: AnalyzeProtocolPhase.Result,
+                result: event.result,
+              },
+              event,
+            });
+          }
+          return protocolFailure(
+            AnalyzeProtocolErrorKind.State,
+            "Analyze worker emitted an out-of-order event",
+          );
         case AnalyzeProtocolPhase.Result:
           if (event.type !== AnalyzeWorkerMessageType.Complete) {
             return protocolFailure(
@@ -662,15 +703,16 @@ export function acceptProtocolLine(
               "Analyze worker must complete immediately after result",
             );
           }
-          phase = AnalyzeProtocolPhase.Complete;
-          break;
-        case AnalyzeProtocolPhase.Complete:
-          return protocolFailure(
-            AnalyzeProtocolErrorKind.State,
-            "Analyze worker emitted data after terminal completion",
-          );
+          return Effect.succeed<AnalyzeProtocolTransition>({
+            state: {
+              bytes,
+              runId: state.runId,
+              phase: AnalyzeProtocolPhase.Complete,
+              result: state.result,
+            },
+            event,
+          });
       }
-      return Effect.succeed({ bytes, runId: budget.runId, phase, event });
     }),
   );
 }
