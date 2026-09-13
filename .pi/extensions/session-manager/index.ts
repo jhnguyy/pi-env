@@ -312,7 +312,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       syncingName = false;
     }
     installEditor(ctx, false);
-    ctx.ui.setStatus("session-manager", `session: ${session.record.name}`);
   };
 
   const startReadinessPublisher = async (launch: RestoredWorkLaunch): Promise<void> => {
@@ -472,7 +471,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       const renamed = await queue(() => run(lifecycle.rename(target, name)));
       if (target.record.sessionId !== managed?.record.sessionId) return;
       managed = renamed;
-      ctx.ui.setStatus("session-manager", `session: ${managed.record.name}`);
     } catch (error) {
       if (target.record.sessionId !== managed?.record.sessionId) return;
       if (error instanceof SessionWindowSyncFailed) {
@@ -500,7 +498,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
           syncingName = false;
         }
         if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
-        ctx.ui.setStatus("session-manager", `session: ${managed.record.name}`);
         ctx.ui.notify(`Session adopted as ${managed.record.name}.`, "info");
       } catch (error) {
         if (error instanceof SessionBindingFailed) {
@@ -511,7 +508,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
             syncingName = false;
           }
           if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
-          ctx.ui.setStatus("session-manager", `session: ${managed.record.name}`);
         }
         notifyError(ctx, "Session adoption", error);
       }
@@ -577,7 +573,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         notifyError(ctx, "Tmux window release", error);
       }
     }
-    ctx.ui.setStatus("session-manager", undefined);
     if (installedFactory && ctx.ui.getEditorComponent() === installedFactory) {
       ctx.ui.setEditorComponent(previousFactory);
     }
