@@ -11,21 +11,15 @@ import { analyze, analyzeEffect } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
 import { formatResult, shouldFail } from "../format.js";
 import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, ProcessErrorKind, ScopeMode, Severity, type AnalysisResult, type Finding } from "../model.js";
-import { createAnalysisProjectEffect, isTypeProject, ProjectRequirement, SyntaxSourceSelection } from "../program.js";
-import { analyzerDescriptor, projectRequirement, projectSourceSelection } from "../registry.js";
+import { createSyntaxProjectEffect, createTypeProjectEffect, SyntaxSourceSelection } from "../program.js";
 import { childHeapLimitMb, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
 import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
-const createProjectEffect = (cwd: string) =>
-  createAnalysisProjectEffect(cwd, allScope, ProjectRequirement.Types).pipe(
-    Effect.map((project) => {
-      if (!project || !isTypeProject(project)) throw new Error("Expected a type project");
-      return project;
-    }),
-  );
+const zeroRuntime = { now: () => 0, memory: () => ({ rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 }) };
+const createProjectEffect = (cwd: string) => createTypeProjectEffect(cwd);
 const testCloneBody = `
   const values = [1, 2, 3, 4];
   let total = 0;
@@ -210,24 +204,20 @@ describe("analyze contracts", () => {
   });
 
   it("rejects impossible analyzer budgets before capability loading while allowing eligible checks", async () => {
-    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    let creations = 0;
-    let launches = 0;
-    const runtime = { now: () => 0, memory: () => ({ rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 }) };
+    const runtime = zeroRuntime;
     const rejectedInternal = await Effect.runPromise(analyzeEffect({
-      cwd, scope: ScopeMode.All, maxMemoryMb: 1023, checks: [AnalyzerName.Types],
-    }, { createAnalysisProject: () => { creations++; return undefined; }, runtime }));
-    expect(creations).toBe(0); // preflight rejects before the semantic project is created
+      cwd: fixtureRoot(), scope: ScopeMode.All, maxMemoryMb: 1023, checks: [AnalyzerName.Types],
+    }, { runtime }));
     expect(rejectedInternal.analyzerFailures[0]).toMatchObject({ analyzer: AnalyzerName.Types });
 
+    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
+    let launches = 0;
     const result = await Effect.runPromise(analyzeEffect({
       cwd, scope: ScopeMode.All, maxMemoryMb: 512, checks: [AnalyzerName.Complexity, AnalyzerName.Types],
     }, {
-      createAnalysisProject: () => { creations++; return undefined; },
       processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); },
       runtime,
     }));
-    expect(creations).toBe(1); // complexity is accepted exactly at its 512 MiB boundary
     expect(launches).toBe(0);
     expect(result.analyzerFailures).toEqual(expect.arrayContaining([
       expect.objectContaining({ analyzer: AnalyzerName.Types, message: expect.stringContaining("512 MiB") }),
@@ -250,25 +240,18 @@ describe("analyze contracts", () => {
   });
 
   it("stops before project creation when runtime memory exceeds the budget", async () => {
-    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    let creations = 0;
     const result = await Effect.runPromise(analyzeEffect({
-      cwd,
+      cwd: fixtureRoot(),
       scope: ScopeMode.All,
       maxMemoryMb: 512,
       checks: [AnalyzerName.Complexity],
     }, {
-      createAnalysisProject: () => {
-        creations += 1;
-        return undefined;
-      },
       runtime: {
         now: () => 0,
         memory: () => ({ rssBytes: 513 * 1024 * 1024, heapUsedBytes: 0, externalBytes: 0 }),
       },
     }));
 
-    expect(creations).toBe(0);
     expect(result.analyzerFailures).toEqual([
       expect.objectContaining({ analyzer: AnalyzerName.Complexity, message: expect.stringContaining("Memory budget exceeded") }),
     ]);
@@ -301,13 +284,28 @@ describe("analyze contracts", () => {
     expect(invocation?.options?.env?.NODE_OPTIONS ?? "").not.toContain("--max-old-space-size");
   });
 
-  it("plans external-only runs without creating a Program and profiles only on request", async () => {
-    const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
-    let creations = 0;
-    const plain = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Bundle] }, { createAnalysisProject: () => { creations++; return Effect.die("unexpected project creation"); } }));
-    expect(creations).toBe(0);
+  it("runs external-only analysis without a TypeScript project", async () => {
+    const cwd = fixtureRoot();
+    const plain = await Effect.runPromise(analyze({
+      cwd,
+      scope: ScopeMode.All,
+      checks: [AnalyzerName.Knip],
+      maxMemoryMb: 768,
+    }, {
+      processRunner: () => Effect.succeed({ stdout: JSON.stringify({ files: [], issues: [] }), stderr: "" }),
+      runtime: zeroRuntime,
+    }));
+    expect(plain.analyzerFailures).toEqual([]);
     expect(plain.profile).toBeUndefined();
-    const profiled = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All, checks: [], profile: true }));
+  });
+
+  it("profiles only on request", async () => {
+    const profiled = await Effect.runPromise(analyze({
+      cwd: fixtureRoot(),
+      scope: ScopeMode.All,
+      checks: [],
+      profile: true,
+    }));
     expect(profiled.profile?.peak.rssBytes).toBeGreaterThan(0);
     expect(profiled.profile?.timings.scope).toBeGreaterThanOrEqual(0);
     expect(profiled.profile?.memory["after:scope"]?.rssBytes).toBeGreaterThan(0);
@@ -318,25 +316,46 @@ describe("analyze contracts", () => {
     expect(childHeapLimitMb(1024, 400 * 1024 * 1024)).toBe(112);
   });
 
-  it("plans the least expensive project capability for selected analyzers", async () => {
+  it("keeps scoped syntax loading within the selected paths", async () => {
     const cwd = writeProject({
       "src/changed.ts": "export const changed = 1;",
       "src/global.ts": "export const global = 1;",
     });
-    const scope = pathScope(["src/changed.ts"]);
-    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.AsyncRisk])).toBe(ProjectRequirement.ScopedSyntax);
-    expect(projectRequirement([AnalyzerName.Complexity, AnalyzerName.Duplicates])).toBe(ProjectRequirement.ScopedSyntax);
-    expect(projectRequirement([AnalyzerName.TestDuplicates])).toBe(ProjectRequirement.ScopedSyntax);
-    expect(projectRequirement([AnalyzerName.Duplicates, AnalyzerName.Types])).toBe(ProjectRequirement.Types);
-    expect(projectSourceSelection([AnalyzerName.TestDuplicates])).toBe(SyntaxSourceSelection.Tests);
-    expect(projectSourceSelection([AnalyzerName.Complexity, AnalyzerName.TestDuplicates])).toBe(
-      SyntaxSourceSelection.ProductionAndTests,
+    const project = await Effect.runPromise(
+      createSyntaxProjectEffect(cwd, pathScope(["src/changed.ts"])),
     );
-    const scoped = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.ScopedSyntax)))!;
-    const corpus = (await Effect.runPromise(createAnalysisProjectEffect(cwd, scope, ProjectRequirement.CorpusSyntax)))!;
-    expect(scoped.files.map((file) => file.fileName)).toHaveLength(1);
-    expect(corpus.files.map((file) => file.fileName)).toHaveLength(2);
-    expect(isTypeProject(scoped)).toBe(false);
+
+    expect(project.files.map((file) => file.fileName)).toEqual([join(cwd, "src/changed.ts")]);
+  });
+
+  it("does not broaden scoped duplicates when types needs the production corpus", async () => {
+    const cwd = writeProject({
+      "src/selected.ts": `
+        export function selected(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
+        export interface SelectedDto { id: string; name: string; active: boolean; count: number; }
+      `,
+      "src/outside.ts": `
+        export function outside(other: number) { const items = [5,6,7,8]; let sum = 0; for (const item of items) { if (item > other) sum += item * 3; else sum += item; } return sum; }
+        export interface OutsideDto { id: string; name: string; active: boolean; count: number; }
+      `,
+    });
+    const result = await Effect.runPromise(analyzeEffect({
+      cwd,
+      scope: ScopeMode.Paths,
+      paths: ["src/selected.ts"],
+      checks: [AnalyzerName.Duplicates, AnalyzerName.Types],
+      maxMemoryMb: 1024,
+    }, { runtime: zeroRuntime }));
+
+    expect(result.analyzerFailures).toEqual([]);
+    expect(result.findings.filter(({ analyzer }) => analyzer === AnalyzerName.Duplicates)).toEqual([]);
+    expect(result.findings.filter(({ analyzer }) => analyzer === AnalyzerName.Types)).toEqual([
+      expect.objectContaining({
+        kind: FindingKind.TypeSimilarity,
+        location: expect.objectContaining({ path: "src/selected.ts" }),
+        related: [expect.objectContaining({ path: "src/outside.ts" })],
+      }),
+    ]);
   });
 
   it("loads selected test sources separately from production sources", async () => {
@@ -355,18 +374,12 @@ describe("analyze contracts", () => {
       "src/__tests__/fixture.json",
     ]);
 
-    const production = (await Effect.runPromise(
-      createAnalysisProjectEffect(cwd, scope, ProjectRequirement.ScopedSyntax),
-    ))!;
-    const tests = (await Effect.runPromise(
-      createAnalysisProjectEffect(
-        cwd,
-        scope,
-        ProjectRequirement.ScopedSyntax,
-        undefined,
-        SyntaxSourceSelection.Tests,
-      ),
-    ))!;
+    const production = await Effect.runPromise(
+      createSyntaxProjectEffect(cwd, scope),
+    );
+    const tests = await Effect.runPromise(
+      createSyntaxProjectEffect(cwd, scope, undefined, SyntaxSourceSelection.Tests),
+    );
 
     expect(production.files.map((file) => file.fileName)).toHaveLength(1);
     expect(production.testFiles).toEqual([]);
@@ -380,26 +393,23 @@ describe("analyze contracts", () => {
       "src/b.ts": "export const b = 'bbbbbbbbbbbbbbbb';",
     });
     const scope = pathScope(["src/a.ts", "src/b.ts"]);
-    const tooMany = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+    const tooMany = await Effect.runPromise(Effect.result(createSyntaxProjectEffect(
       cwd,
       scope,
-      ProjectRequirement.ScopedSyntax,
       { maxFiles: 1, maxFileBytes: 1_000, maxTotalBytes: 2_000 },
     )));
     expect(Result.isFailure(tooMany) ? tooMany.failure.message : "").toContain("file limit exceeded");
 
-    const oversizedFile = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+    const oversizedFile = await Effect.runPromise(Effect.result(createSyntaxProjectEffect(
       cwd,
       scope,
-      ProjectRequirement.ScopedSyntax,
       { maxFiles: 2, maxFileBytes: 10, maxTotalBytes: 2_000 },
     )));
     expect(Result.isFailure(oversizedFile) ? oversizedFile.failure.message : "").toContain("file byte limit exceeded");
 
-    const oversizedTotal = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+    const oversizedTotal = await Effect.runPromise(Effect.result(createSyntaxProjectEffect(
       cwd,
       scope,
-      ProjectRequirement.ScopedSyntax,
       { maxFiles: 2, maxFileBytes: 1_000, maxTotalBytes: 50 },
     )));
     expect(Result.isFailure(oversizedTotal) ? oversizedTotal.failure.message : "").toContain("aggregate byte limit exceeded");
@@ -410,21 +420,12 @@ describe("analyze contracts", () => {
     const outside = join(fixtureRoot(), "outside.ts");
     writeFileSync(outside, "export const outside = true;");
     symlinkSync(outside, join(cwd, "src/link.ts"));
-    const outcome = await Effect.runPromise(Effect.result(createAnalysisProjectEffect(
+    const outcome = await Effect.runPromise(Effect.result(createSyntaxProjectEffect(
       cwd,
       pathScope(["src/link.ts"]),
-      ProjectRequirement.ScopedSyntax,
       { maxFiles: 1, maxFileBytes: 1_000, maxTotalBytes: 1_000 },
     )));
     expect(Result.isFailure(outcome) ? outcome.failure.message : "").toContain("resolves outside cwd");
-  });
-
-  it("captures internal analyzer exceptions in the typed error channel", async () => {
-    const outcome = await Effect.runPromise(Effect.result(analyzerDescriptor(AnalyzerName.Complexity).run({
-      cwd: fixtureRoot(), scope: allScope, maxMemoryMb: 256, beforeBundleEntry: () => true,
-    }).pipe(Effect.provide(processServiceLayer()))));
-    expect(outcome._tag).toBe("Failure");
-    if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
   });
 
   it("returns a structured result when tsconfig is missing", async () => {

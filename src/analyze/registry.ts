@@ -2,30 +2,58 @@ import { Effect } from "effect";
 import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "./analyzers.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import { AnalyzerName, AnalyzerRunError, type Finding } from "./model.js";
-import { isTypeProject, ProjectRequirement, SyntaxSourceSelection, type Project } from "./program.js";
+import { SyntaxSourceSelection, type SyntaxProject, type TypeProject } from "./program.js";
 import type { ProcessService } from "./process.js";
 import type { Scope } from "./scope.js";
 
-export interface AnalyzerContext {
+export interface SyntaxAnalyzerContext {
   cwd: string;
   scope: Scope;
-  project?: Project;
+  project: SyntaxProject;
+}
+
+export interface TypeAnalyzerContext {
+  cwd: string;
+  scope: Scope;
+  project: TypeProject;
   typeSimilarityThreshold?: number;
+}
+
+export interface ExternalAnalyzerContext {
+  cwd: string;
+  scope: Scope;
   maxMemoryMb: number;
   externalTimeoutMs?: number;
   beforeBundleEntry: (entrypoint: string) => boolean;
 }
 
-type AnalyzerRunner = (context: AnalyzerContext) => Effect.Effect<Finding[], AnalyzerRunError, ProcessService>;
-
-export interface AnalyzerDescriptor {
+interface AnalyzerDescriptorBase {
   name: AnalyzerName;
   defaultEnabled: boolean;
   /** Minimum total analysis budget, based on conservative observed peak runs. */
   minimumTotalMemoryMb: number;
-  project: ProjectRequirement;
-  run: AnalyzerRunner;
 }
+
+export interface SyntaxAnalyzerDescriptor extends AnalyzerDescriptorBase {
+  capability: "syntax";
+  sourceSelection: SyntaxSourceSelection;
+  run: (context: SyntaxAnalyzerContext) => Effect.Effect<Finding[], AnalyzerRunError>;
+}
+
+export interface TypeAnalyzerDescriptor extends AnalyzerDescriptorBase {
+  capability: "type";
+  run: (context: TypeAnalyzerContext) => Effect.Effect<Finding[], AnalyzerRunError>;
+}
+
+export interface ExternalAnalyzerDescriptor extends AnalyzerDescriptorBase {
+  capability: "external";
+  run: (context: ExternalAnalyzerContext) => Effect.Effect<Finding[], AnalyzerRunError, ProcessService>;
+}
+
+export type AnalyzerDescriptor =
+  | SyntaxAnalyzerDescriptor
+  | TypeAnalyzerDescriptor
+  | ExternalAnalyzerDescriptor;
 
 const analyzerError = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError =>
   cause instanceof AnalyzerRunError
@@ -35,120 +63,89 @@ const analyzerError = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError
 const internalEffect = (name: AnalyzerName, operation: Effect.Effect<Finding[], unknown>): Effect.Effect<Finding[], AnalyzerRunError> =>
   operation.pipe(Effect.mapError((cause) => analyzerError(name, cause)));
 
-const missingProject = (analyzer: AnalyzerName, message: string): Effect.Effect<never, AnalyzerRunError> =>
-  Effect.fail(new AnalyzerRunError({ analyzer, message }));
-
-const ANALYZERS: readonly AnalyzerDescriptor[] = [
-  {
+const ANALYZERS = {
+  [AnalyzerName.Complexity]: {
     name: AnalyzerName.Complexity,
     defaultEnabled: true,
     minimumTotalMemoryMb: 512,
-    project: ProjectRequirement.ScopedSyntax,
-    run: (context) => internalEffect(AnalyzerName.Complexity, context.project === undefined
-      ? missingProject(AnalyzerName.Complexity, "Complexity analyzer requires a syntax project")
-      : complexityEffect(context.project, context.cwd, context.scope)),
+    capability: "syntax",
+    sourceSelection: SyntaxSourceSelection.Production,
+    run: (context) => internalEffect(AnalyzerName.Complexity, complexityEffect(context.project, context.cwd, context.scope)),
   },
-  {
+  [AnalyzerName.Duplicates]: {
     name: AnalyzerName.Duplicates,
     defaultEnabled: true,
     minimumTotalMemoryMb: 512,
-    project: ProjectRequirement.ScopedSyntax,
-    run: (context) => internalEffect(AnalyzerName.Duplicates, context.project === undefined
-      ? missingProject(AnalyzerName.Duplicates, "Duplicate analyzer requires a syntax project")
-      : duplicatesEffect(context.project, context.cwd, context.scope)),
+    capability: "syntax",
+    sourceSelection: SyntaxSourceSelection.Production,
+    run: (context) => internalEffect(AnalyzerName.Duplicates, duplicatesEffect(context.project, context.cwd, context.scope)),
   },
-  {
+  [AnalyzerName.TestDuplicates]: {
     name: AnalyzerName.TestDuplicates,
     defaultEnabled: false,
     minimumTotalMemoryMb: 512,
-    project: ProjectRequirement.ScopedSyntax,
-    run: (context) => internalEffect(AnalyzerName.TestDuplicates, context.project === undefined
-      ? missingProject(AnalyzerName.TestDuplicates, "Test duplicate analyzer requires a syntax project")
-      : testDuplicatesEffect(context.project, context.cwd, context.scope)),
+    capability: "syntax",
+    sourceSelection: SyntaxSourceSelection.Tests,
+    run: (context) => internalEffect(AnalyzerName.TestDuplicates, testDuplicatesEffect(context.project, context.cwd, context.scope)),
   },
-  {
+  [AnalyzerName.Types]: {
     name: AnalyzerName.Types,
     defaultEnabled: true,
     minimumTotalMemoryMb: 1024,
-    project: ProjectRequirement.Types,
-    run: (context) => internalEffect(AnalyzerName.Types, context.project === undefined || !isTypeProject(context.project)
-      ? missingProject(AnalyzerName.Types, "Type analyzer requires a TypeScript type project")
-      : similarTypesEffect(context.project, context.cwd, context.scope, context.typeSimilarityThreshold)),
+    capability: "type",
+    run: (context) => internalEffect(AnalyzerName.Types, similarTypesEffect(context.project, context.cwd, context.scope, context.typeSimilarityThreshold)),
   },
-  {
+  [AnalyzerName.AsyncRisk]: {
     name: AnalyzerName.AsyncRisk,
     defaultEnabled: true,
     minimumTotalMemoryMb: 512,
-    project: ProjectRequirement.ScopedSyntax,
-    run: (context) => internalEffect(AnalyzerName.AsyncRisk, context.project === undefined
-      ? missingProject(AnalyzerName.AsyncRisk, "Async-risk analyzer requires a syntax project")
-      : asyncRisksEffect(context.project, context.cwd, context.scope)),
+    capability: "syntax",
+    sourceSelection: SyntaxSourceSelection.Production,
+    run: (context) => internalEffect(AnalyzerName.AsyncRisk, asyncRisksEffect(context.project, context.cwd, context.scope)),
   },
-  {
+  [AnalyzerName.Eslint]: {
     name: AnalyzerName.Eslint,
     defaultEnabled: true,
     minimumTotalMemoryMb: 1536,
-    project: ProjectRequirement.None,
+    capability: "external",
     run: (context) => eslintAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs),
   },
-  {
+  [AnalyzerName.Dependencies]: {
     name: AnalyzerName.Dependencies,
     defaultEnabled: true,
     minimumTotalMemoryMb: 768,
-    project: ProjectRequirement.None,
+    capability: "external",
     run: (context) => dependencyAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs),
   },
-  {
+  [AnalyzerName.Knip]: {
     name: AnalyzerName.Knip,
     defaultEnabled: true,
     minimumTotalMemoryMb: 768,
-    project: ProjectRequirement.None,
+    capability: "external",
     run: (context) => knipAnalyzerEffect(context.cwd, context.maxMemoryMb, context.externalTimeoutMs),
   },
-  {
+  [AnalyzerName.Bundle]: {
     name: AnalyzerName.Bundle,
     defaultEnabled: false,
     minimumTotalMemoryMb: 768,
-    project: ProjectRequirement.None,
+    capability: "external",
     run: (context) => bundleAnalyzerEffect(context.cwd, context.scope, context.maxMemoryMb, context.externalTimeoutMs, { beforeEntry: context.beforeBundleEntry }),
   },
-] as const;
+} satisfies Readonly<Record<AnalyzerName, AnalyzerDescriptor>>;
 
-const descriptorByName = new Map(ANALYZERS.map((descriptor) => [descriptor.name, descriptor]));
-const requirementRank: Readonly<Record<ProjectRequirement, number>> = {
-  [ProjectRequirement.None]: 0,
-  [ProjectRequirement.ScopedSyntax]: 1,
-  [ProjectRequirement.CorpusSyntax]: 2,
-  [ProjectRequirement.Types]: 3,
-};
+const ANALYZER_ORDER: readonly AnalyzerName[] = [
+  AnalyzerName.Complexity,
+  AnalyzerName.Duplicates,
+  AnalyzerName.TestDuplicates,
+  AnalyzerName.Types,
+  AnalyzerName.AsyncRisk,
+  AnalyzerName.Eslint,
+  AnalyzerName.Dependencies,
+  AnalyzerName.Knip,
+  AnalyzerName.Bundle,
+];
 
-export const defaultAnalyzerNames = ANALYZERS.flatMap((descriptor) =>
-  descriptor.defaultEnabled ? [descriptor.name] : [],
-);
+export const defaultAnalyzerNames = ANALYZER_ORDER.filter((name) => ANALYZERS[name].defaultEnabled);
 
-export function analyzerDescriptor(name: AnalyzerName): AnalyzerDescriptor {
-  return descriptorByName.get(name)!;
-}
-
-export function projectRequirement(checks: readonly AnalyzerName[]): ProjectRequirement {
-  let requirement: ProjectRequirement = ProjectRequirement.None;
-  for (const name of checks) {
-    const candidate = analyzerDescriptor(name).project;
-    if (requirementRank[candidate] > requirementRank[requirement]) requirement = candidate;
-  }
-  return requirement;
-}
-
-export function projectSourceSelection(checks: readonly AnalyzerName[]): SyntaxSourceSelection {
-  const internalChecks = checks.filter(
-    (name) => analyzerDescriptor(name).project !== ProjectRequirement.None,
-  );
-  const tests = internalChecks.includes(AnalyzerName.TestDuplicates);
-  const production = internalChecks.some((name) => name !== AnalyzerName.TestDuplicates);
-  if (tests && production) return SyntaxSourceSelection.ProductionAndTests;
-  return tests ? SyntaxSourceSelection.Tests : SyntaxSourceSelection.Production;
-}
-
-export function runAnalyzer(name: AnalyzerName, context: AnalyzerContext): Effect.Effect<Finding[], AnalyzerRunError, ProcessService> {
-  return analyzerDescriptor(name).run(context);
-}
+export const resolveAnalyzerDescriptors = (names: readonly AnalyzerName[]): readonly AnalyzerDescriptor[] =>
+  names.map((name) => ANALYZERS[name]);
