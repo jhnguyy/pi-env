@@ -97,10 +97,16 @@ function readPiPackageEntry(piPackageDir) {
 
 function writePiWrapper(piPackageDir, piPackageEntry) {
   mkdirSync(piBinDir, { recursive: true });
+  const sessionManagerStart = join(repo, '.pi', 'extensions', 'session-manager', 'dist', 'start.js');
+  const sessionManagerExtension = join(repo, '.pi', 'extensions', 'session-manager', 'dist', 'index.js');
+  const installedWrapper = join(piBinDir, 'pi');
   const wrapper = `#!/usr/bin/env sh
 set -eu
 DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
 PI_PACKAGE_ENTRY='${shSingleQuote(piPackageEntry)}'
+SESSION_MANAGER_START='${shSingleQuote(sessionManagerStart)}'
+SESSION_MANAGER_EXTENSION='${shSingleQuote(sessionManagerExtension)}'
+INSTALLED_PI_WRAPPER='${shSingleQuote(installedWrapper)}'
 REQUESTED_PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-}"
 PI_PACKAGE_DIR="$DEFAULT_PI_PACKAGE_DIR"
 if [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/$PI_PACKAGE_ENTRY" ]; then
@@ -120,6 +126,16 @@ if [ ! -f "$PI_PACKAGE_DIR/package.json" ] || [ ! -f "$PI_ENTRY" ]; then
   echo "pi-env: missing pi package install at $PI_PACKAGE_DIR" >&2
   echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
+fi
+if [ "$#" -eq 1 ] && [ "$1" = "--start" ] && [ "\${PI_ENV_SESSION_MANAGER_BYPASS:-}" != "1" ]; then
+  if [ ! -f "$SESSION_MANAGER_START" ] || [ ! -f "$SESSION_MANAGER_EXTENSION" ]; then
+    echo "pi-env: session manager build is missing. Rerun setup." >&2
+    exit 127
+  fi
+  PI_ENV_REAL_PI_ENTRY="$PI_ENTRY" \
+  PI_ENV_PI_WRAPPER="$INSTALLED_PI_WRAPPER" \
+  PI_ENV_SESSION_MANAGER_EXTENSION="$SESSION_MANAGER_EXTENSION" \
+  PI_NODE_ARGV0=pi exec "$NODE_BIN" "$SESSION_MANAGER_START"
 fi
 PI_NODE_ARGV0=pi exec "$NODE_BIN" "$PI_ENTRY" "$@"
 `;

@@ -6,7 +6,9 @@ import {
   type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { Effect, Layer } from "effect";
+import { readFile, unlink } from "node:fs/promises";
+import { Effect, Exit, Layer, Schedule, Scope } from "effect";
+import { createWorkspaceReconciler, renderRestoreSummary } from "./coordinator.js";
 import { CloseSource, secureNameEntropy, type NameEntropy } from "./domain.js";
 import { SessionHost, tmuxSessionHostLayer, type SessionHostShape } from "./host.js";
 import {
@@ -17,15 +19,23 @@ import {
   type SessionLifecycle,
   type SessionStartInput,
 } from "./lifecycle.js";
-import { nodeSessionFileProbe, type SessionFileProbe } from "./session-file.js";
 import {
-  SessionCatalog,
-  sessionCatalogLayer,
-  type SessionCatalogShape,
-} from "./storage.js";
+  RuntimeBusFailure,
+  RuntimeMethod,
+  runtimeRequest,
+  startRuntimeBus,
+  type RuntimeBusServer,
+} from "./runtime-bus.js";
+import { resolveRuntimePaths, workspaceId } from "./runtime-path.js";
+import { nodeSessionFileProbe, type SessionFileProbe } from "./session-file.js";
+import { SessionCatalog, sessionCatalogLayer, type SessionCatalogShape } from "./storage.js";
 
 type Environment = Readonly<Record<string, string | undefined>>;
-type EditorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => EditorComponent;
+type EditorFactory = (
+  tui: TUI,
+  theme: EditorTheme,
+  keybindings: KeybindingsManager,
+) => EditorComponent;
 type EditorWithCtrlD = ReturnType<EditorFactory> & {
   readonly actionHandlers: Map<string, () => void>;
   onCtrlD?: () => void;
@@ -58,6 +68,37 @@ function isEditorWithCtrlD(editor: ReturnType<EditorFactory>): editor is EditorW
   return "actionHandlers" in editor && editor.actionHandlers instanceof Map;
 }
 
+type StartupClaim = {
+  readonly workspaceId?: string;
+  readonly coordinatorSessionId?: string;
+  readonly launchId?: string;
+  readonly pid?: number;
+};
+
+function validateStartupClaim(
+  claim: StartupClaim,
+  workspaceId: string,
+  coordinatorSessionId: string,
+  launchId: string,
+): void {
+  if (
+    claim.workspaceId !== workspaceId ||
+    claim.coordinatorSessionId !== coordinatorSessionId ||
+    claim.launchId !== launchId ||
+    claim.pid !== process.pid
+  ) {
+    throw new Error("startup claim does not match the coordinator runtime");
+  }
+}
+
+function restoreNoticeLevel(summary: {
+  outcomes: readonly { state: string }[];
+}): "warning" | "info" {
+  return summary.outcomes.some((item) => item.state === "failed" || item.state === "timed-out")
+    ? "warning"
+    : "info";
+}
+
 export type SessionManagerOptions = {
   readonly catalog: SessionCatalogShape;
   readonly host: SessionHostShape;
@@ -69,10 +110,11 @@ export type SessionManagerOptions = {
 export function registerSessionManager(pi: ExtensionAPI, options: SessionManagerOptions): void {
   const environment = options.environment ?? process.env;
   const host = options.host;
+  const sessionFiles = options.sessionFiles ?? nodeSessionFileProbe;
   const lifecycle: SessionLifecycle = createSessionLifecycle({
     catalog: options.catalog,
     host: options.host,
-    sessionFiles: options.sessionFiles ?? nodeSessionFileProbe,
+    sessionFiles,
     entropy: options.entropy ?? secureNameEntropy,
   });
   let managed: ManagedSession | undefined;
@@ -82,6 +124,9 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   let previousFactory: EditorFactory | undefined;
   let generation = 0;
   let transitions: Promise<void> = Promise.resolve();
+  let runtimeBus: RuntimeBusServer | undefined;
+  let readinessScope: Scope.Closeable | undefined;
+  let coordinatorBinding: { readonly paneId: string; readonly sessionId: string } | undefined;
 
   const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
   const queue = <A>(operation: () => Promise<A>): Promise<A> => {
@@ -107,8 +152,11 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     finalization = queue(() =>
       run(lifecycle.close(target, source, ctx.sessionManager.getSessionFile())),
     )
-      .then(() => {
+      .then(async () => {
         if (targetGeneration !== generation) return;
+        await run(host.releaseCurrent(target.paneId, target.record.sessionId)).catch((error) =>
+          notifyError(ctx, "Tmux window release", error),
+        );
         managed = undefined;
         shutdown();
       })
@@ -147,10 +195,123 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     ctx.ui.setEditorComponent(installedFactory);
   };
 
+  const coordinatorLaunch = (ctx: ExtensionContext, expectedWorkspace: string) => {
+    const paneId = environment.TMUX_PANE;
+    const expectedSessionId = environment.PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID;
+    if (ctx.mode !== "tui" || !paneId) {
+      throw new Error("managed coordinator requires an interactive tmux session");
+    }
+    if (
+      environment.PI_ENV_SESSION_MANAGER_EXPECTED !== "1" ||
+      environment.PI_ENV_SESSION_MANAGER_WORKSPACE_ID !== expectedWorkspace ||
+      expectedSessionId !== ctx.sessionManager.getSessionId()
+    ) {
+      throw new Error("managed coordinator launch identity does not match");
+    }
+    const extensionPath = environment.PI_ENV_SESSION_MANAGER_EXTENSION;
+    const wrapperPath = environment.PI_ENV_PI_WRAPPER;
+    if (!extensionPath || !wrapperPath) throw new Error("managed launch paths are missing");
+    return { paneId, expectedSessionId, extensionPath, wrapperPath };
+  };
+
+  const startCoordinatorSession = async (ctx: ExtensionContext) => {
+    try {
+      const identity = await run(options.catalog.identity(ctx.cwd));
+      const expectedWorkspace = workspaceId(identity.canonicalCwd);
+      const { paneId, expectedSessionId, extensionPath, wrapperPath } = coordinatorLaunch(
+        ctx,
+        expectedWorkspace,
+      );
+      const manifest = await run(options.catalog.read(identity.canonicalCwd));
+      if (!manifest?.coordinator || manifest.coordinator.sessionId !== expectedSessionId) {
+        throw new Error("durable coordinator identity does not match");
+      }
+      if (host.prepareWorkspace) {
+        await run(host.prepareWorkspace(paneId, identity.canonicalCwd));
+      }
+      await run(
+        host.bindCurrent(paneId, manifest.coordinator.sessionId, manifest.coordinator.name),
+      );
+      coordinatorBinding = { paneId, sessionId: manifest.coordinator.sessionId };
+      if (pi.getSessionName() !== manifest.coordinator.name) {
+        pi.setSessionName(manifest.coordinator.name);
+      }
+      const paths = await run(resolveRuntimePaths(identity.canonicalCwd, environment));
+      const reconciler = createWorkspaceReconciler({
+        catalog: options.catalog,
+        host,
+        paneId,
+        cwd: identity.canonicalCwd,
+        workspaceId: expectedWorkspace,
+        coordinatorSessionId: manifest.coordinator.sessionId,
+        wrapperPath,
+        extensionPath,
+        sessionFiles,
+      });
+      runtimeBus = await run(
+        startRuntimeBus({
+          paths,
+          workspaceId: expectedWorkspace,
+          coordinatorSessionId: manifest.coordinator.sessionId,
+          handlers: reconciler,
+        }),
+      );
+      const launchId = environment.PI_ENV_SESSION_MANAGER_LAUNCH_ID;
+      if (launchId) {
+        const claim = JSON.parse(await readFile(paths.claimPath, "utf8")) as StartupClaim;
+        validateStartupClaim(claim, expectedWorkspace, manifest.coordinator.sessionId, launchId);
+        await unlink(paths.claimPath);
+      }
+      installEditor(ctx, true);
+      const summary = await reconciler.reconcile();
+      ctx.ui.notify(renderRestoreSummary(summary), restoreNoticeLevel(summary));
+    } catch (error) {
+      await runtimeBus?.close().catch(() => undefined);
+      runtimeBus = undefined;
+      notifyError(ctx, "Workspace coordinator startup", error);
+      ctx.shutdown();
+    }
+  };
+
+  const publishChildReady = async (session: ManagedSession, role?: string) => {
+    if (environment.PI_ENV_SESSION_MANAGER_EXPECTED !== "1") return;
+    const expectedWorkspace = workspaceId(session.record.cwd);
+    const coordinatorId = environment.PI_ENV_SESSION_MANAGER_COORDINATOR_ID;
+    const launchId = environment.PI_ENV_SESSION_MANAGER_LAUNCH_ID;
+    if (
+      role !== "work" ||
+      environment.PI_ENV_SESSION_MANAGER_WORKSPACE_ID !== expectedWorkspace ||
+      environment.PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID !== session.record.sessionId ||
+      !coordinatorId ||
+      !launchId
+    ) {
+      throw new Error("managed child launch identity does not match");
+    }
+    const paths = await run(resolveRuntimePaths(session.record.cwd, environment));
+    const windowId = (await run(host.inspectCurrent(session.paneId))).windowId;
+    await run(
+      runtimeRequest({
+        socketPath: paths.socketPath,
+        workspaceId: expectedWorkspace,
+        coordinatorSessionId: coordinatorId,
+        method: RuntimeMethod.PublishReady,
+        idempotencyKey: `${session.record.sessionId}:${launchId}:${Math.floor(Date.now() / 5_000)}`,
+        timeoutMs: 5_000,
+        params: {
+          sessionId: session.record.sessionId,
+          runtimeId: `${process.pid}`,
+          launchId,
+          windowId,
+        },
+      }),
+    );
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     const startGeneration = ++generation;
-    if (environment.PI_ENV_SESSION_MANAGER_ROLE === "coordinator") {
-      if (ctx.mode === "tui") installEditor(ctx, true);
+    const role = environment.PI_ENV_SESSION_MANAGER_ROLE;
+    if (role === "coordinator") {
+      await startCoordinatorSession(ctx);
       return;
     }
     try {
@@ -170,6 +331,26 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       }
       installEditor(ctx, false);
       ctx.ui.setStatus("session-manager", `session: ${result.session.record.name}`);
+      await publishChildReady(result.session, role);
+      if (environment.PI_ENV_SESSION_MANAGER_EXPECTED === "1" && !readinessScope) {
+        readinessScope = await run(Scope.make());
+        const scope = readinessScope;
+        const publisher = Effect.tryPromise({
+          try: async () => {
+            if (managed) await publishChildReady(managed, role);
+          },
+          catch: (error) =>
+            new RuntimeBusFailure({
+              operation: "repeat publish-ready",
+              reason: errorMessage(error),
+            }),
+        }).pipe(
+          Effect.catch(() => Effect.void),
+          Effect.repeat(Schedule.spaced("5 seconds")),
+          Effect.asVoid,
+        );
+        await run(publisher.pipe(Effect.forkIn(scope)));
+      }
     } catch (error) {
       if (startGeneration !== generation) {
         if (error instanceof SessionBindingFailed) {
@@ -189,10 +370,47 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         installEditor(ctx, false);
       }
       notifyError(ctx, "Session enrollment", error);
+      if (environment.PI_ENV_SESSION_MANAGER_EXPECTED === "1") ctx.shutdown();
     }
   });
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (environment.PI_ENV_SESSION_MANAGER_ROLE === "coordinator") {
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (!sessionFile) return;
+      try {
+        const identity = await run(options.catalog.identity(ctx.cwd));
+        const exists = await run(sessionFiles.exists(sessionFile));
+        if (!exists) return;
+        await run(
+          sessionFiles.verify(
+            sessionFile,
+            ctx.sessionManager.getSessionId(),
+            identity.canonicalCwd,
+          ),
+        );
+        await queue(() =>
+          run(
+            options.catalog.update(identity.canonicalCwd, (manifest) => {
+              if (manifest.coordinator?.sessionId !== ctx.sessionManager.getSessionId()) {
+                throw new Error("durable coordinator identity does not match");
+              }
+              if (manifest.coordinator.persistence.state === "materialized") return manifest;
+              return {
+                ...manifest,
+                coordinator: {
+                  ...manifest.coordinator,
+                  persistence: { state: "materialized", sessionFile },
+                },
+              };
+            }),
+          ),
+        );
+      } catch (error) {
+        notifyError(ctx, "Coordinator materialization", error);
+      }
+      return;
+    }
     if (!managed) return;
     const targetGeneration = generation;
     try {
@@ -307,13 +525,23 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     },
   });
 
-  pi.on("session_shutdown", async (event, ctx) => {
+  pi.on("session_shutdown", async (_event, ctx) => {
     generation += 1;
+    if (readinessScope) await run(Scope.close(readinessScope, Exit.void));
+    readinessScope = undefined;
+    await runtimeBus?.close().catch(() => undefined);
+    runtimeBus = undefined;
+    if (coordinatorBinding) {
+      const binding = coordinatorBinding;
+      try {
+        await queue(() => run(host.releaseCurrent(binding.paneId, binding.sessionId)));
+      } catch (error) {
+        notifyError(ctx, "Coordinator window release", error);
+      }
+      coordinatorBinding = undefined;
+    }
     const target = managed;
-    if (
-      target &&
-      (event.reason === "new" || event.reason === "resume" || event.reason === "fork")
-    ) {
+    if (target) {
       try {
         await queue(() => run(host.releaseCurrent(target.paneId, target.record.sessionId)));
       } catch (error) {
@@ -354,8 +582,11 @@ export {
 } from "./storage.js";
 export { SessionManifestSchema, canonicalJson, gcTombstones, validateManifest } from "./schema.js";
 export * from "./contracts.js";
+export * from "./coordinator.js";
 export * from "./domain.js";
 export * from "./host.js";
 export * from "./lifecycle.js";
+export * from "./runtime-bus.js";
+export * from "./runtime-path.js";
 export * from "./session-file.js";
 export type { SessionCatalogShape, StorageAdapter } from "./storage.js";
