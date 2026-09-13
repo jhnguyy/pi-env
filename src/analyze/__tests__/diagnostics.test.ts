@@ -27,7 +27,7 @@ import {
   AnalyzeWorkerMessageType,
   MAX_PROTOCOL_LINE_BYTES,
   acceptProtocolLine,
-  initialProtocolBudget,
+  initialProtocolState,
   parseAnalyzeWorkerEvent,
   parseAnalyzeWorkerRequest,
 } from "../protocol.js";
@@ -320,12 +320,12 @@ describe("analyze worker protocol", () => {
         runId: "protocol-run",
         ...extra,
       });
-    let budget = await Effect.runPromise(
-      acceptProtocolLine(initialProtocolBudget("protocol-run"), workerEvent("started")),
+    let transition = await Effect.runPromise(
+      acceptProtocolLine(initialProtocolState("protocol-run"), workerEvent("started")),
     );
-    budget = await Effect.runPromise(
+    transition = await Effect.runPromise(
       acceptProtocolLine(
-        budget,
+        transition.state,
         workerEvent("result", {
           result: {
             version: 1,
@@ -337,9 +337,11 @@ describe("analyze worker protocol", () => {
         }),
       ),
     );
-    const terminal = await Effect.runPromise(acceptProtocolLine(budget, workerEvent("complete")));
-    expect(terminal.phase).toBe("complete");
-    expect(await leftKind(acceptProtocolLine(terminal, workerEvent("complete")))).toBe(
+    transition = await Effect.runPromise(
+      acceptProtocolLine(transition.state, workerEvent("complete")),
+    );
+    expect(transition.state.phase).toBe("complete");
+    expect(await leftKind(acceptProtocolLine(transition.state, workerEvent("complete")))).toBe(
       AnalyzeProtocolErrorKind.State,
     );
   });

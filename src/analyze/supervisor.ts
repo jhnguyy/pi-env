@@ -9,8 +9,8 @@ import {
   AnalyzeWorkerMessageType,
   AnalyzeProtocolPhase,
   acceptProtocolLine,
-  initialProtocolBudget,
-  type AnalyzeProtocolBudget,
+  initialProtocolState,
+  type AnalyzeProtocolState,
   type AnalyzeWorkerEvent,
 } from "./protocol.js";
 import { ANALYZE_LIMITS, type SafeAnalyzeRequest } from "./policy.js";
@@ -207,11 +207,11 @@ export async function superviseAnalyze(
     let pendingStdout = "";
     let stdoutBytes = 0;
     let stderrBytes = 0;
-    let budget: AnalyzeProtocolBudget = initialProtocolBudget(runId);
-    let result: AnalysisResult | undefined;
     let failure: AnalyzeSupervisorError | undefined;
     let stopping: Promise<void> | undefined;
-    let protocolQueue: Promise<void> = Promise.resolve();
+    let protocolQueue: Promise<AnalyzeProtocolState> = Promise.resolve(
+      initialProtocolState(runId),
+    );
 
     const stop = (kind: AnalyzeSupervisorError["kind"], message: string): Promise<void> => {
       if (stopping !== undefined) return stopping;
@@ -249,20 +249,22 @@ export async function superviseAnalyze(
         if (newline < 0) break;
         const line = pendingStdout.slice(0, newline);
         pendingStdout = pendingStdout.slice(newline + 1);
-        protocolQueue = protocolQueue
-          .then(async () => {
-            budget = await Effect.runPromise(acceptProtocolLine(budget, line));
-            const event = budget.event;
-            if (event === undefined) return;
-            if (event.type === AnalyzeWorkerMessageType.Diagnostic) {
-              await record(event.event.type, event.event.attributes);
+        protocolQueue = protocolQueue.then(async (protocolState) => {
+          let nextState = protocolState;
+          try {
+            const transition = await Effect.runPromise(
+              acceptProtocolLine(protocolState, line),
+            );
+            nextState = transition.state;
+            if (transition.event.type === AnalyzeWorkerMessageType.Diagnostic) {
+              await record(transition.event.event.type, transition.event.event.attributes);
             }
-            options.onEvent?.(event);
-            if (event.type === AnalyzeWorkerMessageType.Result) result = event.result;
-          })
-          .catch(async () => {
+            options.onEvent?.(transition.event);
+          } catch {
             await stop("protocol", "analyze worker emitted invalid protocol");
-          });
+          }
+          return nextState;
+        });
       }
     });
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -288,7 +290,7 @@ export async function superviseAnalyze(
     await closeProcessScope().catch(() => undefined);
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abort);
-    await protocolQueue;
+    const protocolState = await protocolQueue;
     if (stopping !== undefined) await stopping;
 
     if (failure !== undefined) {
@@ -300,8 +302,7 @@ export async function superviseAnalyze(
       throw failure;
     }
     if (
-      budget.phase !== AnalyzeProtocolPhase.Complete ||
-      result === undefined ||
+      protocolState.phase !== AnalyzeProtocolPhase.Complete ||
       pendingStdout.length > 0
     ) {
       const error = new AnalyzeSupervisorError(
@@ -316,6 +317,7 @@ export async function superviseAnalyze(
       throw error;
     }
 
+    const result = protocolState.result;
     await finish(
       AnalyzeDiagnosticEventType.RunCompleted,
       result.summary.failures === 0 ? AnalyzeOutcome.Success : AnalyzeOutcome.Failure,
