@@ -1,8 +1,9 @@
 import { opendir, realpath, stat } from "node:fs/promises";
 import { extname, relative, resolve } from "node:path";
 import { Effect } from "effect";
-import { ScopeError, ScopeMode } from "./model.js";
+import { ScopeError, ScopeMode, type ScopeSelection } from "./model.js";
 import { DEFAULT_EXTERNAL_TIMEOUT_MS, ProcessService } from "./process.js";
+import { isOutsideWorkspace, normalizeWorkspacePath } from "./workspace-path.js";
 
 export interface Hunk { start: number; end: number }
 export interface Scope { mode: ScopeMode; files: readonly string[]; hunks: ReadonlyMap<string, readonly Hunk[]> }
@@ -34,12 +35,11 @@ export function parseUnifiedHunks(text: string): Map<string, Hunk[]> {
   return output;
 }
 
-const normalize = (path: string): string => path.replaceAll("\\", "/");
 const analyzablePath = (path: string): boolean => ANALYZABLE_EXTENSIONS.has(extname(path));
 const isSkippedRoot = (relativeRoot: string): boolean =>
   [...SKIPPED_DIRECTORY_NAMES, ...SKIPPED_ROOTS].some((name) => relativeRoot === name || relativeRoot.startsWith(`${name}/`));
 const eligibleScopePath = (path: string): boolean => {
-  const normalized = normalize(path);
+  const normalized = normalizeWorkspacePath(path);
   return analyzablePath(normalized) && !isSkippedRoot(normalized);
 };
 
@@ -50,7 +50,7 @@ function boundedSortedFiles(files: Iterable<string>, maxFiles: number = MAX_SCOP
 }
 
 function addAnalyzableFile(cwd: string, absolute: string, files: Set<string>, maxFiles: number): void {
-  const relativePath = normalize(relative(cwd, absolute));
+  const relativePath = normalizeWorkspacePath(relative(cwd, absolute));
   if (!analyzablePath(relativePath)) return;
   files.add(relativePath);
   if (files.size > maxFiles) throw new ScopeError({ message: `Scope file limit exceeded: discovered more than ${maxFiles} analyzable files` });
@@ -91,7 +91,7 @@ function walkDirectoryEffect(
               throw new ScopeError({ message: `Scope entry limit exceeded: visited more than ${budget.maxEntries} directory entries` });
             }
             const entryPath = resolve(current, entry.name);
-            const relativePath = normalize(relative(cwd, entryPath));
+            const relativePath = normalizeWorkspacePath(relative(cwd, entryPath));
             if (entry.isDirectory() && (SKIPPED_DIRECTORY_NAMES.has(entry.name) || isSkippedRoot(relativePath))) continue;
             if (entry.isDirectory()) stack.push(entryPath);
             else if (entry.isFile()) addAnalyzableFile(cwd, entryPath, files, maxFiles);
@@ -116,16 +116,16 @@ export function expandExplicitPathsEffect(
     const root = yield* Effect.tryPromise({ try: () => realpath(cwd), catch: scopeError });
     for (const path of paths) {
       const absolute = resolve(root, path);
-      const lexicalRoot = normalize(relative(root, absolute));
-      if (lexicalRoot === ".." || lexicalRoot.startsWith("../") || lexicalRoot.startsWith("/")) {
+      const lexicalRoot = normalizeWorkspacePath(relative(root, absolute));
+      if (isOutsideWorkspace(lexicalRoot)) {
         return yield* new ScopeError({ message: `Explicit path resolves outside cwd: ${path}` });
       }
       if (isSkippedRoot(lexicalRoot)) continue;
       const stats = yield* Effect.tryPromise({ try: () => pathStats(absolute), catch: scopeError });
       if (stats === undefined) continue;
       const resolved = yield* Effect.tryPromise({ try: () => realpath(absolute), catch: scopeError });
-      const relativeRoot = normalize(relative(root, resolved));
-      if (relativeRoot === ".." || relativeRoot.startsWith("../") || relativeRoot.startsWith("/")) {
+      const relativeRoot = normalizeWorkspacePath(relative(root, resolved));
+      if (isOutsideWorkspace(relativeRoot)) {
         return yield* new ScopeError({ message: `Explicit path resolves outside cwd: ${path}` });
       }
       if (isSkippedRoot(relativeRoot)) continue;
@@ -148,14 +148,23 @@ function gitEffect(cwd: string, args: readonly string[]): Effect.Effect<string, 
   );
 }
 
-export function resolveScopeEffect(cwd: string, mode: ScopeMode, paths: readonly string[], ref = "main", maxFiles: number = MAX_SCOPE_FILES): Effect.Effect<Scope, ScopeError, ProcessService> {
-  if (mode === ScopeMode.Paths) return expandExplicitPathsEffect(cwd, paths, maxFiles).pipe(Effect.map((files) => ({ mode, files, hunks: new Map() })));
-  if (mode === ScopeMode.All) return Effect.succeed({ mode, files: [], hunks: new Map() });
+export function resolveScopeEffect(
+  request: ScopeSelection & { readonly cwd: string },
+  maxFiles: number = MAX_SCOPE_FILES,
+): Effect.Effect<Scope, ScopeError, ProcessService> {
+  if (request.scope === ScopeMode.Paths) {
+    return expandExplicitPathsEffect(request.cwd, request.paths, maxFiles).pipe(
+      Effect.map((files) => ({ mode: request.scope, files, hunks: new Map() })),
+    );
+  }
+  if (request.scope === ScopeMode.All) {
+    return Effect.succeed({ mode: request.scope, files: [], hunks: new Map() });
+  }
   return Effect.gen(function* () {
-    const base = (yield* gitEffect(cwd, ["merge-base", ref, "HEAD"])).trim();
+    const base = (yield* gitEffect(request.cwd, ["merge-base", request.ref ?? "main", "HEAD"])).trim();
     // Compare the base directly with the worktree. Each hunk then uses the
     // same line numbers as the source files that the analyzers parse.
-    const chunks = [yield* gitEffect(cwd, ["diff", "--unified=0", base])];
+    const chunks = [yield* gitEffect(request.cwd, ["diff", "--unified=0", base])];
     const hunks = new Map<string, Hunk[]>();
     yield* Effect.try({
       try: () => {
@@ -169,17 +178,17 @@ export function resolveScopeEffect(cwd: string, mode: ScopeMode, paths: readonly
       },
       catch: scopeError,
     });
-    const untracked = (yield* gitEffect(cwd, ["ls-files", "--others", "--exclude-standard"])).trim();
+    const untracked = (yield* gitEffect(request.cwd, ["ls-files", "--others", "--exclude-standard"])).trim();
     yield* Effect.try({
       try: () => {
         for (const path of untracked.split("\n").filter(eligibleScopePath)) {
-          hunks.set(normalize(path), [{ start: 1, end: Number.MAX_SAFE_INTEGER }]);
+          hunks.set(normalizeWorkspacePath(path), [{ start: 1, end: Number.MAX_SAFE_INTEGER }]);
           if (hunks.size > maxFiles) throw new ScopeError({ message: `Scope file limit exceeded: discovered more than ${maxFiles} analyzable files` });
         }
       },
       catch: scopeError,
     });
     const files = yield* Effect.try({ try: () => boundedSortedFiles(hunks.keys(), maxFiles), catch: scopeError });
-    return { mode, files, hunks };
+    return { mode: request.scope, files, hunks };
   });
 }

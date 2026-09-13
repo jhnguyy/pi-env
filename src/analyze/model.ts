@@ -6,6 +6,23 @@ export const FindingKind = { Complexity: "complexity", Duplicate: "duplicate", T
 export type FindingKind = typeof FindingKind[keyof typeof FindingKind];
 export const ScopeMode = { All: "all", Paths: "paths", Diff: "diff" } as const;
 export type ScopeMode = typeof ScopeMode[keyof typeof ScopeMode];
+export type NonEmptyReadonlyArray<Value> = readonly [Value, ...Value[]];
+export type ScopeSelection =
+  | {
+      readonly scope: typeof ScopeMode.All;
+      readonly paths?: never;
+      readonly ref?: never;
+    }
+  | {
+      readonly scope: typeof ScopeMode.Diff;
+      readonly paths?: never;
+      readonly ref?: string;
+    }
+  | {
+      readonly scope: typeof ScopeMode.Paths;
+      readonly paths: NonEmptyReadonlyArray<string>;
+      readonly ref?: never;
+    };
 export const OutputMode = { Compact: "compact", Pretty: "pretty", Json: "json" } as const;
 export type OutputMode = typeof OutputMode[keyof typeof OutputMode];
 export const FailPolicy = { Never: "never", Warning: "warning", Error: "error" } as const;

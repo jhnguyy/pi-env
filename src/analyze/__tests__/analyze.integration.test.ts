@@ -201,7 +201,7 @@ describe("analyze contracts", () => {
     git("commit", "-m", "change third");
     writeFileSync(join(cwd, "src/a.ts"), "// shifts committed hunk\nexport const first = 1;\nexport const second = 2;\nexport const third = 30;\n");
 
-    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Diff, [], "main").pipe(Effect.provide(processServiceLayer())));
+    const scope = await Effect.runPromise(resolveScopeEffect({ cwd, scope: ScopeMode.Diff, ref: "main" }).pipe(Effect.provide(processServiceLayer())));
     expect(scope.files).toEqual(["src/a.ts", "tools/local.ts"]);
     expect(scope.hunks.get("src/a.ts")).toEqual([
       { start: 1, end: 1 },
@@ -427,13 +427,10 @@ describe("analyze contracts", () => {
     if (outcome._tag === "Failure") expect(outcome.failure).toMatchObject({ _tag: "AnalyzerRunError", analyzer: AnalyzerName.Complexity });
   });
 
-  it("returns structured results for unknown checks and missing tsconfig", async () => {
+  it("returns a structured result when tsconfig is missing", async () => {
     const cwd = fixtureRoot();
     const missing = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
     expect(missing.analyzerFailures[0]?.analyzer).toBe("program");
-    const configured = writeProject({ "src/a.ts": "export const a = 1;" });
-    const unknown = await Effect.runPromise(analyze({ cwd: configured, scope: ScopeMode.All, checks: ["wat"] }));
-    expect(unknown.analyzerFailures[0]?.analyzer).toBe("configuration");
   });
 });
 
@@ -873,7 +870,7 @@ describe("bounded hardening", () => {
       ".pi/extensions/demo/index.ts": "export const demo = 1;",
       "config/app.json": "{}",
     });
-    const scope = await Effect.runPromise(resolveScopeEffect(cwd, ScopeMode.Paths, ["src", ".pi", "config", "tools", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"]).pipe(Effect.provide(processServiceLayer())));
+    const scope = await Effect.runPromise(resolveScopeEffect({ cwd, scope: ScopeMode.Paths, paths: ["src", ".pi", "config", "tools", "dist", "coverage", "node_modules", ".git", ".analyze-bundle"] }).pipe(Effect.provide(processServiceLayer())));
     expect(scope.files).toEqual([".pi/extensions/demo/index.ts", "config/app.json", "src/a.ts", "tools/local.ts"]);
   });
 

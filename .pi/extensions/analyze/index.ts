@@ -79,7 +79,6 @@ export function createAnalyzeTool(
       const cwd = await resolveWorktree(params.worktree);
       signal?.throwIfAborted();
       const scope = params.scope ?? ScopeMode.Diff;
-      if (scope === ScopeMode.Paths && (!params.paths || params.paths.length === 0)) throw new Error("paths scope requires at least one path");
       const result = await runner({
         cwd,
         scope,

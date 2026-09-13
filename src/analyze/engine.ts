@@ -24,7 +24,7 @@ import {
   type BenchmarkResult,
   type Finding,
   type MemorySnapshot,
-  type ScopeMode,
+  type ScopeSelection,
 } from "./model.js";
 import { createAnalysisProjectEffect, ProjectRequirement, type Project, type SyntaxSourceBudget, type SyntaxSourceSelection } from "./program.js";
 import { processServiceLayer, type ProcessService, type streamProcessEffect } from "./process.js";
@@ -37,12 +37,9 @@ import {
 } from "./registry.js";
 import { resolveScopeEffect, type Scope } from "./scope.js";
 
-export interface AnalyzeOptions {
+interface AnalyzeOptionFields {
   cwd: string;
-  scope: ScopeMode;
-  paths?: readonly string[];
-  ref?: string;
-  checks?: readonly string[];
+  checks?: readonly AnalyzerName[];
   bundle?: boolean;
   typeSimilarityThreshold?: number;
   profile?: boolean;
@@ -51,6 +48,8 @@ export interface AnalyzeOptions {
   sourceBudget?: SyntaxSourceBudget;
   externalTimeoutMs?: number;
 }
+
+export type AnalyzeOptions = AnalyzeOptionFields & ScopeSelection;
 
 /** The only runtime dependency of the analysis workflow: suitable for deterministic tests. */
 export interface AnalysisRuntime {
@@ -200,21 +199,10 @@ function validateOptionsEffect(options: AnalyzeOptions): Effect.Effect<number, C
   return Effect.succeed(budget);
 }
 
-function selectedChecksEffect(
-  options: AnalyzeOptions,
-): Effect.Effect<readonly AnalyzerName[], ConfigError> {
-  const requested = options.checks ?? defaultAnalyzerNames;
-  const valid = new Set<string>(Object.values(AnalyzerName));
-  const unknown = requested.filter((name) => !valid.has(name));
-  if (unknown.length > 0)
-    return Effect.fail(
-      new ConfigError({
-        message: `Unknown checks: ${unknown.join(", ")}. Valid checks: ${Object.values(AnalyzerName).join(", ")}`,
-      }),
-    );
-  const selected = [...requested] as AnalyzerName[];
+function selectedChecks(options: AnalyzeOptions): readonly AnalyzerName[] {
+  const selected = [...(options.checks ?? defaultAnalyzerNames)];
   if (options.bundle && !selected.includes(AnalyzerName.Bundle)) selected.push(AnalyzerName.Bundle);
-  return Effect.succeed(selected);
+  return selected;
 }
 
 const emptyProfile = (): AnalysisProfile => ({
@@ -353,7 +341,7 @@ function setupAnalysis(
     const runtime = yield* AnalysisRuntime;
     const started = runtime.now();
     const budget = yield* validateOptionsEffect(options);
-    const selected = yield* selectedChecksEffect(options);
+    const selected = selectedChecks(options);
     // This preflight is deliberately before scope/project capability loading and analyzer dispatch.
     // A rejected check must not raise the shared project's capability for checks that can run.
     let state = initialState();
@@ -377,7 +365,7 @@ function setupAnalysis(
     const scope = yield* diagnostics.span(
       AnalyzeSpanName.Scope,
       { scope_mode: options.scope },
-      resolveScopeEffect(options.cwd, options.scope, options.paths ?? [], options.ref, options.sourceBudget?.maxFiles),
+      resolveScopeEffect(options, options.sourceBudget?.maxFiles),
     );
     const scopeEnded = runtime.now();
     state = timing(state, options.profile === true, "scope", scopeStarted, scopeEnded);

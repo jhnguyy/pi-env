@@ -9,7 +9,12 @@ import {
   type AnalysisDiagnosticEvent,
 } from "../../../src/analyze/diagnostics.js";
 import { ANALYZE_LIMITS } from "../../../src/analyze/policy.js";
-import type { AnalysisResult, AnalyzerFailure, Finding } from "../../../src/analyze/model.js";
+import {
+  ScopeMode,
+  type AnalysisResult,
+  type AnalyzerFailure,
+  type Finding,
+} from "../../../src/analyze/model.js";
 
 const MAX_INPUT_BYTES = 64 * 1024;
 
@@ -132,9 +137,12 @@ async function main(): Promise<void> {
       analyze(
         {
           cwd: request.cwd,
-          scope: request.scope,
-          paths: request.paths,
-          ref: request.ref,
+          ...(request.scope === ScopeMode.Paths
+            ? { scope: request.scope, paths: request.paths }
+            : {
+                scope: request.scope,
+                ...(request.ref === undefined ? {} : { ref: request.ref }),
+              }),
           checks: request.checks,
           maxMemoryMb: request.maxMemoryMb,
           sourceBudget: {

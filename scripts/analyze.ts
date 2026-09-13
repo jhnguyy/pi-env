@@ -69,8 +69,11 @@ if (failPolicy === undefined) {
 let result: AnalysisResult;
 if (parseError !== undefined) {
   result = failure(parseError);
-} else if (flags.has("--all") && (flags.has("--diff") || paths.length > 0)) {
-  result = failure("--all cannot be combined with --diff or explicit paths");
+} else if (
+  (flags.has("--all") && flags.has("--diff")) ||
+  (flags.has("--diff") && paths.length > 0)
+) {
+  result = failure("scope options cannot be combined");
 } else {
   const threshold = values.get("--type-similarity-threshold") ?? values.get("--type-threshold");
   result = await runPublicAnalyze({
