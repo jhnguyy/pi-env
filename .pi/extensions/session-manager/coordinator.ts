@@ -1,7 +1,7 @@
 import { access, realpath } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { Clock, Data, Effect } from "effect";
-import type { CoordinatorRecord, SessionCatalogFailure, SessionManifest } from "./contracts.js";
+import type { CoordinatorRecord, SessionCatalogFailure } from "./contracts.js";
 import { gcTombstones } from "./schema.js";
 import { nameCandidates, selectAvailableName, type NameEntropy } from "./domain.js";
 import type { SessionHostError, SessionHostShape } from "./host.js";
@@ -20,7 +20,6 @@ export function ensureCoordinator(options: {
   readonly catalog: SessionCatalogShape;
   readonly cwd: string;
   readonly entropy: NameEntropy;
-  readonly sessionId?: string;
 }): Effect.Effect<CoordinatorRecord, CoordinatorError> {
   return Effect.gen(function* () {
     const timestamp = yield* nowIso;
@@ -35,7 +34,7 @@ export function ensureCoordinator(options: {
       if (!name) throw new CoordinatorUnavailable({ reason: "no coordinator name is available" });
       selected = {
         version: 1,
-        sessionId: options.sessionId ?? randomUUID(),
+        sessionId: randomUUID(),
         cwd: current.canonicalCwd,
         name,
         persistence: { state: "pending" },
@@ -197,8 +196,4 @@ export function renderRestoreSummary(summary: RestoreSummary): string {
     "",
     `${active} active, ${failed} failed`,
   ].join("\n");
-}
-
-export function coordinatorFromManifest(manifest: SessionManifest): CoordinatorRecord | undefined {
-  return manifest.coordinator;
 }

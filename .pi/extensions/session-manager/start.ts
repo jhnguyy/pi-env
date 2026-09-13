@@ -16,7 +16,7 @@ import {
   parseRuntimeMetadata,
   parseStartupClaim,
 } from "./launch.js";
-import { SessionCatalog, sessionCatalogLayer, type SessionCatalogShape } from "./storage.js";
+import { createFileSessionCatalog, type SessionCatalogShape } from "./storage.js";
 
 const env = process.env;
 const required = (name: string): string => {
@@ -285,9 +285,7 @@ async function main(): Promise<void> {
   const paneId = required("TMUX_PANE");
   await Promise.all([access(nodeBin), access(piEntry), access(wrapperPath), access(extensionPath)]);
   const agentDir = env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-  const catalog = await Effect.runPromise(
-    SessionCatalog.pipe(Effect.provide(sessionCatalogLayer(agentDir))),
-  );
+  const catalog = createFileSessionCatalog(agentDir);
   const identity = await Effect.runPromise(catalog.identity(process.cwd()));
   const id = workspaceId(identity.canonicalCwd);
   const paths = await Effect.runPromise(resolveRuntimePaths(identity.canonicalCwd));

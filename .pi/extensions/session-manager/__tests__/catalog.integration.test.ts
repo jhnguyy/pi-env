@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -13,10 +14,8 @@ import {
   ManifestLockCompromised,
   ManifestLockTimeout,
   ManifestMalformed,
-  makeSessionCatalog,
-  nodeStorage,
-  type StorageAdapter,
-} from "../index.js";
+} from "../contracts.js";
+import { createFileSessionCatalog, nodeStorage, type StorageAdapter } from "../storage.js";
 
 const roots: string[] = [];
 
@@ -26,7 +25,7 @@ async function fixture() {
   const cwd = join(root, "workspace");
   const agentDir = join(root, "agent");
   await mkdir(cwd);
-  return { root, cwd, agentDir, catalog: makeSessionCatalog(agentDir) };
+  return { root, cwd, agentDir, catalog: createFileSessionCatalog(agentDir) };
 }
 
 function withStorage(overrides: Partial<StorageAdapter>): StorageAdapter {
@@ -71,7 +70,7 @@ describe("session catalog storage", () => {
           return new Promise<string[]>(() => {});
         },
       });
-      const catalog = makeSessionCatalog(agentDir, storage);
+      const catalog = createFileSessionCatalog(agentDir, storage);
       const fiber = yield* catalog.update(cwd, (current) => current).pipe(Effect.forkChild);
       yield* Effect.promise(() => entered);
 
@@ -111,7 +110,7 @@ describe("session catalog storage", () => {
           };
         },
       });
-      const catalog = makeSessionCatalog(agentDir, storage);
+      const catalog = createFileSessionCatalog(agentDir, storage);
       const updateFiber = yield* catalog.update(cwd, (current) => current).pipe(Effect.forkChild);
       yield* Effect.promise(() => syncStarted);
       const interruptFiber = yield* Fiber.interrupt(updateFiber).pipe(Effect.forkChild);
@@ -132,7 +131,8 @@ describe("session catalog storage", () => {
     const identity = await Effect.runPromise(catalog.identity(cwd));
     const aliasIdentity = await Effect.runPromise(catalog.identity(alias));
     expect(aliasIdentity).toEqual(identity);
-    expect(basename(identity.manifestPath)).toMatch(/^[0-9a-f]{64}\.json$/);
+    const digest = createHash("sha256").update(identity.canonicalCwd, "utf8").digest("hex");
+    expect(basename(identity.manifestPath)).toBe(`${digest}.json`);
 
     const committed = await Effect.runPromise(catalog.update(cwd, (current) => current));
     const bytes = await readFile(identity.manifestPath, "utf8");
@@ -255,7 +255,7 @@ describe("session catalog storage", () => {
         };
       },
     });
-    const catalog = makeSessionCatalog(agentDir, storage);
+    const catalog = createFileSessionCatalog(agentDir, storage);
 
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestLockCompromised,
@@ -275,17 +275,17 @@ describe("session catalog storage", () => {
         };
       },
     });
-    const catalog = makeSessionCatalog(agentDir, storage);
+    const catalog = createFileSessionCatalog(agentDir, storage);
 
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestCommittedReleaseFailed,
     );
-    expect((await Effect.runPromise(makeSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
+    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
   });
 
   it("classifies failures before rename as determinate", async () => {
     const { cwd, agentDir } = await fixture();
-    const catalog = makeSessionCatalog(
+    const catalog = createFileSessionCatalog(
       agentDir,
       withStorage({ rename: async () => Promise.reject(new Error("rename failed")) }),
     );
@@ -299,7 +299,7 @@ describe("session catalog storage", () => {
 
   it("classifies directory flush failures after rename as indeterminate without rollback", async () => {
     const { cwd, agentDir } = await fixture();
-    const normal = makeSessionCatalog(agentDir);
+    const normal = createFileSessionCatalog(agentDir);
     await Effect.runPromise(normal.update(cwd, (current) => current));
     const identity = await Effect.runPromise(normal.identity(cwd));
     const storage = withStorage({
@@ -313,7 +313,7 @@ describe("session catalog storage", () => {
         };
       },
     });
-    const catalog = makeSessionCatalog(agentDir, storage);
+    const catalog = createFileSessionCatalog(agentDir, storage);
 
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestCommitIndeterminate,
@@ -334,11 +334,11 @@ describe("session catalog storage", () => {
         return nodeStorage.readFile(path);
       },
     });
-    const catalog = makeSessionCatalog(agentDir, storage);
+    const catalog = createFileSessionCatalog(agentDir, storage);
 
     expect(await failureOf(catalog.update(cwd, (current) => current))).toBeInstanceOf(
       ManifestCommitIndeterminate,
     );
-    expect((await Effect.runPromise(makeSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
+    expect((await Effect.runPromise(createFileSessionCatalog(agentDir).read(cwd)))?.revision).toBe(1);
   });
 });

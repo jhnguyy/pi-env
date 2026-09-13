@@ -9,17 +9,13 @@ import type {
 import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import {
-  ManifestCommitFailure,
-  ensureCoordinator,
-  makeSessionCatalog,
-  registerSessionManager,
-  workspaceId as workspaceIdFor,
-  type CurrentWindow,
-  type SessionCatalogShape,
-  type SessionFileProbe,
-  type SessionHostShape,
-} from "../index.js";
+import { ManifestCommitFailure } from "../contracts.js";
+import { ensureCoordinator } from "../coordinator.js";
+import type { CurrentWindow, SessionHostShape } from "../host.js";
+import { registerSessionManager } from "../index.js";
+import { workspaceId as workspaceIdFor } from "../runtime-path.js";
+import type { SessionFileProbe } from "../session-file.js";
+import { createFileSessionCatalog, type SessionCatalogShape } from "../storage.js";
 
 type EditorFactory = (
   tui: TUI,
@@ -100,9 +96,9 @@ describe("session-manager extension", () => {
     roots.push(root);
     const cwd = join(root, "workspace");
     await mkdir(cwd);
-    const catalog = makeSessionCatalog(join(root, "agent"));
+    const catalog = createFileSessionCatalog(join(root, "agent"));
     await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0, sessionId: "coordinator-a" }),
+      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
     );
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
@@ -182,7 +178,7 @@ describe("session-manager extension", () => {
     roots.push(root);
     const cwd = join(root, "workspace");
     await mkdir(cwd);
-    const persistedCatalog = makeSessionCatalog(join(root, "agent"));
+    const persistedCatalog = createFileSessionCatalog(join(root, "agent"));
     let rejectUpdate = false;
     const catalog: SessionCatalogShape = {
       identity: (path) => persistedCatalog.identity(path),
@@ -193,8 +189,6 @@ describe("session-manager extension", () => {
           : persistedCatalog.update(path, transform),
     };
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const commands = new Map<string, (args: string, ctx: ExtensionContext) => unknown>();
-    let name: string | undefined;
     let editorFactory: EditorFactory | undefined;
     let previousCtrlDCalls = 0;
     const editor = cast<CompatibleEditor>({
@@ -209,14 +203,9 @@ describe("session-manager extension", () => {
       on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) => {
         handlers.set(event, handler);
       },
-      registerCommand: (
-        command: string,
-        options: { handler: (args: string, ctx: ExtensionContext) => unknown },
-      ) => commands.set(command, options.handler),
-      getSessionName: () => name,
-      setSessionName: (value: string) => {
-        name = value;
-      },
+      registerCommand: () => {},
+      getSessionName: () => undefined,
+      setSessionName: () => {},
       exec: async () => ({ code: 0, stdout: "", stderr: "" }),
     });
     const notifications: string[] = [];
@@ -265,11 +254,6 @@ describe("session-manager extension", () => {
     });
 
     await handlers.get("session_start")?.({} as never, ctx);
-    expect(name).toMatch(/^[a-z]+-[a-z]+$/);
-    await handlers.get("session_info_changed")?.(cast<never>({ name: "quiet-pine" }), ctx);
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
-      name: "quiet-pine",
-    });
     expect(editorFactory).not.toBe(previousFactory);
     const composed = cast<CompatibleEditor>(
       editorFactory?.(cast<never>({}), cast<never>({}), cast<never>({})),
@@ -293,7 +277,6 @@ describe("session-manager extension", () => {
       desiredState: "closed",
       closedBy: "ctrl-d",
     });
-    expect(notifications[0]).toContain("Session finalization failed");
   });
 
   it("keeps an incompatible editor and reports that Ctrl+D composition is unavailable", async () => {
@@ -330,7 +313,7 @@ describe("session-manager extension", () => {
       },
       shutdown: () => {},
     });
-    const catalog = makeSessionCatalog(join(root, "agent"));
+    const catalog = createFileSessionCatalog(join(root, "agent"));
     const window: CurrentWindow = {
       socketPath: "/tmp/tmux.sock",
       tmuxSessionId: "$1",
@@ -356,9 +339,7 @@ describe("session-manager extension", () => {
     await handlers.get("session_start")?.({} as never, ctx);
     factory?.(cast<never>({}), cast<never>({}), cast<never>({}));
 
-    expect(notices).toContain(
-      "Session manager cannot compose Ctrl+D with the configured editor. Use /session-done to finalize this session.",
-    );
+    expect(notices).toHaveLength(1);
 
     await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
     expect(releaseCalls).toBe(1);

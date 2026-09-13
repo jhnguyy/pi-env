@@ -4,9 +4,8 @@ import {
   DuplicateWindowBinding,
   WindowBindingConflict,
   createTmuxSessionHost,
-  workspaceSessionName,
   type Exec,
-} from "../index.js";
+} from "../host.js";
 
 function executor(initialTags: Readonly<Record<string, string>>) {
   const tags: Record<string, string> = { ...initialTags };
@@ -49,18 +48,18 @@ describe("tmux session host", () => {
 
     await Effect.runPromise(createTmuxSessionHost(exec).prepareWorkspace!("%1", cwd));
 
-    const name = workspaceSessionName(cwd);
-    expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(80);
-    expect(calls).toContainEqual([
+    const rename = calls.find((call) => call.includes("rename-session"));
+    expect(rename?.slice(0, -1)).toEqual([
       "tmux",
       "-S",
       "/tmp/tmux.sock",
       "rename-session",
       "-t",
       "$1",
-      name,
     ]);
+    const name = rename?.at(-1) ?? "";
+    expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(80);
   });
 
   it("binds and renames the current window with argv-safe values", async () => {
