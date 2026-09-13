@@ -1,6 +1,6 @@
 # Analyze
 
-> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates,test-duplicates`. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
+> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates,test-duplicates`. Only diff scope accepts a base ref. Only paths scope accepts paths. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
 >
 > All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits. They are not containment.
 

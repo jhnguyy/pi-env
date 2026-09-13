@@ -9,6 +9,7 @@ import {
   type AnalyzerFailure,
   type Finding,
   type Location,
+  type NonEmptyReadonlyArray,
 } from "./model.js";
 import {
   ANALYZE_DIAGNOSTIC_VERSION,
@@ -20,7 +21,9 @@ import {
   ANALYZE_LIMITS,
   SAFE_CHECKS,
   isBoundedWorkspaceRelativePath,
+  isSafeAnalyzerName,
   type SafeAnalyzerName,
+  type SafeScopeSelection,
 } from "./policy.js";
 
 export const ANALYZE_WORKER_PROTOCOL_VERSION = 1 as const;
@@ -37,21 +40,20 @@ export const AnalyzeWorkerMessageType = {
 export type AnalyzeWorkerMessageType =
   (typeof AnalyzeWorkerMessageType)[keyof typeof AnalyzeWorkerMessageType];
 
-export interface AnalyzeWorkerRequest {
+interface AnalyzeWorkerRequestFields {
   readonly version: typeof ANALYZE_WORKER_PROTOCOL_VERSION;
   readonly type: typeof AnalyzeWorkerMessageType.Request;
   readonly runId: string;
   readonly cwd: string;
-  readonly scope: typeof ScopeMode.Diff | typeof ScopeMode.Paths;
-  readonly paths?: readonly string[];
-  readonly ref?: string;
-  readonly checks: readonly SafeAnalyzerName[];
+  readonly checks: NonEmptyReadonlyArray<SafeAnalyzerName>;
   readonly maxMemoryMb: typeof ANALYZE_LIMITS.maxMemoryMb;
   readonly maxSourceFiles: typeof ANALYZE_LIMITS.sourceFiles;
   readonly maxSourceFileBytes: typeof ANALYZE_LIMITS.sourceFileBytes;
   readonly maxSourceBytes: typeof ANALYZE_LIMITS.sourceBytes;
   readonly timeoutMs: number;
 }
+
+export type AnalyzeWorkerRequest = AnalyzeWorkerRequestFields & SafeScopeSelection;
 
 export interface AnalyzeWorkerStarted {
   readonly version: typeof ANALYZE_WORKER_PROTOCOL_VERSION;
@@ -211,28 +213,26 @@ function validateEnvelope(
   return Effect.succeed(value.runId);
 }
 
-type ValidRequestRoot = Pick<AnalyzeWorkerRequest, "cwd" | "scope">;
 type ValidRequestLimits = Pick<AnalyzeWorkerRequest, "maxMemoryMb" | "maxSourceFiles" | "maxSourceFileBytes" | "maxSourceBytes" | "timeoutMs">;
 
-function validRequestRoot(value: Record<string, unknown>): value is Record<string, unknown> & ValidRequestRoot {
-  return (
-    isBoundedString(value.cwd, ANALYZE_LIMITS.cwdLength) &&
-    isAbsolute(value.cwd) &&
-    (value.scope === ScopeMode.Diff || value.scope === ScopeMode.Paths)
-  );
+function validRequestCwd(value: unknown): value is string {
+  return isBoundedString(value, ANALYZE_LIMITS.cwdLength) && isAbsolute(value);
 }
 
-function validRequestChecks(value: Record<string, unknown>): value is Record<string, unknown> & Pick<AnalyzeWorkerRequest, "checks"> {
-  return (
-    Array.isArray(value.checks) &&
-    value.checks.length > 0 &&
-    value.checks.length <= SAFE_CHECKS.length &&
-    new Set(value.checks).size === value.checks.length &&
-    value.checks.every(
-      (check): check is SafeAnalyzerName =>
-        typeof check === "string" && SAFE_CHECKS.some((safeCheck) => safeCheck === check),
-    )
-  );
+function parseRequestChecks(
+  value: unknown,
+): NonEmptyReadonlyArray<SafeAnalyzerName> | undefined {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > SAFE_CHECKS.length ||
+    new Set(value).size !== value.length
+  ) {
+    return undefined;
+  }
+  if (!value.every(isSafeAnalyzerName)) return undefined;
+  const [first, ...rest] = value;
+  return first === undefined ? undefined : [first, ...rest];
 }
 
 function validRequestLimits(value: Record<string, unknown>): value is Record<string, unknown> & ValidRequestLimits {
@@ -248,26 +248,48 @@ function validRequestLimits(value: Record<string, unknown>): value is Record<str
   );
 }
 
-function validRequestPaths(value: Record<string, unknown>): value is Record<string, unknown> & Pick<AnalyzeWorkerRequest, "paths"> {
-  if (value.paths === undefined) return true;
-  return (
-    Array.isArray(value.paths) &&
-    value.paths.length > 0 &&
-    value.paths.length <= ANALYZE_LIMITS.paths &&
-    new Set(value.paths).size === value.paths.length &&
-    value.paths.every((path) => typeof path === "string" && isBoundedWorkspaceRelativePath(path))
-  );
+function parseRequestDiffScope(
+  paths: unknown,
+  ref: unknown,
+): Extract<SafeScopeSelection, { readonly scope: typeof ScopeMode.Diff }> | undefined {
+  return paths === undefined &&
+    (ref === undefined ||
+      (isBoundedString(ref, ANALYZE_LIMITS.refLength) && !ref.startsWith("-")))
+    ? {
+        scope: ScopeMode.Diff,
+        ...(ref === undefined ? {} : { ref }),
+      }
+    : undefined;
 }
 
-function requestScopeMatchesPaths(value: Record<string, unknown>): boolean {
-  return value.scope === ScopeMode.Paths ? value.paths !== undefined : value.paths === undefined;
+function parseRequestPathsScope(
+  paths: unknown,
+  ref: unknown,
+): Extract<SafeScopeSelection, { readonly scope: typeof ScopeMode.Paths }> | undefined {
+  if (ref !== undefined || !Array.isArray(paths) || paths.length === 0) return undefined;
+  if (paths.length > ANALYZE_LIMITS.paths || new Set(paths).size !== paths.length) {
+    return undefined;
+  }
+  const [first, ...rest] = paths;
+  return typeof first === "string" &&
+    isBoundedWorkspaceRelativePath(first) &&
+    rest.every(
+      (path): path is string =>
+        typeof path === "string" && isBoundedWorkspaceRelativePath(path),
+    )
+    ? { scope: ScopeMode.Paths, paths: [first, ...rest] }
+    : undefined;
 }
 
-function validRequestRef(value: Record<string, unknown>): value is Record<string, unknown> & Pick<AnalyzeWorkerRequest, "ref"> {
-  return (
-    value.ref === undefined ||
-    (isBoundedString(value.ref, ANALYZE_LIMITS.refLength) && !value.ref.startsWith("-"))
-  );
+function parseRequestScope(value: Record<string, unknown>): SafeScopeSelection | undefined {
+  switch (value.scope) {
+    case ScopeMode.Diff:
+      return parseRequestDiffScope(value.paths, value.ref);
+    case ScopeMode.Paths:
+      return parseRequestPathsScope(value.paths, value.ref);
+    default:
+      return undefined;
+  }
 }
 
 export function parseAnalyzeWorkerRequest(
@@ -276,13 +298,21 @@ export function parseAnalyzeWorkerRequest(
   return Effect.gen(function* () {
     const value = yield* parseObjectLine(line);
     const runId = yield* validateEnvelope(value, AnalyzeWorkerMessageType.Request);
-    if (!validRequestRoot(value)) {
+    if (!validRequestCwd(value.cwd)) {
       return yield* protocolFailure(
         AnalyzeProtocolErrorKind.Malformed,
-        "Analyze worker request scope or cwd is invalid",
+        "Analyze worker request cwd is invalid",
       );
     }
-    if (!validRequestChecks(value)) {
+    const scope = parseRequestScope(value);
+    if (scope === undefined) {
+      return yield* protocolFailure(
+        AnalyzeProtocolErrorKind.Malformed,
+        "Analyze worker request scope is invalid",
+      );
+    }
+    const checks = parseRequestChecks(value.checks);
+    if (checks === undefined) {
       return yield* protocolFailure(
         AnalyzeProtocolErrorKind.Malformed,
         "Analyze worker request checks are invalid",
@@ -294,29 +324,18 @@ export function parseAnalyzeWorkerRequest(
         "Analyze worker request limits are invalid",
       );
     }
-    if (!validRequestPaths(value)) {
-      return yield* protocolFailure(
-        AnalyzeProtocolErrorKind.Malformed,
-        "Analyze worker request paths are invalid",
-      );
-    }
-    if (!requestScopeMatchesPaths(value)) {
-      return yield* protocolFailure(
-        AnalyzeProtocolErrorKind.Malformed,
-        "Analyze worker request scope and paths disagree",
-      );
-    }
-    if (!validRequestRef(value)) {
-      return yield* protocolFailure(
-        AnalyzeProtocolErrorKind.Malformed,
-        "Analyze worker request ref is invalid",
-      );
-    }
     return {
-      ...value,
       version: ANALYZE_WORKER_PROTOCOL_VERSION,
       type: AnalyzeWorkerMessageType.Request,
       runId,
+      cwd: value.cwd,
+      ...scope,
+      checks,
+      maxMemoryMb: value.maxMemoryMb,
+      maxSourceFiles: value.maxSourceFiles,
+      maxSourceFileBytes: value.maxSourceFileBytes,
+      maxSourceBytes: value.maxSourceBytes,
+      timeoutMs: value.timeoutMs,
     };
   });
 }

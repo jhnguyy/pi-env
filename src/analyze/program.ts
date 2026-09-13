@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import ts from "typescript";
 import { ProgramError, ScopeMode } from "./model.js";
 import type { Scope } from "./scope.js";
+import { isOutsideWorkspace, normalizeWorkspacePath } from "./workspace-path.js";
 
 export const ProjectRequirement = {
   None: "none",
@@ -41,8 +42,8 @@ interface ParsedConfig {
 const SourceCategory = { Production: "production", Test: "test" } as const;
 type SourceCategory = typeof SourceCategory[keyof typeof SourceCategory];
 
-const slash = (value: string): string => value.replaceAll("\\", "/");
-const sourcePath = (cwd: string, fileName: string): string => slash(relative(cwd, resolve(fileName)));
+const sourcePath = (cwd: string, fileName: string): string =>
+  normalizeWorkspacePath(relative(cwd, resolve(fileName)));
 function sourceCategory(cwd: string, fileName: string): SourceCategory | undefined {
   const path = sourcePath(cwd, fileName);
   if (path.includes("node_modules/") || /(^|\/)(dist|generated)(\/|$)/.test(path)) return undefined;
@@ -191,7 +192,7 @@ function createExplicitSyntaxProject(
   const fileNames = scope.files.map((file) => {
     const resolved = realpathSync(resolve(root, file));
     const relativePath = sourcePath(root, resolved);
-    if (relativePath === ".." || relativePath.startsWith("../") || relativePath.startsWith("/")) {
+    if (isOutsideWorkspace(relativePath)) {
       throw new ProgramError({ message: `Syntax source resolves outside cwd: ${file}` });
     }
     return resolved;

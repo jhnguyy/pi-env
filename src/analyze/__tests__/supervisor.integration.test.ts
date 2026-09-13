@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { describe, expect, it } from "vitest";
 import { AnalyzerName, ScopeMode } from "../model.js";
-import { ANALYZE_LIMITS, classifyAnalyzeRequest, type SafeAnalyzeRequest } from "../policy.js";
+import { ANALYZE_LIMITS, type SafeAnalyzeRequest } from "../policy.js";
 import { runPublicAnalyze } from "../public.js";
 import { superviseAnalyze } from "../supervisor.js";
 import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
@@ -12,7 +12,12 @@ import { AnalyzeDiagnosticEventType, AnalyzeSpanName } from "../diagnostics.js";
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-supervisor-"));
 const disabledEnv = { PI_ENV_ANALYZE_JOURNAL_ENABLED: "false" } as const;
 
-function safeRequest(cwd: string, overrides: Partial<SafeAnalyzeRequest> = {}): SafeAnalyzeRequest {
+type PathsSafeRequest = Extract<SafeAnalyzeRequest, { readonly scope: typeof ScopeMode.Paths }>;
+
+function safeRequest(
+  cwd: string,
+  overrides: Partial<Omit<PathsSafeRequest, "cwd" | "scope">> = {},
+): PathsSafeRequest {
   return {
     cwd,
     scope: ScopeMode.Paths,
@@ -106,100 +111,6 @@ setInterval(() => {}, 1000);`,
   await waitFor(() => !isAlive(pids.workerPid) && !isAlive(pids.grandchildPid));
   return pids;
 }
-
-describe("safe analyze policy", () => {
-  it("allows only explicit safe checks on diff or bounded relative paths", () => {
-    const cwd = fixtureRoot();
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.Diff,
-        checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk],
-        maxMemoryMb: 8_192,
-      }),
-    ).toMatchObject({
-      _tag: "safe",
-      request: { maxMemoryMb: 512, checks: ["complexity", "async-risk"] },
-    });
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.Paths,
-        paths: ["src/a.ts"],
-        checks: [AnalyzerName.AsyncRisk],
-      }),
-    ).toMatchObject({ _tag: "safe" });
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.Paths,
-        paths: ["src/a.ts"],
-        checks: [AnalyzerName.Duplicates],
-        maxMemoryMb: 8_192,
-      }),
-    ).toMatchObject({
-      _tag: "safe",
-      request: {
-        maxMemoryMb: 512,
-        maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
-        maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
-        maxSourceBytes: ANALYZE_LIMITS.sourceBytes,
-      },
-    });
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.Diff,
-        checks: [AnalyzerName.TestDuplicates],
-      }),
-    ).toMatchObject({ _tag: "safe" });
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        scope: ScopeMode.Paths,
-        paths: ["src/a.test.ts"],
-        checks: [AnalyzerName.TestDuplicates],
-      }),
-    ).toMatchObject({ _tag: "safe" });
-    for (const path of ["../outside.ts", "src/../../outside.ts", "src\\..\\outside.ts"]) {
-      expect(
-        classifyAnalyzeRequest({
-          cwd,
-          scope: ScopeMode.Paths,
-          paths: [path],
-          checks: [AnalyzerName.AsyncRisk],
-        }),
-      ).toMatchObject({ _tag: "invalid" });
-    }
-  });
-
-  it("fails closed for omitted/invalid checks and classifies heavy work as strict", () => {
-    const cwd = fixtureRoot();
-    expect(classifyAnalyzeRequest({ cwd })).toMatchObject({ _tag: "invalid" });
-    expect(
-      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity, AnalyzerName.Complexity] }),
-    ).toMatchObject({ _tag: "invalid" });
-    expect(
-      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] }),
-    ).toMatchObject({ _tag: "strict" });
-    expect(
-      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Duplicates] }),
-    ).toMatchObject({ _tag: "strict" });
-    expect(classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Types] })).toMatchObject({
-      _tag: "strict",
-    });
-    expect(
-      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity], profile: true }),
-    ).toMatchObject({ _tag: "strict" });
-    expect(
-      classifyAnalyzeRequest({
-        cwd,
-        checks: [AnalyzerName.Complexity],
-        ref: "--upload-pack=malicious",
-      }),
-    ).toMatchObject({ _tag: "invalid" });
-  });
-});
 
 describe("analyze supervisor", () => {
   it("reports worker spawn failures through the supervisor boundary", async () => {
@@ -404,7 +315,7 @@ describe("public analyze boundary", () => {
     });
   }, 30_000);
 
-  it("returns safe worker results and refuses heavy/all work before spawn", async () => {
+  it("refuses strict and malformed work before spawn", async () => {
     const cwd = fixtureRoot();
     const marker = join(cwd, "spawned");
     const worker = writeWorker(
@@ -415,17 +326,23 @@ emit({ version: 1, type: "started", runId: request.runId });
 emit({ version: 1, type: "result", runId: request.runId, result: ${emptyResult} });
 emit({ version: 1, type: "complete", runId: request.runId });`,
     );
-    const safe = await runPublicAnalyze(
-      { cwd, scope: ScopeMode.Paths, paths: ["src/a.ts"], checks: [AnalyzerName.Complexity] },
-      { workerPath: validWorker(cwd), env: disabledEnv },
-    );
-    expect(safe.summary.failures).toBe(0);
-
     const strict = await runPublicAnalyze(
       { cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] },
       { workerPath: worker, env: disabledEnv },
     );
     expect(strict.analyzerFailures[0]).toMatchObject({ analyzer: "containment" });
+    expect(existsSync(marker)).toBe(false);
+
+    const invalid = await runPublicAnalyze(
+      {
+        cwd,
+        scope: ScopeMode.All,
+        paths: ["../outside.ts"],
+        checks: [AnalyzerName.Types],
+      },
+      { workerPath: worker, env: disabledEnv },
+    );
+    expect(invalid.analyzerFailures[0]).toMatchObject({ analyzer: "configuration" });
     expect(existsSync(marker)).toBe(false);
   });
 

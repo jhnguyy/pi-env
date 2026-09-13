@@ -271,9 +271,14 @@ describe("analyze worker protocol", () => {
     timeoutMs: 10_000,
   } as const;
 
-  it.effect("accepts a bounded versioned request", () =>
+  it.effect("accepts bounded versioned diff and paths requests", () =>
     Effect.gen(function* () {
-      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify(request))).toEqual(request);
+      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify({ ...request, ref: "main" }))).toEqual({
+        ...request,
+        ref: "main",
+      });
+      const pathsRequest = { ...request, scope: "paths", paths: ["src/a.ts"] } as const;
+      expect(yield* parseAnalyzeWorkerRequest(JSON.stringify(pathsRequest))).toEqual(pathsRequest);
     }),
   );
 
@@ -294,6 +299,16 @@ describe("analyze worker protocol", () => {
           parseAnalyzeWorkerRequest(JSON.stringify({ ...request, scope: "paths", paths: [path] })),
         ),
       ).toBe(AnalyzeProtocolErrorKind.Malformed);
+    }
+    for (const malformed of [
+      { ...request, paths: [] },
+      { ...request, scope: "paths", paths: [] },
+      { ...request, scope: "paths", paths: ["src/a.ts"], ref: "main" },
+      { ...request, scope: "all" },
+    ]) {
+      expect(await leftKind(parseAnalyzeWorkerRequest(JSON.stringify(malformed)))).toBe(
+        AnalyzeProtocolErrorKind.Malformed,
+      );
     }
   });
 

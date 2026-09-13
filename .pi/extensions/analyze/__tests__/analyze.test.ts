@@ -77,9 +77,23 @@ describe("analyze tool", () => {
     expect(runner).not.toHaveBeenCalled();
   });
 
-  it("requires absolute worktrees and paths for path scope", async () => {
+  it("requires absolute worktrees", async () => {
     await expect(execute({ worktree: "relative" })).rejects.toThrow("absolute path");
+  });
+
+  it("reports paths scope without paths through the public policy", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "analyze-tool-"));
-    await expect(execute({ worktree, scope: ScopeMode.Paths })).rejects.toThrow("requires at least one path");
+    const tool = createAnalyzeTool();
+    const output = await tool.execute(
+      "call",
+      { worktree, scope: ScopeMode.Paths },
+      new AbortController().signal,
+      undefined,
+      {} as never,
+    );
+    expect(output.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("paths scope requires non-empty explicit paths"),
+    });
   });
 });
