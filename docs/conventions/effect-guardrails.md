@@ -12,6 +12,7 @@ The pinned Effect declarations, repository typecheck, and runtime tests are auth
 ## Data and failure
 
 - Decode untrusted input at the adapter edge before it reaches core workflows. Use `Schema.decodeUnknownEffect` when a schema is warranted, or `Result` for pure synchronous parsing. Reserve throwing decoders and constructors for trusted startup and test paths.
+- Return a refined domain value from parsing. Do not decode or validate into a broad type and require the workflow to repeat the same checks. Follow [`domain-modeling.md`](domain-modeling.md) for invariant-preserving representations.
 - Use Schema models for reusable encoded, persisted, or boundary-crossing contracts. Keep internal records and control data plain TypeScript or `Data` variants when they do not need runtime decoding. A same-name Schema interface is optional rather than a repo requirement.
 - Use `Schema.optionalKey` when an encoded key may be absent. Use `Schema.optional` only when explicit `undefined` is part of the in-memory contract.
 - Expected operational failures use `Data.TaggedError` or equivalent discriminated data when they stay local. Use schema-backed tagged errors when the error itself needs decoding, encoding, persistence, or a public transport contract.

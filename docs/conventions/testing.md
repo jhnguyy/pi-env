@@ -16,6 +16,18 @@ Delete or avoid assertions that only mirror source constants, private field layo
 
 Do not test test wiring. Do not pin package scripts, verification registry arrays, workflow text, dependency versions, generated dependency declarations, dependency waiver snapshots, source import placement, or validator invocation details in tests. Running the canonical validation is the authority for that wiring. Use a static policy check when source structure is a necessary constraint. Test a validation helper only when it owns a durable parsing, exit-status, or fail-safe contract that a successful repository run cannot prove.
 
+## Domain-first evidence
+
+When a boundary parses weak input into a domain value, test the parser and the domain workflow as separate claims.
+
+- Parser tests prove that accepted input produces the required refined representation and rejected input produces the expected typed failure.
+- Workflow tests use parsed domain values. They must not repeat every invalid-input case at downstream layers.
+- Add an interaction case when structural decoding and semantic parsing can disagree.
+- Treat repeated validation tests across downstream functions as evidence of a missing domain boundary, not as a coverage target.
+- Do not expose a validator, constructor, or unsafe factory only for tests. Test through the runtime-owned parsing boundary.
+
+Keep a downstream defensive check only when the domain type cannot practically preserve the invariant or when state can become invalid after parsing. State that reason in the test claim.
+
 ## Test maintenance
 
 Each permanent test must justify its maintenance cost with a durable behavioral claim. Delete a test when no requirement, known regression, safety invariant, or cross-boundary interaction explains why a failure matters.
