@@ -7,9 +7,9 @@ description: Build, validate, and evaluate pi skills following Agent Skills spec
 
 ## Conventions
 
-**Reference skills** — lightweight skills that live in `~/.agents/skills/reference/` or a package-root `.agents/skills/reference/` directory as plain `.md` files. They are loaded only when explicitly referenced, not through passive skill context.
+**Reference skills** — standard skill directories whose `SKILL.md` sets `disable-model-invocation: true`. Invoke them with native `/skill:name` commands. See [Pi's skills documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md).
 
-**Auto-discovered skills** — directories with `SKILL.md` in a configured Pi skill path. Names use lowercase letters, digits, and single hyphens, with a maximum of 64 characters.
+**Other skills** — directories with `SKILL.md` in a configured Pi skill path. Names use lowercase letters, digits, and single hyphens, with a maximum of 64 characters.
 
 ## Building a New Skill
 

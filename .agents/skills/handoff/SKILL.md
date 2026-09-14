@@ -1,5 +1,6 @@
 ---
 name: handoff
+disable-model-invocation: true
 description: Write or read a session handoff. Use when the user explicitly asks for a handoff, new session, fresh context, or continuation from a handoff.
 ---
 

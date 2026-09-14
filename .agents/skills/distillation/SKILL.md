@@ -1,5 +1,6 @@
 ---
 name: distillation
+disable-model-invocation: true
 description: Compress verbose design docs, worklogs, and notes into dense, current-state references. Use when docs contain completed phases, stale plans, or session-specific reasoning that has crystallized into lessons.
 ---
 

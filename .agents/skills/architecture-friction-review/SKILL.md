@@ -1,5 +1,6 @@
 ---
 name: architecture-friction-review
+disable-model-invocation: true
 description: Review code for architectural friction, module-depth opportunities, and better seams. Use when asked to improve architecture, find better boundaries, or pressure-test a refactor candidate.
 ---
 

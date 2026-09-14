@@ -1,5 +1,6 @@
 ---
 name: grill
+disable-model-invocation: true
 description: Stress-test a plan, design, decision, or architecture proposal one question at a time. Use when the user asks to be grilled, challenged, interrogated, or wants a plan reviewed before acting.
 ---
 

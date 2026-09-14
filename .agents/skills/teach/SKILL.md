@@ -1,5 +1,6 @@
 ---
 name: teach
+disable-model-invocation: true
 description: Guide a user through learning a topic with mission-grounded, retrieval-based lessons. Use when the user asks to learn, practice, study, be taught, or build durable understanding across sessions.
 ---
 

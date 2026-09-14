@@ -1,5 +1,6 @@
 ---
 name: planning
+disable-model-invocation: true
 description: Transform a request into a scoped, testable delivery path that continues through production landing and explicit closure. Use when the user asks to apply ownership to feature, roadmap, migration, or operational planning.
 ---
 
