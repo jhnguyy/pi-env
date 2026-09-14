@@ -155,10 +155,7 @@ it.each(templateCases)(
     });
 
     expect(created.content[0].text).toContain(`Template: ${template}  Files: ${files.join(", ")}`);
-    expect(created.details).toMatchObject({
-      skillDir,
-      validation: { valid: true, issues: [], name },
-    });
+    expect(created.details).toMatchObject({ skillDir });
     if ("auxiliaryDirectory" in templateCase) {
       expect(existsSync(join(skillDir, templateCase.auxiliaryDirectory))).toBe(true);
     }
@@ -169,10 +166,7 @@ it.each(templateCases)(
     const validated = await tool.execute({ path: join("skills", name) });
 
     expect(validated.content[0].text).toContain("✓ Validate: passed");
-    expect(validated.details).toMatchObject({
-      skillDir,
-      validation: { valid: true, issues: [], name },
-    });
+    expect(validated.details).toMatchObject({ skillDir });
     expect(tool.exec).not.toHaveBeenCalled();
   },
 );
@@ -233,9 +227,12 @@ it("requires a user goal for advisory evaluation", async () => {
   expect(runner).not.toHaveBeenCalled();
 });
 
-it("blocks advisory evaluation after registered deterministic validation fails", async () => {
+it("blocks advisory evaluation when a reference escapes the skill directory", async () => {
   const root = tempRoot();
-  writeSkill(root, "---\ndescription: Missing name.\n---\n\n# Invalid\n");
+  writeSkill(
+    root,
+    "---\nname: review-skill\ndescription: Reviews a skill.\n---\n\nSee [secret](../secret.md).\n",
+  );
   const tool = registeredSkillBuild(root);
 
   const result = await tool.execute({
@@ -245,6 +242,7 @@ it("blocks advisory evaluation after registered deterministic validation fails",
   });
 
   expect(result.content[0]?.text).toContain("✗ Validate:");
+  expect(result.content[0]?.text).toContain("reference-scope");
   expect(result.content[0]?.text).not.toContain("Advisory evaluation");
   expect(tool.exec).not.toHaveBeenCalled();
 });
