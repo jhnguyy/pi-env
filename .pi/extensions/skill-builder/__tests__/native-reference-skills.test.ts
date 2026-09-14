@@ -24,6 +24,7 @@ const referenceNames = [
   "planning",
   "teach",
 ];
+const referenceNameSet = new Set(referenceNames);
 const roots: string[] = [];
 
 afterEach(() => {
@@ -36,8 +37,10 @@ async function loadPackageSkills() {
   roots.push(root);
   vi.stubEnv("HOME", root);
   const packageDir = join(root, "package");
-  const referenceDir = join(packageDir, ".agents", "skills", "reference");
-  cpSync(join(repository, ".agents", "skills", "reference"), referenceDir, { recursive: true });
+  const skillsDir = join(packageDir, ".agents", "skills");
+  for (const name of referenceNames) {
+    cpSync(join(repository, ".agents", "skills", name), join(skillsDir, name), { recursive: true });
+  }
   const manifest = JSON.parse(readFileSync(join(repository, "package.json"), "utf8"));
   writeFileSync(
     join(packageDir, "package.json"),
@@ -63,14 +66,14 @@ async function loadPackageSkills() {
     noContextFiles: true,
   });
   await loader.reload();
-  return { root, agentDir, referenceDir, loader, settingsManager };
+  return { root, agentDir, skillsDir, loader, settingsManager };
 }
 
 it("discovers packaged reference skills without offering them in the passive prompt", async () => {
-  const { loader, referenceDir } = await loadPackageSkills();
+  const { loader } = await loadPackageSkills();
   const { skills, diagnostics } = loader.getSkills();
   expect(diagnostics.filter((diagnostic) => diagnostic.type === "error")).toEqual([]);
-  const references = skills.filter((skill) => skill.baseDir === referenceDir);
+  const references = skills.filter((skill) => referenceNameSet.has(skill.name));
   expect(references.map((skill) => skill.name).sort()).toEqual(referenceNames);
   const prompt = formatSkillsForPrompt(skills);
   expect(prompt).toContain("visible-control");
@@ -81,8 +84,8 @@ it("discovers packaged reference skills without offering them in the passive pro
 });
 
 it("expands an explicitly invoked reference skill with user arguments", async () => {
-  const { root, agentDir, referenceDir, loader, settingsManager } = await loadPackageSkills();
-  const skillPath = join(referenceDir, "planning.md");
+  const { root, agentDir, skillsDir, loader, settingsManager } = await loadPackageSkills();
+  const skillPath = join(skillsDir, "planning", "SKILL.md");
   const marker = "explicit-skill-content-control";
   writeFileSync(skillPath, `${readFileSync(skillPath, "utf8")}\n${marker}\n`);
   const modelRuntime = await ModelRuntime.create({
