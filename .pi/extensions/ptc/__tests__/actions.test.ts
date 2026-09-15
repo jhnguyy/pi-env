@@ -65,7 +65,7 @@ describe("PTC actions", () => {
       output: "not used",
       details: new PtcExecutionTracker(() => 0).details(PtcCompletion.Success),
     }));
-    const registry = registrySnapshot(["read", "dev-tools"], ["direct_only"]);
+    const registry = registrySnapshot(["read", "dev-tools", "closeout"], ["direct_only"]);
 
     const result = await executePtcAction(
       { action: PtcAction.Inspect },
@@ -80,11 +80,13 @@ describe("PTC actions", () => {
     expect(result.output).toContain('"dev-tools"(args?: Record<string, unknown>): Promise<string>;');
     expect(result.output).toContain("direct_only: This active direct tool has no PTC dispatcher. Call it directly.");
     expect(result.output).toContain("ptc: This tool is blocked inside PTC. Call it directly.");
+    expect(result.output).toContain("closeout: This tool is blocked inside PTC. Call it directly.");
     expect(result.details).toMatchObject({
       action: PtcAction.Inspect,
       catalog: {
         nestedReturnType: "Promise<string>",
-        callable: expect.arrayContaining([expect.objectContaining({ name: "read", key: "read" })]),
+        callable: expect.not.arrayContaining([expect.objectContaining({ name: "closeout" })]),
+        blocked: expect.arrayContaining([expect.objectContaining({ name: "closeout" })]),
         unavailable: [expect.objectContaining({ name: "direct_only" })],
       },
     });
