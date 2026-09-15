@@ -141,7 +141,7 @@
     "packageManager": {
       "name": "nub",
       "version": "^0.9.2",
-      "onFail": "ignore"
+      "onFail": "warn"
     },
     "runtime": {
       "name": "node",
