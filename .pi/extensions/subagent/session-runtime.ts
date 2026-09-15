@@ -8,7 +8,6 @@ import {
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
 import type { ExtToolRegistration } from "../_shared/agent-tools";
-import { clearSlot, setSlot } from "../_shared/ui-render";
 import {
   DEFAULT_SUBAGENT_CONFIG,
   loadSubagentRuntimeConfig,
@@ -83,8 +82,9 @@ export function renderActiveJobStatusSlot(
 ): void {
   if (!ctx.hasUI) return;
   const lines = formatActiveJobStatusLines(jobs, ctx.ui.theme);
-  if (lines.length === 0) clearSlot("subagents", ctx);
-  else setSlot("subagents", lines, ctx);
+  ctx.ui.setWidget("subagents", lines.length > 0 ? lines : undefined, {
+    placement: "belowEditor",
+  });
 }
 
 export class SubagentSessionRuntime {
@@ -147,7 +147,7 @@ export class SubagentSessionRuntime {
   startSession(ctx: ExtensionContext): Promise<boolean> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
-    clearSlot("subagents", ctx);
+    renderActiveJobStatusSlot([], ctx);
     this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       await this.disposeActiveResources();
@@ -223,7 +223,7 @@ export class SubagentSessionRuntime {
   shutdownSession(ctx?: ExtensionContext): Promise<void> {
     const generation = ++this.lifecycleGeneration;
     this.sessionState = SubagentSessionState.ShuttingDown;
-    if (ctx) clearSlot("subagents", ctx);
+    if (ctx) renderActiveJobStatusSlot([], ctx);
     this.dagRuntime?.stopAccepting();
     return this.enqueueTransition(async () => {
       try {
@@ -315,7 +315,7 @@ export class SubagentSessionRuntime {
 
   private updateJobStatusSlot(jobs: readonly SubagentJob[], ctx: ExtensionContext): void {
     if (this.sessionState !== SubagentSessionState.Active) {
-      clearSlot("subagents", ctx);
+      renderActiveJobStatusSlot([], ctx);
       return;
     }
     renderActiveJobStatusSlot(jobs, ctx);

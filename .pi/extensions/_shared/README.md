@@ -16,4 +16,3 @@
 | Query Git state | `gitSync()`, `isGitRepo()`, `getCurrentBranch()`, `getDirtyCount()`, `getMergedBranches()` | `git.ts` |
 | Detect headless extension contexts | `isHeadless()` | `context.ts` |
 | Render the configured tool-output expansion hint with a `ctrl+o` fallback | `toolExpandKeyHint()`, `toolExpandHint()` | `tool-render.ts` |
-| Update shared TUI slots | `setSlot()`, `clearSlot()`, `batchSlots()`, `flush()`, `resetSlots()` | `ui-render.ts` |

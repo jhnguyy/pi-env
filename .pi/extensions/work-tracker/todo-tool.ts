@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { setSlot } from "../_shared/ui-render";
 import { formatTodoMilestoneLabel } from "./milestones";
 import type { TodoStore } from "./store";
 
@@ -57,8 +56,8 @@ function requireText(action: TodoAction, text: string[] | undefined): string[] {
 }
 
 function updateTodoSlot(store: TodoStore, ctx?: ExtensionContext): void {
-  if (!ctx?.ui) return;
-  setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
+  if (!ctx?.hasUI) return;
+  ctx.ui.setWidget("session-todos", store.renderWidget(ctx.ui.theme), { placement: "aboveEditor" });
 }
 
 function textResult(text: string, details: Record<string, unknown> = {}): TodoResult {

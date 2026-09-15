@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { resetSlots } from "../../_shared/ui-render";
 import { formatActiveJobStatusLines, renderActiveJobStatusSlot } from "../session-runtime";
 import { createSubagentHarness } from "./harness";
 
@@ -18,8 +17,6 @@ function job(
 ) {
   return { id, name, status, createdAt, task } as any;
 }
-
-afterEach(() => resetSlots());
 
 describe("active subagent status", () => {
   it("renders one brief ordered line per nonterminal background child", () => {
