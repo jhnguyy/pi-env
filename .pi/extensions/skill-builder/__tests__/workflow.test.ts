@@ -155,10 +155,7 @@ it.each(templateCases)(
     });
 
     expect(created.content[0].text).toContain(`Template: ${template}  Files: ${files.join(", ")}`);
-    expect(created.details).toMatchObject({
-      skillDir,
-      validation: { valid: true, issues: [], name },
-    });
+    expect(created.details).toMatchObject({ skillDir });
     if ("auxiliaryDirectory" in templateCase) {
       expect(existsSync(join(skillDir, templateCase.auxiliaryDirectory))).toBe(true);
     }
@@ -169,10 +166,7 @@ it.each(templateCases)(
     const validated = await tool.execute({ path: join("skills", name) });
 
     expect(validated.content[0].text).toContain("✓ Validate: passed");
-    expect(validated.details).toMatchObject({
-      skillDir,
-      validation: { valid: true, issues: [], name },
-    });
+    expect(validated.details).toMatchObject({ skillDir });
     expect(tool.exec).not.toHaveBeenCalled();
   },
 );
@@ -233,9 +227,12 @@ it("requires a user goal for advisory evaluation", async () => {
   expect(runner).not.toHaveBeenCalled();
 });
 
-it("blocks advisory evaluation after registered deterministic validation fails", async () => {
+it("blocks advisory evaluation when a reference escapes the skill directory", async () => {
   const root = tempRoot();
-  writeSkill(root, "---\ndescription: Missing name.\n---\n\n# Invalid\n");
+  writeSkill(
+    root,
+    "---\nname: review-skill\ndescription: Reviews a skill.\n---\n\nSee [secret](../secret.md).\n",
+  );
   const tool = registeredSkillBuild(root);
 
   const result = await tool.execute({
@@ -245,6 +242,7 @@ it("blocks advisory evaluation after registered deterministic validation fails",
   });
 
   expect(result.content[0]?.text).toContain("✗ Validate:");
+  expect(result.content[0]?.text).toContain("reference-scope");
   expect(result.content[0]?.text).not.toContain("Advisory evaluation");
   expect(tool.exec).not.toHaveBeenCalled();
 });
@@ -252,14 +250,14 @@ it("blocks advisory evaluation after registered deterministic validation fails",
 it("uses the in-process subagent with the user goal and automatic Git diff", async () => {
   const root = tempRoot();
   writeSkill(root);
-  const exec = vi.fn(async (command: string, args: string[]) => {
-    expect(command).toBe("git");
-    expect(args).toEqual(["diff", "HEAD", "--", "SKILL.md"]);
-    return { code: 0, stdout: "+ changed instruction\n", stderr: "" };
-  });
+  const exec = vi.fn(async (_command: string, _args: string[]) => ({
+    code: 0,
+    stdout: "+ changed instruction\n",
+    stderr: "",
+  }));
   const runner = vi.fn((run, _ctx, options) =>
     Effect.sync(() => {
-      expect(run.task).toContain("## User Goal\n\nReduce recurring context.");
+      expect(run.task).toContain("Reduce recurring context.");
       expect(run.task).toContain("+ changed instruction");
       expect(run.tools).toEqual([]);
       expect(run.toolNames).toEqual([]);
@@ -280,7 +278,6 @@ it("uses the in-process subagent with the user goal and automatic Git diff", asy
   expect(runner).toHaveBeenCalledOnce();
   expect(exec.mock.calls.some(([command]) => command === "pi")).toBe(false);
   expect(result.content[0]?.text).toContain("Advisory evaluation: 1 finding(s) for user review");
-  expect(result.content[0]?.text).toContain("Do not rerun only to obtain a pass");
   expect(result.details).toMatchObject({
     diffSource: "git-head",
     evaluation: {

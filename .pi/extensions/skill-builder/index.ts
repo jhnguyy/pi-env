@@ -224,25 +224,41 @@ function operationalFailure(
 }
 
 function validationCounts(validation: ValidationResult): {
-  error_count: number;
-  warning_count: number;
+  local_error_count: number;
+  local_warning_count: number;
+  native_error_count: number;
+  native_warning_count: number;
+  native_collision_count: number;
 } {
   return {
-    error_count: validation.issues.filter((issue) => issue.severity === "error").length,
-    warning_count: validation.issues.filter((issue) => issue.severity === "warning").length,
+    local_error_count: validation.issues.filter((issue) => issue.severity === "error").length,
+    local_warning_count: validation.issues.filter((issue) => issue.severity === "warning").length,
+    native_error_count: validation.nativeDiagnostics.filter(
+      (diagnostic) => diagnostic.type === "error",
+    ).length,
+    native_warning_count: validation.nativeDiagnostics.filter(
+      (diagnostic) => diagnostic.type === "warning",
+    ).length,
+    native_collision_count: validation.nativeDiagnostics.filter(
+      (diagnostic) => diagnostic.type === "collision",
+    ).length,
   };
 }
 
 function appendValidationSummary(lines: string[], validation: ValidationResult): void {
-  const errorCount = validation.issues.filter((issue) => issue.severity === "error").length;
-  const warningCount = validation.issues.filter((issue) => issue.severity === "warning").length;
+  const counts = validationCounts(validation);
 
   lines.push("");
   lines.push(
     validation.valid
       ? "✓ Validate: passed"
-      : `✗ Validate: ${errorCount} error(s), ${warningCount} warning(s)`,
+      : `✗ Validate: failed (${counts.local_error_count} local error(s), ${counts.native_error_count} native error(s), ${counts.local_warning_count + counts.native_warning_count} warning(s), ${counts.native_collision_count} collision(s))`,
   );
+  for (const diagnostic of validation.nativeDiagnostics) {
+    lines.push(
+      `  [NATIVE ${diagnostic.type.toUpperCase()}] ${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`,
+    );
+  }
   for (const issue of validation.issues) {
     lines.push(
       `  [${issue.severity.toUpperCase()}] ${issue.rule}: ${issue.message}${issue.file ? ` (${issue.file})` : ""}`,

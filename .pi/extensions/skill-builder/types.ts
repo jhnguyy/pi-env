@@ -2,6 +2,8 @@
  * Shared types for the skill-builder extension.
  */
 
+import type { ResourceDiagnostic } from "@earendil-works/pi-coding-agent";
+
 /** Result of a single validation check. */
 export interface ValidationIssue {
   rule: string;
@@ -11,24 +13,13 @@ export interface ValidationIssue {
   file?: string;
 }
 
-/** Aggregate validation result. */
+/** Aggregate native acceptance and local authoring-policy result. */
 export interface ValidationResult {
   valid: boolean;
   issues: ValidationIssue[];
-  /** Skill name extracted from frontmatter, if parseable. */
+  nativeDiagnostics: ResourceDiagnostic[];
+  /** Skill name accepted by the native loader. */
   name?: string;
-}
-
-/** Parsed SKILL.md frontmatter. */
-export interface SkillFrontmatter {
-  name?: unknown;
-  description?: unknown;
-  license?: string;
-  compatibility?: string;
-  metadata?: Record<string, unknown>;
-  "allowed-tools"?: string;
-  "disable-model-invocation"?: boolean;
-  [key: string]: unknown;
 }
 
 /** Template types available for scaffolding. */
