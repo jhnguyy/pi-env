@@ -85,7 +85,7 @@ registerCrossHostTool(pi, {
 });
 ```
 
-Use `jit_catch` as the canonical shared-contract example and `closeout` as the migrated example. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
+Use `notes` and `linear` as PTC-eligible examples. `closeout` shows a tool that remains available to child agents but is blocked from PTC. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
 
 Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration automatically exposes eligible tools to subagents and PTC, subject to the PTC blocklist in `.pi/extensions/ptc/types.ts`.
 

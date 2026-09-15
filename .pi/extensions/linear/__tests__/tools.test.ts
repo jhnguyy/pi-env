@@ -3,7 +3,7 @@ import { expect, it, vi } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
 import type { IssueSummary, LinearResourceSummary } from "../api";
 import { LinearErrorCode, linearError, type LinearToolError } from "../domain";
-import { createLinearTool, LinearAction, type LinearToolGateway } from "../tools";
+import { createLinearContract, LinearAction, type LinearToolGateway } from "../tools";
 
 function issue(number: number): IssueSummary {
   return {
@@ -54,16 +54,15 @@ function gateway() {
 }
 
 function tool(fakeGateway: ReturnType<typeof gateway>) {
-  return createLinearTool(fakeGateway);
+  return createLinearContract(fakeGateway);
 }
 
 async function execute(
   fakeGateway: ReturnType<typeof gateway>,
   params: Record<string, unknown>,
   signal?: AbortSignal,
-  ctx: any = {},
 ) {
-  return tool(fakeGateway).execute("tool-call", params as never, signal, undefined, ctx);
+  return tool(fakeGateway).execute(params as never, { cwd: "/repo", signal });
 }
 
 describeIfEnabled("linear", "Linear tool", () => {
@@ -77,13 +76,9 @@ describeIfEnabled("linear", "Linear tool", () => {
     expect(Check(definition.parameters, { action: "create-issue" })).toBe(false);
   });
 
-  it("routes each action, forwards cancellation, and never asks for confirmation", async () => {
+  it("routes each action and forwards cancellation", async () => {
     const fakeGateway = gateway();
     const controller = new AbortController();
-    const confirm = vi.fn(async () => {
-      throw new Error("Linear read actions must not prompt for credential use.");
-    });
-    const ctx = { hasUI: true, ui: { confirm } } as any;
     const calls = [
       [LinearAction.Viewer, {}, "viewer"],
       [LinearAction.ListResources, { resourceType: "teams" }, "listResources"],
@@ -94,12 +89,11 @@ describeIfEnabled("linear", "Linear tool", () => {
 
     for (const [action, params, method] of calls) {
       await expect(
-        execute(fakeGateway, { action, ...params }, controller.signal, ctx),
+        execute(fakeGateway, { action, ...params }, controller.signal),
       ).resolves.toBeDefined();
       expect(fakeGateway[method]).toHaveBeenCalledOnce();
       expect(fakeGateway[method].mock.calls[0]?.at(-1)).toBe(controller.signal);
     }
-    expect(confirm).not.toHaveBeenCalled();
   });
 
   it.each([

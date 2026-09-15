@@ -1,11 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ToolCapability } from "../_shared/agent-tools";
 import { getCredentialSource } from "../_shared/credential-source";
-import { registerPublicTool } from "../_shared/tool-render";
+import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 import { LinearGateway } from "./client";
 import { createLinearSdkApi } from "./sdk-adapter";
-import { createLinearTool } from "./tools";
+import { createLinearContract, linearPiOptions } from "./tools";
 
 export default function linearExtension(pi: ExtensionAPI) {
   const gateway = new LinearGateway(getCredentialSource, createLinearSdkApi);
-  registerPublicTool(pi, createLinearTool(gateway));
+  registerCrossHostTool(pi, {
+    contract: createLinearContract(gateway),
+    capabilities: [ToolCapability.Read],
+    piOptions: linearPiOptions,
+  });
 }
