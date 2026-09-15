@@ -44,12 +44,12 @@ jobs:
           mkdir -p "$TRIVY_CACHE_DIR"
           cd "$TRIVY_SCAN_ROOT"
           test -f package.json
-          test -f lock.yaml
+          test -f nub.lock
 
           trivy fs \
             --quiet \
             --scanners vuln \
-            --file-patterns pnpm:lock.yaml \
+            --file-patterns pnpm:nub.lock \
             --include-dev-deps \
             --list-all-pkgs \
             --skip-dirs node_modules \
@@ -59,8 +59,8 @@ jobs:
             --output /tmp/trivy-dependency-inventory.json \
             .
 
-          if ! grep -q '"Target": *"lock.yaml"' /tmp/trivy-dependency-inventory.json; then
-            echo "Trivy did not report lock.yaml as a dependency target. Verify the lock format and pnpm file pattern." >&2
+          if ! grep -q '"Target": *"nub.lock"' /tmp/trivy-dependency-inventory.json; then
+            echo "Trivy did not report nub.lock as a dependency target. Verify the lock format and pnpm file pattern." >&2
             exit 2
           fi
 
@@ -69,14 +69,14 @@ jobs:
             echo "Trivy detected only $package_count dependency packages. Verify the lockfile scanner configuration." >&2
             exit 2
           fi
-          echo "Trivy dependency inventory: lock.yaml ($package_count packages)."
+          echo "Trivy dependency inventory: nub.lock ($package_count packages)."
 
           rm -f /tmp/trivy-policy-results.txt
           set +e
           trivy fs \
             --quiet \
             --scanners vuln,secret,misconfig \
-            --file-patterns pnpm:lock.yaml \
+            --file-patterns pnpm:nub.lock \
             --skip-dirs node_modules \
             --skip-dirs .git \
             --severity HIGH,CRITICAL \

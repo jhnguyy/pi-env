@@ -7,6 +7,7 @@ source "$(cd "$(dirname "$0")" && pwd)/helpers.sh"
 make_repo() {
   git init -q "$1"
   mkdir -p "$1/nested/path" "$1/.git/hooks" "$1/dist"
+  printf '%s\n' '{ "packageManager": "nub@0.9.2" }' > "$1/package.json"
   printf '%s\n' 'hook sentinel' > "$1/.git/hooks/pre-commit"
   printf '%s\n' 'dist sentinel' > "$1/dist/sentinel"
 }
@@ -15,6 +16,10 @@ make_fake_nub() {
   mkdir -p "$1"
   make_executable "$1/nub" '#!/usr/bin/env bash
 set -euo pipefail
+if [ "${1:-}" = "--version" ]; then
+  printf "v%s\n" "${NUB_VERSION:-0.9.2}"
+  exit 0
+fi
 printf "%s|%s\n" "$PWD" "$*" >> "$NUB_LOG"
 if [ "${1:-}" = "install" ]; then
   count=0
@@ -138,6 +143,27 @@ test_fails_after_one_retry_without_verifying() {
   finish_fixture
 }
 
+test_rejects_an_outdated_nub_before_removing_dependencies() {
+  new_fixture
+  mkdir -p "$REPO/node_modules"
+  printf '%s\n' local > "$REPO/node_modules/local-sentinel"
+  local output status
+
+  set +e
+  output=$(run_init "$REPO" NUB_VERSION=0.2.10 2>&1)
+  status=$?
+  set -e
+
+  [ "$status" -ne 0 ] || fail "worktree initialization accepted an outdated Nub"
+  assert_file_contains "$REPO/node_modules/local-sentinel" 'local'
+  [ ! -e "$COUNT" ] || fail "outdated Nub attempted an install"
+  case "$output" in
+    *'Nub 0.9.2 is required; found 0.2.10.'*) ;;
+    *) fail "outdated Nub failure did not show the required version" ;;
+  esac
+  finish_fixture
+}
+
 test_reports_missing_nub() {
   new_fixture
   local no_nub_bin="$TEMP/no-nub-bin" output status
@@ -162,6 +188,7 @@ test_keeps_a_local_dependency_tree_after_success
 test_retries_once_after_removing_partial_install
 test_preserves_a_shared_target_created_by_a_failed_install
 test_fails_after_one_retry_without_verifying
+test_rejects_an_outdated_nub_before_removing_dependencies
 test_reports_missing_nub
 
 echo "worktree init tests passed"

@@ -31,8 +31,8 @@ const setupNodeBin = process.argv[2] || process.execPath;
 const command = parseRuntimeCommand(process.argv[3]);
 
 function selectInstallStrategy() {
-  if (commandSucceeds('nub', ['run', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
-  if (commandSucceeds('nub', ['run', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
+  if (commandSucceeds('nub', ['run', '--no-check', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
+  if (commandSucceeds('nub', ['run', '--no-check', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
     return InstallStrategy.PlainNodeBootstrap;
   }
   return InstallStrategy.NubManaged;

@@ -21,6 +21,7 @@ run_strategy() {
 
   cat > "$tmp/repo/package.json" <<'JSON'
 {
+  "packageManager": "nub@0.9.2",
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@effect/language-service": "1.0.0"
@@ -37,12 +38,16 @@ SH
 
   cat > "$fake_bin/nub" <<'SH'
 #!/usr/bin/env sh
+if [ "${1:-}" = "--version" ]; then
+  printf 'v0.9.2\n'
+  exit 0
+fi
 printf 'nub %s\n' "$*" >> "$COMMAND_LOG"
 case "$*" in
-  "run --silent check:node")
+  "run --no-check --silent check:node")
     [ "$INSTALL_STRATEGY" = "nub-managed" ]
     ;;
-  "run --node --ignore-scripts --silent check:node")
+  "run --no-check --node --ignore-scripts --silent check:node")
     [ "$INSTALL_STRATEGY" = "plain-node-bootstrap" ]
     ;;
   install\ *|"run build")

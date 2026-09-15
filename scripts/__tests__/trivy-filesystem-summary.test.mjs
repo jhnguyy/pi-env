@@ -23,8 +23,8 @@ describe("filesystem Trivy reporting", () => {
   it("reports each actionable vulnerability on one compact line", () => {
     const result = runSummary(
       [
-        "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.5.0 | fixed=8.9.0 | target=lock.yaml",
-        "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.7.0 | fixed=8.9.0 | target=lock.yaml",
+        "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.5.0 | fixed=8.9.0 | target=nub.lock",
+        "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.7.0 | fixed=8.9.0 | target=nub.lock",
         "",
       ].join("\n"),
       1,
@@ -34,8 +34,8 @@ describe("filesystem Trivy reporting", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout.trim().split("\n")).toEqual([
       "Trivy policy: 2 actionable HIGH/CRITICAL finding(s).",
-      "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.5.0 | fixed=8.9.0 | target=lock.yaml",
-      "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.7.0 | fixed=8.9.0 | target=lock.yaml",
+      "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.5.0 | fixed=8.9.0 | target=nub.lock",
+      "VULNERABILITY HIGH CVE-2026-13697 | package=undici | installed=8.7.0 | fixed=8.9.0 | target=nub.lock",
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("filesystem Trivy reporting", () => {
     const report = Array.from(
       { length: 52 },
       (_, index) =>
-        `VULNERABILITY HIGH CVE-TEST-${index + 1} | package=test | installed=1 | fixed=2 | target=lock.yaml`,
+        `VULNERABILITY HIGH CVE-TEST-${index + 1} | package=test | installed=1 | fixed=2 | target=nub.lock`,
     ).join("\n");
     const result = runSummary(report, 1);
 

@@ -27,9 +27,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup Nub and project Node
-        uses: nubjs/setup-nub@45fe48f651d367e68a42bd886a42e93d696f0a24
+        uses: nubjs/setup-nub@21b317c170eee658503996209cf87b63481be35a
         with:
-          nub-version: 0.2.10
+          nub-version: 0.9.2
+          cache-dependency-path: nub.lock
 
       - name: Show toolchain
         shell: bash
