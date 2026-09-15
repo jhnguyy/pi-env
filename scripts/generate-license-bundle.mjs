@@ -115,7 +115,7 @@ function immediatePackageRoots(nodeModulesPath) {
   if (!existsSync(nodeModulesPath)) return [];
   const roots = [];
   for (const entry of readdirSync(nodeModulesPath, { withFileTypes: true })) {
-    if (entry.name === ".bin" || entry.name === ".nub" || entry.name === ".store") continue;
+    if (entry.name === ".bin" || entry.name === ".nub") continue;
     const entryPath = join(nodeModulesPath, entry.name);
     if (!isDirectoryEntry(entry, entryPath)) continue;
     if (entry.name.startsWith("@")) {

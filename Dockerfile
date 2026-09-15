@@ -60,6 +60,7 @@ USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
   && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
   && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
+  && rm -rf /home/node/.local/share/nub/store \
   && rm -rf ${PI_ENV_HOME}/.git
 
 USER node
