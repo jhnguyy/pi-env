@@ -28,6 +28,8 @@ See [licensing](licensing.md) for the artifact contract.
 
 The artifact includes Git for HTTPS workflows but not an SSH client. Downstream agent images that require SSH transport or SSH signing must add a client and own its security update policy.
 
+The build excludes the native `tsgolint` binary from the final image layer after source verification. The current binary uses a Go standard library with known high-severity vulnerabilities. Run TypeScript lint checks in a source checkout, not from the published image.
+
 ## State and secrets
 
 Image-owned:
