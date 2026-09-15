@@ -43,18 +43,23 @@ RUN chown -R node:node ${PI_ENV_HOME}
 
 USER node
 
+# Keep Nub's content-addressed download store out of immutable image layers.
 # Local equivalent: nub install --frozen-lockfile
-RUN nub install --frozen-lockfile
+RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+  nub install --frozen-lockfile
 
-RUN nub run licenses:generate \
+RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+  nub run licenses:generate \
   --package-root /usr/local/lib/node_modules \
   --system-license node-LICENSE.txt=/usr/local/LICENSE
 
 # Local equivalent: nub run build
-RUN nub run build
+RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+  nub run build
 
 # BuildKit does not run the image entrypoint, so Tini must reap detached test descendants here.
-RUN tini -s -- nub run verify
+RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+  tini -s -- nub run verify
 
 USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
