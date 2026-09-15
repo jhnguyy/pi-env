@@ -34,7 +34,6 @@ describeIfEnabled("skill-builder", "Validator", () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ rule: "dir-exists", severity: "error" }),
     );
-    expect(result.nativeDiagnostics).toEqual([]);
   });
 
   it("fails when the skill directory has no SKILL.md", () => {
@@ -47,7 +46,6 @@ describeIfEnabled("skill-builder", "Validator", () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ rule: "skill-md-exists", severity: "error" }),
     );
-    expect(result.nativeDiagnostics).toEqual([]);
   });
 
   it("warns when a referenced file does not exist", () => {

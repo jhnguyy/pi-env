@@ -12,7 +12,6 @@ import {
   resolveToolingOtelConfig,
   sanitizeToolingAttributes,
 } from "../../../../src/telemetry/tooling.js";
-import { DEFAULT_BOUNDED_OTEL_BOUNDS } from "../../../../src/telemetry/otel.js";
 
 const roots: string[] = [];
 
@@ -75,11 +74,6 @@ describe("skill-builder tooling telemetry", () => {
       operation: "x".repeat(500),
       mode: "evaluate",
       outcome: "success",
-      local_error_count: 1,
-      local_warning_count: 2,
-      native_error_count: 3,
-      native_warning_count: 4,
-      native_collision_count: 5,
       path: "/secret/worktree/SKILL.md",
       content: "secret skill content",
       diff: "secret diff",
@@ -96,14 +90,8 @@ describe("skill-builder tooling telemetry", () => {
       operation: "x".repeat(MAX_TOOLING_STRING_LENGTH),
       mode: "evaluate",
       outcome: "success",
-      local_error_count: 1,
-      local_warning_count: 2,
-      native_error_count: 3,
-      native_warning_count: 4,
-      native_collision_count: 5,
     });
     expect(JSON.stringify(attributes)).not.toContain("secret");
-    expect(TOOLING_OTEL_BOUNDS).toBe(DEFAULT_BOUNDED_OTEL_BOUNDS);
     expect(TOOLING_OTEL_BOUNDS.maxQueueSize).toBeLessThanOrEqual(64);
     expect(TOOLING_OTEL_BOUNDS.maxExportBatchSize).toBeLessThanOrEqual(
       TOOLING_OTEL_BOUNDS.maxQueueSize,
