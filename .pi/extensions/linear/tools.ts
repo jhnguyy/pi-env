@@ -4,12 +4,8 @@ import { Type, type Static } from "typebox";
 import type { CursorPage, IssueSummary, LinearResourceSummary } from "./api";
 import type { LinearGateway } from "./client";
 import { asLinearError, LinearErrorCode, linearError, throwToolError } from "./domain";
-import {
-  definePublicTool,
-  renderCompactToolCall,
-  renderTextToolResult,
-  type PublicPiToolDefinition,
-} from "../_shared/tool-render";
+import type { PublicPiToolUi, ToolContract } from "../_shared/tool-contract";
+import { renderCompactToolCall, renderTextToolResult } from "../_shared/tool-render";
 
 const MAX_RESULTS = 50;
 const DEFAULT_RESULTS = 20;
@@ -208,25 +204,28 @@ async function dispatchLinear(
   }
 }
 
-export function createLinearTool(
+export function createLinearContract(
   gateway: LinearToolGateway,
-): PublicPiToolDefinition<typeof LinearParameters, unknown> {
-  return definePublicTool<typeof LinearParameters, unknown>({
+): ToolContract<LinearParameters, unknown, typeof LinearParameters> {
+  return {
     name: "linear",
     label: "Linear",
     description:
       "Read Linear viewer, resource, and issue data. Use the action parameter to select an operation. List operations support bounded cursor pagination.",
     parameters: LinearParameters,
-    async execute(_id, params, signal) {
-      return executeTool(() => dispatchLinear(gateway, params, signal));
+    async execute(params, context) {
+      return executeTool(() => dispatchLinear(gateway, params, context.signal));
     },
-    renderCall: (params, theme) =>
-      renderCompactToolCall(
-        "linear",
-        [params.action, params.issueId, params.query].filter(Boolean).join(" "),
-        theme,
-      ),
-    renderResult: (result, options, theme, context) =>
-      renderTextToolResult("linear", result, options, theme, context),
-  });
+  };
 }
+
+export const linearPiOptions: PublicPiToolUi<typeof LinearParameters, unknown> = {
+  renderCall: (params, theme) =>
+    renderCompactToolCall(
+      "linear",
+      [params.action, params.issueId, params.query].filter(Boolean).join(" "),
+      theme,
+    ),
+  renderResult: (result, options, theme, context) =>
+    renderTextToolResult("linear", result, options, theme, context),
+};
