@@ -2,7 +2,6 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { PiEvent } from "../_shared/agent-tools";
 import { getMergedBranches } from "../_shared/git";
-import { batchSlots, setSlot, resetSlots } from "../_shared/ui-render";
 
 import { buildStatusLine, buildStatusLineThemed, getGitStatus, isGitMutating, invalidateGitCache, resetGitFailureCache } from "./context";
 import {
@@ -32,8 +31,10 @@ function refreshWorkTrackerSlots(
   store: TodoStore,
   options: { includeGitStatus: boolean },
 ): void {
-  setSlot("session-todos", store.renderWidget(ctx.ui.theme), ctx);
-  setSlot("work-tracker", options.includeGitStatus ? buildStatusLineThemed(config, ctx.ui.theme) ?? undefined : undefined, ctx);
+  if (!ctx.hasUI) return;
+  ctx.ui.setWidget("session-todos", store.renderWidget(ctx.ui.theme), { placement: "aboveEditor" });
+  const statusLine = options.includeGitStatus ? buildStatusLineThemed(config, ctx.ui.theme) : undefined;
+  ctx.ui.setWidget("work-tracker", statusLine ? [statusLine] : undefined, { placement: "belowEditor" });
 }
 
 export function registerHooks(
@@ -96,7 +97,7 @@ export function registerHooks(
     // Skip git status on startup — spawning git subprocesses synchronously at
     // session_start blocks in environments with many or slow mount points.
     // Replacement sessions refresh status because the cwd/session may change.
-    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: isReplacementSession }), ctx);
+    refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: isReplacementSession });
 
     if (isReplacementSession && open > 0) {
       ctx.ui.notify(`Session switched. Cleared ${open} open task${open === 1 ? "" : "s"}.`, "info");
@@ -106,17 +107,16 @@ export function registerHooks(
   pi.on(PiEvent.SessionShutdown, async () => {
     store.clear();
     resetGitFailureCache();
-    resetSlots();
   });
 
   pi.on(PiEvent.TurnEnd, async (_event, ctx) => {
     invalidateGitCache();
-    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
+    refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true });
   });
 
   pi.on(PiEvent.BeforeAgentStart, async (_event, ctx) => {
     store.purgeCompleted();
-    batchSlots(() => refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true }), ctx);
+    refreshWorkTrackerSlots(ctx, config, store, { includeGitStatus: true });
 
     const line = buildStatusLine(config);
     if (!line) return {};
