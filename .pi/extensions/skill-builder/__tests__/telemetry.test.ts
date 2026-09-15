@@ -2,8 +2,9 @@ import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { it } from "@effect/vitest";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, vi } from "vitest";
 
 import { runSkillBuild } from "../index";
 import {
@@ -98,21 +99,21 @@ describe("skill-builder tooling telemetry", () => {
     );
   });
 
-  it("normalizes enabled endpoints without credentials, query strings, or fragments", async () => {
-    const config = await Effect.runPromise(
-      resolveToolingOtelConfig({
+  it.effect("normalizes enabled endpoints without credentials, query strings, or fragments", () =>
+    Effect.gen(function* () {
+      const config = yield* resolveToolingOtelConfig({
         PI_ENV_TOOLING_OTEL_ENABLED: "yes",
         PI_ENV_TOOLING_OTEL_ENDPOINT:
           "https://user:pass@collector.example:4318/custom/?token=secret#fragment",
-      }),
-    );
+      });
 
-    expect(config).toEqual({
-      enabled: true,
-      endpoint: "https://collector.example:4318/custom",
-    });
-    expect(JSON.stringify(config)).not.toMatch(/user|pass|token|secret|fragment/);
-  });
+      expect(config).toEqual({
+        enabled: true,
+        endpoint: "https://collector.example:4318/custom",
+      });
+      expect(JSON.stringify(config)).not.toMatch(/user|pass|token|secret|fragment/);
+    }),
+  );
 
   it("exports bounded evaluation spans without skill, goal, diff, or subagent output", async () => {
     const root = tempRoot("skill-builder-secret-path-");
