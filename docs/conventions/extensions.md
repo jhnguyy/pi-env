@@ -51,6 +51,23 @@ Schema decoding should happen once at the consumer boundary with `decodeSettings
 
 Agent settings use Effect Schema for `enabledModels`, `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Model annotations can be model-selection guidance or machine policy. Generic subagent tool descriptions omit known machine-policy annotations such as `reviewer`. Domain consumers can enforce these annotations without adding them to model prompts. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
 
+## Tool host selection
+
+For each model-facing tool, decide whether Pi, child agents, and PTC can call it. Ordinary Pi registration does not provide an executable PTC dispatcher.
+
+| Required hosts | Registration |
+| --- | --- |
+| Pi, child agents, and PTC | Use `registerCrossHostTool`. Public AgentTool registrations are PTC-callable unless the tool name is blocked. |
+| Pi and PTC only | Use `registerPtcTools`. |
+| Pi only | Use `registerPublicTool` and document why child-agent or PTC execution is unsafe or incomplete. |
+| Child agents only | Use `registerAgentToolsOnSessionStart`. If the same name is a Pi tool, add an explicit PTC block before treating it as unavailable to PTC. |
+
+Classify a multi-action tool by its most permissive action. Capabilities guide child-agent selection, but PTC does not enforce them. If one action is not safe for PTC, split the tool or keep the complete tool direct-only. Use direct execution when a tool needs non-text result content, result details, interactive UI, run-scoped state, or confirmation that a batch cannot preserve.
+
+Package extensions outside this repository can opt a Pi tool into PTC through the remembered event contract. Emit `ptc-tools:register` with the stable `{ tool }` registration on `session_start`. Emit `ptc-tools:unregister` with the same object on `session_shutdown`. The lifecycle emissions prevent load order and reload from leaving an absent or stale dispatcher. Do not publish tools that can recurse into PTC, start agent runtimes, require interactive confirmation, or have effects that cannot be reconciled after a partial batch failure. Document non-transactional behavior for every side-effecting tool.
+
+Use `ptc inspect` as the runtime authority. An active tool can still be direct-only when its extension did not publish a dispatcher.
+
 ## Cross-host tool registration
 
 Generally reusable tools that should behave the same in Pi and AgentTool hosts should register through `.pi/extensions/_shared/register-cross-host-tool.ts` via the canonical shape:

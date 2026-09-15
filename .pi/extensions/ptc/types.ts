@@ -96,6 +96,7 @@ export const BLOCKED_TOOLS = new Set<string>([
   "subagent",      // in-process agent loops and background job management
   "jit_catch",     // spawns a subagent internally
   "skill_build",   // spawns a subagent internally
+  "closeout",      // synchronizes main and removes a worktree and branch
 ]);
 
 // ─── RPC message types ────────────────────────────────────────────────────────

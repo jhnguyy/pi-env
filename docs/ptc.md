@@ -8,6 +8,8 @@ Use `action="inspect"` when tool availability is uncertain or changes at runtime
 
 Use `action="run"` to execute `code`. The action defaults to `run`, so existing `{ code }` calls remain valid. Each run uses one tool snapshot.
 
+Extension authors must select Pi, child-agent, and PTC availability explicitly. Follow the registration matrix in [Extension conventions](conventions/extensions.md#tool-host-selection). A tool can be active in Pi without providing a PTC dispatcher.
+
 The `tools` namespace is the canonical API. Each nested tool returns plain text as `Promise<string>`:
 
 ```ts
