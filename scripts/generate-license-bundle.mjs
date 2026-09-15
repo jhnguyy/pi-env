@@ -115,7 +115,7 @@ function immediatePackageRoots(nodeModulesPath) {
   if (!existsSync(nodeModulesPath)) return [];
   const roots = [];
   for (const entry of readdirSync(nodeModulesPath, { withFileTypes: true })) {
-    if (entry.name === ".bin" || entry.name === ".nub") continue;
+    if (entry.name === ".bin" || entry.name === ".nub" || entry.name === ".store") continue;
     const entryPath = join(nodeModulesPath, entry.name);
     if (!isDirectoryEntry(entry, entryPath)) continue;
     if (entry.name.startsWith("@")) {
@@ -132,9 +132,9 @@ function immediatePackageRoots(nodeModulesPath) {
 }
 
 export function discoverNubPackages(nodeModulesPath) {
-  const virtualStorePath = join(nodeModulesPath, ".nub");
-  if (!existsSync(virtualStorePath)) {
-    throw new Error(`Nub virtual store is missing: ${virtualStorePath}`);
+  const virtualStorePaths = [join(nodeModulesPath, ".store"), join(nodeModulesPath, ".nub")];
+  if (!virtualStorePaths.some(existsSync)) {
+    throw new Error(`Nub virtual store is missing: expected ${virtualStorePaths.join(" or ")}`);
   }
   return discoverStandardPackages(nodeModulesPath);
 }

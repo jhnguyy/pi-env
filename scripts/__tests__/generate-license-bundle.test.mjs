@@ -28,9 +28,9 @@ function write(path, content) {
   writeFileSync(path, content);
 }
 
-function packageRoot(repoRoot, virtualId, name) {
+function packageRoot(repoRoot, virtualId, name, virtualStore = ".nub") {
   const parts = name.startsWith("@") ? name.split("/") : [name];
-  return join(repoRoot, "node_modules", ".nub", virtualId, "node_modules", ...parts);
+  return join(repoRoot, "node_modules", virtualStore, virtualId, "node_modules", ...parts);
 }
 
 function addPackage(repoRoot, {
@@ -40,9 +40,10 @@ function addPackage(repoRoot, {
   repository = "https://example.test/project",
   files = { LICENSE: "license text\n" },
   virtualId = `${name.replaceAll("/", "+")}@${version}`,
+  virtualStore = ".nub",
   linked = true,
 }) {
-  const root = packageRoot(repoRoot, virtualId, name);
+  const root = packageRoot(repoRoot, virtualId, name, virtualStore);
   mkdirSync(root, { recursive: true });
   const manifest = { name, version, repository };
   if (license !== undefined) manifest.license = license;
@@ -104,6 +105,15 @@ describe("license bundle generation", () => {
       dependencies: { "declared-only": "1.0.0" },
     })}\n`);
     addPackage(repoRoot, { name: "installed-package" });
+
+    const result = generate(repoRoot);
+
+    expect(result.javascriptPackages.map((pkg) => pkg.name)).toEqual(["installed-package"]);
+  });
+
+  it("discovers packages from Nub's isolated virtual store", () => {
+    const repoRoot = temporaryDirectory();
+    addPackage(repoRoot, { name: "installed-package", virtualStore: ".store" });
 
     const result = generate(repoRoot);
 
