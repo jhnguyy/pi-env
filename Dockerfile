@@ -31,7 +31,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     ca-certificates \
     git \
     tini \
-  && npm install --global --omit=dev @nubjs/nub@0.2.10 \
+  && npm install --global --omit=dev @nubjs/nub@0.9.2 \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && rm -rf /var/lib/apt/lists/* \
@@ -43,23 +43,24 @@ RUN chown -R node:node ${PI_ENV_HOME}
 
 USER node
 
-# Local equivalent: nub install --frozen-lockfile
-RUN nub install --frozen-lockfile
-
-RUN nub run licenses:generate \
-  --package-root /usr/local/lib/node_modules \
-  --system-license node-LICENSE.txt=/usr/local/LICENSE
-
-# Local equivalent: nub run build
-RUN nub run build
-
-# BuildKit does not run the image entrypoint, so Tini must reap detached test descendants here.
-RUN tini -s -- nub run verify
+# Keep Nub's content-addressed download store and build-only lint binary out of
+# immutable image layers. BuildKit does not run the image entrypoint, so Tini
+# must reap detached test descendants during verification.
+RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
+  nub install --frozen-lockfile \
+  && nub run licenses:generate \
+    --package-root /usr/local/lib/node_modules \
+    --system-license node-LICENSE.txt=/usr/local/LICENSE \
+  && nub run build \
+  && tini -s -- nub run verify \
+  && find ${PI_ENV_HOME}/node_modules/.store \
+    -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete
 
 USER root
 RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
   && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
   && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
+  && rm -rf /home/node/.local/share/nub/store \
   && rm -rf ${PI_ENV_HOME}/.git
 
 USER node

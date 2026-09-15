@@ -12,7 +12,7 @@ trivy_args=(
   fs
   --quiet
   --scanners "${TRIVY_SCANNERS:-vuln,secret,misconfig}"
-  --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:lock.yaml}"
+  --file-patterns "${TRIVY_FILE_PATTERNS:-pnpm:nub.lock}"
   --skip-dirs node_modules
   --skip-dirs .git
   --severity "${TRIVY_SEVERITY:-HIGH,CRITICAL}"

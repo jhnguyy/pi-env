@@ -16,32 +16,32 @@ function hasLockedPackage(lockText, packageName) {
 }
 
 function readLockfile(root, errors, reason) {
-  const lockPath = join(root, "lock.yaml");
+  const lockPath = join(root, "nub.lock");
   if (!existsSync(lockPath)) {
-    errors.push(`package ${reason} is configured but lock.yaml is missing`);
+    errors.push(`package ${reason} is configured but nub.lock is missing`);
     return undefined;
   }
   return readFileSync(lockPath, "utf8");
 }
 
-function requireAllowBuildsContract(pkg, errors, root) {
-  const allowBuilds = pkg.allowBuilds;
-  if (allowBuilds === undefined) return;
-  if (!isRecord(allowBuilds)) {
+function requireAllowScriptsContract(pkg, errors, root) {
+  const allowScripts = pkg.allowScripts;
+  if (allowScripts === undefined) return;
+  if (!isRecord(allowScripts)) {
     errors.push(
-      "package allowBuilds must be an object of package names mapped to boolean install-build decisions",
+      "package allowScripts must be an object of package names mapped to boolean install-script decisions",
     );
     return;
   }
 
-  const lockText = readLockfile(root, errors, "allowBuilds");
+  const lockText = readLockfile(root, errors, "allowScripts");
   if (lockText === undefined) return;
-  for (const [packageName, approved] of Object.entries(allowBuilds)) {
+  for (const [packageName, approved] of Object.entries(allowScripts)) {
     if (typeof approved !== "boolean") {
-      errors.push(`package allowBuilds entry must be boolean: ${packageName}`);
+      errors.push(`package allowScripts entry must be boolean: ${packageName}`);
     }
     if (!hasLockedPackage(lockText, packageName)) {
-      errors.push(`package allowBuilds package is not present in lock.yaml: ${packageName}`);
+      errors.push(`package allowScripts package is not present in nub.lock: ${packageName}`);
     }
   }
 }
@@ -65,7 +65,7 @@ function requirePatchedDependenciesContract(pkg, errors, root) {
       errors.push(`package patchedDependencies patch file is missing: ${patchPath}`);
     }
     if (!lockText.includes(`path: ${patchPath}`)) {
-      errors.push(`package patchedDependencies patch is not recorded in lock.yaml: ${packageSpec}`);
+      errors.push(`package patchedDependencies patch is not recorded in nub.lock: ${packageSpec}`);
     }
   }
 }
@@ -73,7 +73,7 @@ function requirePatchedDependenciesContract(pkg, errors, root) {
 export function validatePackageInstall(manifest) {
   const { repoRoot, pkg } = manifest;
   const errors = [];
-  requireAllowBuildsContract(pkg, errors, repoRoot);
+  requireAllowScriptsContract(pkg, errors, repoRoot);
   requirePatchedDependenciesContract(pkg, errors, repoRoot);
   return errors;
 }

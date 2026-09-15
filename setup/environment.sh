@@ -39,6 +39,7 @@ setup_check_prerequisites() {
   section "Prerequisites"
 
   check_required_commands git nub
+  ok "nub ($(nub --version 2>/dev/null | head -n 1))"
   ok "node ($(resolve_setup_node_bin))"
   setup_detect_environment
 

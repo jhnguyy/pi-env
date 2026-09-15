@@ -38,19 +38,25 @@ SH
   cat > "$fake_bin/nub" <<'SH'
 #!/usr/bin/env sh
 printf 'nub %s\n' "$*" >> "$COMMAND_LOG"
-case "$*" in
-  "run --silent check:node")
-    [ "$INSTALL_STRATEGY" = "nub-managed" ]
-    ;;
-  "run --node --ignore-scripts --silent check:node")
-    [ "$INSTALL_STRATEGY" = "plain-node-bootstrap" ]
-    ;;
-  install\ *|"run build")
-    exit 0
-    ;;
-  *)
-    exit 1
-    ;;
+if [ "${1:-}" = "run" ]; then
+  has_node=0
+  command=""
+  for argument in "$@"; do
+    [ "$argument" = "--node" ] && has_node=1
+    command="$argument"
+  done
+  if [ "$command" = "check:node" ]; then
+    if [ "$has_node" -eq 1 ]; then
+      [ "$INSTALL_STRATEGY" = "plain-node-bootstrap" ]
+    else
+      [ "$INSTALL_STRATEGY" = "nub-managed" ]
+    fi
+    exit
+  fi
+fi
+case "${1:-}" in
+  install|run) exit 0 ;;
+  *) exit 1 ;;
 esac
 SH
   cat > "$setup_node" <<'SH'

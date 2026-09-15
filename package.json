@@ -136,11 +136,11 @@
     "toml": "4.2.0",
     "undici": "8.9.0"
   },
-  "packageManager": "nub@0.2.10",
+  "packageManager": "nub@0.9.2",
   "devEngines": {
     "packageManager": {
       "name": "nub",
-      "version": "^0.2.10",
+      "version": "^0.9.2",
       "onFail": "warn"
     },
     "runtime": {
@@ -157,7 +157,7 @@
     "@opentelemetry/sdk-trace-node": "2.9.0",
     "effect": "4.0.0-beta.97"
   },
-  "allowBuilds": {
+  "allowScripts": {
     "@google/genai": true,
     "esbuild": true,
     "msgpackr-extract": false

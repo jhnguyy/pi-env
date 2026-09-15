@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nub = {
-      url = "github:nubjs/nub";
+      url = "github:nubjs/nub/v0.9.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

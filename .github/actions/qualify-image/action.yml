@@ -73,7 +73,7 @@ runs:
           image \
           --input /image/pi-env-image.tar \
           --scanners vuln,secret,misconfig \
-          --file-patterns pnpm:lock.yaml \
+          --file-patterns pnpm:nub.lock \
           --severity HIGH,CRITICAL \
           --ignorefile /etc/trivy/.trivyignore.yaml \
           --format json \

@@ -11,7 +11,6 @@ if ! command -v nub >/dev/null 2>&1; then
   echo "Nub is required. Install the pi-env toolchain, then retry." >&2
   exit 1
 fi
-
 remove_dependency_tree() {
   if [ -L node_modules ]; then
     rm node_modules

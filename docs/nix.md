@@ -28,7 +28,7 @@ Source-owned setup behavior lives in [`setup.sh`](../setup.sh), [`setup/`](../se
 Handled deterministically:
 
 - Nix pins the host toolchain through [`flake.lock`](../flake.lock).
-- Nub pins repo JavaScript dependencies through [`lock.yaml`](../lock.yaml).
+- Nub pins repository JavaScript dependencies.
 - Managed pi settings are merged from [`setup/config/managed-settings.json`](../setup/config/managed-settings.json) without overwriting machine-local settings.
 
 Intentionally mutable/local:

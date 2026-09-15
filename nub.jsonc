@@ -1,0 +1,12 @@
+{
+  "$schema": "https://nubjs.com/schema/v0.9.json",
+
+  // Refuse to run repository scripts against a stale dependency tree.
+  "verifyDeps": "error",
+
+  // Keep each worktree and container image self-contained.
+  "install": {
+    "linker": "isolated",
+    "minimumReleaseAge": "1d",
+  },
+}
