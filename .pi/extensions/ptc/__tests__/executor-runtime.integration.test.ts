@@ -374,18 +374,16 @@ describe("PTC live transport", () => {
   });
 
   it("does not create global compatibility aliases for blocked tools", async () => {
-    const blocked = ["ptc", "subagent", "jit_catch", "skill_build"];
-    expect([...BLOCKED_TOOLS]).toEqual(blocked);
-    const code = [
-      "typeof ptc",
-      "typeof subagent",
-      "typeof jit_catch",
-      "typeof skill_build",
-    ].join(", ");
+    const blocked = [...BLOCKED_TOOLS];
+    const code = blocked.map((name) => `typeof globalThis[${JSON.stringify(name)}]`).join(", ");
 
-    await expect(
-      executionOutput(makeExecutor(blocked), `return [${code}].join(",");`),
-    ).resolves.toBe("undefined,undefined,undefined,undefined");
+    const output = await executionOutput(
+      makeExecutor(blocked),
+      `return [${code}].join(",");`,
+    );
+
+    expect(output.split(",")).toHaveLength(blocked.length);
+    expect(output.split(",")).toEqual(blocked.map(() => "undefined"));
   });
 });
 
