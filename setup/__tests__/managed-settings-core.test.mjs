@@ -45,8 +45,6 @@ describe("managed settings core", () => {
       applyManagedSettingsTransforms(
         { nested: { keep: true } },
         { _comment: "ignored", nested: { add: 1 } },
-        "/repo",
-        "/repo",
       ),
     ).toMatchObject({
       nested: { keep: true, add: 1 },
