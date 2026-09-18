@@ -31,7 +31,7 @@ Pi-env owns the portable Inbox, Worklog, and Wiki lifecycle. Providers remain st
 
 ### Inbox
 
-Inbox notes use `inbox/YYYY/MM/DD.md`. An Inbox read without a date returns the earliest nonblank item. A dated read returns Notes and Follow-ups from that date. Results include Follow-up checked state. Reads never mutate note content.
+Inbox notes use `inbox/YYYYMMDD.md`. An Inbox read without a date returns the earliest nonblank item. A dated read returns Notes and Follow-ups from that date. Results include Follow-up checked state. Reads never mutate note content.
 
 An Inbox write records one Note or unchecked Follow-up for the Pi process system-local date. It creates the daily note or exact level-two section when needed and preserves unrelated content.
 

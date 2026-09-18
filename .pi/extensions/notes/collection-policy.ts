@@ -48,7 +48,7 @@ export interface CursorPosition {
 }
 
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
-const INBOX_PATH = /^inbox\/(\d{4})\/(\d{2})\/(\d{2})\.md$/;
+const INBOX_PATH = /^inbox\/(\d{4})(\d{2})(\d{2})\.md$/;
 const RECORD_PATH = /^records\/(\d{4})\/(\d{2})\/(\d{2})\.md$/;
 
 export function localDate(now: Date): string {
@@ -74,7 +74,7 @@ export function requireIsoDate(value: string): string {
 
 export function inboxPath(date: string): string {
   const [year, month, day] = requireIsoDate(date).split("-");
-  return `inbox/${year}/${month}/${day}.md`;
+  return `inbox/${year}${month}${day}.md`;
 }
 
 export function recordPath(date: string): string {

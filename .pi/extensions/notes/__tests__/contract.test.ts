@@ -1,11 +1,6 @@
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
-import {
-  applyExactEdits,
-  createNotesContract,
-  MAX_DETAIL_ITEMS,
-  NOTES_ACTIONS,
-} from "../contract";
+import { applyExactEdits, createNotesContract, MAX_DETAIL_ITEMS, NOTES_ACTIONS } from "../contract";
 import {
   MAX_EDIT_ITEMS,
   MAX_INDEX_BYTES,
@@ -187,10 +182,11 @@ describe("notes tool contract", () => {
 
   it("reads Inbox items without mutation and preserves Follow-up state", async () => {
     const fake = memoryProvider({
-      "inbox/2026/09/01.md":
+      "inbox/20260901.md":
         "## Follow-ups\n\n- [x] done\n- [ ] open\n\n## Notes\n\n```md\n- hidden example\n```\n-\n- first note\n  - detail\n",
-      "inbox/2026/09/02.md": "## Notes\n\n- later note\n",
+      "inbox/20260902.md": "## Notes\n\n- later note\n",
       "inbox/daily/2026/08/01.md": "## Notes\n\n- legacy\n",
+      "inbox/2026/09/01.md": "## Notes\n\n- nested legacy\n",
       "inbox/2026/10/Untitled.md": "",
     });
     const contract = createNotesContract(fake);
@@ -205,7 +201,7 @@ describe("notes tool contract", () => {
         kind: "followup",
         text: "done",
         checked: true,
-        sourcePath: "inbox/2026/09/01.md",
+        sourcePath: "inbox/20260901.md",
       }),
     ]);
 
@@ -284,8 +280,8 @@ describe("notes tool contract", () => {
 
   it("binds collection continuation cursors to the original read scope", async () => {
     const fake = memoryProvider({
-      "inbox/2026/09/01.md": "## Notes\n\n- one\n- two\n",
-      "inbox/2026/09/02.md": "## Notes\n\n- other date\n",
+      "inbox/20260901.md": "## Notes\n\n- one\n- two\n",
+      "inbox/20260902.md": "## Notes\n\n- other date\n",
       "wiki/a.md": "a",
       "wiki/b.md": "b",
       "wiki/nested/c.md": "c",
@@ -435,8 +431,9 @@ describe("notes tool contract", () => {
 
   it("uses the process-local date for collection writes and preserves other sections", async () => {
     const fake = memoryProvider({
-      "inbox/2026/09/12.md":
+      "inbox/20260912.md":
         "# Context\r\n\r\n```md\r\n## Follow-ups\r\n- [ ]\r\n```\r\n\r\n## Follow-ups\r\n\r\n- [ ]\r\n\r\n## Notes\r\n\r\n- old\r\n\r\n## Other\r\n\r\nkeep\r\n",
+      "inbox/2026/09/12.md": "## Notes\n\n- nested legacy\n",
       "records/2026/09/12.md": "---\ntype: record\n---\n# Record\n\n## Decisions\n\nkeep\n",
     });
     const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 12, 23, 59) });
@@ -450,17 +447,20 @@ describe("notes tool contract", () => {
       { cwd: "/repo" },
     );
 
-    expect(fake.documents.get("inbox/2026/09/12.md")?.content).toBe(
+    expect(fake.documents.get("inbox/20260912.md")?.content).toBe(
       "# Context\r\n\r\n```md\r\n## Follow-ups\r\n- [ ]\r\n```\r\n\r\n## Follow-ups\r\n\r\n- [ ] new task\r\n\r\n## Notes\r\n\r\n- old\r\n\r\n## Other\r\n\r\nkeep\r\n",
+    );
+    expect(fake.documents.get("inbox/2026/09/12.md")?.content).toBe(
+      "## Notes\n\n- nested legacy\n",
     );
     expect(fake.documents.get("records/2026/09/12.md")?.content).toContain(
       "## Decisions\n\nkeep\n\n## Worklog\n\n- Shipped the contract\n",
     );
-    expect(fake.documents.has("inbox/2026/09/13.md")).toBe(false);
+    expect(fake.documents.has("inbox/20260913.md")).toBe(false);
   });
 
   it("rejects a collection append that would exceed the note byte limit", async () => {
-    const path = "inbox/2026/09/12.md";
+    const path = "inbox/20260912.md";
     const prefix = "## Notes\n\n- ";
     const fake = memoryProvider({ [path]: prefix + "x".repeat(MAX_NOTE_BYTES - prefix.length) });
     const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 12) });
@@ -475,7 +475,7 @@ describe("notes tool contract", () => {
   });
 
   it("rejects a concurrent Inbox append without replacing the newer content", async () => {
-    const path = "inbox/2026/09/12.md";
+    const path = "inbox/20260912.md";
     const fake = memoryProvider({ [path]: "## Notes\n\n- current\n" });
     vi.mocked(fake.write).mockImplementationOnce(async () => {
       fake.documents.set(path, { path, content: "## Notes\n\n- concurrent\n", revision: "newer" });
