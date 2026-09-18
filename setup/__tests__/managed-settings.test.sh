@@ -12,6 +12,12 @@ json_get() {
   "$node" -e "const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')); const value = $expr; console.log(Array.isArray(value) ? JSON.stringify(value) : value);" "$file"
 }
 
+resolved_package_path() {
+  local file="$1" index="$2" node
+  node=$(node_bin)
+  "$node" -e "const fs = require('fs'); const path = require('path'); const s = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); console.log(path.resolve(path.dirname(process.argv[1]), s.packages[Number(process.argv[2])]));" "$file" "$index"
+}
+
 apply_settings() {
   local settings="$1" repo="$2" node
   node=$(node_bin)
@@ -45,7 +51,7 @@ JSON
   [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "missing theme should default to gruvbox automatic light/dark"
   [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "_comment_managed_retry")')" = "false" ] || fail "managed comments should not be written to user settings"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
-  [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "package path should be repo"
+  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "package path should resolve to repo"
   [ "$(json_get "$settings" 's.extensions')" = '["-playwright-client","-work-tracker"]' ] || fail "default-disabled extensions should be disabled by setup"
 
   rm -rf "$tmp"
@@ -110,7 +116,23 @@ test_applies_to_missing_settings_file() {
   [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "created settings should include managed timeout"
   [ "$(json_get "$settings" 's.piUpdate.enabled')" = "false" ] || fail "created settings should disable piUpdate"
   [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "created settings should include gruvbox automatic light/dark theme"
-  [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "created settings should include package"
+  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "created settings should include package"
+
+  rm -rf "$tmp"
+}
+
+test_repairs_malformed_packages_setting() {
+  local tmp settings repo
+  tmp="$(with_temp_dir)"
+  settings="$tmp/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo"
+  printf '%s\n' '{"packages": {"invalid": true}}' > "$settings"
+
+  apply_settings "$settings" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "malformed packages should be repaired before registration"
+  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "repaired package path should resolve to repo"
 
   rm -rf "$tmp"
 }
@@ -177,7 +199,7 @@ JSON
 
   [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
-  [ "$(json_get "$settings" 's.packages[0]')" = "$repo" ] || fail "worktree setup should register primary checkout"
+  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
 
   git -C "$repo" worktree remove -f "$worktree" >/dev/null 2>&1 || true
   rm -rf "$tmp"
@@ -214,6 +236,7 @@ test_applies_managed_settings_and_package_once
 test_preserves_unmanaged_retry_settings
 test_preserves_enabled_pi_update
 test_applies_to_missing_settings_file
+test_repairs_malformed_packages_setting
 test_preserves_existing_theme
 test_disables_default_extensions_without_clobbering_other_extensions
 test_registers_primary_checkout_when_run_from_worktree

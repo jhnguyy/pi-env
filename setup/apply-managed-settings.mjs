@@ -2,6 +2,7 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
   applyManagedSettingsTransforms,
   parseJsonRelaxedText,
@@ -44,14 +45,34 @@ function packageRepoPath() {
 const before = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, "utf8") : "";
 const settings = parseJsonRelaxed(settingsFile);
 const managed = parseJsonRelaxed(managedSettingsFile);
-const after = renderSettings(
-  applyManagedSettingsTransforms(settings, managed, repoPath, packageRepoPath()),
-);
+const afterManagedSettings = renderSettings(applyManagedSettingsTransforms(settings, managed));
 
 fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
-if (before !== after) {
-  fs.writeFileSync(settingsFile, after);
-  console.log(before ? "updated" : "created");
-} else {
-  console.log("unchanged");
+if (before !== afterManagedSettings) fs.writeFileSync(settingsFile, afterManagedSettings);
+
+const agentDir = path.dirname(settingsFile);
+const settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
+const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });
+const packagePath = packageRepoPath();
+await packageManager.installAndPersist(packagePath);
+if (packagePath !== repoPath) packageManager.removeSourceFromSettings(repoPath);
+await settingsManager.flush();
+const settingsErrors = settingsManager.drainErrors();
+if (settingsErrors.length > 0) {
+  throw new AggregateError(
+    settingsErrors.map(
+      ({ scope, path: settingsPath, error }) =>
+        new Error(`${scope} settings${settingsPath ? ` at ${settingsPath}` : ""}: ${error.message}`, {
+          cause: error,
+        }),
+    ),
+    "Pi package registration failed",
+  );
 }
+
+let finalSettings = fs.readFileSync(settingsFile, "utf8");
+if (!finalSettings.endsWith("\n")) {
+  finalSettings += "\n";
+  fs.writeFileSync(settingsFile, finalSettings);
+}
+console.log(before === finalSettings ? "unchanged" : before ? "updated" : "created");

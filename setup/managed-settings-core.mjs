@@ -51,10 +51,6 @@ function mergeManaged(target, managed) {
   return target;
 }
 
-function packageSource(pkg) {
-  return typeof pkg === "string" ? pkg : isPlainObject(pkg) ? pkg.source : undefined;
-}
-
 function ensurePiUpdateDefault(settings) {
   if (!isPlainObject(settings.piUpdate)) settings.piUpdate = {};
   if (settings.piUpdate.enabled !== true) settings.piUpdate.enabled = false;
@@ -91,19 +87,13 @@ function ensureDisabledExtensions(settings) {
   ];
 }
 
-export function applyManagedSettingsTransforms(settings, managed, repoPath, packagePath) {
+export function applyManagedSettingsTransforms(settings, managed) {
   mergeManaged(settings, managed);
   ensureDefaultTheme(settings);
   migrateDefaultNpmCommand(settings);
   ensurePiUpdateDefault(settings);
   ensureDisabledExtensions(settings);
-
   if (!Array.isArray(settings.packages)) settings.packages = [];
-  settings.packages = settings.packages.filter(
-    (pkg) => packageSource(pkg) !== repoPath || repoPath === packagePath,
-  );
-  if (!settings.packages.some((pkg) => packageSource(pkg) === packagePath))
-    settings.packages.push(packagePath);
   return settings;
 }
 
