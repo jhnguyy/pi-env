@@ -240,9 +240,13 @@ function runResolvedSubagentWorkflow(
       convertToLlm,
       getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
       headers: { "X-Initiator": "agent" },
-      shouldStopAfterTurn: () => hasReachedTurnLimit(accumulator.usage.turns, maxTurns),
+      finishTurn: () =>
+        hasReachedTurnLimit(accumulator.usage.turns, maxTurns) ? { action: "end" } : undefined,
     };
-    const agentContext: AgentContext = { systemPrompt, messages: [], tools: resolvedTools };
+    const agentContext: AgentContext = {
+      messages: [{ role: "system", content: systemPrompt, timestamp: Date.now() }],
+      tools: resolvedTools,
+    };
     const prompts: AgentMessage[] = [
       {
         role: "user",

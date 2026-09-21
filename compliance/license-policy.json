@@ -22,13 +22,13 @@
     {
       "repository": "https://github.com/aws/aws-sdk-js-v3",
       "license": "Apache-2.0",
-      "versions": ["3.972.55", "3.997.27"],
+      "versions": ["3.972.55", "3.972.73", "3.972.78", "3.997.27", "3.997.45"],
       "file": "compliance/Apache-2.0.txt"
     },
     {
       "repository": "https://github.com/earendil-works/pi",
       "license": "MIT",
-      "versions": ["0.85.1"],
+      "versions": ["0.85.1", "0.87.0"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {
@@ -52,7 +52,13 @@
     {
       "repository": "https://github.com/bash-lsp/bash-language-server",
       "license": "MIT",
-      "versions": ["5.6.0"],
+      "versions": ["5.6.0", "5.8.1"],
+      "file": "compliance/npm-missing-license-notices.txt"
+    },
+    {
+      "repository": "https://github.com/TooTallNate/proxy-agents",
+      "license": "MIT",
+      "versions": ["1.1.0"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {
@@ -85,6 +91,12 @@
       "repository": "https://github.com/parcel-bundler/lightningcss",
       "versions": ["1.32.0"],
       "revision": "7f8a861bdee476fe90c89a8badeb3fd33a99c51a",
+      "reference": "https://github.com/parcel-bundler/lightningcss/tree/{revision}"
+    },
+    {
+      "repository": "https://github.com/parcel-bundler/lightningcss",
+      "versions": ["1.33.0"],
+      "revision": "c6a0c3cebf3395635e61075d2c81a96a710d4910",
       "reference": "https://github.com/parcel-bundler/lightningcss/tree/{revision}"
     }
   ]

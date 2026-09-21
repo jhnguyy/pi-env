@@ -107,10 +107,10 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.87.0",
+    "@earendil-works/pi-ai": "0.87.0",
+    "@earendil-works/pi-coding-agent": "0.87.0",
+    "@earendil-works/pi-tui": "0.87.0",
     "@effect/language-service": "^0.86.6",
     "@effect/vitest": "4.0.0-beta.97",
     "@oxlint/plugins": "1.73.0",
@@ -127,7 +127,9 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
+    "@effect/platform-node-shared": "4.0.0-beta.97",
     "brace-expansion": "5.0.9",
+    "dependency-cruiser": "18.0.0",
     "minimatch": "10.2.3",
     "nanoid": "3.3.18",
     "postcss": "8.5.25",

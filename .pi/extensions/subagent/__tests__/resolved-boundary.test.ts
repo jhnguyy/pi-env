@@ -31,7 +31,7 @@ const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (prompts, contex
           usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
         },
       };
-      captured.stopAfterFirst = await config.shouldStopAfterTurn?.({} as any);
+      captured.stopAfterFirst = (await config.finishTurn?.({} as any))?.action === "end";
       if (captured.stopAfterFirst) return;
       yield {
         type: "message_end",
@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 describe("resolved subagent boundary", () => {
-  it("starts with empty messages and supplied tools without project-agent resolution", async () => {
+  it("starts with a transcript-backed system prompt and supplied tools without project-agent resolution", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-resolved-"));
     temps.push(cwd);
     const sessionManager = SessionManager.create(cwd, cwd);
@@ -92,7 +92,9 @@ describe("resolved subagent boundary", () => {
       ),
     );
     expect(captured.prompts).toMatchObject([{ role: "user" }]);
-    expect(captured.context.messages).toEqual([]);
+    expect(captured.context.messages).toEqual([
+      { role: "system", content: "sys", timestamp: expect.any(Number) },
+    ]);
     expect(captured.context.tools).toEqual([tool]);
     expect(captured.config.sessionId).toBe(result.details.sessionId);
   });
