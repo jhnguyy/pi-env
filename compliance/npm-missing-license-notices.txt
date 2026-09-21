@@ -19,6 +19,9 @@ Copyright (c) 2023 Boshen
 bash-language-server:
 Copyright (c) 2018 Mads Hartmann
 
+proxy-agent-negotiate:
+Copyright (c) Nathan Rajlich
+
 data-uri-to-buffer:
 Copyright (c) Nathan Rajlich
 
