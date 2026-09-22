@@ -104,6 +104,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   let managed: ManagedSession | undefined;
   let finalization: Promise<void> | undefined;
   let syncingName = false;
+  let displayName: string | undefined;
   let installedFactory: EditorFactory | undefined;
   let previousFactory: EditorFactory | undefined;
   let generation = 0;
@@ -215,9 +216,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         host.bindCurrent(paneId, manifest.coordinator.sessionId, manifest.coordinator.name),
       );
       coordinatorBinding = { paneId, sessionId: manifest.coordinator.sessionId };
-      if (pi.getSessionName() !== manifest.coordinator.name) {
-        pi.setSessionName(manifest.coordinator.name);
-      }
       const reconciler = createWorkspaceReconciler({
         catalog: options.catalog,
         host,
@@ -306,11 +304,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 
   const activateManagedSession = (ctx: ExtensionContext, session: ManagedSession): void => {
     managed = session;
-    if (pi.getSessionName() !== session.record.name) {
-      syncingName = true;
-      pi.setSessionName(session.record.name);
-      syncingName = false;
-    }
     installEditor(ctx, false);
   };
 
@@ -387,6 +380,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 
   pi.on("session_start", async (_event, ctx) => {
     const startGeneration = ++generation;
+    displayName = pi.getSessionName();
     launchIntent = undefined;
     const parsedLaunch = parseLaunchIntent(environment);
     if (Result.isFailure(parsedLaunch)) {
@@ -456,17 +450,12 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   });
 
   pi.on("session_info_changed", async (event, ctx) => {
-    if (!managed || syncingName || event.name === managed.record.name) return;
-    if (!event.name) {
-      syncingName = true;
-      pi.setSessionName(managed.record.name);
-      syncingName = false;
-      ctx.ui.notify("Managed sessions must have a name. The stable name was restored.", "warning");
-      return;
-    }
+    if (syncingName) return;
+    const previousDisplayName = displayName;
+    displayName = event.name;
+    if (!managed || !event.name || event.name === managed.record.name) return;
     const target = managed;
     const name = event.name;
-    const previousName = target.record.name;
     try {
       const renamed = await queue(() => run(lifecycle.rename(target, name)));
       if (target.record.sessionId !== managed?.record.sessionId) return;
@@ -479,8 +468,9 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         return;
       }
       syncingName = true;
-      pi.setSessionName(previousName);
+      pi.setSessionName(previousDisplayName ?? "");
       syncingName = false;
+      displayName = previousDisplayName;
       notifyError(ctx, "Session rename", error);
     }
   });
@@ -492,21 +482,11 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         managed = await queue(() =>
           run(lifecycle.adopt(startInput(pi, ctx, environment.TMUX_PANE))),
         );
-        if (pi.getSessionName() !== managed.record.name) {
-          syncingName = true;
-          pi.setSessionName(managed.record.name);
-          syncingName = false;
-        }
         if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
         ctx.ui.notify(`Session adopted as ${managed.record.name}.`, "info");
       } catch (error) {
         if (error instanceof SessionBindingFailed) {
           managed = error.session;
-          if (pi.getSessionName() !== managed.record.name) {
-            syncingName = true;
-            pi.setSessionName(managed.record.name);
-            syncingName = false;
-          }
           if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
         }
         notifyError(ctx, "Session adoption", error);
