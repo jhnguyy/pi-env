@@ -275,6 +275,8 @@ export interface NotesToolDetails {
   readonly truncated?: boolean;
 }
 
+type DocumentCollection = "projects" | "wiki";
+
 export interface NotesContractOptions {
   readonly now?: () => Date;
 }
@@ -541,13 +543,7 @@ async function projectsReadAction(
   signal?: AbortSignal,
 ) {
   const target = projectTarget(params.target);
-  const note = validateDocument(await provider.read(target.path, signal), target.path);
-  return result(formatDocument(note.path, note.revision, note.content), {
-    action: params.action,
-    collection: "projects",
-    path: note.path,
-    revision: note.revision,
-  });
+  return readDocumentAction(provider, params, target.path, signal, "projects");
 }
 
 async function projectsWriteAction(
@@ -556,25 +552,7 @@ async function projectsWriteAction(
   signal?: AbortSignal,
 ) {
   const target = projectTarget(params.target);
-  if (params.content === undefined) throw new Error("notes projects write requires content");
-  assertNoteSize(params.content);
-  const mutation = validateMutation(
-    await provider.write(
-      {
-        path: target.path,
-        content: params.content,
-        expectedRevision: requireWriteRevision(params),
-      },
-      signal,
-    ),
-    target.path,
-  );
-  return result(`Wrote ${mutation.path}`, {
-    action: params.action,
-    collection: "projects",
-    path: mutation.path,
-    revision: mutation.revision,
-  });
+  return writeDocumentAction(provider, params, target.path, signal, "projects");
 }
 
 async function worklogReadAction(
@@ -719,13 +697,7 @@ async function worklogRecordAction(
 async function wikiReadAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const target = wikiTarget(params.target);
   if (target.kind === "file") {
-    const note = validateDocument(await provider.read(target.path, signal), target.path);
-    return result(formatDocument(note.path, note.revision, note.content), {
-      action: params.action,
-      collection: "wiki",
-      path: note.path,
-      revision: note.revision,
-    });
+    return readDocumentAction(provider, params, target.path, signal, "wiki");
   }
   const entries = await listComplete(provider, target.path, signal);
   const children = wikiChildren(entries, target.target);
@@ -750,25 +722,7 @@ async function wikiReadAction(provider: NotesProvider, params: NotesParams, sign
 async function wikiWriteAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const target = wikiTarget(params.target);
   if (target.kind !== "file") throw new Error("notes wiki write requires a Markdown file target");
-  if (params.content === undefined) throw new Error("notes wiki write requires content");
-  assertNoteSize(params.content);
-  const mutation = validateMutation(
-    await provider.write(
-      {
-        path: target.path,
-        content: params.content,
-        expectedRevision: requireWriteRevision(params),
-      },
-      signal,
-    ),
-    target.path,
-  );
-  return result(`Wrote ${mutation.path}`, {
-    action: params.action,
-    collection: "wiki",
-    path: mutation.path,
-    revision: mutation.revision,
-  });
+  return writeDocumentAction(provider, params, target.path, signal, "wiki");
 }
 
 async function canonicalPaths(
@@ -906,9 +860,18 @@ async function listAction(provider: NotesProvider, params: NotesParams, signal?:
 }
 
 async function readAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const requestedPath = requirePath(params);
-  const note = await provider.read(requestedPath, signal);
-  return documentResult(params, note, requestedPath);
+  return readDocumentAction(provider, params, requirePath(params), signal);
+}
+
+async function readDocumentAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  path: string,
+  signal?: AbortSignal,
+  collection?: DocumentCollection,
+) {
+  const note = await provider.read(path, signal);
+  return documentResult(params, note, path, collection);
 }
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
@@ -934,32 +897,51 @@ async function resolveAction(provider: NotesProvider, params: NotesParams, signa
   return documentResult(params, note);
 }
 
-function documentResult(params: NotesParams, candidate: NoteDocument, expectedPath?: string) {
+function documentResult(
+  params: NotesParams,
+  candidate: NoteDocument,
+  expectedPath?: string,
+  collection?: DocumentCollection,
+) {
   const note = validateDocument(candidate, expectedPath);
   return result(formatDocument(note.path, note.revision, note.content), {
     action: params.action,
+    ...(collection === undefined ? {} : { collection }),
     path: note.path,
     revision: note.revision,
   });
 }
 
 async function writeAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const notePath = requirePath(params);
-  if (params.content === undefined) throw new Error("notes write requires content");
+  return writeDocumentAction(provider, params, requirePath(params), signal);
+}
+
+async function writeDocumentAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  path: string,
+  signal?: AbortSignal,
+  collection?: DocumentCollection,
+) {
+  if (params.content === undefined) {
+    const subject = collection === undefined ? "notes write" : `notes ${collection} write`;
+    throw new Error(`${subject} requires content`);
+  }
   assertNoteSize(params.content);
   const mutation = validateMutation(
     await provider.write(
       {
-        path: notePath,
+        path,
         content: params.content,
         expectedRevision: requireWriteRevision(params),
       },
       signal,
     ),
-    notePath,
+    path,
   );
   return result(`Wrote ${mutation.path}`, {
     action: params.action,
+    ...(collection === undefined ? {} : { collection }),
     path: mutation.path,
     revision: mutation.revision,
   });

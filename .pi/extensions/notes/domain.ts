@@ -6,7 +6,8 @@ export const MAX_INDEX_BYTES = 16_384;
 export const MAX_INDEX_ENTRIES = 200;
 export const MAX_SEARCH_QUERY_LENGTH = 1_000;
 export const MAX_SEARCH_RESULTS = 100;
-export const MAX_LIST_CURSOR_LENGTH = 4_096;
+// A collection cursor can embed one full UTF-8 note path and its selection scope.
+export const MAX_LIST_CURSOR_LENGTH = 16_384;
 export const MAX_REVISION_LENGTH = 256;
 export const MAX_EDIT_ITEMS = 8;
 export const MAX_EDIT_TEXT_LENGTH = 8_192;
