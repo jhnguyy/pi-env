@@ -93,7 +93,6 @@ export class PtcToolDispatchError extends Error {
  */
 export const BLOCKED_TOOLS = new Set<string>([
   "closeout",      // synchronizes main and removes a worktree and branch
-  "jit_catch",     // spawns a subagent internally
   "ptc",           // self — prevent recursion
   "skill_build",   // spawns a subagent internally
   "subagent",      // in-process agent loops and background job management

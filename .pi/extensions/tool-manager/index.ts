@@ -238,7 +238,7 @@ export default function toolManager(pi: ExtensionAPI) {
     description: "Find and activate inactive tools by exact name, capability group, or multiple strong terms. Additive only.",
     promptSnippet: "Find and activate tools for capabilities that are not currently available.",
     promptGuidelines: [
-      "Use search_tools when a task needs a capability that is not active; search by exact tool name or capability such as code analysis, delegation, skills, catching tests, prior sessions, or web access.",
+      "Use search_tools when a task needs a capability that is not active; search by exact tool name or capability such as code analysis, delegation, skills, prior sessions, or web access.",
     ],
     parameters: Type.Object({ query: Type.String({ description: "Tool name, group, or capability terms to activate." }) }),
     async execute(_id, params) {
