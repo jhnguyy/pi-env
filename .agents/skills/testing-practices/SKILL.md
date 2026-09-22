@@ -1,24 +1,37 @@
 ---
 name: testing-practices
-description: Designs and reviews software tests from public requirements, known regressions, and safety invariants. Use when adding, changing, removing, or reviewing tests, fixing a regression, or selecting test evidence.
+description: Designs and reviews E2E-first evidence from public requirements, known regressions, and safety invariants. Use when adding, changing, removing, or reviewing tests, fixing a regression, or selecting test evidence.
 ---
 
 # Testing Practices
 
-> Tautological tests considered harmful.
+## Select the evidence before implementation
 
-1. Read the repository test policy, public contract, and nearby tests.
-2. For risk-triggered work, map each risk to its owning boundary and existing or missing evidence. Fix expected scenarios in a separate clean-base session before the builder sees the implementation diff.
-3. State one standalone requirement, regression, or safety claim before you write a permanent test. State why a failure matters. Do not add the test if the claim only describes source structure or wiring.
-4. Test the claim at the narrowest stable public boundary. A behavior-preserving refactor must not require a test change. Behavior or contract changes can require new expectations.
-5. For weak or untrusted input, test the parser that returns the refined domain value. Test downstream workflows with that domain value instead of repeating the invalid-input matrix at each layer. Repeated validation tests can identify a missing domain boundary.
-6. Do not pin source constants, private state, exact prompt prose, registry contents, dependency versions, generated declarations, import placement, or command spelling. Use a static policy check when source structure is the contract.
-7. Show red and green for regressions. Use a practical negative control for new requirements.
-8. Use a separate adversarial pass for high-risk boundaries identified by the repository policy.
-9. Before merge, review every added or changed test and nearby tests at the same boundary. Remove repeated or implementation-coupled evidence when the repository policy permits it. Preserve interaction and safety evidence.
-10. Find production exports, getters, return values, injection options, and helpers that only tests use. Remove each seam unless it has a separate runtime or design owner.
-11. Use repository-owned commands and verification portfolios.
+1. Read the repository test policy, public contract, and existing evidence. Discover local artifact storage, privacy, and verification requirements.
+2. State the observable user or operator outcome, exact inputs, expected results, and material failure cases.
+3. Prefer an E2E scenario as the sole behavioral evidence when it covers the claim and risks. Enter through the real supported interface. Name the production boundaries exercised and any substitutions or omitted behavior.
+4. For risk-triggered work, fix scenarios and expected outcomes in a separate clean-base session before production implementation. Follow the repository's independence requirements.
+5. Reuse an existing scenario or write runnable acceptance evidence before the production change. Establish a failing baseline where practical.
+6. Name residual evidence gaps. For each necessary isolated test, explain why E2E evidence cannot safely or reliably cover the claim. Enumerate relevant failure modes and expected outcomes, then write the tests before implementing the component or fix.
 
-Do not use test count, assertion count, implementation coverage, or easy mockability as substitutes for durable behavioral evidence. Do not add production seams only to make internal steps directly testable.
+For existing code, derive scenarios from the public contract before inspecting implementation details. Write the reproducer before changing production code. For a gap found after implementation, return to independent contract-first design before further production changes and record the late-discovered evidence honestly.
 
-Use the `jit-catch` skill before you promote a generated catching test to permanent coverage.
+## Implement and verify
+
+1. Implement the behavior and run the selected scenarios.
+2. Produce bounded, privacy-safe artifacts on success and failure: source and fixture identity, runtime, repeat command, expected and actual observations, and selected observable products. Follow repository retention policy.
+3. Verify saved products against the scenario contract with a repeatable command. A saved pass flag or an agent summary is not sufficient evidence. Mark missing or truncated evidence explicitly.
+4. Show red and green for regressions. Use a practical negative control for new requirements and a separate adversarial pass where repository policy requires it.
+5. Keep type, static policy, packaging, and install checks. Run repository-owned verification portfolios before integration.
+
+## Maintain the portfolio
+
+Migrate one capability at a time: establish E2E evidence, identify residual gaps, retain justified isolated tests, then remove demonstrably redundant evidence. Preserve safety and interaction coverage until replacements detect the same meaningful defects.
+
+A permanent test must protect a requirement, known regression, or safety invariant. Test observable behavior rather than source constants, private state, exact prompt prose, registries, versions, import placement, or command spelling. A behavior-preserving refactor must not require expectation changes.
+
+For weak input, establish acceptance and rejection at the E2E boundary first. Add isolated parser cases for named gaps. Use parsed domain values downstream instead of repeating invalid-input matrices at every layer.
+
+Review test-only production seams with their tests. Keep a seam only when it has a runtime or independent design owner. Use static policy checks when source structure is the necessary contract.
+
+Temporary catching tests remain exploratory. Use the `jit-catch` skill before independently re-deriving any permanent evidence from them. Test count, implementation coverage, speed, and easy mockability are not substitutes for durable behavioral claims.

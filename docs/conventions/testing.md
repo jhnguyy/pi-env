@@ -2,6 +2,44 @@
 
 Permanent tests protect capabilities, regressions, or safety invariants. Test count is not a quality target, and moving slow safety coverage out of blocking verification is not a valid speedup.
 
+## E2E-first workflow
+
+Prefer end-to-end (E2E) scenarios as the sole behavioral evidence for a capability when they cover its requirements and material risks. Keep type, static policy, packaging, and install checks alongside behavioral evidence.
+
+An E2E scenario enters through a supported user or operator interface, crosses the production boundaries relevant to its claim, and checks an externally observable result. Name that boundary and any substitutions. A configuration CLI scenario does not prove dependency installation. A local provider substitute does not prove hosted-provider behavior.
+
+For new or changed behavior:
+
+1. State the observable outcome, exact input, expected result, and material failure cases before implementation.
+2. Select an existing E2E scenario or write a runnable acceptance scenario before changing production code. Establish a failing baseline where practical.
+3. Implement the behavior and run the scenario through its declared entrypoint.
+4. Verify the resulting artifacts against the expected outcomes. Use a negative control or regression red/green result to prove that the evidence detects the defect.
+5. Name each remaining evidence gap. Add isolated tests only when an E2E scenario cannot safely or reliably establish that claim.
+6. For each isolated-test exception, enumerate relevant failure modes and expected outcomes, then write the executable tests before implementing the component or fix. Record why the E2E boundary cannot cover the gap.
+7. Run the required verification portfolio and report the evidence and limitations.
+
+For existing code, derive isolated-test scenarios from the public contract before inspecting implementation details. Establish the reproducer before changing production code. When a gap is discovered after implementation, return to independent contract-first design before making further production changes. Mark this as late-discovered evidence in review rather than claiming test-first provenance.
+
+Use deterministic local E2E scenarios for blocking verification when possible. Keep environment-dependent checks explicit and state what the blocking portfolio cannot prove. An existing unchanged capability can reuse established evidence instead of adding a new scenario.
+
+## E2E artifact contract
+
+Each new or changed E2E scenario produces inspectable evidence on success and failure. Discover repository-owned storage and privacy policy before writing artifacts. Keep artifacts outside tracked source files.
+
+Record:
+
+- Scenario and fixture identity, source revision and dirty state, runtime, declared boundary, and substitutions
+- One command to repeat the run, prerequisites, and relevant non-secret environment settings
+- Expected and actual observations with assertion verdicts and process exit status
+- Selected resulting files or other observable products, with hashes for integrity checks
+- Bounded, redacted diagnostics with explicit truncation or capture-failure status
+
+Provide a command to verify the saved evidence without rerunning the system under test. Verification checks recorded products against the scenario contract, not only a saved pass flag. Artifact hashes detect changes but are not independent proof of correctness or authenticity.
+
+Capture only necessary fixture-owned data. Use synthetic credentials, omit host secrets and ambient environment dumps, and define retention and cleanup. Preserve partial evidence when a scenario fails and mark missing evidence as incomplete. A repeat run must establish the same behavioral verdict under the declared conditions. Timestamps and temporary paths need not be identical.
+
+The setup configuration pilot is documented in [`docs/setup-e2e.md`](../setup-e2e.md). Existing E2E scenarios adopt this contract when their capability changes. This is not a reason to remove existing coverage first.
+
 ## Test classes
 
 Every committed test should have one primary intent:
@@ -9,7 +47,8 @@ Every committed test should have one primary intent:
 - **Requirement hardening** — public behavior derived from a documented requirement or tool contract.
 - **Regression hardening** — reproduces a known failure and prevents recurrence.
 - **Safety invariant** — lifecycle, cancellation, cleanup, process-tree, resource-bound, setup, credential, or portability behavior that must fail safely.
-- **Integration/e2e** — requires a real process, socket, git repository, analyzer, browser, or language server. This is a cost classification in addition to one of the intents above.
+- **Integration** — requires a real process, socket, git repository, analyzer, browser, or language server. This is a cost classification in addition to one of the intents above.
+- **E2E** — exercises the declared user or operator entrypoint through the relevant production boundaries. An integration test is not automatically E2E.
 - **Catching** — temporary, diff-aware evidence for one implementation. Files named `*.catching.test.ts` are never committed.
 
 Delete or avoid assertions that only mirror source constants, private field layout, function arity, exact prompt prose, incidental rendering details, or lifecycle checks already enforced by build/install verification. A behavior-preserving source change must not require a test change. If a test fails after such a change, treat the test as a removal candidate.
@@ -18,9 +57,9 @@ Do not test test wiring. Do not pin package scripts, verification registry array
 
 ## Domain-first evidence
 
-When a boundary parses weak input into a domain value, test the parser and the domain workflow as separate claims.
+When a boundary parses weak input into a domain value, first establish acceptance and rejection behavior through the E2E workflow. Separate parser and workflow claims only for a named evidence gap.
 
-- Parser tests prove that accepted input produces the required refined representation and rejected input produces the expected typed failure.
+- Justified isolated parser tests prove that accepted input produces the required refined representation and rejected input produces the expected typed failure. Enumerate failure modes and write these tests before implementing parser changes.
 - Workflow tests use parsed domain values. They must not repeat every invalid-input case at downstream layers.
 - Add an interaction case when structural decoding and semantic parsing can disagree.
 - Treat repeated validation tests across downstream functions as evidence of a missing domain boundary, not as a coverage target.
@@ -34,7 +73,7 @@ Each permanent test must justify its maintenance cost with a durable behavioral 
 
 When a test is the only caller of a production export, getter, injection option, return value, or helper, review both items together. Remove the production seam when it has no runtime owner or non-test design purpose. Do not preserve production complexity only to support direct unit inspection.
 
-Before you merge any contribution that adds or changes tests, review each changed test and nearby tests at the same boundary. Remove assertions that restate arrangement data, source structure, or another assertion. Remove existing low-value evidence in the same change. Prefer one test at the public boundary over parallel tests of each internal step. Preserve narrower tests only when they improve safety evidence, failure diagnosis, or counterfactual strength.
+Before you merge any contribution that adds or changes tests, review each changed test and nearby tests at the same boundary. Remove assertions that restate arrangement data, source structure, or another assertion. Remove existing low-value evidence in the same change. Prefer one E2E scenario over parallel tests of each internal step. Retain narrower tests for named evidence gaps. Migrate one capability at a time: establish E2E evidence, identify residual gaps, then remove tests whose meaningful defects the replacement demonstrably detects. Preserve existing safety and interaction coverage until equivalent evidence exists.
 
 ## Test file boundaries
 
@@ -73,9 +112,9 @@ Risk-triggered changes require requirement-derived test design that is independe
 
 1. The implementation owner creates an evidence map. For each requirement or risk, record the owning boundary, existing evidence, missing evidence, and test class.
 2. A test-design session starts from the base worktree. It receives the requirement, public contracts, evidence map, and existing tests, but not the implementation diff.
-3. The designer fixes behavioral scenarios and expected outcomes before implementation details are available.
-4. The implementation session can create and discard catching tests. It must not promote each internal branch to permanent evidence.
-5. A test builder may inspect the branch only after the scenarios are fixed. The builder connects assertions to public APIs and fixtures.
+3. The designer fixes E2E scenarios, expected artifacts, and isolated-test exceptions before production implementation begins. For each exception, enumerate failure modes and expected outcomes.
+4. The builder writes runnable acceptance scenarios and justified isolated tests before the corresponding production change. An unavailable interface can establish the initial failure, but the completed test must detect behavioral defects rather than only a missing symbol.
+5. The implementation session runs this evidence while building. Temporary catching tests remain exploratory evidence, not an exception to the permanent-test design sequence. For a late-discovered gap, return to the independent designer and record the exception before continuing.
 6. Regression tests must fail on the base revision and pass on the branch. This red/green result is the counterfactual evidence for an ordinary bug fix.
 7. New capabilities use requirement-first evidence plus a practical negative control when one exists. A negative control changes or bypasses the behavior under test and confirms that the test detects the difference.
 8. For concurrency, cancellation, cleanup, persistence, resource admission, authority, credential, and security boundaries, a separate adversarial pass proves the highest-risk evidence through a narrow mutation, removed admission check, injected failure, corrupted persisted value, or equivalent counterfactual.
@@ -106,8 +145,10 @@ The safe and standard portfolios must preserve blocking setup, type, packaging, 
 
 For risk-triggered work, the pull request records:
 
-- Test class and protected capability, regression, or safety invariant
-- Independent design origin
+- Test class, declared E2E boundary, and protected capability, regression, or safety invariant
+- Artifact location, repeat command, verification command, and retention
+- Isolated-test exceptions, their failure-mode inventory, and why E2E evidence is insufficient
+- Independent design origin, pre-implementation evidence, and any late-discovered gaps
 - Red/green, mutation, or negative-control evidence
 - Added, reused, and removed portfolio evidence
 - Integration or end-to-end runtime impact

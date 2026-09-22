@@ -15,6 +15,7 @@ if [ -z "${PI_ENV_TEST_NODE_BIN:-}" ]; then
 fi
 
 SETUP_TESTS=(
+  setup/__tests__/configuration.e2e.test.sh
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh
   setup/__tests__/nix-managed-config.test.sh
