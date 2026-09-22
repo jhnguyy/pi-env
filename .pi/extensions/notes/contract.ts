@@ -22,6 +22,8 @@ import {
   newInboxNote,
   newWorklogRecord,
   page,
+  projectItems,
+  projectTarget,
   recordDateFromPath,
   recordPath,
   requireIsoDate,
@@ -69,9 +71,18 @@ export const NOTES_ACTIONS = [
   "record",
 ] as const;
 
-export const NOTES_COLLECTIONS = ["store", "inbox", "worklog", "wiki"] as const;
+export const NOTES_COLLECTIONS = ["store", "inbox", "projects", "worklog", "wiki"] as const;
+const NOTES_COLLECTION_DESCRIPTIONS = {
+  store: "Provider-neutral orientation, search, legacy access, and maintenance",
+  inbox: "Unclassified captures",
+  projects: "Active plans, owners, status, next actions, and linked tickets",
+  wiki: "Maintained knowledge",
+  worklog: "Completed outcomes",
+} as const;
 const NOTES_STORE_ACTIONS = NOTES_ACTIONS.filter((action) => action !== "record");
 
+const collectionParameter = <Name extends keyof typeof NOTES_COLLECTION_DESCRIPTIONS>(name: Name) =>
+  Type.Literal(name, { description: NOTES_COLLECTION_DESCRIPTIONS[name] });
 const collectionLimitParameter = () =>
   Type.Optional(
     Type.Integer({
@@ -95,7 +106,7 @@ const revisionPrecondition = () =>
 export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
-      collection: Type.Optional(Type.Literal("store")),
+      collection: Type.Optional(collectionParameter("store")),
       action: StringEnum(NOTES_STORE_ACTIONS, { description: "Transitional Store operation" }),
       path: Type.Optional(
         Type.String({ maxLength: 1_024, description: "Store-relative Markdown path" }),
@@ -136,7 +147,7 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("inbox"),
+      collection: collectionParameter("inbox"),
       action: Type.Literal("read"),
       date: Type.Optional(Type.String({ maxLength: 10, description: "Exact ISO date" })),
       limit: collectionLimitParameter(),
@@ -146,7 +157,7 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("inbox"),
+      collection: collectionParameter("inbox"),
       action: Type.Literal("write"),
       kind: StringEnum(["note", "followup"] as const),
       text: Type.String({ maxLength: MAX_APPEND_LENGTH }),
@@ -155,7 +166,40 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("worklog"),
+      collection: collectionParameter("projects"),
+      action: Type.Literal("list"),
+      limit: collectionLimitParameter(),
+      cursor: continuationCursor(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      collection: collectionParameter("projects"),
+      action: Type.Literal("read"),
+      target: Type.String({
+        maxLength: 1_015,
+        description: "Markdown path relative to projects/",
+      }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      collection: collectionParameter("projects"),
+      action: Type.Literal("write"),
+      target: Type.String({
+        maxLength: 1_015,
+        description: "Markdown path relative to projects/",
+      }),
+      content: Type.String({ maxLength: MAX_NOTE_BYTES }),
+      revision: revisionPrecondition(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      collection: collectionParameter("worklog"),
       action: Type.Literal("read"),
       selector: Type.Optional(
         Type.String({ maxLength: 32, description: "ISO date, inclusive range, or all" }),
@@ -168,7 +212,7 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("worklog"),
+      collection: collectionParameter("worklog"),
       action: Type.Literal("record"),
       text: Type.String({ maxLength: MAX_APPEND_LENGTH }),
     },
@@ -176,7 +220,7 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("wiki"),
+      collection: collectionParameter("wiki"),
       action: Type.Literal("read"),
       target: Type.Optional(
         Type.String({ maxLength: 1_018, description: "Path relative to wiki/" }),
@@ -188,7 +232,7 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
   Type.Object(
     {
-      collection: Type.Literal("wiki"),
+      collection: collectionParameter("wiki"),
       action: Type.Literal("write"),
       target: Type.String({ maxLength: 1_018, description: "Markdown path relative to wiki/" }),
       content: Type.String({ maxLength: MAX_NOTE_BYTES }),
@@ -231,13 +275,17 @@ export interface NotesToolDetails {
   readonly truncated?: boolean;
 }
 
+type DocumentCollection = "projects" | "wiki";
+
 export interface NotesContractOptions {
   readonly now?: () => Date;
 }
 
 export const NOTES_DESCRIPTION = [
-  "Read and maintain Inbox, Worklog, Wiki, and transitional Store notes through the configured provider.",
-  "Use collection-specific actions for core note behavior and Store actions for orientation, search, legacy access, and maintenance.",
+  "Read and maintain four note collections through the configured provider.",
+  "Inbox holds unclassified captures. Projects hold active plans, owners, status, next actions, and linked tickets.",
+  "Wiki holds maintained knowledge. Worklog holds completed outcomes.",
+  "Use Store actions for orientation, search, legacy access, and maintenance.",
   "Reads are bounded and non-destructive. Mutations preserve unrelated content and use revision preconditions.",
 ].join(" ");
 
@@ -290,26 +338,64 @@ async function executeNotesAction(
 
 async function executeCollectionAction(
   provider: NotesProvider,
-  collection: "inbox" | "worklog" | "wiki",
+  collection: "inbox" | "projects" | "worklog" | "wiki",
   params: NotesParams,
   signal: AbortSignal | undefined,
   now: () => Date,
 ) {
   switch (collection) {
     case "inbox":
-      if (params.action === "read") return inboxReadAction(provider, params, signal);
-      if (params.action === "write") return inboxWriteAction(provider, params, signal, now);
-      break;
+      return executeInboxAction(provider, params, signal, now);
+    case "projects":
+      return executeProjectsAction(provider, params, signal);
     case "worklog":
-      if (params.action === "read") return worklogReadAction(provider, params, signal, now);
-      if (params.action === "record") return worklogRecordAction(provider, params, signal, now);
-      break;
+      return executeWorklogAction(provider, params, signal, now);
     case "wiki":
-      if (params.action === "read") return wikiReadAction(provider, params, signal);
-      if (params.action === "write") return wikiWriteAction(provider, params, signal);
-      break;
+      return executeWikiAction(provider, params, signal);
   }
-  throw invalidCollectionAction(collection, params.action);
+}
+
+function executeInboxAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal: AbortSignal | undefined,
+  now: () => Date,
+) {
+  if (params.action === "read") return inboxReadAction(provider, params, signal);
+  if (params.action === "write") return inboxWriteAction(provider, params, signal, now);
+  throw invalidCollectionAction("inbox", params.action);
+}
+
+function executeProjectsAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal?: AbortSignal,
+) {
+  if (params.action === "list") return projectsListAction(provider, params, signal);
+  if (params.action === "read") return projectsReadAction(provider, params, signal);
+  if (params.action === "write") return projectsWriteAction(provider, params, signal);
+  throw invalidCollectionAction("projects", params.action);
+}
+
+function executeWorklogAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal: AbortSignal | undefined,
+  now: () => Date,
+) {
+  if (params.action === "read") return worklogReadAction(provider, params, signal, now);
+  if (params.action === "record") return worklogRecordAction(provider, params, signal, now);
+  throw invalidCollectionAction("worklog", params.action);
+}
+
+function executeWikiAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal?: AbortSignal,
+) {
+  if (params.action === "read") return wikiReadAction(provider, params, signal);
+  if (params.action === "write") return wikiWriteAction(provider, params, signal);
+  throw invalidCollectionAction("wiki", params.action);
 }
 
 async function inboxReadAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
@@ -425,6 +511,48 @@ async function inboxWriteAction(
     path,
     revision: mutation.revision,
   });
+}
+
+async function projectsListAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal?: AbortSignal,
+) {
+  const items = projectItems(await listComplete(provider, "projects/", signal));
+  const scope = "all";
+  const cursor = decodeCursor(params.cursor, "projects", scope);
+  const offset =
+    cursor.location === undefined
+      ? cursor.offset
+      : items.findIndex((item) => item.target === cursor.location);
+  if (offset < 0) throw invalidCollectionCursor();
+  const envelope = page(items, collectionLimit(params.limit), offset, (next) =>
+    encodeCursor("projects", scope, 0, items[next].target),
+  );
+  return collectionResult(collectionText("Projects", envelope), {
+    action: params.action,
+    collection: "projects",
+    items: envelope.items,
+    nextCursor: envelope.nextCursor,
+  });
+}
+
+async function projectsReadAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal?: AbortSignal,
+) {
+  const target = projectTarget(params.target);
+  return readDocumentAction(provider, params, target.path, signal, "projects");
+}
+
+async function projectsWriteAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  signal?: AbortSignal,
+) {
+  const target = projectTarget(params.target);
+  return writeDocumentAction(provider, params, target.path, signal, "projects");
 }
 
 async function worklogReadAction(
@@ -569,13 +697,7 @@ async function worklogRecordAction(
 async function wikiReadAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const target = wikiTarget(params.target);
   if (target.kind === "file") {
-    const note = validateDocument(await provider.read(target.path, signal), target.path);
-    return result(formatDocument(note.path, note.revision, note.content), {
-      action: params.action,
-      collection: "wiki",
-      path: note.path,
-      revision: note.revision,
-    });
+    return readDocumentAction(provider, params, target.path, signal, "wiki");
   }
   const entries = await listComplete(provider, target.path, signal);
   const children = wikiChildren(entries, target.target);
@@ -600,25 +722,7 @@ async function wikiReadAction(provider: NotesProvider, params: NotesParams, sign
 async function wikiWriteAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   const target = wikiTarget(params.target);
   if (target.kind !== "file") throw new Error("notes wiki write requires a Markdown file target");
-  if (params.content === undefined) throw new Error("notes wiki write requires content");
-  assertNoteSize(params.content);
-  const mutation = validateMutation(
-    await provider.write(
-      {
-        path: target.path,
-        content: params.content,
-        expectedRevision: requireWriteRevision(params),
-      },
-      signal,
-    ),
-    target.path,
-  );
-  return result(`Wrote ${mutation.path}`, {
-    action: params.action,
-    collection: "wiki",
-    path: mutation.path,
-    revision: mutation.revision,
-  });
+  return writeDocumentAction(provider, params, target.path, signal, "wiki");
 }
 
 async function canonicalPaths(
@@ -756,9 +860,18 @@ async function listAction(provider: NotesProvider, params: NotesParams, signal?:
 }
 
 async function readAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const requestedPath = requirePath(params);
-  const note = await provider.read(requestedPath, signal);
-  return documentResult(params, note, requestedPath);
+  return readDocumentAction(provider, params, requirePath(params), signal);
+}
+
+async function readDocumentAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  path: string,
+  signal?: AbortSignal,
+  collection?: DocumentCollection,
+) {
+  const note = await provider.read(path, signal);
+  return documentResult(params, note, path, collection);
 }
 
 async function searchAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
@@ -784,32 +897,51 @@ async function resolveAction(provider: NotesProvider, params: NotesParams, signa
   return documentResult(params, note);
 }
 
-function documentResult(params: NotesParams, candidate: NoteDocument, expectedPath?: string) {
+function documentResult(
+  params: NotesParams,
+  candidate: NoteDocument,
+  expectedPath?: string,
+  collection?: DocumentCollection,
+) {
   const note = validateDocument(candidate, expectedPath);
   return result(formatDocument(note.path, note.revision, note.content), {
     action: params.action,
+    ...(collection === undefined ? {} : { collection }),
     path: note.path,
     revision: note.revision,
   });
 }
 
 async function writeAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
-  const notePath = requirePath(params);
-  if (params.content === undefined) throw new Error("notes write requires content");
+  return writeDocumentAction(provider, params, requirePath(params), signal);
+}
+
+async function writeDocumentAction(
+  provider: NotesProvider,
+  params: NotesParams,
+  path: string,
+  signal?: AbortSignal,
+  collection?: DocumentCollection,
+) {
+  if (params.content === undefined) {
+    const subject = collection === undefined ? "notes write" : `notes ${collection} write`;
+    throw new Error(`${subject} requires content`);
+  }
   assertNoteSize(params.content);
   const mutation = validateMutation(
     await provider.write(
       {
-        path: notePath,
+        path,
         content: params.content,
         expectedRevision: requireWriteRevision(params),
       },
       signal,
     ),
-    notePath,
+    path,
   );
   return result(`Wrote ${mutation.path}`, {
     action: params.action,
+    ...(collection === undefined ? {} : { collection }),
     path: mutation.path,
     revision: mutation.revision,
   });

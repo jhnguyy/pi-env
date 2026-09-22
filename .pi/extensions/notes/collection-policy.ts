@@ -25,6 +25,10 @@ export interface WorklogItem {
   readonly position: number;
 }
 
+export interface ProjectItem extends NoteEntry {
+  readonly target: string;
+}
+
 export interface WikiChild {
   readonly kind: "folder" | "file";
   readonly target: string;
@@ -36,7 +40,7 @@ export interface WikiChild {
 
 interface CursorPayload {
   readonly v: 1;
-  readonly collection: "inbox" | "worklog" | "wiki";
+  readonly collection: "inbox" | "projects" | "worklog" | "wiki";
   readonly scope: string;
   readonly offset: number;
   readonly location?: string;
@@ -300,37 +304,95 @@ function isClosingFence(
   );
 }
 
+export function projectTarget(target: string | undefined): {
+  readonly target: string;
+  readonly path: string;
+} {
+  const normalized = normalizeCollectionTarget(target, "Project", false);
+  if (!normalized.toLowerCase().endsWith(".md")) {
+    throw invalidCollectionTarget("Project", target);
+  }
+  return {
+    target: normalized,
+    path: requireCollectionPathLength("Project", `projects/${normalized}`),
+  };
+}
+
+export function projectItems(entries: readonly NoteEntry[]): ProjectItem[] {
+  const prefix = "projects/";
+  return entries
+    .flatMap((entry) =>
+      entry.path.startsWith(prefix) && entry.path.length > prefix.length
+        ? [targetedNoteEntry(entry, entry.path.slice(prefix.length))]
+        : [],
+    )
+    .sort((left, right) => left.target.localeCompare(right.target));
+}
+
 export function wikiTarget(target: string | undefined): {
   readonly target: string;
   readonly path: string;
   readonly kind: "file" | "folder";
 } {
+  const normalized = normalizeCollectionTarget(target, "Wiki", true);
+  const kind = normalized.toLowerCase().endsWith(".md") ? "file" : "folder";
+  const relative = normalized ? `${normalized}${kind === "folder" ? "/" : ""}` : "";
+  return {
+    target: normalized,
+    path: requireCollectionPathLength("Wiki", `wiki/${relative}`),
+    kind,
+  };
+}
+
+function normalizeCollectionTarget(
+  target: string | undefined,
+  label: "Project" | "Wiki",
+  allowEmpty: boolean,
+): string {
   const normalized = (target ?? "").replaceAll("\\", "/");
-  if (/^\//.test(normalized) || (normalized.length > 0 && normalized.endsWith("/"))) {
-    throw new NotesProviderError({
-      code: "invalid-path",
-      message: `Invalid Wiki target: ${target}`,
-    });
+  if (
+    (!allowEmpty && normalized === "") ||
+    /^\//.test(normalized) ||
+    (normalized.length > 0 && normalized.endsWith("/"))
+  ) {
+    throw invalidCollectionTarget(label, target);
   }
   const segments = normalized === "" ? [] : normalized.split("/");
   if (segments.some((segment) => segment === "" || segment === ".." || segment.startsWith("."))) {
+    const root = label === "Project" ? "projects/" : "wiki/";
     throw new NotesProviderError({
       code: "path-escape",
-      message: `Wiki target escapes wiki/: ${target}`,
+      message: `${label} target escapes ${root}: ${target}`,
     });
   }
   if (normalized.includes(":") || /[\x00-\x1f\x7f]/.test(normalized)) {
+    throw invalidCollectionTarget(label, target);
+  }
+  return normalized;
+}
+
+function invalidCollectionTarget(label: "Project" | "Wiki", target: string | undefined) {
+  return new NotesProviderError({
+    code: "invalid-path",
+    message: `Invalid ${label} target: ${target}`,
+  });
+}
+
+function requireCollectionPathLength(label: "Project" | "Wiki", path: string): string {
+  if (path.length > 1_024) {
     throw new NotesProviderError({
       code: "invalid-path",
-      message: `Invalid Wiki target: ${target}`,
+      message: `${label} target is too long.`,
     });
   }
-  const kind = normalized.toLowerCase().endsWith(".md") ? "file" : "folder";
-  const path = normalized ? `wiki/${normalized}${kind === "folder" ? "/" : ""}` : "wiki/";
-  if (path.length > 1_024) {
-    throw new NotesProviderError({ code: "invalid-path", message: "Wiki target is too long." });
-  }
-  return { target: normalized, path, kind };
+  return path;
+}
+
+function targetedNoteEntry(
+  entry: NoteEntry,
+  target: string,
+): NoteEntry & { readonly target: string } {
+  return { target, ...entry };
 }
 
 export function wikiChildren(entries: readonly NoteEntry[], folderTarget: string): WikiChild[] {
@@ -350,11 +412,7 @@ export function wikiChildren(entries: readonly NoteEntry[], folderTarget: string
     const target = folderTarget ? `${folderTarget}/${relative}` : relative;
     children.set(`file:${target}`, {
       kind: "file",
-      target,
-      path: entry.path,
-      ...(entry.revision === undefined ? {} : { revision: entry.revision }),
-      ...(entry.size === undefined ? {} : { size: entry.size }),
-      ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
+      ...targetedNoteEntry(entry, target),
     });
   }
   return [...children.values()].sort((left, right) =>
