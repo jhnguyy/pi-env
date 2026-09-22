@@ -4,21 +4,21 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export function requiredNubVersion(packageJson) {
+function requiredNubVersion(packageJson) {
   const value = packageJson.packageManager;
   const match = typeof value === "string" ? /^nub@(\d+\.\d+\.\d+)$/.exec(value) : null;
   if (!match) throw new Error("package.json#packageManager must declare an exact Nub version");
   return match[1];
 }
 
-export function installedNubVersion(output) {
-  const firstLine = output.split(/\r?\n/, 1)[0]?.trim() ?? "";
-  const match = /^v?(\d+\.\d+\.\d+)$/.exec(firstLine);
-  if (!match) throw new Error(`Nub returned an invalid version: ${firstLine || "<empty>"}`);
+function installedNubVersion(output) {
+  const value = output.trim();
+  const match = /^v?(\d+\.\d+\.\d+)$/.exec(value);
+  if (!match) throw new Error(`Nub returned an invalid version: ${value || "<empty>"}`);
   return match[1];
 }
 
-export function checkNubVersion(repo, nubBin = "nub") {
+function checkNubVersion(repo, nubBin = "nub") {
   const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
   const required = requiredNubVersion(pkg);
   const result = spawnSync(nubBin, ["--version"], { cwd: repo, encoding: "utf8" });

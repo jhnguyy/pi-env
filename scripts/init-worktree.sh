@@ -16,10 +16,7 @@ if ! command -v nub >/dev/null 2>&1; then
   echo "Nub is required. Install the pi-env toolchain, then retry." >&2
   exit 1
 fi
-required_nub=$(grep -Eo '"packageManager"[[:space:]]*:[[:space:]]*"nub@[0-9]+\.[0-9]+\.[0-9]+"' package.json \
-  | head -n 1 | sed -E 's/.*nub@([0-9]+\.[0-9]+\.[0-9]+)"/\1/' || true)
-installed_nub=$(nub --version 2>/dev/null | head -n 1 | sed -E 's/^v//' || true)
-if [ -z "$required_nub" ] || [ "$installed_nub" != "$required_nub" ]; then
+if ! scripts/node-run.sh scripts/check-nub-version.mjs "$ROOT"; then
   echo "Nub does not satisfy package.json#packageManager; preserving node_modules." >&2
   exit 1
 fi
@@ -52,7 +49,7 @@ fi
 
 if ! install_dependencies; then
   if [ "$had_node_modules" -eq 1 ]; then
-    echo "Nub install failed; preserving existing node_modules without retry." >&2
+    echo "Nub install failed; setup will not delete node_modules or retry." >&2
     exit 1
   fi
   echo "Nub install failed. Removing partial node_modules and retrying once." >&2

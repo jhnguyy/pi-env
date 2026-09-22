@@ -51,7 +51,7 @@ function installWithRetry(args) {
   const hadNodeModules = existsSync(nodeModules);
   if (nubInstall(args)) return;
   if (hadNodeModules) {
-    fail('  ✗  Nub install failed; preserving existing node_modules without retry.');
+    fail('  ✗  Nub install failed; setup will not delete node_modules or retry.');
   }
   console.log('  —  Nub install failed. Setup will remove partial node_modules and retry once.');
   rmSync(nodeModules, { recursive: true, force: true });

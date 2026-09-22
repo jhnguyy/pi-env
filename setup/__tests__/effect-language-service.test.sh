@@ -21,7 +21,7 @@ run_strategy() {
 
   cat > "$tmp/repo/package.json" <<'JSON'
 {
-  "packageManager": "nub@0.9.2",
+  "packageManager": "nub@1.2.3",
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@effect/language-service": "1.0.0"
@@ -41,7 +41,7 @@ SH
   cat > "$fake_bin/nub" <<'SH'
 #!/usr/bin/env sh
 if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' v0.9.2
+  printf '%s\n' v1.2.3
   exit
 fi
 printf 'nub %s\n' "$*" >> "$COMMAND_LOG"

@@ -22,6 +22,7 @@ SETUP_TESTS=(
   setup/__tests__/node-policy.test.sh
   setup/__tests__/repo-hooks.test.sh
   setup/__tests__/worktree-init.test.sh
+  setup/__tests__/nub-version-admission.test.sh
   setup/__tests__/runtime-install-safety.test.sh
   setup/__tests__/node-resolution.test.sh
   setup/__tests__/pi-cli-wrapper.test.sh
