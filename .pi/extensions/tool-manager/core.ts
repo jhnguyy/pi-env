@@ -20,7 +20,6 @@ export const DEFAULT_GROUPS: Record<string, string[]> = {
   analysis: ["analyze"],
   delegation: ["subagent"],
   skills: ["skill_build"],
-  "catching-tests": ["jit_catch"],
   sessions: ["list_sessions", "read_session"],
   review: ["review"],
   web: ["web_fetch"],
@@ -32,7 +31,6 @@ export const GROUP_HINTS: Record<string, RegExp[]> = {
   analysis: [/\banalys(is|e|ze|ing)\b/, /\bcomplexity\b/, /\bduplicates?\b/, /\basync[- ]?risk\b/, /\bstatic checks?\b/],
   delegation: [/\bdelegat(e|ion)\b/, /\bsubagents?\b/, /\bbackground agents?\b/, /\bparallel agents?\b/],
   skills: [/\bskills?\b/],
-  "catching-tests": [/\bcatching\b/, /\bjit[- ]?catch\b/],
   sessions: [/\bsessions?\b/, /\bconversation history\b/],
   review: [
     /\breview\b.*(?:\bpull request\b|\bpr\b|github\.com\/\S+\/pull\/\d+)/,
@@ -50,7 +48,7 @@ export const DEFAULT_MANUAL_ONLY = new Set<string>();
 export const CORE_PROFILE = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME];
 export const DEFAULT_PROFILES: Record<string, string[]> = {
   core: CORE_PROFILE,
-  coding: [...CORE_PROFILE, "analysis", "delegation", "catching-tests"],
+  coding: [...CORE_PROFILE, "analysis", "delegation"],
   full: ["*"],
 };
 
@@ -170,7 +168,6 @@ export function triggerGroups(input: { text: string; source?: string }, autoActi
   if (/\b(static checks?|code analysis|complexity|async-risk|duplicates? check)\b/.test(t) || (codingAction && codeEntity)) groups.push("analysis");
   if (/\b(delegate|delegation|subagent|parallel agents?|background agent|start a subagent)\b/.test(t)) groups.push("delegation");
   if (/\b(create|build|review|reference) (a )?skill\b|\bskill (create|build|review|reference)\b/.test(t)) groups.push("skills");
-  if (/\b(catching|jit[- ]?catch)\b/.test(t)) groups.push("catching-tests");
   if (/\b(prior|previous|past) (session|conversation)\b|\bsession history\b/.test(t)) groups.push("sessions");
   if ((GROUP_HINTS.review ?? []).some((rx) => rx.test(t))) groups.push("review");
   if (/https?:\/\/\S+|\b(web fetch|fetch (the )?(website|url|page)|website context)\b/.test(t)) groups.push("web");

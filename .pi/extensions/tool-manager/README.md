@@ -13,7 +13,7 @@ Configure the `toolManager` block in global or project `settings.json`:
 - `manualOnly`: tools excluded from `search_tools` and automatic input activation. Explicit `/tools on` and `/tools profile` commands may still activate them.
 - `autoActivate`: enables high-confidence input-triggered activation. The default is `true`.
 
-Built-in profiles are `core`, `coding`, and `full`. Built-in groups are `analysis`, `delegation`, `skills`, `catching-tests`, `sessions`, and `web`.
+Built-in profiles are `core`, `coding`, and `full`. Built-in groups are `analysis`, `delegation`, `skills`, `sessions`, and `web`.
 
 ## Commands
 

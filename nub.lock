@@ -129,8 +129,6 @@ importers:
 
   .pi/extensions/introspection: {}
 
-  .pi/extensions/jit-catch: {}
-
   .pi/extensions/linear:
     dependencies:
       '@earendil-works/pi-ai':

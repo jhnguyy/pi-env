@@ -10,7 +10,7 @@ import {
   triggerGroups,
 } from "../core";
 
-const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "jit_catch", "review", "web_fetch", "notes", "linear"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
+const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "review", "web_fetch", "notes", "linear"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
 
 describe("tool manager core", () => {
   it("uses the core profile after all tools are known and rejects an invalid configured default", () => {
@@ -39,7 +39,6 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "analyze this design" }, true)).not.toContain("analysis");
     expect(triggerGroups({ text: "delegate this to subagent in background" }, true)).toContain("delegation");
     expect(triggerGroups({ text: "create a skill for this" }, true)).toContain("skills");
-    expect(triggerGroups({ text: "use catching for JIT phrasing" }, true)).toContain("catching-tests");
     expect(triggerGroups({ text: "read previous session conversation" }, true)).toContain("sessions");
     expect(triggerGroups({ text: "Review this PR https://github.com/acme/widgets/pull/123" }, true)).toContain("review");
     expect(triggerGroups({ text: "Review this pull request" }, true)).toContain("review");
@@ -49,7 +48,6 @@ describe("tool manager core", () => {
     expect(triggerGroups({ text: "address this feedback" }, true)).not.toContain("review");
     expect(triggerGroups({ text: "review this TypeScript file" }, true)).not.toContain("review");
     expect(triggerGroups({ text: "fetch https://example.com" }, true)).toContain("web");
-    expect(triggerGroups({ text: "run extension tests" }, true)).not.toContain("catching-tests");
     expect(triggerGroups({ text: "fetch https://example.com", source: "extension" }, true)).toEqual([]);
     expect(triggerGroups({ text: "find the Linear issue for this work" }, true)).toContain("linear-read");
   });
