@@ -160,6 +160,8 @@ export const BACKEND_CONFIGS: LspBackendConfig[] = [
     capabilities: TS_CAPABILITIES,
     initializationOptions: {
       disableAutomaticTypingAcquisition: true,
+      // These tools do not offer auto-import completions. Avoid their dependency-wide index.
+      preferences: { includePackageJsonAutoImports: "off" },
       maxTsServerMemory: 768,
       plugins: [
         {

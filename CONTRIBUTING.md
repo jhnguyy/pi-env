@@ -47,6 +47,14 @@ Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for E2E-firs
 
 Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Run the safe verification portfolio before integration when the full workspace contract is required.
 
+Run the dev-tools real-workspace canary with retained evidence:
+
+```bash
+PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run test:e2e:real-workspace-canary
+```
+
+Each run writes a `pi-dev-tools-canary-*/result.json` with the revision, public request, expected destination, actual result, and verdict. Keep this directory for review. Without the environment variable, evidence goes to temporary storage.
+
 ## Worktree requirements
 
 Keep the primary working tree on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.
