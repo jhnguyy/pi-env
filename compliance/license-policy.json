@@ -28,7 +28,7 @@
     {
       "repository": "https://github.com/earendil-works/pi",
       "license": "MIT",
-      "versions": ["0.85.1", "0.87.0"],
+      "versions": ["0.85.1", "0.87.0", "0.87.1"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {
