@@ -43,7 +43,7 @@ Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vites
 
 ## Testing and review
 
-Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for test classes, evidence requirements, catching-test policy, and verification portfolios. Catching tests are ephemeral and may not be committed.
+Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for E2E-first testing and evidence requirements. Catching tests are ephemeral and may not be committed.
 
 Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Run the safe verification portfolio before integration when the full workspace contract is required.
 
