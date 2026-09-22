@@ -3,7 +3,6 @@ import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_SHORT_DESCRIPTION_LIMIT,
   WidthBoundedText,
   registerPublicTool,
   renderTextToolResult,
@@ -11,10 +10,8 @@ import {
 } from "../_shared/tool-render";
 
 describe("shared compact tool rendering", () => {
-  it("uses the 70-character compatibility limit and adds a marker only on overflow", () => {
-    const exact = "x".repeat(DEFAULT_SHORT_DESCRIPTION_LIMIT);
-    expect(shortDescription(exact)).toBe(exact);
-    expect(shortDescription(`${exact}y`)).toBe(`${exact}...`);
+  it("adds a marker only when text exceeds an explicit limit", () => {
+    expect(shortDescription("abcde", { limit: 5 })).toBe("abcde");
     expect(shortDescription("abcdef", { limit: 5 })).toBe("abcde...");
   });
 
@@ -26,7 +23,7 @@ describe("shared compact tool rendering", () => {
 
   it("removes terminal sequences before it truncates a short description", () => {
     const styled = `\u001b[31m${"x".repeat(71)}\u001b[0m`;
-    expect(shortDescription(styled)).toBe(`${"x".repeat(70)}...`);
+    expect(shortDescription(styled, { limit: 70 })).toBe(`${"x".repeat(70)}...`);
   });
 
   it("truncates styled text at the component width without splitting ANSI sequences", () => {

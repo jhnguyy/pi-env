@@ -36,8 +36,9 @@ function run(cwd, env = {}) {
 describe("changed-code quality wrapper", () => {
   it("skips a packaged source tree without git metadata", async () => {
     const cwd = await fixtureRoot("quality-no-git-");
-    expect(run(cwd)).toMatchObject({ status: 0 });
-    expect(run(cwd).stdout).toContain("no git metadata");
+    const result = run(cwd);
+    expect(result).toMatchObject({ status: 0 });
+    expect(result.stdout).toContain("no git metadata");
   });
 
   it("skips a packaged git snapshot without a base ref", async () => {
