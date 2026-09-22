@@ -1,24 +1,12 @@
 ---
 name: testing-practices
-description: Designs and reviews software tests from public requirements, known regressions, and safety invariants. Use when adding, changing, removing, or reviewing tests, fixing a regression, or selecting test evidence.
+description: Designs E2E-first tests and repeatable evidence. Use when adding or reviewing tests, fixing a regression, or deciding whether isolated tests are necessary.
 ---
 
 # Testing Practices
 
-> Tautological tests considered harmful.
+Read the repository testing policy and requirements.
 
-1. Read the repository test policy, public contract, and nearby tests.
-2. For risk-triggered work, map each risk to its owning boundary and existing or missing evidence. Fix expected scenarios in a separate clean-base session before the builder sees the implementation diff.
-3. State one standalone requirement, regression, or safety claim before you write a permanent test. State why a failure matters. Do not add the test if the claim only describes source structure or wiring.
-4. Test the claim at the narrowest stable public boundary. A behavior-preserving refactor must not require a test change. Behavior or contract changes can require new expectations.
-5. For weak or untrusted input, test the parser that returns the refined domain value. Test downstream workflows with that domain value instead of repeating the invalid-input matrix at each layer. Repeated validation tests can identify a missing domain boundary.
-6. Do not pin source constants, private state, exact prompt prose, registry contents, dependency versions, generated declarations, import placement, or command spelling. Use a static policy check when source structure is the contract.
-7. Show red and green for regressions. Use a practical negative control for new requirements.
-8. Use a separate adversarial pass for high-risk boundaries identified by the repository policy.
-9. Before merge, review every added or changed test and nearby tests at the same boundary. Remove repeated or implementation-coupled evidence when the repository policy permits it. Preserve interaction and safety evidence.
-10. Find production exports, getters, return values, injection options, and helpers that only tests use. Remove each seam unless it has a separate runtime or design owner.
-11. Use repository-owned commands and verification portfolios.
-
-Do not use test count, assertion count, implementation coverage, or easy mockability as substitutes for durable behavioral evidence. Do not add production seams only to make internal steps directly testable.
-
-Use the `jit-catch` skill before you promote a generated catching test to permanent coverage.
+1. **Start with E2E.** Exercise the workflow people use and check its final result. Prefer this as the only behavioral test layer. Reuse existing coverage when it already proves the outcome.
+2. **Leave evidence.** Each run produces an inspectable artifact with inputs, expected and actual results, and instructions to reproduce and check it. Preserve failure evidence and follow local privacy and storage policy.
+3. **Use isolation only for a named gap.** Explain what E2E cannot exercise reliably. List failure modes and expected outcomes, then write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it. Derive expectations from requirements, not implementation details.
