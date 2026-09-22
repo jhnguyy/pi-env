@@ -14,7 +14,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type { TSchema } from "typebox";
 
-export const DEFAULT_SHORT_DESCRIPTION_LIMIT = 70;
+const DEFAULT_SHORT_DESCRIPTION_LIMIT = 70;
 
 export interface ToolRenderTheme {
   fg(color: string, text: string): string;

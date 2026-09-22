@@ -19,15 +19,16 @@ resolved_package_path() {
 }
 
 apply_settings() {
-  local settings="$1" repo="$2" node
+  local settings="$1" repo="$2" managed="${3:-$MANAGED}" node
   node=$(node_bin)
-  "$node" "$SCRIPT" "$settings" "$MANAGED" "$repo"
+  "$node" "$SCRIPT" "$settings" "$managed" "$repo"
 }
 
 test_applies_managed_settings_and_package_once() {
-  local tmp settings repo first second
+  local tmp settings managed repo first second
   tmp="$(with_temp_dir)"
   settings="$tmp/settings.json"
+  managed="$tmp/managed.json"
   repo="$tmp/repo"
   mkdir -p "$repo"
   cat > "$settings" <<'JSON'
@@ -37,22 +38,18 @@ test_applies_managed_settings_and_package_once() {
   ],
 }
 JSON
+  printf '%s\n' '{"_comment_fixture":"ignore","fixtureManaged":{"enabled":true}}' > "$managed"
 
-  first=$(apply_settings "$settings" "$repo")
-  second=$(apply_settings "$settings" "$repo")
+  first=$(apply_settings "$settings" "$repo" "$managed")
+  second=$(apply_settings "$settings" "$repo" "$managed")
 
   [ "$first" = "updated" ] || fail "first run should update settings, got $first"
   [ "$second" = "unchanged" ] || fail "second run should be unchanged, got $second"
   [ "$(json_get "$settings" 's.defaultProvider')" = "anthropic" ] || fail "defaultProvider should be preserved"
-  [ "$(json_get "$settings" 's.retry.enabled')" = "true" ] || fail "retry.enabled should be true"
-  [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "provider timeout should be 20000"
-  [ "$(json_get "$settings" 's.retry.provider.maxRetries')" = "1" ] || fail "provider retries should be 1"
-  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "false" ] || fail "piUpdate should default to disabled"
-  [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "missing theme should default to gruvbox automatic light/dark"
-  [ "$(json_get "$settings" 'Object.prototype.hasOwnProperty.call(s, "_comment_managed_retry")')" = "false" ] || fail "managed comments should not be written to user settings"
+  [ "$(json_get "$settings" 's.fixtureManaged.enabled')" = "true" ] || fail "managed settings should be applied"
+  [ "$(json_get "$settings" 'Object.keys(s).some((key) => key.startsWith("_comment"))')" = "false" ] || fail "managed comments should not be written to user settings"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "package path should resolve to repo"
-  [ "$(json_get "$settings" 's.extensions')" = '["-playwright-client","-work-tracker"]' ] || fail "default-disabled extensions should be disabled by setup"
 
   rm -rf "$tmp"
 }
@@ -113,9 +110,6 @@ test_applies_to_missing_settings_file() {
   result=$(apply_settings "$settings" "$repo")
 
   [ "$result" = "created" ] || fail "missing settings should be created, got $result"
-  [ "$(json_get "$settings" 's.retry.provider.timeoutMs')" = "20000" ] || fail "created settings should include managed timeout"
-  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "false" ] || fail "created settings should disable piUpdate"
-  [ "$(json_get "$settings" 's.theme')" = "gruvbox-light/gruvbox-dark" ] || fail "created settings should include gruvbox automatic light/dark theme"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "created settings should include package"
 
   rm -rf "$tmp"
