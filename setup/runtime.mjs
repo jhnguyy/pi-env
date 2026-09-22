@@ -42,10 +42,19 @@ function nubInstall(args) {
   return run('nub', ['install', ...args, '--frozen-lockfile'], { cwd: repo }).status === 0;
 }
 
+function nubAcceptsCommittedLock(args) {
+  return run('nub', ['install', ...args, '--lockfile-only', '--ignore-scripts', '--frozen-lockfile'], { cwd: repo }).status === 0;
+}
+
 function installWithRetry(args) {
+  const nodeModules = join(repo, 'node_modules');
+  const hadNodeModules = existsSync(nodeModules);
   if (nubInstall(args)) return;
-  console.log('  —  Nub install failed. Setup will remove node_modules and retry once.');
-  rmSync(join(repo, 'node_modules'), { recursive: true, force: true });
+  if (hadNodeModules) {
+    fail('  ✗  Nub install failed; preserving existing node_modules without retry.');
+  }
+  console.log('  —  Nub install failed. Setup will remove partial node_modules and retry once.');
+  rmSync(nodeModules, { recursive: true, force: true });
   if (!nubInstall(args)) fail('  ✗  Nub install failed after the retry.');
 }
 
@@ -56,15 +65,24 @@ function patchEffectTypeScript() {
 
 function installDependencies() {
   section('Dependencies');
+  if (!existsSync(join(repo, 'nub.lock'))) {
+    fail('  ✗  missing committed nub.lock; refusing to install dependencies.');
+  }
+  runChecked(setupNodeBin, [join(repo, 'scripts', 'check-nub-version.mjs'), repo], { cwd: repo });
   console.log('  —  Setup will install repository dependencies with Nub.');
-  switch (selectInstallStrategy()) {
+  const strategy = selectInstallStrategy();
+  const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ['--ignore-scripts'] : [];
+  if (!nubAcceptsCommittedLock(installArgs)) {
+    fail('  ✗  Nub cannot consume the committed nub.lock; preserving node_modules.');
+  }
+  switch (strategy) {
     case InstallStrategy.PlainNodeBootstrap:
       console.log('  —  Nub cannot run Node in this environment. Setup will use plain Node for setup scripts.');
-      installWithRetry(['--ignore-scripts']);
+      installWithRetry(installArgs);
       runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
       break;
     case InstallStrategy.NubManaged:
-      installWithRetry([]);
+      installWithRetry(installArgs);
       runChecked('nub', ['run', 'build'], { cwd: repo });
       break;
     default:
