@@ -68,7 +68,6 @@ function installDependencies() {
   if (!existsSync(join(repo, 'nub.lock'))) {
     fail('  ✗  missing committed nub.lock; refusing to install dependencies.');
   }
-  runChecked(setupNodeBin, [join(repo, 'scripts', 'check-nub-version.mjs'), repo], { cwd: repo });
   console.log('  —  Setup will install repository dependencies with Nub.');
   const strategy = selectInstallStrategy();
   const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ['--ignore-scripts'] : [];

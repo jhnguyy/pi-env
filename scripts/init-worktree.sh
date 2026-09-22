@@ -16,10 +16,6 @@ if ! command -v nub >/dev/null 2>&1; then
   echo "Nub is required. Install the pi-env toolchain, then retry." >&2
   exit 1
 fi
-if ! scripts/node-run.sh scripts/check-nub-version.mjs "$ROOT"; then
-  echo "Nub does not satisfy package.json#packageManager; preserving node_modules." >&2
-  exit 1
-fi
 remove_dependency_tree() {
   if [ -L node_modules ]; then
     rm node_modules

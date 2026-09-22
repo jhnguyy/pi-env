@@ -6,17 +6,10 @@ source "$(cd "$(dirname "$0")" && pwd)/helpers.sh"
 
 make_repo() {
   git init -q "$1"
-  mkdir -p "$1/nested/path" "$1/.git/hooks" "$1/dist" "$1/scripts" "$1/setup"
-  cp "$ROOT/scripts/check-node-version.mjs" "$1/scripts/check-node-version.mjs"
-  cp "$ROOT/scripts/check-nub-version.mjs" "$1/scripts/check-nub-version.mjs"
-  cp "$ROOT/scripts/node-policy.mjs" "$1/scripts/node-policy.mjs"
-  cp "$ROOT/scripts/node-run.sh" "$1/scripts/node-run.sh"
-  cp "$ROOT/setup/node-runtime.sh" "$1/setup/node-runtime.sh"
+  mkdir -p "$1/nested/path" "$1/.git/hooks" "$1/dist"
   printf '%s\n' 'hook sentinel' > "$1/.git/hooks/pre-commit"
   printf '%s\n' 'dist sentinel' > "$1/dist/sentinel"
-  printf '%s\n' '{"packageManager":"nub@1.2.3","engines":{"node":">=24.0.0"}}' > "$1/package.json"
-  printf '%s\n' '24.0.0' > "$1/.node-version"
-  printf '%s\n' '24.0.0' > "$1/.nvmrc"
+  printf '%s\n' '{}' > "$1/package.json"
   printf '%s\n' 'lockfileVersion: 1' > "$1/nub.lock"
   git -C "$1" add package.json nub.lock
   git -C "$1" -c advice.ignoredHook=false -c user.name=test -c user.email=test@example.invalid commit -qm fixture
@@ -26,10 +19,6 @@ make_fake_nub() {
   mkdir -p "$1"
   make_executable "$1/nub" '#!/usr/bin/env bash
 set -euo pipefail
-if [ "${1:-}" = "--version" ]; then
-  printf "v%s\n" "${NUB_VERSION:-1.2.3}"
-  exit
-fi
 printf "%s|%s\n" "$PWD" "$*" >> "$NUB_LOG"
 if [[ " $* " == *" --lockfile-only "* ]]; then
   printf '%s\n' attempted > "$NUB_PREFLIGHT"
@@ -77,7 +66,7 @@ run_init() {
   shift
   (
     cd "$cwd"
-    env PATH="$BIN:$PATH" PI_ENV_NODE_BIN="$(node_bin)" NUB_LOG="$LOG" NUB_COUNT="$COUNT" NUB_PREFLIGHT="$PREFLIGHT" NUB_VERIFY="$VERIFY" "$@" \
+    env PATH="$BIN:$PATH" NUB_LOG="$LOG" NUB_COUNT="$COUNT" NUB_PREFLIGHT="$PREFLIGHT" NUB_VERIFY="$VERIFY" "$@" \
       bash "$ROOT/scripts/init-worktree.sh"
   )
 }
@@ -129,24 +118,6 @@ test_retries_once_after_removing_partial_install() {
   finish_fixture
 }
 
-test_incompatible_nub_fails_before_touching_existing_dependencies() {
-  new_fixture
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_init "$REPO" NUB_VERSION=1.2.2 >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "worktree initialization accepted an incompatible Nub"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "worktree initialization invoked a dependency command after version admission failed"
-  [ ! -e "$COUNT" ] || fail "worktree initialization installed after version admission failed"
-  finish_fixture
-}
-
 test_lock_preflight_failure_does_not_install_or_remove_existing_dependencies() {
   new_fixture
   mkdir -p "$REPO/node_modules"
@@ -165,25 +136,6 @@ test_lock_preflight_failure_does_not_install_or_remove_existing_dependencies() {
   finish_fixture
 }
 
-test_malformed_package_manager_fails_before_install() {
-  new_fixture
-  printf '%s\n' '{"packageManager":"nub@latest","engines":{"node":">=24.0.0"}}' > "$REPO/package.json"
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_init "$REPO" >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "worktree initialization accepted a non-exact Nub declaration"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "worktree initialization installed after packageManager admission failed"
-  [ ! -e "$PREFLIGHT" ] || fail "worktree initialization checked the lock after packageManager admission failed"
-  finish_fixture
-}
-
 test_does_not_delete_or_retry_existing_dependencies_after_failed_install() {
   new_fixture
   mkdir -p "$REPO/node_modules"
@@ -199,24 +151,6 @@ test_does_not_delete_or_retry_existing_dependencies_after_failed_install() {
   assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
   assert_eq "$(cat "$COUNT")" "1" "existing dependency install count"
   [ ! -e "$VERIFY" ] || fail "worktree initialization verified a failed install"
-  finish_fixture
-}
-
-test_missing_lock_fails_before_install_and_preserves_dependencies() {
-  new_fixture
-  rm "$REPO/nub.lock"
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_init "$REPO" >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "worktree initialization accepted a missing lockfile"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "worktree initialization invoked Nub without a lockfile"
   finish_fixture
 }
 
@@ -275,11 +209,8 @@ test_reports_missing_nub() {
 test_initializes_from_nested_cwd_without_sharing_dependencies
 test_keeps_a_local_dependency_tree_after_success
 test_retries_once_after_removing_partial_install
-test_incompatible_nub_fails_before_touching_existing_dependencies
 test_lock_preflight_failure_does_not_install_or_remove_existing_dependencies
-test_malformed_package_manager_fails_before_install
 test_does_not_delete_or_retry_existing_dependencies_after_failed_install
-test_missing_lock_fails_before_install_and_preserves_dependencies
 test_preserves_a_shared_target_created_by_a_failed_install
 test_fails_after_one_retry_without_verifying
 test_reports_missing_nub

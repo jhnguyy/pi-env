@@ -21,7 +21,6 @@ run_strategy() {
 
   cat > "$tmp/repo/package.json" <<'JSON'
 {
-  "packageManager": "nub@1.2.3",
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.0.0",
     "@effect/language-service": "1.0.0"
@@ -29,7 +28,6 @@ run_strategy() {
 }
 JSON
   printf '%s\n' 'lockfileVersion: 1' > "$tmp/repo/nub.lock"
-  cp "$ROOT/scripts/check-nub-version.mjs" "$tmp/repo/scripts/check-nub-version.mjs"
   printf '{"bin":{"pi":"dist/cli.js"}}\n' > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/package.json"
   : > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   : > "$tmp/repo/node_modules/@effect/language-service/cli.js"
@@ -40,10 +38,6 @@ SH
 
   cat > "$fake_bin/nub" <<'SH'
 #!/usr/bin/env sh
-if [ "${1:-}" = "--version" ]; then
-  printf '%s\n' v1.2.3
-  exit
-fi
 printf 'nub %s\n' "$*" >> "$COMMAND_LOG"
 if [ "${1:-}" = "run" ]; then
   has_node=0

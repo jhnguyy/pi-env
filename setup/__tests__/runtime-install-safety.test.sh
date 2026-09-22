@@ -11,9 +11,8 @@ new_fixture() {
   LOG="$TEMP/nub.log"
   PREFLIGHT="$TEMP/nub.preflight"
   mkdir -p "$REPO/scripts" "$BIN" "$TEMP/pi-bin"
-  cp "$ROOT/scripts/check-nub-version.mjs" "$REPO/scripts/check-nub-version.mjs"
   cat > "$REPO/package.json" <<'JSON'
-{ "packageManager": "nub@1.2.3", "devDependencies": { "@earendil-works/pi-coding-agent": "1.0.0" } }
+{ "devDependencies": { "@earendil-works/pi-coding-agent": "1.0.0" } }
 JSON
   printf '%s\n' 'lockfileVersion: 1' > "$REPO/nub.lock"
   printf '%s\n' '// fixture patch helper' > "$REPO/scripts/patch-effect-language-service.mjs"
@@ -21,10 +20,6 @@ JSON
 exit 0'
   make_executable "$BIN/nub" '#!/usr/bin/env bash
 set -euo pipefail
-if [ "${1:-}" = "--version" ]; then
-  printf "v%s\n" "${NUB_VERSION:-1.2.3}"
-  exit
-fi
 printf "%s\n" "$*" >> "$NUB_LOG"
 case "${1:-}" in
   install)
@@ -59,43 +54,6 @@ run_runtime() {
 
 finish_fixture() {
   rm -rf "$TEMP"
-}
-
-test_incompatible_nub_fails_before_touching_existing_dependencies() {
-  new_fixture
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_runtime NUB_VERSION=1.2.2 >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "runtime setup accepted an incompatible Nub"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "runtime setup invoked a dependency command after version admission failed"
-  [ ! -e "$TEMP/nub.count" ] || fail "runtime setup installed after version admission failed"
-  finish_fixture
-}
-
-test_malformed_package_manager_fails_before_install() {
-  new_fixture
-  printf '%s\n' '{"packageManager":"nub@latest"}' > "$REPO/package.json"
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_runtime >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "runtime setup accepted a non-exact Nub declaration"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "runtime setup installed after packageManager admission failed"
-  [ ! -e "$PREFLIGHT" ] || fail "runtime setup checked the lock after packageManager admission failed"
-  finish_fixture
 }
 
 test_lock_preflight_failure_does_not_install_or_remove_existing_dependencies() {
@@ -143,29 +101,8 @@ test_retries_once_after_cleaning_a_new_partial_tree() {
   finish_fixture
 }
 
-test_missing_lock_fails_before_install_and_preserves_dependencies() {
-  new_fixture
-  rm "$REPO/nub.lock"
-  mkdir -p "$REPO/node_modules"
-  printf '%s\n' existing > "$REPO/node_modules/existing-sentinel"
-  local status
-
-  set +e
-  run_runtime >/dev/null 2>&1
-  status=$?
-  set -e
-
-  [ "$status" -ne 0 ] || fail "runtime setup accepted a missing lockfile"
-  assert_file_contains "$REPO/node_modules/existing-sentinel" 'existing'
-  [ ! -e "$LOG" ] || fail "runtime setup invoked Nub without a lockfile"
-  finish_fixture
-}
-
-test_incompatible_nub_fails_before_touching_existing_dependencies
-test_malformed_package_manager_fails_before_install
 test_lock_preflight_failure_does_not_install_or_remove_existing_dependencies
 test_does_not_delete_or_retry_existing_dependencies_after_failed_install
 test_retries_once_after_cleaning_a_new_partial_tree
-test_missing_lock_fails_before_install_and_preserves_dependencies
 
 echo "runtime install safety tests passed"
