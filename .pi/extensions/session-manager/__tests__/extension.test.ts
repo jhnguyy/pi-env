@@ -354,7 +354,7 @@ describe("session-manager extension", () => {
     const cwd = join(root, "workspace");
     await mkdir(cwd);
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const setSessionNames: string[] = [];
+    let displayName: string | undefined;
     const renamedWindows: string[] = [];
     let editorFactory: EditorFactory | undefined = () =>
       cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
@@ -362,8 +362,10 @@ describe("session-manager extension", () => {
       on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
         handlers.set(event, handler),
       registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: (name: string) => setSessionNames.push(name),
+      getSessionName: () => displayName,
+      setSessionName: (name: string) => {
+        displayName = name.trim() || undefined;
+      },
     });
     const ctx = cast<ExtensionContext>({
       mode: "tui",
@@ -387,8 +389,9 @@ describe("session-manager extension", () => {
       windowId: "@1",
       bindings: [],
     };
+    const catalog = createFileSessionCatalog(join(root, "agent"));
     registerSessionManager(pi, {
-      catalog: createFileSessionCatalog(join(root, "agent")),
+      catalog,
       host: {
         inspectCurrent: () => Effect.succeed(currentWindow),
         bindCurrent: () => Effect.succeed(currentWindow),
@@ -404,18 +407,23 @@ describe("session-manager extension", () => {
     });
 
     await handlers.get("session_start")?.({} as never, ctx);
-    expect(setSessionNames).toEqual([]);
+    expect(displayName).toBeUndefined();
 
+    displayName = "investigate-resume";
     await handlers.get("session_info_changed")?.(
       cast<never>({ name: "investigate-resume" }),
       ctx,
     );
 
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBe(
+      "investigate-resume",
+    );
     expect(renamedWindows).toEqual(["investigate-resume"]);
 
+    displayName = undefined;
     await handlers.get("session_info_changed")?.(cast<never>({ name: undefined }), ctx);
 
-    expect(setSessionNames).toEqual([]);
+    expect(displayName).toBeUndefined();
     expect(renamedWindows).toEqual(["investigate-resume"]);
   });
 });
