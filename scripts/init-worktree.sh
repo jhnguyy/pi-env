@@ -11,30 +11,14 @@ if ! command -v nub >/dev/null 2>&1; then
   echo "Nub is required. Install the pi-env toolchain, then retry." >&2
   exit 1
 fi
-remove_dependency_tree() {
-  if [ -L node_modules ]; then
-    rm node_modules
-  else
-    rm -rf node_modules
-  fi
-}
-
 if [ -L node_modules ]; then
   echo "Removing the shared node_modules symlink."
-  remove_dependency_tree
+  rm node_modules
 fi
 
-install_dependencies() {
-  nub install --frozen-lockfile
-}
-
-if ! install_dependencies; then
-  echo "Nub install failed. Removing node_modules and retrying once." >&2
-  remove_dependency_tree
-  if ! install_dependencies; then
-    echo "Nub install failed after the retry." >&2
-    exit 1
-  fi
+if ! nub install --frozen-lockfile; then
+  echo "Nub install failed." >&2
+  exit 1
 fi
 
 nub run verify:install

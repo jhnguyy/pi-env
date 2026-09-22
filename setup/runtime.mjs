@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   RuntimeCommand,
@@ -42,13 +42,6 @@ function nubInstall(args) {
   return run('nub', ['install', ...args, '--frozen-lockfile'], { cwd: repo }).status === 0;
 }
 
-function installWithRetry(args) {
-  if (nubInstall(args)) return;
-  console.log('  —  Nub install failed. Setup will remove node_modules and retry once.');
-  rmSync(join(repo, 'node_modules'), { recursive: true, force: true });
-  if (!nubInstall(args)) fail('  ✗  Nub install failed after the retry.');
-}
-
 function patchEffectTypeScript() {
   const script = join(repo, 'scripts', 'patch-effect-language-service.mjs');
   runChecked(setupNodeBin, [script, setupNodeBin], { cwd: repo });
@@ -57,14 +50,15 @@ function patchEffectTypeScript() {
 function installDependencies() {
   section('Dependencies');
   console.log('  —  Setup will install repository dependencies with Nub.');
-  switch (selectInstallStrategy()) {
+  const strategy = selectInstallStrategy();
+  const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ['--ignore-scripts'] : [];
+  if (!nubInstall(installArgs)) fail('  ✗  Nub install failed.');
+  switch (strategy) {
     case InstallStrategy.PlainNodeBootstrap:
       console.log('  —  Nub cannot run Node in this environment. Setup will use plain Node for setup scripts.');
-      installWithRetry(['--ignore-scripts']);
       runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
       break;
     case InstallStrategy.NubManaged:
-      installWithRetry([]);
       runChecked('nub', ['run', 'build'], { cwd: repo });
       break;
     default:
