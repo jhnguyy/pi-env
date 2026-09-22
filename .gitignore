@@ -1,6 +1,5 @@
 node_modules/
 coverage/
-.artifacts/
 THIRD_PARTY_LICENSES/
 THIRD_PARTY_SOURCES/
 *.tsbuildinfo

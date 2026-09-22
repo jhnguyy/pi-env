@@ -6,7 +6,7 @@ Permanent tests protect capabilities, regressions, or safety invariants. Test co
 
 Prefer end-to-end (E2E) scenarios as the sole behavioral evidence for a capability when they cover its requirements and material risks. Keep type, static policy, packaging, and install checks alongside behavioral evidence.
 
-An E2E scenario enters through a supported user or operator interface, crosses the production boundaries relevant to its claim, and checks an externally observable result. Name that boundary and any substitutions. A configuration CLI scenario does not prove dependency installation. A local provider substitute does not prove hosted-provider behavior.
+An E2E scenario enters through a supported user or operator interface, crosses the production boundaries relevant to its claim, and checks an externally observable result. Name that boundary and any substitutions. A local provider substitute does not prove hosted-provider behavior.
 
 For new or changed behavior:
 
@@ -38,7 +38,7 @@ Provide a command to verify the saved evidence without rerunning the system unde
 
 Capture only necessary fixture-owned data. Use synthetic credentials, omit host secrets and ambient environment dumps, and define retention and cleanup. Preserve partial evidence when a scenario fails and mark missing evidence as incomplete. A repeat run must establish the same behavioral verdict under the declared conditions. Timestamps and temporary paths need not be identical.
 
-The setup configuration pilot is documented in [`docs/setup-e2e.md`](../setup-e2e.md). Existing E2E scenarios adopt this contract when their capability changes. This is not a reason to remove existing coverage first.
+Existing E2E scenarios adopt this contract when their capability changes. This is not a reason to remove existing coverage first.
 
 ## Test classes
 
