@@ -25,6 +25,14 @@ export interface WorklogItem {
   readonly position: number;
 }
 
+export interface ProjectItem {
+  readonly target: string;
+  readonly path: string;
+  readonly revision?: string;
+  readonly size?: number;
+  readonly modifiedAt?: number;
+}
+
 export interface WikiChild {
   readonly kind: "folder" | "file";
   readonly target: string;
@@ -36,7 +44,7 @@ export interface WikiChild {
 
 interface CursorPayload {
   readonly v: 1;
-  readonly collection: "inbox" | "worklog" | "wiki";
+  readonly collection: "inbox" | "projects" | "worklog" | "wiki";
   readonly scope: string;
   readonly offset: number;
   readonly location?: string;
@@ -298,6 +306,61 @@ function isClosingFence(
   return (
     candidate !== undefined && candidate[0] === fence.character && candidate.length >= fence.length
   );
+}
+
+export function projectTarget(target: string | undefined): {
+  readonly target: string;
+  readonly path: string;
+} {
+  const normalized = (target ?? "").replaceAll("\\", "/");
+  if (
+    normalized === "" ||
+    /^\//.test(normalized) ||
+    normalized.endsWith("/") ||
+    !normalized.toLowerCase().endsWith(".md")
+  ) {
+    throw new NotesProviderError({
+      code: "invalid-path",
+      message: `Invalid Project target: ${target}`,
+    });
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => segment === "" || segment === ".." || segment.startsWith("."))) {
+    throw new NotesProviderError({
+      code: "path-escape",
+      message: `Project target escapes projects/: ${target}`,
+    });
+  }
+  if (normalized.includes(":") || /[\x00-\x1f\x7f]/.test(normalized)) {
+    throw new NotesProviderError({
+      code: "invalid-path",
+      message: `Invalid Project target: ${target}`,
+    });
+  }
+  const path = `projects/${normalized}`;
+  if (path.length > 1_024) {
+    throw new NotesProviderError({ code: "invalid-path", message: "Project target is too long." });
+  }
+  return { target: normalized, path };
+}
+
+export function projectItems(entries: readonly NoteEntry[]): ProjectItem[] {
+  const prefix = "projects/";
+  return entries
+    .flatMap((entry) =>
+      entry.path.startsWith(prefix) && entry.path.length > prefix.length
+        ? [
+            {
+              target: entry.path.slice(prefix.length),
+              path: entry.path,
+              ...(entry.revision === undefined ? {} : { revision: entry.revision }),
+              ...(entry.size === undefined ? {} : { size: entry.size }),
+              ...(entry.modifiedAt === undefined ? {} : { modifiedAt: entry.modifiedAt }),
+            },
+          ]
+        : [],
+    )
+    .sort((left, right) => left.target.localeCompare(right.target));
 }
 
 export function wikiTarget(target: string | undefined): {

@@ -107,6 +107,19 @@ describe("notes tool contract", () => {
       Check(contract.parameters, { collection: "inbox", action: "read", date: "2026-09-12" }),
     ).toBe(true);
     expect(
+      Check(contract.parameters, { collection: "projects", action: "list" }),
+    ).toBe(true);
+    expect(
+      Check(contract.parameters, {
+        collection: "projects",
+        action: "write",
+        target: "platform/roadmap.md",
+        content: "# Roadmap",
+        revision: null,
+      }),
+    ).toBe(true);
+    expect(Check(contract.parameters, { collection: "projects", action: "search" })).toBe(false);
+    expect(
       Check(contract.parameters, { collection: "worklog", action: "record", text: "Shipped" }),
     ).toBe(true);
     expect(Check(contract.parameters, { collection: "wiki", action: "read", target: "ai" })).toBe(
@@ -216,6 +229,108 @@ describe("notes tool contract", () => {
     ]);
     expect(fake.write).not.toHaveBeenCalled();
     expect(fake.delete).not.toHaveBeenCalled();
+  });
+
+  it("lists and reads only canonical Project documents with bounded cursors", async () => {
+    const fake = memoryProvider({
+      "projects/alpha.md": "# Alpha",
+      "projects/platform/roadmap.md": "# Platform roadmap",
+      "projects-old.md": "not a project",
+      "wiki/project.md": "wiki",
+    });
+    const contract = createNotesContract(fake);
+
+    const first = await contract.execute(
+      { collection: "projects", action: "list", limit: 1 },
+      { cwd: "/repo" },
+    );
+    expect(first.details.items).toEqual([
+      expect.objectContaining({ target: "alpha.md", path: "projects/alpha.md" }),
+    ]);
+    expect(first.details.nextCursor).toEqual(expect.any(String));
+
+    const second = await contract.execute(
+      {
+        collection: "projects",
+        action: "list",
+        limit: 1,
+        cursor: first.details.nextCursor,
+      },
+      { cwd: "/repo" },
+    );
+    expect(second.details.items).toEqual([
+      expect.objectContaining({
+        target: "platform/roadmap.md",
+        path: "projects/platform/roadmap.md",
+      }),
+    ]);
+
+    const read = await contract.execute(
+      { collection: "projects", action: "read", target: "platform/roadmap.md" },
+      { cwd: "/repo" },
+    );
+    expect(read.details).toMatchObject({
+      collection: "projects",
+      path: "projects/platform/roadmap.md",
+      revision: expect.any(String),
+    });
+    await expect(
+      contract.execute(
+        { collection: "wiki", action: "read", cursor: first.details.nextCursor },
+        { cwd: "/repo" },
+      ),
+    ).rejects.toThrow("mismatched");
+  });
+
+  it("keeps Project writes under projects/ and requires revision preconditions", async () => {
+    const fake = memoryProvider({ "projects/existing.md": "# Existing" });
+    const contract = createNotesContract(fake);
+    const content =
+      "# Existing\n\nOwner: Team\n\nStatus: active\n\n## Next actions\n\n- Ship\n\nTicket: T-1\n";
+    const revision = fake.documents.get("projects/existing.md")?.revision;
+
+    await contract.execute(
+      {
+        collection: "projects",
+        action: "write",
+        target: "existing.md",
+        content,
+        revision,
+      },
+      { cwd: "/repo" },
+    );
+    await contract.execute(
+      {
+        collection: "projects",
+        action: "write",
+        target: "nested/new.md",
+        content: "Free-form active plan",
+        revision: null,
+      },
+      { cwd: "/repo" },
+    );
+
+    expect(fake.documents.get("projects/existing.md")?.content).toBe(content);
+    expect(fake.documents.get("projects/nested/new.md")?.content).toBe("Free-form active plan");
+    await expect(
+      contract.execute(
+        {
+          collection: "projects",
+          action: "write",
+          target: "existing.md",
+          content: "stale",
+          revision,
+        },
+        { cwd: "/repo" },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      contract.execute(
+        { collection: "projects", action: "read", target: "../outside.md" },
+        { cwd: "/repo" },
+      ),
+    ).rejects.toMatchObject({ code: "path-escape" });
+    expect(fake.documents.get("projects/existing.md")?.content).toBe(content);
   });
 
   it("reads bounded Worklog selections in the requested date order", async () => {

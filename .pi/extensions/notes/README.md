@@ -27,7 +27,12 @@ Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project
 
 ## Collection behavior
 
-Pi-env owns the portable Inbox, Worklog, and Wiki lifecycle. Providers remain storage-neutral and own storage, transport, credentials, revisions, conflicts, and commit behavior.
+Pi-env owns four portable collections. Providers remain storage-neutral and own storage, transport, credentials, revisions, conflicts, and commit behavior.
+
+- Inbox contains unclassified captures.
+- Projects contain active plans, owners, status, next actions, and linked tickets.
+- Wiki contains maintained knowledge.
+- Worklog contains completed outcomes.
 
 ### Inbox
 
@@ -35,19 +40,25 @@ Inbox notes use `inbox/YYYYMMDD.md`. An Inbox read without a date returns the ea
 
 An Inbox write records one Note or unchecked Follow-up for the Pi process system-local date. It creates the daily note or exact level-two section when needed and preserves unrelated content.
 
-### Worklog
+### Projects
 
-Worklog items are brief completed-work bullets under `## Worklog` in `records/YYYY/MM/DD.md`. Recording always uses the Pi process system-local date. Reads support today, an exact ISO date, an inclusive `start..end` range, or `all`. They default to newest-date-first order and can request chronological order.
+Project targets are Markdown paths relative to `projects/`. A list returns project documents. A read returns one project document and its revision. Project writes require a null revision for explicit creation or the revision returned by a prior read for update.
+
+Keep only active project state in this collection. Each project document records its plan, owners, status, next actions, and linked tickets. Move completed outcomes to Worklog and maintained knowledge to Wiki.
 
 ### Wiki
 
 Wiki targets are relative to `wiki/`. A read without a target lists immediate root children. A folder target lists immediate child folders and Markdown files. A Markdown file target returns its content and revision. Wiki writes require a null revision for explicit creation or the revision returned by a prior read for update.
 
+### Worklog
+
+Worklog items are brief completed-work bullets under `## Worklog` in `records/YYYY/MM/DD.md`. Recording always uses the Pi process system-local date. Reads support today, an exact ISO date, an inclusive `start..end` range, or `all`. They default to newest-date-first order and can request chronological order.
+
 All collection list results are bounded. A returned opaque cursor continues the same selection. Do not reuse a cursor with a different collection, selector, target, or order.
 
 ## Store compatibility
 
-Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These actions remain available for orientation, global search, legacy and adapter-owned notes, and bounded migration work. Use collection actions for new Inbox, Worklog, and Wiki writes.
+Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These actions remain available for orientation, global search, legacy and adapter-owned notes, and bounded migration work. Use collection actions for new Inbox, Projects, Wiki, and Worklog writes.
 
 Each provider supplies a bounded index response for store-specific orientation. Use list as the authoritative inventory when working outside the core collections.
 
