@@ -2,7 +2,7 @@
 
 [`setup.sh`](../setup.sh) is the executable authority for prerequisite checks, setup modes, Node/Nub selection, and fallback behavior.
 
-Nub is the canonical JavaScript toolchain boundary. Before dependency installation, setup uses a frozen lock-only operation to confirm that Nub can consume the committed lockfile. A lock-compatibility failure does not modify `node_modules`. If installation fails against a pre-existing dependency tree, setup does not delete the tree or retry the installation.
+Nub is the canonical JavaScript toolchain boundary. Setup runs one frozen dependency installation and reports its result. It does not delete `node_modules` or retry after an installation failure.
 
 Local-Nix setup requires Nix with flakes. Externally managed setup consumes the provisioned toolchain. Portable setup checks host commands but does not install system packages.
 

@@ -27,7 +27,6 @@ run_strategy() {
   }
 }
 JSON
-  printf '%s\n' 'lockfileVersion: 1' > "$tmp/repo/nub.lock"
   printf '{"bin":{"pi":"dist/cli.js"}}\n' > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/package.json"
   : > "$tmp/repo/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
   : > "$tmp/repo/node_modules/@effect/language-service/cli.js"
