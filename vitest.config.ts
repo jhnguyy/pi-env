@@ -21,12 +21,9 @@ export default defineConfig({
   test: {
     testTimeout: e2e ? 30_000 : 5_000,
     include: e2e
-      ? [
-          ".pi/extensions/**/__tests__/e2e.test.ts",
-          ...(realWorkspaceCanary
-            ? [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"]
-            : []),
-        ]
+      ? realWorkspaceCanary
+        ? [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"]
+        : [".pi/extensions/**/__tests__/e2e.test.ts"]
       : portfolio === "integration"
         ? integrationTestRoots
         : testRoots,

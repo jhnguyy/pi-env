@@ -36,9 +36,7 @@ type DevToolsRegistrationApi = Pick<
   "exec" | "registerCommand" | "registerTool"
 > & AgentToolEvents;
 
-export function registerDevTools(pi: DevToolsRegistrationApi) {
-  const client = new LspClient();
-
+export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspClient()) {
   registerCleanupCommand(pi);
   registerCloseout(pi);
 
