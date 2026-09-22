@@ -347,4 +347,75 @@ describe("session-manager extension", () => {
       desiredState: "open",
     });
   });
+
+  it("leaves the Pi session unnamed while explicit renames sync to tmux", async () => {
+    const root = await mkdtemp(join(tmpdir(), "session-extension-name-"));
+    roots.push(root);
+    const cwd = join(root, "workspace");
+    await mkdir(cwd);
+    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+    const setSessionNames: string[] = [];
+    const renamedWindows: string[] = [];
+    let editorFactory: EditorFactory | undefined = () =>
+      cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
+    const pi = cast<ExtensionAPI>({
+      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
+        handlers.set(event, handler),
+      registerCommand: () => {},
+      getSessionName: () => undefined,
+      setSessionName: (name: string) => setSessionNames.push(name),
+    });
+    const ctx = cast<ExtensionContext>({
+      mode: "tui",
+      cwd,
+      sessionManager: {
+        getSessionId: () => "session-a",
+        getSessionFile: () => undefined,
+      },
+      ui: {
+        getEditorComponent: () => editorFactory,
+        setEditorComponent: (factory: EditorFactory | undefined) => {
+          editorFactory = factory;
+        },
+        notify: () => {},
+      },
+      shutdown: () => {},
+    });
+    const currentWindow: CurrentWindow = {
+      socketPath: "/tmp/tmux.sock",
+      tmuxSessionId: "$1",
+      windowId: "@1",
+      bindings: [],
+    };
+    registerSessionManager(pi, {
+      catalog: createFileSessionCatalog(join(root, "agent")),
+      host: {
+        inspectCurrent: () => Effect.succeed(currentWindow),
+        bindCurrent: () => Effect.succeed(currentWindow),
+        renameCurrent: (_paneId, _sessionId, name) =>
+          Effect.sync(() => {
+            renamedWindows.push(name);
+          }),
+        releaseCurrent: () => Effect.void,
+      },
+      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
+      entropy: () => 0,
+      environment: { TMUX_PANE: "%1" },
+    });
+
+    await handlers.get("session_start")?.({} as never, ctx);
+    expect(setSessionNames).toEqual([]);
+
+    await handlers.get("session_info_changed")?.(
+      cast<never>({ name: "investigate-resume" }),
+      ctx,
+    );
+
+    expect(renamedWindows).toEqual(["investigate-resume"]);
+
+    await handlers.get("session_info_changed")?.(cast<never>({ name: undefined }), ctx);
+
+    expect(setSessionNames).toEqual([]);
+    expect(renamedWindows).toEqual(["investigate-resume"]);
+  });
 });
