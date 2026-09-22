@@ -11,10 +11,7 @@ import {
 import { err } from "../../_shared/result";
 import { createJitCatchExtension } from "../index";
 import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
-import {
-  createJitCatchContractWithRunner,
-  type JitCatchOperations,
-} from "../contract";
+import { createJitCatchContractWithRunner, type JitCatchOperations } from "../contract";
 import {
   ExecPhaseError,
   phaseErrorToRunResult,
@@ -22,6 +19,8 @@ import {
   type JitRunner,
 } from "../runner";
 import type { ExtensionRunResult } from "../types";
+
+const behavior = "the changed extension behavior remains observable";
 
 const diff = [
   "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
@@ -50,7 +49,7 @@ const testOperations: JitCatchOperations = {
     runnerState.runCalls.push(args);
     if (runnerState.runEffect) return runnerState.runEffect;
     return Effect.sync(() => {
-      args[4]?.("running tests…");
+      args[5]?.("running tests…");
       return runnerState.runResult;
     });
   },
@@ -122,8 +121,10 @@ describe("jit_catch tool contract", () => {
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
 
-    await harness.tools[0].execute("pi", {}, undefined, undefined, { cwd: "/pi/context" });
-    await harness.registrations[0].tool.execute("agent", {}, undefined);
+    await harness.tools[0].execute("pi", { behavior }, undefined, undefined, {
+      cwd: "/pi/context",
+    });
+    await harness.registrations[0].tool.execute("agent", { behavior }, undefined);
 
     expect(runnerState.runCalls.map((call) => call[3])).toEqual([
       "/pi/context/root",
@@ -139,8 +140,8 @@ describe("jit_catch tool contract", () => {
     harness.startSession("/session/two");
     const secondSessionTool = harness.registrations[1].tool;
 
-    await firstSessionTool.execute("first", {}, undefined);
-    await secondSessionTool.execute("second", {}, undefined);
+    await firstSessionTool.execute("first", { behavior }, undefined);
+    await secondSessionTool.execute("second", { behavior }, undefined);
 
     expect(runnerState.runCalls.map((call) => call[3])).toEqual([
       "/session/one/root",
@@ -153,10 +154,14 @@ describe("jit_catch tool contract", () => {
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
 
-    await harness.tools[0].execute("pi", { git_cwd: "/explicit" }, undefined, undefined, {
+    await harness.tools[0].execute("pi", { behavior, git_cwd: "/explicit" }, undefined, undefined, {
       cwd: "/pi/context",
     });
-    await harness.registrations[0].tool.execute("agent", { git_cwd: "/explicit" }, undefined);
+    await harness.registrations[0].tool.execute(
+      "agent",
+      { behavior, git_cwd: "/explicit" },
+      undefined,
+    );
 
     expect(runnerState.runCalls.map((call) => call[3])).toEqual([
       "/explicit/root",
@@ -172,10 +177,16 @@ describe("jit_catch tool contract", () => {
     const piUpdates: unknown[] = [];
     const agentUpdates: unknown[] = [];
 
-    await harness.tools[0].execute("pi", {}, signal, (update: unknown) => piUpdates.push(update), {
-      cwd: "/pi/context",
-    });
-    await harness.registrations[0].tool.execute("agent", {}, signal, (update: unknown) =>
+    await harness.tools[0].execute(
+      "pi",
+      { behavior },
+      signal,
+      (update: unknown) => piUpdates.push(update),
+      {
+        cwd: "/pi/context",
+      },
+    );
+    await harness.registrations[0].tool.execute("agent", { behavior }, signal, (update: unknown) =>
       agentUpdates.push(update),
     );
 
@@ -196,7 +207,7 @@ describe("jit_catch tool contract", () => {
     setTimeout(() => controller.abort(), 0);
 
     await expect(
-      contract.execute({}, { cwd: "/cancel", signal: controller.signal }),
+      contract.execute({ behavior }, { cwd: "/cancel", signal: controller.signal }),
     ).rejects.toBeDefined();
     expect(runnerState.runCalls).toHaveLength(1);
   });
@@ -216,10 +227,10 @@ describe("jit_catch tool contract", () => {
       captureDiff: () => Effect.fail(acquisitionFailure),
     };
 
-    const result = await createJitCatchContractWithRunner(
-      testRunner,
-      failingOperations,
-    ).execute({}, { cwd: "/same" });
+    const result = await createJitCatchContractWithRunner(testRunner, failingOperations).execute(
+      { behavior },
+      { cwd: "/same" },
+    );
 
     expect(result).toEqual(
       err("Operational subprocess failure during capture diff: git diff: spawn ENOENT"),
@@ -237,7 +248,7 @@ describe("jit_catch tool contract", () => {
     jitCatchExtension(harness.pi as any);
     harness.startSession("/agent/session");
 
-    const piResult = await harness.tools[0].execute("pi", {}, undefined, undefined, {
+    const piResult = await harness.tools[0].execute("pi", { behavior }, undefined, undefined, {
       cwd: "/same",
     });
     expect(piResult.content[0].text).toContain("✗ demo — tests FAILED.");

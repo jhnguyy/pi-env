@@ -128,8 +128,28 @@ function registeredTool() {
 }
 
 function execute(params: Record<string, unknown>, cwd = "/context") {
+  return registeredTool().execute(
+    "call-id",
+    { behavior: "the changed extension behavior remains observable", ...params },
+    undefined,
+    undefined,
+    { cwd },
+  );
+}
+
+function executeWithoutBehavior(params: Record<string, unknown>, cwd = "/context") {
   return registeredTool().execute("call-id", params, undefined, undefined, { cwd });
 }
+
+it("rejects an unnamed experiment at the registered public boundary", async () => {
+  const result = await executeWithoutBehavior({
+    diff: changedFiles(".pi/extensions/demo/index.ts"),
+  });
+
+  expect(result.details).toEqual({ error: expect.any(String) });
+  expect(extensionRunner).not.toHaveBeenCalled();
+  expect(processRunner).not.toHaveBeenCalled();
+});
 
 it.each(pathCases)(
   "$label raw path selects its extension source through the registered tool",

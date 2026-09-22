@@ -3,12 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
-import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform.js";
+import {
+  ProcessFailure,
+  ProcessFailureKind,
+  resolveNodeCommand,
+} from "../../../../src/process/platform.js";
 import {
   platformJitRunner,
   readSourceFiles,
   resolveExtensionDir,
   resolveGitRootEffect,
+  resolveRepositoryTestCommand,
   runForExtensionEffect,
 } from "../runner";
 import type { ExecResult, JitRunner } from "../runner";
@@ -21,7 +26,17 @@ const runForExtension = (
   runner: JitRunner,
   signal: AbortSignal | undefined,
   workspaceRoot: string,
-) => Effect.runPromise(runForExtensionEffect(ext, diffText, runner, workspaceRoot), { signal });
+) =>
+  Effect.runPromise(
+    runForExtensionEffect(
+      ext,
+      diffText,
+      runner,
+      workspaceRoot,
+      "the changed behavior is observable",
+    ),
+    { signal },
+  );
 
 function tempRoot(): string {
   const dir = join(tmpdir(), `jit-catch-runner-${process.pid}-${tempDirs.length}`);
@@ -41,19 +56,29 @@ describe("resolveExtensionDir", () => {
     const extDir = join(root, ".pi", "extensions", "dev-tools");
     mkdirSync(extDir, { recursive: true });
 
-    expect(resolveExtensionDir({
-      name: "dev-tools",
-      changedFiles: [".pi/extensions/dev-tools/index.ts"],
-    }, root)).toBe(extDir);
+    expect(
+      resolveExtensionDir(
+        {
+          name: "dev-tools",
+          changedFiles: [".pi/extensions/dev-tools/index.ts"],
+        },
+        root,
+      ),
+    ).toBe(extDir);
   });
 
   it("falls back to the global extension directory when the project-local path is absent", () => {
     const root = tempRoot();
 
-    expect(resolveExtensionDir({
-      name: "dev-tools",
-      changedFiles: [".pi/extensions/dev-tools/index.ts"],
-    }, root)).toMatch(/\.pi\/agent\/extensions\/dev-tools$/);
+    expect(
+      resolveExtensionDir(
+        {
+          name: "dev-tools",
+          changedFiles: [".pi/extensions/dev-tools/index.ts"],
+        },
+        root,
+      ),
+    ).toMatch(/\.pi\/agent\/extensions\/dev-tools$/);
   });
 });
 
@@ -73,8 +98,18 @@ describe("readSourceFiles", () => {
 
 describe("resolveGitRoot", () => {
   it.each([
-    ["uses git rev-parse output when available", { code: 0, stdout: "/repo/root\n", stderr: "" }, "/repo/root/subdir", "/repo/root"],
-    ["falls back to gitCwd when rev-parse fails", { code: 128, stdout: "", stderr: "not a repo" }, "/not/repo", "/not/repo"],
+    [
+      "uses git rev-parse output when available",
+      { code: 0, stdout: "/repo/root\n", stderr: "" },
+      "/repo/root/subdir",
+      "/repo/root",
+    ],
+    [
+      "falls back to gitCwd when rev-parse fails",
+      { code: 128, stdout: "", stderr: "not a repo" },
+      "/not/repo",
+      "/not/repo",
+    ],
   ] as const)("%s", async (_claim, result, cwd, expected) => {
     const exec: JitRunner = () => Effect.succeed(result);
 
@@ -82,25 +117,56 @@ describe("resolveGitRoot", () => {
   });
 });
 
+describe("resolveRepositoryTestCommand", () => {
+  it("forwards a root-relative filter to Nub without a script-argument separator", () => {
+    const root = tempRoot();
+    const testPath = join(root, ".pi", "extensions", "demo", "__tests__", "demo.catching.test.ts");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    writeFileSync(join(root, "nub.lock"), "");
+
+    const resolved = resolveRepositoryTestCommand(root, testPath);
+
+    expect(resolved.command).toBe("nub");
+    expect(resolved.cwd).toBe(root);
+    expect(resolved.args).not.toContain("--");
+    expect(resolved.args.at(-1)).toBe(".pi/extensions/demo/__tests__/demo.catching.test.ts");
+  });
+});
+
 describe("platformJitRunner", () => {
   const node = resolveNodeCommand();
 
   it("returns normal nonzero exit code and output as command data", async () => {
-    const result = await Effect.runPromise(platformJitRunner(node, ["-e", "console.log('out'); console.error('err'); process.exit(5)"], { timeout: 5_000 }));
+    const result = await Effect.runPromise(
+      platformJitRunner(node, ["-e", "console.log('out'); console.error('err'); process.exit(5)"], {
+        timeout: 5_000,
+      }),
+    );
     expect(result).toEqual({ code: 5, stdout: "out\n", stderr: "err\n" });
   });
 
   it("fails timeouts as operational ProcessFailure errors", async () => {
-    const result = await Effect.runPromise(Effect.result(platformJitRunner(node, ["-e", "setInterval(()=>{}, 1000)"], { timeout: 50 })));
+    const result = await Effect.runPromise(
+      Effect.result(platformJitRunner(node, ["-e", "setInterval(()=>{}, 1000)"], { timeout: 50 })),
+    );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
   });
 
-  it.runIf(process.platform !== "win32")("fails self-signal termination as operational ProcessFailure errors", async () => {
-    const result = await Effect.runPromise(Effect.result(platformJitRunner(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], { timeout: 5_000 })));
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") expect(result.failure.kind).toBe(ProcessFailureKind.Exit);
-  });
+  it.runIf(process.platform !== "win32")(
+    "fails self-signal termination as operational ProcessFailure errors",
+    async () => {
+      const result = await Effect.runPromise(
+        Effect.result(
+          platformJitRunner(node, ["-e", "process.kill(process.pid, 'SIGTERM')"], {
+            timeout: 5_000,
+          }),
+        ),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") expect(result.failure.kind).toBe(ProcessFailureKind.Exit);
+    },
+  );
 });
 
 describe("runForExtension", () => {
@@ -109,6 +175,8 @@ describe("runForExtension", () => {
     const extDir = join(root, ".pi", "extensions", "demo");
     mkdirSync(extDir, { recursive: true });
     writeFileSync(join(extDir, "index.ts"), "export const demo = true;\n");
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }));
+    writeFileSync(join(root, "nub.lock"), "");
     return { root, extDir, testPath: join(extDir, "__tests__", "demo.catching.test.ts") };
   }
 
@@ -121,7 +189,12 @@ describe("runForExtension", () => {
     });
 
     const exec: JitRunner = (cmd, _args, _opts) => {
-      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
+      if (cmd === "pi")
+        return Effect.succeed({
+          code: 0,
+          stdout: "import { describe } from 'vitest';",
+          stderr: "",
+        });
 
       setTimeout(() => controller.abort(), 0);
       return Effect.callback<ExecResult>(() => {
@@ -129,13 +202,15 @@ describe("runForExtension", () => {
       });
     };
 
-    await expect(runForExtension(
-      { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
-      "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
-      exec,
-      controller.signal,
-      root,
-    )).rejects.toThrow();
+    await expect(
+      runForExtension(
+        { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
+        "diff --git a/.pi/extensions/demo/index.ts b/.pi/extensions/demo/index.ts",
+        exec,
+        controller.signal,
+        root,
+      ),
+    ).rejects.toThrow();
 
     await expect(signalAbortObserved).resolves.toBeUndefined();
     expect(existsSync(testPath)).toBe(true);
@@ -143,9 +218,12 @@ describe("runForExtension", () => {
 
   it("deletes the generated catching test after a passing run", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
-      ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
-      : { code: 0, stdout: "pass", stderr: "" });
+    const exec: JitRunner = (cmd) =>
+      Effect.succeed(
+        cmd === "pi"
+          ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
+          : { code: 0, stdout: "pass", stderr: "" },
+      );
 
     const result = await runForExtension(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
@@ -162,7 +240,12 @@ describe("runForExtension", () => {
   it("keeps passing runs passing when best-effort deletion fails", async () => {
     const { root, testPath } = makeExtensionRoot();
     const exec: JitRunner = (cmd) => {
-      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
+      if (cmd === "pi")
+        return Effect.succeed({
+          code: 0,
+          stdout: "import { describe } from 'vitest';",
+          stderr: "",
+        });
       rmSync(testPath, { force: true });
       return Effect.succeed({ code: 0, stdout: "pass", stderr: "" });
     };
@@ -180,9 +263,12 @@ describe("runForExtension", () => {
 
   it("keeps generator nonzero behavior and stderr in the user-facing result", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
-      ? { code: 2, stdout: "", stderr: "generator failed exactly" }
-      : { code: 0, stdout: "pass", stderr: "" });
+    const exec: JitRunner = (cmd) =>
+      Effect.succeed(
+        cmd === "pi"
+          ? { code: 2, stdout: "", stderr: "generator failed exactly" }
+          : { code: 0, stdout: "pass", stderr: "" },
+      );
 
     const result = await runForExtension(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
@@ -195,16 +281,20 @@ describe("runForExtension", () => {
     expect(result).toMatchObject({
       passed: false,
       testPath: null,
-      testOutput: "Test generation failed: Test-writer subagent failed (exit 2): generator failed exactly",
+      testOutput:
+        "Test generation failed: Test-writer subagent failed (exit 2): generator failed exactly",
     });
     expect(existsSync(testPath)).toBe(false);
   });
 
   it("keeps npm nonzero as a failed-test result with retained output and file", async () => {
     const { root, testPath } = makeExtensionRoot();
-    const exec: JitRunner = (cmd) => Effect.succeed(cmd === "pi"
-      ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
-      : { code: 1, stdout: "", stderr: "failed" });
+    const exec: JitRunner = (cmd) =>
+      Effect.succeed(
+        cmd === "pi"
+          ? { code: 0, stdout: "import { describe } from 'vitest';", stderr: "" }
+          : { code: 1, stdout: "", stderr: "failed" },
+      );
 
     const result = await runForExtension(
       { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
@@ -223,16 +313,32 @@ describe("runForExtension", () => {
   it("returns typed subprocess phase failures and keeps generated diagnostics", async () => {
     const { root, testPath } = makeExtensionRoot();
     const exec: JitRunner = (cmd) => {
-      if (cmd === "pi") return Effect.succeed({ code: 0, stdout: "import { describe } from 'vitest';", stderr: "" });
-      return Effect.fail(new ProcessFailure({ kind: ProcessFailureKind.Spawn, command: "npm test", message: "spawn ENOENT" }));
+      if (cmd === "pi")
+        return Effect.succeed({
+          code: 0,
+          stdout: "import { describe } from 'vitest';",
+          stderr: "",
+        });
+      return Effect.fail(
+        new ProcessFailure({
+          kind: ProcessFailureKind.Spawn,
+          command: "npm test",
+          message: "spawn ENOENT",
+        }),
+      );
     };
 
-    const result = await Effect.runPromise(Effect.result(runForExtensionEffect(
-      { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
-      "diff",
-      exec,
-      root,
-    )));
+    const result = await Effect.runPromise(
+      Effect.result(
+        runForExtensionEffect(
+          { name: "demo", changedFiles: [".pi/extensions/demo/index.ts"] },
+          "diff",
+          exec,
+          root,
+          "the test command failure remains diagnostic",
+        ),
+      ),
+    );
 
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {

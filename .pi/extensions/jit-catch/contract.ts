@@ -16,6 +16,10 @@ import { err } from "../_shared/result";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
 
 export const JIT_CATCH_PARAMETERS = Type.Object({
+  behavior: Type.String({
+    minLength: 1,
+    description: "Named observable behavior or failure for the temporary experiment.",
+  }),
   diff_source: Type.Optional(
     StringEnum(["unstaged", "staged", "commit"] as const, {
       description: "How to acquire the diff. Default: 'unstaged'.",
@@ -46,35 +50,9 @@ export const JIT_CATCH_PARAMETERS = Type.Object({
 export type JitCatchParams = Static<typeof JIT_CATCH_PARAMETERS>;
 
 export const JIT_CATCH_DESCRIPTION = [
-  "Generate and run ephemeral catching tests for a code diff against extension files.",
-  "Tests are written by a subagent, executed with npm test, then auto-discarded on pass.",
-  "Never commits test files.",
-  "",
-  "## Taxonomy",
-  "Hardening tests: committed, validate requirements that must never regress.",
-  "Catching tests: ephemeral, verify this specific diff once, then discarded.",
-  "",
-  "## When to use",
-  "Use jit_catch for changes to extension files with NO existing hardening test coverage.",
-  "Use `npm test` directly if coverage already exists in __tests__/, or for non-extension files.",
-  "",
-  "## Diff acquisition (pick one):",
-  "  diff_source='unstaged' (default) — runs `git diff` in git_cwd",
-  "  diff_source='staged'             — runs `git diff --cached` in git_cwd",
-  "  diff_source='commit', commit=<SHA> — runs `git show <SHA>` in git_cwd",
-  "  diff=<raw text>                  — skip git entirely, pass diff directly",
-  "",
-  "Optional: ext_name overrides auto-detected extension (useful for multi-extension diffs).",
-  "",
-  "## Symlink edge case (important for pi-env)",
-  "If extension dir is symlinked to git repo, a previous failed run's file may remain staged.",
-  "After every jit_catch run: `git status | rg catching` — expect no output.",
-  "If any .catching.test.ts appears, `git restore` it before committing.",
-  "",
-  "## On failure",
-  "Fix code, then re-run jit_catch (auto-discards on pass) or edit the kept test file",
-  "at the reported path, then `npm test` and `rm` it. Use the jit-catch skill",
-  "for promoting criteria.",
+  "Run a focused, temporary experiment for a named observable behavior or failure in an extension diff.",
+  "A subagent writes the diagnostic, then the owning repository test script runs from the workspace root.",
+  "Passing diagnostics are removed; failures and interruptions preserve them for inspection.",
 ].join("\n");
 
 export interface JitCatchOperations {
@@ -120,6 +98,10 @@ function executeJitCatchEffect(
   const progress = context.progress ?? (() => {});
 
   return Effect.gen(function* () {
+    if (!params.behavior?.trim()) {
+      return err("jit_catch requires a named observable behavior or failure");
+    }
+
     let diffText: string;
     let workspaceRoot = params.git_cwd ?? context.cwd;
     progress("Acquiring diff…");
@@ -166,9 +148,16 @@ function executeJitCatchEffect(
     for (const ext of targets) {
       progress(`${ext.name}: generating tests…`);
       const result = yield* Effect.result(
-        operations.runForExtension(ext, diffText, runner, workspaceRoot, (phase: string) => {
-          progress(`${ext.name}: ${phase}`);
-        }),
+        operations.runForExtension(
+          ext,
+          diffText,
+          runner,
+          workspaceRoot,
+          params.behavior.trim(),
+          (phase: string) => {
+            progress(`${ext.name}: ${phase}`);
+          },
+        ),
       );
       results.push(
         Result.isSuccess(result)
