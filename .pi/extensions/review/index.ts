@@ -72,6 +72,7 @@ import {
   readVerifiedPinnedDiff,
   existingReviewWithMarker,
   prepareResolvedSnapshot,
+  removeManagedGitWorktreeEffect,
   reviewGitExec,
   resolvePrUrl,
   resolveReviewMetadata,
@@ -428,32 +429,23 @@ async function removeManagedWorktree(
   }
   assertContainedResolved(root, repoDir);
   if (existsSync(worktree)) assertContainedResolved(root, worktree);
-  const remove = existsSync(worktree)
-    ? await pi.exec("git", ["worktree", "remove", "--force", worktree], {
-        cwd: repoDir,
-        signal,
-        timeout: 120000,
-      })
-    : { code: 0 };
-  if (remove.code !== 0) rmSync(worktree, { recursive: true, force: true });
-  const prune = await pi.exec("git", ["worktree", "prune"], {
-    cwd: repoDir,
-    signal,
-    timeout: 120000,
-  });
-  return prune.code === 0;
+  const cleanup = removeManagedGitWorktreeEffect(
+    reviewGitExec,
+    state.snapshot.metadata,
+    repoDir,
+    worktree,
+  );
+  return signal ? Effect.runPromise(cleanup, { signal }) : Effect.runPromise(cleanup);
 }
 
 async function assertActivePreparationScope(
-  pi: ExtensionAPI,
-  state: ReviewState,
+  _pi: ExtensionAPI,
+  _state: ReviewState,
   scope: ReviewCoordinatorScope,
 ): Promise<void> {
-  if (coordinator.isScopeActive(scope)) return;
-  if (existsSync(state.snapshot.worktree))
-    await removeManagedWorktree(pi, state).catch(() => false);
-  rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
-  throw new Error("The review session changed during the operation.");
+  // A replacement session may own this review ID. Leave resources for recovery.
+  if (!coordinator.isScopeActive(scope))
+    throw new Error("The review session changed during the operation.");
 }
 
 async function reconcileInterruptedPreparations(pi: ExtensionAPI): Promise<void> {
@@ -745,6 +737,40 @@ async function createReviewAttempt(
   return reviewActionResult(state);
 }
 
+async function retryFailedSnapshot(
+  pi: ExtensionAPI,
+  existing: ReviewState,
+  signal: AbortSignal,
+  scope: ReviewCoordinatorScope,
+): Promise<string> {
+  const reviewId = existing.snapshot.id;
+  if (coordinator.isPreparing(reviewId))
+    throw new Error("Review cleanup or preparation is already active. Retry after it completes.");
+  coordinator.beginPreparation(reviewId);
+  try {
+    const worktreeCleaned = await removeManagedWorktree(pi, existing, signal).catch(() => false);
+    assertActiveCoordinatorScope(scope);
+    if (!worktreeCleaned)
+      throw new Error("Snapshot retry stopped because managed worktree cleanup failed.");
+    if (coordinator.review(reviewId) !== existing)
+      throw new Error("The review changed during snapshot retry cleanup.");
+    removeReviewArtifacts(existing);
+    pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...existing, cleaned: true }));
+    coordinator.deleteReview(reviewId);
+    return reviewId;
+  } catch (cause) {
+    if (coordinator.isScopeActive(scope)) coordinator.finishPreparation(reviewId);
+    throw cause;
+  }
+}
+
+function removeReviewArtifacts(state: ReviewState): void {
+  const root = join(getAgentDir(), "pr-review");
+  if (existsSync(state.snapshot.artifactDir))
+    assertContainedResolved(root, state.snapshot.artifactDir);
+  rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
+}
+
 async function startReview(
   pi: ExtensionAPI,
   params: CreateReviewParams,
@@ -780,18 +806,7 @@ async function startReview(
     if (!forceRerun) {
       const existing = matchingReview(identityKey, parentSessionId);
       if (existing?.preparation?.status === "failed" && existing.preparation.stage === "snapshot") {
-        const worktreeCleaned = await removeManagedWorktree(pi, existing, operationSignal).catch(
-          () => false,
-        );
-        assertActiveCoordinatorScope(coordinatorScope);
-        if (!worktreeCleaned)
-          throw new Error("Snapshot retry stopped because managed worktree cleanup failed.");
-        if (existsSync(existing.snapshot.artifactDir))
-          assertContainedResolved(join(getAgentDir(), "pr-review"), existing.snapshot.artifactDir);
-        rmSync(existing.snapshot.artifactDir, { recursive: true, force: true });
-        pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...existing, cleaned: true }));
-        coordinator.deleteReview(existing.snapshot.id);
-        retryReviewId = existing.snapshot.id;
+        retryReviewId = await retryFailedSnapshot(pi, existing, operationSignal, coordinatorScope);
       } else if (existing) {
         coordinator.remember(existing);
         return reviewActionResult(existing, true);
@@ -1437,6 +1452,26 @@ function openReview(reviewId: string): string {
   return `${renderStatus()}\nWalkthrough: /review pr walkthrough ${state.snapshot.id}`;
 }
 
+async function finishReviewCleanup(
+  pi: ExtensionAPI,
+  state: ReviewState,
+  scope: ReviewCoordinatorScope,
+): Promise<string> {
+  const cleaned = await removeManagedWorktree(pi, state, coordinator.operationSignal(scope));
+  if (!cleaned) throw new Error("git worktree prune failed.");
+  const reviewId = state.snapshot.id;
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed during cleanup. Resources remain available for recovery. No cleanup state was appended.";
+  if (coordinator.review(reviewId) !== state)
+    return "The review changed during cleanup. No cleanup state was appended.";
+  removeReviewArtifacts(state);
+  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...state, cleaned: true }));
+  if (!coordinator.isScopeActive(scope))
+    return "The review session changed during cleanup. Cleanup state was not applied to the replacement session.";
+  coordinator.deleteReview(reviewId);
+  return `Review cleanup complete: ${reviewId}.`;
+}
+
 async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const scope = coordinator.captureScope();
   const state = stateById(reviewId);
@@ -1444,21 +1479,15 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const targetReviewId = state.snapshot.id;
   if (coordinator.isPreparing(targetReviewId) || state.dag?.status === "running")
     return `Review ${targetReviewId} is active. Cancel or wait for it before cleanup.`;
-  const signal = coordinator.operationSignal(scope);
-  const worktreeCleaned = await removeManagedWorktree(pi, state, signal);
-  if (!worktreeCleaned) throw new Error("git worktree prune failed.");
-  const root = join(getAgentDir(), "pr-review");
-  if (existsSync(state.snapshot.artifactDir))
-    assertContainedResolved(root, state.snapshot.artifactDir);
-  rmSync(state.snapshot.artifactDir, { recursive: true, force: true });
-  if (!coordinator.isScopeActive(scope))
-    return "The review session changed during cleanup. Owned resources may already be removed. No cleanup state was appended.";
-  const cleaned = { ...state, cleaned: true };
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(cleaned));
-  if (!coordinator.isScopeActive(scope))
-    return "The review session changed during cleanup. Cleanup state was not applied to the replacement session.";
-  coordinator.deleteReview(targetReviewId);
-  return `Review cleanup complete: ${targetReviewId}.`;
+  coordinator.beginPreparation(targetReviewId);
+  try {
+    return await finishReviewCleanup(pi, state, scope);
+  } catch (cause) {
+    if (coordinator.isScopeActive(scope)) throw cause;
+    return "The review session changed during cleanup. Resources remain available for recovery. No cleanup state was appended.";
+  } finally {
+    if (coordinator.isScopeActive(scope)) coordinator.finishPreparation(targetReviewId);
+  }
 }
 
 function postCommand(

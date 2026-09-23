@@ -52,7 +52,7 @@ The review deck stores one shared metadata reference, one shared pinned-diff ref
 
 Repository cache operations use a per-repository lock. Snapshot fetches use a blob filter. If a reused shallow cache lacks merge-base ancestry, the extension restores the ancestry and retries the calculation. Fetch timeout, missing-ref, ref-mismatch, and missing-ancestry failures remain distinct in the failed review record. On POSIX hosts, the extension owns each Git process group and terminates the complete group on cancellation or timeout. Other hosts terminate the direct Git process.
 
-A successful review worktree remains available until explicit cleanup. If snapshot preparation fails, the extension removes incomplete worktrees and artifacts, preserves the repository cache, and retains a bounded failed review record in parent session state.
+A successful review worktree remains available until explicit cleanup. If snapshot preparation fails, the extension removes incomplete worktrees and artifacts, preserves the repository cache, and retains a bounded failed review record in parent session state. An explicit new create request retries only a failed snapshot under the same review ID. Retry and explicit cleanup cannot own that review at the same time.
 
 ## Review DAG and model policy
 

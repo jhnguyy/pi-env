@@ -711,7 +711,7 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
-  it("does not append stale cleanup completion after blocked removal rotates sessions", async () => {
+  it("retains replacement-session artifacts after blocked cleanup rotates sessions", async () => {
     tempRoot();
     const original = sampleState("r", []);
     const replacement = { ...structuredClone(original), preface: "replacement" };
@@ -747,7 +747,9 @@ describe("review extension pull request surface", () => {
     await cleaning;
     expect(pi.appended).toHaveLength(0);
     expect(notes.at(-1)).toContain("No cleanup state was appended");
-    expect(existsSync(original.snapshot.artifactDir)).toBe(false);
+    expect(existsSync(replacement.snapshot.artifactDir)).toBe(true);
+    await pi.command("pr list", runtime("replacement", replacement));
+    expect(notes.at(-1)).toContain("r");
   });
 
   it("creates an approval-required draft plan from selected findings", async () => {
@@ -857,17 +859,42 @@ describe("review extension pull request surface", () => {
     });
 
     failFetch = false;
-    const [second, concurrent] = await Promise.all(
-      ["2", "concurrent"].map((callId) =>
-        pi.tools[0].execute(
-          callId,
-          { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
-          undefined,
-          undefined,
-          ctx,
-        ),
+    const originalExec = pi.exec;
+    let enterRetryCleanup!: () => void;
+    const retryCleanupEntered = new Promise<void>((resolve) => {
+      enterRetryCleanup = resolve;
+    });
+    let releaseRetryCleanup!: () => void;
+    const retryCleanupReleased = new Promise<void>((resolve) => {
+      releaseRetryCleanup = resolve;
+    });
+    let held = false;
+    pi.exec = async (cmd: string, args: string[], options: unknown) => {
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "prune" && !held) {
+        held = true;
+        enterRetryCleanup();
+        await retryCleanupReleased;
+      }
+      return originalExec(cmd, args, options);
+    };
+    const retries = ["2", "concurrent"].map((callId) =>
+      pi.tools[0].execute(
+        callId,
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
       ),
     );
+    await retryCleanupEntered;
+    const messages: string[] = [];
+    const cleanup = pi.command(`pr cleanup ${result.details.reviewId}`, {
+      ui: { notify: (message: string) => messages.push(message) },
+    } as any);
+    releaseRetryCleanup();
+    const [second, concurrent] = await Promise.all(retries);
+    await cleanup;
+    expect(messages.at(-1)).toContain("active");
     expect(second).toMatchObject({
       isError: true,
       details: { stage: "dag-service", reused: false },
@@ -898,6 +925,74 @@ describe("review extension pull request surface", () => {
       details: { reviewId: result.details.reviewId, stage: "dag-service", reused: true },
     });
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+  });
+
+  it("does not retry a failed snapshot while explicit cleanup owns the review", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("cleanup-first", []),
+      plan: undefined,
+      result: undefined,
+      preparation: {
+        status: "failed" as const,
+        stage: "snapshot" as const,
+        code: "fetch_failed",
+        message: "fetch failed",
+        worktreeCleaned: false,
+      },
+    };
+    mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(state.snapshot.artifactDir, { recursive: true });
+    const pi = extensionPi();
+    let markRemoval!: () => void;
+    const removalStarted = new Promise<void>((resolve) => {
+      markRemoval = resolve;
+    });
+    let finishRemoval!: () => void;
+    const removalReleased = new Promise<void>((resolve) => {
+      finishRemoval = resolve;
+    });
+    let worktreeAdds = 0;
+    pi.exec = async (cmd: string, args: string[]) => {
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: state.snapshot.metadata.url,
+            baseRefOid: "b",
+            headRefOid: "h",
+          }),
+          stderr: "",
+        };
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add") worktreeAdds++;
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "remove") {
+        markRemoval();
+        await removalReleased;
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent", getBranch: () => [custom(state)] },
+      modelRegistry: { getAvailable: () => [] },
+      ui: { notify: () => {} },
+    };
+    pi.handlers.session_start({}, ctx);
+    const cleaning = pi.command(`pr cleanup ${state.snapshot.id}`, ctx);
+    await removalStarted;
+    const retry = await pi.tools[0].execute(
+      "retry-during-cleanup",
+      { command: "pr", action: "create", url: state.snapshot.metadata.url },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(retry).toMatchObject({ isError: true });
+    expect(retry.content[0].text).toContain("cleanup or preparation is already active");
+    finishRemoval();
+    await cleaning;
+    expect(worktreeAdds).toBe(0);
   });
 
   it("creates a new snapshot identity when the pinned base changes", async () => {
@@ -1049,7 +1144,8 @@ describe("review extension pull request surface", () => {
     });
     expect(submit).not.toHaveBeenCalled();
     expect(pi.appended).toHaveLength(appendCountAtSwitch);
-    expect(existsSync(staleArtifactDir)).toBe(false);
+    // Leave the original session's evidence for recovery, not replacement-session cleanup.
+    expect(existsSync(staleArtifactDir)).toBe(true);
     const notes: string[] = [];
     await pi.command("pr list", {
       ...sessionB,

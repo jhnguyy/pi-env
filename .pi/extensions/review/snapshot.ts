@@ -408,8 +408,47 @@ function parseNameStatusZ(raw: string): ChangedFile[] {
   return out;
 }
 
-function removePathEffect(path: string): Effect.Effect<void> {
-  return Effect.sync(() => rmSync(path, { recursive: true, force: true }));
+function removePathEffect(path: string): Effect.Effect<void, SnapshotError> {
+  return Effect.try({
+    try: () => rmSync(path, { recursive: true, force: true }),
+    catch: (cause) => toSnapshotError(`Could not remove snapshot path: ${path}`, cause),
+  });
+}
+
+/** Shared Git unregister/prune boundary for failed snapshots and explicit cleanup. */
+export function removeGitWorktreeEffect(exec: Exec, repoDir: string, worktree: string) {
+  return Effect.gen(function* () {
+    const remove = yield* runEffect(exec, "git", ["worktree", "remove", "--force", worktree], {
+      cwd: repoDir,
+      timeout: 120000,
+      failOnNonZero: false,
+    });
+    if (remove.code !== 0) yield* removePathEffect(worktree);
+    const prune = yield* runEffect(exec, "git", ["worktree", "prune"], {
+      cwd: repoDir,
+      timeout: 120000,
+      failOnNonZero: false,
+    });
+    if (prune.code !== 0) return false;
+    const listed = yield* runEffect(exec, "git", ["worktree", "list", "--porcelain"], {
+      cwd: repoDir,
+      timeout: 120000,
+      failOnNonZero: false,
+    });
+    return listed.code === 0 && !listed.stdout.split("\n").includes(`worktree ${worktree}`);
+  });
+}
+
+/** Serialize external cleanup against preparation even when parent sessions change. */
+export function removeManagedGitWorktreeEffect(
+  exec: Exec,
+  metadata: Pick<ReviewMetadata, "owner" | "repo">,
+  repoDir: string,
+  worktree: string,
+) {
+  return snapshotSemaphore.withPermit(`${metadata.owner}/${metadata.repo}`)(
+    removeGitWorktreeEffect(exec, repoDir, worktree),
+  );
 }
 
 function cleanupFailedSnapshotEffect(
@@ -417,19 +456,8 @@ function cleanupFailedSnapshotEffect(
   repoDir: string,
   worktree: string,
   artifactDir: string,
-): Effect.Effect<void> {
-  return runEffect(exec, "git", ["worktree", "remove", "--force", worktree], {
-    cwd: repoDir,
-    timeout: 120000,
-    failOnNonZero: false,
-  }).pipe(
-    Effect.andThen(
-      runEffect(exec, "git", ["worktree", "prune"], {
-        cwd: repoDir,
-        timeout: 120000,
-        failOnNonZero: false,
-      }),
-    ),
+): Effect.Effect<void, SnapshotError> {
+  return removeGitWorktreeEffect(exec, repoDir, worktree).pipe(
     Effect.ignore,
     Effect.andThen(removePathEffect(worktree)),
     Effect.andThen(removePathEffect(artifactDir)),
@@ -451,9 +479,12 @@ function prepareSnapshotWorkflow(
     Effect.gen(function* () {
       const metadata = structuredClone(resolvedMetadata);
       const repoDir = join(agentDir, "pr-review", "repos", parsed.owner, parsed.repo);
-      yield* Effect.sync(() => {
-        mkdirSync(repoDir, { recursive: true, mode: 0o700 });
-        chmodSync(repoDir, 0o700);
+      yield* Effect.try({
+        try: () => {
+          mkdirSync(repoDir, { recursive: true, mode: 0o700 });
+          chmodSync(repoDir, 0o700);
+        },
+        catch: (cause) => toSnapshotError("Could not create the review repository cache.", cause),
       });
       if (!metadata.headOid) return yield* toSnapshotError("Could not resolve PR head commit.");
       if (!metadata.baseRef || !metadata.baseOid)
@@ -523,13 +554,14 @@ function prepareSnapshotWorkflow(
       const worktree = join(agentDir, "pr-review", "worktrees", id);
       const diffPath = join(artifactDir, "diff.patch");
       const snapshotEffect = Effect.gen(function* () {
-        yield* Effect.sync(() => {
-          mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
-          chmodSync(artifactDir, 0o700);
-        });
-        yield* Effect.sync(() => {
-          writeFileSync(diffPath, diff, { mode: 0o600 });
-          chmodSync(diffPath, 0o600);
+        yield* Effect.try({
+          try: () => {
+            mkdirSync(artifactDir, { recursive: true, mode: 0o700 });
+            chmodSync(artifactDir, 0o700);
+            writeFileSync(diffPath, diff, { mode: 0o600 });
+            chmodSync(diffPath, 0o600);
+          },
+          catch: (cause) => toSnapshotError("Could not write the pinned review diff.", cause),
         });
         yield* runEffect(
           gitExec,
@@ -540,7 +572,10 @@ function prepareSnapshotWorkflow(
             timeout: 180000,
           },
         );
-        yield* Effect.sync(() => chmodSync(worktree, 0o700));
+        yield* Effect.try({
+          try: () => chmodSync(worktree, 0o700),
+          catch: (cause) => toSnapshotError("Could not protect the review worktree.", cause),
+        });
         const snapshot: ReviewSnapshot = {
           id,
           metadata,
@@ -551,7 +586,10 @@ function prepareSnapshotWorkflow(
           createdAt: new Date().toISOString(),
           cache: { repoDir, worktree },
         };
-        yield* Effect.sync(() => persistJson(join(artifactDir, "metadata.json"), snapshot));
+        yield* Effect.try({
+          try: () => persistJson(join(artifactDir, "metadata.json"), snapshot),
+          catch: (cause) => toSnapshotError("Could not persist review snapshot metadata.", cause),
+        });
         return snapshot;
       });
       return yield* snapshotEffect.pipe(
