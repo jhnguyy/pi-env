@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { restore } from "../index";
 import { formatPullRequestContext } from "../context";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import { setManagedGitExecForTests } from "../snapshot";
 import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
   registerDagRuntimeService as registerRuntimeService,
@@ -25,6 +26,7 @@ afterEach(() => {
     unregisterDagRuntimeService(pi, registration);
   for (const pi of activePis.splice(0)) pi.handlers.session_shutdown?.();
   vi.unstubAllEnvs();
+  setManagedGitExecForTests();
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -131,6 +133,7 @@ function extensionPi() {
     },
     exec: async () => ({ code: 0, stdout: "", stderr: "" }),
   };
+  setManagedGitExecForTests((command, args, options) => pi.exec(command, args, options));
   reviewExtension(pi);
   activePis.push(pi);
   return pi;
@@ -481,6 +484,43 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.cache!.worktree)).toBe(false);
   });
 
+  it("does not restore an interrupted preparation into a replacement session", async () => {
+    tempRoot();
+    const state = { ...sampleState("stale-preparation", []), plan: undefined, result: undefined };
+    mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    const pi = extensionPi();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseCleanup!: () => void;
+    pi.exec = async (_cmd: string, args: string[]) => {
+      if (args[0] === "worktree" && args[1] === "remove") {
+        markStarted();
+        return new Promise((resolve) => {
+          releaseCleanup = () => resolve({ code: 0, stdout: "", stderr: "" });
+        });
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    pi.handlers.session_start({}, {
+      sessionManager: { getBranch: () => [custom(state)], getSessionId: () => "session-a" },
+    } as any);
+    await started;
+    pi.handlers.session_tree({}, {
+      sessionManager: { getBranch: () => [], getSessionId: () => "session-b" },
+    } as any);
+    releaseCleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(pi.appended).toHaveLength(0);
+    const notes: string[] = [];
+    await pi.command("pr list", {
+      ui: { notify: (message: string) => notes.push(message) },
+    } as any);
+    expect(notes.at(-1)).toBe("No active PR reviews.");
+  });
+
   it("cleans an unaccepted running review after process loss", async () => {
     const root = tempRoot();
     const state = {
@@ -671,7 +711,7 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
-  it("does not append stale cleanup completion after blocked removal rotates sessions", async () => {
+  it("retains replacement-session artifacts after blocked cleanup rotates sessions", async () => {
     tempRoot();
     const original = sampleState("r", []);
     const replacement = { ...structuredClone(original), preface: "replacement" };
@@ -707,7 +747,9 @@ describe("review extension pull request surface", () => {
     await cleaning;
     expect(pi.appended).toHaveLength(0);
     expect(notes.at(-1)).toContain("No cleanup state was appended");
-    expect(existsSync(original.snapshot.artifactDir)).toBe(false);
+    expect(existsSync(replacement.snapshot.artifactDir)).toBe(true);
+    await pi.command("pr list", runtime("replacement", replacement));
+    expect(notes.at(-1)).toContain("r");
   });
 
   it("creates an approval-required draft plan from selected findings", async () => {
@@ -746,13 +788,16 @@ describe("review extension pull request surface", () => {
     expect(pi.appended).toHaveLength(0);
   });
 
-  it("owns a pre-DAG failure and reopens the same review for an identical create", async () => {
+  it("retries a failed snapshot preparation with the same review identity", async () => {
     const root = tempRoot();
     mkdirSync(join(root, "pr-review", "artifacts"), { recursive: true });
     const pi = extensionPi();
     const calls: string[][] = [];
+    let failFetch = true;
     pi.exec = async (cmd: string, args: string[]) => {
       calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "fetch" && failFetch)
+        return { code: 1, stdout: "", stderr: "fixture fetch failure" };
       if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
         mkdirSync(args[3], { recursive: true });
       if (cmd === "gh")
@@ -795,42 +840,215 @@ describe("review extension pull request surface", () => {
         command: "pr",
         action: "create",
         status: "failed",
-        stage: "dag-service",
-        failureCode: "dag_service_failed",
-        error: "The session DAG runtime is not available for PR review.",
+        stage: "snapshot",
+        failureCode: "fetch_failed",
+        error: expect.stringContaining("Git fetch exited 1"),
+        stderr: "fixture fetch failure",
         worktreeCleaned: true,
       },
     });
     expect(result.content[0].text).toContain("Next: /review pr open");
-    expect(pi.appended).toHaveLength(3);
+    expect(pi.appended).toHaveLength(2);
     expect(pi.appended[0]?.[0]).toBe(REVIEW_ENTRY_TYPE);
     expect(pi.appended[0]?.[1].state.snapshot.diffHash).toBe("");
-    expect(pi.appended.at(-1)?.[1].state).toMatchObject({
-      preparation: {
-        status: "failed",
-        stage: "dag-service",
-        worktreeCleaned: true,
-      },
+    expect(pi.appended.at(-1)?.[1].state.preparation).toMatchObject({
+      status: "failed",
+      stage: "snapshot",
+      code: "fetch_failed",
+      worktreeCleaned: true,
     });
-    const second = await pi.tools[0].execute(
-      "2",
+
+    failFetch = false;
+    const originalExec = pi.exec;
+    let enterRetryCleanup!: () => void;
+    const retryCleanupEntered = new Promise<void>((resolve) => {
+      enterRetryCleanup = resolve;
+    });
+    let releaseRetryCleanup!: () => void;
+    const retryCleanupReleased = new Promise<void>((resolve) => {
+      releaseRetryCleanup = resolve;
+    });
+    let held = false;
+    pi.exec = async (cmd: string, args: string[], options: unknown) => {
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "prune" && !held) {
+        held = true;
+        enterRetryCleanup();
+        await retryCleanupReleased;
+      }
+      return originalExec(cmd, args, options);
+    };
+    const retries = ["2", "concurrent"].map((callId) =>
+      pi.tools[0].execute(
+        callId,
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    );
+    await retryCleanupEntered;
+    const messages: string[] = [];
+    const cleanup = pi.command(`pr cleanup ${result.details.reviewId}`, {
+      ui: { notify: (message: string) => messages.push(message) },
+    } as any);
+    releaseRetryCleanup();
+    const [second, concurrent] = await Promise.all(retries);
+    await cleanup;
+    expect(messages.at(-1)).toContain("active");
+    expect(second).toMatchObject({
+      isError: true,
+      details: { stage: "dag-service", reused: false },
+    });
+    expect(concurrent).toMatchObject({
+      isError: true,
+      details: { stage: "dag-service", reviewId: second.details.reviewId },
+    });
+    expect(second.details.reviewId).toBe(result.details.reviewId);
+    expect(
+      pi.appended.some(
+        (entry: any[]) =>
+          entry[1]?.state.snapshot.id === result.details.reviewId &&
+          entry[1]?.state.cleaned === true,
+      ),
+    ).toBe(true);
+    expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
+
+    const third = await pi.tools[0].execute(
+      "3",
       { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
       undefined,
       undefined,
       ctx,
     );
-    expect(second).toMatchObject({
+    expect(third).toMatchObject({
       isError: true,
-      details: { reviewId: result.details.reviewId, reused: true },
+      details: { reviewId: result.details.reviewId, stage: "dag-service", reused: true },
     });
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
-    const notes: string[] = [];
-    await pi.command("pr rerun", {
-      ...ctx,
-      ui: { notify: (message: string) => notes.push(message) },
+  });
+
+  it("does not retry a failed snapshot while explicit cleanup owns the review", async () => {
+    const root = tempRoot();
+    const state = {
+      ...sampleState("cleanup-first", []),
+      plan: undefined,
+      result: undefined,
+      preparation: {
+        status: "failed" as const,
+        stage: "snapshot" as const,
+        code: "fetch_failed",
+        message: "fetch failed",
+        worktreeCleaned: false,
+      },
+    };
+    mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+    mkdirSync(state.snapshot.cache!.worktree, { recursive: true });
+    mkdirSync(state.snapshot.artifactDir, { recursive: true });
+    const pi = extensionPi();
+    let markRemoval!: () => void;
+    const removalStarted = new Promise<void>((resolve) => {
+      markRemoval = resolve;
     });
-    expect(notes.at(-1)).toContain("failed during dag-service");
-    expect(notes.at(-1)).not.toContain(`Review ${result.details.reviewId} failed`);
+    let finishRemoval!: () => void;
+    const removalReleased = new Promise<void>((resolve) => {
+      finishRemoval = resolve;
+    });
+    let worktreeAdds = 0;
+    pi.exec = async (cmd: string, args: string[]) => {
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: state.snapshot.metadata.url,
+            baseRefOid: "b",
+            headRefOid: "h",
+          }),
+          stderr: "",
+        };
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add") worktreeAdds++;
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "remove") {
+        markRemoval();
+        await removalReleased;
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent", getBranch: () => [custom(state)] },
+      modelRegistry: { getAvailable: () => [] },
+      ui: { notify: () => {} },
+    };
+    pi.handlers.session_start({}, ctx);
+    const cleaning = pi.command(`pr cleanup ${state.snapshot.id}`, ctx);
+    await removalStarted;
+    const retry = await pi.tools[0].execute(
+      "retry-during-cleanup",
+      { command: "pr", action: "create", url: state.snapshot.metadata.url },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(retry).toMatchObject({ isError: true });
+    expect(retry.content[0].text).toContain("cleanup or preparation is already active");
+    finishRemoval();
+    await cleaning;
+    expect(worktreeAdds).toBe(0);
+  });
+
+  it("creates a new snapshot identity when the pinned base changes", async () => {
+    const root = tempRoot();
+    const pi = extensionPi();
+    const calls: string[][] = [];
+    let baseOid = "base-one";
+    pi.exec = async (cmd: string, args: string[]) => {
+      calls.push([cmd, ...args]);
+      if (cmd === "git" && args[0] === "worktree" && args[1] === "add")
+        mkdirSync(args[3], { recursive: true });
+      if (cmd === "gh")
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/o/r/pull/1",
+            baseRefName: "trunk",
+            baseRefOid: baseOid,
+            headRefOid: "head",
+          }),
+          stderr: "",
+        };
+      if (args[0] === "rev-parse")
+        return {
+          code: 0,
+          stdout: `${args[1].startsWith("refs/pi-pr-review/base") ? baseOid : "head"}\n`,
+          stderr: "",
+        };
+      if (args[0] === "merge-base") return { code: 0, stdout: `${baseOid}\n`, stderr: "" };
+      if (args[0] === "diff" && args.includes("--name-status"))
+        return { code: 0, stdout: "A\0a.ts\0", stderr: "" };
+      return { code: 0, stdout: "diff --git a/a.ts b/a.ts\n", stderr: "" };
+    };
+    const ctx: any = {
+      cwd: root,
+      sessionManager: { getSessionId: () => "parent" },
+      modelRegistry: { getAvailable: () => [] },
+    };
+    let toolCall = 0;
+    const create = () =>
+      pi.tools[0].execute(
+        String(++toolCall),
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+    const first = await create();
+    baseOid = "base-two";
+    const second = await create();
+
+    expect(first.details.stage).toBe("dag-service");
+    expect(second.details.stage).toBe("dag-service");
+    expect(second.details.reviewId).not.toBe(first.details.reviewId);
+    expect(second.details.reused).toBe(false);
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
   });
 
@@ -926,7 +1144,8 @@ describe("review extension pull request surface", () => {
     });
     expect(submit).not.toHaveBeenCalled();
     expect(pi.appended).toHaveLength(appendCountAtSwitch);
-    expect(existsSync(staleArtifactDir)).toBe(false);
+    // Leave the original session's evidence for recovery, not replacement-session cleanup.
+    expect(existsSync(staleArtifactDir)).toBe(true);
     const notes: string[] = [];
     await pi.command("pr list", {
       ...sessionB,
