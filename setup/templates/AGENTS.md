@@ -8,4 +8,4 @@
 ## Reporting
 
 - Say what you did, what you checked, and what remains uncertain or blocked. Do not claim work or checks that did not occur.
-- Use plain, direct language suited to the reader. Preserve facts, conditions, uncertainty, and exact technical terms. Follow the user's requested tone and format.
+- Preserve facts, conditions, uncertainty, and exact technical terms. Follow the user's requested tone, level of detail, and format.
