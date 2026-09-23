@@ -10,7 +10,7 @@ Use `review pr get` for existing pull request context or feedback work. The resu
 
 Use `review pr create` for a new independent review. Each run uses new child agent sessions with no parent conversation context. The `create` action does not post a GitHub review.
 
-Within one parent session, `create` is idempotent for the same pull request and pinned head. An identical call opens the existing review. Use the explicit rerun command to create another attempt.
+Within one parent session, `create` is idempotent for the same pull request and pinned base and head. An identical call retries a failed snapshot preparation with the same review ID. It opens an existing review after snapshot preparation succeeds or fails at a later stage. Use the explicit rerun command to create another attempt.
 
 If an action has no URL, the extension resolves the current checkout pull request. If resolution fails, the agent asks the user for a URL.
 
@@ -50,7 +50,9 @@ The preparation step records the base commit, head commit, diff hash, changed-fi
 
 The review deck stores one shared metadata reference, one shared pinned-diff reference, and one canonical file table. Compact file IDs connect selected ranges to the file table. The deck does not repeat shared artifact identity for each file.
 
-Repository cache operations use a per-repository lock. A successful review worktree remains available until explicit cleanup. If preparation fails before DAG submission, the extension removes the worktree and retains a bounded failed review record and artifacts for inspection.
+Repository cache operations use a per-repository lock. Snapshot fetches use a blob filter. If a reused shallow cache lacks merge-base ancestry, the extension restores the ancestry and retries the calculation. Fetch timeout, missing-ref, ref-mismatch, and missing-ancestry failures remain distinct in the failed review record. On POSIX hosts, the extension owns each Git process group and terminates the complete group on cancellation or timeout. Other hosts terminate the direct Git process.
+
+A successful review worktree remains available until explicit cleanup. If snapshot preparation fails, the extension removes incomplete worktrees and artifacts, preserves the repository cache, and retains a bounded failed review record in parent session state.
 
 ## Review DAG and model policy
 
