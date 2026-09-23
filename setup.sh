@@ -31,11 +31,9 @@ fi
 
 if ! has_explicit_setup_mode "$@" && [ "${PI_ENV_AUTO_NIX:-1}" = "1" ] && [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" != "1" ] && command -v nix >/dev/null 2>&1; then
   cd "$SCRIPT_DIR"
-  if nix run .#setup -- "$@"; then
-    exit 0
-  fi
-  echo "./setup.sh: automatic Nix setup failed; falling back to portable setup." >&2
-  export PI_ENV_AUTO_NIX_FAILED=1
+  # Nix may have already started setup. Do not retry with PATH tools after a
+  # failure: that could run a second install with an incompatible Nub.
+  exec nix run .#setup -- "$@"
 fi
 
 exec "$SCRIPT_DIR/setup/main.sh" "$@"

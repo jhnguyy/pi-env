@@ -26,20 +26,21 @@ const InstallStrategy = Object.freeze({
 });
 
 const repo = mustEnv('REPO');
+const nubBin = process.env.PI_ENV_NUB_BIN || 'nub';
 const piBinDir = mustEnv('PI_BIN_DIR');
 const setupNodeBin = process.argv[2] || process.execPath;
 const command = parseRuntimeCommand(process.argv[3]);
 
 function selectInstallStrategy() {
-  if (commandSucceeds('nub', ['run', '--no-check', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
-  if (commandSucceeds('nub', ['run', '--no-check', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
+  if (commandSucceeds(nubBin, ['run', '--no-check', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
+  if (commandSucceeds(nubBin, ['run', '--no-check', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
     return InstallStrategy.PlainNodeBootstrap;
   }
   return InstallStrategy.NubManaged;
 }
 
 function nubInstall(args) {
-  return run('nub', ['install', ...args, '--frozen-lockfile'], { cwd: repo }).status === 0;
+  return run(nubBin, ['install', ...args, '--frozen-lockfile'], { cwd: repo }).status === 0;
 }
 
 function patchEffectTypeScript() {
@@ -59,7 +60,7 @@ function installDependencies() {
       runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
       break;
     case InstallStrategy.NubManaged:
-      runChecked('nub', ['run', 'build'], { cwd: repo });
+      runChecked(nubBin, ['run', 'build'], { cwd: repo });
       break;
     default:
       fail('unknown install strategy');

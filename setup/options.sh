@@ -32,8 +32,8 @@ setup_parse_args() {
         cat <<'EOF'
 Usage: ./setup.sh [options]
 
-When Nix is available, plain ./setup.sh automatically tries the recommended
-Nix setup app before falling back to portable setup.
+When Nix is available, plain ./setup.sh runs the recommended Nix setup app.
+If that app fails, setup stops. Use --portable to select PATH tools explicitly.
 
 Options:
   --nix-managed    Force Nix/Home Manager ownership of shell and terminal config.

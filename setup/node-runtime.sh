@@ -12,8 +12,9 @@ pi_env_node_candidate_works() {
 
 pi_env_nub_node_candidate() {
   repo="${1:-$(pwd)}"
-  command -v nub >/dev/null 2>&1 || return 1
-  (cd "$repo" && nub node which 2>/dev/null) || return 1
+  nub_bin="${PI_ENV_NUB_BIN:-nub}"
+  command -v "$nub_bin" >/dev/null 2>&1 || return 1
+  (cd "$repo" && "$nub_bin" node which 2>/dev/null) || return 1
 }
 
 pi_env_setup_nix_managed() {
