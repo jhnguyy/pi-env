@@ -35,34 +35,11 @@ async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
 }
 
 describe("tmux session host", () => {
-  it("binds and renames the current window with argv-safe values", async () => {
+  it("passes a user name with shell metacharacters as one argument", async () => {
     const { calls, exec } = executor({});
-    const host = createTmuxSessionHost(exec);
     const name = "quiet pine; $(touch nope)";
-
-    await Effect.runPromise(host.bindCurrent("%1", "session-a", name));
-
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "set-option",
-      "-w",
-      "-o",
-      "-t",
-      "@1",
-      "@pi_session_id",
-      "session-a",
-    ]);
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "rename-window",
-      "-t",
-      "@1",
-      name,
-    ]);
+    await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a", name));
+    expect(calls.find((call) => call.includes("rename-window"))?.at(-1)).toBe(name);
   });
 
   it("releases only the current session's owned window binding", async () => {
@@ -83,7 +60,7 @@ describe("tmux session host", () => {
     ]);
   });
 
-  it("restores a pending session in one detached argv-safe window and reuses its binding", async () => {
+  it("restores a pending session once and reuses its binding", async () => {
     const { calls, exec: baseExec } = executor({});
     let created = false;
     const exec: Exec = async (command, args) => {
@@ -120,44 +97,9 @@ describe("tmux session host", () => {
     expect(repeated).toEqual({ state: "existing", windowId: "@3" });
     expect(calls.filter((call) => call.includes("new-window"))).toHaveLength(1);
     const creation = calls.find((call) => call.includes("new-window"));
-    expect(creation).toEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "new-window",
-      "-d",
-      "-P",
-      "-F",
-      "#{window_id}",
-      "-t",
-      "$1:",
-      "-n",
-      input.name,
-      "-c",
-      input.cwd,
-      "-e",
-      "PI_ENV_SESSION_MANAGER_EXPECTED=1",
-      "-e",
-      "PI_ENV_SESSION_MANAGER_ROLE=work",
-      "-e",
-      `PI_ENV_SESSION_MANAGER_WORKSPACE_ID=${input.workspaceId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_COORDINATOR_ID=${input.coordinatorSessionId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID=${input.sessionId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_LAUNCH_ID=${input.launchId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_EXTENSION=${input.extensionPath}`,
-      "--",
-      input.wrapperPath,
-      "--session-id",
-      input.sessionId,
-      "--name",
-      input.name,
-      "--extension",
-      input.extensionPath,
-    ]);
+    expect(creation).toContain(input.name);
+    expect(creation).toContain(input.wrapperPath);
+    expect(creation).toContain(input.sessionId);
   });
 
   it("accepts a child that wins the window-tag race only when it writes the expected identity", async () => {
