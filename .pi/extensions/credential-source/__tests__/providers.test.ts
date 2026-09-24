@@ -1,7 +1,10 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Redacted } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { CredentialErrorCode } from "../../_shared/credential-source";
-import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform";
+import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform";
 import {
   CREDENTIAL_STDERR_LIMIT_BYTES,
   CREDENTIAL_STDOUT_LIMIT_BYTES,
@@ -15,6 +18,21 @@ const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
 const itemId = "12345678-1234-1234-1234-123456789abc";
 
 describe("credential providers", () => {
+  it.runIf(process.platform !== "win32")("resolves a fixed 1Password reference through a direct child", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-credential-op-"));
+    try {
+      const executable = join(directory, "op");
+      writeFileSync(executable, `#!${resolveNodeCommand()}\nif (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['read', '--no-newline', 'op://Private/Canary/credential'])) process.exit(2);\nprocess.stdout.write('SECRET_SENTINEL_DO_NOT_LEAK');\n`);
+      chmodSync(executable, 0o700);
+      const provider = createOnePasswordProvider(undefined, () => executable);
+      const result = await Effect.runPromise(provider.resolve({
+        provider: "1password", consumers: ["linear"], reference: "op://Private/Canary/credential",
+      }, "linear.apiKey"));
+      expect(Redacted.value(result)).toBe(SENTINEL);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("uses a constrained 1Password CLI read with a fixed secret reference", async () => {
     const runner = vi.fn<CredentialProcessRunner>((_command, _args, _options) =>
       Effect.succeed({ stdout: SENTINEL, stderr: "" }),
@@ -38,6 +56,25 @@ describe("credential providers", () => {
     expect(options.stdoutLimitBytes).toBe(CREDENTIAL_STDOUT_LIMIT_BYTES);
     expect(options.stderrLimitBytes).toBe(CREDENTIAL_STDERR_LIMIT_BYTES);
     expect(Redacted.value(wrapped)).toBe(SENTINEL);
+  });
+
+  it("sanitizes 1Password errors that include credential material", async () => {
+    const runner: CredentialProcessRunner = () => Effect.fail(new ProcessFailure({
+      kind: ProcessFailureKind.Exit,
+      command: "op",
+      message: SENTINEL,
+      stdout: SENTINEL,
+      stderr: SENTINEL,
+    }));
+    const provider = createOnePasswordProvider(runner);
+    const result = await Effect.runPromise(Effect.result(provider.resolve({
+      provider: "1password", consumers: ["linear"], reference: "op://Private/Canary/credential",
+    }, "linear.apiKey")));
+    expect(result._tag).toBe("Failure");
+    if (result._tag === "Failure") {
+      expect(result.failure.code).toBe(CredentialErrorCode.ProviderFailed);
+      expect(JSON.stringify(result.failure)).not.toContain(SENTINEL);
+    }
   });
 
   it("passes the Bitwarden session through runner stdin, not arguments or environment", async () => {

@@ -86,6 +86,41 @@ describe("process platform streamProcess", () => {
     }
   });
 
+  it("times out a non-detached child without signaling the caller's process group", async () => {
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "setInterval(()=>{}, 1000)"], {
+      detached: false, timeoutMs: 100, killGraceMs: 50,
+    })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) expect(result.failure.kind).toBe(ProcessFailureKind.Timeout);
+  });
+
+  it("stops a non-detached child when its output exceeds the limit", async () => {
+    const result = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "process.stdout.write('overflow'); setInterval(()=>{}, 1000)"], {
+      detached: false, stdoutLimitBytes: 3, timeoutMs: 5_000, killGraceMs: 50,
+    })));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure.kind).toBe(ProcessFailureKind.OutputLimit);
+      expect(result.failure.stdout).toBe("ove");
+    }
+  });
+
+  it("interrupts a non-detached child and leaves the caller alive", async () => {
+    const directory = temporaryDirectory("pi-process-direct-interrupt-");
+    try {
+      const pidFile = join(directory, "pid");
+      const fiber = Effect.runFork(streamProcess(node, ["-e", `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(()=>{}, 1000)`], {
+        detached: false, timeoutMs: 5_000, killGraceMs: 50,
+      }));
+      await eventually(() => expect(existsSync(pidFile)).toBe(true), 120);
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      await Effect.runPromise(Fiber.interrupt(fiber));
+      await eventually(() => expect(isAlive(pid)).toBe(false));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("enforces byte-accurate stdout and stderr caps with partial output", async () => {
     const stdoutResult = await Effect.runPromise(Effect.result(streamProcess(node, ["-e", "process.stdout.write('abcdef')"], { stdoutLimitBytes: 3, timeoutMs: 5_000 })));
     expect(Result.isFailure(stdoutResult)).toBe(true);

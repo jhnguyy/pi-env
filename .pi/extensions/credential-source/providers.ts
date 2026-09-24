@@ -10,6 +10,7 @@ import {
 import { CredentialErrorCode, type CredentialName } from "../_shared/credential-source";
 import type { CredentialEntry } from "./config";
 import { credentialError, providerFailure, sanitizeProviderError } from "./errors";
+import { readOnePassword } from "./onepassword-runner";
 
 export const CredentialExecutable = {
   OnePassword: "op",
@@ -95,7 +96,7 @@ function validateCredential(
 }
 
 export function createOnePasswordProvider(
-  runner: CredentialProcessRunner = streamProcess,
+  runner: CredentialProcessRunner = readOnePassword,
   resolveExecutable: CredentialExecutableResolver = () => CredentialExecutable.OnePassword,
 ): CredentialProvider {
   return {
