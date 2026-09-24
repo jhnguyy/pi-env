@@ -22,7 +22,26 @@ describe("credential providers", () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-credential-op-"));
     try {
       const executable = join(directory, "op");
-      writeFileSync(executable, `#!${resolveNodeCommand()}\nconst { spawnSync } = require('node:child_process');\nconst { readFileSync } = require('node:fs');\nif (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(['read', '--no-newline', 'op://Private/Canary/credential'])) process.exit(2);\nconst group = (pid) => process.platform === 'linux'\n  ? readFileSync('/proc/' + pid + '/stat', 'utf8').split(') ').at(-1).split(' ')[2]\n  : spawnSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).stdout?.trim();\nif (!group(process.pid) || group(process.pid) !== group(process.ppid)) process.exit(3);\nprocess.stdout.write('SECRET_SENTINEL_DO_NOT_LEAK');\n`);
+      writeFileSync(executable, `#!${resolveNodeCommand()}
+const { spawnSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
+
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify([
+  "read", "--no-newline", "op://Private/Canary/credential",
+])) process.exit(2);
+
+function processGroup(pid) {
+  if (process.platform === "linux") {
+    const stat = readFileSync("/proc/" + pid + "/stat", "utf8");
+    return stat.slice(stat.lastIndexOf(") ") + 2).split(" ")[2];
+  }
+  return spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout?.trim();
+}
+if (!processGroup(process.pid) || processGroup(process.pid) !== processGroup(process.ppid)) {
+  process.exit(3);
+}
+process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
+`);
       chmodSync(executable, 0o700);
       const provider = createOnePasswordProvider(undefined, () => executable);
       const result = await Effect.runPromise(provider.resolve({

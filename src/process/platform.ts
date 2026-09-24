@@ -32,10 +32,10 @@ export interface ProcessOptions {
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
   readonly killGraceMs?: number;
-  /** Inherit the caller's terminal session only for a trusted command. */
-  readonly terminalSession?: "isolated" | "inherit";
 }
 export interface StreamProcessOptions extends ProcessOptions {
+  /** Inherit the caller's terminal session only for a trusted command. */
+  readonly terminalSession?: "isolated" | "inherit";
   readonly stdin?: string | Uint8Array;
   readonly stdoutLimitBytes?: number;
   readonly stderrLimitBytes?: number;
@@ -72,12 +72,16 @@ function validateNonNegativeInteger(value: number, name: string, command: string
     : new ProcessFailure({ kind: ProcessFailureKind.Spawn, command, message: `${name} must be a non-negative integer` });
 }
 
-function spawnOptions(options: ScopedChildProcessOptions | StreamProcessOptions, stdio: SpawnOptions["stdio"]): SpawnOptions {
+function spawnOptions(
+  options: ProcessOptions,
+  stdio: SpawnOptions["stdio"],
+  terminalSession: "isolated" | "inherit" = "isolated",
+): SpawnOptions {
   return {
     cwd: options.cwd,
     env: options.env,
     stdio,
-    detached: process.platform !== "win32" && (options.terminalSession ?? "isolated") === "isolated",
+    detached: process.platform !== "win32" && terminalSession === "isolated",
   };
 }
 
@@ -377,7 +381,11 @@ function collectProcess(
     timeoutTimer.unref();
 
     try {
-      child = spawn(command, [...args], spawnOptions(options, [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"]));
+      child = spawn(command, [...args], spawnOptions(
+        options,
+        [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        options.terminalSession ?? "isolated",
+      ));
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", onStderr);
       child.once("error", onError);
@@ -421,7 +429,7 @@ export function streamProcess(
 export function runProcess(
   command: string,
   args: readonly string[],
-  options: StreamProcessOptions = {},
+  options: Omit<StreamProcessOptions, "terminalSession"> = {},
 ): Effect.Effect<ProcessCommandResult, ProcessFailure> {
   return collectProcess(command, args, options, true);
 }
