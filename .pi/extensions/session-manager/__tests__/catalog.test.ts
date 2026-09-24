@@ -82,7 +82,11 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
-  it("rejects whitespace-only names without forbidding embedded spaces", () => {
+  it("rejects invalid explicit names without forbidding embedded spaces", () => {
+    const { name: _name, ...unnamed } = openRecord();
+    expect(() =>
+      validateManifest(manifest({ sessions: [{ ...unnamed, explicitName: true }] })),
+    ).toThrow(ManifestSemanticFailure);
     expect(() =>
       validateManifest(manifest({ sessions: [openRecord({ name: "\u2003" })] })),
     ).toThrow(ManifestSemanticFailure);

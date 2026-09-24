@@ -12,12 +12,12 @@ type Base = {
   readonly version: 1;
   readonly sessionId: string;
   readonly cwd: string;
-  readonly name: string;
+  readonly name?: string;
   readonly persistence: Persistence;
   readonly createdAt: string;
   readonly lastOpenedAt: string;
 };
-type WorkBase = Base & { readonly taskRef?: TaskRef };
+type WorkBase = Base & { readonly taskRef?: TaskRef; readonly explicitName?: true };
 export type CoordinatorRecord = Base & { readonly role: "coordinator" };
 export type OpenSessionRecord = WorkBase & {
   readonly role: "work";

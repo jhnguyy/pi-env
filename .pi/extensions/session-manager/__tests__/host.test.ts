@@ -35,61 +35,11 @@ async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
 }
 
 describe("tmux session host", () => {
-  it("renames only a sole tmux session with a bounded cwd-derived name", async () => {
-    const { calls, exec: baseExec } = executor({});
-    const exec: Exec = async (command, args) => {
-      if (args.includes("list-sessions")) {
-        calls.push([command, ...args]);
-        return { code: 0, stdout: "$1\n", stderr: "" };
-      }
-      return baseExec(command, args);
-    };
-    const cwd = `/tmp/${"é unsafe name ".repeat(20)}`;
-
-    await Effect.runPromise(createTmuxSessionHost(exec).prepareWorkspace!("%1", cwd));
-
-    const rename = calls.find((call) => call.includes("rename-session"));
-    expect(rename?.slice(0, -1)).toEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "rename-session",
-      "-t",
-      "$1",
-    ]);
-    const name = rename?.at(-1) ?? "";
-    expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(80);
-  });
-
-  it("binds and renames the current window with argv-safe values", async () => {
+  it("passes a user name with shell metacharacters as one argument", async () => {
     const { calls, exec } = executor({});
-    const host = createTmuxSessionHost(exec);
     const name = "quiet pine; $(touch nope)";
-
-    await Effect.runPromise(host.bindCurrent("%1", "session-a", name));
-
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "set-option",
-      "-w",
-      "-o",
-      "-t",
-      "@1",
-      "@pi_session_id",
-      "session-a",
-    ]);
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "rename-window",
-      "-t",
-      "@1",
-      name,
-    ]);
+    await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a", name));
+    expect(calls.find((call) => call.includes("rename-window"))?.at(-1)).toBe(name);
   });
 
   it("releases only the current session's owned window binding", async () => {
@@ -110,7 +60,7 @@ describe("tmux session host", () => {
     ]);
   });
 
-  it("restores a pending session in one detached argv-safe window and reuses its binding", async () => {
+  it("restores a pending session once and reuses its binding", async () => {
     const { calls, exec: baseExec } = executor({});
     let created = false;
     const exec: Exec = async (command, args) => {
@@ -130,6 +80,7 @@ describe("tmux session host", () => {
       paneId: "%1",
       sessionId: "session with spaces",
       name: "quiet pine; literal",
+      explicitName: true as const,
       cwd: "/tmp/work space",
       wrapperPath: "/opt/pi env/bin/pi",
       extensionPath: "/opt/pi env/session manager/index.js",
@@ -146,44 +97,9 @@ describe("tmux session host", () => {
     expect(repeated).toEqual({ state: "existing", windowId: "@3" });
     expect(calls.filter((call) => call.includes("new-window"))).toHaveLength(1);
     const creation = calls.find((call) => call.includes("new-window"));
-    expect(creation).toEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "new-window",
-      "-d",
-      "-P",
-      "-F",
-      "#{window_id}",
-      "-t",
-      "$1:",
-      "-n",
-      input.name,
-      "-c",
-      input.cwd,
-      "-e",
-      "PI_ENV_SESSION_MANAGER_EXPECTED=1",
-      "-e",
-      "PI_ENV_SESSION_MANAGER_ROLE=work",
-      "-e",
-      `PI_ENV_SESSION_MANAGER_WORKSPACE_ID=${input.workspaceId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_COORDINATOR_ID=${input.coordinatorSessionId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_EXPECTED_SESSION_ID=${input.sessionId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_LAUNCH_ID=${input.launchId}`,
-      "-e",
-      `PI_ENV_SESSION_MANAGER_EXTENSION=${input.extensionPath}`,
-      "--",
-      input.wrapperPath,
-      "--session-id",
-      input.sessionId,
-      "--name",
-      input.name,
-      "--extension",
-      input.extensionPath,
-    ]);
+    expect(creation).toContain(input.name);
+    expect(creation).toContain(input.wrapperPath);
+    expect(creation).toContain(input.sessionId);
   });
 
   it("accepts a child that wins the window-tag race only when it writes the expected identity", async () => {

@@ -32,23 +32,25 @@ describe("workspace coordinator", () => {
   it("creates one stable durable coordinator", async () => {
     const { cwd, catalog } = await fixture();
 
-    const first = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
-    );
-    const second = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 99 }),
-    );
+    const first = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
+    const second = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
 
     expect(first.role).toBe("coordinator");
+    expect(first.name).toBeUndefined();
     expect(second).toEqual(first);
     expect((await Effect.runPromise(catalog.read(cwd)))?.coordinator).toEqual(first);
+    await Effect.runPromise(
+      catalog.update(cwd, (manifest) => ({
+        ...manifest,
+        coordinator: { ...first, name: "coordinator-green-pine" },
+      })),
+    );
+    expect(await Effect.runPromise(ensureCoordinator({ catalog, cwd }))).toEqual(first);
   });
 
   it("restores independent sessions and reports one failure without failing the workspace", async () => {
     const { root, cwd, catalog } = await fixture();
-    const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
-    );
+    const coordinator = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     const timestamp = new Date().toISOString();
     const sessionFile = join(root, "work-a.jsonl");
     await writeFile(
@@ -125,9 +127,7 @@ describe("workspace coordinator", () => {
 
   it("accepts a fresh readiness announcement from a surviving existing window", async () => {
     const { cwd, catalog } = await fixture();
-    const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
-    );
+    const coordinator = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({
@@ -185,9 +185,7 @@ describe("workspace coordinator", () => {
 
   it("leaves an unready restored window running and reports its timeout", async () => {
     const { cwd, catalog } = await fixture();
-    const coordinator = await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
-    );
+    const coordinator = await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({

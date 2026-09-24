@@ -18,13 +18,17 @@ const base = {
   version: Schema.Literal(1),
   sessionId: Schema.String,
   cwd: Schema.String,
-  name: Schema.String,
+  name: Schema.optionalKey(Schema.String),
   persistence: Schema.Union([pending, materialized]),
   createdAt: Schema.String,
   lastOpenedAt: Schema.String,
 };
 const coordinator = Schema.Struct({ ...base, role: Schema.Literal("coordinator") });
-const workBase = { ...base, taskRef: Schema.optionalKey(task) };
+const workBase = {
+  ...base,
+  taskRef: Schema.optionalKey(task),
+  explicitName: Schema.optionalKey(Schema.Literal(true)),
+};
 const open = Schema.Struct({
   ...workBase,
   role: Schema.Literal("work"),
@@ -76,20 +80,26 @@ function validateMetadata(manifest: SessionManifest, path: string): void {
   if (!timestamp(manifest.updatedAt)) semantic(path, "invalid updated timestamp");
 }
 
+function validRecordName(record: SessionRecord): boolean {
+  if (record.role === "work" && record.explicitName && record.name === undefined) return false;
+  if (record.name === undefined) return true;
+  return (
+    record.name.trim().length > 0 &&
+    bytes(record.name) <= 128 &&
+    !/[\p{Cc}\p{Cf}]/u.test(record.name)
+  );
+}
+
 function validateRecordBase(record: SessionRecord, canonicalCwd: string, path: string): void {
   const validIdentity =
     bytes(record.sessionId) >= 1 &&
     bytes(record.sessionId) <= 256 &&
     !/[\0\r\n]/.test(record.sessionId);
-  const validName =
-    record.name.trim().length > 0 &&
-    bytes(record.name) <= 128 &&
-    !/[\p{Cc}\p{Cf}]/u.test(record.name);
   const validTimes =
     timestamp(record.createdAt) &&
     timestamp(record.lastOpenedAt) &&
     record.createdAt <= record.lastOpenedAt;
-  if (!validIdentity || record.cwd !== canonicalCwd || !validName || !validTimes) {
+  if (!validIdentity || record.cwd !== canonicalCwd || !validRecordName(record) || !validTimes) {
     semantic(path, "invalid record fields");
   }
 }
@@ -128,8 +138,10 @@ function addUniqueIdentity(
   if (ids.has(record.sessionId)) semantic(path, "duplicate session id");
   ids.add(record.sessionId);
   if (record.role === "work" && record.desiredState !== "open") return;
-  if (activeNames.has(record.name)) semantic(path, "duplicate active name");
-  activeNames.add(record.name);
+  if (record.name !== undefined) {
+    if (activeNames.has(record.name)) semantic(path, "duplicate active name");
+    activeNames.add(record.name);
+  }
 }
 
 function validateUpdatedAt(record: SessionRecord, updatedAt: string, path: string): void {

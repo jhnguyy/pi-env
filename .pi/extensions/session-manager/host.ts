@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { basename } from "node:path";
 import { Data, Effect } from "effect";
 
 export type ExecResult = {
@@ -43,7 +41,8 @@ export type CurrentWindow = {
 export type RestoreWindowInput = {
   readonly paneId: string;
   readonly sessionId: string;
-  readonly name: string;
+  readonly name?: string;
+  readonly explicitName?: true;
   readonly cwd: string;
   readonly wrapperPath: string;
   readonly extensionPath: string;
@@ -61,14 +60,10 @@ export type RestoredWindow = {
 
 export interface SessionHostShape {
   readonly inspectCurrent: (paneId: string) => Effect.Effect<CurrentWindow, SessionHostFailure>;
-  readonly prepareWorkspace?: (
-    paneId: string,
-    canonicalCwd: string,
-  ) => Effect.Effect<CurrentWindow, SessionHostFailure>;
   readonly bindCurrent: (
     paneId: string,
     sessionId: string,
-    name: string,
+    name?: string,
   ) => Effect.Effect<CurrentWindow, SessionHostError>;
   readonly renameCurrent: (
     paneId: string,
@@ -85,17 +80,6 @@ export interface SessionHostShape {
 }
 
 const text = (result: ExecResult) => (result.stderr || result.stdout).trim();
-
-function workspaceSessionName(canonicalCwd: string): string {
-  const hash = createHash("sha256").update(canonicalCwd, "utf8").digest("hex").slice(0, 8);
-  const slug =
-    basename(canonicalCwd)
-      .normalize("NFKD")
-      .replace(/[^A-Za-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "workspace";
-  const suffix = `-${hash}`;
-  return `pi-${slug.slice(0, 80 - Buffer.byteLength(`pi-${suffix}`, "ascii"))}${suffix}`;
-}
 
 export function createTmuxSessionHost(exec: Exec): SessionHostShape {
   const run = (operation: string, args: string[]) =>
@@ -183,31 +167,6 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       };
     });
 
-  const prepareWorkspace = (paneId: string, canonicalCwd: string) =>
-    Effect.gen(function* () {
-      const current = yield* inspectCurrent(paneId);
-      const sessionIds = (yield* run("list tmux sessions", [
-        "-S",
-        current.socketPath,
-        "list-sessions",
-        "-F",
-        "#{session_id}",
-      ]))
-        .split("\n")
-        .filter(Boolean);
-      if (sessionIds.length === 1 && sessionIds[0] === current.tmuxSessionId) {
-        yield* run("rename workspace session", [
-          "-S",
-          current.socketPath,
-          "rename-session",
-          "-t",
-          current.tmuxSessionId,
-          workspaceSessionName(canonicalCwd),
-        ]);
-      }
-      return current;
-    });
-
   const assertBinding = (
     window: CurrentWindow,
     sessionId: string,
@@ -230,7 +189,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       : Effect.void;
   };
 
-  const bindCurrent = (paneId: string, sessionId: string, name: string) =>
+  const bindCurrent = (paneId: string, sessionId: string, name?: string) =>
     Effect.gen(function* () {
       const window = yield* inspectCurrent(paneId);
       yield* assertBinding(window, sessionId);
@@ -247,24 +206,37 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           sessionId,
         ]);
       }
-      yield* run("disable automatic rename", [
-        "-S",
-        window.socketPath,
-        "set-option",
-        "-w",
-        "-t",
-        window.windowId,
-        "automatic-rename",
-        "off",
-      ]);
-      yield* run("rename window", [
-        "-S",
-        window.socketPath,
-        "rename-window",
-        "-t",
-        window.windowId,
-        name,
-      ]);
+      if (name) {
+        yield* run("disable automatic rename", [
+          "-S",
+          window.socketPath,
+          "set-option",
+          "-w",
+          "-t",
+          window.windowId,
+          "automatic-rename",
+          "off",
+        ]);
+        yield* run("rename window", [
+          "-S",
+          window.socketPath,
+          "rename-window",
+          "-t",
+          window.windowId,
+          name,
+        ]);
+      } else {
+        yield* run("restore automatic rename", [
+          "-S",
+          window.socketPath,
+          "set-option",
+          "-w",
+          "-u",
+          "-t",
+          window.windowId,
+          "automatic-rename",
+        ]);
+      }
       const verified = yield* inspectCurrent(paneId);
       if (verified.boundSessionId !== sessionId) {
         return yield* new SessionHostFailure({
@@ -286,6 +258,16 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           reason: "the current window is not bound to this Pi session",
         });
       }
+      yield* run("disable automatic rename", [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-t",
+        window.windowId,
+        "automatic-rename",
+        "off",
+      ]);
       yield* run("rename window", [
         "-S",
         window.socketPath,
@@ -327,7 +309,11 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       const sessionArgs =
         input.persistence.state === "materialized"
           ? ["--session", input.persistence.sessionFile]
-          : ["--session-id", input.sessionId, "--name", input.name];
+          : [
+              "--session-id",
+              input.sessionId,
+              ...(input.explicitName && input.name ? ["--name", input.name] : []),
+            ];
       const args = [
         "-S",
         current.socketPath,
@@ -338,8 +324,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
         "#{window_id}",
         "-t",
         `${current.tmuxSessionId}:`,
-        "-n",
-        input.name,
+        ...(input.explicitName && input.name ? ["-n", input.name] : []),
         "-c",
         input.cwd,
         "-e",
@@ -400,16 +385,17 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           ),
         ),
       );
-      yield* run("disable restored window automatic rename", [
-        "-S",
-        current.socketPath,
-        "set-option",
-        "-w",
-        "-t",
-        windowId,
-        "automatic-rename",
-        "off",
-      ]);
+      if (input.explicitName)
+        yield* run("disable restored window automatic rename", [
+          "-S",
+          current.socketPath,
+          "set-option",
+          "-w",
+          "-t",
+          windowId,
+          "automatic-rename",
+          "off",
+        ]);
       const verified = yield* run("verify restored window binding", [
         "-S",
         current.socketPath,
@@ -433,7 +419,6 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
 
   return {
     inspectCurrent,
-    prepareWorkspace,
     bindCurrent,
     renameCurrent,
     releaseCurrent,
