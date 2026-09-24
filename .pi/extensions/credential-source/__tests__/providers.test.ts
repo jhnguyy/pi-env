@@ -1,7 +1,7 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Redacted } from "effect";
+import { Effect, Fiber, Redacted } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { CredentialErrorCode } from "../../_shared/credential-source";
 import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform";
@@ -52,6 +52,90 @@ process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
       rmSync(directory, { recursive: true, force: true });
     }
   });
+  it.runIf(process.platform !== "win32")("does not overlap 1Password reads from the same provider", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-credential-parallel-"));
+    const marker = join(directory, "active");
+    const overlap = join(directory, "overlap");
+    try {
+      const executable = join(directory, "op");
+      writeFileSync(executable, `#!${resolveNodeCommand()}
+const { closeSync, openSync, unlinkSync, writeFileSync } = require("node:fs");
+const marker = ${JSON.stringify(marker)};
+const overlap = ${JSON.stringify(overlap)};
+let owned = false;
+try {
+  closeSync(openSync(marker, "wx"));
+  owned = true;
+} catch (error) {
+  if (error.code !== "EEXIST") throw error;
+  writeFileSync(overlap, "overlap");
+}
+setTimeout(() => {
+  if (owned) unlinkSync(marker);
+  process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
+}, 300);
+`);
+      chmodSync(executable, 0o700);
+      const provider = createOnePasswordProvider(undefined, () => executable);
+      const entry = {
+        provider: "1password" as const,
+        consumers: ["linear"],
+        reference: "op://Private/Canary/credential",
+      };
+      const [first, second] = await Promise.all([
+        Effect.runPromise(provider.resolve(entry, "linear.apiKey")),
+        Effect.runPromise(provider.resolve(entry, "linear.apiKey")),
+      ]);
+      expect(Redacted.value(first)).toBe(SENTINEL);
+      expect(Redacted.value(second)).toBe(SENTINEL);
+      expect(existsSync(overlap)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform !== "win32")("releases the read permit after interruption", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-credential-interrupt-"));
+    const pidFile = join(directory, "first-pid");
+    const executable = join(directory, "op");
+    writeFileSync(executable, `#!${resolveNodeCommand()}
+const { existsSync, readFileSync, writeFileSync } = require("node:fs");
+const pidFile = ${JSON.stringify(pidFile)};
+if (!existsSync(pidFile)) {
+  writeFileSync(pidFile, String(process.pid));
+  setInterval(() => {}, 1000);
+} else {
+  try {
+    process.kill(Number(readFileSync(pidFile, "utf8")), 0);
+    process.exit(3);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+    process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
+  }
+}
+`);
+    chmodSync(executable, 0o700);
+    const provider = createOnePasswordProvider(undefined, () => executable);
+    const entry = {
+      provider: "1password" as const,
+      consumers: ["linear"],
+      reference: "op://Private/Canary/credential",
+    };
+    const first = Effect.runFork(provider.resolve(entry, "linear.apiKey"));
+    try {
+      for (let index = 0; index < 120 && !existsSync(pidFile); index++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(existsSync(pidFile)).toBe(true);
+      const second = Effect.runPromise(provider.resolve(entry, "linear.apiKey"));
+      await Effect.runPromise(Fiber.interrupt(first));
+      expect(Redacted.value(await second)).toBe(SENTINEL);
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(first));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("uses a constrained 1Password CLI read with a fixed secret reference", async () => {
     const runner = vi.fn<CredentialProcessRunner>((_command, _args, _options) =>
       Effect.succeed({ stdout: SENTINEL, stderr: "" }),
