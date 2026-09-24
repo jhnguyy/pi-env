@@ -135,6 +135,8 @@ export function createOnePasswordProvider(
           }
           return runner(executable, ["read", "--no-newline", entry.reference], {
             ...PROVIDER_PROCESS_OPTIONS,
+            // Only this fixed read inherits Pi's terminal session for 1Password app authorization.
+            terminalSession: "inherit",
           }).pipe(
             Effect.mapError((error) => providerFailure(error, "1password")),
             Effect.flatMap((output) => validateCredential(output.stdout, "1password", name)),

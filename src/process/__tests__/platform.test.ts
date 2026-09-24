@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess } from "../platform";
+import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess, type StreamProcessOptions } from "../platform";
 
 const node = resolveNodeCommand();
 
@@ -60,6 +60,19 @@ describe("process platform streamProcess", () => {
   it("runProcess preserves nonzero exit, stdout, and stderr as data", async () => {
     const result = await Effect.runPromise(runProcess(node, ["-e", "console.log('partial'); console.error('warn'); process.exit(7)"], { timeoutMs: 5_000 }));
     expect(result).toMatchObject({ exitCode: 7, stdout: "partial\n", stderr: "warn\n" });
+  });
+
+  it.runIf(process.platform !== "win32")("runProcess stays isolated when a typed options variable requests inheritance", async () => {
+    const options: StreamProcessOptions = { terminalSession: "inherit", timeoutMs: 5_000 };
+    const result = await Effect.runPromise(runProcess(node, ["-e", `
+      try {
+        process.kill(-process.pid, 0);
+        console.log('isolated');
+      } catch {
+        console.log('inherited');
+      }
+    `], options));
+    expect(result.stdout.trim()).toBe("isolated");
   });
 
   it("runProcess shares timeout failures", async () => {

@@ -1,7 +1,10 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect, Redacted } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { CredentialErrorCode } from "../../_shared/credential-source";
-import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform";
+import { ProcessFailure, ProcessFailureKind, resolveNodeCommand } from "../../../../src/process/platform";
 import {
   CREDENTIAL_STDERR_LIMIT_BYTES,
   CREDENTIAL_STDOUT_LIMIT_BYTES,
@@ -15,6 +18,40 @@ const SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK";
 const itemId = "12345678-1234-1234-1234-123456789abc";
 
 describe("credential providers", () => {
+  it.runIf(process.platform !== "win32")("inherits the caller's process group for a fixed 1Password read", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-credential-op-"));
+    try {
+      const executable = join(directory, "op");
+      writeFileSync(executable, `#!${resolveNodeCommand()}
+const { spawnSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
+
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify([
+  "read", "--no-newline", "op://Private/Canary/credential",
+])) process.exit(2);
+
+function processGroup(pid) {
+  if (process.platform === "linux") {
+    const stat = readFileSync("/proc/" + pid + "/stat", "utf8");
+    return stat.slice(stat.lastIndexOf(") ") + 2).split(" ")[2];
+  }
+  return spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout?.trim();
+}
+if (!processGroup(process.pid) || processGroup(process.pid) !== processGroup(process.ppid)) {
+  process.exit(3);
+}
+process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
+`);
+      chmodSync(executable, 0o700);
+      const provider = createOnePasswordProvider(undefined, () => executable);
+      const result = await Effect.runPromise(provider.resolve({
+        provider: "1password", consumers: ["linear"], reference: "op://Private/Canary/credential",
+      }, "linear.apiKey"));
+      expect(Redacted.value(result)).toBe(SENTINEL);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
   it("uses a constrained 1Password CLI read with a fixed secret reference", async () => {
     const runner = vi.fn<CredentialProcessRunner>((_command, _args, _options) =>
       Effect.succeed({ stdout: SENTINEL, stderr: "" }),

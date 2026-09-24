@@ -34,6 +34,8 @@ export interface ProcessOptions {
   readonly killGraceMs?: number;
 }
 export interface StreamProcessOptions extends ProcessOptions {
+  /** Inherit the caller's terminal session only for a trusted command. */
+  readonly terminalSession?: "isolated" | "inherit";
   readonly stdin?: string | Uint8Array;
   readonly stdoutLimitBytes?: number;
   readonly stderrLimitBytes?: number;
@@ -70,12 +72,16 @@ function validateNonNegativeInteger(value: number, name: string, command: string
     : new ProcessFailure({ kind: ProcessFailureKind.Spawn, command, message: `${name} must be a non-negative integer` });
 }
 
-function spawnOptions(options: ScopedChildProcessOptions | StreamProcessOptions, stdio: SpawnOptions["stdio"]): SpawnOptions {
+function spawnOptions(
+  options: ProcessOptions,
+  stdio: SpawnOptions["stdio"],
+  terminalSession: "isolated" | "inherit" = "isolated",
+): SpawnOptions {
   return {
     cwd: options.cwd,
     env: options.env,
     stdio,
-    detached: process.platform !== "win32",
+    detached: process.platform !== "win32" && terminalSession === "isolated",
   };
 }
 
@@ -251,18 +257,21 @@ function collectProcess(
   args: readonly string[],
   options: StreamProcessOptions,
   preserveExit: false,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessOutput, ProcessFailure>;
 function collectProcess(
   command: string,
   args: readonly string[],
   options: StreamProcessOptions,
   preserveExit: true,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessCommandResult, ProcessFailure>;
 function collectProcess(
   command: string,
   args: readonly string[],
-  options: StreamProcessOptions = {},
+  options: StreamProcessOptions,
   preserveExit: boolean,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessOutput | ProcessCommandResult, ProcessFailure> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
   const stdoutLimit = options.stdoutLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
@@ -375,7 +384,11 @@ function collectProcess(
     timeoutTimer.unref();
 
     try {
-      child = spawn(command, [...args], spawnOptions(options, [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"]));
+      child = spawn(command, [...args], spawnOptions(
+        options,
+        [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
+        terminalSession,
+      ));
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", onStderr);
       child.once("error", onError);
@@ -412,14 +425,14 @@ export function streamProcess(
   args: readonly string[],
   options: StreamProcessOptions = {},
 ): Effect.Effect<ProcessOutput, ProcessFailure> {
-  return collectProcess(command, args, options, false);
+  return collectProcess(command, args, options, false, options.terminalSession);
 }
 
 /** Runs a bounded command, preserving stdout/stderr and exit code (including nonzero) as data. */
 export function runProcess(
   command: string,
   args: readonly string[],
-  options: StreamProcessOptions = {},
+  options: Omit<StreamProcessOptions, "terminalSession"> = {},
 ): Effect.Effect<ProcessCommandResult, ProcessFailure> {
-  return collectProcess(command, args, options, true);
+  return collectProcess(command, args, options, true, "isolated");
 }
