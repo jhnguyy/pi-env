@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
@@ -130,9 +130,6 @@ function matchingReview(identityKey: string, parentSessionId: string): ReviewSta
 function stateById(reviewId?: string): ReviewState | undefined {
   return reviewId ? coordinator.review(reviewId) : coordinator.latestState();
 }
-function statePath(id: string): string {
-  return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
-}
 function customData(entry: any): any {
   if (entry?.type === "custom" && entry?.customType === REVIEW_ENTRY_TYPE) return entry.data;
   return undefined;
@@ -145,10 +142,9 @@ function stateEntry(state: ReviewState) {
   };
 }
 function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
-  if (!coordinator.remember(state, scope)) return false;
-  persistJson(statePath(state.snapshot.id), state);
+  if (scope && !coordinator.isScopeActive(scope)) return false;
   pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
-  return true;
+  return coordinator.remember(state, scope);
 }
 function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
   if (!coordinator.isScopeActive(scope))
@@ -555,6 +551,7 @@ async function createReviewAttempt(
     decisions: {},
     posts: [],
   };
+  mkdirSync(state.snapshot.artifactDir, { recursive: true, mode: 0o700 });
   saveState(pi, state, coordinatorScope);
   try {
     const snapshot = await prepareResolvedSnapshot(
@@ -1130,7 +1127,6 @@ function newAttempt(s: ReviewState, event: ReviewEventValue, contentHash: string
     at: new Date().toISOString(),
     contentHash,
   };
-  s.posts.push(attempt);
   return attempt;
 }
 
@@ -1336,7 +1332,7 @@ export async function postReview(
     if (typeof state === "string") return state;
     if (!attempt) {
       attempt = newAttempt(state, event, contentHash);
-      if (!saveState(pi, state, scope))
+      if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
         return "The review session changed before the posting attempt was recorded. Nothing was posted.";
     }
     const current = currentState("submission");

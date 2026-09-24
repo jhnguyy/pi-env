@@ -195,6 +195,35 @@ describe("review pull request posting", () => {
     expect(posted).toBe(false);
   });
 
+  it("does not publish a pending attempt or POST if session append rejects", async () => {
+    restore({ sessionManager: { getBranch: () => [reviewEntry(state())] } } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry(): void {
+        throw new Error("session append rejected");
+      },
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      }),
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).rejects.toThrow();
+    expect(posts).toBe(0);
+    // The next attempt must record a new marker, not reuse the rejected one.
+    const accepted: unknown[] = [];
+    pi.appendEntry = (...args: unknown[]) => {
+      accepted.push(args);
+    };
+    await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).resolves.toBe(
+      "Review posted.",
+    );
+    expect(accepted).toHaveLength(2);
+    expect(posts).toBe(1);
+  });
+
   it("does not repost while an earlier attempt remains uncertain", async () => {
     restore({ sessionManager: { getBranch: () => [reviewEntry(state())] } } as any);
     let posts = 0;

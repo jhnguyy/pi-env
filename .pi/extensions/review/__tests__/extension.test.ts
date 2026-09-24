@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
@@ -449,6 +449,109 @@ describe("review extension pull request surface", () => {
     } as any);
     await pi.command("pr status", { ui: { notify: (m: string) => notes.push(m) } } as any);
     expect(notes.at(-1)).toContain("Selected: 0");
+  });
+
+  it("restores decisions from the active branch without writing a second state file", async () => {
+    const root = tempRoot();
+    const previous = sampleState("r-one", []);
+    const unrelated = sampleState("r-other", []);
+    const entries = [custom(previous), custom(unrelated)];
+    const sessionManager = {
+      getSessionId: () => "session-one",
+      getBranch: () => entries,
+    };
+    restore({ sessionManager } as any);
+    const pi = extensionPi();
+    pi.appendEntry = (type: string, data: any) => {
+      pi.appended.push([type, data]);
+      entries.push({ type: "custom", customType: type, data });
+    };
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
+    await pi.command("pr select r-one F1", ctx);
+    expect(notes.at(-1)).toContain("1 finding(s) selected");
+    const oldStatePath = join(root, "pr-review/artifacts/r-one/state.json");
+    expect(existsSync(oldStatePath)).toBe(false);
+    expect(pi.appended).toHaveLength(1);
+    // A stale legacy mirror must not override the active session branch.
+    mkdirSync(previous.snapshot.artifactDir, { recursive: true });
+    writeFileSync(oldStatePath, JSON.stringify(previous));
+    pi.handlers.session_shutdown();
+
+    restore({ sessionManager } as any);
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("Selected: 1");
+    restore({ sessionManager: { ...sessionManager, getBranch: () => [custom(previous)] } } as any);
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("Selected: 0");
+  });
+
+  it("does not publish a decision when the session append rejects it", async () => {
+    tempRoot();
+    const before = sampleState("r-one", []);
+    restore({ sessionManager: { getBranch: () => [custom(before)] } } as any);
+    const pi = extensionPi();
+    pi.appendEntry = () => {
+      throw new Error("session append rejected");
+    };
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
+    await pi.command("pr select r-one F1", ctx);
+    expect(notes.at(-1)).toContain("session append rejected");
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("Selected: 0");
+  });
+
+  it("restores a long active branch without scanning child sessions", async () => {
+    const root = tempRoot();
+    const reviewIds = Array.from({ length: 40 }, (_, index) => `r-${index}`);
+    const entries = Array.from({ length: 4_000 }, (_, index) =>
+      custom(sampleState(reviewIds[index % reviewIds.length], index % 2 ? ["F1"] : [])),
+    );
+    const manager = {
+      getSessionId: () => "long-session",
+      getBranch: () => entries,
+      getSessionDir: () => {
+        throw new Error("child session files must not be read");
+      },
+    };
+    const serializedBytes = Buffer.byteLength(JSON.stringify(entries));
+    const start = performance.now();
+    restore({ sessionManager: manager } as any);
+    const elapsedMs = performance.now() - start;
+    const pi = extensionPi();
+    const notes: string[] = [];
+    await pi.command("pr list", {
+      ui: { notify: (message: string) => notes.push(message) },
+    } as any);
+    const restoredReviews = notes.at(-1)!.split("\n").length;
+    expect(restoredReviews).toBe(reviewIds.length);
+    expect(notes.at(-1)).toContain("r-39");
+    expect(notes.at(-1)).toContain("r-0");
+    const evidenceDir = process.env.PI_ENV_REVIEW_RESTORE_ARTIFACT_DIR;
+    if (evidenceDir) {
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(
+        join(evidenceDir, "review-restore.json"),
+        JSON.stringify(
+          {
+            inputs: {
+              entries: entries.length,
+              reviewIds: reviewIds.length,
+              activeBranch: true,
+              serializedBytes,
+            },
+            expected: { reviews: reviewIds.length, childSessionReads: 0 },
+            actual: { elapsedMs, reviews: restoredReviews, childSessionReads: 0 },
+            reproduce:
+              "PI_ENV_REVIEW_RESTORE_ARTIFACT_DIR=<dir> scripts/node-run.sh node_modules/vitest/vitest.mjs run .pi/extensions/review/__tests__/extension.test.ts -t 'restores a long active branch'",
+          },
+          null,
+          2,
+        ),
+      );
+    }
+    expect(existsSync(join(root, "pr-review/artifacts/r-0/state.json"))).toBe(false);
   });
 
   it("marks an unfinished pre-DAG review interrupted and removes its worktree on restart", async () => {
