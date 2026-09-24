@@ -207,9 +207,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       ) {
         throw new Error("startup claim does not match the coordinator runtime");
       }
-      if (host.prepareWorkspace) {
-        await run(host.prepareWorkspace(paneId, identity.canonicalCwd));
-      }
       await run(host.bindCurrent(paneId, manifest.coordinator.sessionId));
       coordinatorBinding = { paneId, sessionId: manifest.coordinator.sessionId };
       const reconciler = createWorkspaceReconciler({

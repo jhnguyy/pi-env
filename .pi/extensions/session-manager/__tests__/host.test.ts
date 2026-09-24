@@ -35,33 +35,6 @@ async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
 }
 
 describe("tmux session host", () => {
-  it("renames only a sole tmux session with a bounded cwd-derived name", async () => {
-    const { calls, exec: baseExec } = executor({});
-    const exec: Exec = async (command, args) => {
-      if (args.includes("list-sessions")) {
-        calls.push([command, ...args]);
-        return { code: 0, stdout: "$1\n", stderr: "" };
-      }
-      return baseExec(command, args);
-    };
-    const cwd = `/tmp/${"é unsafe name ".repeat(20)}`;
-
-    await Effect.runPromise(createTmuxSessionHost(exec).prepareWorkspace!("%1", cwd));
-
-    const rename = calls.find((call) => call.includes("rename-session"));
-    expect(rename?.slice(0, -1)).toEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "rename-session",
-      "-t",
-      "$1",
-    ]);
-    const name = rename?.at(-1) ?? "";
-    expect(name).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(Buffer.byteLength(name, "utf8")).toBeLessThanOrEqual(80);
-  });
-
   it("binds and renames the current window with argv-safe values", async () => {
     const { calls, exec } = executor({});
     const host = createTmuxSessionHost(exec);
@@ -96,6 +69,7 @@ describe("tmux session host", () => {
     const { calls, exec } = executor({});
     await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a"));
     expect(calls.some((call) => call.includes("rename-window"))).toBe(false);
+    expect(calls.some((call) => call.includes("rename-session"))).toBe(false);
     expect(calls).toContainEqual([
       "tmux",
       "-S",

@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { basename } from "node:path";
 import { Data, Effect } from "effect";
 
 export type ExecResult = {
@@ -62,10 +60,6 @@ export type RestoredWindow = {
 
 export interface SessionHostShape {
   readonly inspectCurrent: (paneId: string) => Effect.Effect<CurrentWindow, SessionHostFailure>;
-  readonly prepareWorkspace?: (
-    paneId: string,
-    canonicalCwd: string,
-  ) => Effect.Effect<CurrentWindow, SessionHostFailure>;
   readonly bindCurrent: (
     paneId: string,
     sessionId: string,
@@ -86,17 +80,6 @@ export interface SessionHostShape {
 }
 
 const text = (result: ExecResult) => (result.stderr || result.stdout).trim();
-
-function workspaceSessionName(canonicalCwd: string): string {
-  const hash = createHash("sha256").update(canonicalCwd, "utf8").digest("hex").slice(0, 8);
-  const slug =
-    basename(canonicalCwd)
-      .normalize("NFKD")
-      .replace(/[^A-Za-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "workspace";
-  const suffix = `-${hash}`;
-  return `pi-${slug.slice(0, 80 - Buffer.byteLength(`pi-${suffix}`, "ascii"))}${suffix}`;
-}
 
 export function createTmuxSessionHost(exec: Exec): SessionHostShape {
   const run = (operation: string, args: string[]) =>
@@ -182,31 +165,6 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
         boundSessionId,
         bindings: tagged.filter((entry) => entry.sessionId.length > 0),
       };
-    });
-
-  const prepareWorkspace = (paneId: string, canonicalCwd: string) =>
-    Effect.gen(function* () {
-      const current = yield* inspectCurrent(paneId);
-      const sessionIds = (yield* run("list tmux sessions", [
-        "-S",
-        current.socketPath,
-        "list-sessions",
-        "-F",
-        "#{session_id}",
-      ]))
-        .split("\n")
-        .filter(Boolean);
-      if (sessionIds.length === 1 && sessionIds[0] === current.tmuxSessionId) {
-        yield* run("rename workspace session", [
-          "-S",
-          current.socketPath,
-          "rename-session",
-          "-t",
-          current.tmuxSessionId,
-          workspaceSessionName(canonicalCwd),
-        ]);
-      }
-      return current;
     });
 
   const assertBinding = (
@@ -461,7 +419,6 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
 
   return {
     inspectCurrent,
-    prepareWorkspace,
     bindCurrent,
     renameCurrent,
     releaseCurrent,
