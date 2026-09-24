@@ -41,7 +41,7 @@ export class ReviewCoordinator {
   private evidenceRegistration: DagExecutorRegistration | undefined;
   private selectedReviewId: string | undefined;
   private sessionId: string | undefined;
-  private uncertainWriteSessionId: string | undefined;
+  private readonly uncertainWriteSessionIds = new Set<string>();
   private generation = 0;
   private sessionAbortController = new AbortController();
 
@@ -81,13 +81,15 @@ export class ReviewCoordinator {
   }
 
   markSessionWriteUncertain(): void {
-    this.uncertainWriteSessionId = this.sessionId;
+    // Pi can retain an entry in memory after its disk append throws. Do not
+    // replay that branch in this process, including after session switches.
+    if (this.sessionId) this.uncertainWriteSessionIds.add(this.sessionId);
     this.states.clear();
     this.selectedReviewId = undefined;
   }
 
   isSessionWriteUncertain(): boolean {
-    return this.sessionId !== undefined && this.uncertainWriteSessionId === this.sessionId;
+    return this.sessionId !== undefined && this.uncertainWriteSessionIds.has(this.sessionId);
   }
 
   reviews(): readonly ReviewState[] {

@@ -288,7 +288,7 @@ describe("review pull request posting", () => {
         { cwd: "/tmp", ui: { confirm: async () => true } } as any,
         ReviewEvent.Comment,
       ),
-    ).rejects.toThrow();
+    ).resolves.toContain("unresolved");
     expect(posts).toBe(0);
   });
 
@@ -399,6 +399,72 @@ describe("review pull request posting", () => {
       "not posting duplicate",
     );
     expect(posts).toBe(1);
+  });
+
+  it("does not post changed content after a prior review is recorded as posted", async () => {
+    const s = state();
+    s.posts = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        event: ReviewEvent.Comment,
+        marker: "<!-- pi-env-pr-review:r:11111111-1111-4111-8111-111111111111 -->",
+        status: "posted",
+        reviewId: "remote",
+        at: new Date().toISOString(),
+        contentHash: "a".repeat(64),
+      },
+    ];
+    s.preface = "changed after posting";
+    restore({ sessionManager: { getBranch: () => [reviewEntry(s)] } } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      }),
+    };
+    expect(
+      await postReview(
+        pi as any,
+        { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+        ReviewEvent.Comment,
+      ),
+    ).toContain("already posted");
+    expect(posts).toBe(0);
+  });
+
+  it("refuses to resubmit a legacy pending attempt without a recoverable local intent", async () => {
+    const s = state();
+    s.posts = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        event: ReviewEvent.Comment,
+        marker: "<!-- pi-env-pr-review:r:11111111-1111-4111-8111-111111111111 -->",
+        status: "pending",
+        at: new Date().toISOString(),
+      },
+    ];
+    restore({ sessionManager: { getBranch: () => [reviewEntry(s)] } } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      }),
+    };
+    const result = await postReview(
+      pi as any,
+      { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+      ReviewEvent.Comment,
+    );
+    expect(result).toContain("legacy attempt");
+    expect(posts).toBe(0);
   });
 
   it("does not repost while an earlier attempt remains uncertain", async () => {

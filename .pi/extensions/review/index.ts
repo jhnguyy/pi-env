@@ -1330,7 +1330,7 @@ export async function postReview(
   }
 
   async function reconcileRecordedIntent(state: ReviewState): Promise<string | undefined> {
-    const existingIntent = readPostingIntent(state.snapshot, scope.sessionId, contentHash);
+    const existingIntent = readPostingIntent(state.snapshot, scope.sessionId);
     if (!existingIntent) return undefined;
     const prior = await existingReviewWithMarker(
       pi.exec.bind(pi),
@@ -1360,24 +1360,30 @@ export async function postReview(
     if (!attempt) return { state };
     const prior = await reconcile(state, attempt);
     if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
-    if (attempt.status === "uncertain")
-      return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
-    const current = currentState("reconciliation");
-    return typeof current === "string" ? current : { state: current, attempt };
+    // A legacy pending entry has no recoverable local intent. It may already
+    // have reached GitHub, so an empty GET is not permission to resubmit it.
+    return "Previous posting result is still uncertain. Verify the legacy attempt on GitHub before retrying.";
+  }
+
+  function unresolvedOtherContent(state: ReviewState): string | undefined {
+    if (state.posts.some((post) => post.status !== "posted" && !post.contentHash))
+      return "A legacy attempt has no recoverable content identity. Verify it on GitHub before posting.";
+    if (state.posts.some((post) => post.status !== "posted" && post.contentHash !== contentHash))
+      return "Another posting attempt is unresolved. Reconcile it before posting changed content.";
+    if (!hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts)) return undefined;
+    const existing = readPostingIntent(state.snapshot, scope.sessionId);
+    return !existing || existing.attempt.contentHash !== contentHash
+      ? "Another posting attempt is unresolved. Reconcile it before posting changed content."
+      : undefined;
   }
 
   async function execute(): Promise<string> {
     let state = await preflight("posting queue");
     if (typeof state === "string") return state;
-    const posted = state.posts.find(
-      (post) => post.contentHash === contentHash && post.status === "posted",
-    );
+    const posted = state.posts.find((post) => post.status === "posted");
     if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-    if (
-      hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts) &&
-      !readPostingIntent(state.snapshot, scope.sessionId, contentHash)
-    )
-      return "Another posting attempt is unresolved. Reconcile it before posting changed content.";
+    const conflict = unresolvedOtherContent(state);
+    if (conflict) return conflict;
     const recorded = await reconcileRecordedIntent(state);
     if (recorded) return recorded;
     const resolved = await resolvePriorAttempt(state);
