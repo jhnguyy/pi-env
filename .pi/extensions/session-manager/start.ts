@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { randomInt, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { access, lstat, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,11 +11,7 @@ import { ensureCoordinator, renderRestoreSummary } from "./coordinator.js";
 import { createTmuxSessionHost } from "./host.js";
 import { RuntimeMethod, runtimeRequest } from "./runtime-bus.js";
 import { resolveRuntimePaths, workspaceId, type RuntimePaths } from "./runtime-path.js";
-import {
-  classifyStartupClaim,
-  parseRuntimeMetadata,
-  parseStartupClaim,
-} from "./launch.js";
+import { classifyStartupClaim, parseRuntimeMetadata, parseStartupClaim } from "./launch.js";
 import { createFileSessionCatalog, type SessionCatalogShape } from "./storage.js";
 
 const env = process.env;
@@ -109,7 +105,7 @@ async function assertCoordinatorOffline(
     }
     if (processAlive(metadata.pid)) {
       throw new Error(
-        `CoordinatorUnresponsive: ${coordinator.name} process ${metadata.pid} is still alive at ${paths.socketPath}`,
+        `CoordinatorUnresponsive: ${coordinator.name ?? coordinator.sessionId} process ${metadata.pid} is still alive at ${paths.socketPath}`,
       );
     }
   } catch (error) {
@@ -121,7 +117,7 @@ async function assertCoordinatorOffline(
   );
   if (coordinatorWindows.length > 0) {
     throw new Error(
-      `CoordinatorUnresponsive: ${coordinator.name} is bound to ${coordinatorWindows.map((item) => item.windowId).join(", ")} at ${paths.socketPath}`,
+      `CoordinatorUnresponsive: ${coordinator.name ?? coordinator.sessionId} is bound to ${coordinatorWindows.map((item) => item.windowId).join(", ")} at ${paths.socketPath}`,
     );
   }
 }
@@ -176,7 +172,6 @@ async function selectCoordinator(options: {
       ensureCoordinator({
         catalog: options.catalog,
         cwd: options.canonicalCwd,
-        entropy: randomInt,
       }),
     );
     const active = current?.coordinator
@@ -184,11 +179,7 @@ async function selectCoordinator(options: {
       : false;
     if (active) return { active, coordinator, launchId };
     if (current?.coordinator) {
-      const claimState = await classifyLiveClaim(
-        options.paths,
-        options.workspaceId,
-        coordinator,
-      );
+      const claimState = await classifyLiveClaim(options.paths, options.workspaceId, coordinator);
       if (claimState === "starting") {
         throw new Error("WorkspaceStartInProgress: the coordinator is still starting");
       }
@@ -259,7 +250,11 @@ function launchCoordinator(
   const sessionArgs =
     coordinator.persistence.state === "materialized"
       ? ["--session", coordinator.persistence.sessionFile]
-      : ["--session-id", coordinator.sessionId, "--name", coordinator.name];
+      : [
+          "--session-id",
+          coordinator.sessionId,
+          ...(coordinator.name ? ["--name", coordinator.name] : []),
+        ];
   process.execve!(nodeBin, [nodeBin, piEntry, ...sessionArgs, "--extension", extensionPath], {
     ...env,
     PI_ENV_SESSION_MANAGER_BYPASS: "1",

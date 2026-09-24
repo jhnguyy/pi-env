@@ -9,7 +9,7 @@ import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { readFile, unlink } from "node:fs/promises";
 import { Effect, Exit, Result, Schedule, Scope } from "effect";
 import { createWorkspaceReconciler, renderRestoreSummary } from "./coordinator.js";
-import { CloseSource, findRecord, secureNameEntropy, type NameEntropy } from "./domain.js";
+import { CloseSource, findRecord } from "./domain.js";
 import { createTmuxSessionHost, type SessionHostShape } from "./host.js";
 import {
   type CoordinatorLaunch,
@@ -87,7 +87,6 @@ export type SessionManagerOptions = {
   readonly catalog: SessionCatalogShape;
   readonly host: SessionHostShape;
   readonly sessionFiles?: SessionFileProbe;
-  readonly entropy?: NameEntropy;
   readonly environment?: Environment;
 };
 
@@ -99,7 +98,6 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     catalog: options.catalog,
     host: options.host,
     sessionFiles,
-    entropy: options.entropy ?? secureNameEntropy,
   });
   let managed: ManagedSession | undefined;
   let finalization: Promise<void> | undefined;
@@ -486,7 +484,10 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
           run(lifecycle.adopt(startInput(pi, ctx, environment.TMUX_PANE))),
         );
         if (!installedFactory && ctx.mode === "tui") installEditor(ctx, false);
-        ctx.ui.notify(`Session adopted as ${managed.record.name}.`, "info");
+        ctx.ui.notify(
+          `Session adopted${managed.record.name ? ` as ${managed.record.name}` : ""}.`,
+          "info",
+        );
       } catch (error) {
         if (error instanceof SessionBindingFailed) {
           managed = error.session;
@@ -521,7 +522,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         }
         const status = await run(lifecycle.status(ctx.cwd, ctx.sessionManager.getSessionId()));
         const current = status.current
-          ? `${status.current.name} ${status.current.persistence.state}`
+          ? `${status.current.name ?? status.current.sessionId} ${status.current.persistence.state}`
           : "unmanaged";
         ctx.ui.notify(
           `Session ${current}. Workspace: ${status.open} open, ${status.closed} closed. Revision ${status.revision}.`,

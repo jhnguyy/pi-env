@@ -97,7 +97,7 @@ describe("session-manager extension", () => {
     const cwd = join(root, "workspace");
     await mkdir(cwd);
     const catalog = createFileSessionCatalog(join(root, "agent"));
-    await Effect.runPromise(ensureCoordinator({ catalog, cwd, entropy: () => 0 }));
+    await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({
@@ -247,7 +247,6 @@ describe("session-manager extension", () => {
       catalog,
       host,
       sessionFiles,
-      entropy: () => 0,
       environment: { TMUX_PANE: "%1" },
     });
 
@@ -330,7 +329,6 @@ describe("session-manager extension", () => {
           }),
       },
       sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      entropy: () => 0,
       environment: { TMUX_PANE: "%1" },
     });
 
@@ -405,7 +403,6 @@ describe("session-manager extension", () => {
         releaseCurrent: () => Effect.void,
       },
       sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      entropy: () => 0,
       environment: { TMUX_PANE: "%1" },
     });
 
@@ -413,10 +410,7 @@ describe("session-manager extension", () => {
     expect(displayName).toBeUndefined();
     expect(boundNames).toEqual([undefined]);
 
-    const generatedName = (await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name;
-    displayName = generatedName;
-    await handlers.get("session_info_changed")?.(cast<never>({ name: generatedName }), ctx);
-    expect(renamedWindows).toEqual([generatedName]);
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
 
     displayName = "investigate-resume";
     await handlers.get("session_info_changed")?.(cast<never>({ name: "investigate-resume" }), ctx);
@@ -424,12 +418,12 @@ describe("session-manager extension", () => {
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBe(
       "investigate-resume",
     );
-    expect(renamedWindows).toEqual([generatedName, "investigate-resume"]);
+    expect(renamedWindows).toEqual(["investigate-resume"]);
 
     displayName = undefined;
     await handlers.get("session_info_changed")?.(cast<never>({ name: undefined }), ctx);
 
     expect(displayName).toBeUndefined();
-    expect(renamedWindows).toEqual([generatedName, "investigate-resume"]);
+    expect(renamedWindows).toEqual(["investigate-resume"]);
   });
 });

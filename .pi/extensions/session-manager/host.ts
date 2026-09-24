@@ -43,7 +43,7 @@ export type CurrentWindow = {
 export type RestoreWindowInput = {
   readonly paneId: string;
   readonly sessionId: string;
-  readonly name: string;
+  readonly name?: string;
   readonly explicitName?: true;
   readonly cwd: string;
   readonly wrapperPath: string;
@@ -354,7 +354,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           : [
               "--session-id",
               input.sessionId,
-              ...(input.explicitName ? ["--name", input.name] : []),
+              ...(input.explicitName && input.name ? ["--name", input.name] : []),
             ];
       const args = [
         "-S",
@@ -366,7 +366,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
         "#{window_id}",
         "-t",
         `${current.tmuxSessionId}:`,
-        ...(input.explicitName ? ["-n", input.name] : []),
+        ...(input.explicitName && input.name ? ["-n", input.name] : []),
         "-c",
         input.cwd,
         "-e",

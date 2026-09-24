@@ -12,7 +12,7 @@ type Base = {
   readonly version: 1;
   readonly sessionId: string;
   readonly cwd: string;
-  readonly name: string;
+  readonly name?: string;
   readonly persistence: Persistence;
   readonly createdAt: string;
   readonly lastOpenedAt: string;

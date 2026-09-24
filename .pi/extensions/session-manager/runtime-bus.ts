@@ -26,7 +26,7 @@ export type ReadyPublication = {
 };
 export type RestoreOutcome = {
   readonly sessionId: string;
-  readonly name: string;
+  readonly name?: string;
   readonly state: "restored" | "active" | "timed-out" | "failed";
   readonly reason?: string;
 };
@@ -124,7 +124,7 @@ const restoreSummarySchema = Schema.Struct({
   outcomes: Schema.Array(
     Schema.Struct({
       sessionId: Schema.String,
-      name: Schema.String,
+      name: Schema.optionalKey(Schema.String),
       state: Schema.Literals(["restored", "active", "timed-out", "failed"]),
       reason: Schema.optionalKey(Schema.String),
     }),
@@ -138,10 +138,9 @@ const decodeReadyPublication = Schema.decodeUnknownSync(readyPublicationSchema, 
 const decodeRestoreSummary = Schema.decodeUnknownSync(restoreSummarySchema, {
   onExcessProperty: "error",
 });
-const decodePingResult = Schema.decodeUnknownSync(
-  Schema.Struct({ alive: Schema.Literal(true) }),
-  { onExcessProperty: "error" },
-);
+const decodePingResult = Schema.decodeUnknownSync(Schema.Struct({ alive: Schema.Literal(true) }), {
+  onExcessProperty: "error",
+});
 const decodePublishReadyResult = Schema.decodeUnknownSync(
   Schema.Struct({ accepted: Schema.Literal(true) }),
   { onExcessProperty: "error" },

@@ -124,7 +124,6 @@ describe("tmux session host", () => {
       createTmuxSessionHost(exec).restoreWindow!({
         paneId: "%1",
         sessionId: "session-a",
-        name: "green-pine",
         cwd: "/tmp/work",
         wrapperPath: "/tmp/pi",
         extensionPath: "/tmp/extension",

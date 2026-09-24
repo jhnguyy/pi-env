@@ -37,7 +37,6 @@ async function fixture() {
     catalog,
     host,
     sessionFiles: nodeSessionFileProbe,
-    entropy: () => 0,
   });
   const input: SessionStartInput = {
     mode: "tui",
@@ -58,7 +57,7 @@ afterEach(async () => {
 });
 
 describe("session lifecycle", () => {
-  it("enrolls only an eligible pending tmux session and preserves its generated name", async () => {
+  it("enrolls eligible pending sessions without assigning names", async () => {
     const { cwd, catalog, lifecycle, input } = await fixture();
 
     expect(await Effect.runPromise(lifecycle.start({ ...input, mode: "rpc" }))).toEqual({
@@ -83,10 +82,39 @@ describe("session lifecycle", () => {
     if (first.state !== "managed" || second.state !== "managed" || collision.state !== "managed") {
       return;
     }
-    expect(first.session.record.name).toMatch(/^[a-z]+-[a-z]+$/);
-    expect(second.session.record.name).toBe(first.session.record.name);
-    expect(collision.session.record.name).not.toBe(first.session.record.name);
+    expect(first.session.record.name).toBeUndefined();
+    expect(second.session.record.name).toBeUndefined();
+    expect(collision.session.record.name).toBeUndefined();
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions).toHaveLength(2);
+  });
+
+  it("removes a legacy generated name when an unnamed session reopens", async () => {
+    const { cwd, catalog, lifecycle, input } = await fixture();
+    await Effect.runPromise(lifecycle.start(input));
+    await Effect.runPromise(
+      catalog.update(cwd, (manifest) => ({
+        ...manifest,
+        sessions: manifest.sessions.map((record) => ({ ...record, name: "green-pine" })),
+      })),
+    );
+
+    const resumed = await Effect.runPromise(lifecycle.start(input));
+    expect(resumed.state).toBe("managed");
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
+  });
+
+  it("uses an explicit Pi name when an unnamed session reopens", async () => {
+    const { cwd, catalog, lifecycle, input } = await fixture();
+    await Effect.runPromise(lifecycle.start(input));
+
+    const resumed = await Effect.runPromise(
+      lifecycle.start({ ...input, sessionName: "investigate" }),
+    );
+    expect(resumed.state).toBe("managed");
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
+      name: "investigate",
+      explicitName: true,
+    });
   });
 
   it("requires explicit adoption for a materialized session and verifies its header identity", async () => {
@@ -145,9 +173,9 @@ describe("session lifecycle", () => {
     expect(
       await failureOf(lifecycle.refreshMaterialization(started.session, input.sessionFile)),
     ).toBeInstanceOf(SessionFileInvalid);
-    expect(
-      (await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.persistence.state,
-    ).toBe("pending");
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.persistence.state).toBe(
+      "pending",
+    );
 
     await writeFile(
       input.sessionFile!,
