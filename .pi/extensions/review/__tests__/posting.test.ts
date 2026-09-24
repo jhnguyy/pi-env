@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { ReviewEvent, type ReviewState } from "../core";
 import { postReview, restore } from "../index";
+import { readPostingIntent, recordPostingIntent } from "../posting-attempt";
 import {
   githubStub,
   registeredReview,
@@ -290,6 +291,28 @@ describe("review pull request posting", () => {
       ),
     ).resolves.toContain("unresolved");
     expect(posts).toBe(0);
+  });
+
+  it("exclusively claims a review across different content identities", () => {
+    const s = state();
+    const first = {
+      id: "11111111-1111-4111-8111-111111111111",
+      event: ReviewEvent.Comment,
+      marker: "<!-- pi-env-pr-review:r:11111111-1111-4111-8111-111111111111 -->",
+      status: "pending" as const,
+      at: new Date().toISOString(),
+      contentHash: "a".repeat(64),
+    };
+    recordPostingIntent(s.snapshot, "session", first);
+    expect(() =>
+      recordPostingIntent(s.snapshot, "session", {
+        ...first,
+        id: "22222222-2222-4222-8222-222222222222",
+        marker: "<!-- pi-env-pr-review:r:22222222-2222-4222-8222-222222222222 -->",
+        contentHash: "b".repeat(64),
+      }),
+    ).toThrow("already owns");
+    expect(readPostingIntent(s.snapshot, "session")?.attempt.contentHash).toBe(first.contentHash);
   });
 
   it("blocks a duplicate after restart when the session lost its pending entry", async () => {
