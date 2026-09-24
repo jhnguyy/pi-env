@@ -257,18 +257,21 @@ function collectProcess(
   args: readonly string[],
   options: StreamProcessOptions,
   preserveExit: false,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessOutput, ProcessFailure>;
 function collectProcess(
   command: string,
   args: readonly string[],
   options: StreamProcessOptions,
   preserveExit: true,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessCommandResult, ProcessFailure>;
 function collectProcess(
   command: string,
   args: readonly string[],
-  options: StreamProcessOptions = {},
+  options: StreamProcessOptions,
   preserveExit: boolean,
+  terminalSession: StreamProcessOptions["terminalSession"],
 ): Effect.Effect<ProcessOutput | ProcessCommandResult, ProcessFailure> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS;
   const stdoutLimit = options.stdoutLimitBytes ?? options.maxBuffer ?? DEFAULT_STREAM_LIMIT_BYTES;
@@ -384,7 +387,7 @@ function collectProcess(
       child = spawn(command, [...args], spawnOptions(
         options,
         [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-        options.terminalSession ?? "isolated",
+        terminalSession,
       ));
       child.stdout?.on("data", onStdout);
       child.stderr?.on("data", onStderr);
@@ -422,7 +425,7 @@ export function streamProcess(
   args: readonly string[],
   options: StreamProcessOptions = {},
 ): Effect.Effect<ProcessOutput, ProcessFailure> {
-  return collectProcess(command, args, options, false);
+  return collectProcess(command, args, options, false, options.terminalSession);
 }
 
 /** Runs a bounded command, preserving stdout/stderr and exit code (including nonzero) as data. */
@@ -431,5 +434,5 @@ export function runProcess(
   args: readonly string[],
   options: Omit<StreamProcessOptions, "terminalSession"> = {},
 ): Effect.Effect<ProcessCommandResult, ProcessFailure> {
-  return collectProcess(command, args, options, true);
+  return collectProcess(command, args, options, true, "isolated");
 }
