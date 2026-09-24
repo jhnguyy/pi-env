@@ -363,7 +363,9 @@ describe("review pull request posting", () => {
         getBranch: () => [reviewEntry({ ...s, preface: "new content", posts: [] })],
       },
     } as any);
-    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("result is unknown");
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
+      "result is unknown",
+    );
     expect(posts).toBe(1);
   });
 
@@ -549,6 +551,40 @@ describe("review pull request posting", () => {
       "result is unknown",
     );
     expect(posts).toBe(1);
+  });
+
+  it("serializes different events with one shared posting permit", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let posts = 0;
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        post: async () => {
+          posts++;
+          await blocked;
+          return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+        },
+      }),
+    });
+    const ctx = { ...h.session(), ui: view.ctx.ui };
+    h.handlers.session_start({}, ctx);
+    const first = h.command("pr post r comment", ctx);
+    await vi.waitFor(() => expect(posts).toBe(1));
+    const second = h.command("pr post r approve", ctx);
+    release();
+    await Promise.all([first, second]);
+    expect(posts).toBe(1);
+    expect(view.notes).toContain("Review already posted (remote).");
+    expect(h.appended.at(-1).state.posts).toMatchObject([{ status: "posted" }]);
+    await h.command("pr cleanup r", ctx);
+    expect(view.notes.at(-1)).toBe("Review cleanup complete: r.");
   });
 
   it("serializes concurrent identical posts and posts once", async () => {
