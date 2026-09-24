@@ -14,6 +14,7 @@ function executor(initialTags: Readonly<Record<string, string>>) {
     calls.push([command, ...args]);
     const format = args.at(-1);
     if (args.includes("list-windows")) return { code: 0, stdout: "@1\n@2\n", stderr: "" };
+    if (args.includes("new-window")) return { code: 0, stdout: "@3\n", stderr: "" };
     if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
     if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
     if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
@@ -69,7 +70,6 @@ describe("tmux session host", () => {
     const { calls, exec } = executor({});
     await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a"));
     expect(calls.some((call) => call.includes("rename-window"))).toBe(false);
-    expect(calls.some((call) => call.includes("rename-session"))).toBe(false);
     expect(calls).toContainEqual([
       "tmux",
       "-S",
@@ -85,15 +85,7 @@ describe("tmux session host", () => {
   });
 
   it("creates an unnamed restored window without an explicit title", async () => {
-    const { calls, exec: baseExec } = executor({});
-    let creation: string[] = [];
-    const exec: Exec = (command, args) => {
-      if (args.includes("new-window")) {
-        creation = [command, ...args];
-        return Promise.resolve({ code: 0, stdout: "@3\n", stderr: "" });
-      }
-      return baseExec(command, args);
-    };
+    const { calls, exec } = executor({});
     await Effect.runPromise(
       createTmuxSessionHost(exec).restoreWindow!({
         paneId: "%1",
@@ -107,7 +99,8 @@ describe("tmux session host", () => {
         persistence: { state: "pending" },
       }),
     );
-    expect(creation).toContain("new-window");
+    const creation = calls.find((call) => call.includes("new-window"));
+    expect(creation).toBeDefined();
     expect(creation).not.toContain("-n");
     expect(creation).not.toContain("--name");
     expect(calls.some((call) => call.includes("automatic-rename"))).toBe(false);

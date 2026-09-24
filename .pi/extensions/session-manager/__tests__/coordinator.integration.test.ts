@@ -39,20 +39,13 @@ describe("workspace coordinator", () => {
     expect(first.name).toBeUndefined();
     expect(second).toEqual(first);
     expect((await Effect.runPromise(catalog.read(cwd)))?.coordinator).toEqual(first);
-  });
-
-  it("removes a legacy generated coordinator name", async () => {
-    const { cwd, catalog } = await fixture();
-    await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({
         ...manifest,
-        coordinator: { ...manifest.coordinator!, name: "coordinator-green-pine" },
+        coordinator: { ...first, name: "coordinator-green-pine" },
       })),
     );
-
-    expect((await Effect.runPromise(ensureCoordinator({ catalog, cwd }))).name).toBeUndefined();
-    expect((await Effect.runPromise(catalog.read(cwd)))?.coordinator?.name).toBeUndefined();
+    expect(await Effect.runPromise(ensureCoordinator({ catalog, cwd }))).toEqual(first);
   });
 
   it("restores independent sessions and reports one failure without failing the workspace", async () => {

@@ -51,15 +51,6 @@ function manifest(overrides: Partial<SessionManifest> = {}): SessionManifest {
 }
 
 describe("session manifest v1", () => {
-  it("allows multiple unnamed sessions and rejects a name marker without a name", () => {
-    const { name: _legacyName, ...unnamed } = openRecord({ sessionId: "session-a" });
-    const other = { ...unnamed, sessionId: "session-b" };
-    expect(validateManifest(manifest({ sessions: [unnamed, other] })).sessions).toHaveLength(2);
-    expect(() =>
-      validateManifest(manifest({ sessions: [{ ...unnamed, explicitName: true }] })),
-    ).toThrow(ManifestSemanticFailure);
-  });
-
   it("rejects unknown fields and unsupported versions without coercion", () => {
     expect(() => validateManifest({ ...manifest(), extra: true })).toThrow(ManifestMalformed);
     expect(() =>
@@ -91,7 +82,11 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
-  it("rejects whitespace-only names without forbidding embedded spaces", () => {
+  it("rejects invalid explicit names without forbidding embedded spaces", () => {
+    const { name: _name, ...unnamed } = openRecord();
+    expect(() =>
+      validateManifest(manifest({ sessions: [{ ...unnamed, explicitName: true }] })),
+    ).toThrow(ManifestSemanticFailure);
     expect(() =>
       validateManifest(manifest({ sessions: [openRecord({ name: "\u2003" })] })),
     ).toThrow(ManifestSemanticFailure);

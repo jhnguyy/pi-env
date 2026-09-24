@@ -80,37 +80,23 @@ describe("session lifecycle", () => {
     expect(second.state).toBe("managed");
     expect(collision.state).toBe("managed");
     if (first.state !== "managed" || second.state !== "managed" || collision.state !== "managed") {
-      return;
+      throw new Error("expected managed sessions");
     }
     expect(first.session.record.name).toBeUndefined();
     expect(second.session.record.name).toBeUndefined();
     expect(collision.session.record.name).toBeUndefined();
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions).toHaveLength(2);
-  });
-
-  it("removes a legacy generated name when an unnamed session reopens", async () => {
-    const { cwd, catalog, lifecycle, input } = await fixture();
-    await Effect.runPromise(lifecycle.start(input));
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({
         ...manifest,
-        sessions: manifest.sessions.map((record) => ({ ...record, name: "green-pine" })),
+        sessions: manifest.sessions.map((record) =>
+          record.sessionId === input.sessionId ? { ...record, name: "green-pine" } : record,
+        ),
       })),
     );
-
-    const resumed = await Effect.runPromise(lifecycle.start(input));
-    expect(resumed.state).toBe("managed");
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
-  });
-
-  it("uses an explicit Pi name when an unnamed session reopens", async () => {
-    const { cwd, catalog, lifecycle, input } = await fixture();
     await Effect.runPromise(lifecycle.start(input));
-
-    const resumed = await Effect.runPromise(
-      lifecycle.start({ ...input, sessionName: "investigate" }),
-    );
-    expect(resumed.state).toBe("managed");
+    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
+    await Effect.runPromise(lifecycle.start({ ...input, sessionName: "investigate" }));
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
       name: "investigate",
       explicitName: true,
