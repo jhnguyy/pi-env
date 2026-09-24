@@ -53,6 +53,7 @@ describe("credential providers", () => {
     expect(command).toBe("/trusted/op");
     expect(args).toEqual(["read", "--no-newline", "op://Private/Linear/credential"]);
     expect(options.env).not.toHaveProperty("PI_ENV_NODE_BIN");
+    expect(options.detached).toBe(false);
     expect(options.stdoutLimitBytes).toBe(CREDENTIAL_STDOUT_LIMIT_BYTES);
     expect(options.stderrLimitBytes).toBe(CREDENTIAL_STDERR_LIMIT_BYTES);
     expect(Redacted.value(wrapped)).toBe(SENTINEL);
@@ -104,6 +105,7 @@ describe("credential providers", () => {
     expect(JSON.stringify(options.env)).not.toContain("SESSION_SENTINEL");
     expect(options.env).not.toHaveProperty("PI_ENV_NODE_BIN");
     expect(options.env).not.toHaveProperty("OPENAI_API_KEY");
+    expect(options.detached).toBeUndefined();
     expect(Buffer.isBuffer(options.stdin)).toBe(true);
     expect(Buffer.from(options.stdin ?? "").toString("utf8")).toBe("SESSION_SENTINEL\n");
     expect(options.stdoutLimitBytes).toBe(CREDENTIAL_STDOUT_LIMIT_BYTES);

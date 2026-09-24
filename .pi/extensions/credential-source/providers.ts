@@ -10,7 +10,6 @@ import {
 import { CredentialErrorCode, type CredentialName } from "../_shared/credential-source";
 import type { CredentialEntry } from "./config";
 import { credentialError, providerFailure, sanitizeProviderError } from "./errors";
-import { readOnePassword } from "./onepassword-runner";
 
 export const CredentialExecutable = {
   OnePassword: "op",
@@ -96,7 +95,7 @@ function validateCredential(
 }
 
 export function createOnePasswordProvider(
-  runner: CredentialProcessRunner = readOnePassword,
+  runner: CredentialProcessRunner = streamProcess,
   resolveExecutable: CredentialExecutableResolver = () => CredentialExecutable.OnePassword,
 ): CredentialProvider {
   return {
@@ -136,6 +135,8 @@ export function createOnePasswordProvider(
           }
           return runner(executable, ["read", "--no-newline", entry.reference], {
             ...PROVIDER_PROCESS_OPTIONS,
+            // Only this fixed read inherits Pi's terminal session for 1Password app authorization.
+            detached: false,
           }).pipe(
             Effect.mapError((error) => providerFailure(error, "1password")),
             Effect.flatMap((output) => validateCredential(output.stdout, "1password", name)),
