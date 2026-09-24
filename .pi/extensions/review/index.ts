@@ -1273,7 +1273,7 @@ export async function postReview(
       state?.posts.findIndex(
         (post) =>
           post.id === attempt.id &&
-          post.contentHash === contentHash &&
+          post.contentHash === attempt.contentHash &&
           post.marker === attempt.marker,
       ) ?? -1;
     if (!state || state.cleaned || index < 0) return false;
@@ -1342,8 +1342,15 @@ export async function postReview(
     assertActiveCoordinatorScope(scope);
     if (!prior)
       return "A posting attempt is recorded locally, but its remote result is unknown. Verify it on GitHub before retrying.";
-    const current = currentState("posting reconciliation");
-    if (typeof current === "string") return current;
+    // Reconciliation concerns the original remote side effect, not the edited
+    // draft or the current remote head. Only submission requires preflight.
+    const current = coordinator.review(targetId);
+    if (
+      !current ||
+      current.cleaned ||
+      current.snapshot.metadata.headOid !== state.snapshot.metadata.headOid
+    )
+      return "The review changed before posting reconciliation was recorded.";
     const reconciled = { ...existingIntent.attempt, status: "posted" as const, reviewId: prior };
     const posts = current.posts.filter((post) => post.id !== reconciled.id);
     if (!saveState(pi, { ...current, posts: [...posts, reconciled] }, scope))
@@ -1351,13 +1358,9 @@ export async function postReview(
     return `Existing review found for marker; not posting duplicate (${prior}).`;
   }
 
-  async function resolvePriorAttempt(
-    state: ReviewState,
-  ): Promise<{ state: ReviewState; attempt?: PostAttempt } | string> {
-    const attempt = state.posts.find(
-      (post) => post.contentHash === contentHash && post.status !== "posted",
-    );
-    if (!attempt) return { state };
+  async function resolvePriorAttempt(state: ReviewState): Promise<string | undefined> {
+    const attempt = state.posts.find((post) => post.status !== "posted");
+    if (!attempt) return undefined;
     const prior = await reconcile(state, attempt);
     if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
     // A legacy pending entry has no recoverable local intent. It may already
@@ -1365,40 +1368,28 @@ export async function postReview(
     return "Previous posting result is still uncertain. Verify the legacy attempt on GitHub before retrying.";
   }
 
-  function unresolvedOtherContent(state: ReviewState): string | undefined {
-    if (state.posts.some((post) => post.status !== "posted" && !post.contentHash))
-      return "A legacy attempt has no recoverable content identity. Verify it on GitHub before posting.";
-    if (state.posts.some((post) => post.status !== "posted" && post.contentHash !== contentHash))
-      return "Another posting attempt is unresolved. Reconcile it before posting changed content.";
-    if (!hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts)) return undefined;
-    const existing = readPostingIntent(state.snapshot, scope.sessionId);
-    return !existing || existing.attempt.contentHash !== contentHash
-      ? "Another posting attempt is unresolved. Reconcile it before posting changed content."
-      : undefined;
-  }
-
   async function execute(): Promise<string> {
+    const original = coordinator.review(targetId);
+    if (!original || original.cleaned) return "The review changed before posting could start.";
+    const posted = original.posts.find((post) => post.status === "posted");
+    if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
+    const recorded = await reconcileRecordedIntent(original);
+    if (recorded) return recorded;
+    const resolved = await resolvePriorAttempt(original);
+    if (resolved) return resolved;
+    // A directory left by an interrupted intent write is not permission to
+    // create a new attempt, even if its JSON file is absent.
+    if (hasUnresolvedPostingIntent(original.snapshot, scope.sessionId, original.posts))
+      return "Another posting attempt is unresolved. Reconcile it before posting changed content.";
     let state = await preflight("posting queue");
     if (typeof state === "string") return state;
-    const posted = state.posts.find((post) => post.status === "posted");
-    if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-    const conflict = unresolvedOtherContent(state);
-    if (conflict) return conflict;
-    const recorded = await reconcileRecordedIntent(state);
-    if (recorded) return recorded;
-    const resolved = await resolvePriorAttempt(state);
-    if (typeof resolved === "string") return resolved;
-    state = resolved.state;
-    let attempt = resolved.attempt;
     if (!(await confirm(ctx, "Post PR review?", postingConfirmation(state, event))))
       return "Posting cancelled.";
     state = await preflight("confirmation");
     if (typeof state === "string") return state;
-    if (!attempt) {
-      attempt = newAttempt(state, event, contentHash);
-      if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
-        return "The review session changed before the posting attempt was recorded. Nothing was posted.";
-    }
+    const attempt = newAttempt(state, event, contentHash);
+    if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
+      return "The review session changed before the posting attempt was recorded. Nothing was posted.";
     recordPostingIntent(state.snapshot, scope.sessionId, attempt);
     const current = currentState("submission");
     if (typeof current === "string") return current;
@@ -1545,7 +1536,10 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const targetReviewId = state.snapshot.id;
   if (coordinator.isPreparing(targetReviewId) || state.dag?.status === "running")
     return `Review ${targetReviewId} is active. Cancel or wait for it before cleanup.`;
-  if (hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts))
+  if (
+    state.posts.some((post) => post.status !== "posted") ||
+    hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts)
+  )
     return `Review ${targetReviewId} has an unresolved posting attempt. Reconcile it before cleanup.`;
   coordinator.beginPreparation(targetReviewId);
   try {
@@ -1694,6 +1688,7 @@ export default function reviewExtension(pi: ExtensionAPI) {
     void reconcilePersistedDagStates(pi, ctx);
   });
   pi.on("session_tree" as any, (_event: unknown, ctx: ExtensionContext) => {
+    coordinator.invalidateBranch();
     restore(ctx);
     void reconcileInterruptedPreparations(pi);
     void reconcilePersistedDagStates(pi, ctx);

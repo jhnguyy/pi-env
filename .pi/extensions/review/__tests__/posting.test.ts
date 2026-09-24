@@ -363,7 +363,7 @@ describe("review pull request posting", () => {
         getBranch: () => [reviewEntry({ ...s, preface: "new content", posts: [] })],
       },
     } as any);
-    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("unresolved");
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("result is unknown");
     expect(posts).toBe(1);
   });
 
@@ -421,6 +421,47 @@ describe("review pull request posting", () => {
     expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
       "not posting duplicate",
     );
+    expect(posts).toBe(1);
+  });
+
+  it("reconciles a remote review after human edits and a remote head change", async () => {
+    const dir = root();
+    const s = { ...state(dir), preface: "original" };
+    const view = reviewContext(dir);
+    let remoteHead = "head";
+    let visible = false;
+    let posts = 0;
+    let marker = "";
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        head: () => ({ code: 0, stdout: `${remoteHead}\n`, stderr: "" }),
+        list: () => ({
+          code: 0,
+          stdout: visible ? JSON.stringify([{ id: "remote", body: marker }]) : "[]",
+          stderr: "",
+        }),
+        post: (args: string[]) => {
+          posts++;
+          marker = JSON.parse(readFileSync(args.at(-1)!, "utf8")).body;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    });
+    const ctx = { ...h.session(), ui: { ...view.ctx.ui, editor: async () => "new preface" } };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    expect(posts).toBe(1);
+    await h.command("pr preface r", ctx);
+    remoteHead = "next-head";
+    visible = true;
+    await h.command("pr post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("Existing review found for marker");
+    expect(h.appended.at(-1).state).toMatchObject({
+      preface: "new preface",
+      posts: [{ status: "posted", reviewId: "remote" }],
+    });
     expect(posts).toBe(1);
   });
 

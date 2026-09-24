@@ -160,8 +160,10 @@ export class ReviewCoordinator {
     this.reset();
   }
 
-  reset(): void {
-    this.sessionAbortController.abort(new Error("The review session changed."));
+  // A tree move can select a new branch without changing Pi's session ID.
+  // Keep the session's runtime registration, but cancel branch-owned work.
+  invalidateBranch(): void {
+    this.sessionAbortController.abort(new Error("The review session branch changed."));
     this.sessionAbortController = new AbortController();
     this.generation += 1;
     this.states.clear();
@@ -170,6 +172,10 @@ export class ReviewCoordinator {
     this.reconcilingRunIds.clear();
     this.selectedReviewId = undefined;
     this.postingSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
+  }
+
+  reset(): void {
+    this.invalidateBranch();
     this.context = undefined;
     this.sessionId = undefined;
     this.runtimeRegistration = undefined;
