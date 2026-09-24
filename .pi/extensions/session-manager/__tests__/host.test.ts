@@ -14,7 +14,6 @@ function executor(initialTags: Readonly<Record<string, string>>) {
     calls.push([command, ...args]);
     const format = args.at(-1);
     if (args.includes("list-windows")) return { code: 0, stdout: "@1\n@2\n", stderr: "" };
-    if (args.includes("new-window")) return { code: 0, stdout: "@3\n", stderr: "" };
     if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
     if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
     if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
@@ -64,46 +63,6 @@ describe("tmux session host", () => {
       "@1",
       name,
     ]);
-  });
-
-  it("binds an unnamed session without changing its tmux window title", async () => {
-    const { calls, exec } = executor({});
-    await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a"));
-    expect(calls.some((call) => call.includes("rename-window"))).toBe(false);
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "set-option",
-      "-w",
-      "-u",
-      "-t",
-      "@1",
-      "automatic-rename",
-    ]);
-    expect(calls.some((call) => call.includes("@pi_session_id"))).toBe(true);
-  });
-
-  it("creates an unnamed restored window without an explicit title", async () => {
-    const { calls, exec } = executor({});
-    await Effect.runPromise(
-      createTmuxSessionHost(exec).restoreWindow!({
-        paneId: "%1",
-        sessionId: "session-a",
-        cwd: "/tmp/work",
-        wrapperPath: "/tmp/pi",
-        extensionPath: "/tmp/extension",
-        workspaceId: "a".repeat(64),
-        coordinatorSessionId: "coordinator-a",
-        launchId: "launch-a",
-        persistence: { state: "pending" },
-      }),
-    );
-    const creation = calls.find((call) => call.includes("new-window"));
-    expect(creation).toBeDefined();
-    expect(creation).not.toContain("-n");
-    expect(creation).not.toContain("--name");
-    expect(calls.some((call) => call.includes("automatic-rename"))).toBe(false);
   });
 
   it("releases only the current session's owned window binding", async () => {

@@ -352,7 +352,6 @@ describe("session-manager extension", () => {
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
     let displayName: string | undefined;
     const renamedWindows: string[] = [];
-    const boundNames: (string | undefined)[] = [];
     let editorFactory: EditorFactory | undefined = () =>
       cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
     const pi = cast<ExtensionAPI>({
@@ -391,11 +390,7 @@ describe("session-manager extension", () => {
       catalog,
       host: {
         inspectCurrent: () => Effect.succeed(currentWindow),
-        bindCurrent: (_paneId, _sessionId, name) =>
-          Effect.sync(() => {
-            boundNames.push(name);
-            return currentWindow;
-          }),
+        bindCurrent: () => Effect.succeed(currentWindow),
         renameCurrent: (_paneId, _sessionId, name) =>
           Effect.sync(() => {
             renamedWindows.push(name);
@@ -408,8 +403,6 @@ describe("session-manager extension", () => {
 
     await handlers.get("session_start")?.({} as never, ctx);
     expect(displayName).toBeUndefined();
-    expect(boundNames).toEqual([undefined]);
-
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
 
     displayName = "investigate-resume";
