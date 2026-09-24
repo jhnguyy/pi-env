@@ -41,6 +41,7 @@ export class ReviewCoordinator {
   private evidenceRegistration: DagExecutorRegistration | undefined;
   private selectedReviewId: string | undefined;
   private sessionId: string | undefined;
+  private uncertainWriteSessionId: string | undefined;
   private generation = 0;
   private sessionAbortController = new AbortController();
 
@@ -77,6 +78,16 @@ export class ReviewCoordinator {
 
   isScopeActive(scope: ReviewCoordinatorScope): boolean {
     return scope.sessionId === this.sessionId && scope.generation === this.generation;
+  }
+
+  markSessionWriteUncertain(): void {
+    this.uncertainWriteSessionId = this.sessionId;
+    this.states.clear();
+    this.selectedReviewId = undefined;
+  }
+
+  isSessionWriteUncertain(): boolean {
+    return this.sessionId !== undefined && this.uncertainWriteSessionId === this.sessionId;
   }
 
   reviews(): readonly ReviewState[] {

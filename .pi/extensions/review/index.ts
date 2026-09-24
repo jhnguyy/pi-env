@@ -66,6 +66,11 @@ import {
 } from "./review-dag-runner";
 import { readVerifiedRawFinding } from "./reviewer-dossier";
 import { renderReviewCall, renderReviewResult } from "./render";
+import {
+  hasUnresolvedPostingIntent,
+  readPostingIntent,
+  recordPostingIntent,
+} from "./posting-attempt";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
@@ -130,6 +135,9 @@ function matchingReview(identityKey: string, parentSessionId: string): ReviewSta
 function stateById(reviewId?: string): ReviewState | undefined {
   return reviewId ? coordinator.review(reviewId) : coordinator.latestState();
 }
+function statePath(id: string): string {
+  return join(getAgentDir(), "pr-review", "artifacts", id, "state.json");
+}
 function customData(entry: any): any {
   if (entry?.type === "custom" && entry?.customType === REVIEW_ENTRY_TYPE) return entry.data;
   return undefined;
@@ -142,8 +150,16 @@ function stateEntry(state: ReviewState) {
   };
 }
 function saveState(pi: ExtensionAPI, state: ReviewState, scope?: ReviewCoordinatorScope): boolean {
+  if (coordinator.isSessionWriteUncertain())
+    throw new Error("Review session write is uncertain. Restart Pi before changing this review.");
   if (scope && !coordinator.isScopeActive(scope)) return false;
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+  try {
+    pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry(state));
+    persistJson(statePath(state.snapshot.id), state);
+  } catch (cause) {
+    coordinator.markSessionWriteUncertain();
+    throw cause;
+  }
   return coordinator.remember(state, scope);
 }
 function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
@@ -153,6 +169,7 @@ function assertActiveCoordinatorScope(scope: ReviewCoordinatorScope): void {
 export function restore(ctx: ExtensionContext): void {
   coordinator.activate(ctx);
   coordinator.resetReviews();
+  if (coordinator.isSessionWriteUncertain()) return;
   const latestById = new Map<string, ReviewState>();
   for (const entry of (ctx.sessionManager as any).getBranch?.() ?? []) {
     const data = customData(entry);
@@ -777,6 +794,8 @@ async function startReview(
   onProgress?: Parameters<typeof runReviewDag>[0]["onProgress"],
 ): Promise<ReviewActionResult> {
   coordinator.activate(ctx);
+  if (coordinator.isSessionWriteUncertain())
+    throw new Error("Review session write is uncertain. Restart Pi before changing this review.");
   const coordinatorScope = coordinator.captureScope();
   const operationSignal = coordinator.operationSignal(coordinatorScope, signal);
   const resolved = await resolvePrUrl(pi.exec.bind(pi), ctx.cwd, params.url, operationSignal);
@@ -1217,6 +1236,8 @@ export async function postReview(
   signal?: AbortSignal,
   reviewId?: string,
 ): Promise<string> {
+  if (coordinator.isSessionWriteUncertain())
+    return "Review session write is uncertain. Restart Pi before posting.";
   const scope = coordinator.captureScope();
   const initial = stateById(reviewId);
   if (!initial || initial.cleaned)
@@ -1308,6 +1329,43 @@ export async function postReview(
       : "The review was accepted remotely, but the review changed before completion was recorded.";
   }
 
+  async function reconcileRecordedIntent(state: ReviewState): Promise<string | undefined> {
+    const existingIntent = readPostingIntent(state.snapshot, scope.sessionId, contentHash);
+    if (!existingIntent) return undefined;
+    const prior = await existingReviewWithMarker(
+      pi.exec.bind(pi),
+      ctx.cwd,
+      state.snapshot,
+      existingIntent.attempt.marker,
+      operationSignal,
+    );
+    assertActiveCoordinatorScope(scope);
+    if (!prior)
+      return "A posting attempt is recorded locally, but its remote result is unknown. Verify it on GitHub before retrying.";
+    const current = currentState("posting reconciliation");
+    if (typeof current === "string") return current;
+    const reconciled = { ...existingIntent.attempt, status: "posted" as const, reviewId: prior };
+    const posts = current.posts.filter((post) => post.id !== reconciled.id);
+    if (!saveState(pi, { ...current, posts: [...posts, reconciled] }, scope))
+      return "The review session changed before posting reconciliation was recorded.";
+    return `Existing review found for marker; not posting duplicate (${prior}).`;
+  }
+
+  async function resolvePriorAttempt(
+    state: ReviewState,
+  ): Promise<{ state: ReviewState; attempt?: PostAttempt } | string> {
+    const attempt = state.posts.find(
+      (post) => post.contentHash === contentHash && post.status !== "posted",
+    );
+    if (!attempt) return { state };
+    const prior = await reconcile(state, attempt);
+    if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
+    if (attempt.status === "uncertain")
+      return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
+    const current = currentState("reconciliation");
+    return typeof current === "string" ? current : { state: current, attempt };
+  }
+
   async function execute(): Promise<string> {
     let state = await preflight("posting queue");
     if (typeof state === "string") return state;
@@ -1315,17 +1373,17 @@ export async function postReview(
       (post) => post.contentHash === contentHash && post.status === "posted",
     );
     if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-    let attempt = state.posts.find(
-      (post) => post.contentHash === contentHash && post.status !== "posted",
-    );
-    if (attempt) {
-      const prior = await reconcile(state, attempt);
-      if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;
-      if (attempt.status === "uncertain")
-        return "Previous posting result is still uncertain. Reconcile the review on GitHub before retrying.";
-      state = currentState("reconciliation");
-      if (typeof state === "string") return state;
-    }
+    if (
+      hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts) &&
+      !readPostingIntent(state.snapshot, scope.sessionId, contentHash)
+    )
+      return "Another posting attempt is unresolved. Reconcile it before posting changed content.";
+    const recorded = await reconcileRecordedIntent(state);
+    if (recorded) return recorded;
+    const resolved = await resolvePriorAttempt(state);
+    if (typeof resolved === "string") return resolved;
+    state = resolved.state;
+    let attempt = resolved.attempt;
     if (!(await confirm(ctx, "Post PR review?", postingConfirmation(state, event))))
       return "Posting cancelled.";
     state = await preflight("confirmation");
@@ -1335,6 +1393,7 @@ export async function postReview(
       if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
         return "The review session changed before the posting attempt was recorded. Nothing was posted.";
     }
+    recordPostingIntent(state.snapshot, scope.sessionId, attempt);
     const current = currentState("submission");
     if (typeof current === "string") return current;
     const pending = current.posts.find((post) => post.id === attempt.id);
@@ -1461,7 +1520,12 @@ async function finishReviewCleanup(
   if (coordinator.review(reviewId) !== state)
     return "The review changed during cleanup. No cleanup state was appended.";
   removeReviewArtifacts(state);
-  pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...state, cleaned: true }));
+  try {
+    pi.appendEntry(REVIEW_ENTRY_TYPE, stateEntry({ ...state, cleaned: true }));
+  } catch (cause) {
+    coordinator.markSessionWriteUncertain();
+    throw cause;
+  }
   if (!coordinator.isScopeActive(scope))
     return "The review session changed during cleanup. Cleanup state was not applied to the replacement session.";
   coordinator.deleteReview(reviewId);
@@ -1475,6 +1539,8 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const targetReviewId = state.snapshot.id;
   if (coordinator.isPreparing(targetReviewId) || state.dag?.status === "running")
     return `Review ${targetReviewId} is active. Cancel or wait for it before cleanup.`;
+  if (hasUnresolvedPostingIntent(state.snapshot, scope.sessionId, state.posts))
+    return `Review ${targetReviewId} has an unresolved posting attempt. Reconcile it before cleanup.`;
   coordinator.beginPreparation(targetReviewId);
   try {
     return await finishReviewCleanup(pi, state, scope);
@@ -1543,6 +1609,13 @@ async function command(
   ctx: ExtensionCommandContext,
 ): Promise<void> {
   const [subject = "", cmd = "status", ...rest] = args.trim().split(/\s+/);
+  if (subject === "pr" && cmd !== "get" && coordinator.isSessionWriteUncertain()) {
+    ctx.ui.notify(
+      "Review session write is uncertain. Restart Pi before changing this review.",
+      "error",
+    );
+    return;
+  }
   try {
     const fn = subject === "pr" ? handlers[cmd] : undefined;
     ctx.ui.notify(

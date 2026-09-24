@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { Check } from "typebox/value";
 import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
@@ -451,7 +451,7 @@ describe("review extension pull request surface", () => {
     expect(notes.at(-1)).toContain("Selected: 0");
   });
 
-  it("restores decisions from the active branch without writing a second state file", async () => {
+  it("restores decisions from the active branch rather than a stale state mirror", async () => {
     const root = tempRoot();
     const previous = sampleState("r-one", []);
     const unrelated = sampleState("r-other", []);
@@ -471,7 +471,7 @@ describe("review extension pull request surface", () => {
     await pi.command("pr select r-one F1", ctx);
     expect(notes.at(-1)).toContain("1 finding(s) selected");
     const oldStatePath = join(root, "pr-review/artifacts/r-one/state.json");
-    expect(existsSync(oldStatePath)).toBe(false);
+    expect(existsSync(oldStatePath)).toBe(true);
     expect(pi.appended).toHaveLength(1);
     // A stale legacy mirror must not override the active session branch.
     mkdirSync(previous.snapshot.artifactDir, { recursive: true });
@@ -489,7 +489,12 @@ describe("review extension pull request surface", () => {
   it("does not publish a decision when the session append rejects it", async () => {
     tempRoot();
     const before = sampleState("r-one", []);
-    restore({ sessionManager: { getBranch: () => [custom(before)] } } as any);
+    restore({
+      sessionManager: {
+        getSessionId: () => "rejected-decision",
+        getBranch: () => [custom(before)],
+      },
+    } as any);
     const pi = extensionPi();
     pi.appendEntry = () => {
       throw new Error("session append rejected");
@@ -499,7 +504,30 @@ describe("review extension pull request surface", () => {
     await pi.command("pr select r-one F1", ctx);
     expect(notes.at(-1)).toContain("session append rejected");
     await pi.command("pr open r-one", ctx);
-    expect(notes.at(-1)).toContain("Selected: 0");
+    expect(notes.at(-1)).toContain("uncertain");
+  });
+
+  it("quarantines an actual Pi session that exposes a rejected append in its branch", async () => {
+    tempRoot();
+    const state = sampleState("r-actual", []);
+    const manager = SessionManager.inMemory();
+    manager.appendCustomEntry(REVIEW_ENTRY_TYPE, { reviewId: state.snapshot.id, state });
+    const ctx = { sessionManager: manager, ui: { notify: vi.fn() } } as any;
+    restore(ctx);
+    const pi = extensionPi();
+    pi.appendEntry = (type: string, data: unknown) => manager.appendCustomEntry(type, data);
+    (manager as any)._persist = () => {
+      throw new Error("injected session write failure");
+    };
+    await pi.command("pr select r-actual F1", ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("injected session write failure"),
+      "error",
+    );
+    expect((manager.getBranch().at(-1) as any).data.state.selectedFindingIds).toContain("F1");
+    pi.handlers.session_tree({}, ctx);
+    await pi.command("pr open r-actual", ctx);
+    expect(ctx.ui.notify).toHaveBeenLastCalledWith(expect.stringContaining("uncertain"), "error");
   });
 
   it("restores a long active branch without scanning child sessions", async () => {

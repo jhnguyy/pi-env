@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -196,7 +204,12 @@ describe("review pull request posting", () => {
   });
 
   it("does not publish a pending attempt or POST if session append rejects", async () => {
-    restore({ sessionManager: { getBranch: () => [reviewEntry(state())] } } as any);
+    restore({
+      sessionManager: {
+        getSessionId: () => "rejected-post",
+        getBranch: () => [reviewEntry(state())],
+      },
+    } as any);
     let posts = 0;
     const pi = {
       appendEntry(): void {
@@ -212,15 +225,179 @@ describe("review pull request posting", () => {
     const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
     await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).rejects.toThrow();
     expect(posts).toBe(0);
-    // The next attempt must record a new marker, not reuse the rejected one.
-    const accepted: unknown[] = [];
-    pi.appendEntry = (...args: unknown[]) => {
-      accepted.push(args);
-    };
-    await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).resolves.toBe(
-      "Review posted.",
+    // A rejected append may still be visible in Pi's in-memory branch.
+    // Stop this session rather than treating it as clean on the next attempt.
+    await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).resolves.toContain(
+      "Restart Pi",
     );
-    expect(accepted).toHaveLength(2);
+    expect(posts).toBe(0);
+  });
+
+  it("records the marker on disk before POST when session append is only in memory", async () => {
+    const s = state();
+    restore({
+      sessionManager: { getSessionId: () => "session", getBranch: () => [reviewEntry(s)] },
+    } as any);
+    let observed = false;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          const dir = `${s.snapshot.artifactDir}/../../posting/${s.snapshot.id}`;
+          const files = readdirSync(dir);
+          expect(files).toHaveLength(1);
+          const intent = JSON.parse(readFileSync(`${dir}/${files[0]}`, "utf8"));
+          expect(intent.attempt.marker).toContain(s.snapshot.id);
+          observed = true;
+          return { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+        },
+      }),
+    };
+    await expect(
+      postReview(
+        pi as any,
+        { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+        ReviewEvent.Comment,
+      ),
+    ).resolves.toBe("Review posted.");
+    expect(observed).toBe(true);
+  });
+
+  it("does not POST when the local posting intent cannot be recorded", async () => {
+    const s = state();
+    restore({
+      sessionManager: { getSessionId: () => "session", getBranch: () => [reviewEntry(s)] },
+    } as any);
+    // The expected directory is occupied by a regular file.
+    const directory = `${s.snapshot.artifactDir}/../../posting/${s.snapshot.id}`;
+    mkdirSync(`${s.snapshot.artifactDir}/../../posting`, { recursive: true });
+    writeFileSync(directory, "blocked");
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      }),
+    };
+    await expect(
+      postReview(
+        pi as any,
+        { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+        ReviewEvent.Comment,
+      ),
+    ).rejects.toThrow();
+    expect(posts).toBe(0);
+  });
+
+  it("blocks a duplicate after restart when the session lost its pending entry", async () => {
+    const s = state();
+    const entries = [reviewEntry(s)];
+    const session = { sessionManager: { getSessionId: () => "session", getBranch: () => entries } };
+    restore(session as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("uncertain");
+    restore(session as any);
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
+      "result is unknown",
+    );
+    expect(posts).toBe(1);
+  });
+
+  it("blocks changed content while an earlier remote attempt remains unresolved", async () => {
+    const s = state();
+    const sessionId = "session";
+    restore({
+      sessionManager: { getSessionId: () => sessionId, getBranch: () => [reviewEntry(s)] },
+    } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    await postReview(pi as any, ctx as any, ReviewEvent.Comment);
+    restore({
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getBranch: () => [reviewEntry({ ...s, preface: "new content", posts: [] })],
+      },
+    } as any);
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("unresolved");
+    expect(posts).toBe(1);
+  });
+
+  it("fails closed on a damaged posting intent after restart", async () => {
+    const s = state();
+    const session = {
+      sessionManager: { getSessionId: () => "session", getBranch: () => [reviewEntry(s)] },
+    };
+    restore(session as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    await postReview(pi as any, ctx as any, ReviewEvent.Comment);
+    const dir = `${s.snapshot.artifactDir}/../../posting/${s.snapshot.id}`;
+    writeFileSync(`${dir}/${readdirSync(dir)[0]}`, "not JSON");
+    restore(session as any);
+    await expect(postReview(pi as any, ctx as any, ReviewEvent.Comment)).rejects.toThrow();
+    expect(posts).toBe(1);
+  });
+
+  it("reconciles a posting intent after restart when the pending session entry was lost", async () => {
+    const s = state();
+    const session = {
+      sessionManager: { getSessionId: () => "session", getBranch: () => [reviewEntry(s)] },
+    };
+    restore(session as any);
+    let posts = 0;
+    let marker = "";
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        list: () => ({
+          code: 0,
+          stdout: marker ? JSON.stringify([{ id: "remote", body: marker }]) : "[]",
+          stderr: "",
+        }),
+        post: (args: string[]) => {
+          posts++;
+          marker = JSON.parse(readFileSync(args.at(-1)!, "utf8")).body;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    };
+    const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("reconciled");
+    restore(session as any);
+    expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
+      "not posting duplicate",
+    );
     expect(posts).toBe(1);
   });
 
@@ -239,7 +416,7 @@ describe("review pull request posting", () => {
     const ctx = { cwd: "/tmp", ui: { confirm: async () => true } };
     expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain("uncertain");
     expect(await postReview(pi as any, ctx as any, ReviewEvent.Comment)).toContain(
-      "still uncertain",
+      "result is unknown",
     );
     expect(posts).toBe(1);
   });
@@ -536,7 +713,7 @@ describe("review pull request posting", () => {
     async function interleave() {
       await h.command(`pr ${action} r`, runtime);
       expect(view.notes.at(-1)).toContain(
-        action === "cleanup" ? "Review cleanup complete" : "Preface updated",
+        action === "cleanup" ? "unresolved posting attempt" : "Preface updated",
       );
       appendsAfterAction = h.appended.length;
     }
@@ -572,9 +749,9 @@ describe("review pull request posting", () => {
     expect(confirm).toHaveBeenCalledTimes(1);
     if (action === "cleanup") {
       await h.command("pr list", runtime);
-      expect(view.notes.at(-1)).toBe("No active PR reviews.");
-      expect(existsSync(review.snapshot.artifactDir)).toBe(false);
-      expect(h.appended).toHaveLength(appendsAfterAction);
+      expect(view.notes.at(-1)).toContain("r succeeded");
+      expect(existsSync(review.snapshot.artifactDir)).toBe(true);
+      expect(h.appended.at(-1).state.posts[0].status).toBe("posted");
     } else {
       expect(view.notes.at(-1)).toMatch(/Review posted|Posted review reconciled/);
       expect(h.appended.at(-1).state.posts[0]).toMatchObject({
