@@ -32,10 +32,10 @@ export interface ProcessOptions {
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
   readonly killGraceMs?: number;
+  /** Inherit the caller's terminal session only for a trusted command. */
+  readonly terminalSession?: "isolated" | "inherit";
 }
 export interface StreamProcessOptions extends ProcessOptions {
-  /** Only use for a fixed, trusted command that needs the parent's terminal session. */
-  readonly detached?: boolean;
   readonly stdin?: string | Uint8Array;
   readonly stdoutLimitBytes?: number;
   readonly stderrLimitBytes?: number;
@@ -77,7 +77,7 @@ function spawnOptions(options: ScopedChildProcessOptions | StreamProcessOptions,
     cwd: options.cwd,
     env: options.env,
     stdio,
-    detached: "detached" in options ? options.detached : process.platform !== "win32",
+    detached: process.platform !== "win32" && (options.terminalSession ?? "isolated") === "isolated",
   };
 }
 
@@ -95,11 +95,6 @@ function signalChildTree(proc: ChildProcess, signal: NodeJS.Signals): void {
       // The group may already be gone; a live direct child still gets a fallback signal.
     }
   }
-  if (!directChildIsOpen(proc)) return;
-  try { proc.kill(signal); } catch { /* already gone */ }
-}
-
-function signalDirectChild(proc: ChildProcess, signal: NodeJS.Signals): void {
   if (!directChildIsOpen(proc)) return;
   try { proc.kill(signal); } catch { /* already gone */ }
 }
@@ -130,24 +125,6 @@ export async function terminateAndWait(proc: ChildProcess, graceMs: number = DEF
     // Always signal the POSIX group after the parent closes or grace expires so
     // TERM-ignoring descendants cannot survive a cooperative parent exit.
     signalChildTree(proc, "SIGKILL");
-    await closed;
-  } finally {
-    if (graceTimer) clearTimeout(graceTimer);
-  }
-}
-
-async function terminateDirectChildAndWait(proc: ChildProcess, graceMs: number): Promise<void> {
-  if (!directChildIsOpen(proc)) return;
-  const closed = waitForClose(proc);
-  let graceTimer: NodeJS.Timeout | undefined;
-  const graceElapsed = new Promise<void>((resolve) => {
-    graceTimer = setTimeout(resolve, graceMs);
-    graceTimer.unref();
-  });
-  signalDirectChild(proc, "SIGTERM");
-  try {
-    await Promise.race([closed, graceElapsed]);
-    signalDirectChild(proc, "SIGKILL");
     await closed;
   } finally {
     if (graceTimer) clearTimeout(graceTimer);
@@ -330,9 +307,7 @@ function collectProcess(
     const beginTermination = (): Promise<void> => {
       if (termination) return termination;
       if (!child || closed) return Promise.resolve();
-      termination = options.detached === false
-        ? terminateDirectChildAndWait(child, killGraceMs)
-        : terminateAndWait(child, killGraceMs);
+      termination = terminateAndWait(child, killGraceMs);
       return termination;
     };
     const failAndTerminate = (error: ProcessFailure): void => {
