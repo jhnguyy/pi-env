@@ -92,6 +92,54 @@ describe("tmux session host", () => {
     ]);
   });
 
+  it("binds an unnamed session without changing its tmux window title", async () => {
+    const { calls, exec } = executor({});
+    await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a"));
+    expect(calls.some((call) => call.includes("rename-window"))).toBe(false);
+    expect(calls).toContainEqual([
+      "tmux",
+      "-S",
+      "/tmp/tmux.sock",
+      "set-option",
+      "-w",
+      "-u",
+      "-t",
+      "@1",
+      "automatic-rename",
+    ]);
+    expect(calls.some((call) => call.includes("@pi_session_id"))).toBe(true);
+  });
+
+  it("creates an unnamed restored window without an explicit title", async () => {
+    const { calls, exec: baseExec } = executor({});
+    let creation: string[] = [];
+    const exec: Exec = (command, args) => {
+      if (args.includes("new-window")) {
+        creation = [command, ...args];
+        return Promise.resolve({ code: 0, stdout: "@3\n", stderr: "" });
+      }
+      return baseExec(command, args);
+    };
+    await Effect.runPromise(
+      createTmuxSessionHost(exec).restoreWindow!({
+        paneId: "%1",
+        sessionId: "session-a",
+        name: "green-pine",
+        cwd: "/tmp/work",
+        wrapperPath: "/tmp/pi",
+        extensionPath: "/tmp/extension",
+        workspaceId: "a".repeat(64),
+        coordinatorSessionId: "coordinator-a",
+        launchId: "launch-a",
+        persistence: { state: "pending" },
+      }),
+    );
+    expect(creation).toContain("new-window");
+    expect(creation).not.toContain("-n");
+    expect(creation).not.toContain("--name");
+    expect(calls.some((call) => call.includes("automatic-rename"))).toBe(false);
+  });
+
   it("releases only the current session's owned window binding", async () => {
     const { calls, exec } = executor({ "@1": "session-a" });
 
@@ -130,6 +178,7 @@ describe("tmux session host", () => {
       paneId: "%1",
       sessionId: "session with spaces",
       name: "quiet pine; literal",
+      explicitName: true as const,
       cwd: "/tmp/work space",
       wrapperPath: "/opt/pi env/bin/pi",
       extensionPath: "/opt/pi env/session manager/index.js",

@@ -17,7 +17,7 @@ type Base = {
   readonly createdAt: string;
   readonly lastOpenedAt: string;
 };
-type WorkBase = Base & { readonly taskRef?: TaskRef };
+type WorkBase = Base & { readonly taskRef?: TaskRef; readonly explicitName?: true };
 export type CoordinatorRecord = Base & { readonly role: "coordinator" };
 export type OpenSessionRecord = WorkBase & {
   readonly role: "work";

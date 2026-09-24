@@ -128,6 +128,7 @@ export function createWorkspaceReconciler(options: {
               paneId: options.paneId,
               sessionId: record.sessionId,
               name: record.name,
+              ...(record.explicitName ? { explicitName: true as const } : {}),
               cwd: record.cwd,
               wrapperPath: options.wrapperPath,
               extensionPath: options.extensionPath,

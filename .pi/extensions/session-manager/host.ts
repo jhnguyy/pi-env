@@ -44,6 +44,7 @@ export type RestoreWindowInput = {
   readonly paneId: string;
   readonly sessionId: string;
   readonly name: string;
+  readonly explicitName?: true;
   readonly cwd: string;
   readonly wrapperPath: string;
   readonly extensionPath: string;
@@ -68,7 +69,7 @@ export interface SessionHostShape {
   readonly bindCurrent: (
     paneId: string,
     sessionId: string,
-    name: string,
+    name?: string,
   ) => Effect.Effect<CurrentWindow, SessionHostError>;
   readonly renameCurrent: (
     paneId: string,
@@ -230,7 +231,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       : Effect.void;
   };
 
-  const bindCurrent = (paneId: string, sessionId: string, name: string) =>
+  const bindCurrent = (paneId: string, sessionId: string, name?: string) =>
     Effect.gen(function* () {
       const window = yield* inspectCurrent(paneId);
       yield* assertBinding(window, sessionId);
@@ -247,24 +248,37 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           sessionId,
         ]);
       }
-      yield* run("disable automatic rename", [
-        "-S",
-        window.socketPath,
-        "set-option",
-        "-w",
-        "-t",
-        window.windowId,
-        "automatic-rename",
-        "off",
-      ]);
-      yield* run("rename window", [
-        "-S",
-        window.socketPath,
-        "rename-window",
-        "-t",
-        window.windowId,
-        name,
-      ]);
+      if (name) {
+        yield* run("disable automatic rename", [
+          "-S",
+          window.socketPath,
+          "set-option",
+          "-w",
+          "-t",
+          window.windowId,
+          "automatic-rename",
+          "off",
+        ]);
+        yield* run("rename window", [
+          "-S",
+          window.socketPath,
+          "rename-window",
+          "-t",
+          window.windowId,
+          name,
+        ]);
+      } else {
+        yield* run("restore automatic rename", [
+          "-S",
+          window.socketPath,
+          "set-option",
+          "-w",
+          "-u",
+          "-t",
+          window.windowId,
+          "automatic-rename",
+        ]);
+      }
       const verified = yield* inspectCurrent(paneId);
       if (verified.boundSessionId !== sessionId) {
         return yield* new SessionHostFailure({
@@ -286,6 +300,16 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           reason: "the current window is not bound to this Pi session",
         });
       }
+      yield* run("disable automatic rename", [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-t",
+        window.windowId,
+        "automatic-rename",
+        "off",
+      ]);
       yield* run("rename window", [
         "-S",
         window.socketPath,
@@ -327,7 +351,11 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       const sessionArgs =
         input.persistence.state === "materialized"
           ? ["--session", input.persistence.sessionFile]
-          : ["--session-id", input.sessionId, "--name", input.name];
+          : [
+              "--session-id",
+              input.sessionId,
+              ...(input.explicitName ? ["--name", input.name] : []),
+            ];
       const args = [
         "-S",
         current.socketPath,
@@ -338,8 +366,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
         "#{window_id}",
         "-t",
         `${current.tmuxSessionId}:`,
-        "-n",
-        input.name,
+        ...(input.explicitName ? ["-n", input.name] : []),
         "-c",
         input.cwd,
         "-e",
@@ -400,16 +427,17 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           ),
         ),
       );
-      yield* run("disable restored window automatic rename", [
-        "-S",
-        current.socketPath,
-        "set-option",
-        "-w",
-        "-t",
-        windowId,
-        "automatic-rename",
-        "off",
-      ]);
+      if (input.explicitName)
+        yield* run("disable restored window automatic rename", [
+          "-S",
+          current.socketPath,
+          "set-option",
+          "-w",
+          "-t",
+          windowId,
+          "automatic-rename",
+          "off",
+        ]);
       const verified = yield* run("verify restored window binding", [
         "-S",
         current.socketPath,

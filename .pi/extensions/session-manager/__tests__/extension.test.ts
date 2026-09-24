@@ -97,9 +97,7 @@ describe("session-manager extension", () => {
     const cwd = join(root, "workspace");
     await mkdir(cwd);
     const catalog = createFileSessionCatalog(join(root, "agent"));
-    await Effect.runPromise(
-      ensureCoordinator({ catalog, cwd, entropy: () => 0 }),
-    );
+    await Effect.runPromise(ensureCoordinator({ catalog, cwd, entropy: () => 0 }));
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
       catalog.update(cwd, (manifest) => ({
@@ -356,6 +354,7 @@ describe("session-manager extension", () => {
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
     let displayName: string | undefined;
     const renamedWindows: string[] = [];
+    const boundNames: (string | undefined)[] = [];
     let editorFactory: EditorFactory | undefined = () =>
       cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
     const pi = cast<ExtensionAPI>({
@@ -394,7 +393,11 @@ describe("session-manager extension", () => {
       catalog,
       host: {
         inspectCurrent: () => Effect.succeed(currentWindow),
-        bindCurrent: () => Effect.succeed(currentWindow),
+        bindCurrent: (_paneId, _sessionId, name) =>
+          Effect.sync(() => {
+            boundNames.push(name);
+            return currentWindow;
+          }),
         renameCurrent: (_paneId, _sessionId, name) =>
           Effect.sync(() => {
             renamedWindows.push(name);
@@ -408,22 +411,25 @@ describe("session-manager extension", () => {
 
     await handlers.get("session_start")?.({} as never, ctx);
     expect(displayName).toBeUndefined();
+    expect(boundNames).toEqual([undefined]);
+
+    const generatedName = (await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name;
+    displayName = generatedName;
+    await handlers.get("session_info_changed")?.(cast<never>({ name: generatedName }), ctx);
+    expect(renamedWindows).toEqual([generatedName]);
 
     displayName = "investigate-resume";
-    await handlers.get("session_info_changed")?.(
-      cast<never>({ name: "investigate-resume" }),
-      ctx,
-    );
+    await handlers.get("session_info_changed")?.(cast<never>({ name: "investigate-resume" }), ctx);
 
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBe(
       "investigate-resume",
     );
-    expect(renamedWindows).toEqual(["investigate-resume"]);
+    expect(renamedWindows).toEqual([generatedName, "investigate-resume"]);
 
     displayName = undefined;
     await handlers.get("session_info_changed")?.(cast<never>({ name: undefined }), ctx);
 
     expect(displayName).toBeUndefined();
-    expect(renamedWindows).toEqual(["investigate-resume"]);
+    expect(renamedWindows).toEqual([generatedName, "investigate-resume"]);
   });
 });

@@ -5,6 +5,7 @@ import {
   type Persistence,
   type SessionCatalogFailure,
   type SessionManifest,
+  type SessionRecord,
 } from "./contracts.js";
 import {
   type CloseSource,
@@ -80,7 +81,9 @@ export type SessionStatus = {
 
 export interface SessionLifecycle {
   readonly start: (input: SessionStartInput) => Effect.Effect<StartResult, SessionLifecycleError>;
-  readonly adopt: (input: SessionStartInput) => Effect.Effect<ManagedSession, SessionLifecycleError>;
+  readonly adopt: (
+    input: SessionStartInput,
+  ) => Effect.Effect<ManagedSession, SessionLifecycleError>;
   readonly close: (
     session: ManagedSession,
     source: CloseSource,
@@ -94,7 +97,10 @@ export interface SessionLifecycle {
     session: ManagedSession,
     sessionFile?: string,
   ) => Effect.Effect<ManagedSession, SessionLifecycleError>;
-  readonly status: (cwd: string, sessionId: string) => Effect.Effect<SessionStatus, SessionCatalogFailure>;
+  readonly status: (
+    cwd: string,
+    sessionId: string,
+  ) => Effect.Effect<SessionStatus, SessionCatalogFailure>;
 }
 
 const nowIso = Effect.map(Clock.currentTimeMillis, (value) => new Date(value).toISOString());
@@ -104,13 +110,21 @@ const isDomainError = (value: unknown): value is SessionLifecycleDomainError =>
   value instanceof SessionIdentityConflict ||
   value instanceof SessionNameConflict ||
   value instanceof SessionNameUnavailable;
-const unwrapDomain = (error: SessionCatalogFailure): SessionCatalogFailure | SessionLifecycleDomainError =>
+const unwrapDomain = (
+  error: SessionCatalogFailure,
+): SessionCatalogFailure | SessionLifecycleDomainError =>
   error instanceof ManifestOperationFailure && isDomainError(error.cause) ? error.cause : error;
 
 function persistenceFor(materialized: boolean, sessionFile?: string): Persistence {
   return materialized && sessionFile
     ? { state: "materialized", sessionFile }
     : { state: "pending" };
+}
+
+function adoptionNameSource(found: SessionRecord | undefined, requestedName?: string) {
+  if (found)
+    return found.role === "work" && found.explicitName ? { explicitName: true as const } : {};
+  return requestedName ? { explicitName: true as const } : {};
 }
 
 export function createSessionLifecycle(options: {
@@ -165,7 +179,10 @@ export function createSessionLifecycle(options: {
         return { state: "unmanaged", reason: "session is closed" } as const;
       }
       if (!existing && observed.exists) {
-        return { state: "unmanaged", reason: "materialized session requires /session-adopt" } as const;
+        return {
+          state: "unmanaged",
+          reason: "materialized session requires /session-adopt",
+        } as const;
       }
       const timestamp = yield* nowIso;
       const candidates = nameCandidates(entropy);
@@ -186,7 +203,9 @@ export function createSessionLifecycle(options: {
             selected = {
               ...found,
               persistence:
-                observed.persistence.state === "materialized" ? observed.persistence : found.persistence,
+                observed.persistence.state === "materialized"
+                  ? observed.persistence
+                  : found.persistence,
               lastOpenedAt: timestamp,
             };
             return replaceWorkRecord(manifest, selected);
@@ -208,6 +227,7 @@ export function createSessionLifecycle(options: {
             sessionId: input.sessionId,
             cwd: identity.canonicalCwd,
             name,
+            ...(requestedName ? { explicitName: true as const } : {}),
             persistence: observed.persistence,
             createdAt: timestamp,
             lastOpenedAt: timestamp,
@@ -220,7 +240,7 @@ export function createSessionLifecycle(options: {
       const record = selected ?? (findRecord(committed, input.sessionId) as OpenSessionRecord);
       const session: ManagedSession = { role: "work", record, paneId: input.paneId };
       yield* host
-        .bindCurrent(input.paneId, input.sessionId, record.name)
+        .bindCurrent(input.paneId, input.sessionId, record.explicitName ? record.name : undefined)
         .pipe(Effect.mapError((cause) => new SessionBindingFailed({ session, cause })));
       return {
         state: "managed",
@@ -263,12 +283,14 @@ export function createSessionLifecycle(options: {
               record.desiredState === "open" &&
               record.name === name,
           );
-          if (manifest.coordinator?.name === name || collision) throw new SessionNameConflict({ name });
+          if (manifest.coordinator?.name === name || collision)
+            throw new SessionNameConflict({ name });
           selected = {
             version: 1,
             sessionId: input.sessionId,
             cwd: identity.canonicalCwd,
             name,
+            ...adoptionNameSource(found, requestedName),
             persistence: { state: "materialized", sessionFile: input.sessionFile! },
             createdAt: found?.createdAt ?? timestamp,
             lastOpenedAt: timestamp,
@@ -282,7 +304,7 @@ export function createSessionLifecycle(options: {
       const record = selected ?? (findRecord(committed, input.sessionId) as OpenSessionRecord);
       const session: ManagedSession = { role: "work", record, paneId: input.paneId };
       yield* host
-        .bindCurrent(input.paneId, input.sessionId, record.name)
+        .bindCurrent(input.paneId, input.sessionId, record.explicitName ? record.name : undefined)
         .pipe(Effect.mapError((cause) => new SessionBindingFailed({ session, cause })));
       return session;
     });
@@ -320,7 +342,7 @@ export function createSessionLifecycle(options: {
     Effect.gen(function* () {
       const normalized = name.trim();
       if (!normalized) return yield* new SessionNameConflict({ name });
-      if (normalized === session.record.name) return session;
+      if (normalized === session.record.name && session.record.explicitName) return session;
       let selected: OpenSessionRecord | undefined;
       const committed = yield* catalog
         .update(session.record.cwd, (manifest) => {
@@ -337,11 +359,12 @@ export function createSessionLifecycle(options: {
                 record.name === normalized,
             );
           if (collision) throw new SessionNameConflict({ name: normalized });
-          selected = { ...found, name: normalized };
+          selected = { ...found, name: normalized, explicitName: true };
           return replaceWorkRecord(manifest, selected);
         })
         .pipe(Effect.mapError(unwrapDomain));
-      const record = selected ?? (findRecord(committed, session.record.sessionId) as OpenSessionRecord);
+      const record =
+        selected ?? (findRecord(committed, session.record.sessionId) as OpenSessionRecord);
       const renamed = { ...session, record };
       yield* host
         .renameCurrent(session.paneId, record.sessionId, record.name)
@@ -366,7 +389,8 @@ export function createSessionLifecycle(options: {
           return replaceWorkRecord(manifest, selected);
         })
         .pipe(Effect.mapError(unwrapDomain));
-      const record = selected ?? (findRecord(committed, session.record.sessionId) as OpenSessionRecord);
+      const record =
+        selected ?? (findRecord(committed, session.record.sessionId) as OpenSessionRecord);
       return { ...session, record };
     });
 
@@ -375,8 +399,7 @@ export function createSessionLifecycle(options: {
       const manifest = yield* catalog.read(cwd);
       if (!manifest) return { open: 0, closed: 0, revision: 0 };
       const found = findRecord(manifest, sessionId);
-      const current =
-        found?.role === "work" && found.desiredState === "open" ? found : undefined;
+      const current = found?.role === "work" && found.desiredState === "open" ? found : undefined;
       return {
         ...(current ? { current } : {}),
         open: manifest.sessions.filter((record) => record.desiredState === "open").length,

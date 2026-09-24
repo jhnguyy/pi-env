@@ -212,9 +212,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
       if (host.prepareWorkspace) {
         await run(host.prepareWorkspace(paneId, identity.canonicalCwd));
       }
-      await run(
-        host.bindCurrent(paneId, manifest.coordinator.sessionId, manifest.coordinator.name),
-      );
+      await run(host.bindCurrent(paneId, manifest.coordinator.sessionId));
       coordinatorBinding = { paneId, sessionId: manifest.coordinator.sessionId };
       const reconciler = createWorkspaceReconciler({
         catalog: options.catalog,
@@ -453,7 +451,12 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     if (syncingName) return;
     const previousDisplayName = displayName;
     displayName = event.name;
-    if (!managed || !event.name || event.name === managed.record.name) return;
+    if (
+      !managed ||
+      !event.name ||
+      (event.name === managed.record.name && managed.record.explicitName)
+    )
+      return;
     const target = managed;
     const name = event.name;
     try {

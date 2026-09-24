@@ -24,7 +24,11 @@ const base = {
   lastOpenedAt: Schema.String,
 };
 const coordinator = Schema.Struct({ ...base, role: Schema.Literal("coordinator") });
-const workBase = { ...base, taskRef: Schema.optionalKey(task) };
+const workBase = {
+  ...base,
+  taskRef: Schema.optionalKey(task),
+  explicitName: Schema.optionalKey(Schema.Literal(true)),
+};
 const open = Schema.Struct({
   ...workBase,
   role: Schema.Literal("work"),
