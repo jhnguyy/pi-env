@@ -9,7 +9,7 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 ## Establish the Contribution
 
-- Read the repository instructions before changing files. Read `README.md` and `CONTRIBUTING.md` when they exist. Follow applicable area-specific instructions.
+- Identify the target repository from the request or ask if it is ambiguous. Find its root and the task worktree before repository commands, even when Pi starts elsewhere. Read the target repository's `README.md` and `CONTRIBUTING.md` when they exist. Follow applicable area-specific instructions.
 - State the intended outcome, material assumptions, success criteria, and required validation. Record an assumption when it can change the solution, risk, or result.
 - Deliver one coherent outcome completely. Include all code, tests, documentation, migrations, and cleanup required for that outcome. Preserve unrelated behavior. Every changed part must support the pull request intention.
 - Separate work that has an independent purpose into another contribution or explicit follow-up.
