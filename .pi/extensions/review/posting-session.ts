@@ -1,12 +1,4 @@
-import {
-  closeSync,
-  existsSync,
-  fstatSync,
-  fsyncSync,
-  openSync,
-  readFileSync,
-  statSync,
-} from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, openSync, readSync, statSync } from "node:fs";
 import { dirname, parse, resolve } from "node:path";
 import {
   parseSessionEntries,
@@ -77,7 +69,14 @@ export function syncPersistedPostingEntry(
   try {
     const size = fstatSync(fd).size;
     if (size > MAX_SESSION_BYTES_FOR_POST) return false;
-    const entries = parseSessionEntries(readFileSync(fd, "utf8"));
+    const bytes = Buffer.alloc(size);
+    let read = 0;
+    while (read < size) {
+      const count = readSync(fd, bytes, read, size - read, read);
+      if (count === 0) return false;
+      read += count;
+    }
+    const entries = parseSessionEntries(bytes.toString("utf8"));
     if (entries[0]?.type !== "session" || entries[0].id !== manager.getSessionId()) return false;
     const persisted = entries.some(
       (entry) =>

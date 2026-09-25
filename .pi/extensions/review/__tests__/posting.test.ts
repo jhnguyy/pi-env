@@ -773,6 +773,45 @@ describe("review pull request posting", () => {
     expect(posts).toBe(0);
   });
 
+  it("does not overlook an unresolved legacy attempt when an older attempt was posted", async () => {
+    const s = state();
+    s.posts = [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        event: ReviewEvent.Comment,
+        marker: "<!-- pi-env-pr-review:r:11111111-1111-4111-8111-111111111111 -->",
+        status: "posted",
+        reviewId: "remote1",
+        at: new Date().toISOString(),
+      },
+      {
+        id: "22222222-2222-4222-8222-222222222222",
+        event: ReviewEvent.Comment,
+        marker: "<!-- pi-env-pr-review:r:22222222-2222-4222-8222-222222222222 -->",
+        status: "uncertain",
+        at: new Date().toISOString(),
+      },
+    ];
+    restore({ sessionManager: { getBranch: () => [reviewEntry(s)] } } as any);
+    let posts = 0;
+    const pi = {
+      appendEntry() {},
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 0, stdout: "{}", stderr: "" };
+        },
+      }),
+    };
+    const result = await postReview(
+      pi as any,
+      { cwd: "/tmp", ui: { confirm: async () => true } } as any,
+      ReviewEvent.Comment,
+    );
+    expect(result).toContain("legacy attempt");
+    expect(posts).toBe(0);
+  });
+
   it("refuses to resubmit a legacy pending attempt without a recoverable local intent", async () => {
     const s = state();
     s.posts = [

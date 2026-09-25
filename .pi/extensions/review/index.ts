@@ -1388,11 +1388,23 @@ export async function postReview(
     return undefined;
   }
 
+  async function existingPostedResult(state: ReviewState): Promise<string | undefined> {
+    const posted = state.posts.find((post) => post.status === "posted");
+    if (!posted) return undefined;
+    // Older histories can contain a posted review and a later uncertain
+    // attempt. Do not hide that attempt behind the already-posted shortcut.
+    if (state.posts.some((post) => post.status !== "posted")) {
+      const unresolved = await resolvePriorAttempt(state);
+      if (unresolved) return unresolved;
+    }
+    return `Review already posted (${posted.reviewId ?? posted.id}).`;
+  }
+
   async function execute(): Promise<string> {
     const original = coordinator.review(targetId);
     if (!original || original.cleaned) return "The review changed before posting could start.";
-    const posted = original.posts.find((post) => post.status === "posted");
-    if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
+    const postedResult = await existingPostedResult(original);
+    if (postedResult) return postedResult;
     const recorded = await reconcileRecordedIntent(original);
     if (recorded) return recorded;
     const resolved = await resolvePriorAttempt(original);
