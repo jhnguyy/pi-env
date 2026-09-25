@@ -28,7 +28,7 @@ Install and configure the `op` CLI with desktop-app integration. The extension r
 
 1Password authorizes the terminal session, not the Pi session. Authorization expires after 10 minutes of inactivity or 12 hours at most. A later read can ask for Touch ID again, even if Pi is still open. Authorization can also remain valid after Pi closes. See [1Password app integration security](https://developer.1password.com/docs/cli/app-integration-security/). The provider runs one `op read` at a time, so parallel requests cannot start concurrent authorization prompts. It does not cache credentials or track authorization expiry.
 
-A headless test on macOS 26.6.2 with `op` 2.39.0 succeeded without a controlling terminal. Two sequential reads from one Pi process needed one Touch ID prompt; a new process asked again. This still requires a user to approve the prompt in the 1Password desktop app. Unattended service or CI use is not supported by this configuration. If the app cannot authorize a read, the provider reports a sanitized failure. Do not pass a service-account token into Pi's environment.
+Headless reads can work without a controlling terminal when the 1Password desktop app can request approval. Sequential reads in one process can reuse that approval. A new process asks for approval again. A user must still approve the prompt in the desktop app. Unattended service or CI use is not supported by this configuration. If the app cannot authorize a read, the provider reports a sanitized failure. Do not pass a service-account token into Pi's environment.
 
 ### Bitwarden CLI
 

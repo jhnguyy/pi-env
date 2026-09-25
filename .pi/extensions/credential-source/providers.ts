@@ -64,6 +64,13 @@ function minimalProviderEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJ
   return output;
 }
 
+function onePasswordReadPermit(): Semaphore.Semaphore {
+  const root = globalThis as typeof globalThis & {
+    __piEnvOnePasswordReadPermitV1?: Semaphore.Semaphore;
+  };
+  return (root.__piEnvOnePasswordReadPermitV1 ??= Semaphore.makeUnsafe(1));
+}
+
 const PROVIDER_PROCESS_OPTIONS: StreamProcessOptions = {
   timeoutMs: DEFAULT_CREDENTIAL_TIMEOUT_MS,
   stdoutLimitBytes: CREDENTIAL_STDOUT_LIMIT_BYTES,
@@ -98,7 +105,7 @@ export function createOnePasswordProvider(
   runner: CredentialProcessRunner = streamProcess,
   resolveExecutable: CredentialExecutableResolver = () => CredentialExecutable.OnePassword,
 ): CredentialProvider {
-  const readPermit = Semaphore.makeUnsafe(1);
+  const readPermit = onePasswordReadPermit();
   return {
     id: "1password",
     resolve(entry, name) {

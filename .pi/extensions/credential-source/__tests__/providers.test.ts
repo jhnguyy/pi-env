@@ -52,7 +52,7 @@ process.stdout.write("SECRET_SENTINEL_DO_NOT_LEAK");
       rmSync(directory, { recursive: true, force: true });
     }
   });
-  it.runIf(process.platform !== "win32")("does not overlap 1Password reads from the same provider", async () => {
+  it.runIf(process.platform !== "win32")("does not overlap 1Password reads across provider instances", async () => {
     const directory = mkdtempSync(join(tmpdir(), "pi-credential-parallel-"));
     const marker = join(directory, "active");
     const overlap = join(directory, "overlap");
@@ -76,15 +76,16 @@ setTimeout(() => {
 }, 300);
 `);
       chmodSync(executable, 0o700);
-      const provider = createOnePasswordProvider(undefined, () => executable);
+      const firstProvider = createOnePasswordProvider(undefined, () => executable);
+      const secondProvider = createOnePasswordProvider(undefined, () => executable);
       const entry = {
         provider: "1password" as const,
         consumers: ["linear"],
         reference: "op://Private/Canary/credential",
       };
       const [first, second] = await Promise.all([
-        Effect.runPromise(provider.resolve(entry, "linear.apiKey")),
-        Effect.runPromise(provider.resolve(entry, "linear.apiKey")),
+        Effect.runPromise(firstProvider.resolve(entry, "linear.apiKey")),
+        Effect.runPromise(secondProvider.resolve(entry, "linear.apiKey")),
       ]);
       expect(Redacted.value(first)).toBe(SENTINEL);
       expect(Redacted.value(second)).toBe(SENTINEL);
