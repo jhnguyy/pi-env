@@ -73,11 +73,15 @@ export const NOTES_ACTIONS = [
 
 export const NOTES_COLLECTIONS = ["store", "inbox", "projects", "worklog", "wiki"] as const;
 const NOTES_COLLECTION_DESCRIPTIONS = {
-  store: "Provider-neutral orientation, search, legacy access, and maintenance",
-  inbox: "Unclassified captures",
-  projects: "Active plans, owners, status, next actions, and linked tickets",
-  wiki: "Maintained knowledge",
-  worklog: "Completed outcomes",
+  store:
+    "General provider store. Use for orientation, global search, legacy notes, and bounded maintenance. Omit collection for Store.",
+  inbox:
+    "Unclassified captures. Read the earliest item or a date; write a Note or unchecked Follow-up for today.",
+  projects:
+    "Active plans, owners, status, next actions, and linked tickets. List, read, or revision-guard a document write.",
+  wiki: "Maintained current knowledge. Read a folder listing or Markdown file; revision-guard document writes.",
+  worklog:
+    "Brief completed-work outcomes. Read by date or range; record a bullet for today, not plans or session narrative.",
 } as const;
 const NOTES_STORE_ACTIONS = NOTES_ACTIONS.filter((action) => action !== "record");
 
@@ -88,68 +92,125 @@ const collectionLimitParameter = () =>
     Type.Integer({
       minimum: 1,
       maximum: MAX_COLLECTION_LIMIT,
-      description: "Maximum collection results",
+      description: `Maximum items returned per page (default ${DEFAULT_COLLECTION_LIMIT}, maximum ${MAX_COLLECTION_LIMIT}).`,
     }),
   );
 const continuationCursor = () =>
   Type.Optional(
     Type.String({
       maxLength: MAX_LIST_CURSOR_LENGTH,
-      description: "Opaque continuation cursor returned by the same read",
+      description:
+        "Use nextCursor from a prior page with the same collection, selector, target, and order.",
     }),
   );
 const revisionPrecondition = () =>
   Type.Union([Type.String({ maxLength: MAX_REVISION_LENGTH }), Type.Null()], {
-    description: "Use null to require creation or the revision returned by read for update.",
+    description:
+      "Use null only to create a new document. For an update, use the revision from a prior read; stale revisions fail.",
   });
 
 export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: Type.Optional(collectionParameter("store")),
-      action: StringEnum(NOTES_STORE_ACTIONS, { description: "Transitional Store operation" }),
+      action: StringEnum(NOTES_STORE_ACTIONS, {
+        description:
+          "Store actions: index for orientation; list for inventory; read by path; search by query across notes; resolve a provider reference (if supported); write full content; edit exact text or append; delete by path. Prefer collection actions for new writes.",
+      }),
       path: Type.Optional(
-        Type.String({ maxLength: 1_024, description: "Store-relative Markdown path" }),
+        Type.String({
+          maxLength: 1_024,
+          description:
+            "Store-relative Markdown path for read, write, edit, or delete. Use a path from list or search.",
+        }),
       ),
       prefix: Type.Optional(
-        Type.String({ maxLength: 1_024, description: "Store-relative list prefix" }),
+        Type.String({
+          maxLength: 1_024,
+          description: "Optional Store list path prefix. Omit to list the full provider inventory.",
+        }),
       ),
       query: Type.Optional(
-        Type.String({ maxLength: MAX_SEARCH_QUERY_LENGTH, description: "Search query" }),
+        Type.String({
+          maxLength: MAX_SEARCH_QUERY_LENGTH,
+          description: "Store search text across notes. Required for search.",
+        }),
       ),
       limit: Type.Optional(
         Type.Integer({
           minimum: 1,
           maximum: MAX_DETAIL_ITEMS,
-          description: `Maximum Store list results. Search is capped at ${MAX_SEARCH_RESULTS}.`,
+          description: `Maximum Store list or search results. Search is capped at ${MAX_SEARCH_RESULTS}.`,
         }),
       ),
       cursor: Type.Optional(
-        Type.String({ maxLength: MAX_LIST_CURSOR_LENGTH, description: "Store list cursor" }),
+        Type.String({
+          maxLength: MAX_LIST_CURSOR_LENGTH,
+          description:
+            "Continue a Store list with its returned nextCursor and the same prefix and limit.",
+        }),
       ),
       reference: Type.Optional(
-        Type.String({ maxLength: 256, description: "Provider-owned reference" }),
+        Type.String({
+          maxLength: 256,
+          description: "Provider-owned reference for resolve; obtain it from provider results.",
+        }),
       ),
-      content: Type.Optional(Type.String({ maxLength: MAX_NOTE_BYTES })),
-      revision: Type.Optional(revisionPrecondition()),
+      content: Type.Optional(
+        Type.String({
+          maxLength: MAX_NOTE_BYTES,
+          description: "Full Markdown content for Store write; replaces the document.",
+        }),
+      ),
+      revision: Type.Optional(
+        Type.Union([Type.String({ maxLength: MAX_REVISION_LENGTH }), Type.Null()], {
+          description:
+            "Required for Store write, edit, or delete. Use null only to create; for changes use the revision from a prior read.",
+        }),
+      ),
       edits: Type.Optional(
         Type.Array(
           Type.Object({
-            oldText: Type.String({ maxLength: MAX_EDIT_TEXT_LENGTH }),
-            newText: Type.String({ maxLength: MAX_EDIT_TEXT_LENGTH }),
+            oldText: Type.String({
+              maxLength: MAX_EDIT_TEXT_LENGTH,
+              description: "Text that must occur exactly once in the document.",
+            }),
+            newText: Type.String({
+              maxLength: MAX_EDIT_TEXT_LENGTH,
+              description: "Replacement text for that exact occurrence.",
+            }),
           }),
-          { maxItems: MAX_EDIT_ITEMS },
+          {
+            maxItems: MAX_EDIT_ITEMS,
+            description:
+              "Exact replacements for Store edit. All must match uniquely or no change is written.",
+          },
         ),
       ),
-      append: Type.Optional(Type.String({ maxLength: MAX_APPEND_LENGTH })),
+      append: Type.Optional(
+        Type.String({
+          maxLength: MAX_APPEND_LENGTH,
+          description:
+            "Text to append in a Store edit; use collection actions for new captures or outcomes.",
+        }),
+      ),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       collection: collectionParameter("inbox"),
-      action: Type.Literal("read"),
-      date: Type.Optional(Type.String({ maxLength: 10, description: "Exact ISO date" })),
+      action: Type.Literal("read", {
+        description:
+          "Without date, return the earliest nonblank Inbox item. With date, page through Notes and Follow-ups without changing them.",
+      }),
+      date: Type.Optional(
+        Type.String({
+          maxLength: 10,
+          description:
+            "Exact date YYYY-MM-DD for an Inbox daily note. Omit to get the earliest item.",
+        }),
+      ),
       limit: collectionLimitParameter(),
       cursor: continuationCursor(),
     },
@@ -158,16 +219,28 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("inbox"),
-      action: Type.Literal("write"),
-      kind: StringEnum(["note", "followup"] as const),
-      text: Type.String({ maxLength: MAX_APPEND_LENGTH }),
+      action: Type.Literal("write", {
+        description:
+          "Capture a Note or unchecked Follow-up in today's Inbox; do not classify or move it.",
+      }),
+      kind: StringEnum(["note", "followup"] as const, {
+        description: "note adds a Note bullet; followup adds an unchecked Follow-up checkbox.",
+      }),
+      text: Type.String({
+        maxLength: MAX_APPEND_LENGTH,
+        description:
+          "Nonblank capture text for today's system-local date. No date parameter is accepted.",
+      }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       collection: collectionParameter("projects"),
-      action: Type.Literal("list"),
+      action: Type.Literal("list", {
+        description:
+          "List canonical Projects Markdown documents with relative targets for later reads.",
+      }),
       limit: collectionLimitParameter(),
       cursor: continuationCursor(),
     },
@@ -176,10 +249,12 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("projects"),
-      action: Type.Literal("read"),
+      action: Type.Literal("read", {
+        description: "Read one active Project document and its revision before an update.",
+      }),
       target: Type.String({
         maxLength: 1_015,
-        description: "Markdown path relative to projects/",
+        description: "Markdown file path relative to projects/, such as platform/roadmap.md.",
       }),
     },
     { additionalProperties: false },
@@ -187,12 +262,18 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("projects"),
-      action: Type.Literal("write"),
+      action: Type.Literal("write", {
+        description:
+          "Create or replace one active Project document. Keep completed outcomes in Worklog.",
+      }),
       target: Type.String({
         maxLength: 1_015,
-        description: "Markdown path relative to projects/",
+        description: "Markdown file path relative to projects/, such as platform/roadmap.md.",
       }),
-      content: Type.String({ maxLength: MAX_NOTE_BYTES }),
+      content: Type.String({
+        maxLength: MAX_NOTE_BYTES,
+        description: "Full Project Markdown content; replaces the document on update.",
+      }),
       revision: revisionPrecondition(),
     },
     { additionalProperties: false },
@@ -200,11 +281,22 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("worklog"),
-      action: Type.Literal("read"),
+      action: Type.Literal("read", {
+        description: "Read completed-work bullets from Worklog records; defaults to today.",
+      }),
       selector: Type.Optional(
-        Type.String({ maxLength: 32, description: "ISO date, inclusive range, or all" }),
+        Type.String({
+          maxLength: 32,
+          description:
+            "YYYY-MM-DD, inclusive YYYY-MM-DD..YYYY-MM-DD range, or all. Omit for today's system-local date.",
+        }),
       ),
-      order: Type.Optional(StringEnum(["newest", "chronological"] as const)),
+      order: Type.Optional(
+        StringEnum(["newest", "chronological"] as const, {
+          description:
+            "Date order for range or all: newest first by default, or chronological (oldest first).",
+        }),
+      ),
       limit: collectionLimitParameter(),
       cursor: continuationCursor(),
     },
@@ -213,17 +305,31 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("worklog"),
-      action: Type.Literal("record"),
-      text: Type.String({ maxLength: MAX_APPEND_LENGTH }),
+      action: Type.Literal("record", {
+        description:
+          "Append one brief completed-work outcome to today's Worklog record; not a plan or session narrative.",
+      }),
+      text: Type.String({
+        maxLength: MAX_APPEND_LENGTH,
+        description:
+          "Nonblank completed-work bullet for the system-local date. No date or selector is accepted.",
+      }),
     },
     { additionalProperties: false },
   ),
   Type.Object(
     {
       collection: collectionParameter("wiki"),
-      action: Type.Literal("read"),
+      action: Type.Literal("read", {
+        description:
+          "List immediate Wiki children at the root or a folder, or read one Markdown file and its revision.",
+      }),
       target: Type.Optional(
-        Type.String({ maxLength: 1_018, description: "Path relative to wiki/" }),
+        Type.String({
+          maxLength: 1_018,
+          description:
+            "Path relative to wiki/: omit for root, use a folder to list children, or a .md file to read content.",
+        }),
       ),
       limit: collectionLimitParameter(),
       cursor: continuationCursor(),
@@ -233,9 +339,19 @@ export const NOTES_PARAMETERS = Type.Union([
   Type.Object(
     {
       collection: collectionParameter("wiki"),
-      action: Type.Literal("write"),
-      target: Type.String({ maxLength: 1_018, description: "Markdown path relative to wiki/" }),
-      content: Type.String({ maxLength: MAX_NOTE_BYTES }),
+      action: Type.Literal("write", {
+        description:
+          "Create or replace a maintained Wiki Markdown file; integrate updates instead of appending a session log.",
+      }),
+      target: Type.String({
+        maxLength: 1_018,
+        description:
+          "Markdown file path relative to wiki/, such as guides/setup.md. Folder targets cannot be written.",
+      }),
+      content: Type.String({
+        maxLength: MAX_NOTE_BYTES,
+        description: "Full Wiki Markdown content; replaces the document on update.",
+      }),
       revision: revisionPrecondition(),
     },
     { additionalProperties: false },
@@ -285,7 +401,8 @@ export const NOTES_DESCRIPTION = [
   "Read and maintain four note collections through the configured provider.",
   "Inbox holds unclassified captures. Projects hold active plans, owners, status, next actions, and linked tickets.",
   "Wiki holds maintained knowledge. Worklog holds completed outcomes.",
-  "Use Store actions for orientation, search, legacy access, and maintenance.",
+  "Choose collection and action: inbox read/write; projects list/read/write; wiki read/write; worklog read/record.",
+  "Omit collection for Store index/list/read/search/resolve/write/edit/delete, used for orientation, legacy access, and maintenance.",
   "Reads are bounded and non-destructive. Mutations preserve unrelated content and use revision preconditions.",
 ].join(" ");
 
@@ -366,11 +483,7 @@ function executeInboxAction(
   throw invalidCollectionAction("inbox", params.action);
 }
 
-function executeProjectsAction(
-  provider: NotesProvider,
-  params: NotesParams,
-  signal?: AbortSignal,
-) {
+function executeProjectsAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   if (params.action === "list") return projectsListAction(provider, params, signal);
   if (params.action === "read") return projectsReadAction(provider, params, signal);
   if (params.action === "write") return projectsWriteAction(provider, params, signal);
@@ -388,11 +501,7 @@ function executeWorklogAction(
   throw invalidCollectionAction("worklog", params.action);
 }
 
-function executeWikiAction(
-  provider: NotesProvider,
-  params: NotesParams,
-  signal?: AbortSignal,
-) {
+function executeWikiAction(provider: NotesProvider, params: NotesParams, signal?: AbortSignal) {
   if (params.action === "read") return wikiReadAction(provider, params, signal);
   if (params.action === "write") return wikiWriteAction(provider, params, signal);
   throw invalidCollectionAction("wiki", params.action);

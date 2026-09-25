@@ -96,6 +96,28 @@ describe("notes tool contract", () => {
   it("exposes one stable provider-neutral schema", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
+    const variants = contract.parameters.anyOf as Array<{
+      properties: Record<string, { const?: string; description?: string }>;
+    }>;
+    const fields = (collection: string, action: string) =>
+      variants.find(
+        (variant) =>
+          variant.properties.collection?.const === collection &&
+          variant.properties.action?.const === action,
+      )?.properties;
+    expect(contract.description).toContain("Worklog");
+    for (const variant of variants) {
+      expect(variant.properties.collection?.description).toBeTruthy();
+      expect(variant.properties.action?.description).toBeTruthy();
+    }
+    expect(fields("worklog", "record")?.action.description).toContain("completed");
+    expect(fields("worklog", "record")?.text.description).toContain("local date");
+    expect(fields("worklog", "read")?.selector.description).toContain("YYYY-MM-DD..YYYY-MM-DD");
+    expect(fields("inbox", "read")?.action.description).toContain("earliest");
+    expect(fields("inbox", "write")?.kind.description).toContain("followup");
+    expect(fields("projects", "write")?.revision.description).toContain("null");
+    expect(fields("wiki", "read")?.target.description).toContain("folder");
+    expect(variants[0].properties.action.description).toContain("delete");
     for (const action of NOTES_ACTIONS.filter((candidate) => candidate !== "record")) {
       expect(Check(contract.parameters, { action })).toBe(true);
     }
@@ -107,9 +129,7 @@ describe("notes tool contract", () => {
     expect(
       Check(contract.parameters, { collection: "inbox", action: "read", date: "2026-09-12" }),
     ).toBe(true);
-    expect(
-      Check(contract.parameters, { collection: "projects", action: "list" }),
-    ).toBe(true);
+    expect(Check(contract.parameters, { collection: "projects", action: "list" })).toBe(true);
     expect(
       Check(contract.parameters, {
         collection: "projects",
