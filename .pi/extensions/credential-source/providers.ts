@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { Effect, Redacted } from "effect";
+import { Effect, Redacted, Semaphore } from "effect";
 import {
   resolveNodeCommand,
   streamProcess,
@@ -64,6 +64,13 @@ function minimalProviderEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJ
   return output;
 }
 
+function onePasswordReadPermit(): Semaphore.Semaphore {
+  const root = globalThis as typeof globalThis & {
+    __piEnvOnePasswordReadPermitV1?: Semaphore.Semaphore;
+  };
+  return (root.__piEnvOnePasswordReadPermitV1 ??= Semaphore.makeUnsafe(1));
+}
+
 const PROVIDER_PROCESS_OPTIONS: StreamProcessOptions = {
   timeoutMs: DEFAULT_CREDENTIAL_TIMEOUT_MS,
   stdoutLimitBytes: CREDENTIAL_STDOUT_LIMIT_BYTES,
@@ -98,6 +105,7 @@ export function createOnePasswordProvider(
   runner: CredentialProcessRunner = streamProcess,
   resolveExecutable: CredentialExecutableResolver = () => CredentialExecutable.OnePassword,
 ): CredentialProvider {
+  const readPermit = onePasswordReadPermit();
   return {
     id: "1password",
     resolve(entry, name) {
@@ -133,11 +141,13 @@ export function createOnePasswordProvider(
               ),
             );
           }
-          return runner(executable, ["read", "--no-newline", entry.reference], {
-            ...PROVIDER_PROCESS_OPTIONS,
-            // Only this fixed read inherits Pi's terminal session for 1Password app authorization.
-            terminalSession: "inherit",
-          }).pipe(
+          return readPermit.withPermit(
+            Effect.suspend(() => runner(executable, ["read", "--no-newline", entry.reference], {
+              ...PROVIDER_PROCESS_OPTIONS,
+              // Only this fixed read inherits Pi's terminal session for 1Password app authorization.
+              terminalSession: "inherit",
+            })),
+          ).pipe(
             Effect.mapError((error) => providerFailure(error, "1password")),
             Effect.flatMap((output) => validateCredential(output.stdout, "1password", name)),
           );

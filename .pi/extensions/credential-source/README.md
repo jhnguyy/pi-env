@@ -26,7 +26,9 @@ Add `credentialSource` to `~/.pi/agent/settings.json`.
 
 Install and configure the `op` CLI with desktop-app integration. The extension runs only `op read --no-newline` with the fixed global secret reference. It starts `op` directly in Pi's terminal session, with piped output. It does not use a shell, `op run`, `OP_SERVICE_ACCOUNT_TOKEN`, or a model-facing 1Password tool.
 
-1Password authorizes the terminal session, not the Pi session. Authorization expires after 10 minutes of inactivity or 12 hours at most. A later read can ask for Touch ID again, even if Pi is still open. Authorization can also remain valid after Pi closes. See [1Password app integration security](https://developer.1password.com/docs/cli/app-integration-security/). In headless sessions, `op` can fail if desktop-app integration cannot authorize the read. Configure the supported provider outside Pi before use; do not pass a service-account token into Pi's environment.
+1Password authorizes the terminal session, not the Pi session. Authorization expires after 10 minutes of inactivity or 12 hours at most. A later read can ask for Touch ID again, even if Pi is still open. Authorization can also remain valid after Pi closes. See [1Password app integration security](https://developer.1password.com/docs/cli/app-integration-security/). The provider runs one `op read` at a time, so parallel requests cannot start concurrent authorization prompts. It does not cache credentials or track authorization expiry.
+
+Headless reads can work without a controlling terminal when the 1Password desktop app can request approval. Sequential reads in one process can reuse that approval. A new process asks for approval again. A user must still approve the prompt in the desktop app. Unattended service or CI use is not supported by this configuration. If the app cannot authorize a read, the provider reports a sanitized failure. Do not pass a service-account token into Pi's environment.
 
 ### Bitwarden CLI
 
