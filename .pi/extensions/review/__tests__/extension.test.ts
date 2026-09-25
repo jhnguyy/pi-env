@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -529,6 +529,48 @@ describe("review extension pull request surface", () => {
     await pi.command("pr open r-actual", ctx);
     expect(ctx.ui.notify).toHaveBeenLastCalledWith(expect.stringContaining("uncertain"), "error");
   });
+
+  it.each(["failed", "partial"])(
+    "quarantines a %s Pi JSONL append and checks the reopened branch",
+    async (failure) => {
+      const dir = tempRoot();
+      const state = sampleState("r-restart", []);
+      const sessionDir = join(dir, "sessions");
+      const manager = SessionManager.create(dir, sessionDir);
+      manager.appendCustomEntry(REVIEW_ENTRY_TYPE, { reviewId: state.snapshot.id, state });
+      manager.appendMessage({
+        role: "assistant",
+        content: [],
+        provider: "test",
+        model: "test",
+      } as any);
+      const file = manager.getSessionFile()!;
+      const notes: string[] = [];
+      const ctx = {
+        sessionManager: manager,
+        ui: { notify: (message: string) => notes.push(message) },
+      } as any;
+      const pi = extensionPi();
+      pi.appendEntry = (type: string, data: unknown) => manager.appendCustomEntry(type, data);
+      pi.handlers.session_start({}, ctx);
+      (manager as any)._persist = () => {
+        if (failure === "partial") appendFileSync(file, '{"type":"custom",');
+        throw new Error("injected session write failure");
+      };
+      await pi.command("pr select r-restart F1", ctx);
+      expect(notes.at(-1)).toContain("injected session write failure");
+      expect((manager.getBranch().at(-1) as any).data.state.selectedFindingIds).toContain("F1");
+      pi.handlers.session_tree({}, ctx);
+      await pi.command("pr open r-restart", ctx);
+      expect(notes.at(-1)).toContain("uncertain");
+      const reopened = SessionManager.open(file, sessionDir);
+      const recovered = reopened
+        .getBranch()
+        .filter((entry) => entry.type === "custom")
+        .at(-1) as any;
+      expect(recovered.data.state.selectedFindingIds).toEqual([]);
+    },
+  );
 
   it("restores a long active branch without scanning child sessions", async () => {
     const root = tempRoot();

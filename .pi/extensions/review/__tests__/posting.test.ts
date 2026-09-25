@@ -9,8 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { ReviewEvent, type ReviewState } from "../core";
+import { REVIEW_ENTRY_TYPE, ReviewEvent, type ReviewState } from "../core";
 import { postReview, restore } from "../index";
 import { readPostingIntent, recordPostingIntent } from "../posting-attempt";
 import {
@@ -465,6 +466,62 @@ describe("review pull request posting", () => {
       posts: [{ status: "posted", reviewId: "remote" }],
     });
     expect(posts).toBe(1);
+  });
+
+  it("reconciles an uncertain remote review after reopening a real Pi JSONL session", async () => {
+    const dir = root();
+    const s = state(dir);
+    const sessionDir = join(dir, "sessions");
+    let manager = SessionManager.create(dir, sessionDir);
+    manager.appendCustomEntry(REVIEW_ENTRY_TYPE, (reviewEntry(s) as any).data);
+    // An assistant message flushes the earlier review entry to a real JSONL file.
+    manager.appendMessage({
+      role: "assistant",
+      content: [],
+      provider: "test",
+      model: "test",
+    } as any);
+    const file = manager.getSessionFile()!;
+    expect(existsSync(file)).toBe(true);
+    const view = reviewContext(dir);
+    let posts = 0;
+    let visible = false;
+    let marker = "";
+    const h = registeredReview({
+      root: dir,
+      entries: [],
+      append: (type, data) => {
+        manager.appendCustomEntry(type, data);
+      },
+      exec: githubStub({
+        list: () => ({
+          code: 0,
+          stdout: visible ? JSON.stringify([{ id: "remote", body: marker }]) : "[]",
+          stderr: "",
+        }),
+        post: (args: string[]) => {
+          posts++;
+          marker = JSON.parse(readFileSync(args.at(-1)!, "utf8")).body;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    });
+    const context = () => ({ ...h.session(), sessionManager: manager, ui: view.ctx.ui });
+    h.handlers.session_start({}, context());
+    await h.command("pr post r comment", context());
+    expect(view.notes.at(-1)).toContain("uncertain");
+    expect(posts).toBe(1);
+    manager = SessionManager.open(file, sessionDir);
+    expect((manager.getBranch().at(-1) as any).data.state.posts[0].status).toBe("uncertain");
+    h.handlers.session_tree({}, context());
+    visible = true;
+    await h.command("pr post r comment", context());
+    expect(view.notes.at(-1)).toContain("Existing review found for marker");
+    expect(posts).toBe(1);
+    const restarted = SessionManager.open(file, sessionDir);
+    expect((restarted.getBranch().at(-1) as any).data.state.posts).toMatchObject([
+      { status: "posted", reviewId: "remote" },
+    ]);
   });
 
   it("does not post changed content after a prior review is recorded as posted", async () => {
