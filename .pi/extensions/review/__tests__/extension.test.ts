@@ -1,14 +1,14 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { DEFAULT_MAX_BYTES, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { Check } from "typebox/value";
 import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { restore } from "../index";
 import { formatPullRequestContext } from "../context";
-import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
+import { REVIEW_ENTRY_TYPE, ReviewEvent, type ReviewState } from "../core";
 import { setManagedGitExecForTests } from "../snapshot";
 import { reviewEntry as custom } from "./fixtures/review-ui";
 import {
@@ -451,6 +451,179 @@ describe("review extension pull request surface", () => {
     expect(notes.at(-1)).toContain("Selected: 0");
   });
 
+  it("restores decisions from the active branch rather than a stale state mirror", async () => {
+    const root = tempRoot();
+    const previous = sampleState("r-one", []);
+    const unrelated = sampleState("r-other", []);
+    const entries = [custom(previous), custom(unrelated)];
+    const sessionManager = {
+      getSessionId: () => "session-one",
+      getBranch: () => entries,
+    };
+    restore({ sessionManager } as any);
+    const pi = extensionPi();
+    pi.appendEntry = (type: string, data: any) => {
+      pi.appended.push([type, data]);
+      entries.push({ type: "custom", customType: type, data });
+    };
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
+    await pi.command("pr select r-one F1", ctx);
+    expect(notes.at(-1)).toContain("1 finding(s) selected");
+    const oldStatePath = join(root, "pr-review/artifacts/r-one/state.json");
+    expect(existsSync(oldStatePath)).toBe(true);
+    expect(pi.appended).toHaveLength(1);
+    // A stale legacy mirror must not override the active session branch.
+    mkdirSync(previous.snapshot.artifactDir, { recursive: true });
+    writeFileSync(oldStatePath, JSON.stringify(previous));
+    pi.handlers.session_shutdown();
+
+    restore({ sessionManager } as any);
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("Selected: 1");
+    restore({ sessionManager: { ...sessionManager, getBranch: () => [custom(previous)] } } as any);
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("Selected: 0");
+  });
+
+  it("does not publish a decision when the session append rejects it", async () => {
+    tempRoot();
+    const before = sampleState("r-one", []);
+    restore({
+      sessionManager: {
+        getSessionId: () => "rejected-decision",
+        getBranch: () => [custom(before)],
+      },
+    } as any);
+    const pi = extensionPi();
+    pi.appendEntry = () => {
+      throw new Error("session append rejected");
+    };
+    const notes: string[] = [];
+    const ctx = { ui: { notify: (message: string) => notes.push(message) } } as any;
+    await pi.command("pr select r-one F1", ctx);
+    expect(notes.at(-1)).toContain("session append rejected");
+    await pi.command("pr open r-one", ctx);
+    expect(notes.at(-1)).toContain("uncertain");
+  });
+
+  it("quarantines an actual Pi session that exposes a rejected append in its branch", async () => {
+    tempRoot();
+    const state = sampleState("r-actual", []);
+    const manager = SessionManager.inMemory();
+    manager.appendCustomEntry(REVIEW_ENTRY_TYPE, { reviewId: state.snapshot.id, state });
+    const ctx = { sessionManager: manager, ui: { notify: vi.fn() } } as any;
+    restore(ctx);
+    const pi = extensionPi();
+    pi.appendEntry = (type: string, data: unknown) => manager.appendCustomEntry(type, data);
+    (manager as any)._persist = () => {
+      throw new Error("injected session write failure");
+    };
+    await pi.command("pr select r-actual F1", ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("injected session write failure"),
+      "error",
+    );
+    expect((manager.getBranch().at(-1) as any).data.state.selectedFindingIds).toContain("F1");
+    pi.handlers.session_tree({}, ctx);
+    await pi.command("pr open r-actual", ctx);
+    expect(ctx.ui.notify).toHaveBeenLastCalledWith(expect.stringContaining("uncertain"), "error");
+  });
+
+  it.each(["failed", "partial"])(
+    "quarantines a %s Pi JSONL append and checks the reopened branch",
+    async (failure) => {
+      const dir = tempRoot();
+      const state = sampleState("r-restart", []);
+      const sessionDir = join(dir, "sessions");
+      const manager = SessionManager.create(dir, sessionDir);
+      manager.appendCustomEntry(REVIEW_ENTRY_TYPE, { reviewId: state.snapshot.id, state });
+      manager.appendMessage({
+        role: "assistant",
+        content: [],
+        provider: "test",
+        model: "test",
+      } as any);
+      const file = manager.getSessionFile()!;
+      const notes: string[] = [];
+      const ctx = {
+        sessionManager: manager,
+        ui: { notify: (message: string) => notes.push(message) },
+      } as any;
+      const pi = extensionPi();
+      pi.appendEntry = (type: string, data: unknown) => manager.appendCustomEntry(type, data);
+      pi.handlers.session_start({}, ctx);
+      (manager as any)._persist = () => {
+        if (failure === "partial") appendFileSync(file, '{"type":"custom",');
+        throw new Error("injected session write failure");
+      };
+      await pi.command("pr select r-restart F1", ctx);
+      expect(notes.at(-1)).toContain("injected session write failure");
+      expect((manager.getBranch().at(-1) as any).data.state.selectedFindingIds).toContain("F1");
+      pi.handlers.session_tree({}, ctx);
+      await pi.command("pr open r-restart", ctx);
+      expect(notes.at(-1)).toContain("uncertain");
+      const reopened = SessionManager.open(file, sessionDir);
+      const recovered = reopened
+        .getBranch()
+        .filter((entry) => entry.type === "custom")
+        .at(-1) as any;
+      expect(recovered.data.state.selectedFindingIds).toEqual([]);
+    },
+  );
+
+  it("restores a long active branch without scanning child sessions", async () => {
+    const root = tempRoot();
+    const reviewIds = Array.from({ length: 40 }, (_, index) => `r-${index}`);
+    const entries = Array.from({ length: 4_000 }, (_, index) =>
+      custom(sampleState(reviewIds[index % reviewIds.length], index % 2 ? ["F1"] : [])),
+    );
+    const manager = {
+      getSessionId: () => "long-session",
+      getBranch: () => entries,
+      getSessionDir: () => {
+        throw new Error("child session files must not be read");
+      },
+    };
+    const serializedBytes = Buffer.byteLength(JSON.stringify(entries));
+    const start = performance.now();
+    restore({ sessionManager: manager } as any);
+    const elapsedMs = performance.now() - start;
+    const pi = extensionPi();
+    const notes: string[] = [];
+    await pi.command("pr list", {
+      ui: { notify: (message: string) => notes.push(message) },
+    } as any);
+    const restoredReviews = notes.at(-1)!.split("\n").length;
+    expect(restoredReviews).toBe(reviewIds.length);
+    expect(notes.at(-1)).toContain("r-39");
+    expect(notes.at(-1)).toContain("r-0");
+    const evidenceDir = process.env.PI_ENV_REVIEW_RESTORE_ARTIFACT_DIR;
+    if (evidenceDir) {
+      mkdirSync(evidenceDir, { recursive: true });
+      writeFileSync(
+        join(evidenceDir, "review-restore.json"),
+        JSON.stringify(
+          {
+            inputs: {
+              entries: entries.length,
+              reviewIds: reviewIds.length,
+              activeBranch: true,
+              serializedBytes,
+            },
+            expected: { reviews: reviewIds.length, childSessionReads: 0 },
+            actual: { elapsedMs, reviews: restoredReviews, childSessionReads: 0 },
+            reproduce:
+              "PI_ENV_REVIEW_RESTORE_ARTIFACT_DIR=<dir> scripts/node-run.sh node_modules/vitest/vitest.mjs run .pi/extensions/review/__tests__/extension.test.ts -t 'restores a long active branch'",
+          },
+          null,
+          2,
+        ),
+      );
+    }
+    expect(existsSync(join(root, "pr-review/artifacts/r-0/state.json"))).toBe(false);
+  });
+
   it("marks an unfinished pre-DAG review interrupted and removes its worktree on restart", async () => {
     const root = tempRoot();
     const state = {
@@ -686,6 +859,33 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(true);
     expect(pi.appended).toHaveLength(0);
   });
+
+  it.each(["pending", "uncertain"])(
+    "keeps legacy %s posting attempts and their artifacts during cleanup",
+    async (status) => {
+      tempRoot();
+      const state = sampleState("r", []);
+      state.posts = [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          marker: "<!-- pi-env-pr-review:r:11111111-1111-4111-8111-111111111111 -->",
+          event: ReviewEvent.Comment,
+          status: status as "pending" | "uncertain",
+          at: new Date().toISOString(),
+        },
+      ];
+      mkdirSync(state.snapshot.artifactDir, { recursive: true });
+      restore({ sessionManager: { getBranch: () => [custom(state)] } } as any);
+      const pi = extensionPi();
+      const notes: string[] = [];
+      await pi.command("pr cleanup r", {
+        ui: { notify: (message: string) => notes.push(message) },
+      } as any);
+      expect(notes.at(-1)).toContain("unresolved posting attempt");
+      expect(existsSync(state.snapshot.artifactDir)).toBe(true);
+      expect(pi.appended).toHaveLength(0);
+    },
+  );
 
   it("cleanup uses a temporary managed root and appends durable cleanup state", async () => {
     const root = tempRoot();
@@ -1052,107 +1252,110 @@ describe("review extension pull request surface", () => {
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(2);
   });
 
-  it("cancels an in-flight create without leaking state when the session switches", async () => {
-    const root = tempRoot();
-    const pi = extensionPi();
-    const submit = vi.fn(() => Effect.die("stale DAG submit must not run"));
-    const sessionA: any = {
-      cwd: root,
-      sessionManager: {
-        getBranch: () => [],
-        getSessionId: () => "session-a",
-        getSessionDir: () => root,
-      },
-      modelRegistry: { getAvailable: () => [] },
-    };
-    const sessionB: any = {
-      ...sessionA,
-      sessionManager: {
-        getBranch: () => [],
-        getSessionId: () => "session-b",
-        getSessionDir: () => root,
-      },
-    };
-    pi.handlers.session_start({}, sessionA);
-    registerDagRuntimeService(pi, {
-      parentSessionId: "session-a",
-      sessionGeneration: "generation-a",
-      service: {
-        submit,
-        reconstruct: () => Effect.die("reconstruction must not run"),
-      },
-    });
+  it.each(["session-b", "session-a"])(
+    "cancels an in-flight create when tree navigation selects %s",
+    async (nextSessionId) => {
+      const root = tempRoot();
+      const pi = extensionPi();
+      const submit = vi.fn(() => Effect.die("stale DAG submit must not run"));
+      const sessionA: any = {
+        cwd: root,
+        sessionManager: {
+          getBranch: () => [],
+          getSessionId: () => "session-a",
+          getSessionDir: () => root,
+        },
+        modelRegistry: { getAvailable: () => [] },
+      };
+      const sessionB: any = {
+        ...sessionA,
+        sessionManager: {
+          getBranch: () => [],
+          getSessionId: () => nextSessionId,
+          getSessionDir: () => root,
+        },
+      };
+      pi.handlers.session_start({}, sessionA);
+      registerDagRuntimeService(pi, {
+        parentSessionId: "session-a",
+        sessionGeneration: "generation-a",
+        service: {
+          submit,
+          reconstruct: () => Effect.die("reconstruction must not run"),
+        },
+      });
 
-    let releaseSnapshot!: () => void;
-    let markSnapshotStarted!: () => void;
-    const snapshotStarted = new Promise<void>((resolve) => {
-      markSnapshotStarted = resolve;
-    });
-    let markAbortObserved!: () => void;
-    const abortObserved = new Promise<void>((resolve) => {
-      markAbortObserved = resolve;
-    });
-    pi.exec = async (cmd: string, args: string[], options: any) => {
-      if (cmd === "gh")
-        return {
-          code: 0,
-          stdout: JSON.stringify({
-            url: "https://github.com/o/r/pull/1",
-            baseRefName: "trunk",
-            baseRefOid: "b",
-            headRefOid: "h",
-          }),
-          stderr: "",
-        };
-      if (cmd === "git" && args[0] === "init") {
-        markSnapshotStarted();
-        return new Promise((resolve, reject) => {
-          options.signal.addEventListener("abort", markAbortObserved, { once: true });
-          releaseSnapshot = () => {
-            if (options.signal.aborted)
-              reject(options.signal.reason ?? new Error("snapshot preparation aborted"));
-            else resolve({ code: 0, stdout: "", stderr: "" });
+      let releaseSnapshot!: () => void;
+      let markSnapshotStarted!: () => void;
+      const snapshotStarted = new Promise<void>((resolve) => {
+        markSnapshotStarted = resolve;
+      });
+      let markAbortObserved!: () => void;
+      const abortObserved = new Promise<void>((resolve) => {
+        markAbortObserved = resolve;
+      });
+      pi.exec = async (cmd: string, args: string[], options: any) => {
+        if (cmd === "gh")
+          return {
+            code: 0,
+            stdout: JSON.stringify({
+              url: "https://github.com/o/r/pull/1",
+              baseRefName: "trunk",
+              baseRefOid: "b",
+              headRefOid: "h",
+            }),
+            stderr: "",
           };
-        });
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    };
+        if (cmd === "git" && args[0] === "init") {
+          markSnapshotStarted();
+          return new Promise((resolve, reject) => {
+            options.signal.addEventListener("abort", markAbortObserved, { once: true });
+            releaseSnapshot = () => {
+              if (options.signal.aborted)
+                reject(options.signal.reason ?? new Error("snapshot preparation aborted"));
+              else resolve({ code: 0, stdout: "", stderr: "" });
+            };
+          });
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      };
 
-    const create = pi.tools[0].execute(
-      "create-a",
-      { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
-      undefined,
-      undefined,
-      sessionA,
-    );
-    await snapshotStarted;
-    const appendCountAtSwitch = pi.appended.length;
-    expect(appendCountAtSwitch).toBe(1);
-    const staleArtifactDir = pi.appended[0][1].state.snapshot.artifactDir as string;
-    expect(existsSync(staleArtifactDir)).toBe(true);
+      const create = pi.tools[0].execute(
+        "create-a",
+        { command: "pr", action: "create", url: "https://github.com/o/r/pull/1" },
+        undefined,
+        undefined,
+        sessionA,
+      );
+      await snapshotStarted;
+      const appendCountAtSwitch = pi.appended.length;
+      expect(appendCountAtSwitch).toBe(1);
+      const staleArtifactDir = pi.appended[0][1].state.snapshot.artifactDir as string;
+      expect(existsSync(staleArtifactDir)).toBe(true);
 
-    pi.handlers.session_tree({}, sessionB);
-    await abortObserved;
-    releaseSnapshot();
+      pi.handlers.session_tree({}, sessionB);
+      await abortObserved;
+      releaseSnapshot();
 
-    await expect(create).resolves.toMatchObject({
-      isError: true,
-      details: {
-        status: "failed",
-        error: "The review session changed during the operation.",
-      },
-    });
-    expect(submit).not.toHaveBeenCalled();
-    expect(pi.appended).toHaveLength(appendCountAtSwitch);
-    // Leave the original session's evidence for recovery, not replacement-session cleanup.
-    expect(existsSync(staleArtifactDir)).toBe(true);
-    const notes: string[] = [];
-    await pi.command("pr list", {
-      ...sessionB,
-      ui: { notify: (message: string) => notes.push(message) },
-    });
-    expect(notes.at(-1)).toBe("No active PR reviews.");
-  });
+      await expect(create).resolves.toMatchObject({
+        isError: true,
+        details: {
+          status: "failed",
+          error: "The review session changed during the operation.",
+        },
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(pi.appended).toHaveLength(appendCountAtSwitch);
+      // Leave the original session's evidence for recovery, not replacement-session cleanup.
+      expect(existsSync(staleArtifactDir)).toBe(true);
+      const notes: string[] = [];
+      await pi.command("pr list", {
+        ...sessionB,
+        ui: { notify: (message: string) => notes.push(message) },
+      });
+      expect(notes.at(-1)).toBe("No active PR reviews.");
+    },
+  );
 
   it("coalesces concurrent creates for the same session, pull request, and head", async () => {
     const root = tempRoot();

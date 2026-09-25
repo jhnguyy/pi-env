@@ -41,6 +41,7 @@ export class ReviewCoordinator {
   private evidenceRegistration: DagExecutorRegistration | undefined;
   private selectedReviewId: string | undefined;
   private sessionId: string | undefined;
+  private readonly uncertainWriteSessionIds = new Set<string>();
   private generation = 0;
   private sessionAbortController = new AbortController();
 
@@ -77,6 +78,18 @@ export class ReviewCoordinator {
 
   isScopeActive(scope: ReviewCoordinatorScope): boolean {
     return scope.sessionId === this.sessionId && scope.generation === this.generation;
+  }
+
+  markSessionWriteUncertain(): void {
+    // Pi can retain an entry in memory after its disk append throws. Do not
+    // replay that branch in this process, including after session switches.
+    if (this.sessionId) this.uncertainWriteSessionIds.add(this.sessionId);
+    this.states.clear();
+    this.selectedReviewId = undefined;
+  }
+
+  isSessionWriteUncertain(): boolean {
+    return this.sessionId !== undefined && this.uncertainWriteSessionIds.has(this.sessionId);
   }
 
   reviews(): readonly ReviewState[] {
@@ -147,8 +160,10 @@ export class ReviewCoordinator {
     this.reset();
   }
 
-  reset(): void {
-    this.sessionAbortController.abort(new Error("The review session changed."));
+  // A tree move can select a new branch without changing Pi's session ID.
+  // Keep the session's runtime registration, but cancel branch-owned work.
+  invalidateBranch(): void {
+    this.sessionAbortController.abort(new Error("The review session branch changed."));
     this.sessionAbortController = new AbortController();
     this.generation += 1;
     this.states.clear();
@@ -157,6 +172,10 @@ export class ReviewCoordinator {
     this.reconcilingRunIds.clear();
     this.selectedReviewId = undefined;
     this.postingSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
+  }
+
+  reset(): void {
+    this.invalidateBranch();
     this.context = undefined;
     this.sessionId = undefined;
     this.runtimeRegistration = undefined;
