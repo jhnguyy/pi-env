@@ -71,6 +71,7 @@ import {
   readPostingIntent,
   recordPostingIntent,
 } from "./posting-attempt";
+import { postingSessionStorage, type PostingSessionStorage } from "./posting-session";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
@@ -1235,6 +1236,7 @@ export async function postReview(
   event: ReviewEventValue,
   signal?: AbortSignal,
   reviewId?: string,
+  sessionStorage: PostingSessionStorage = postingSessionStorage,
 ): Promise<string> {
   if (coordinator.isSessionWriteUncertain())
     return "Review session write is uncertain. Restart Pi before posting.";
@@ -1259,6 +1261,11 @@ export async function postReview(
   }
 
   async function preflight(stage: string): Promise<ReviewState | string> {
+    const manager = coordinator.activeContext?.sessionManager;
+    if (!manager || typeof manager.getSessionFile !== "function")
+      return "Review session persistence is unavailable. Nothing was posted.";
+    if (!sessionStorage.hasPersistedReviewSession(manager))
+      return "Review session is not persisted or exceeds the posting verification limit. Wait for an assistant response or use a smaller session before posting.";
     const state = currentState(stage);
     if (typeof state === "string") return state;
     const blocked = await postingPreflight(pi, ctx, state, event, operationSignal);
@@ -1368,6 +1375,19 @@ export async function postReview(
     return "Previous posting result is still uncertain. Verify the legacy attempt on GitHub before retrying.";
   }
 
+  function persistPending(state: ReviewState, attempt: PostAttempt): string | undefined {
+    if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
+      return "The review session changed before the posting attempt was recorded. Nothing was posted.";
+    const manager = coordinator.activeContext?.sessionManager;
+    if (
+      !manager ||
+      typeof manager.getSessionFile !== "function" ||
+      !sessionStorage.syncPersistedPostingEntry(manager, state.snapshot, attempt)
+    )
+      return "The posting attempt was not recoverable from the session file. Nothing was posted.";
+    return undefined;
+  }
+
   async function execute(): Promise<string> {
     const original = coordinator.review(targetId);
     if (!original || original.cleaned) return "The review changed before posting could start.";
@@ -1388,8 +1408,8 @@ export async function postReview(
     state = await preflight("confirmation");
     if (typeof state === "string") return state;
     const attempt = newAttempt(state, event, contentHash);
-    if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
-      return "The review session changed before the posting attempt was recorded. Nothing was posted.";
+    const pendingFailure = persistPending(state, attempt);
+    if (pendingFailure) return pendingFailure;
     recordPostingIntent(state.snapshot, scope.sessionId, attempt);
     const current = currentState("submission");
     if (typeof current === "string") return current;
@@ -1556,11 +1576,13 @@ function postCommand(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
   rest: string[],
+  sessionStorage: PostingSessionStorage = postingSessionStorage,
 ): Promise<string> {
   const first = rest[0] ?? "";
   const legacyEvent = first === "" || ["comment", "approve", "request-changes"].includes(first);
-  if (legacyEvent) return postReview(pi, ctx, eventFrom(first || "comment"));
-  return postReview(pi, ctx, eventFrom(rest[1] ?? "comment"), undefined, first);
+  if (legacyEvent)
+    return postReview(pi, ctx, eventFrom(first || "comment"), undefined, undefined, sessionStorage);
+  return postReview(pi, ctx, eventFrom(rest[1] ?? "comment"), undefined, first, sessionStorage);
 }
 
 const handlers: Partial<
@@ -1599,7 +1621,6 @@ const handlers: Partial<
         ?.text ?? "Rerun started."
     );
   },
-  post: (pi, rest, ctx) => postCommand(pi, ctx, rest),
   "draft-plan": (pi) => draftImplementationPlan(pi),
   cleanup: (pi, rest) => cleanup(pi, rest[0]),
 };
@@ -1607,6 +1628,7 @@ async function command(
   pi: ExtensionAPI,
   args: string,
   ctx: ExtensionCommandContext,
+  sessionStorage: PostingSessionStorage = postingSessionStorage,
 ): Promise<void> {
   const [subject = "", cmd = "status", ...rest] = args.trim().split(/\s+/);
   if (subject === "pr" && cmd !== "get" && coordinator.isSessionWriteUncertain()) {
@@ -1617,7 +1639,13 @@ async function command(
     return;
   }
   try {
-    const fn = subject === "pr" ? handlers[cmd] : undefined;
+    const fn =
+      subject === "pr"
+        ? cmd === "post"
+          ? (pi: ExtensionAPI, rest: string[], ctx: ExtensionCommandContext) =>
+              postCommand(pi, ctx, rest, sessionStorage)
+          : handlers[cmd]
+        : undefined;
     ctx.ui.notify(
       fn ? await fn(pi, rest, ctx) : `Usage: /review pr ${REVIEW_COMMANDS.join("|")}`,
       fn ? "info" : "warning",
@@ -1640,7 +1668,10 @@ export function reviewProgressResult(progress: ReviewDagProgress) {
   };
 }
 
-export default function reviewExtension(pi: ExtensionAPI) {
+export default function reviewExtension(
+  pi: ExtensionAPI,
+  options: { postingSessionStorage?: PostingSessionStorage } = {},
+) {
   let stopDagRuntimeListener: (() => void) | undefined;
   const ensureDagRuntimeListener = () => {
     if (stopDagRuntimeListener || !(pi as { events?: unknown }).events) return;
@@ -1679,7 +1710,8 @@ export default function reviewExtension(pi: ExtensionAPI) {
   pi.registerCommand("review", {
     description:
       "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|rerun|post <id> [comment|approve|request-changes]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
-    handler: (args, ctx) => command(pi, Array.isArray(args) ? args.join(" ") : args, ctx),
+    handler: (args, ctx) =>
+      command(pi, Array.isArray(args) ? args.join(" ") : args, ctx, options.postingSessionStorage),
   });
   pi.on(PiEvent.SessionStart, (_event, ctx) => {
     ensureDagRuntimeListener();
