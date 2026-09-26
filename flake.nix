@@ -67,7 +67,8 @@
             exit 2
           fi
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
-          export PI_ENV_NODE_BIN="$(command -v node)"
+          PI_ENV_NODE_BIN="$(command -v node)"
+          export PI_ENV_NODE_BIN
           export NODE_EXECUTABLE="$PI_ENV_NODE_BIN"
           exec ./setup.sh --nix-managed "$@"
         '';
@@ -91,7 +92,8 @@
 
           cd "$target"
           export PI_ENV_CONFIG_MANAGED_BY_NIX=1
-          export PI_ENV_NODE_BIN="$(command -v node)"
+          PI_ENV_NODE_BIN="$(command -v node)"
+          export PI_ENV_NODE_BIN
           export NODE_EXECUTABLE="$PI_ENV_NODE_BIN"
           exec ./setup.sh --nix-managed
         '';
@@ -104,7 +106,8 @@
             echo "pi-env verify app must be run from a pi-env checkout." >&2
             exit 2
           fi
-          export NODE_EXECUTABLE="$(command -v node)"
+          NODE_EXECUTABLE="$(command -v node)"
+          export NODE_EXECUTABLE
           exec nub run verify:install
         '';
       };
