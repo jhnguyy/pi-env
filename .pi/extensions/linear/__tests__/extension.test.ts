@@ -1,7 +1,12 @@
 import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { AgentToolEvent, PiEvent, ToolCapability, type ExtToolRegistration } from "../../_shared/agent-tools";
+import {
+  AgentToolEvent,
+  PiEvent,
+  ToolCapability,
+  type ExtToolRegistration,
+} from "../../_shared/agent-tools";
 import linearExtension from "../index";
 
 describe("Linear extension hosts", () => {
@@ -29,7 +34,7 @@ describe("Linear extension hosts", () => {
     expect(registrations).toHaveLength(1);
     expect(registrations[0]).toMatchObject({
       tool: { name: "linear" },
-      capabilities: [ToolCapability.Read],
+      capabilities: [ToolCapability.Read, ToolCapability.Write],
     });
   });
 });

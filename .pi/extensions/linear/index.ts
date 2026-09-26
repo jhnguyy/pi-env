@@ -10,7 +10,7 @@ export default function linearExtension(pi: ExtensionAPI) {
   const gateway = new LinearGateway(getCredentialSource, createLinearSdkApi);
   registerCrossHostTool(pi, {
     contract: createLinearContract(gateway),
-    capabilities: [ToolCapability.Read],
+    capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: linearPiOptions,
   });
 }
