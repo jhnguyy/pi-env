@@ -38,16 +38,13 @@ setup_detect_environment() {
 setup_check_prerequisites() {
   section "Prerequisites"
 
-  check_required_commands git nub
-  ok "nub ($(nub --version 2>/dev/null | head -n 1))"
+  check_required_commands git
+  ok "nub ($SETUP_NUB_VERSION; $PI_ENV_NUB_BIN)"
   ok "node ($(resolve_setup_node_bin))"
   setup_detect_environment
 
   echo "  —  platform: $os_label"
   echo "  —  context: $context_label"
-  if [ "${PI_ENV_AUTO_NIX_FAILED:-0}" = "1" ]; then
-    echo "  —  Nix detected, but automatic Nix setup was unavailable; using current PATH tools"
-  fi
   check_recommended_commands tmux gh rg
 
   if [ "$should_link_ghostty" -eq 1 ]; then

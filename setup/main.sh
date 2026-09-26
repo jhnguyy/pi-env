@@ -21,7 +21,11 @@ source "$SETUP_DIR/install.sh"
 # shellcheck source=setup/configure.sh
 source "$SETUP_DIR/configure.sh"
 
+# shellcheck source=setup/nub-admission.sh
+source "$SETUP_DIR/nub-admission.sh"
+
 setup_environment() {
+  setup_admit_nub
   require_node
   setup_check_prerequisites
 }
