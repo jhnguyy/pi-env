@@ -12,4 +12,4 @@ Keep exact quotations, identifiers, commands, paths, and machine syntax unchange
 
 ## Credentials
 
-Use trusted credential-source consumers for secrets. Do not run raw `op` commands through bash, PTC, or model-facing tools. Do not put secret values in model-visible output.
+Use the credential helper, trusted consumer, or CLI tool appropriate to the task. Keep secret values out of model-visible output.
