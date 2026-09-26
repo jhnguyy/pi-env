@@ -58,7 +58,7 @@ All collection list results are bounded. A returned opaque cursor continues the 
 
 ## Store compatibility
 
-Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These actions remain available for orientation, global search, legacy and adapter-owned notes, and bounded migration work. Use collection actions for new Inbox, Projects, Wiki, and Worklog writes.
+Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These catchall actions remain available for orientation, global search, notes outside the core collections, and bounded maintenance or migration work. Use collection actions for new Inbox, Projects, Wiki, and Worklog writes.
 
 Each provider supplies a bounded index response for store-specific orientation. Use list as the authoritative inventory when working outside the core collections.
 

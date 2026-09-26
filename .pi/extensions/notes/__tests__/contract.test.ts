@@ -96,6 +96,13 @@ describe("notes tool contract", () => {
   it("exposes one stable provider-neutral schema", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
+    const variants = contract.parameters.anyOf as Array<{
+      properties: Record<string, { description?: string }>;
+    }>;
+    for (const variant of variants) {
+      expect(variant.properties.collection?.description).toBeTruthy();
+      expect(variant.properties.action.description).toBeTruthy();
+    }
     for (const action of NOTES_ACTIONS.filter((candidate) => candidate !== "record")) {
       expect(Check(contract.parameters, { action })).toBe(true);
     }
@@ -107,9 +114,7 @@ describe("notes tool contract", () => {
     expect(
       Check(contract.parameters, { collection: "inbox", action: "read", date: "2026-09-12" }),
     ).toBe(true);
-    expect(
-      Check(contract.parameters, { collection: "projects", action: "list" }),
-    ).toBe(true);
+    expect(Check(contract.parameters, { collection: "projects", action: "list" })).toBe(true);
     expect(
       Check(contract.parameters, {
         collection: "projects",
