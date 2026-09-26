@@ -1,10 +1,14 @@
+import { randomUUID } from "node:crypto";
 import {
   CredentialErrorCode,
   CredentialSourceError,
   type CredentialSource,
 } from "../_shared/credential-source";
 import type {
+  CommentSummary,
   CursorPage,
+  CreateIssueApiInput,
+  UpdateIssueApiInput,
   IssueSummary,
   LinearApi,
   LinearApiFactory,
@@ -24,6 +28,35 @@ export interface ListIssuesInput {
 
 export interface SearchIssuesInput extends ListIssuesInput {
   query: string;
+}
+
+export interface CreateIssueInput {
+  team: string;
+  title: string;
+  description?: string;
+  assignee?: string;
+  state?: string;
+  project?: string;
+  priority?: number;
+  dueDate?: string;
+  labels?: string[];
+}
+
+export interface UpdateIssueInput {
+  issueId: string;
+  title?: string;
+  description?: string;
+  assignee?: string | null;
+  state?: string;
+  project?: string | null;
+  priority?: number;
+  dueDate?: string | null;
+  labels?: string[];
+}
+
+export interface CreateCommentInput {
+  issueId: string;
+  body: string;
 }
 
 export interface ListResourcesInput {
@@ -57,7 +90,8 @@ function selectResource(
       LinearErrorCode.AmbiguousReference,
       `Linear ${type} reference is ambiguous: ${reference}.`,
       {
-        recovery: "Use the Linear list-resources action to find an exact UUID or unique name, key, or email.",
+        recovery:
+          "Use the Linear list-resources action to find an exact UUID or unique name, key, or email.",
         details: { type, candidates: matches.slice(0, 20) },
       },
     );
@@ -100,6 +134,38 @@ class ResourceResolver {
     } while (true);
     return candidates;
   }
+}
+
+function definedFields<T extends object>(fields: T): T {
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as T;
+}
+
+function requireTeamResources(
+  teamId: string | undefined,
+  state?: LinearResourceSummary,
+  labels?: LinearResourceSummary[],
+): void {
+  if (state?.teamId && state.teamId !== teamId) {
+    throw linearError(
+      LinearErrorCode.Validation,
+      "Workflow state does not belong to the issue team.",
+    );
+  }
+  if (labels?.some((label) => label.teamId && label.teamId !== teamId)) {
+    throw linearError(LinearErrorCode.Validation, "A label does not belong to the issue team.");
+  }
+}
+
+function resolveOptional(
+  resolver: ResourceResolver,
+  type: LinearResourceType,
+  reference?: string | null,
+) {
+  return reference ? resolver.resolve(type, reference) : undefined;
+}
+
+function resolveLabels(resolver: ResourceResolver, labels?: string[]) {
+  return labels ? Promise.all(labels.map((label) => resolver.resolve("labels", label))) : undefined;
 }
 
 async function resolveIssueFilters(
@@ -173,6 +239,66 @@ export class LinearGateway {
 
   issue(issueId: string, signal?: AbortSignal): Promise<IssueSummary> {
     return this.#withApi(signal, (api) => api.issue(issueId));
+  }
+
+  createIssue(input: CreateIssueInput, signal?: AbortSignal): Promise<IssueSummary> {
+    return this.#withApi(signal, async (api) => {
+      const resolver = new ResourceResolver(api);
+      const [team, assignee, state, project, labels] = await Promise.all([
+        resolver.resolve("teams", input.team),
+        resolveOptional(resolver, "users", input.assignee),
+        resolveOptional(resolver, "states", input.state),
+        resolveOptional(resolver, "projects", input.project),
+        resolveLabels(resolver, input.labels),
+      ]);
+      requireTeamResources(team.id, state, labels);
+      const fields: CreateIssueApiInput = {
+        id: randomUUID(),
+        teamId: team.id,
+        title: input.title,
+        description: input.description,
+        assigneeId: assignee?.id,
+        stateId: state?.id,
+        projectId: project?.id,
+        priority: input.priority,
+        dueDate: input.dueDate,
+        labelIds: labels?.map((label) => label.id),
+      };
+      return api.createIssue(definedFields(fields));
+    });
+  }
+
+  updateIssue(input: UpdateIssueInput, signal?: AbortSignal): Promise<IssueSummary> {
+    return this.#withApi(signal, async (api) => {
+      const resolver = new ResourceResolver(api);
+      const [issue, assignee, state, project, labels] = await Promise.all([
+        api.issue(input.issueId),
+        resolveOptional(resolver, "users", input.assignee),
+        resolveOptional(resolver, "states", input.state),
+        resolveOptional(resolver, "projects", input.project),
+        resolveLabels(resolver, input.labels),
+      ]);
+      requireTeamResources(issue.teamId, state, labels);
+      const fields: UpdateIssueApiInput = {
+        issueId: issue.id,
+        title: input.title,
+        description: input.description,
+        assigneeId: input.assignee === undefined ? undefined : (assignee?.id ?? null),
+        stateId: state?.id,
+        projectId: input.project === undefined ? undefined : (project?.id ?? null),
+        priority: input.priority,
+        dueDate: input.dueDate,
+        labelIds: labels?.map((label) => label.id),
+      };
+      return api.updateIssue(definedFields(fields));
+    });
+  }
+
+  createComment(input: CreateCommentInput, signal?: AbortSignal): Promise<CommentSummary> {
+    return this.#withApi(signal, async (api) => {
+      const issue = await api.issue(input.issueId);
+      return api.createComment({ id: randomUUID(), issueId: issue.id, body: input.body });
+    });
   }
 
   async #withApi<T>(
