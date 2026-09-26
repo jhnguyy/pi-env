@@ -1,7 +1,5 @@
 ## House writing style
 
-For human-readable prose:
-
 - Be direct and specific. Give each sentence one main idea.
 - Prefer active voice and concrete verbs.
 - Use one term for each concept. Put conditions before actions.
