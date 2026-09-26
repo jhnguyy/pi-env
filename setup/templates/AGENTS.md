@@ -9,7 +9,3 @@ Use the core principles of ASD-STE100 Simplified Technical English, Issue 9, as 
 - Use neutral and inclusive language.
 
 Keep exact quotations, identifiers, commands, paths, and machine syntax unchanged when accuracy requires exact text. Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning.
-
-## Credentials
-
-Use the credential helper, trusted consumer, or CLI tool appropriate to the task. Keep secret values out of model-visible output.
