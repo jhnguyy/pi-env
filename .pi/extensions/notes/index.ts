@@ -58,7 +58,7 @@ export async function activateNotesExtension(
       promptSnippet: "Maintain Inbox, Projects, Wiki, Worklog, and other Markdown notes",
       promptGuidelines: [
         "Use the Inbox, Projects, Wiki, and Worklog collection actions for their defined behaviors. Pi-env owns their canonical paths and lifecycle semantics.",
-        "Use Store index before the first general store interaction in a task. Use Store list for authoritative legacy or adapter-owned inventory and Store search for global retrieval.",
+        "Use Store index before the first general store interaction in a task. Use Store list for authoritative inventory outside the core collections and Store search for global retrieval.",
         "Use Inbox for unclassified captures. Inbox reads are non-destructive. Inbox writes do not classify, route, promote, rewrite, or delete captures.",
         "Use Projects for active plans, owners, status, next actions, and linked tickets.",
         "Use Wiki for maintained current knowledge. Integrate coherent updates instead of appending session logs.",

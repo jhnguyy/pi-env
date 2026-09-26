@@ -74,7 +74,7 @@ export const NOTES_ACTIONS = [
 export const NOTES_COLLECTIONS = ["store", "inbox", "projects", "worklog", "wiki"] as const;
 const NOTES_COLLECTION_DESCRIPTIONS = {
   store:
-    "General provider store. Use for orientation, global search, legacy notes, and bounded maintenance. Omit collection for Store.",
+    "Catchall provider store for notes outside the core collections, orientation, global search, and bounded maintenance. Omit collection for Store.",
   inbox:
     "Unclassified captures. Read the earliest item or a date; write a Note or unchecked Follow-up for today.",
   projects:
@@ -402,7 +402,7 @@ export const NOTES_DESCRIPTION = [
   "Inbox holds unclassified captures. Projects hold active plans, owners, status, next actions, and linked tickets.",
   "Wiki holds maintained knowledge. Worklog holds completed outcomes.",
   "Choose collection and action: inbox read/write; projects list/read/write; wiki read/write; worklog read/record.",
-  "Omit collection for Store index/list/read/search/resolve/write/edit/delete, used for orientation, legacy access, and maintenance.",
+  "Omit collection for Store index/list/read/search/resolve/write/edit/delete, used for catchall access, orientation, search, and maintenance.",
   "Reads are bounded and non-destructive. Mutations preserve unrelated content and use revision preconditions.",
 ].join(" ");
 
