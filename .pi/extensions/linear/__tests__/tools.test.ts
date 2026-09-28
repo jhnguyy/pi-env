@@ -50,6 +50,14 @@ function gateway() {
       totalCount: 100,
     })),
     issue: vi.fn(async () => issue(1)),
+    createIssue: vi.fn(async () => issue(2)),
+    updateIssue: vi.fn(async () => issue(1)),
+    createComment: vi.fn(async () => ({
+      id: "comment-1",
+      issueId: "id-1",
+      createdAt: "2026-01-01",
+      url: "https://linear.app/comment/1",
+    })),
   } satisfies LinearToolGateway;
 }
 
@@ -120,6 +128,67 @@ describeIfEnabled("linear", "Linear tool", () => {
     });
     expect(fakeGateway.viewer).not.toHaveBeenCalled();
     expect(fakeGateway.issue).not.toHaveBeenCalled();
+  });
+
+  it("routes collection actions and rejects invalid pairs before network access", async () => {
+    const fakeGateway = gateway();
+    await execute(fakeGateway, { collection: "issues", action: "read", issueId: "ENG-1" });
+    await execute(fakeGateway, { collection: "issues", action: "search", query: "bug" });
+    await execute(fakeGateway, { collection: "resources", action: "list", resourceType: "teams" });
+    expect(fakeGateway.issue).toHaveBeenCalledOnce();
+    expect(fakeGateway.searchIssues).toHaveBeenCalledOnce();
+    expect(fakeGateway.listResources).toHaveBeenCalledOnce();
+    await expect(
+      execute(fakeGateway, { collection: "comments", action: "search", query: "bug" }),
+    ).rejects.toMatchObject({ name: "LinearToolError" });
+    expect(fakeGateway.searchIssues).toHaveBeenCalledOnce();
+  });
+
+  it("validates mutations before the gateway and forwards patches and cancellation", async () => {
+    const fakeGateway = gateway();
+    for (const params of [
+      { collection: "issues", action: "create", team: "PLAT", title: " " },
+      { collection: "issues", action: "update", issueId: "ENG-1" },
+      { collection: "comments", action: "create", issueId: "ENG-1", body: " " },
+      { collection: "issues", action: "create", team: "PLAT", title: "New", issueId: "ENG-1" },
+    ]) {
+      await expect(execute(fakeGateway, params)).rejects.toMatchObject({ name: "LinearToolError" });
+    }
+    expect(fakeGateway.createIssue).not.toHaveBeenCalled();
+    expect(fakeGateway.updateIssue).not.toHaveBeenCalled();
+    expect(fakeGateway.createComment).not.toHaveBeenCalled();
+
+    const signal = new AbortController().signal;
+    await execute(
+      fakeGateway,
+      { collection: "issues", action: "create", team: "PLAT", title: "New" },
+      signal,
+    );
+    await execute(
+      fakeGateway,
+      {
+        collection: "issues",
+        action: "update",
+        issueId: "ENG-1",
+        description: "New description",
+        assignee: null,
+      },
+      signal,
+    );
+    await execute(
+      fakeGateway,
+      { collection: "comments", action: "create", issueId: "ENG-1", body: "A comment" },
+      signal,
+    );
+    expect(fakeGateway.createIssue).toHaveBeenCalledWith({ team: "PLAT", title: "New" }, signal);
+    expect(fakeGateway.updateIssue).toHaveBeenCalledWith(
+      { issueId: "ENG-1", description: "New description", assignee: null },
+      signal,
+    );
+    expect(fakeGateway.createComment).toHaveBeenCalledWith(
+      { issueId: "ENG-1", body: "A comment" },
+      signal,
+    );
   });
 
   it("preserves typed gateway failures", async () => {

@@ -16,50 +16,157 @@ export const LinearAction = {
   ListIssues: "list-issues",
   SearchIssues: "search-issues",
   GetIssue: "get-issue",
+  Read: "read",
+  List: "list",
+  Search: "search",
+  Create: "create",
+  Update: "update",
 } as const;
 export type LinearAction = (typeof LinearAction)[keyof typeof LinearAction];
 
 const LINEAR_ACTIONS = Object.values(LinearAction) as [LinearAction, ...LinearAction[]];
 const LinearParameters = Type.Object(
   {
+    collection: Type.Optional(
+      StringEnum(["viewer", "resources", "issues", "comments"] as const, {
+        description:
+          "Linear resource collection. Required for collection actions; omit for legacy read actions.",
+      }),
+    ),
     action: StringEnum(LINEAR_ACTIONS, {
-      description: "Linear operation to perform.",
+      description: "Operation on the selected collection.",
     }),
     resourceType: Type.Optional(
       StringEnum(["teams", "users", "states", "projects", "labels"] as const, {
-        description: "Resource type. Required for action=list-resources.",
+        description: "Resource type. Required for resources/list (or legacy list-resources).",
       }),
     ),
     query: Type.Optional(
       Type.String({
         minLength: 1,
-        description: "Resource filter or issue search text. Required for action=search-issues.",
+        description: "Resource filter or issue search text. Required for issues/search.",
       }),
     ),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_RESULTS })),
     cursor: Type.Optional(Type.String({ description: "endCursor from the previous page." })),
-    team: Type.Optional(Type.String({ description: "Team name, key, or UUID." })),
-    assignee: Type.Optional(Type.String({ description: "Assignee name, email, or UUID." })),
+    team: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 256, description: "Team name, key, or UUID." }),
+    ),
+    assignee: Type.Optional(
+      Type.Union([Type.String({ minLength: 1, maxLength: 256 }), Type.Null()], {
+        description: "Assignee name, email, or UUID; null clears it on update.",
+      }),
+    ),
     includeArchived: Type.Optional(Type.Boolean()),
     issueId: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 256, description: "Issue UUID or identifier." }),
+    ),
+    title: Type.Optional(
       Type.String({
         minLength: 1,
-        description: "Issue UUID or identifier. Required for action=get-issue.",
+        maxLength: 512,
+        description: "Issue title. Required for issues/create.",
+      }),
+    ),
+    description: Type.Optional(Type.String({ maxLength: 100_000 })),
+    body: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 100_000,
+        description: "Comment text. Required for comments/create.",
+      }),
+    ),
+    state: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    project: Type.Optional(
+      Type.Union([Type.String({ minLength: 1, maxLength: 256 }), Type.Null()]),
+    ),
+    priority: Type.Optional(Type.Integer({ minimum: 0, maximum: 4 })),
+    dueDate: Type.Optional(
+      Type.Union([Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }), Type.Null()]),
+    ),
+    labels: Type.Optional(
+      Type.Array(Type.String({ minLength: 1, maxLength: 256 }), {
+        maxItems: 50,
+        description: "Full label set; [] clears labels on update.",
       }),
     ),
   },
   { additionalProperties: false },
 );
 type LinearParameters = Static<typeof LinearParameters>;
-type LinearParameterName = Exclude<keyof LinearParameters, "action">;
+type LinearParameterName = Exclude<keyof LinearParameters, "action" | "collection">;
+type Operation =
+  | "viewer"
+  | "list-resources"
+  | "list-issues"
+  | "search-issues"
+  | "get-issue"
+  | "create-issue"
+  | "update-issue"
+  | "create-comment";
 
-const ACTION_PARAMETERS: Record<LinearAction, readonly LinearParameterName[]> = {
-  [LinearAction.Viewer]: [],
-  [LinearAction.ListResources]: ["resourceType", "query", "limit", "cursor"],
-  [LinearAction.ListIssues]: ["limit", "cursor", "team", "assignee", "includeArchived"],
-  [LinearAction.SearchIssues]: ["query", "limit", "cursor", "team", "assignee", "includeArchived"],
-  [LinearAction.GetIssue]: ["issueId"],
+const ACTION_PARAMETERS: Record<Operation, readonly LinearParameterName[]> = {
+  viewer: [],
+  "list-resources": ["resourceType", "query", "limit", "cursor"],
+  "list-issues": ["limit", "cursor", "team", "assignee", "includeArchived"],
+  "search-issues": ["query", "limit", "cursor", "team", "assignee", "includeArchived"],
+  "get-issue": ["issueId"],
+  "create-issue": [
+    "team",
+    "title",
+    "description",
+    "assignee",
+    "state",
+    "project",
+    "priority",
+    "dueDate",
+    "labels",
+  ],
+  "update-issue": [
+    "issueId",
+    "title",
+    "description",
+    "assignee",
+    "state",
+    "project",
+    "priority",
+    "dueDate",
+    "labels",
+  ],
+  "create-comment": ["issueId", "body"],
 };
+
+function operation(params: LinearParameters): Operation {
+  if (!params.collection) {
+    if (
+      ["viewer", "list-resources", "list-issues", "search-issues", "get-issue"].includes(
+        params.action,
+      )
+    )
+      return params.action as Operation;
+  } else {
+    const mapped: Partial<
+      Record<NonNullable<LinearParameters["collection"]>, Partial<Record<LinearAction, Operation>>>
+    > = {
+      viewer: { read: "viewer" },
+      resources: { list: "list-resources" },
+      issues: {
+        list: "list-issues",
+        search: "search-issues",
+        read: "get-issue",
+        create: "create-issue",
+        update: "update-issue",
+      },
+      comments: { create: "create-comment" },
+    };
+    const result = mapped[params.collection]?.[params.action];
+    if (result) return result;
+  }
+  throw linearError(
+    LinearErrorCode.Validation,
+    "Invalid Linear collection and action combination.",
+  );
+}
 
 function resultText(value: unknown): string {
   return truncateHead(JSON.stringify(value, null, 2)).content;
@@ -107,11 +214,14 @@ async function executeTool<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-function validateParameters(params: LinearParameters): void {
-  const allowed = new Set<LinearParameterName>(ACTION_PARAMETERS[params.action]);
+function validateParameters(params: LinearParameters, selected: Operation): void {
+  const allowed = new Set<LinearParameterName>(ACTION_PARAMETERS[selected]);
   const unexpected = (Object.keys(params) as Array<keyof LinearParameters>).filter(
     (name): name is LinearParameterName =>
-      name !== "action" && params[name] !== undefined && !allowed.has(name),
+      name !== "action" &&
+      name !== "collection" &&
+      params[name] !== undefined &&
+      !allowed.has(name),
   );
   if (unexpected.length > 0) {
     throw linearError(
@@ -120,31 +230,120 @@ function validateParameters(params: LinearParameters): void {
       { details: { action: params.action, parameters: unexpected } },
     );
   }
-  if (params.action === LinearAction.ListResources && !params.resourceType) {
+  validateRequiredFields(params, selected);
+}
+
+function validateRequiredFields(params: LinearParameters, selected: Operation): void {
+  if (selected === "list-resources" && !params.resourceType) {
     throw linearError(LinearErrorCode.Validation, "resourceType is required for list-resources.");
   }
-  if (params.action === LinearAction.SearchIssues && !params.query) {
+  if (selected === "search-issues" && !params.query?.trim()) {
     throw linearError(LinearErrorCode.Validation, "query is required for search-issues.");
   }
-  if (params.action === LinearAction.GetIssue && !params.issueId) {
-    throw linearError(LinearErrorCode.Validation, "issueId is required for get-issue.");
+  if (
+    ["get-issue", "update-issue", "create-comment"].includes(selected) &&
+    !params.issueId?.trim()
+  ) {
+    throw linearError(LinearErrorCode.Validation, "issueId is required.");
+  }
+  if (selected === "create-issue" && (!params.team?.trim() || !params.title?.trim())) {
+    throw linearError(
+      LinearErrorCode.Validation,
+      "team and title are required for issue creation.",
+    );
+  }
+  if (selected === "create-comment" && !params.body?.trim()) {
+    throw linearError(LinearErrorCode.Validation, "body is required for comment creation.");
+  }
+  validateWriteFields(params, selected);
+}
+
+function validateWriteFields(params: LinearParameters, selected: Operation): void {
+  if (selected !== "update-issue" && params.assignee === null) {
+    throw linearError(LinearErrorCode.Validation, "Only issue updates can clear assignee.");
+  }
+  if (
+    selected === "create-issue" &&
+    (params.project === null || params.dueDate === null || params.assignee === null)
+  ) {
+    throw linearError(
+      LinearErrorCode.Validation,
+      "Null references are only valid for issue updates.",
+    );
+  }
+  if (
+    selected === "update-issue" &&
+    !ACTION_PARAMETERS[selected].some((name) => name !== "issueId" && params[name] !== undefined)
+  ) {
+    throw linearError(
+      LinearErrorCode.Validation,
+      "At least one change is required for issue update.",
+    );
+  }
+  if (
+    ["create-issue", "update-issue"].includes(selected) &&
+    params.title !== undefined &&
+    !params.title.trim()
+  ) {
+    throw linearError(LinearErrorCode.Validation, "title cannot be blank.");
+  }
+  validateDateAndReferences(params);
+}
+
+function validateDateAndReferences(params: LinearParameters): void {
+  if (
+    params.dueDate &&
+    (Number.isNaN(Date.parse(`${params.dueDate}T00:00:00Z`)) ||
+      new Date(`${params.dueDate}T00:00:00Z`).toISOString().slice(0, 10) !== params.dueDate)
+  ) {
+    throw linearError(LinearErrorCode.Validation, "dueDate must be a valid ISO date.");
+  }
+  if (
+    [params.team, params.state, ...(params.labels ?? [])].some(
+      (value) => value !== undefined && !value.trim(),
+    )
+  ) {
+    throw linearError(LinearErrorCode.Validation, "Resource references cannot be blank.");
   }
 }
 
 export type LinearToolGateway = Pick<
   LinearGateway,
-  "viewer" | "listResources" | "listIssues" | "searchIssues" | "issue"
+  | "viewer"
+  | "listResources"
+  | "listIssues"
+  | "searchIssues"
+  | "issue"
+  | "createIssue"
+  | "updateIssue"
+  | "createComment"
 >;
+
+function definedFields<T extends object>(fields: T): T {
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) as T;
+}
 
 async function dispatchLinear(
   gateway: LinearToolGateway,
   params: LinearParameters,
   signal?: AbortSignal,
 ) {
-  validateParameters(params);
-  const limit = params.limit ?? DEFAULT_RESULTS;
+  const selected = operation(params);
+  validateParameters(params, selected);
+  if (["create-issue", "update-issue", "create-comment"].includes(selected)) {
+    return dispatchWrite(gateway, params, selected, signal);
+  }
+  return dispatchRead(gateway, params, selected, signal);
+}
 
-  switch (params.action) {
+async function dispatchRead(
+  gateway: LinearToolGateway,
+  params: LinearParameters,
+  selected: Operation,
+  signal?: AbortSignal,
+) {
+  const limit = params.limit ?? DEFAULT_RESULTS;
+  switch (selected) {
     case LinearAction.Viewer: {
       const viewer = await gateway.viewer(signal);
       return toolResult(resultText(viewer), viewer);
@@ -171,7 +370,7 @@ async function dispatchLinear(
             limit,
             cursor: params.cursor,
             team: params.team,
-            assignee: params.assignee,
+            assignee: params.assignee ?? undefined,
             includeArchived: params.includeArchived,
           },
           signal,
@@ -188,7 +387,7 @@ async function dispatchLinear(
             limit,
             cursor: params.cursor,
             team: params.team,
-            assignee: params.assignee,
+            assignee: params.assignee ?? undefined,
             includeArchived: params.includeArchived,
           },
           signal,
@@ -202,6 +401,59 @@ async function dispatchLinear(
       return toolResult(resultText(issue), issue);
     }
   }
+  throw linearError(LinearErrorCode.Validation, "Invalid Linear read action.");
+}
+
+async function dispatchWrite(
+  gateway: LinearToolGateway,
+  params: LinearParameters,
+  selected: Operation,
+  signal?: AbortSignal,
+) {
+  switch (selected) {
+    case "create-issue": {
+      const issue = await gateway.createIssue(
+        definedFields({
+          team: params.team!,
+          title: params.title!,
+          description: params.description,
+          assignee: params.assignee ?? undefined,
+          state: params.state,
+          project: params.project ?? undefined,
+          priority: params.priority,
+          dueDate: params.dueDate ?? undefined,
+          labels: params.labels,
+        }),
+        signal,
+      );
+      return toolResult(resultText(issue), issue);
+    }
+    case "update-issue": {
+      const issue = await gateway.updateIssue(
+        definedFields({
+          issueId: params.issueId!,
+          title: params.title,
+          description: params.description,
+          assignee: params.assignee,
+          state: params.state,
+          project: params.project,
+          priority: params.priority,
+          dueDate: params.dueDate,
+          labels: params.labels,
+        }),
+        signal,
+      );
+      return toolResult(resultText(issue), issue);
+    }
+    case "create-comment": {
+      const comment = await gateway.createComment(
+        { issueId: params.issueId!, body: params.body! },
+        signal,
+      );
+      return toolResult(resultText(comment), comment);
+    }
+  }
+  throw linearError(LinearErrorCode.Validation, "Invalid Linear write action.");
 }
 
 export function createLinearContract(
@@ -211,7 +463,7 @@ export function createLinearContract(
     name: "linear",
     label: "Linear",
     description:
-      "Read Linear viewer, resource, and issue data. Use the action parameter to select an operation. List operations support bounded cursor pagination.",
+      "Read and write Linear issues and comments. Select a collection (viewer, resources, issues, comments) and action (read, list, search, create, update). Mutations change Linear tickets. Legacy read actions remain available without a collection. List operations support bounded cursor pagination.",
     parameters: LinearParameters,
     async execute(params, context) {
       return executeTool(() => dispatchLinear(gateway, params, context.signal));
@@ -223,7 +475,7 @@ export const linearPiOptions: PublicPiToolUi<typeof LinearParameters, unknown> =
   renderCall: (params, theme) =>
     renderCompactToolCall(
       "linear",
-      [params.action, params.issueId, params.query].filter(Boolean).join(" "),
+      [params.collection, params.action, params.issueId, params.query].filter(Boolean).join(" "),
       theme,
     ),
   renderResult: (result, options, theme, context) =>
