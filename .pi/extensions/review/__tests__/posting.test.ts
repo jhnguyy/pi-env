@@ -912,6 +912,63 @@ describe("review pull request posting", () => {
     ]);
   });
 
+  it("retries only by confirmation after reopening a real Pi JSONL session", async () => {
+    const dir = root();
+    const s = state(dir);
+    const sessionDir = join(dir, "sessions");
+    let manager = SessionManager.create(dir, sessionDir);
+    manager.appendCustomEntry(REVIEW_ENTRY_TYPE, (reviewEntry(s) as any).data);
+    manager.appendMessage({
+      role: "assistant",
+      content: [],
+      provider: "test",
+      model: "test",
+    } as any);
+    const file = manager.getSessionFile()!;
+    const view = reviewContext(dir);
+    let posts = 0;
+    const bodies: string[] = [];
+    let confirmations = 0;
+    const h = registeredReview({
+      root: dir,
+      entries: [],
+      append: (type, data) => {
+        manager.appendCustomEntry(type, data);
+      },
+      exec: githubStub({
+        list: () => ({ code: 0, stdout: "[]", stderr: "" }),
+        post: (args: string[]) => {
+          posts++;
+          bodies.push(JSON.parse(readFileSync(args.at(-1)!, "utf8")).body);
+          return posts === 1
+            ? { code: 1, stdout: "", stderr: "response lost" }
+            : { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+        },
+      }),
+    });
+    const context = () => ({
+      ...h.session(),
+      sessionManager: manager,
+      ui: { ...view.ctx.ui, confirm: async () => ++confirmations === 1 || confirmations === 3 },
+    });
+    h.handlers.session_start({}, context());
+    await h.command("pr post r comment", context());
+    expect(posts).toBe(1);
+    manager = SessionManager.open(file, sessionDir);
+    h.handlers.session_tree({}, context());
+    await h.command("pr retry-post r comment", context());
+    expect(view.notes.at(-1)).toBe("Retry cancelled.");
+    expect(posts).toBe(1);
+    await h.command("pr retry-post r comment", context());
+    expect(view.notes.at(-1)).toBe("Review posted.");
+    expect(posts).toBe(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    const restarted = SessionManager.open(file, sessionDir);
+    expect((restarted.getBranch().at(-1) as any).data.state.posts).toMatchObject([
+      { status: "posted", reviewId: "remote" },
+    ]);
+  });
+
   it("does not post changed content after a prior review is recorded as posted", async () => {
     const s = state();
     s.posts = [
