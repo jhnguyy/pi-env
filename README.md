@@ -22,10 +22,11 @@ Nub is the canonical JavaScript toolchain. Nix remains available for host/runtim
 | Existing checkout with local Nix | `nix run .#setup` or `./setup.sh --use-nix` |
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
 | No Nix | `./setup.sh` |
+| No Nix, obsolete or missing Nub | `./setup.sh --portable --bootstrap-nub` |
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
 
-Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env guidance block in `~/.pi/agent/AGENTS.md` and preserves content outside the managed block.
+Portable fallback setup intentionally uses whatever tools are already on `PATH`. [Opt-in Nub recovery](docs/prerequisites.md#portable-nub-recovery) can use a verified temporary Nub without changing the host toolchain. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env guidance block in `~/.pi/agent/AGENTS.md` and preserves content outside the managed block.
 
 ## Documentation
 

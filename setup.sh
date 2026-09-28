@@ -13,7 +13,7 @@ has_explicit_setup_mode() {
   [ -n "${PI_ENV_SETUP_MODE:-}" ] && return 0
   for arg in "$@"; do
     case "$arg" in
-      --use-nix|--nix-managed|--portable) return 0 ;;
+      --use-nix|--nix-managed|--portable|--bootstrap-nub) return 0 ;;
     esac
   done
   return 1
