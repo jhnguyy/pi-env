@@ -332,6 +332,180 @@ describe("review pull request posting", () => {
     expect(readPostingIntent(s.snapshot, "session")?.attempt.contentHash).toBe(first.contentHash);
   });
 
+  it("requires a duplicate-risk decision before retrying an uncertain POST", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    const bodies: string[] = [];
+    let allowRetry = false;
+    const prompts: string[] = [];
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        list: () => ({ code: 0, stdout: "[]", stderr: "" }),
+        post: (args: string[]) => {
+          bodies.push(JSON.parse(readFileSync(args.at(-1)!, "utf8")).body);
+          return bodies.length === 1
+            ? { code: 1, stdout: "", stderr: "response lost" }
+            : { code: 0, stdout: JSON.stringify({ id: "remote" }), stderr: "" };
+        },
+      }),
+    });
+    const ctx = {
+      ...h.session(),
+      ui: {
+        ...view.ctx.ui,
+        confirm: async (_title: string, prompt: string) => {
+          prompts.push(prompt);
+          return prompts.length === 1 || allowRetry;
+        },
+      },
+    };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    expect(bodies).toHaveLength(1);
+    await h.command("pr retry-post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("cancelled");
+    expect(prompts.at(-1)).toContain("duplicate");
+    expect(bodies).toHaveLength(1);
+    allowRetry = true;
+    await h.command("pr retry-post r comment", ctx);
+    expect(view.notes.at(-1)).toBe("Review posted.");
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it("does not retry when GitHub reveals the original review after confirmation", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let marker = "";
+    let visible = false;
+    let posts = 0;
+    let confirms = 0;
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        list: () => ({
+          code: 0,
+          stdout: visible ? JSON.stringify([{ id: "remote", body: marker }]) : "[]",
+          stderr: "",
+        }),
+        post: (args: string[]) => {
+          posts++;
+          marker = JSON.parse(readFileSync(args.at(-1)!, "utf8")).body;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    });
+    const ctx = {
+      ...h.session(),
+      ui: {
+        ...view.ctx.ui,
+        confirm: async () => {
+          if (++confirms === 2) visible = true;
+          return true;
+        },
+      },
+    };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    await h.command("pr retry-post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("Existing review found for marker");
+    expect(posts).toBe(1);
+    expect(h.appended.at(-1).state.posts).toMatchObject([{ status: "posted", reviewId: "remote" }]);
+  });
+
+  it("refuses to retry an uncertain POST with changed content", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let posts = 0;
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        post: () => {
+          posts++;
+          return { code: 1, stdout: "", stderr: "lost" };
+        },
+      }),
+    });
+    const ctx = { ...h.session(), ui: { ...view.ctx.ui, editor: async () => "changed" } };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    await h.command("pr preface r", ctx);
+    await h.command("pr retry-post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("differs from the recorded attempt");
+    expect(posts).toBe(1);
+  });
+
+  it("keeps a human edit made during the final retry marker check", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let checks = 0;
+    let posts = 0;
+    let ctx: any;
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        list: async () => {
+          if (++checks === 5) await h.command("pr preface r", ctx);
+          return { code: 0, stdout: "[]", stderr: "" };
+        },
+        post: () => {
+          posts++;
+          return { code: 1, stdout: "", stderr: "lost" };
+        },
+      }),
+    });
+    ctx = { ...h.session(), ui: { ...view.ctx.ui, editor: async () => "human edit" } };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    await h.command("pr retry-post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("review changed during retry marker check");
+    expect(h.appended.at(-1).state.preface).toBe("human edit");
+    expect(posts).toBe(1);
+  });
+
+  it("polls a saved marker on resume before deciding the result is uncertain", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let posts = 0;
+    let checks = 0;
+    let marker = "";
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({
+        list: () => ({
+          code: 0,
+          stdout: ++checks >= 3 ? JSON.stringify([{ id: "remote", body: marker }]) : "[]",
+          stderr: "",
+        }),
+        post: (args: string[]) => {
+          posts++;
+          marker = JSON.parse(readFileSync(args.at(-1)!, "utf8")).body;
+          return { code: 1, stdout: "", stderr: "response lost" };
+        },
+      }),
+    });
+    const ctx = { ...h.session(), ui: view.ctx.ui };
+    h.handlers.session_start({}, ctx);
+    await h.command("pr post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("uncertain");
+    h.handlers.session_tree({}, h.session([reviewEntry(s)]));
+    await h.command("pr post r comment", ctx);
+    expect(view.notes.at(-1)).toContain("Existing review found for marker");
+    expect(checks).toBe(3);
+    expect(posts).toBe(1);
+  });
+
   it("blocks a duplicate after restart when the session lost its pending entry", async () => {
     const s = state();
     const entries = [reviewEntry(s)];
@@ -863,6 +1037,45 @@ describe("review pull request posting", () => {
     expect(posts).toBe(1);
   });
 
+  it("waits to clean up while posting is at confirmation", async () => {
+    const dir = root();
+    const s = state(dir);
+    const view = reviewContext(dir);
+    let resolveConfirmation!: (answer: boolean) => void;
+    let confirmationStarted!: () => void;
+    const confirmation = new Promise<boolean>((resolve) => {
+      resolveConfirmation = resolve;
+    });
+    const entered = new Promise<void>((resolve) => {
+      confirmationStarted = resolve;
+    });
+    const h = registeredReview({
+      root: dir,
+      entries: [reviewEntry(s)],
+      exec: githubStub({ post: () => ({ code: 1, stdout: "", stderr: "response lost" }) }),
+    });
+    const ctx = {
+      ...h.session(),
+      ui: {
+        ...view.ctx.ui,
+        confirm: async () => {
+          confirmationStarted();
+          return confirmation;
+        },
+      },
+    };
+    h.handlers.session_start({}, ctx);
+    const posting = h.command("pr post r comment", ctx);
+    await entered;
+    const cleaning = h.command("pr cleanup r", ctx);
+    await Promise.resolve();
+    expect(existsSync(s.snapshot.artifactDir)).toBe(true);
+    resolveConfirmation(true);
+    await Promise.all([posting, cleaning]);
+    expect(existsSync(s.snapshot.artifactDir)).toBe(true);
+    expect(view.notes).toContain("Review r is posting. Wait before cleanup.");
+  });
+
   it("serializes different events with one shared posting permit", async () => {
     const dir = root();
     const s = state(dir);
@@ -1189,7 +1402,7 @@ describe("review pull request posting", () => {
     async function interleave() {
       await h.command(`pr ${action} r`, runtime);
       expect(view.notes.at(-1)).toContain(
-        action === "cleanup" ? "unresolved posting attempt" : "Preface updated",
+        action === "cleanup" ? "is posting. Wait before cleanup" : "Preface updated",
       );
       appendsAfterAction = h.appended.length;
     }

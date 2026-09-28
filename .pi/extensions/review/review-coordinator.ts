@@ -33,6 +33,7 @@ export class ReviewCoordinator {
   private readonly states = new Map<string, ReviewState>();
   private readonly createOperations = new Map<string, Promise<ReviewActionResult>>();
   private readonly preparingReviewIds = new Set<string>();
+  private readonly postingReviewIds = new Map<string, number>();
   private readonly reconcilingRunIds = new Set<string>();
 
   private postingSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });
@@ -121,6 +122,20 @@ export class ReviewCoordinator {
     this.preparingReviewIds.delete(reviewId);
   }
 
+  isPosting(reviewId: string): boolean {
+    return (this.postingReviewIds.get(reviewId) ?? 0) > 0;
+  }
+
+  beginPosting(reviewId: string): void {
+    this.postingReviewIds.set(reviewId, (this.postingReviewIds.get(reviewId) ?? 0) + 1);
+  }
+
+  finishPosting(reviewId: string): void {
+    const count = this.postingReviewIds.get(reviewId) ?? 0;
+    if (count <= 1) this.postingReviewIds.delete(reviewId);
+    else this.postingReviewIds.set(reviewId, count - 1);
+  }
+
   beginReconciliation(runId: string): boolean {
     if (this.reconcilingRunIds.has(runId)) return false;
     this.reconcilingRunIds.add(runId);
@@ -169,6 +184,7 @@ export class ReviewCoordinator {
     this.states.clear();
     this.createOperations.clear();
     this.preparingReviewIds.clear();
+    this.postingReviewIds.clear();
     this.reconcilingRunIds.clear();
     this.selectedReviewId = undefined;
     this.postingSemaphore = PartitionedSemaphore.makeUnsafe<string>({ permits: 1 });

@@ -75,6 +75,7 @@ export const REVIEW_COMMANDS = [
   "defer",
   "rerun",
   "post",
+  "retry-post",
   "draft-plan",
   "cleanup",
 ] as const;

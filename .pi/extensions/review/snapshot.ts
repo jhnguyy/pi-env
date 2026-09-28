@@ -660,8 +660,7 @@ export async function existingReviewWithMarker(
 ): Promise<string | undefined> {
   const url = typeof stateOrUrl === "string" ? stateOrUrl : stateOrUrl.metadata.url;
   const parsed = parsePrUrl(url);
-  let page = 1;
-  for (;;) {
+  for (let page = 1; page <= 20; page++) {
     const r = await run(
       exec,
       "gh",
@@ -682,6 +681,6 @@ export async function existingReviewWithMarker(
     const found = reviews.find((review: any) => String(review.body ?? "").includes(markerText));
     if (found?.id !== undefined) return String(found.id);
     if (reviews.length < 100) return undefined;
-    page += 1;
   }
+  throw new Error("bounded review search exceeded 20 pages; remote result remains uncertain.");
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
@@ -1237,6 +1238,7 @@ export async function postReview(
   signal?: AbortSignal,
   reviewId?: string,
   sessionStorage: PostingSessionStorage = postingSessionStorage,
+  retryUncertain = false,
 ): Promise<string> {
   if (coordinator.isSessionWriteUncertain())
     return "Review session write is uncertain. Restart Pi before posting.";
@@ -1245,6 +1247,8 @@ export async function postReview(
   if (!initial || initial.cleaned)
     return reviewId ? `Review not found: ${reviewId}.` : "No active PR review.";
   const targetId = initial.snapshot.id;
+  if (coordinator.isPreparing(targetId))
+    return `Review ${targetId} is in cleanup or preparation. Wait before posting.`;
   const contentHash = contentHashFor(initial, event);
   const operationSignal = coordinator.operationSignal(scope, signal);
   const uncertainSession =
@@ -1336,21 +1340,11 @@ export async function postReview(
       : "The review was accepted remotely, but the review changed before completion was recorded.";
   }
 
-  async function reconcileRecordedIntent(state: ReviewState): Promise<string | undefined> {
-    const existingIntent = readPostingIntent(state.snapshot, scope.sessionId);
-    if (!existingIntent) return undefined;
-    const prior = await existingReviewWithMarker(
-      pi.exec.bind(pi),
-      ctx.cwd,
-      state.snapshot,
-      existingIntent.attempt.marker,
-      operationSignal,
-    );
-    assertActiveCoordinatorScope(scope);
-    if (!prior)
-      return "A posting attempt is recorded locally, but its remote result is unknown. Verify it on GitHub before retrying.";
-    // Reconciliation concerns the original remote side effect, not the edited
-    // draft or the current remote head. Only submission requires preflight.
+  function recordExistingReview(
+    state: ReviewState,
+    attempt: PostAttempt,
+    remoteId: string,
+  ): string {
     const current = coordinator.review(targetId);
     if (
       !current ||
@@ -1358,11 +1352,66 @@ export async function postReview(
       current.snapshot.metadata.headOid !== state.snapshot.metadata.headOid
     )
       return "The review changed before posting reconciliation was recorded.";
-    const reconciled = { ...existingIntent.attempt, status: "posted" as const, reviewId: prior };
+    const reconciled = { ...attempt, status: "posted" as const, reviewId: remoteId };
     const posts = current.posts.filter((post) => post.id !== reconciled.id);
     if (!saveState(pi, { ...current, posts: [...posts, reconciled] }, scope))
       return "The review session changed before posting reconciliation was recorded.";
-    return `Existing review found for marker; not posting duplicate (${prior}).`;
+    return `Existing review found for marker; not posting duplicate (${remoteId}).`;
+  }
+
+  async function retryRecordedIntent(state: ReviewState, attempt: PostAttempt): Promise<string> {
+    if (attempt.event !== event || attempt.contentHash !== contentHash)
+      return "The confirmed review differs from the recorded attempt. Do not retry changed content.";
+    let current = await preflight("retry");
+    if (typeof current === "string") return current;
+    const warning = `GitHub did not show the original marker after bounded checks. Retrying may post a duplicate review.\nMarker: ${attempt.marker}\n${postingConfirmation(current, event)}`;
+    if (!(await confirm(ctx, "Retry uncertain PR review?", warning))) return "Retry cancelled.";
+    current = await preflight("retry confirmation");
+    if (typeof current === "string") return current;
+    const found = await existingReviewWithMarker(
+      pi.exec.bind(pi),
+      ctx.cwd,
+      current.snapshot,
+      attempt.marker,
+      operationSignal,
+    );
+    assertActiveCoordinatorScope(scope);
+    if (found) return recordExistingReview(current, attempt, found);
+    const ready = currentState("retry marker check");
+    if (typeof ready === "string") return ready;
+    const pending = { ...attempt, status: "pending" as const };
+    const failure = persistPending(ready, pending);
+    if (failure) return failure;
+    recordPostingIntent(ready.snapshot, scope.sessionId, pending);
+    const submitted = currentState("retry submission");
+    if (typeof submitted === "string") return submitted;
+    return submit(submitted, pending);
+  }
+
+  async function reconcileRecordedIntent(state: ReviewState): Promise<string | undefined> {
+    const existingIntent = readPostingIntent(state.snapshot, scope.sessionId);
+    if (!existingIntent) return undefined;
+    let prior: string | undefined;
+    for (let check = 0; check < 3; check++) {
+      if (check) await delay(check * 150, undefined, { signal: operationSignal });
+      prior = await existingReviewWithMarker(
+        pi.exec.bind(pi),
+        ctx.cwd,
+        state.snapshot,
+        existingIntent.attempt.marker,
+        operationSignal,
+      );
+      assertActiveCoordinatorScope(scope);
+      if (prior) break;
+    }
+    assertActiveCoordinatorScope(scope);
+    if (!prior)
+      return retryUncertain
+        ? retryRecordedIntent(state, existingIntent.attempt)
+        : `A posting attempt is recorded locally, but its remote result is unknown. Use /review pr retry-post ${targetId} after verifying the duplicate risk.`;
+    // Reconciliation concerns the original remote side effect, not the edited
+    // draft or the current remote head. Only submission requires preflight.
+    return recordExistingReview(state, existingIntent.attempt, prior);
   }
 
   async function resolvePriorAttempt(state: ReviewState): Promise<string | undefined> {
@@ -1376,7 +1425,8 @@ export async function postReview(
   }
 
   function persistPending(state: ReviewState, attempt: PostAttempt): string | undefined {
-    if (!saveState(pi, { ...state, posts: [...state.posts, attempt] }, scope))
+    const posts = state.posts.filter((post) => post.id !== attempt.id);
+    if (!saveState(pi, { ...state, posts: [...posts, attempt] }, scope))
       return "The review session changed before the posting attempt was recorded. Nothing was posted.";
     const manager = coordinator.activeContext?.sessionManager;
     if (
@@ -1400,6 +1450,11 @@ export async function postReview(
     return `Review already posted (${posted.reviewId ?? posted.id}).`;
   }
 
+  async function resolvePriorOrMissingIntent(state: ReviewState): Promise<string | undefined> {
+    if (retryUncertain) return "No recoverable posting intent is available for retry.";
+    return resolvePriorAttempt(state);
+  }
+
   async function execute(): Promise<string> {
     const original = coordinator.review(targetId);
     if (!original || original.cleaned) return "The review changed before posting could start.";
@@ -1407,7 +1462,7 @@ export async function postReview(
     if (postedResult) return postedResult;
     const recorded = await reconcileRecordedIntent(original);
     if (recorded) return recorded;
-    const resolved = await resolvePriorAttempt(original);
+    const resolved = await resolvePriorOrMissingIntent(original);
     if (resolved) return resolved;
     // A directory left by an interrupted intent write is not permission to
     // create a new attempt, even if its JSON file is absent.
@@ -1431,6 +1486,7 @@ export async function postReview(
     return submit(current, pending);
   }
 
+  coordinator.beginPosting(targetId);
   try {
     return await Effect.runPromise(
       PartitionedSemaphore.withPermits(
@@ -1446,6 +1502,8 @@ export async function postReview(
         ? uncertainSession
         : "The review session changed before remote submission. Nothing was posted.";
     throw cause;
+  } finally {
+    if (coordinator.isScopeActive(scope)) coordinator.finishPosting(targetId);
   }
 }
 
@@ -1566,6 +1624,8 @@ async function cleanup(pi: ExtensionAPI, reviewId?: string): Promise<string> {
   const state = stateById(reviewId);
   if (!state || state.cleaned) return "Review cleanup complete.";
   const targetReviewId = state.snapshot.id;
+  if (coordinator.isPosting(targetReviewId))
+    return `Review ${targetReviewId} is posting. Wait before cleanup.`;
   if (coordinator.isPreparing(targetReviewId) || state.dag?.status === "running")
     return `Review ${targetReviewId} is active. Cancel or wait for it before cleanup.`;
   if (
@@ -1595,6 +1655,24 @@ function postCommand(
   if (legacyEvent)
     return postReview(pi, ctx, eventFrom(first || "comment"), undefined, undefined, sessionStorage);
   return postReview(pi, ctx, eventFrom(rest[1] ?? "comment"), undefined, first, sessionStorage);
+}
+
+function retryPostCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  rest: string[],
+  sessionStorage: PostingSessionStorage,
+): Promise<string> {
+  if (!rest[0]) return Promise.resolve("An explicit review ID is required for retry.");
+  return postReview(
+    pi,
+    ctx,
+    eventFrom(rest[1] ?? "comment"),
+    undefined,
+    rest[0],
+    sessionStorage,
+    true,
+  );
 }
 
 const handlers: Partial<
@@ -1656,7 +1734,10 @@ async function command(
         ? cmd === "post"
           ? (pi: ExtensionAPI, rest: string[], ctx: ExtensionCommandContext) =>
               postCommand(pi, ctx, rest, sessionStorage)
-          : handlers[cmd]
+          : cmd === "retry-post"
+            ? (pi: ExtensionAPI, rest: string[], ctx: ExtensionCommandContext) =>
+                retryPostCommand(pi, ctx, rest, sessionStorage)
+            : handlers[cmd]
         : undefined;
     ctx.ui.notify(
       fn ? await fn(pi, rest, ctx) : `Usage: /review pr ${REVIEW_COMMANDS.join("|")}`,
@@ -1721,7 +1802,7 @@ export default function reviewExtension(
   });
   pi.registerCommand("review", {
     description:
-      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|rerun|post <id> [comment|approve|request-changes]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
+      "Manage reviews. Mutations require an explicit review ID. Usage: /review pr create [url]|get [url]|list|open <id>|walkthrough <id>|status|findings|select <id> <finding>...|reject <id> <finding>...|defer <id> <finding>...|edit <id> <finding>|preface <id>|rerun|post <id> [comment|approve|request-changes]|retry-post <id> [event]|draft-plan|cleanup [id]. Legacy post [event] targets the current review only for compatibility.",
     handler: (args, ctx) =>
       command(pi, Array.isArray(args) ? args.join(" ") : args, ctx, options.postingSessionStorage),
   });

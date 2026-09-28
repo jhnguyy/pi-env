@@ -941,6 +941,8 @@ describe("review extension pull request surface", () => {
     pi.handlers.session_start?.({}, runtime("original", original));
     const cleaning = pi.command("pr cleanup r", runtime("original", original));
     await vi.waitFor(() => expect(ownedSignal).toBeDefined());
+    await pi.command("pr post r comment", runtime("original", original));
+    expect(notes.at(-1)).toContain("in cleanup or preparation");
     pi.handlers.session_tree?.({}, runtime("replacement", replacement));
     expect(ownedSignal?.aborted).toBe(true);
     releaseRemoval();
