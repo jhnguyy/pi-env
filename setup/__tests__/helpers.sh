@@ -46,8 +46,11 @@ assert_file_count() {
   assert_eq "$actual" "$expected" "$file copy count for $pattern"
 }
 
+# Resolve symlinks: macOS mktemp returns /var/..., but Git reports /private/var/....
 with_temp_dir() {
-  mktemp -d
+  local dir
+  dir=$(mktemp -d)
+  (cd "$dir" && pwd -P)
 }
 
 make_executable() {
