@@ -7,6 +7,7 @@ import type {
   ExtensionContext,
   ExtensionToolContext,
   AgentToolResult,
+  ToolDefinition,
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -39,18 +40,13 @@ interface RememberedTool {
   readonly execute: ExecuteFn;
 }
 
-const BUILTIN_FACTORIES = Object.fromEntries(
-  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
-    name,
-    contract.agentFactory,
-  ]),
-) as Record<string, (cwd: string) => AgentTool<any, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
   private readonly pi: ExtensionAPI;
   private extensionTools = new Map<string, RememberedTool>();
   private builtinCache = new Map<string, AgentTool<any, any>>();
+  private builtinDefinitions = new Map<string, ToolDefinition<any, any, any>>();
   private readonly stopListening: Array<() => void> = [];
 
   constructor(pi: ExtensionAPI) {
@@ -148,20 +144,31 @@ export class ToolRegistry {
 
     if (BUILTIN_NAMES.has(toolName)) {
       const cacheKey = `${cwd}:${toolName}`;
-      let def = this.builtinCache.get(cacheKey);
-      if (!def) {
-        const factory = BUILTIN_FACTORIES[toolName];
-        def = factory(cwd);
-        this.builtinCache.set(cacheKey, def);
+      const contract = BUILT_IN_TOOL_CONTRACTS[toolName as keyof typeof BUILT_IN_TOOL_CONTRACTS];
+      if (ctx) {
+        let definition = this.builtinDefinitions.get(cacheKey);
+        if (!definition) {
+          definition = contract.definitionFactory(cwd);
+          this.builtinDefinitions.set(cacheKey, definition);
+        }
+        result = await definition.execute(toolCallId, params, signal, undefined, effectiveCtx);
+      } else {
+        let agentTool = this.builtinCache.get(cacheKey);
+        if (!agentTool) {
+          agentTool = contract.agentFactory(cwd);
+          this.builtinCache.set(cacheKey, agentTool);
+        }
+        result = await agentTool.execute(toolCallId, params, signal, undefined);
       }
-      result = await def.execute(toolCallId, params, signal, undefined);
     } else {
       result = await this.extensionTools
         .get(toolName)!
         .execute(toolCallId, params, signal, undefined, effectiveCtx);
     }
 
-    return extractText(result);
+    const text = extractText(result);
+    if (result.isError) throw new Error(text || `PTC tool "${toolName}" failed.`);
+    return text;
   }
 
   private assertCallable(toolName: string): void {

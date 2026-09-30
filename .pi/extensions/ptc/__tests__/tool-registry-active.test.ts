@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, test } from "vitest";
-import type { ExtensionAPI, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition, ToolInfo } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   registerAgentTools,
@@ -125,6 +125,31 @@ describe("ToolRegistry active filtering", () => {
     await expect(registry.dispatch("external", {}, process.cwd(), undefined)).rejects.toMatchObject({
       failure: { class: "unavailable-tool", tool: "external" },
     });
+  });
+
+  it("treats a failed built-in Bash result as a nested failure", async () => {
+    const harness = createHarness(["bash"]);
+    const registry = createRegistry(harness.api);
+
+    await expect(registry.dispatch("bash", { command: "exit 9" }, process.cwd(), undefined))
+      .rejects.toThrow("Command exited with code 9");
+  });
+
+  it("keeps the session environment for built-in Bash calls with a parent context", async () => {
+    const harness = createHarness(["bash"]);
+    const registry = createRegistry(harness.api);
+    const cwd = process.cwd();
+    // The built-in shell only reads these session fields from its context.
+    const ctx = {
+      cwd,
+      sessionManager: {
+        getSessionId: () => "ptc-test-session",
+        getSessionFile: () => undefined,
+      },
+    } as ExtensionContext;
+
+    await expect(registry.dispatch("bash", { command: "printf '%s' \"$PI_SESSION_ID\"" }, cwd, undefined, ctx))
+      .resolves.toBe("ptc-test-session");
   });
 
   it("executes agent-tool registrations", async () => {
