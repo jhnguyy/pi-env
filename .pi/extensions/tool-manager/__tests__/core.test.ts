@@ -10,7 +10,7 @@ import {
   triggerGroups,
 } from "../core";
 
-const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "review", "web_fetch", "notes", "linear"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, sourceInfo: { source: "x" } as any }));
+const tools = ["read", "bash", "edit", "write", "dev-tools", "ptc", SEARCH_TOOL_NAME, "analyze", "subagent", "review", "web_fetch", "notes", "linear"].map((name) => ({ name, description: name === "notes" ? "team notes forgejo" : name, parameters: {}, exposure: "direct" as const, sourceInfo: { source: "x" } as any }));
 
 describe("tool manager core", () => {
   it("uses the core profile after all tools are known and rejects an invalid configured default", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it, onTestFinished } from "vitest";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
 import {
@@ -187,7 +187,7 @@ describe("registerCrossHostTool contract", () => {
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/agent" });
 
-    await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionContext);
+    await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionToolContext);
     await harness.registrations[0].tool.execute("agent", { value: "a" }, signal, (update) => agentUpdates.push(update));
 
     expect(seen.map((entry) => entry.signal)).toEqual([signal, signal]);
