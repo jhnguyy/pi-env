@@ -18,8 +18,7 @@
     "setup/runtime.mjs",
     "vitest.config.ts",
     ".pi/extensions/*/index.ts",
-    ".pi/extensions/dev-tools/daemon.ts",
-    ".pi/extensions/ptc/subprocess-preamble.ts"
+    ".pi/extensions/dev-tools/daemon.ts"
   ],
   "project": [
     "scripts/**/*.mjs",

@@ -105,6 +105,8 @@ export default function (pi: ExtensionAPI) {
   registerPublicTool(pi, {
     name: "list_sessions",
     label: "List Sessions",
+    exposure: "deferred",
+    namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
       "List pi sessions as compact navigation digests before selecting one for read_session. Returns cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
     parameters: LIST_SCHEMA,
@@ -120,6 +122,8 @@ export default function (pi: ExtensionAPI) {
   registerPublicTool(pi, {
     name: "read_session",
     label: "Read Session",
+    exposure: "deferred",
+    namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
       "Read a session path selected with list_sessions as a sparse navigation view. Default output includes metadata, user prompts, tool error summaries, labels, branch summaries, and compactions; it excludes raw tool outputs and full assistant narrative.",
     parameters: READ_SCHEMA,

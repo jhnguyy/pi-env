@@ -41,13 +41,6 @@
         "banner": false
       }
     ],
-    "ptc": [
-      {
-        "entry": "subprocess-preamble.ts",
-        "outfile": "dist/subprocess-preamble.js",
-        "banner": false
-      }
-    ],
     "session-manager": [
       {
         "entry": "start.ts",

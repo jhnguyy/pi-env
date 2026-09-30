@@ -646,6 +646,7 @@ export default function (pi: ExtensionAPI) {
   registerPublicTool(pi, {
     name: "skill_build",
     label: "Skill Build",
+    exposure: "model-only",
     description:
       "Create, validate, or evaluate a pi skill. " +
       "Create mode passes name + description + template. " +

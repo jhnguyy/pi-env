@@ -503,6 +503,7 @@ export function registerCloseout(pi: CloseoutRegistrationApi): void {
     contract,
     capabilities: [ToolCapability.Write, ToolCapability.Execute],
     piOptions: {
+      exposure: "model-only",
       promptSnippet: CLOSEOUT_PROMPT_SNIPPET,
       promptGuidelines: CLOSEOUT_PROMPT_GUIDELINES,
       renderCall: (args, theme) =>

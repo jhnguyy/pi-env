@@ -102,13 +102,15 @@ describe("registerCrossHostTool contract", () => {
     registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
       capabilities: [ToolCapability.Read],
-      piOptions: { promptSnippet, promptGuidelines, renderCall, renderResult },
+      piOptions: { promptSnippet, promptGuidelines, renderCall, renderResult, exposure: "deferred", namespace: { name: "pi-env" } },
     });
 
     expect(harness.tools[0]?.promptSnippet).toBe(promptSnippet);
     expect(harness.tools[0]?.promptGuidelines).toBe(promptGuidelines);
     expect(harness.tools[0]?.renderCall).toBe(renderCall);
     expect(harness.tools[0]?.renderResult).toBe(renderResult);
+    expect(harness.tools[0]?.exposure).toBe("deferred");
+    expect(harness.tools[0]?.namespace).toEqual({ name: "pi-env" });
   });
 
   it("registers AgentTool at session start and unregisters it at session shutdown", () => {

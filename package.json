@@ -21,12 +21,9 @@
     ".pi/extensions/notes",
     ".pi/extensions/pi-update",
     ".pi/extensions/review",
-    ".pi/extensions/ptc",
-    ".pi/extensions/security",
     ".pi/extensions/session-manager",
     ".pi/extensions/skill-builder",
-    ".pi/extensions/subagent",
-    ".pi/extensions/tool-manager"
+    ".pi/extensions/subagent"
   ],
   "pi": {
     "extensions": [
@@ -40,18 +37,12 @@
       ".pi/extensions/notes",
       ".pi/extensions/pi-update",
       ".pi/extensions/review",
-      ".pi/extensions/ptc",
-      ".pi/extensions/security",
       ".pi/extensions/session-manager",
       ".pi/extensions/skill-builder",
-      ".pi/extensions/subagent",
-      ".pi/extensions/tool-manager"
+      ".pi/extensions/subagent"
     ],
     "skills": [
       ".agents/skills"
-    ],
-    "themes": [
-      "themes"
     ]
   },
   "scripts": {
