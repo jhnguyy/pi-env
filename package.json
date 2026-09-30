@@ -79,6 +79,7 @@
     "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "scripts/node-run.sh scripts/verify.mjs",
     "verify:safe": "scripts/node-run.sh scripts/verify-safe.mjs",
+    "verify:pre-commit": "scripts/node-run.sh scripts/verify-pre-commit.mjs",
     "verify:install": "nub run build && scripts/node-run.sh scripts/verify-install.mjs",
     "verify:image-artifact": "scripts/node-run.sh scripts/verify-image-artifact.mjs",
     "verify:phase": "scripts/node-run.sh scripts/verify-phase.mjs",

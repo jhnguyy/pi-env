@@ -160,6 +160,14 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.InstallReadiness,
 ]);
 
+// Fast static checks that run on every host without strict containment.
+export const PRE_COMMIT_VERIFICATION_PHASES = Object.freeze([
+  VerificationPhase.Format,
+  VerificationPhase.PatternCheck,
+  VerificationPhase.ChangedCodeQuality,
+  VerificationPhase.Typecheck,
+]);
+
 export const EXPLICIT_VERIFICATION_PHASES = Object.freeze([
   ...STANDARD_VERIFICATION_PHASES,
   VerificationPhase.RealWorkspaceSemanticCanary,
