@@ -1,1 +1,1 @@
-When writing or posting correspondence for the user, prefix your text with `🤖:`. If the user provides the message, keep it first; put your context after a blank line prefixed with `🤖:`.
+In correspondence you write or post for the user, start agent-authored text with `🤖:`. If the user provides a message, keep it first and separate your text with a blank line.
