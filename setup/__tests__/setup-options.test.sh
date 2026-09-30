@@ -89,7 +89,7 @@ test_terminal_config_paths() {
   local tmp
   tmp="$(with_temp_dir)"
   mkdir -p "$tmp/home"
-  ROOT="$ROOT" HOME="$tmp/home" bash -c '
+  env -u GHOSTTY_CONFIG_DIR ROOT="$ROOT" HOME="$tmp/home" bash -c '
     set -e
     source "$ROOT/setup/context.sh"
     uname() { printf "Darwin\\n"; }
@@ -99,7 +99,7 @@ test_terminal_config_paths() {
     setup_init_context "$ROOT/setup"
     [ "$GHOSTTY_CONFIG_DIR" = "$HOME/custom-ghostty" ] || exit 1
   ' || fail "macOS Ghostty default or explicit override is incorrect"
-  ROOT="$ROOT" HOME="$tmp/home" bash -c '
+  env -u GHOSTTY_CONFIG_DIR ROOT="$ROOT" HOME="$tmp/home" bash -c '
     set -e
     source "$ROOT/setup/context.sh"
     uname() { printf "Linux\\n"; }

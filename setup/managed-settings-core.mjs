@@ -59,6 +59,10 @@ function adoptNativeDefaults(settings) {
   if (RETIRED_PACKAGE_THEMES.has(settings.theme) || (typeof settings.theme === "string" && settings.theme.trim() === ""))
     delete settings.theme;
   if (!Array.isArray(settings.defaultTools)) settings.defaultTools = [];
+  else if (settings.defaultTools.length === 0) {
+    settings.defaultTools = NATIVE_TOOL_DEFAULTS.map((entry) => entry.slice(1));
+    return;
+  }
   for (const entry of NATIVE_TOOL_DEFAULTS) {
     const name = entry.slice(1);
     if (!settings.defaultTools.some((configured) => configured === name || configured === `+${name}` || configured === `-${name}`))

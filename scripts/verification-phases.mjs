@@ -108,6 +108,14 @@ export const VerificationPhase = Object.freeze({
     VerificationClass.Packaging,
     VerificationCapability.InstallIntegrity,
   ),
+  NativeToolDiscovery: phase(
+    "native-tool-discovery",
+    "native tool discovery",
+    "nub",
+    ["run", "test:e2e:native-tools"],
+    VerificationClass.SafetyIntegration,
+    VerificationCapability.RuntimeBehavior,
+  ),
   RuntimeTests: phase(
     "runtime-tests",
     "runtime tests",
@@ -143,6 +151,7 @@ export const STANDARD_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.LicenseCompliance,
   VerificationPhase.Build,
   VerificationPhase.InstallReadiness,
+  VerificationPhase.NativeToolDiscovery,
   VerificationPhase.RuntimeTests,
 ]);
 
@@ -158,6 +167,7 @@ export const SAFE_VERIFICATION_PHASES = Object.freeze([
   VerificationPhase.SafeRuntimeTests,
   VerificationPhase.Build,
   VerificationPhase.InstallReadiness,
+  VerificationPhase.NativeToolDiscovery,
 ]);
 
 export const EXPLICIT_VERIFICATION_PHASES = Object.freeze([

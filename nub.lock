@@ -184,6 +184,8 @@ importers:
 
   .pi/extensions/review: {}
 
+  .pi/extensions/security: {}
+
   .pi/extensions/session-manager:
     dependencies:
       '@earendil-works/pi-coding-agent':

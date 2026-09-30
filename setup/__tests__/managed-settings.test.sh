@@ -234,6 +234,17 @@ test_migrates_only_retired_theme_and_preserves_explicit_tools() {
     [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "retired $retired_theme should migrate to system"
     [ "$(json_get "$settings" 's.defaultTools')" = '["-codemode","+tool_search"]' ] || fail "explicit native tool opt-out should be preserved"
   done
+  printf '%s\n' '{"defaultTools":[]}' > "$settings"
+  apply_settings "$settings" "$repo" >/dev/null
+  [ "$(json_get "$settings" 's.defaultTools')" = '["codemode","tool_search"]' ] || fail "empty selection must not activate built-in tools"
+  local resolved
+  resolved="$(SETTINGS_PATH="$settings" run_node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    import { SettingsManager } from "@earendil-works/pi-coding-agent";
+    const { defaultTools } = JSON.parse(readFileSync(process.env.SETTINGS_PATH, "utf8"));
+    console.log(JSON.stringify(SettingsManager.inMemory({ defaultTools }).getDefaultTools()));
+  ')"
+  [ "$resolved" = '["codemode","tool_search"]' ] || fail "Pi resolver must keep an explicit empty selection restricted: got $resolved"
   rm -rf "$tmp"
 }
 
