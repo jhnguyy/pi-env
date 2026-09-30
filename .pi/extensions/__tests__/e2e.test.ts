@@ -37,7 +37,7 @@ describe("native tool workflows", () => {
         defaultTools: ["+codemode", "+tool_search"],
         query: "web fetch",
         limit: 1,
-        sensitiveFixture: ".env (synthetic)",
+        sensitiveFixture: ".env and truncated .env (synthetic)",
         notesVault: "temporary Obsidian vault",
         webFixture: "https://example.invalid/pi-env-fixture (synthetic response)",
         bundles: bundles.map((path) => path.slice(repo.length + 1)),
@@ -48,7 +48,7 @@ describe("native tool workflows", () => {
         notCallable: ["closeout", "skill_build", "subagent"],
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
-        sensitiveReads: "redacted in direct and codemode calls",
+        sensitiveReads: "redacted in direct and codemode calls, including truncated read metadata",
         composition: "nested read and Bash results combined with session context",
         bashFailure: "direct Bash reports an error; codemode receives structured exit_code 9",
         notes: "create and read a Wiki note in a temporary vault; reject an unguarded overwrite and release the provider",
@@ -120,8 +120,11 @@ describe("native tool workflows", () => {
         return new Response("synthetic-web-fixture", { status: 200, headers: { "content-type": "text/plain" } });
       };
       const sensitivePath = join(workspace, ".env");
+      const truncatedSensitivePath = join(workspace, "truncated/.env");
       const ordinaryPath = join(workspace, "ordinary.txt");
       writeFileSync(sensitivePath, "synthetic-credential-fixture");
+      mkdirSync(dirname(truncatedSensitivePath));
+      writeFileSync(truncatedSensitivePath, "synthetic-truncated-credential-fixture\n" + "ordinary-line\n".repeat(2001));
       writeFileSync(ordinaryPath, "ordinary-fixture");
       const sessionCommand = `printf 'session=%s' "$PI_SESSION_ID"`;
       faux.setResponses([
@@ -138,6 +141,8 @@ describe("native tool workflows", () => {
         }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
         fauxAssistantMessage(fauxToolCall("read", { path: sensitivePath }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("read", { path: truncatedSensitivePath }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
         fauxAssistantMessage(fauxToolCall("read", { path: ordinaryPath }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
@@ -177,6 +182,11 @@ describe("native tool workflows", () => {
       phase = "read redaction";
       await session.prompt("Read the sensitive fixture through codemode.");
       await session.prompt("Read the sensitive fixture directly.");
+      await session.prompt("Read the truncated sensitive fixture directly.");
+      const truncatedResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "read").at(-1);
+      const truncatedResultRedacted = JSON.stringify(truncatedResult).includes("[.env redacted") && !JSON.stringify(truncatedResult).includes("synthetic-truncated-credential-fixture");
+      evidence.actual = { ...(evidence.actual as object), truncatedResultRedacted };
+      expect(truncatedResultRedacted).toBe(true);
       await session.prompt("Read the ordinary fixture directly.");
       phase = "nested tool composition";
       await session.prompt("Compose an ordinary read and session-aware Bash call in codemode.");
@@ -212,6 +222,7 @@ describe("native tool workflows", () => {
         activeBefore, callableBefore, activeAfter, loaded: searchDetails,
         webFetches: fetchCount,
         sensitiveReadRedactions: transcript.match(/\[\.env redacted/g)?.length ?? 0,
+        truncatedResultRedacted,
         ordinaryRead: transcript.includes("ordinary-fixture"),
         syntheticFixtureInTranscript: transcript.includes("synthetic-credential-fixture"),
         nestedComposition: composedText.includes("ordinary-fixture") && composedText.includes(session.sessionManager.getSessionId()) && composedText.includes('"name":"bash"'),
@@ -226,7 +237,8 @@ describe("native tool workflows", () => {
         fauxCalls: faux.state.callCount,
       };
       expect(transcript).not.toContain("synthetic-credential-fixture");
-      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, noteCreated: true, noteReadReturnedContent: true, noteConflictIsError: true, noteConflictSpecific: true, noteContentPreserved: true, fauxCalls: 24 }));
+      expect(transcript).not.toContain("synthetic-truncated-credential-fixture");
+      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 3, truncatedResultRedacted: true, ordinaryRead: true, syntheticFixtureInTranscript: false, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, noteCreated: true, noteReadReturnedContent: true, noteConflictIsError: true, noteConflictSpecific: true, noteContentPreserved: true, fauxCalls: 26 }));
       phase = "notes provider shutdown";
       writeFileSync(join(workspace, "settings.json"), "{}");
       await session.reload();

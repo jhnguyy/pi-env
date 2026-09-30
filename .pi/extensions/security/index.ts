@@ -26,6 +26,8 @@ export default function (pi: ExtensionAPI) {
           text: `[${filename} redacted — edit the file directly to modify]`,
         },
       ],
+      // A truncated read also stores file text in details.truncation.content.
+      details: {},
     };
   });
 }
