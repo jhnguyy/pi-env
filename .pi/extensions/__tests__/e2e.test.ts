@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,9 +15,10 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { resolveNotesProvider } from "../notes/provider-registry";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-const bundles = ["analyze", "web-context", "dev-tools", "security", "skill-builder", "subagent"].map(
+const bundles = ["analyze", "web-context", "dev-tools", "notes", "security", "skill-builder", "subagent"].map(
   (name) => join(repo, `.pi/extensions/${name}/dist/index.js`),
 );
 
@@ -37,23 +38,28 @@ describe("native tool workflows", () => {
         query: "web fetch",
         limit: 1,
         sensitiveFixture: ".env (synthetic)",
+        notesVault: "temporary Obsidian vault",
         webFixture: "https://example.invalid/pi-env-fixture (synthetic response)",
         bundles: bundles.map((path) => path.slice(repo.length + 1)),
       },
       expected: {
-        activeBefore: ["codemode", "tool_search", "closeout", "skill_build", "subagent"],
-        callableBefore: ["analyze", "web_fetch"],
+        activeBefore: ["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"],
+        callableBefore: ["analyze", "web_fetch", "notes"],
         notCallable: ["closeout", "skill_build", "subagent"],
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         sensitiveReads: "redacted in direct and codemode calls",
         composition: "nested read and Bash results combined with session context",
         bashFailure: "direct Bash reports an error; codemode receives structured exit_code 9",
+        notes: "create and read a Wiki note in a temporary vault; reject an unguarded overwrite and release the provider",
       },
       actual: {},
       verdict: "failed",
     };
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
+    const previousCwd = process.cwd;
+    // Notes discovers project settings from process.cwd(), not the SDK session cwd.
+    process.cwd = () => workspace;
     const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
     const previousTelemetry = process.env.PI_TELEMETRY;
     const previousFetch = globalThis.fetch;
@@ -61,6 +67,7 @@ describe("native tool workflows", () => {
     process.env.PI_TELEMETRY = "0";
     let fetchCount = 0;
     let phase = "initialization";
+    let notesShutdown = false;
     try {
       evidence.bundleHashes = Object.fromEntries(bundles.map((path) => [path.slice(repo.length + 1), createHash("sha256").update(readFileSync(path)).digest("hex")]));
       const settingsManager = SettingsManager.inMemory({ defaultTools: ["+codemode", "+tool_search"] });
@@ -71,6 +78,9 @@ describe("native tool workflows", () => {
         refreshOnCreate: false,
       });
       modelRuntime.registerNativeProvider(faux.provider);
+      const vault = join(workspace, "vault");
+      mkdirSync(vault);
+      writeFileSync(join(workspace, "settings.json"), JSON.stringify({ notes: { provider: "obsidian", vaultPath: vault } }));
       const resourceLoader = new DefaultResourceLoader({
         cwd: workspace,
         agentDir: workspace,
@@ -97,9 +107,9 @@ describe("native tool workflows", () => {
       const activeBefore = session.getActiveToolNames();
       const callableBefore = session.getCallableToolNames();
       evidence.actual = { activeBefore, callableBefore };
-      expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "skill_build", "subagent"]));
+      expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"]));
       expect(activeBefore).not.toContain("web_fetch");
-      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch"]));
+      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "notes"]));
       for (const name of ["tool_search", "closeout", "skill_build", "subagent"]) expect(callableBefore).not.toContain(name);
 
       const webUrl = "https://example.invalid/pi-env-fixture";
@@ -141,6 +151,12 @@ describe("native tool workflows", () => {
         fauxAssistantMessage("done"),
         fauxAssistantMessage(fauxToolCall("bash", { command: "exit 9" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "# Smoke\n\nsynthetic-note", revision: null }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "read", target: "smoke.md" }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "unguarded overwrite", revision: null }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
       ]);
       phase = "deferred codemode call";
       await session.prompt("Fetch the synthetic web fixture through codemode before discovery.");
@@ -171,6 +187,26 @@ describe("native tool workflows", () => {
       const nestedBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
       await session.prompt("Run a failing Bash command directly.");
       const directBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "bash").at(-1);
+      const notePath = join(vault, "wiki/smoke.md");
+      phase = "notes creation";
+      await session.prompt("Create a synthetic Wiki note in the temporary vault.");
+      const noteCreated = existsSync(notePath);
+      evidence.actual = { ...(evidence.actual as object), noteCreated };
+      expect(noteCreated).toBe(true);
+      phase = "notes read";
+      await session.prompt("Read the synthetic Wiki note.");
+      const noteRead = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
+      const noteReadReturnedContent = JSON.stringify(noteRead).includes("synthetic-note");
+      evidence.actual = { ...(evidence.actual as object), noteReadReturnedContent };
+      expect(noteReadReturnedContent).toBe(true);
+      phase = "notes create-only conflict";
+      await session.prompt("Attempt an unguarded overwrite of the synthetic Wiki note.");
+      const noteConflict = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
+      const noteConflictIsError = !!noteConflict && "isError" in noteConflict && noteConflict.isError === true;
+      const noteConflictSpecific = JSON.stringify(noteConflict).includes("Note changed since it was read: wiki/smoke.md");
+      const noteContentPreserved = readFileSync(notePath, "utf8") === "# Smoke\n\nsynthetic-note";
+      evidence.actual = { ...(evidence.actual as object), noteConflictIsError, noteConflictSpecific, noteContentPreserved };
+      expect(noteConflictIsError && noteConflictSpecific && noteContentPreserved).toBe(true);
       const transcript = JSON.stringify(session.messages);
       evidence.actual = {
         activeBefore, callableBefore, activeAfter, loaded: searchDetails,
@@ -182,25 +218,51 @@ describe("native tool workflows", () => {
         nestedBashExitCode: JSON.stringify(nestedBashResult).includes("nested-bash-exit:9") ? 9 : null,
         directBashIsError: !!directBashResult && "isError" in directBashResult && directBashResult.isError === true,
         directBashStatusVisible: JSON.stringify(directBashResult).includes("Command exited with code 9"),
+        noteCreated,
+        noteReadReturnedContent,
+        noteConflictIsError,
+        noteConflictSpecific,
+        noteContentPreserved,
         fauxCalls: faux.state.callCount,
       };
       expect(transcript).not.toContain("synthetic-credential-fixture");
-      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, fauxCalls: 18 }));
+      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, noteCreated: true, noteReadReturnedContent: true, noteConflictIsError: true, noteConflictSpecific: true, noteContentPreserved: true, fauxCalls: 24 }));
+      phase = "notes provider shutdown";
+      writeFileSync(join(workspace, "settings.json"), "{}");
+      await session.reload();
+      notesShutdown = true;
+      const notesUnregistered = !session.getActiveToolNames().includes("notes");
+      let notesProviderUnregistered = false;
+      try {
+        resolveNotesProvider("obsidian");
+      } catch (error) {
+        notesProviderUnregistered = error instanceof Error && error.message === "Configured notes provider is not registered: obsidian";
+      }
+      evidence.actual = { ...(evidence.actual as object), notesUnregistered, notesProviderUnregistered };
+      expect(notesUnregistered && notesProviderUnregistered).toBe(true);
       evidence.verdict = "passed";
     } catch (error) {
       evidence.failedPhase = phase;
       evidence.failureType = error instanceof Error ? error.name : "UnknownError";
       throw error;
     } finally {
-      session?.dispose();
-      globalThis.fetch = previousFetch;
-      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-      if (previousTelemetry === undefined) delete process.env.PI_TELEMETRY;
-      else process.env.PI_TELEMETRY = previousTelemetry;
-      writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
-      console.info(`Native tool evidence: ${artifact}`);
-      rmSync(workspace, { recursive: true, force: true });
+      try {
+        if (session && !notesShutdown) {
+          writeFileSync(join(workspace, "settings.json"), "{}");
+          await session.reload();
+        }
+      } finally {
+        session?.dispose();
+        process.cwd = previousCwd;
+        globalThis.fetch = previousFetch;
+        if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+        if (previousTelemetry === undefined) delete process.env.PI_TELEMETRY;
+        else process.env.PI_TELEMETRY = previousTelemetry;
+        writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
+        console.info(`Native tool evidence: ${artifact}`);
+        rmSync(workspace, { recursive: true, force: true });
+      }
     }
   });
 });
