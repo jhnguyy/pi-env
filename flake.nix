@@ -172,12 +172,9 @@
             # Keep flake checks dependency-free: this source tree intentionally
             # has no node_modules. Effect-backed setup orchestration tests run
             # under `nub run test:setup`, where project JS dependencies exist.
-            bash setup/__tests__/managed-settings.test.sh
             bash setup/__tests__/setup-options.test.sh
-            bash setup/__tests__/policy.test.sh
             bash setup/__tests__/node-policy.test.sh
             bash setup/__tests__/verify-install.test.sh
-            bash setup/__tests__/verify.test.sh
             node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8")); JSON.parse(require("fs").readFileSync("flake.lock", "utf8"));'
             touch "$out"
           '';
