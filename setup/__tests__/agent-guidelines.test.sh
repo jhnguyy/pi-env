@@ -93,6 +93,56 @@ test_agent_guidelines_are_reconciled_idempotently() {
   rm -rf "$tmp"
 }
 
+test_correspondence_rule_is_installed_on_first_setup() {
+  local tmp home append_file
+  tmp="$(with_temp_dir)"
+  home="$tmp/home"
+  append_file="$home/.pi/agent/APPEND_SYSTEM.md"
+
+  configure_pi "$home"
+  assert_file_contains "$append_file" '🤖:'
+  assert_file_count "$append_file" '<!-- pi-env:correspondence:start -->' 1
+
+  rm -rf "$tmp"
+}
+
+test_correspondence_rule_is_managed_in_append_system() {
+  local tmp home append_file before after
+  tmp="$(with_temp_dir)"
+  home="$tmp/home"
+  append_file="$home/.pi/agent/APPEND_SYSTEM.md"
+  mkdir -p "$(dirname "$append_file")"
+  printf '%s\n' 'Local prompt text.' >"$append_file"
+
+  configure_pi "$home"
+  assert_file_contains "$append_file" 'Local prompt text.'
+  assert_file_contains "$append_file" '🤖:'
+  assert_file_count "$append_file" '<!-- pi-env:correspondence:start -->' 1
+  assert_file_count "$append_file" '<!-- pi-env:correspondence:end -->' 1
+  run_node -e '
+    const fs = require("node:fs");
+    const [path, start, end] = process.argv.slice(1);
+    const current = fs.readFileSync(path, "utf8");
+    const from = current.indexOf(start) + start.length;
+    const to = current.indexOf(end);
+    fs.writeFileSync(path, `${current.slice(0, from)}\nstale rule\n${current.slice(to)}`);
+  ' "$append_file" '<!-- pi-env:correspondence:start -->' '<!-- pi-env:correspondence:end -->'
+
+  configure_pi "$home"
+  assert_file_contains "$append_file" 'Local prompt text.'
+  assert_file_contains "$append_file" '🤖:'
+  if grep -q 'stale rule' "$append_file"; then
+    fail 'setup must refresh the correspondence rule'
+  fi
+
+  before="$(sha256sum "$append_file")"
+  configure_pi "$home"
+  after="$(sha256sum "$append_file")"
+  assert_eq "$after" "$before" 'a repeated setup must not change APPEND_SYSTEM.md'
+
+  rm -rf "$tmp"
+}
+
 test_obsolete_roles_link_is_not_installed() {
   local tmp home roles
   tmp="$(with_temp_dir)"
@@ -170,6 +220,8 @@ test_unrelated_roles_link_is_preserved() {
 
 test_agent_guidelines_are_created_from_the_managed_source
 test_agent_guidelines_are_reconciled_idempotently
+test_correspondence_rule_is_installed_on_first_setup
+test_correspondence_rule_is_managed_in_append_system
 test_obsolete_roles_link_is_not_installed
 test_managed_obsolete_roles_link_is_removed
 test_user_owned_roles_file_is_preserved
