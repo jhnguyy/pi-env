@@ -41,7 +41,7 @@ function createHarness(activeNames: string[]) {
   const bus = eventBus();
   const active = [...activeNames];
   const tools: ToolInfo[] = [
-    { name: "read", description: "read", parameters: {}, sourceInfo: sourceInfo("builtin") },
+    { name: "read", description: "read", parameters: {}, exposure: "direct", sourceInfo: sourceInfo("builtin") },
   ];
   const appended: Array<{ type: string; data: unknown }> = [];
   const shutdownHandlers: Array<() => void> = [];
@@ -54,7 +54,7 @@ function createHarness(activeNames: string[]) {
     // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     ({
     registerTool(tool: ToolDefinition<any, any, any>) {
-      tools.push({ ...tool, sourceInfo: sourceInfo("extension") });
+      tools.push({ ...tool, exposure: tool.exposure ?? "direct", sourceInfo: sourceInfo("extension") });
     },
     registerCommand() {},
     appendEntry: (type: string, data: unknown) => appended.push({ type, data }),
@@ -116,6 +116,17 @@ describe("ToolRegistry active filtering", () => {
     await expect(getRegistry().dispatch("external", {}, process.cwd(), undefined)).resolves.toBe("ok");
   });
 
+  it("does not dispatch model-only tools through PTC", async () => {
+    const harness = createHarness(["external"]);
+    registerPtcTools(harness.api, { ...externalTool, exposure: "model-only" });
+    const registry = createRegistry(harness.api);
+
+    expect(registry.getRuntimeSnapshot().catalog.callable).toEqual([]);
+    await expect(registry.dispatch("external", {}, process.cwd(), undefined)).rejects.toMatchObject({
+      failure: { class: "unavailable-tool", tool: "external" },
+    });
+  });
+
   it("executes agent-tool registrations", async () => {
     const harness = createHarness(["external"]);
     const registry = createRegistry(harness.api);
@@ -160,7 +171,7 @@ describe("ToolRegistry active filtering", () => {
   it("dispatches real search_tools from a distinct extension API without agent-channel emission", async () => {
     const harness = createHarness(["search_tools"]);
     harness.tools.push(
-      { name: "web_fetch", description: "web", parameters: {}, sourceInfo: sourceInfo("extension") },
+      { name: "web_fetch", description: "web", parameters: {}, exposure: "direct", sourceInfo: sourceInfo("extension") },
     );
 
     const ptcApi = harness.createApi();

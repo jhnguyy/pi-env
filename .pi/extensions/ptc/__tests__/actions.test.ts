@@ -78,7 +78,7 @@ describe("PTC actions", () => {
     expect(result.output).toContain("Nested tool result: Promise<string> (plain text).");
     expect(result.output).toContain('"dev_tools"(args?: Record<string, unknown>): Promise<string>;');
     expect(result.output).toContain('"dev-tools"(args?: Record<string, unknown>): Promise<string>;');
-    expect(result.output).toContain("direct_only: This active direct tool has no PTC dispatcher. Call it directly.");
+    expect(result.output).toContain("direct_only: This active tool is not callable inside PTC. Call it directly.");
     expect(result.output).toContain("ptc: This tool is blocked inside PTC. Call it directly.");
     expect(result.output).toContain("closeout: This tool is blocked inside PTC. Call it directly.");
     expect(result.details).toMatchObject({

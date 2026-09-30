@@ -147,7 +147,7 @@ export function __create_tools(
       accessFailure(
         PtcToolFailureClass.Unavailable,
         record.name,
-        `PTC unavailable tool "${record.name}". It has no PTC dispatcher. Call it directly.`,
+        `PTC unavailable tool "${record.name}". It is not callable inside PTC. Call it directly.`,
       ),
     );
   }

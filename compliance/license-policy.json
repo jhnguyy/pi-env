@@ -22,13 +22,13 @@
     {
       "repository": "https://github.com/aws/aws-sdk-js-v3",
       "license": "Apache-2.0",
-      "versions": ["3.972.55", "3.972.73", "3.972.78", "3.997.27", "3.997.45"],
+      "versions": ["3.972.55", "3.972.73", "3.972.74", "3.972.78", "3.972.79", "3.997.27", "3.997.45", "3.997.46"],
       "file": "compliance/Apache-2.0.txt"
     },
     {
       "repository": "https://github.com/earendil-works/pi",
       "license": "MIT",
-      "versions": ["0.85.1", "0.87.0", "0.87.1"],
+      "versions": ["0.85.1", "0.87.0", "0.87.1", "0.99.1"],
       "file": "compliance/npm-missing-license-notices.txt"
     },
     {

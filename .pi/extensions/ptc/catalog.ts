@@ -63,7 +63,7 @@ export function createPtcToolCatalog(
       name,
       key: toIdentifier(name),
       class: PtcToolFailureClass.Unavailable,
-      reason: "This active direct tool has no PTC dispatcher. Call it directly.",
+      reason: "This active tool is not callable inside PTC. Call it directly.",
       directCallRequired: true,
     }));
   const blocked = [...BLOCKED_TOOLS]

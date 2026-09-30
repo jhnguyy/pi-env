@@ -65,6 +65,7 @@ function createHarness() {
       registerTool(tool: ToolDefinition<any, any, any>) {
         tools.push({
           ...tool,
+          exposure: tool.exposure ?? "direct",
           sourceInfo: {
             source: "extension",
             path: "/test/cross-host",
