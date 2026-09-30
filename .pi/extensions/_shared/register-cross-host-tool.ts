@@ -17,6 +17,8 @@ interface PiRegistrationHost {
 type PiOnlyOptions<Schema extends TSchema, Details> = PublicPiToolUi<Schema, Details> & {
   promptSnippet?: string;
   promptGuidelines?: string[];
+  exposure?: ToolDefinition["exposure"];
+  namespace?: ToolDefinition["namespace"];
 };
 
 function toMainSessionContext(ctx: ExtensionContext): Pick<ExtensionContext, "cwd"> {
@@ -36,6 +38,8 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
     ...toPiTool(contract, piOptions),
     promptSnippet: piOptions.promptSnippet,
     promptGuidelines: piOptions.promptGuidelines,
+    exposure: piOptions.exposure,
+    namespace: piOptions.namespace,
     renderCall: piOptions.renderCall,
     renderResult: piOptions.renderResult,
   };

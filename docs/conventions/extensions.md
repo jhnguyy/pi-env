@@ -70,7 +70,7 @@ registerCrossHostTool(pi, {
 
 Use `closeout` as a shared-contract example. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
 
-Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration automatically exposes eligible tools to subagents and PTC, subject to the PTC blocklist in `.pi/extensions/ptc/types.ts`.
+Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration exposes eligible tools to subagents. Pi's native `codemode` calls registered Pi tools through `ctx.executeTool()` instead of the AgentTool channel.
 
 Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start` and `subagent`.
 

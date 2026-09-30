@@ -27,6 +27,8 @@ Nub is the canonical JavaScript toolchain. Nix remains available for host/runtim
 
 Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env guidance block in `~/.pi/agent/AGENTS.md` and preserves content outside the managed block.
 
+Setup adds Pi's `codemode` and `tool_search` to `defaultTools` without replacing existing tool choices or explicit opt-outs. It leaves `theme` unset so Pi follows the terminal palette. Setup removes selections of the retired pi-env Pi Gruvbox themes; other themes remain unchanged. Ghostty and tmux palettes remain available through terminal setup. Setup installs Ghostty palettes under its standard Linux or macOS configuration directory when terminal setup is enabled. Set `GHOSTTY_CONFIG_DIR` to override that path. Pi no longer loads local Pi theme files.
+
 ## Documentation
 
 Repository conventions and area-specific documentation live under `docs/`.

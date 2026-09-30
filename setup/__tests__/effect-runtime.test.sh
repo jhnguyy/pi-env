@@ -83,7 +83,7 @@ fi
 
 printf 'not a directory' >"$tmp/blocked-ghostty"
 PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0 PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=0 GHOSTTY_CONFIG_DIR="$tmp/blocked-ghostty" SHOULD_LINK_GHOSTTY=1 "$NODE_BIN" setup/configure.mjs terminal >"$tmp/ghostty.out" 2>"$tmp/ghostty.err"
-if ! grep -q "~/.config/ghostty (cannot create $tmp/blocked-ghostty)" "$tmp/ghostty.out"; then
+if ! grep -Fq "$tmp/blocked-ghostty (cannot create)" "$tmp/ghostty.out"; then
   echo "FAIL: unavailable optional Ghostty directory should remain a non-fatal skip" >&2
   cat "$tmp/ghostty.out" >&2
   cat "$tmp/ghostty.err" >&2

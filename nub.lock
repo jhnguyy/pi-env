@@ -182,8 +182,6 @@ importers:
 
   .pi/extensions/pi-update: {}
 
-  .pi/extensions/ptc: {}
-
   .pi/extensions/review: {}
 
   .pi/extensions/security: {}
@@ -210,8 +208,6 @@ importers:
       '@earendil-works/pi-agent-core':
         specifier: '*'
         version: 0.99.2
-
-  .pi/extensions/tool-manager: {}
 
   .pi/extensions/web-context: {}
 

@@ -1,8 +1,7 @@
 import ts from "typescript";
 
-const DEFAULT_LIGHT_THEME = "gruvbox-light";
-const DEFAULT_DARK_THEME = "gruvbox-dark";
-const DEFAULT_AUTO_THEME = `${DEFAULT_LIGHT_THEME}/${DEFAULT_DARK_THEME}`;
+const RETIRED_PACKAGE_THEMES = new Set(["gruvbox-light", "gruvbox-dark", "gruvbox-light/gruvbox-dark"]);
+const NATIVE_TOOL_DEFAULTS = ["+codemode", "+tool_search"];
 const DISABLED_EXTENSIONS = ["playwright-client", "work-tracker"];
 
 function stripJsonCommentsAndTrailingCommas(raw) {
@@ -56,9 +55,19 @@ function ensurePiUpdateDefault(settings) {
   if (settings.piUpdate.enabled !== true) settings.piUpdate.enabled = false;
 }
 
-function ensureDefaultTheme(settings) {
-  if (typeof settings.theme !== "string" || settings.theme.trim() === "")
-    settings.theme = DEFAULT_AUTO_THEME;
+function adoptNativeDefaults(settings) {
+  if (RETIRED_PACKAGE_THEMES.has(settings.theme) || (typeof settings.theme === "string" && settings.theme.trim() === ""))
+    delete settings.theme;
+  if (!Array.isArray(settings.defaultTools)) settings.defaultTools = [];
+  else if (settings.defaultTools.length === 0) {
+    settings.defaultTools = NATIVE_TOOL_DEFAULTS.map((entry) => entry.slice(1));
+    return;
+  }
+  for (const entry of NATIVE_TOOL_DEFAULTS) {
+    const name = entry.slice(1);
+    if (!settings.defaultTools.some((configured) => configured === name || configured === `+${name}` || configured === `-${name}`))
+      settings.defaultTools.push(entry);
+  }
 }
 
 function migrateDefaultNpmCommand(settings) {
@@ -89,7 +98,7 @@ function ensureDisabledExtensions(settings) {
 
 export function applyManagedSettingsTransforms(settings, managed) {
   mergeManaged(settings, managed);
-  ensureDefaultTheme(settings);
+  adoptNativeDefaults(settings);
   migrateDefaultNpmCommand(settings);
   ensurePiUpdateDefault(settings);
   ensureDisabledExtensions(settings);

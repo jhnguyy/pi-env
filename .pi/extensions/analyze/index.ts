@@ -72,6 +72,8 @@ export function createAnalyzeTool(
   return {
     name: "analyze",
     label: "Analyze",
+    exposure: "deferred",
+    namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description: "Run isolated, bounded code analysis. Local safe mode requires explicit complexity, async-risk, scoped duplicates, and/or test-duplicates checks on diff or workspace-relative paths; semantic/external checks and all scope fail closed without strict containment.",
     parameters: analyzeToolSchema,
     execute: async (_toolCallId, params, signal) => {

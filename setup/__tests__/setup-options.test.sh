@@ -85,7 +85,32 @@ test_later_portable_overrides_nix_managed() {
   [ "$PI_ENV_CONFIG_MANAGED_BY_NIX" = "0" ] || fail "later --portable should clear Nix-managed signal"
 }
 
+test_terminal_config_paths() {
+  local tmp
+  tmp="$(with_temp_dir)"
+  mkdir -p "$tmp/home"
+  env -u GHOSTTY_CONFIG_DIR ROOT="$ROOT" HOME="$tmp/home" bash -c '
+    set -e
+    source "$ROOT/setup/context.sh"
+    uname() { printf "Darwin\\n"; }
+    setup_init_context "$ROOT/setup"
+    [ "$GHOSTTY_CONFIG_DIR" = "$HOME/Library/Application Support/com.mitchellh.ghostty" ] || exit 1
+    GHOSTTY_CONFIG_DIR="$HOME/custom-ghostty"
+    setup_init_context "$ROOT/setup"
+    [ "$GHOSTTY_CONFIG_DIR" = "$HOME/custom-ghostty" ] || exit 1
+  ' || fail "macOS Ghostty default or explicit override is incorrect"
+  env -u GHOSTTY_CONFIG_DIR ROOT="$ROOT" HOME="$tmp/home" bash -c '
+    set -e
+    source "$ROOT/setup/context.sh"
+    uname() { printf "Linux\\n"; }
+    setup_init_context "$ROOT/setup"
+    [ "$GHOSTTY_CONFIG_DIR" = "$HOME/.config/ghostty" ]
+  ' || fail "Linux Ghostty default is incorrect"
+  rm -rf "$tmp"
+}
+
 test_defaults_to_portable
+test_terminal_config_paths
 test_nix_managed_sets_skip_signal
 test_nix_managed_env_selects_nix_mode
 test_granular_flags

@@ -111,6 +111,8 @@ test_applies_to_missing_settings_file() {
 
   [ "$result" = "created" ] || fail "missing settings should be created, got $result"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "created settings should include package"
+  [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "new settings should let Pi use the system theme"
+  [ "$(json_get "$settings" 's.defaultTools')" = '["+codemode","+tool_search"]' ] || fail "new settings should enable native orchestration and search"
 
   rm -rf "$tmp"
 }
@@ -206,6 +208,43 @@ JSON
 
   [ "$(json_get "$settings" 's.theme')" = "tokyonight" ] || fail "custom theme should be preserved"
 
+  rm -rf "$tmp"
+}
+
+test_migrates_only_retired_theme_and_preserves_explicit_tools() {
+  local tmp settings custom repo retired_theme
+  tmp="$(with_temp_dir)"
+  settings="$tmp/settings.json"
+  custom="$tmp/custom/settings.json"
+  repo="$tmp/repo"
+  mkdir -p "$repo" "$(dirname "$custom")"
+  printf '%s\n' '{"theme":"gruvbox-light/gruvbox-dark","defaultTools":["read","write"]}' > "$settings"
+  printf '%s\n' '{"theme":"tokyonight","defaultTools":["-bash","+grep"]}' > "$custom"
+
+  apply_settings "$settings" "$repo" >/dev/null
+  apply_settings "$custom" "$repo" >/dev/null
+
+  [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "retired package theme should migrate to system"
+  [ "$(json_get "$settings" 's.defaultTools')" = '["read","write","+codemode","+tool_search"]' ] || fail "explicit tools should keep their selection and gain native orchestration"
+  [ "$(json_get "$custom" 's.theme')" = "tokyonight" ] || fail "other themes should be preserved"
+  [ "$(json_get "$custom" 's.defaultTools')" = '["-bash","+grep","+codemode","+tool_search"]' ] || fail "custom tool deltas should keep their selection and gain discovery"
+  for retired_theme in gruvbox-light gruvbox-dark; do
+    printf '{"theme":"%s","defaultTools":["-codemode"]}\n' "$retired_theme" > "$settings"
+    apply_settings "$settings" "$repo" >/dev/null
+    [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "retired $retired_theme should migrate to system"
+    [ "$(json_get "$settings" 's.defaultTools')" = '["-codemode","+tool_search"]' ] || fail "explicit native tool opt-out should be preserved"
+  done
+  printf '%s\n' '{"defaultTools":[]}' > "$settings"
+  apply_settings "$settings" "$repo" >/dev/null
+  [ "$(json_get "$settings" 's.defaultTools')" = '["codemode","tool_search"]' ] || fail "empty selection must not activate built-in tools"
+  local resolved
+  resolved="$(SETTINGS_PATH="$settings" run_node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    import { SettingsManager } from "@earendil-works/pi-coding-agent";
+    const { defaultTools } = JSON.parse(readFileSync(process.env.SETTINGS_PATH, "utf8"));
+    console.log(JSON.stringify(SettingsManager.inMemory({ defaultTools }).getDefaultTools()));
+  ')"
+  [ "$resolved" = '["codemode","tool_search"]' ] || fail "Pi resolver must keep an explicit empty selection restricted: got $resolved"
   rm -rf "$tmp"
 }
 
@@ -315,6 +354,7 @@ test_rejects_malformed_package_entry_before_writing
 test_restores_settings_when_package_registration_fails
 test_preserves_empty_settings_file_when_package_registration_fails
 test_preserves_existing_theme
+test_migrates_only_retired_theme_and_preserves_explicit_tools
 test_disables_default_extensions_without_clobbering_other_extensions
 test_registers_primary_checkout_when_run_from_worktree
 test_migrates_only_default_npm_command_to_nub

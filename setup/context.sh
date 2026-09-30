@@ -15,7 +15,12 @@ setup_init_context() {
   TMUX_CONF="$HOME/.tmux.conf"
   TMUX_SOURCE_LINE="source-file $TMUX_THEME_SRC"
 
-  GHOSTTY_CONFIG_DIR="${GHOSTTY_CONFIG_DIR:-$HOME/.config/ghostty}"
+  if [ -z "${GHOSTTY_CONFIG_DIR:-}" ]; then
+    case "$(uname -s)" in
+      Darwin) GHOSTTY_CONFIG_DIR="$HOME/Library/Application Support/com.mitchellh.ghostty" ;;
+      *) GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty" ;;
+    esac
+  fi
 
   APPEND_SRC="$REPO/.pi/agent/APPEND_SYSTEM.md"
   APPEND_DST="$PI_AGENT_DIR/APPEND_SYSTEM.md"
