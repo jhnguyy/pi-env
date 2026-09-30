@@ -2,7 +2,8 @@ Supplemental MIT notices for installed packages that omit a license file
 ============================================================================
 
 @earendil-works/chord, @earendil-works/pi-agent-core,
-@earendil-works/pi-ai, @earendil-works/pi-coding-agent,
+@earendil-works/pi-ai, @earendil-works/pi-codemode,
+@earendil-works/pi-coding-agent, @earendil-works/pi-mcp,
 @earendil-works/pi-telemetry, and @earendil-works/pi-tui:
 Copyright (c) 2025 Mario Zechner
 

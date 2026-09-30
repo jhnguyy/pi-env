@@ -6,7 +6,7 @@ import { handleToolsCommand, type ToolManagerStateApi, type ToolsCommandContext 
 function harness() {
   let active = ["read", SEARCH_TOOL_NAME];
   const entries: unknown[] = [];
-  const tools = ["read", "bash", SEARCH_TOOL_NAME, "analyze", "notes"].map((name) => ({ name, label: name, description: name, parameters: {}, sourceInfo: { source: "extension" as const, path: `/test/${name}`, scope: "project" as const, origin: "top-level" as const } }));
+  const tools = ["read", "bash", SEARCH_TOOL_NAME, "analyze", "notes"].map((name) => ({ name, label: name, description: name, parameters: {}, exposure: "direct" as const, sourceInfo: { source: "extension" as const, path: `/test/${name}`, scope: "project" as const, origin: "top-level" as const } }));
   const pi = {
     getAllTools: () => tools,
     getActiveTools: () => active,

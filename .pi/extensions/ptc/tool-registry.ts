@@ -5,10 +5,12 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ExtensionToolContext,
   AgentToolResult,
   ToolDefinition,
   ToolInfo,
 } from "@earendil-works/pi-coding-agent";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { generateId } from "../_shared/id";
 import { listenForAgentTools, type ExtToolRegistration } from "../_shared/agent-tools";
 import { BUILT_IN_TOOL_CONTRACTS, BUILT_IN_TOOL_NAMES } from "../_shared/built-in-tools";
@@ -26,7 +28,7 @@ type ExecuteFn = (
   params: Record<string, unknown>,
   signal: AbortSignal | undefined,
   onUpdate: undefined,
-  ctx: ExtensionContext,
+  ctx: ExtensionToolContext,
 ) => Promise<AgentToolResult<unknown>>;
 
 export type DispatchContext = { cwd: string } | ExtensionContext;
@@ -38,18 +40,13 @@ interface RememberedTool {
   readonly execute: ExecuteFn;
 }
 
-const BUILTIN_FACTORIES = Object.fromEntries(
-  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
-    name,
-    contract.definitionFactory,
-  ]),
-) as Record<string, (cwd: string) => ToolDefinition<any, any, any>>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const BUILTIN_NAMES = BUILT_IN_TOOL_NAMES;
 
 export class ToolRegistry {
   private readonly pi: ExtensionAPI;
   private extensionTools = new Map<string, RememberedTool>();
-  private builtinCache = new Map<string, ToolDefinition<any, any, any>>();
+  private builtinCache = new Map<string, AgentTool<any, any>>();
+  private builtinDefinitions = new Map<string, ToolDefinition<any, any, any>>();
   private readonly stopListening: Array<() => void> = [];
 
   constructor(pi: ExtensionAPI) {
@@ -112,7 +109,9 @@ export class ToolRegistry {
 
     for (const tool of activeTools) {
       if (BLOCKED_TOOLS.has(tool.name)) continue;
-      if (tool.sourceInfo.source === "builtin" || this.extensionTools.has(tool.name)) {
+      if (!callableExposure(tool.exposure)) {
+        unavailableNames.push(tool.name);
+      } else if (tool.sourceInfo.source === "builtin" || this.extensionTools.has(tool.name)) {
         availableTools.push(tool);
       } else {
         unavailableNames.push(tool.name);
@@ -138,25 +137,38 @@ export class ToolRegistry {
   ): Promise<string> {
     this.assertCallable(toolName);
     const toolCallId = `ptc_${generateId()}`;
-    const effectiveCtx = (ctx ?? { cwd }) as ExtensionContext;
+    // AgentTool registrations also run in child sessions, which only provide cwd.
+    // Legacy PTC registrations can use the parent context when available.
+    const effectiveCtx = (ctx ?? { cwd }) as ExtensionToolContext;
     let result: AgentToolResult<unknown>;
 
     if (BUILTIN_NAMES.has(toolName)) {
       const cacheKey = `${cwd}:${toolName}`;
-      let def = this.builtinCache.get(cacheKey);
-      if (!def) {
-        const factory = BUILTIN_FACTORIES[toolName];
-        def = factory(cwd);
-        this.builtinCache.set(cacheKey, def);
+      const contract = BUILT_IN_TOOL_CONTRACTS[toolName as keyof typeof BUILT_IN_TOOL_CONTRACTS];
+      if (ctx) {
+        let definition = this.builtinDefinitions.get(cacheKey);
+        if (!definition) {
+          definition = contract.definitionFactory(cwd);
+          this.builtinDefinitions.set(cacheKey, definition);
+        }
+        result = await definition.execute(toolCallId, params, signal, undefined, effectiveCtx);
+      } else {
+        let agentTool = this.builtinCache.get(cacheKey);
+        if (!agentTool) {
+          agentTool = contract.agentFactory(cwd);
+          this.builtinCache.set(cacheKey, agentTool);
+        }
+        result = await agentTool.execute(toolCallId, params, signal, undefined);
       }
-      result = await def.execute(toolCallId, params, signal, undefined, effectiveCtx);
     } else {
       result = await this.extensionTools
         .get(toolName)!
         .execute(toolCallId, params, signal, undefined, effectiveCtx);
     }
 
-    return extractText(result);
+    const text = extractText(result);
+    if (result.isError) throw new Error(text || `PTC tool "${toolName}" failed.`);
+    return text;
   }
 
   private assertCallable(toolName: string): void {
@@ -187,14 +199,19 @@ export class ToolRegistry {
       );
     }
 
-    if (!BUILTIN_NAMES.has(toolName) && !captured) {
+    const exposure = this.pi.getAllTools().find((tool) => tool.name === toolName)?.exposure;
+    if ((exposure && !callableExposure(exposure)) || (!BUILTIN_NAMES.has(toolName) && !captured)) {
       throw toolAccessError(
         PtcToolFailureClass.Unavailable,
         toolName,
-        `PTC tool "${toolName}" is not available inside PTC. It has no PTC dispatcher. Call it directly.`,
+        `PTC tool "${toolName}" is not available inside PTC. Call it directly.`,
       );
     }
   }
+}
+
+function callableExposure(exposure: ToolInfo["exposure"]): boolean {
+  return exposure !== "model-only" && exposure !== "hidden";
 }
 
 function toolAccessError(
