@@ -117,7 +117,7 @@
   },
   "overrides": {
     "@effect/platform-node-shared": "4.0.0-beta.97",
-    "brace-expansion": "5.0.9",
+    "brace-expansion": "5.0.11",
     "dependency-cruiser": "18.0.0",
     "minimatch": "10.2.3",
     "nanoid": "3.3.18",
@@ -125,7 +125,7 @@
     "protobufjs": "8.6.6",
     "smol-toml": "1.7.1",
     "toml": "4.2.0",
-    "undici": "8.9.0"
+    "undici": "8.10.2"
   },
   "packageManager": "nub@0.9.5",
   "devEngines": {
