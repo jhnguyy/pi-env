@@ -57,6 +57,13 @@ export function configurePiEffect(ctx) {
       "~/.pi/agent/APPEND_SYSTEM.md",
     );
     yield* managedBlockEffect(
+      join(ctx.setupDir, "templates/correspondence.md"),
+      ctx.appendDst,
+      "<!-- pi-env:correspondence:start -->",
+      "<!-- pi-env:correspondence:end -->",
+      "~/.pi/agent/APPEND_SYSTEM.md",
+    );
+    yield* managedBlockEffect(
       join(ctx.setupDir, "templates/AGENTS.md"),
       join(ctx.piAgentDir, "AGENTS.md"),
       "<!-- pi-env:agent-guidelines:start -->",
