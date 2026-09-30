@@ -58,6 +58,7 @@ describe("native tool discovery", () => {
     process.env.PI_CODING_AGENT_DIR = workspace;
     process.env.PI_TELEMETRY = "0";
     let fetchCount = 0;
+    let phase = "initialization";
     try {
       evidence.bundleHashes = Object.fromEntries(bundles.map((path) => [path.slice(repo.length + 1), createHash("sha256").update(readFileSync(path)).digest("hex")]));
       const settingsManager = SettingsManager.inMemory({ defaultTools: ["+codemode", "+tool_search"] });
@@ -87,9 +88,10 @@ describe("native tool discovery", () => {
         model: faux.getModel(),
         resourceLoader,
         settingsManager,
-        sessionManager: SessionManager.inMemory(),
+        sessionManager: SessionManager.create(workspace, join(workspace, "sessions")),
       }));
       await session.bindExtensions({});
+      phase = "registry";
       const activeBefore = session.getActiveToolNames();
       const callableBefore = session.getCallableToolNames();
       evidence.actual = { activeBefore, callableBefore };
@@ -127,18 +129,23 @@ describe("native tool discovery", () => {
         fauxAssistantMessage(fauxToolCall("read", { path: ordinaryPath }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
       ]);
+      phase = "deferred codemode call";
       await session.prompt("Fetch the synthetic web fixture through codemode before discovery.");
       expect(session.getActiveToolNames()).not.toContain("web_fetch");
       expect(JSON.stringify(session.messages)).toContain("synthetic-web-fixture");
+      phase = "model-issued tool search";
       await session.prompt("Search for the web fetch tool.");
       const activeAfter = session.getActiveToolNames();
       const searchResult = session.messages.find((message) => message.role === "toolResult" && message.toolName === "tool_search");
       const searchDetails = searchResult && "details" in searchResult ? searchResult.details : undefined;
+      evidence.actual = { activeBefore, callableBefore, activeAfter, loaded: searchDetails };
       expect(searchDetails).toEqual({ loaded: ["web_fetch"] });
       expect(activeAfter).toContain("web_fetch");
+      phase = "active direct web fetch";
       await session.prompt("Fetch the synthetic web fixture directly.");
       const directFetch = session.messages.find((message) => message.role === "toolResult" && message.toolName === "web_fetch");
       expect(JSON.stringify(directFetch)).toContain("synthetic-web-fixture");
+      phase = "read redaction";
       await session.prompt("Read the sensitive fixture through codemode.");
       await session.prompt("Read the sensitive fixture directly.");
       await session.prompt("Read the ordinary fixture directly.");
@@ -154,6 +161,10 @@ describe("native tool discovery", () => {
       expect(transcript).not.toContain("synthetic-credential-fixture");
       expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, fauxCalls: 12 }));
       evidence.verdict = "passed";
+    } catch (error) {
+      evidence.failedPhase = phase;
+      evidence.failureType = error instanceof Error ? error.name : "UnknownError";
+      throw error;
     } finally {
       session?.dispose();
       globalThis.fetch = previousFetch;
