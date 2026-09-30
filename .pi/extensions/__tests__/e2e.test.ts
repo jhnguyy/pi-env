@@ -22,8 +22,8 @@ const bundles = ["analyze", "web-context", "dev-tools", "security", "skill-build
 );
 
 /** Real Pi session and built bundles, with a scripted provider and synthetic network response. */
-describe("native tool discovery", () => {
-  it("keeps deferred tools callable and loads them through Pi's tool_search", async () => {
+describe("native tool workflows", () => {
+  it("discovers tools and composes safe nested calls through a scripted provider", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "pi-native-tools-"));
     const evidenceDir = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
     mkdirSync(evidenceDir, { recursive: true });
@@ -47,6 +47,8 @@ describe("native tool discovery", () => {
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         sensitiveReads: "redacted in direct and codemode calls",
+        composition: "nested read and Bash results combined with session context",
+        bashFailure: "direct Bash reports an error; codemode receives structured exit_code 9",
       },
       actual: {},
       verdict: "failed",
@@ -111,6 +113,7 @@ describe("native tool discovery", () => {
       const ordinaryPath = join(workspace, "ordinary.txt");
       writeFileSync(sensitivePath, "synthetic-credential-fixture");
       writeFileSync(ordinaryPath, "ordinary-fixture");
+      const sessionCommand = `printf 'session=%s' "$PI_SESSION_ID"`;
       faux.setResponses([
         fauxAssistantMessage(fauxToolCall("codemode", {
           code: `text(await tools.web_fetch({ url: ${JSON.stringify(webUrl)}, mode: "raw" }))`,
@@ -127,6 +130,16 @@ describe("native tool discovery", () => {
         fauxAssistantMessage(fauxToolCall("read", { path: sensitivePath }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
         fauxAssistantMessage(fauxToolCall("read", { path: ordinaryPath }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("codemode", {
+          code: `const [file, shell] = await Promise.all([tools.read({ path: ${JSON.stringify(ordinaryPath)} }), tools.bash({ command: ${JSON.stringify(sessionCommand)} })]); text(JSON.stringify({ file, output: shell.output, exit_code: shell.exit_code }))`,
+        }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("codemode", {
+          code: `const status = await tools.bash({ command: "exit 9" }); if (status.exit_code !== 9) throw Error("wrong exit code"); text("nested-bash-exit:" + status.exit_code)`,
+        }), { stopReason: "toolUse" }),
+        fauxAssistantMessage("done"),
+        fauxAssistantMessage(fauxToolCall("bash", { command: "exit 9" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
       ]);
       phase = "deferred codemode call";
@@ -149,6 +162,15 @@ describe("native tool discovery", () => {
       await session.prompt("Read the sensitive fixture through codemode.");
       await session.prompt("Read the sensitive fixture directly.");
       await session.prompt("Read the ordinary fixture directly.");
+      phase = "nested tool composition";
+      await session.prompt("Compose an ordinary read and session-aware Bash call in codemode.");
+      const composedResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
+      const composedText = JSON.stringify(composedResult);
+      phase = "Bash nonzero exit contract";
+      await session.prompt("Check the structured exit code from Bash in codemode.");
+      const nestedBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
+      await session.prompt("Run a failing Bash command directly.");
+      const directBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "bash").at(-1);
       const transcript = JSON.stringify(session.messages);
       evidence.actual = {
         activeBefore, callableBefore, activeAfter, loaded: searchDetails,
@@ -156,10 +178,14 @@ describe("native tool discovery", () => {
         sensitiveReadRedactions: transcript.match(/\[\.env redacted/g)?.length ?? 0,
         ordinaryRead: transcript.includes("ordinary-fixture"),
         syntheticFixtureInTranscript: transcript.includes("synthetic-credential-fixture"),
+        nestedComposition: composedText.includes("ordinary-fixture") && composedText.includes(session.sessionManager.getSessionId()) && composedText.includes('"name":"bash"'),
+        nestedBashExitCode: JSON.stringify(nestedBashResult).includes("nested-bash-exit:9") ? 9 : null,
+        directBashIsError: !!directBashResult && "isError" in directBashResult && directBashResult.isError === true,
+        directBashStatusVisible: JSON.stringify(directBashResult).includes("Command exited with code 9"),
         fauxCalls: faux.state.callCount,
       };
       expect(transcript).not.toContain("synthetic-credential-fixture");
-      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, fauxCalls: 12 }));
+      expect(evidence.actual).toEqual(expect.objectContaining({ webFetches: 2, sensitiveReadRedactions: 2, ordinaryRead: true, syntheticFixtureInTranscript: false, nestedComposition: true, nestedBashExitCode: 9, directBashIsError: true, directBashStatusVisible: true, fauxCalls: 18 }));
       evidence.verdict = "passed";
     } catch (error) {
       evidence.failedPhase = phase;

@@ -110,7 +110,7 @@ export const VerificationPhase = Object.freeze({
   ),
   NativeToolDiscovery: phase(
     "native-tool-discovery",
-    "native tool discovery",
+    "native tool workflows",
     "nub",
     ["run", "test:e2e:native-tools"],
     VerificationClass.SafetyIntegration,
