@@ -24,7 +24,8 @@
     ".pi/extensions/security",
     ".pi/extensions/session-manager",
     ".pi/extensions/skill-builder",
-    ".pi/extensions/subagent"
+    ".pi/extensions/subagent",
+    ".pi/extensions/artifact-collector"
   ],
   "pi": {
     "extensions": [
@@ -41,7 +42,8 @@
       ".pi/extensions/security",
       ".pi/extensions/session-manager",
       ".pi/extensions/skill-builder",
-      ".pi/extensions/subagent"
+      ".pi/extensions/subagent",
+      ".pi/extensions/artifact-collector"
     ],
     "skills": [
       ".agents/skills"
