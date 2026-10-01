@@ -61,6 +61,23 @@ The flake exposes a Home Manager module for hosts where you want pi-env shell an
 
 The module can install the baseline toolchain, set the Nix ownership environment, add pi paths to the session PATH, and own tmux/Ghostty config when enabled.
 
+### Home Manager sync
+
+Set `pi-env.homeManager.sync.enable = true;` to keep the Home Manager `pi-env` input at the pi-env commit that the primary checkout has on `main`. The `post-merge` hook runs setup after each pull, so a pull of `main` also updates Home Manager.
+
+Setup reads the `pi-env` revision from the Home Manager `flake.lock` and compares it to `HEAD`:
+
+- If the revisions match, setup does nothing.
+- If they differ and local `main` equals its upstream, setup runs `nix flake update <input> --flake <dir>` and then `home-manager switch --flake <dir>`. Setup updates only the pi-env input.
+- Setup skips the sync in worktrees, on branches other than `main`, and when local `main` differs from its upstream. The flake input fetches the published branch, so an unpushed commit cannot be locked.
+
+| Option | Default | Use |
+| --- | --- | --- |
+| `homeManager.sync.flake` | `"${config.xdg.configHome}/home-manager"` | Directory of the Home Manager flake. |
+| `homeManager.sync.input` | `"pi-env"` | Name of the pi-env input in that flake. |
+
+The module exports `PI_ENV_HOME_MANAGER_FLAKE` and `PI_ENV_HOME_MANAGER_INPUT` for setup. Run `./setup.sh --no-home-manager` to skip the sync once. Keep the Home Manager flake in Git so each lock change is recorded.
+
 ## Validation
 
 Use the flake apps/checks for Nix-backed validation and [`package.json`](../package.json) scripts for Nub-backed validation. Keep command details in those sources rather than duplicating them here.

@@ -21,6 +21,7 @@ SETUP_TESTS=(
   setup/__tests__/setup-options.test.sh
   setup/__tests__/node-policy.test.sh
   setup/__tests__/repo-hooks.test.sh
+  setup/__tests__/home-manager-sync.test.sh
   setup/__tests__/worktree-init.test.sh
   setup/__tests__/runtime-install-safety.test.sh
   setup/__tests__/node-resolution.test.sh

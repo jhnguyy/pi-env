@@ -21,6 +21,7 @@ export function deriveSetupPolicy(env = process.env) {
   const cliManagedExternally = flag(env, 'PI_ENV_CLI_MANAGED_BY_NIX');
   const pathManagedExternally = nixManaged || flag(env, 'PI_ENV_SKIP_PATH_PROFILE');
   const repoHooksDisabled = flag(env, 'PI_ENV_SKIP_REPO_HOOKS');
+  const homeManagerSyncDisabled = flag(env, 'PI_ENV_SKIP_HOME_MANAGER');
   const tmuxManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_TMUX');
   const ghosttyManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_GHOSTTY');
 
@@ -54,6 +55,9 @@ export function deriveSetupPolicy(env = process.env) {
     repoTools: Object.freeze({
       owner: repoHooksDisabled ? Ownership.External : Ownership.Setup,
       installHooks: !repoHooksDisabled,
+    }),
+    homeManager: Object.freeze({
+      sync: !homeManagerSyncDisabled,
     }),
   });
 }
