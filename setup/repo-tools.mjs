@@ -26,7 +26,9 @@ export function configureRepoToolsEffect(ctx, policy) {
       );
       return;
     }
-    const hooksPath = yield* gitEffect(ctx, ["config", "--local", "--get", "core.hooksPath"], {
+    // A global or system hook path is user-owned too. Read Git's effective value
+    // before setting a repository-local override.
+    const hooksPath = yield* gitEffect(ctx, ["config", "--get", "core.hooksPath"], {
       check: false,
     });
     if (hooksPath === HOOKS_PATH) {
