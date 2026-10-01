@@ -7,8 +7,16 @@ import {
   type Exec,
 } from "../host.js";
 
-function executor(initialTags: Readonly<Record<string, string>>) {
-  const tags: Record<string, string> = { ...initialTags };
+function executor(
+  initialTags: Readonly<Record<string, string>>,
+  initialOwners: Readonly<Record<string, string>> = {},
+) {
+  const options: Record<string, Record<string, string>> = {
+    "@pi_session_id": { ...initialTags },
+    "@pi_session_pid": { ...initialOwners },
+  };
+  const tags = options["@pi_session_id"];
+  const owners = options["@pi_session_pid"];
   const calls: string[][] = [];
   const exec: Exec = async (command, args) => {
     calls.push([command, ...args]);
@@ -17,17 +25,20 @@ function executor(initialTags: Readonly<Record<string, string>>) {
     if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
     if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
     if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
-    if (args.includes("show-options")) {
-      const windowId = args[args.indexOf("-t") + 1];
-      return { code: 0, stdout: `${tags[windowId] ?? ""}\n`, stderr: "" };
+    const windowId = args[args.indexOf("-t") + 1];
+    const option = Object.keys(options).find((name) => args.includes(name));
+    if (args.includes("show-options") && option) {
+      return { code: 0, stdout: `${options[option][windowId] ?? ""}\n`, stderr: "" };
     }
-    if (args.includes("set-option") && args.includes("@pi_session_id")) {
-      const windowId = args[args.indexOf("-t") + 1];
-      tags[windowId] = args.at(-1)!;
+    if (args.includes("set-option") && option) {
+      if (args.includes("-u")) delete options[option][windowId];
+      else if (args.includes("-o") && options[option][windowId])
+        return { code: 1, stdout: "", stderr: "already set" };
+      else options[option][windowId] = args.at(-1)!;
     }
     return { code: 0, stdout: "", stderr: "" };
   };
-  return { calls, exec };
+  return { calls, exec, tags, owners };
 }
 
 async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
@@ -152,5 +163,45 @@ describe("tmux session host", () => {
       await failureOf(createTmuxSessionHost(duplicate.exec).bindCurrent("%1", "session-a", "name")),
     ).toBeInstanceOf(DuplicateWindowBinding);
     expect(duplicate.calls.some((call) => call.includes("set-option"))).toBe(false);
+
+    const live = executor({ "@1": "other" }, { "@1": "41" });
+    const liveHost = createTmuxSessionHost(live.exec, { ownerPid: 42, processAlive: () => true });
+    expect(await failureOf(liveHost.bindCurrent("%1", "session-a"))).toBeInstanceOf(
+      WindowBindingConflict,
+    );
+    expect(live.tags["@1"]).toBe("other");
+  });
+
+  it("reclaims the current window from a Pi process that exited without releasing it", async () => {
+    const stale = executor({ "@1": "exited-session" }, { "@1": "41" });
+    const host = createTmuxSessionHost(stale.exec, {
+      ownerPid: 42,
+      processAlive: (pid) => pid !== 41,
+    });
+
+    await Effect.runPromise(host.bindCurrent("%1", "session-a"));
+
+    expect(stale.tags["@1"]).toBe("session-a");
+    expect(stale.owners["@1"]).toBe("42");
+  });
+
+  it("reclaims a binding left by an earlier session in the same Pi process", async () => {
+    const earlier = executor({ "@1": "earlier-session" }, { "@1": "42" });
+    const host = createTmuxSessionHost(earlier.exec, { ownerPid: 42, processAlive: () => true });
+
+    await Effect.runPromise(host.bindCurrent("%1", "session-a"));
+
+    expect(earlier.tags["@1"]).toBe("session-a");
+  });
+
+  it("removes the owner process with the binding on release", async () => {
+    const owned = executor({ "@1": "session-a" }, { "@1": "42" });
+
+    await Effect.runPromise(
+      createTmuxSessionHost(owned.exec, { ownerPid: 42 }).releaseCurrent("%1", "session-a"),
+    );
+
+    expect(owned.tags["@1"]).toBeUndefined();
+    expect(owned.owners["@1"]).toBeUndefined();
   });
 });

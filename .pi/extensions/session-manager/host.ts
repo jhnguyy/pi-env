@@ -81,7 +81,30 @@ export interface SessionHostShape {
 
 const text = (result: ExecResult) => (result.stderr || result.stdout).trim();
 
-export function createTmuxSessionHost(exec: Exec): SessionHostShape {
+const SESSION_OPTION = "@pi_session_id";
+// Records which Pi process owns a binding so a successor can reclaim tags left by a crash.
+const OWNER_OPTION = "@pi_session_pid";
+
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+export type TmuxSessionHostOptions = {
+  readonly ownerPid?: number;
+  readonly processAlive?: (pid: number) => boolean;
+};
+
+export function createTmuxSessionHost(
+  exec: Exec,
+  options: TmuxSessionHostOptions = {},
+): SessionHostShape {
+  const ownerPid = options.ownerPid ?? process.pid;
+  const ownerAlive = options.processAlive ?? processAlive;
   const run = (operation: string, args: string[]) =>
     Effect.tryPromise({
       try: () => exec("tmux", args),
@@ -189,9 +212,49 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       : Effect.void;
   };
 
+  const unsetBinding = (operation: string, window: CurrentWindow) =>
+    Effect.forEach([SESSION_OPTION, OWNER_OPTION], (option) =>
+      run(operation, [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-u",
+        "-t",
+        window.windowId,
+        option,
+      ]),
+    );
+
+  // A foreign binding is stale when its owner exited, or when this process owned it
+  // for an earlier session. Bindings without an owner are kept because liveness is unknown.
+  const reclaimStaleBinding = (window: CurrentWindow, sessionId: string) =>
+    Effect.gen(function* () {
+      if (!window.boundSessionId || window.boundSessionId === sessionId) return window;
+      const owner = yield* run("read window binding owner", [
+        "-S",
+        window.socketPath,
+        "show-options",
+        "-w",
+        "-q",
+        "-v",
+        "-t",
+        window.windowId,
+        OWNER_OPTION,
+      ]);
+      const pid = /^[1-9][0-9]*$/.test(owner) ? Number(owner) : undefined;
+      if (pid === undefined || (pid !== ownerPid && ownerAlive(pid))) return window;
+      yield* unsetBinding("release stale window binding", window);
+      return {
+        ...window,
+        boundSessionId: undefined,
+        bindings: window.bindings.filter((entry) => entry.windowId !== window.windowId),
+      };
+    });
+
   const bindCurrent = (paneId: string, sessionId: string, name?: string) =>
     Effect.gen(function* () {
-      const window = yield* inspectCurrent(paneId);
+      const window = yield* reclaimStaleBinding(yield* inspectCurrent(paneId), sessionId);
       yield* assertBinding(window, sessionId);
       if (!window.boundSessionId) {
         yield* run("create window binding", [
@@ -202,10 +265,20 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
           "-o",
           "-t",
           window.windowId,
-          "@pi_session_id",
+          SESSION_OPTION,
           sessionId,
         ]);
       }
+      yield* run("record window binding owner", [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-t",
+        window.windowId,
+        OWNER_OPTION,
+        `${ownerPid}`,
+      ]);
       if (name) {
         yield* run("disable automatic rename", [
           "-S",
@@ -283,16 +356,7 @@ export function createTmuxSessionHost(exec: Exec): SessionHostShape {
       const window = yield* inspectCurrent(paneId);
       yield* assertBinding(window, sessionId);
       if (window.boundSessionId !== sessionId) return;
-      yield* run("release window binding", [
-        "-S",
-        window.socketPath,
-        "set-option",
-        "-w",
-        "-u",
-        "-t",
-        window.windowId,
-        "@pi_session_id",
-      ]);
+      yield* unsetBinding("release window binding", window);
     });
 
   const restoreWindow = (input: RestoreWindowInput) =>
