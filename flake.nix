@@ -232,7 +232,7 @@
             };
 
             homeManager.sync = {
-              enable = lib.mkEnableOption "pi-env setup sync of this Home Manager flake after the pi-env checkout updates main";
+              enable = lib.mkEnableOption "pi-env setup checks of this Home Manager flake against the pi-env checkout. `./setup.sh --sync-home-manager` updates the input and switches";
 
               flake = lib.mkOption {
                 type = lib.types.str;

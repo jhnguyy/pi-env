@@ -47,6 +47,14 @@ export function configureHomeManagerEffect(ctx, policy) {
       return;
     }
 
+    // Setup also runs from the post-merge hook; activation stays an explicit request.
+    if (!policy.homeManager.update) {
+      console.log(
+        `  —  home-manager ${input} input is ${locked.rev.slice(0, 7)}, main is ${head.slice(0, 7)}; run ./setup.sh --sync-home-manager`,
+      );
+      return;
+    }
+
     // The input fetches the published branch, so update only when local main equals its upstream.
     const upstream = yield* gitEffect(ctx, ["rev-parse", "--verify", "--quiet", "@{upstream}"], {
       check: false,

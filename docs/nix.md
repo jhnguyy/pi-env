@@ -63,20 +63,23 @@ The module can install the baseline toolchain, set the Nix ownership environment
 
 ### Home Manager sync
 
-Set `pi-env.homeManager.sync.enable = true;` to keep the Home Manager `pi-env` input at the pi-env commit that the primary checkout has on `main`. The `post-merge` hook runs setup after each pull, so a pull of `main` also updates Home Manager.
+Set `pi-env.homeManager.sync.enable = true;` to compare the Home Manager `pi-env` input with the pi-env commit that the primary checkout has on `main`. The `post-merge` hook runs setup after each pull, so each pull of `main` reports drift. Setup does not change the lock or activate Home Manager unless you request it.
 
 Setup reads the `pi-env` revision from the Home Manager `flake.lock` and compares it to `HEAD`:
 
 - If the revisions match, setup does nothing.
-- If they differ and local `main` equals its upstream, setup runs `nix flake update <input> --flake <dir>` and then `home-manager switch --flake <dir>`. Setup updates only the pi-env input.
-- Setup skips the sync in worktrees, on branches other than `main`, and when local `main` differs from its upstream. The flake input fetches the published branch, so an unpushed commit cannot be locked.
+- If they differ, setup prints both revisions and the sync command.
+- If they differ and you run `./setup.sh --sync-home-manager`, setup runs `nix flake update <input> --flake <dir>`, checks that the lock contains `HEAD`, and runs `home-manager switch --flake <dir>`. Setup updates only the pi-env input. The update requires local `main` to equal its upstream, because the flake input fetches the published branch.
+- Setup skips the check in worktrees and on branches other than `main`.
+
+This adapter applies only to a standalone user Home Manager flake. Hosts that consume pi-env through a NixOS rebuild or an image deployment keep their own activation process.
 
 | Option | Default | Use |
 | --- | --- | --- |
 | `homeManager.sync.flake` | `"${config.xdg.configHome}/home-manager"` | Directory of the Home Manager flake. |
 | `homeManager.sync.input` | `"pi-env"` | Name of the pi-env input in that flake. |
 
-The module exports `PI_ENV_HOME_MANAGER_FLAKE` and `PI_ENV_HOME_MANAGER_INPUT` for setup. Run `./setup.sh --no-home-manager` to skip the sync once. Keep the Home Manager flake in Git so each lock change is recorded.
+The module exports `PI_ENV_HOME_MANAGER_FLAKE` and `PI_ENV_HOME_MANAGER_INPUT` for setup. Run `./setup.sh --no-home-manager` to skip the check once. Keep the Home Manager flake in Git so each lock change is recorded.
 
 ## Validation
 

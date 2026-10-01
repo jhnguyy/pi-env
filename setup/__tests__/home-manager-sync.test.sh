@@ -59,11 +59,11 @@ printf "{\"nodes\":{\"root\":{\"inputs\":{\"pi-env\":\"pi-env\"}},\"pi-env\":{\"
 echo "home-manager $*" >> "$PI_ENV_TEST_LOG"'
   export PI_ENV_TEST_LOG="$LOG"
   export PI_ENV_HOME_MANAGER_FLAKE="$FLAKE_DIR"
-  unset PI_ENV_HOME_MANAGER_INPUT PI_ENV_SKIP_HOME_MANAGER PI_ENV_TEST_UPDATED_REV || true
+  unset PI_ENV_HOME_MANAGER_INPUT PI_ENV_SKIP_HOME_MANAGER PI_ENV_HOME_MANAGER_SYNC PI_ENV_TEST_UPDATED_REV || true
 }
 
 teardown_fixture() {
-  unset PI_ENV_TEST_LOG PI_ENV_HOME_MANAGER_FLAKE PI_ENV_SKIP_HOME_MANAGER PI_ENV_TEST_UPDATED_REV || true
+  unset PI_ENV_TEST_LOG PI_ENV_HOME_MANAGER_FLAKE PI_ENV_SKIP_HOME_MANAGER PI_ENV_HOME_MANAGER_SYNC PI_ENV_TEST_UPDATED_REV || true
   rm -rf "$TMP"
 }
 
@@ -75,10 +75,24 @@ assert_no_calls() {
   assert_eq "$(cat "$LOG")" "" "$1"
 }
 
-test_stale_lock_updates_and_switches() {
+test_stale_lock_reports_without_sync_request() {
   local output
   setup_fixture
   write_lock "$FLAKE_DIR" 0000000000000000000000000000000000000000
+
+  output="$(configure_home_manager "$REPO_DIR" "$TMP/home")"
+
+  assert_no_calls "setup without --sync-home-manager should not update or switch"
+  printf '%s' "$output" | grep -qF "input is 0000000, main is $(head_rev "$REPO_DIR" | cut -c1-7); run ./setup.sh --sync-home-manager" || fail "stale lock should be reported (got: $output)"
+  grep -qF 0000000000000000000000000000000000000000 "$FLAKE_DIR/flake.lock" || fail "lock revision should not change"
+  teardown_fixture
+}
+
+test_sync_request_updates_and_switches() {
+  local output
+  setup_fixture
+  write_lock "$FLAKE_DIR" 0000000000000000000000000000000000000000
+  export PI_ENV_HOME_MANAGER_SYNC=1
   export PI_ENV_TEST_UPDATED_REV
   PI_ENV_TEST_UPDATED_REV="$(head_rev "$REPO_DIR")"
 
@@ -124,7 +138,7 @@ test_skip_conditions() {
   git -C "$REPO_DIR" worktree remove -f "$TMP/worktree"
 
   commit "$REPO_DIR" unpushed
-  output="$(configure_home_manager "$REPO_DIR" "$TMP/home")"
+  output="$(PI_ENV_HOME_MANAGER_SYNC=1 configure_home_manager "$REPO_DIR" "$TMP/home")"
   printf '%s' "$output" | grep -qF 'differs from its upstream' || fail "unpushed main should skip"
 
   assert_no_calls "skipped sync should not update or switch"
@@ -135,6 +149,7 @@ test_update_mismatch_fails_before_switch() {
   local status=0 output
   setup_fixture
   write_lock "$FLAKE_DIR" 0000000000000000000000000000000000000000
+  export PI_ENV_HOME_MANAGER_SYNC=1
   export PI_ENV_TEST_UPDATED_REV=1111111111111111111111111111111111111111
 
   output="$(configure_home_manager "$REPO_DIR" "$TMP/home" 2>&1)" || status=$?
@@ -145,7 +160,8 @@ test_update_mismatch_fails_before_switch() {
   teardown_fixture
 }
 
-test_stale_lock_updates_and_switches
+test_stale_lock_reports_without_sync_request
+test_sync_request_updates_and_switches
 test_matching_lock_is_noop
 test_skip_conditions
 test_update_mismatch_fails_before_switch

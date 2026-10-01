@@ -22,6 +22,7 @@ export function deriveSetupPolicy(env = process.env) {
   const pathManagedExternally = nixManaged || flag(env, 'PI_ENV_SKIP_PATH_PROFILE');
   const repoHooksDisabled = flag(env, 'PI_ENV_SKIP_REPO_HOOKS');
   const homeManagerSyncDisabled = flag(env, 'PI_ENV_SKIP_HOME_MANAGER');
+  const homeManagerUpdateRequested = flag(env, 'PI_ENV_HOME_MANAGER_SYNC');
   const tmuxManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_TMUX');
   const ghosttyManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_GHOSTTY');
 
@@ -58,6 +59,7 @@ export function deriveSetupPolicy(env = process.env) {
     }),
     homeManager: Object.freeze({
       sync: !homeManagerSyncDisabled,
+      update: homeManagerUpdateRequested,
     }),
   });
 }
