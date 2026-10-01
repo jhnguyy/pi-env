@@ -96,9 +96,54 @@ test_tracked_hooks_are_executable() {
   done
 }
 
+# Exercise Git's hook lookup, not only the configuration and tracked file mode.
+# A stub Nub isolates hook dispatch from the verification portfolio, which CI runs.
+test_git_runs_hooks_in_primary_and_linked_worktrees() {
+  local tmp repo linked output status before
+  tmp="$(with_temp_dir)"
+  tmp=$(cd "$tmp" && pwd -P)
+  repo="$tmp/repo"
+  linked="$tmp/linked"
+  new_repo "$repo"
+  mkdir -p "$repo/setup/hooks" "$repo/setup/__tests__" "$repo/scripts" "$tmp/bin"
+  cp "$ROOT/setup/hooks/pre-commit" "$ROOT/setup/hooks/post-merge" "$repo/setup/hooks/"
+  printf '#!/usr/bin/env bash\n' > "$repo/setup/check.sh"
+  printf '#!/usr/bin/env bash\n' > "$repo/setup/__tests__/check.sh"
+  printf '#!/usr/bin/env bash\n' > "$repo/scripts/check.sh"
+  cat > "$tmp/bin/nub" <<'SH'
+#!/usr/bin/env bash
+printf '%s: %s\n' "$PWD" "$*" >> "$NUB_LOG"
+exit "${NUB_STATUS:-0}"
+SH
+  chmod +x "$tmp/bin/nub"
+  git -C "$repo" add .
+  configure_repo_tools_env "$repo" "$tmp/home" >/dev/null
+
+  output=$(PATH="$tmp/bin:$PATH" NUB_LOG="$tmp/nub.log" \
+    git -C "$repo" -c user.name=HookTest -c user.email=hook@example.invalid \
+    commit -qm initial 2>&1) || fail "primary commit failed: $output"
+  assert_file_contains "$tmp/nub.log" "$repo: run verify:pre-commit"
+
+  git -C "$repo" worktree add -q -b test-linked "$linked"
+  printf 'linked\n' > "$linked/linked.txt"
+  git -C "$linked" add linked.txt
+  before=$(git -C "$linked" rev-parse HEAD)
+  status=0
+  output=$(PATH="$tmp/bin:$PATH" NUB_LOG="$tmp/nub.log" NUB_STATUS=37 \
+    git -C "$linked" -c user.name=HookTest -c user.email=hook@example.invalid \
+    commit -qm linked 2>&1) || status=$?
+  assert_eq "$status" 37 'linked worktree hook failure blocks commit'
+  assert_eq "$(git -C "$linked" rev-parse HEAD)" "$before" 'linked worktree HEAD unchanged'
+  assert_file_contains "$tmp/nub.log" "$linked: run verify:pre-commit"
+  printf 'Primary commit succeeded; linked worktree commit was blocked by hook exit 37.\n' > "$tmp/result.txt"
+  printf 'Reproduce: bash setup/__tests__/repo-hooks.test.sh\nExpected: Git runs the tracked hook in each worktree and blocks a failed commit.\nActual: see result.txt and nub.log.\n' > "$tmp/README"
+  echo "Git hook invocation evidence: $tmp"
+}
+
 test_sets_hooks_path_and_removes_legacy_links
 test_custom_hook_keeps_hooks_path_unset
 test_existing_hooks_path_is_not_replaced
 test_tracked_hooks_are_executable
+test_git_runs_hooks_in_primary_and_linked_worktrees
 
 echo "repo hook tests passed"
