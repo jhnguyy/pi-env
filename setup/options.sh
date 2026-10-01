@@ -8,6 +8,8 @@ setup_parse_args() {
   esac
   PI_ENV_SKIP_TERMINAL="${PI_ENV_SKIP_TERMINAL:-0}"
   PI_ENV_SKIP_REPO_HOOKS="${PI_ENV_SKIP_REPO_HOOKS:-0}"
+  PI_ENV_SKIP_HOME_MANAGER="${PI_ENV_SKIP_HOME_MANAGER:-0}"
+  PI_ENV_HOME_MANAGER_SYNC="${PI_ENV_HOME_MANAGER_SYNC:-0}"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -28,6 +30,12 @@ setup_parse_args() {
       --no-repo-hooks)
         PI_ENV_SKIP_REPO_HOOKS=1
         ;;
+      --no-home-manager)
+        PI_ENV_SKIP_HOME_MANAGER=1
+        ;;
+      --sync-home-manager)
+        PI_ENV_HOME_MANAGER_SYNC=1
+        ;;
       -h|--help)
         cat <<'EOF'
 Usage: ./setup.sh [options]
@@ -43,6 +51,11 @@ Options:
   --no-terminal    Skip tmux and Ghostty setup.
   --no-path        Skip shell profile PATH edits.
   --no-repo-hooks  Skip repo hook installation.
+  --no-home-manager
+                   Skip the Home Manager pi-env input check.
+  --sync-home-manager
+                   Update the Home Manager pi-env input to main and run
+                   home-manager switch. Without it, setup only reports drift.
   -h, --help       Show this help.
 
 Entrypoint-only options/env:
@@ -60,6 +73,6 @@ EOF
     shift
   done
 
-  export PI_ENV_SETUP_MODE PI_ENV_SKIP_TERMINAL PI_ENV_SKIP_REPO_HOOKS
+  export PI_ENV_SETUP_MODE PI_ENV_SKIP_TERMINAL PI_ENV_SKIP_REPO_HOOKS PI_ENV_SKIP_HOME_MANAGER PI_ENV_HOME_MANAGER_SYNC
   export PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE
 }
