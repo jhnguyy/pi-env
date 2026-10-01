@@ -86,6 +86,20 @@ test_existing_hooks_path_is_not_replaced() {
   rm -rf "$tmp"
 }
 
+test_global_hooks_path_is_not_overridden() {
+  local tmp repo output
+  tmp="$(with_temp_dir)"
+  repo="$tmp/repo"
+  new_repo "$repo"
+  printf '[core]\n\thooksPath = /home/user/.githooks\n' > "$tmp/global.gitconfig"
+
+  output=$(GIT_CONFIG_GLOBAL="$tmp/global.gitconfig" configure_repo_tools_env "$repo" "$tmp/home")
+
+  printf '%s' "$output" | grep -qF 'core.hooksPath already set to /home/user/.githooks' || fail 'global hooks path should be reported'
+  assert_eq "$(hooks_path "$repo")" "" 'global core.hooksPath must not be overridden locally'
+  rm -rf "$tmp"
+}
+
 # core.hooksPath runs the tracked files directly, so Git must store them as executable.
 test_tracked_hooks_are_executable() {
   local hook mode
@@ -143,6 +157,7 @@ SH
 test_sets_hooks_path_and_removes_legacy_links
 test_custom_hook_keeps_hooks_path_unset
 test_existing_hooks_path_is_not_replaced
+test_global_hooks_path_is_not_overridden
 test_tracked_hooks_are_executable
 test_git_runs_hooks_in_primary_and_linked_worktrees
 
