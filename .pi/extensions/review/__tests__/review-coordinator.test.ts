@@ -5,7 +5,6 @@ import type { ReviewState } from "../core";
 import { ReviewEvidenceExecutorKind, ReviewEvidenceResolverKey } from "../evidence-resolver";
 import { ReviewCoordinator } from "../review-coordinator";
 
-
 function context(sessionId: string): ExtensionContext {
   return {
     sessionManager: {
@@ -77,6 +76,20 @@ describe("ReviewCoordinator", () => {
 
     expect(await operation).toBe(false);
     expect(coordinator.review("late")).toBeUndefined();
+  });
+
+  it("keeps write uncertainty for each session across navigation", () => {
+    const coordinator = new ReviewCoordinator();
+    coordinator.activate(context("first"));
+    coordinator.markSessionWriteUncertain();
+    coordinator.activate(context("second"));
+    coordinator.markSessionWriteUncertain();
+    coordinator.activate(context("first"));
+    expect(coordinator.isSessionWriteUncertain()).toBe(true);
+    coordinator.activate(context("second"));
+    expect(coordinator.isSessionWriteUncertain()).toBe(true);
+    coordinator.activate(context("third"));
+    expect(coordinator.isSessionWriteUncertain()).toBe(false);
   });
 
   it("registers and removes the evidence executor with its runtime generation", () => {

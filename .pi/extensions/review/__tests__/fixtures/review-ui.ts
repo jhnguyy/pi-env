@@ -1,6 +1,18 @@
 import { onTestFinished, vi } from "vitest";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import reviewExtension from "../../index";
+import { postingSessionStorage, type PostingSessionStorage } from "../../posting-session";
+
+// Only the sentinel represents an old in-memory fixture. Real Pi managers
+// still use the production file/branch verifier in the same test suite.
+export const fixturePostingSessionStorage: PostingSessionStorage = {
+  hasPersistedReviewSession: (manager) =>
+    manager.getSessionFile() === "__review_test_session__" ||
+    postingSessionStorage.hasPersistedReviewSession(manager),
+  syncPersistedPostingEntry: (manager, snapshot, attempt) =>
+    manager.getSessionFile() === "__review_test_session__" ||
+    postingSessionStorage.syncPersistedPostingEntry(manager, snapshot, attempt),
+};
 
 export function useReviewAgentDir(root: string): void {
   vi.stubEnv("PI_CODING_AGENT_DIR", root);
@@ -74,7 +86,7 @@ export function registeredReview(options: {
       throw new Error("walkthrough must not post or call GitHub");
     },
   };
-  reviewExtension(pi as never);
+  reviewExtension(pi as never, { postingSessionStorage: fixturePostingSessionStorage });
   onTestFinished(() => handlers.session_shutdown?.());
   const session = (entries = options.entries, id = options.sessionId ?? "session") => ({
     cwd: options.root,
@@ -82,6 +94,7 @@ export function registeredReview(options: {
     sessionManager: {
       getSessionId: () => id,
       getSessionDir: () => options.sessionDir ?? options.root,
+      getSessionFile: () => "__review_test_session__",
       getBranch: () => entries,
     },
     modelRegistry: { getAvailable: () => [] },

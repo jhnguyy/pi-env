@@ -13,7 +13,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { ProcessFailure, ProcessFailureKind } from "../../../../src/process/platform.js";
-import { prepareResolvedSnapshot, resolvePrUrl, resolveReviewMetadata } from "../snapshot";
+import {
+  existingReviewWithMarker,
+  prepareResolvedSnapshot,
+  resolvePrUrl,
+  resolveReviewMetadata,
+} from "../snapshot";
 
 let agentDir = "";
 const temps: string[] = [];
@@ -77,6 +82,21 @@ async function prepareSnapshot(
 }
 
 describe("review pull request snapshot", () => {
+  it("bounds marker searches when GitHub returns full pages forever", async () => {
+    let pages = 0;
+    const exec = async () => {
+      if (++pages > 20) throw new Error("fixture page budget exceeded");
+      return {
+        code: 0,
+        stdout: JSON.stringify(Array.from({ length: 100 }, (_, id) => ({ id, body: "other" }))),
+        stderr: "",
+      };
+    };
+    await expect(
+      existingReviewWithMarker(exec as any, "/tmp", "https://github.com/o/repo/pull/2", "missing"),
+    ).rejects.toThrow("bounded review search exceeded 20 pages");
+    expect(pages).toBe(20);
+  });
   it("returns a clear needs-url message when gh cannot resolve the pull request", async () => {
     const missing = await resolvePrUrl(
       async () => ({ code: 1, stdout: "", stderr: "no pr" }) as any,
