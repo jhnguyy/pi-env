@@ -89,7 +89,7 @@ describe("playwright-client config", () => {
 });
 
 describe("playwright-client extension registration", () => {
-  it("emits browser on agent-tools:register so ptc can capture it regardless of load order", () => {
+  it("emits browser on agent-tools:register for subagent discovery", () => {
     const sessionStartHandlers: Array<() => void> = [];
     const emitted: unknown[] = [];
     const pi = {

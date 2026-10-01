@@ -11,6 +11,10 @@ export default function linearExtension(pi: ExtensionAPI) {
   registerCrossHostTool(pi, {
     contract: createLinearContract(gateway),
     capabilities: [ToolCapability.Read],
-    piOptions: linearPiOptions,
+    piOptions: {
+      ...linearPiOptions,
+      exposure: "deferred",
+      namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
+    },
   });
 }

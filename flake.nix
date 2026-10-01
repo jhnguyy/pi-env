@@ -201,6 +201,7 @@
       homeManagerModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.pi-env;
+          ghosttyDirectory = if pkgs.stdenv.isDarwin then "Library/Application Support/com.mitchellh.ghostty" else ".config/ghostty";
         in
         {
           options.pi-env = {
@@ -258,9 +259,9 @@
 
             (lib.mkIf cfg.ghostty.enable {
               home.file = {
-                ".config/ghostty/config".source = "${self}/ghostty/config";
-                ".config/ghostty/themes/pi-env-gruvbox-dark".source = "${self}/ghostty/themes/pi-env-gruvbox-dark";
-                ".config/ghostty/themes/pi-env-gruvbox-light".source = "${self}/ghostty/themes/pi-env-gruvbox-light";
+                "${ghosttyDirectory}/config".source = "${self}/ghostty/config";
+                "${ghosttyDirectory}/themes/pi-env-gruvbox-dark".source = "${self}/ghostty/themes/pi-env-gruvbox-dark";
+                "${ghosttyDirectory}/themes/pi-env-gruvbox-light".source = "${self}/ghostty/themes/pi-env-gruvbox-light";
               };
             })
           ]);

@@ -40,12 +40,12 @@ function configureTmuxEffect(ctx, policy) {
 function configureGhosttyEffect(ctx, policy) {
   return Effect.gen(function* () {
     if (!policy.terminal.ghostty.configure) {
-      skip("~/.config/ghostty (managed externally)");
+      skip(`${ctx.ghosttyConfigDir} (managed externally)`);
       return;
     }
     if (ctx.env.SHOULD_LINK_GHOSTTY !== "1") {
       skip(
-        `~/.config/ghostty (not needed for ${ctx.env.CONTEXT_LABEL ?? "this context"}; set PI_ENV_LINK_GHOSTTY=1 to force)`,
+        `${ctx.ghosttyConfigDir} (not needed for ${ctx.env.CONTEXT_LABEL ?? "this context"}; set PI_ENV_LINK_GHOSTTY=1 to force)`,
       );
       return;
     }
@@ -58,23 +58,23 @@ function configureGhosttyEffect(ctx, policy) {
       }
     });
     if (!canCreate) {
-      skip(`~/.config/ghostty (cannot create ${ctx.ghosttyConfigDir})`);
+      skip(`${ctx.ghosttyConfigDir} (cannot create)`);
       return;
     }
     yield* linkPathEffect(
       join(ctx.repo, "ghostty/config"),
       join(ctx.ghosttyConfigDir, "config"),
-      "~/.config/ghostty/config",
+      join(ctx.ghosttyConfigDir, "config"),
     );
     yield* linkPathEffect(
       join(ctx.repo, "ghostty/themes/pi-env-gruvbox-dark"),
       join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-dark"),
-      "~/.config/ghostty/themes/pi-env-gruvbox-dark",
+      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-dark"),
     );
     yield* linkPathEffect(
       join(ctx.repo, "ghostty/themes/pi-env-gruvbox-light"),
       join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-light"),
-      "~/.config/ghostty/themes/pi-env-gruvbox-light",
+      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-light"),
     );
   });
 }

@@ -6,9 +6,8 @@ import { Text } from "@earendil-works/pi-tui";
 import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
-import { registerPtcTools } from "../_shared/ptc-tools";
 import { txt } from "../_shared/result";
-import { definePublicTool, toolExpandHint } from "../_shared/tool-render";
+import { definePublicTool, registerPublicTool, toolExpandHint } from "../_shared/tool-render";
 import { injectAnthropicHostedWebTools, isAnthropicHostedWebToolsModel, loadAnthropicWebToolSettings, shouldInjectAnthropicHostedWebTools, type AnthropicWebToolSettings } from "./anthropic-tools";
 import { injectOpenAIHostedWebTools, isOpenAIHostedWebToolsModel, loadOpenAIWebToolSettings, shouldInjectOpenAIHostedWebTools, type OpenAIWebToolSettings } from "./openai-tools";
 
@@ -367,6 +366,8 @@ export default function webContext(pi: ExtensionAPI) {
   const webFetchTool = definePublicTool({
     name: "web_fetch",
     label: "Web Fetch",
+    exposure: "deferred",
+    namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description: [
       "Fetch an http(s) URL as bounded text; no JS, clicks, auth, or visual inspection.",
       "Default mode='text' strips HTML boilerplate for lower token use; use mode='raw' only when exact markup matters.",
@@ -428,5 +429,5 @@ export default function webContext(pi: ExtensionAPI) {
       return new Text(lines.join("\n"), 0, 0);
     },
   });
-  registerPtcTools(pi, webFetchTool);
+  registerPublicTool(pi, webFetchTool);
 }

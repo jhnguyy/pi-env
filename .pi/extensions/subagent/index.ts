@@ -218,6 +218,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
     registerPublicTool(pi, {
       name: "subagent",
       label: "Subagent",
+      exposure: "model-only",
       description,
       parameters: SUBAGENT_PARAMETERS,
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {

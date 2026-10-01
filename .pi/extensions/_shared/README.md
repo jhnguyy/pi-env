@@ -7,7 +7,7 @@
 | Register or observe extension tools | `registerAgentTools()`, `registerAgentToolsOnSessionStart()`, `listenForAgentTools()` | `agent-tools.ts` |
 | Register or consume the versioned credential source | `registerCredentialSource()`, `getCredentialSource()` | `credential-source.ts` |
 | Adapt one domain tool contract to Pi and AgentTool | `ToolContract`, `toPiTool()`, `toAgentTool()` | `tool-contract.ts` |
-| Resolve built-in tool factories/capabilities | `BUILT_IN_TOOL_CONTRACTS`, `BUILT_IN_TOOL_NAMES` | `built-in-tools.ts` |
+| Resolve built-in tool factories/capabilities | `BUILT_IN_TOOL_CONTRACTS` | `built-in-tools.ts` |
 | Resolve Node executables | `findNodeBinaryLite()` | `node-bin-lite.ts` |
 | Normalize names and generate IDs | `slugify()`, `generateId()` | `slug.ts`, `id.ts` |
 | Format and parse session milestones | `formatTodoSessionMilestone()`, `parseSessionMilestoneLabel()` | `session-milestones.ts` |
