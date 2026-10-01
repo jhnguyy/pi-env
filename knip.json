@@ -11,6 +11,7 @@
     "scripts/verify-install.mjs",
     "scripts/verify.mjs",
     "scripts/verify-phase.mjs",
+    "scripts/verify-pre-commit.mjs",
     "scripts/verify-safe.mjs",
     "scripts/__tests__/lock-holder.mjs",
     "setup/apply-managed-settings.mjs",
