@@ -85,6 +85,9 @@ const SESSION_OPTION = "@pi_session_id";
 // Records which Pi process owns a binding so a successor can reclaim tags left by a crash.
 const OWNER_OPTION = "@pi_session_pid";
 
+// UUIDv7 session IDs start with a timestamp, so only the random tail tells nearby sessions apart.
+export const windowLabel = (sessionId: string): string => `pi-${sessionId.slice(-6)}`;
+
 const processAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
@@ -279,37 +282,24 @@ export function createTmuxSessionHost(
         OWNER_OPTION,
         `${ownerPid}`,
       ]);
-      if (name) {
-        yield* run("disable automatic rename", [
-          "-S",
-          window.socketPath,
-          "set-option",
-          "-w",
-          "-t",
-          window.windowId,
-          "automatic-rename",
-          "off",
-        ]);
-        yield* run("rename window", [
-          "-S",
-          window.socketPath,
-          "rename-window",
-          "-t",
-          window.windowId,
-          name,
-        ]);
-      } else {
-        yield* run("restore automatic rename", [
-          "-S",
-          window.socketPath,
-          "set-option",
-          "-w",
-          "-u",
-          "-t",
-          window.windowId,
-          "automatic-rename",
-        ]);
-      }
+      yield* run("disable automatic rename", [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-t",
+        window.windowId,
+        "automatic-rename",
+        "off",
+      ]);
+      yield* run("rename window", [
+        "-S",
+        window.socketPath,
+        "rename-window",
+        "-t",
+        window.windowId,
+        name ?? windowLabel(sessionId),
+      ]);
       const verified = yield* inspectCurrent(paneId);
       if (verified.boundSessionId !== sessionId) {
         return yield* new SessionHostFailure({
@@ -357,6 +347,27 @@ export function createTmuxSessionHost(
       yield* assertBinding(window, sessionId);
       if (window.boundSessionId !== sessionId) return;
       yield* unsetBinding("release window binding", window);
+      const windowName = yield* run("read window name", [
+        "-S",
+        window.socketPath,
+        "display-message",
+        "-p",
+        "-t",
+        window.windowId,
+        "-F",
+        "#{window_name}",
+      ]);
+      if (windowName !== windowLabel(sessionId)) return;
+      yield* run("restore automatic rename", [
+        "-S",
+        window.socketPath,
+        "set-option",
+        "-w",
+        "-u",
+        "-t",
+        window.windowId,
+        "automatic-rename",
+      ]);
     });
 
   const restoreWindow = (input: RestoreWindowInput) =>
