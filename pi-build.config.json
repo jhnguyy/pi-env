@@ -7,7 +7,6 @@
     "@earendil-works/pi-agent-core",
     "typebox",
     "@sinclair/typebox",
-    "@linear/sdk",
     "@effect/opentelemetry",
     "@opentelemetry/api",
     "@opentelemetry/exporter-trace-otlp-http",
@@ -25,13 +24,6 @@
       {
         "entry": "cli-main.ts",
         "outfile": "dist/cli.js"
-      }
-    ],
-    "credential-source": [
-      {
-        "entry": "bitwarden-runner.ts",
-        "outfile": "dist/bitwarden-runner.js",
-        "banner": false
       }
     ],
     "dev-tools": [
