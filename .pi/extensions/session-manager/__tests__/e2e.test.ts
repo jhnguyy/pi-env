@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -149,7 +149,10 @@ describeE2E("session-manager in real tmux", () => {
     }
     const parent = process.env["PI_ENV_E2E_ARTIFACT_DIR"] || tmpdir();
     mkdirSync(parent, { recursive: true });
-    artifactPath = join(mkdtempSync(join(parent, "pi-session-manager-e2e-")), "result.json");
+    const evidenceDir = mkdtempSync(join(parent, "pi-session-manager-e2e-"));
+    // Hosts that mount the directory may run as a different UID than the container.
+    chmodSync(evidenceDir, 0o755);
+    artifactPath = join(evidenceDir, "result.json");
     console.info(`Session-manager E2E evidence: ${artifactPath}`);
     root = mkdtempSync(join(tmpdir(), "smx-"));
     mkdirSync(join(root, "agent"));
