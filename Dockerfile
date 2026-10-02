@@ -66,3 +66,18 @@ RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec 
 USER node
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["nub", "run", "verify:install"]
+
+# Session-manager E2E: real Pi in an isolated tmux server. Build with
+# `--target session-manager-e2e`; it is not part of the published image.
+FROM pi-env AS session-manager-e2e
+USER root
+RUN export DEBIAN_FRONTEND=noninteractive \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends tmux \
+  && rm -rf /var/lib/apt/lists/*
+USER node
+ENV PI_ENV_E2E_ARTIFACT_DIR=/artifacts
+CMD ["nub", "run", "test:e2e:session-manager"]
+
+# Keep the published image as the default (last) build target.
+FROM pi-env

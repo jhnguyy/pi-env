@@ -55,6 +55,14 @@ PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run test:e2e:real-workspa
 
 Each run writes a `pi-dev-tools-canary-*/result.json` with the revision, public request, expected destination, actual result, and verdict. Keep this directory for review. Without the environment variable, evidence goes to temporary storage.
 
+Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux server and covers window binding, stale-binding reclaim after `kill -9`, release, and labels:
+
+```bash
+nub run test:e2e:session-manager:docker
+```
+
+The script builds the `session-manager-e2e` Dockerfile target from a clone of committed `HEAD`, so it works from a worktree. Evidence goes to `~/.cache/pi-env/session-manager-e2e` unless `PI_ENV_E2E_ARTIFACT_DIR` names another directory that Docker can share. Each run writes a `pi-session-manager-e2e-*/result.json` with the revision, Pi and tmux versions, and the expected result, actual result, and verdict for each case. `nub run test:e2e:session-manager` runs the same test on the host when tmux is installed.
+
 ## Worktree requirements
 
 Keep the primary working tree on `main`. Perform all branch work in a dedicated worktree outside the primary working tree. Concurrent sessions, editors, and the LSP daemon share each working tree, index, and checkout.

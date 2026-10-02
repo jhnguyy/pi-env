@@ -30,6 +30,32 @@ runs:
           exit 1
         fi
 
+    - name: Run session-manager E2E in tmux
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        artifacts="$RUNNER_TEMP/session-manager-e2e"
+        mkdir -p "$artifacts"
+        chmod 0777 "$artifacts"
+        if ! DOCKER_BUILDKIT=1 docker build \
+          --file ./Dockerfile \
+          --target session-manager-e2e \
+          --tag pi-env:session-manager-e2e \
+          .; then
+          echo "::error title=Session-manager E2E build failed::Docker could not build the E2E target."
+          exit 1
+        fi
+        if ! docker run --rm \
+          -e "PI_ENV_REVISION=$GITHUB_SHA" \
+          -v "$artifacts:/artifacts" \
+          pi-env:session-manager-e2e; then
+          cat "$artifacts"/*/result.json || true
+          echo "::error title=Session-manager E2E failed::Real Pi in tmux did not meet the session-binding contract."
+          exit 1
+        fi
+        cat "$artifacts"/*/result.json
+
     - name: Verify container artifact contract
       shell: bash
       working-directory: ${{ github.workspace }}

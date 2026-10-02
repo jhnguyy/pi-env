@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { ManifestCommitFailure } from "../contracts.js";
 import { ensureCoordinator } from "../coordinator.js";
-import { WindowBindingConflict, type CurrentWindow, type SessionHostShape } from "../host.js";
+import type { CurrentWindow, SessionHostShape } from "../host.js";
 import { registerSessionManager } from "../index.js";
 import { workspaceId as workspaceIdFor } from "../runtime-path.js";
 import type { SessionFileProbe } from "../session-file.js";
@@ -418,57 +418,6 @@ describe("session-manager extension", () => {
 
     expect(displayName).toBeUndefined();
     expect(renamedWindows).toEqual(["investigate-resume"]);
-  });
-
-  it("reports the host cause when the current window cannot be bound", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-binding-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const notices: string[] = [];
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: () => {},
-    });
-    const window: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    registerSessionManager(pi, {
-      catalog: createFileSessionCatalog(join(root, "agent")),
-      host: {
-        inspectCurrent: () => Effect.succeed(window),
-        bindCurrent: () =>
-          Effect.fail(new WindowBindingConflict({ windowId: "@1", existingSessionId: "other" })),
-        renameCurrent: () => Effect.void,
-        releaseCurrent: () => Effect.void,
-      },
-      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      environment: { TMUX_PANE: "%1" },
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: { getSessionId: () => "session-a", getSessionFile: () => undefined },
-      ui: {
-        getEditorComponent: () => undefined,
-        setEditorComponent: () => {},
-        notify: (message: string) => notices.push(message),
-      },
-      shutdown: () => {},
-    });
-
-    await handlers.get("session_start")?.({} as never, ctx);
-
-    expect(notices).toEqual([
-      "Session enrollment failed. SessionBindingFailed: WindowBindingConflict (windowId=@1, existingSessionId=other)",
-    ]);
   });
 
   it("releases a binding that completes after shutdown begins", async () => {

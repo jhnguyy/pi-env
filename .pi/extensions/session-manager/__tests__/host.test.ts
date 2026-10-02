@@ -18,7 +18,6 @@ function executor(
   const tags = options["@pi_session_id"];
   const owners = options["@pi_session_pid"];
   const calls: string[][] = [];
-  let windowName = "zsh";
   const exec: Exec = async (command, args) => {
     calls.push([command, ...args]);
     const format = args.at(-1);
@@ -26,8 +25,6 @@ function executor(
     if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
     if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
     if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
-    if (format === "#{window_name}") return { code: 0, stdout: `${windowName}\n`, stderr: "" };
-    if (args.includes("rename-window")) windowName = args.at(-1)!;
     const windowId = args[args.indexOf("-t") + 1];
     const option = Object.keys(options).find((name) => args.includes(name));
     if (args.includes("show-options") && option) {
@@ -54,39 +51,6 @@ describe("tmux session host", () => {
     const name = "quiet pine; $(touch nope)";
     await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a", name));
     expect(calls.find((call) => call.includes("rename-window"))?.at(-1)).toBe(name);
-  });
-
-  it("labels an unnamed session's window with its session ID suffix until release", async () => {
-    const { calls, exec } = executor({});
-    const host = createTmuxSessionHost(exec);
-    const sessionId = "01a0f87b-994a-704b-ba15-e36cc9f4b367";
-    const automaticRename = (flag: string) =>
-      calls.some(
-        (call) => call.includes("automatic-rename") && call.includes(flag) && call.at(-2) === "@1",
-      );
-
-    await Effect.runPromise(host.bindCurrent("%1", sessionId));
-
-    expect(calls.find((call) => call.includes("rename-window"))?.at(-1)).toBe("pi-f4b367");
-    expect(calls.some((call) => call.includes("automatic-rename") && call.at(-1) === "off")).toBe(
-      true,
-    );
-
-    await Effect.runPromise(host.releaseCurrent("%1", sessionId));
-
-    expect(automaticRename("-u")).toBe(true);
-  });
-
-  it("keeps an explicit window name after release", async () => {
-    const { calls, exec } = executor({});
-    const host = createTmuxSessionHost(exec);
-
-    await Effect.runPromise(host.bindCurrent("%1", "session-a", "troubleshooting"));
-    await Effect.runPromise(host.releaseCurrent("%1", "session-a"));
-
-    expect(calls.some((call) => call.includes("automatic-rename") && call.includes("-u"))).toBe(
-      false,
-    );
   });
 
   it("releases only the current session's owned window binding", async () => {
@@ -199,26 +163,6 @@ describe("tmux session host", () => {
       await failureOf(createTmuxSessionHost(duplicate.exec).bindCurrent("%1", "session-a", "name")),
     ).toBeInstanceOf(DuplicateWindowBinding);
     expect(duplicate.calls.some((call) => call.includes("set-option"))).toBe(false);
-
-    const live = executor({ "@1": "other" }, { "@1": "41" });
-    const liveHost = createTmuxSessionHost(live.exec, { ownerPid: 42, processAlive: () => true });
-    expect(await failureOf(liveHost.bindCurrent("%1", "session-a"))).toBeInstanceOf(
-      WindowBindingConflict,
-    );
-    expect(live.tags["@1"]).toBe("other");
-  });
-
-  it("reclaims the current window from a Pi process that exited without releasing it", async () => {
-    const stale = executor({ "@1": "exited-session" }, { "@1": "41" });
-    const host = createTmuxSessionHost(stale.exec, {
-      ownerPid: 42,
-      processAlive: (pid) => pid !== 41,
-    });
-
-    await Effect.runPromise(host.bindCurrent("%1", "session-a"));
-
-    expect(stale.tags["@1"]).toBe("session-a");
-    expect(stale.owners["@1"]).toBe("42");
   });
 
   it("reclaims a binding left by an earlier session in the same Pi process", async () => {
@@ -228,16 +172,5 @@ describe("tmux session host", () => {
     await Effect.runPromise(host.bindCurrent("%1", "session-a"));
 
     expect(earlier.tags["@1"]).toBe("session-a");
-  });
-
-  it("removes the owner process with the binding on release", async () => {
-    const owned = executor({ "@1": "session-a" }, { "@1": "42" });
-
-    await Effect.runPromise(
-      createTmuxSessionHost(owned.exec, { ownerPid: 42 }).releaseCurrent("%1", "session-a"),
-    );
-
-    expect(owned.tags["@1"]).toBeUndefined();
-    expect(owned.owners["@1"]).toBeUndefined();
   });
 });
