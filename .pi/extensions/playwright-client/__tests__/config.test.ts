@@ -1,20 +1,25 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import playwrightClientExtension from "../index";
 import { BrowserClient } from "../browser";
 import { loadBrowserClientConfig } from "../config";
 
-const ENV_KEYS = [
+const BROWSER_ENV_KEYS = [
   "PI_BROWSER_PROFILE",
   "PI_BROWSER_PROFILE_PATH",
   "PI_BROWSER_ARTIFACT_DIR",
 ] as const;
+const ENV_KEYS = ["PI_CODING_AGENT_DIR", ...BROWSER_ENV_KEYS] as const;
 
 const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 const tempDirs: string[] = [];
+
+beforeEach(() => {
+  process.env.PI_CODING_AGENT_DIR = tempProject();
+});
 
 afterEach(() => {
   for (const key of ENV_KEYS) {
@@ -138,7 +143,7 @@ describe("BrowserClient targets", () => {
 });
 
 function clearBrowserEnv(): void {
-  for (const key of ENV_KEYS) delete process.env[key];
+  for (const key of BROWSER_ENV_KEYS) delete process.env[key];
 }
 
 function tempProject(settings?: Record<string, unknown>): string {

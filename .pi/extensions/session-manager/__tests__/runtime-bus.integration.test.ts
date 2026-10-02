@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,13 +17,21 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "session-runtime-"));
+async function temporaryRoot() {
+  // Unix socket fixtures need a short canonical parent, even when TMPDIR is long.
+  const parent = await realpath(process.platform === "win32" ? tmpdir() : "/tmp");
+  const root = await mkdtemp(join(parent, "sr-"));
   roots.push(root);
+  return root;
+}
+
+async function fixture() {
+  const root = await temporaryRoot();
   const runtime = join(root, "runtime");
   const cwd = join(root, "workspace");
   await Promise.all([mkdir(runtime, { mode: 0o700 }), mkdir(cwd)]);
   const paths = await Effect.runPromise(resolveRuntimePaths(cwd, { XDG_RUNTIME_DIR: runtime }));
+  expect(paths.directory).toBe(join(runtime, "pi-env", "session-manager"));
   const publications: unknown[] = [];
   const calls = { reconcile: 0 };
   const server = await Effect.runPromise(
@@ -194,8 +202,7 @@ describe("session runtime bus", () => {
   });
 
   it("rejects a successful response whose result belongs to another method", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-runtime-response-"));
-    roots.push(root);
+    const root = await temporaryRoot();
     const socketPath = join(root, "peer.sock");
     const peer = createServer((socket) => {
       let request = "";
@@ -241,8 +248,7 @@ describe("session runtime bus", () => {
   });
 
   it("removes the socket when metadata publication fails after bind", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-runtime-cleanup-"));
-    roots.push(root);
+    const root = await temporaryRoot();
     const runtime = join(root, "runtime");
     const cwd = join(root, "workspace");
     await Promise.all([mkdir(runtime, { mode: 0o700 }), mkdir(cwd)]);
@@ -263,8 +269,7 @@ describe("session runtime bus", () => {
   });
 
   it("secures a runtime directory that was initially accessible to other users", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-runtime-mode-"));
-    roots.push(root);
+    const root = await temporaryRoot();
     await chmod(root, 0o755);
     const cwd = join(root, "workspace");
     await mkdir(cwd);

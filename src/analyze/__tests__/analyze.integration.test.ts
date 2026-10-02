@@ -14,9 +14,11 @@ import { AnalyzerName, FailPolicy, FindingKind, OutputMode, ProcessError, Proces
 import { createSyntaxProjectEffect, createTypeProjectEffect, SyntaxSourceSelection } from "../program.js";
 import { childHeapLimitMb, processServiceLayer, streamProcessEffect, type StreamProcessOptions } from "../process.js";
 import { expandExplicitPathsEffect, intersectsHunks, parseUnifiedHunks, resolveScopeEffect, type Scope } from "../scope.js";
+import { resolveNodeCommand } from "../../process/platform.js";
 
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
+const node = resolveNodeCommand();
 const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
 const zeroRuntime = { now: () => 0, memory: () => ({ rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 }) };
 const createProjectEffect = (cwd: string) => createTypeProjectEffect(cwd);
@@ -69,16 +71,16 @@ describe("analyze contracts", () => {
   });
 
   it("runs subprocesses and types exit, timeout, and streaming-limit failures", async () => {
-    await expect(Effect.runPromise(streamProcessEffect("/bin/echo", ["ok"]))).resolves.toMatchObject({ stdout: "ok\n" });
-    const exited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/false", [])));
+    await expect(Effect.runPromise(streamProcessEffect(node, ["-e", "process.stdout.write('ok\\n')"]))).resolves.toMatchObject({ stdout: "ok\n" });
+    const exited = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "process.exit(1)"])));
     expect(Result.isFailure(exited) && exited.failure.kind).toBe("exit");
-    const streamTimed = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/sleep", ["10"], { timeoutMs: 10 })));
+    const streamTimed = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "setInterval(() => {}, 1_000)"], { timeoutMs: 10 })));
     expect(Result.isFailure(streamTimed) && streamTimed.failure.kind).toBe(ProcessErrorKind.Timeout);
-    const limited = await Effect.runPromise(Effect.result(streamProcessEffect("/bin/echo", ["x".repeat(10_000)], { stdoutLimitBytes: 100 })));
+    const limited = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "process.stdout.write('x'.repeat(10_000))"], { stdoutLimitBytes: 100 })));
     expect(Result.isFailure(limited) && limited.failure.kind).toBe(ProcessErrorKind.OutputLimit);
     if (Result.isFailure(limited)) expect(Buffer.byteLength(limited.failure.stdout ?? "")).toBeLessThanOrEqual(100);
     const interruptedAt = Date.now();
-    const interrupted = await Effect.runPromiseExit(streamProcessEffect("/bin/sleep", ["10"]).pipe(Effect.timeout("20 millis")));
+    const interrupted = await Effect.runPromiseExit(streamProcessEffect(node, ["-e", "setInterval(() => {}, 1_000)"]).pipe(Effect.timeout("20 millis")));
     expect(interrupted._tag).toBe("Failure");
     expect(Date.now() - interruptedAt).toBeLessThan(1_000);
   });
@@ -142,7 +144,7 @@ describe("analyze contracts", () => {
   });
 
   it("preserves typed benchmark failures", async () => {
-    const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: "/bin/false", args: [], runs: 1 }).pipe(Effect.provide(processServiceLayer()))));
+    const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: node, args: ["-e", "process.exit(1)"], runs: 1 }).pipe(Effect.provide(processServiceLayer()))));
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) expect(outcome.failure._tag).toBe("BenchmarkError");
   });
