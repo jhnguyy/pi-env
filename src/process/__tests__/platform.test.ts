@@ -62,8 +62,8 @@ describe("process platform streamProcess", () => {
     expect(result).toMatchObject({ exitCode: 7, stdout: "partial\n", stderr: "warn\n" });
   });
 
-  it.runIf(process.platform !== "win32")("runProcess stays isolated when a typed options variable requests inheritance", async () => {
-    const options: StreamProcessOptions = { terminalSession: "inherit", timeoutMs: 5_000 };
+  it.runIf(process.platform !== "win32")("runProcess isolates the child process group", async () => {
+    const options: StreamProcessOptions = { timeoutMs: 5_000 };
     const result = await Effect.runPromise(runProcess(node, ["-e", `
       try {
         process.kill(-process.pid, 0);

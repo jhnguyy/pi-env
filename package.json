@@ -13,11 +13,9 @@
   "workspaces": [
     ".pi/extensions/analyze",
     ".pi/extensions/general",
-    ".pi/extensions/credential-source",
     ".pi/extensions/web-context",
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
-    ".pi/extensions/linear",
     ".pi/extensions/notes",
     ".pi/extensions/pi-update",
     ".pi/extensions/review",
@@ -30,11 +28,9 @@
     "extensions": [
       ".pi/extensions/analyze",
       ".pi/extensions/general",
-      ".pi/extensions/credential-source",
       ".pi/extensions/web-context",
       ".pi/extensions/dev-tools",
       ".pi/extensions/introspection",
-      ".pi/extensions/linear",
       ".pi/extensions/notes",
       ".pi/extensions/pi-update",
       ".pi/extensions/review",
