@@ -61,7 +61,7 @@ Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux
 nub run test:e2e:session-manager:docker
 ```
 
-The script runs two [`docker-bake.hcl`](docker-bake.hcl) targets. `session-manager-e2e-evidence` runs the test and exports `result.json`, `exit-code`, and `vitest.log` to `.e2e-evidence/session-manager`, or to `PI_ENV_E2E_ARTIFACT_DIR`, even when the test fails. `session-manager-e2e` reuses the cached run and fails when the test failed. The E2E builds from the shared `toolchain` stage, so it works from a worktree. BuildKit reuses a passing result until the build inputs change; add `--no-cache-filter session-manager-e2e-run` to force a rerun. `nub run test:e2e:session-manager` runs the same test on the host when tmux is installed.
+The script runs two [`docker-bake.hcl`](docker-bake.hcl) targets. `session-manager-e2e-evidence` runs the test and exports `result.json`, `exit-code`, and `vitest.log` to `.e2e-evidence/session-manager` even when the test fails. A `PI_ENV_E2E_ARTIFACT_DIR` outside the repository also needs `docker buildx bake --allow fs.write=<dir>`. `session-manager-e2e` reuses the cached run and fails when the test failed. The E2E builds from the shared `toolchain` stage, so it works from a worktree. BuildKit reuses a passing result until the build inputs change; add `--no-cache-filter session-manager-e2e-run` to force a rerun. `nub run test:e2e:session-manager` runs the same test on the host when tmux is installed.
 
 ## Worktree requirements
 
