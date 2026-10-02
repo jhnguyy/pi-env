@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -100,7 +100,7 @@ describe("subagent resolver", () => {
         return { ...readExtTool, name: "factory-notes" };
       },
     };
-    const ctx = { cwd: "/tmp", modelRegistry } as any;
+    const ctx = { cwd: tmpdir(), modelRegistry } as any;
     const result = resolveSubagentExecutionPlan(
       {
         task: "x",
@@ -114,7 +114,7 @@ describe("subagent resolver", () => {
     expect(result._tag).toBe(ResolutionResultTag.Ok);
     if (result._tag !== ResolutionResultTag.Ok) return;
     expect(result.value.tools[0]?.name).toBe("factory-notes");
-    expect(calls).toEqual([{ cwd: "/tmp", sessionGeneration: "generation-1", parentContext: ctx }]);
+    expect(calls).toEqual([{ cwd: realpathSync(ctx.cwd), sessionGeneration: "generation-1", parentContext: ctx }]);
   });
 
   it("resolves tools by capability subset", () => {
@@ -175,7 +175,7 @@ describe("subagent resolver", () => {
     try {
       const ok = resolveEffectiveCwd({ task: "x", cwd: dir }, "/missing/default");
       expect(ok._tag).toBe(ResolutionResultTag.Ok);
-      if (ok._tag === ResolutionResultTag.Ok) expect(ok.value).toBe(dir);
+      if (ok._tag === ResolutionResultTag.Ok) expect(ok.value).toBe(realpathSync(dir));
       const relative = resolveEffectiveCwd({ task: "x", cwd: "relative" }, dir);
       expect(relative._tag).toBe(ResolutionResultTag.Error);
       if (relative._tag === ResolutionResultTag.Error)

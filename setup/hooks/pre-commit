@@ -10,16 +10,7 @@ if ! command -v nub >/dev/null 2>&1; then
 fi
 
 echo "pre-commit: shell syntax"
-bash -n setup/*.sh setup/__tests__/*.sh scripts/*.sh
+bash -n setup/*.sh setup/__tests__/*.sh setup/hooks/* scripts/*.sh
 
-echo "pre-commit: package manifest"
-nub --node -e 'JSON.parse(require("fs").readFileSync("package.json", "utf8"))'
-
-echo "pre-commit: quality analysis"
-nub run check:quality
-
-echo "pre-commit: typecheck"
-nub run typecheck
-
-echo "pre-commit: install readiness"
-nub run verify:install
+# CI runs the full portfolio; keep this to fast checks that need no strict containment.
+nub run verify:pre-commit

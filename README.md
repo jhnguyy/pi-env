@@ -14,7 +14,9 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-Nub is the canonical JavaScript toolchain. Nix remains available for host/runtime provisioning.
+The operating environment supplies Node and Nub. `pi-env` declares the version requirements in `package.json`. `setup.sh` validates the resolved tools against those requirements.
+
+Nix can supply the declared toolchain.
 
 | Environment | Command |
 | --- | --- |

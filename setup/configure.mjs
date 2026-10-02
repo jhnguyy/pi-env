@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import { deriveSetupPolicyEffect } from "./policy-effect.mjs";
+import { configureHomeManagerEffect } from "./home-manager.mjs";
 import { configurePiEffect } from "./pi-config.mjs";
 import { configureRepoToolsEffect } from "./repo-tools.mjs";
 import { configureTerminalToolsEffect } from "./terminal-config.mjs";
@@ -20,6 +21,7 @@ const ConfigureCommand = Object.freeze({
   Pi: "pi",
   Terminal: "terminal",
   RepoTools: "repo-tools",
+  HomeManager: "home-manager",
 });
 
 const command = process.argv[2] || ConfigureCommand.All;
@@ -82,6 +84,7 @@ function configureEffect() {
         yield* configurePiEffect(ctx, policy);
         yield* configureTerminalToolsEffect(ctx, policy);
         yield* configureRepoToolsEffect(ctx, policy);
+        yield* configureHomeManagerEffect(ctx, policy);
         break;
       case ConfigureCommand.Pi:
         yield* configurePiEffect(ctx, policy);
@@ -91,6 +94,9 @@ function configureEffect() {
         break;
       case ConfigureCommand.RepoTools:
         yield* configureRepoToolsEffect(ctx, policy);
+        break;
+      case ConfigureCommand.HomeManager:
+        yield* configureHomeManagerEffect(ctx, policy);
         break;
       default:
         return yield* Effect.fail(new SetupUsageError(`unknown configure command: ${command}`, 2));

@@ -54,6 +54,15 @@ export class SetupUsageError extends Error {
   }
 }
 
+export class SetupStateError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "SetupStateError";
+    this._tag = "SetupStateError";
+    this.exitCode = 1;
+  }
+}
+
 export function isSetupError(error) {
   return typeof error?._tag === "string" && error._tag.startsWith("Setup");
 }

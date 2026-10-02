@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { defineConfig } from "vitest/config";
 
 const e2e = process.env.E2E === "1";
@@ -19,6 +21,7 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
+    env: { TMPDIR: realpathSync(tmpdir()) },
     testTimeout: e2e ? 30_000 : 5_000,
     include: e2e
       ? realWorkspaceCanary
