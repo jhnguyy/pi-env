@@ -22,39 +22,45 @@ runs:
         IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
         set -euo pipefail
-        if ! DOCKER_BUILDKIT=1 docker build \
-          --file ./Dockerfile \
-          --tag "$IMAGE_TAG" \
-          .; then
+        if ! docker buildx bake image --set "image.tags=$IMAGE_TAG"; then
           echo "::error title=Container image build failed::Docker could not build the image candidate."
           exit 1
         fi
 
-    - name: Run session-manager E2E in tmux
+    - name: Run session-manager E2E
+      id: session-manager-e2e
       shell: bash
       working-directory: ${{ github.workspace }}
+      env:
+        PI_ENV_REVISION: ${{ github.sha }}
+        PI_ENV_E2E_ARTIFACT_DIR: ${{ runner.temp }}/session-manager-e2e
       run: |
         set -euo pipefail
-        artifacts="$RUNNER_TEMP/session-manager-e2e"
-        mkdir -p "$artifacts"
-        chmod 0777 "$artifacts"
-        if ! DOCKER_BUILDKIT=1 docker build \
-          --file ./Dockerfile \
-          --target session-manager-e2e \
-          --tag pi-env:session-manager-e2e \
-          .; then
+        if ! docker buildx bake session-manager-e2e-evidence; then
           echo "::error title=Session-manager E2E build failed::Docker could not build the E2E target."
           exit 1
         fi
-        if ! docker run --rm \
-          -e "PI_ENV_REVISION=$GITHUB_SHA" \
-          -v "$artifacts:/artifacts" \
-          pi-env:session-manager-e2e; then
-          cat "$artifacts"/*/result.json || true
+        cat "$PI_ENV_E2E_ARTIFACT_DIR/result.json"
+
+    - name: Upload session-manager E2E evidence
+      if: ${{ always() && steps.session-manager-e2e.outcome != 'skipped' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: session-manager-e2e-evidence
+        path: ${{ runner.temp }}/session-manager-e2e
+        if-no-files-found: ignore
+
+    - name: Gate on session-manager E2E
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        PI_ENV_REVISION: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        if ! docker buildx bake session-manager-e2e; then
           echo "::error title=Session-manager E2E failed::Real Pi in tmux did not meet the session-binding contract."
           exit 1
         fi
-        cat "$artifacts"/*/result.json
 
     - name: Verify container artifact contract
       shell: bash

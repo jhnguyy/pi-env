@@ -58,7 +58,7 @@
     "test:e2e": "E2E=1 nub run test:vitest --maxWorkers=1",
     "test:e2e:native-tools": "E2E=1 nub run test:vitest .pi/extensions/__tests__/e2e.test.ts",
     "test:e2e:session-manager": "E2E=1 nub run test:vitest .pi/extensions/session-manager/__tests__/e2e.test.ts --maxWorkers=1",
-    "test:e2e:session-manager:docker": "scripts/session-manager-e2e-docker.sh",
+    "test:e2e:session-manager:docker": "export PI_ENV_REVISION=$(git describe --always --dirty --abbrev=40) && docker buildx bake session-manager-e2e-evidence && docker buildx bake session-manager-e2e",
     "test:e2e:real-workspace-canary": "E2E=1 REAL_WORKSPACE_CANARY=1 nub run test:vitest --maxWorkers=1",
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
     "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
