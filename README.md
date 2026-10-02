@@ -14,7 +14,9 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-Nub is the canonical JavaScript toolchain. Nix remains available for host/runtime provisioning.
+The operating environment supplies Node and Nub. `pi-env` declares the compatible Node range in `package.json#engines.node` and the Nub version in `package.json#packageManager`. Setup checks the resolved tools against those requirements. Nub installs dependencies and builds Pi from the local checkout; Node runs Pi. The checkout-level setup and verification commands have the same meaning on development machines, in the Kubernetes image, and on the break-glass host.
+
+Nix can supply the declared toolchain through `.#toolchain`, `nix develop`, and the optional Home Manager module. The Kubernetes image, a NixOS VM or LXC, and a development machine can use different delivery mechanisms. No environment must run Home Manager inside itself to use `pi-env`.
 
 | Environment | Command |
 | --- | --- |
@@ -23,7 +25,7 @@ Nub is the canonical JavaScript toolchain. Nix remains available for host/runtim
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
 | No Nix | `./setup.sh` |
 
-`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
+`--use-nix` invokes local Nix and requires access to realizable store paths. `--nix-managed` uses tools already supplied by the environment without calling `nix run`. Neither option delegates dependency installation or Pi builds to Nix.
 
 Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env guidance block in `~/.pi/agent/AGENTS.md` and preserves content outside the managed block.
 
