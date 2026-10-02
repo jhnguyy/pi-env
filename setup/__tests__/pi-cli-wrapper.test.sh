@@ -87,9 +87,13 @@ test_pi_cli_wrapper_uses_declared_package_entry() {
 }
 
 test_pi_cli_wrapper_pins_configured_node() {
-  local tmp fake_node
+  local tmp fake_node old_home
   tmp="$(with_temp_dir)"
   fake_node="$tmp/node"
+  # Portable setup edits shell profiles because the stub bin dir is not in PATH.
+  old_home="$HOME"
+  HOME="$tmp/home"
+  mkdir -p "$HOME"
 
   create_stub_repo "$tmp"
   cat > "$fake_node" <<'SH'
@@ -111,6 +115,7 @@ SH
   printf '%s' "$wrapper_output" | grep -qF "fake node: $REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" || fail "wrapper should execute configured node (got: $wrapper_output)"
   printf '%s' "$wrapper_output" | grep -qF "PI_ENV_NODE_BIN=$fake_node" || fail "wrapper should expose the configured node to sidecars"
 
+  HOME="$old_home"
   unset PI_ENV_NODE_BIN
   rm -rf "$tmp"
 }
@@ -163,7 +168,7 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   PI_ENV_NODE_BIN=$(node_bin)
   PI_ENV_TEST_NODE_BIN=$PI_ENV_NODE_BIN
   HOME="$tmp/home"
-  PATH="/bin"
+  PATH="/usr/bin:/bin"
   mkdir -p "$HOME"
   create_stub_repo "$tmp"
 
