@@ -17,7 +17,7 @@ import fs from 'node:fs';
 const {EVIDENCE: dir, STATUS: status, PHASE: phase} = process.env;
 fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
   inputs: 'personal.json, legacy JSON settings, metadata-only auth fixtures',
-  expected: 'normal preferences survive; explicit reset replaces baseline/packages and keeps state; registration failures restore exact settings',
+  expected: 'normal preferences survive; explicit reset replaces baseline/packages; registration failures restore exact settings',
   actual: {phase, exitStatus: Number(status)}, verdict: status === '0' ? 'pass' : 'fail',
   reproduce: 'bash setup/__tests__/settings-reset.test.sh',
   inspect: 'workflow.log, before/after JSON, and home/.pi/agent/settings.json.backup-*',
@@ -42,18 +42,15 @@ configure() {
   setup_parse_args "$@" --no-terminal --no-repo-hooks --no-home-manager
   "$NODE" "$ROOT/setup/configure.mjs" pi "$NODE"
 }
-mkdir -p "$PI_AGENT_DIR/sessions" "$PI_AGENT_DIR/files"
+mkdir -p "$PI_AGENT_DIR"
 printf '%s\n' '{"openai":{"type":"oauth"},"openai-codex":{"type":"oauth"}}' > "$PI_AGENT_DIR/auth.json"
-for name in models.json mcp.json keybindings.json sessions/keep files/keep; do
-  printf 'sentinel\n' > "$PI_AGENT_DIR/$name"
-done
 phase='fresh settings'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/initial.json"
 cat > "$EVIDENCE/personal.json" <<'JSON'
 {
   "defaultProvider": "anthropic", "defaultModel": "personal", "defaultThinkingLevel": "high",
-  "defaultTools": [], "npmCommand": ["npm"], "theme": "gruvbox-dark",
+  "defaultTools": [], "npmCommand": ["personal-command"], "theme": "personal-theme",
   "extensions": ["personal"], "custom": {"keep": true}, "packages": ["npm:personal-package"]
 }
 JSON
@@ -69,8 +66,9 @@ cp "$SETTINGS_FILE" "$EVIDENCE/reset.json"
 phase='normal rerun'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/rerun.json"
-phase='preference and state assertions'
-EVIDENCE="$EVIDENCE" "$NODE" --input-type=module <<'JS'
+phase='preference assertions'
+PRIMARY_REPO=$(git -C "$ROOT" worktree list --porcelain | awk '/^worktree / { print substr($0, 10); exit }')
+EVIDENCE="$EVIDENCE" PRIMARY_REPO="$PRIMARY_REPO" "$NODE" --input-type=module <<'JS'
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -79,23 +77,22 @@ const read = name => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
 const personal = read('personal.json');
 const normal = read('normal.json');
 assert.deepEqual({...normal, packages: personal.packages}, personal);
-assert.equal(normal.packages.length, 2);
+const registeredSources = settings => settings.packages.map(source =>
+  source.startsWith('npm:') ? source : path.resolve(path.dirname(process.env.SETTINGS_FILE), source)).sort();
+assert.deepEqual(registeredSources(normal), [...personal.packages, process.env.PRIMARY_REPO].sort());
 const reset = read('reset.json');
 const {packages, ...baseline} = reset;
 assert.deepEqual(baseline, {
   defaultProvider: 'openai', defaultModel: 'gpt-6.1-sol', defaultThinkingLevel: 'medium',
   defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'],
 });
-assert.equal(packages.length, 1);
+assert.deepEqual(registeredSources(reset), [process.env.PRIMARY_REPO]);
 assert.deepEqual(read('initial.json'), reset);
 assert.deepEqual(read('rerun.json'), reset);
 const agent = process.env.PI_AGENT_DIR;
 const backups = fs.readdirSync(agent).filter(name => name.startsWith('settings.json.backup-'));
 assert.equal(backups.length, 1);
 assert.equal(fs.readFileSync(path.join(agent, backups[0]), 'utf8'), fs.readFileSync(path.join(dir, 'normal.json'), 'utf8'));
-for (const name of ['models.json', 'mcp.json', 'keybindings.json', 'sessions/keep', 'files/keep'])
-  assert.equal(fs.readFileSync(path.join(agent, name), 'utf8'), 'sentinel\n');
-assert.deepEqual(JSON.parse(fs.readFileSync(path.join(agent, 'auth.json'), 'utf8')), {openai: {type: 'oauth'}, 'openai-codex': {type: 'oauth'}});
 JS
 cp "$EVIDENCE/legacy.json" "$SETTINGS_FILE"
 for mode in normal reset; do

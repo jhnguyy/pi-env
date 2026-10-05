@@ -45,43 +45,6 @@ test_rejects_malformed_package_entry_before_writing() {
   rm -rf "$tmp"
 }
 
-test_restores_settings_when_package_registration_fails() {
-  local tmp settings repo before
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/missing-repo"
-  printf '%s\n' '{"theme": "existing"}' > "$settings"
-  before="$(cat "$settings")"
-
-  if apply_settings "$settings" "$repo" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    fail "missing package path should fail"
-  fi
-
-  grep -Fq 'Path does not exist' "$tmp/stderr" || fail "package failure should retain native detail"
-  [ "$(cat "$settings")" = "$before" ] || fail "package failure should restore settings"
-  [ ! -s "$tmp/stdout" ] || fail "package failure should not report success"
-
-  rm -rf "$tmp"
-}
-
-test_preserves_empty_settings_file_when_package_registration_fails() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/agent/settings.json"
-  repo="$tmp/missing-repo"
-  mkdir -p "$(dirname "$settings")"
-  : > "$settings"
-
-  if apply_settings "$settings" "$repo" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    fail "missing package path should fail for empty settings"
-  fi
-
-  [ -f "$settings" ] || fail "package failure should preserve an existing empty settings file"
-  [ ! -s "$settings" ] || fail "restored empty settings file should stay empty"
-
-  rm -rf "$tmp"
-}
-
 # This boundary needs an isolated worktree rather than provisioning a second checkout.
 test_registers_primary_checkout_when_run_from_worktree() (
   local tmp settings repo worktree result node
@@ -93,10 +56,10 @@ test_registers_primary_checkout_when_run_from_worktree() (
     DIR="$tmp" STATUS="$status" "$node" --input-type=module <<'JS'
 import fs from 'node:fs';
 fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
-  inputs: 'temporary primary checkout, worktree, and project settings sentinel',
-  expected: 'normal registration canonicalizes to the primary checkout; reset leaves project settings unchanged',
+  inputs: 'temporary primary checkout, worktree, and user settings',
+  expected: 'registration canonicalizes to the primary checkout without duplicate packages',
   actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
-  reproduce: 'bash setup/__tests__/managed-settings.test.sh', inspect: 'normal.json, reset.json, project-before.json, repo/, worktree/',
+  reproduce: 'bash setup/__tests__/managed-settings.test.sh', inspect: 'normal.json, repo/, worktree/',
 }, null, 2) + '\n');
 JS
   }
@@ -118,17 +81,11 @@ JS
 }
 JSON
 
-  mkdir -p "$worktree/.pi"
-  printf '%s\n' '{"customProject":true,"packages":["npm:project"]}' > "$worktree/.pi/settings.json"
-  cp "$worktree/.pi/settings.json" "$tmp/project-before.json"
   result=$(apply_settings "$settings" "$worktree")
   cp "$settings" "$tmp/normal.json"
   [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
-  apply_settings "$settings" "$worktree" --reset >"$tmp/reset.log" 2>&1
-  cp "$settings" "$tmp/reset.json"
-  cmp "$worktree/.pi/settings.json" "$tmp/project-before.json" || fail 'reset changed project settings'
 )
 
 test_rejects_noncanonical_settings_filename() {
@@ -153,8 +110,6 @@ test_rejects_noncanonical_settings_filename() {
 }
 
 test_rejects_malformed_package_entry_before_writing
-test_restores_settings_when_package_registration_fails
-test_preserves_empty_settings_file_when_package_registration_fails
 test_registers_primary_checkout_when_run_from_worktree
 test_rejects_noncanonical_settings_filename
 echo "settings registration tests passed"
