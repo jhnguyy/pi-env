@@ -27,7 +27,7 @@ setup_print_done() {
   echo "Done."
   echo "  Setup mode:     ${PI_ENV_SETUP_MODE:-portable}"
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
-  echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
+  echo "  Machine config: $PI_AGENT_DIR/{auth.json,settings.json}"
   echo "  Install check:  cd $REPO && nub run verify:install"
   echo "  Merge check:    cd $REPO && nub run verify"
 }

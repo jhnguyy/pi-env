@@ -194,6 +194,14 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() (
 
   if [ "$mode" = local-nix ]; then
     assert_file_count "$HOME/.profile" "$HOME/.local/state/pi-env/toolchain/bin" 1
+    mkdir -p "$HOME/.local/state/pi-env/toolchain/bin"
+    make_executable "$HOME/.local/state/pi-env/toolchain/bin/pi" '#!/bin/sh
+exit 0'
+    assert_eq "$(HOME="$HOME" PATH=/usr/bin:/bin bash -c 'source "$HOME/.profile"; command -v pi')" "$PI_BIN_DIR/pi" 'fresh shell selects the adapter'
+    # Reproduce the previously emitted profile ordering for migration coverage.
+    printf '%s\n' '# pi-env: add user-local bin to PATH' "export PATH=\"$PI_BIN_DIR:\$PATH\"" '# pi-env: add local Nix toolchain to PATH' "export PATH=\"$HOME/.local/state/pi-env/toolchain/bin:\$PATH\"" > "$HOME/.profile"
+    PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
+    assert_eq "$(HOME="$HOME" PATH=/usr/bin:/bin bash -c 'source "$HOME/.profile"; command -v pi')" "$PI_BIN_DIR/pi" 'migrated shell selects the adapter'
   fi
   assert_file_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
   assert_file_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
@@ -216,8 +224,13 @@ test_pi_cli_adapter_accepts_upstream_package() (
   create_stub_repo "$tmp" "dist/upstream-cli.js"
   upstream="$tmp/upstream"
   mv "$REPO/node_modules/@earendil-works/pi-coding-agent" "$upstream"
-  PI_PACKAGE_DIR="$upstream" run_pi_cli_setup
+  make_executable "$tmp/pi-upstream" "#!/bin/sh
+export UPSTREAM_RUNTIME=retained
+exec '$PI_ENV_NODE_BIN' '$upstream/dist/upstream-cli.js' \"\$@\""
+  printf '%s\n' 'console.log("upstream runtime", process.env.UPSTREAM_RUNTIME)' >> "$upstream/dist/upstream-cli.js"
+  PI_PACKAGE_DIR="$upstream" PI_ENV_PI_EXECUTABLE="$tmp/pi-upstream" run_pi_cli_setup
   PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" >"$tmp/package.log" 2>&1
+  assert_file_contains "$tmp/package.log" 'upstream runtime retained'
   assert_file_contains "$tmp/package.log" 'stub pi'
   PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start >"$tmp/session.log" 2>&1
   assert_file_contains "$tmp/session.log" 'stub session manager start'

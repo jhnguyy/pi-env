@@ -2,7 +2,7 @@
 
 Normal setup registers pi-env through Pi's stock package manager and preserves existing personal settings. A missing user settings file receives the baseline from `setup/managed-settings-core.mjs`. There is no repeatedly applied preference overlay.
 
-The baseline selects GPT-6.1 Sol, medium thinking, additive codemode/tool-search enablement, and Nub. Provider selection inspects stored authentication type metadata without resolving keys or refreshing tokens. It prefers authenticated `openai`, then authenticated `openai-codex`, and defaults to `openai` when neither is configured.
+Read the [baseline owner](../setup/managed-settings-core.mjs) for initial preference values. Provider selection inspects stored authentication type metadata without resolving keys or refreshing tokens. It prefers authenticated `openai`, then authenticated `openai-codex`, and defaults to `openai` when neither is configured.
 
 ## Explicit reset
 
@@ -18,7 +18,9 @@ Package registration uses the primary checkout when setup runs from a temporary 
 
 Normal dependency installation relies on the shared postinstall hydration operation. When Nub cannot execute the selected runtime, setup installs with `--ignore-scripts` and invokes the same hydration operation through the provisioned Node. Setup does not separately repeat builds or daemon restarts.
 
-`PI_PACKAGE_DIR` can identify the upstream Pi package supplied by Nix. Setup validates its identity, version, and declared executable before generating the session-manager adapter. Exact `pi --start` invokes session selection. Other arguments pass to Pi.
+The [Nix bindings](../nix/outputs.nix) supply Pi's package metadata and upstream executable. The [session adapter](../setup/runtime.mjs) delegates ordinary invocations to that executable, preserving its runtime environment. Portable setup uses the package-declared Node entrypoint. Exact `pi --start` invokes session selection and launches the selected session through the same adapter.
+
+Pi's `PI_CODING_AGENT_DIR` selects user state. Base setup also accepts the legacy `PI_AGENT_DIR` alias. Conflicting selections fail before provisioning or settings writes. Relative paths resolve before setup changes the working directory.
 
 ## Workflow evidence
 
