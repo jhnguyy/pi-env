@@ -240,8 +240,6 @@ async function reconcileActive(
 
 function launchCoordinator(
   selection: StartSelection,
-  nodeBin: string,
-  piEntry: string,
   extensionPath: string,
   wrapperPath: string,
   id: string,
@@ -255,7 +253,7 @@ function launchCoordinator(
           coordinator.sessionId,
           ...(coordinator.name ? ["--name", coordinator.name] : []),
         ];
-  process.execve!(nodeBin, [nodeBin, piEntry, ...sessionArgs, "--extension", extensionPath], {
+  process.execve!(wrapperPath, [wrapperPath, ...sessionArgs, "--extension", extensionPath], {
     ...env,
     PI_ENV_SESSION_MANAGER_BYPASS: "1",
     PI_ENV_SESSION_MANAGER_EXPECTED: "1",
@@ -273,12 +271,10 @@ async function main(): Promise<void> {
   if (typeof process.execve !== "function") {
     throw new Error("pi-env: configured Node does not expose process.execve()");
   }
-  const nodeBin = required("PI_ENV_NODE_BIN");
-  const piEntry = required("PI_ENV_REAL_PI_ENTRY");
   const wrapperPath = required("PI_ENV_PI_WRAPPER");
   const extensionPath = required("PI_ENV_SESSION_MANAGER_EXTENSION");
   const paneId = required("TMUX_PANE");
-  await Promise.all([access(nodeBin), access(piEntry), access(wrapperPath), access(extensionPath)]);
+  await Promise.all([access(wrapperPath), access(extensionPath)]);
   const agentDir = env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
   const catalog = createFileSessionCatalog(agentDir);
   const identity = await Effect.runPromise(catalog.identity(process.cwd()));
@@ -293,7 +289,7 @@ async function main(): Promise<void> {
     paneId,
   });
   if (selection.active) return reconcileActive(selection, paths, id);
-  return launchCoordinator(selection, nodeBin, piEntry, extensionPath, wrapperPath, id);
+  return launchCoordinator(selection, extensionPath, wrapperPath, id);
 }
 
 main().catch((error: unknown) => {

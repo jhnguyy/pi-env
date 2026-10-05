@@ -26,10 +26,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Read declared Nub version
+        id: toolchain
+        shell: bash
+        run: |
+          echo "version=$(node -p 'require("./package.json").packageManager.split("@")[1]')" >> "$GITHUB_OUTPUT"
+
       - name: Setup Nub and project Node
         uses: nubjs/setup-nub@21b317c170eee658503996209cf87b63481be35a
         with:
-          nub-version: 0.9.5
+          nub-version: ${{ steps.toolchain.outputs.version }}
           cache-dependency-path: nub.lock
 
       - name: Show toolchain

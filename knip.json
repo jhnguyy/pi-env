@@ -4,6 +4,8 @@
     "scripts/analyze.ts",
     "scripts/analyze-bundle-worker.ts",
     "scripts/build-extensions.mjs",
+    "scripts/hydrate.mjs",
+    ".agents/skills/pi-update/scripts/collect-release-evidence.mjs",
     "scripts/check-node-version.mjs",
     "scripts/check-patterns.js",
     "scripts/clean-extension-artifacts.mjs",
@@ -28,6 +30,7 @@
     "setup/**/*.mjs",
     ".pi/extensions/**/*.ts",
     ".agents/skills/**/*.ts",
+    ".agents/skills/pi-update/scripts/*.mjs",
     "*.config.ts"
   ],
   "ignore": [

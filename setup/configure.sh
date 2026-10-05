@@ -7,7 +7,6 @@ setup_configure_all() {
   PI_AGENT_DIR="$PI_AGENT_DIR" \
   AGENTS_DIR="$AGENTS_DIR" \
   SETTINGS_FILE="$SETTINGS_FILE" \
-  MANAGED_SETTINGS_FILE="$MANAGED_SETTINGS_FILE" \
   PI_BIN_DIR="$PI_BIN_DIR" \
   TMUX_CONF="$TMUX_CONF" \
   TMUX_SOURCE_LINE="$TMUX_SOURCE_LINE" \
@@ -28,7 +27,7 @@ setup_print_done() {
   echo "Done."
   echo "  Setup mode:     ${PI_ENV_SETUP_MODE:-portable}"
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
-  echo "  Machine config: ~/.pi/agent/{auth.json,settings.json}"
+  echo "  Machine config: $PI_AGENT_DIR/{auth.json,settings.json}"
   echo "  Install check:  cd $REPO && nub run verify:install"
   echo "  Merge check:    cd $REPO && nub run verify"
 }

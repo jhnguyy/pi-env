@@ -1,59 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-# shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 cd "$ROOT"
 
 "$(node_bin)" --input-type=module <<'JS'
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  assertNodePolicy,
-  nodePolicyIssues,
-} from './scripts/node-policy.mjs';
-
-const makeRepo = (pkg, nodeVersion = '24.16.0', nvmrc = nodeVersion) => {
-  const dir = mkdtempSync(join(tmpdir(), 'pi-env-node-policy-'));
-  writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2));
-  writeFileSync(join(dir, '.node-version'), `${nodeVersion}\n`);
-  writeFileSync(join(dir, '.nvmrc'), `${nvmrc}\n`);
-  return dir;
-};
-
-const mismatchedPins = makeRepo({ engines: { node: '>=24.0.0' } }, '24.16.0', '23.0.0');
+import { spawnSync } from 'node:child_process';
+const dir = mkdtempSync(join(tmpdir(), 'pi-env-node-policy-'));
+console.log(`Node policy evidence: ${dir}`);
+const version = process.versions.node;
+const [major] = version.split('.').map(Number);
+const cases = [
+  {range: `>=${version}`, expectedStatus: 0},
+  {range: `>=${major - 1}.0.0`, expectedStatus: 0},
+  {range: `>=${major + 1}.0.0`, expectedStatus: 1},
+  {range: `^${major}.0.0`, expectedStatus: 1},
+];
+const results = [];
+let verdict = 'fail';
 try {
-  assert.match(nodePolicyIssues(mismatchedPins).join('\n'), /\.nvmrc/);
-  assert.throws(() => assertNodePolicy(mismatchedPins), /Node policy mismatch/);
+  for (const [index, input] of cases.entries()) {
+    const repo = join(dir, `case-${index + 1}`);
+    mkdirSync(repo);
+    writeFileSync(join(repo, 'package.json'), JSON.stringify({engines: {node: input.range}}));
+    const actual = spawnSync(process.execPath, ['scripts/check-node-version.mjs', repo], {encoding: 'utf8'});
+    results.push({...input, status: actual.status, stdout: actual.stdout, stderr: actual.stderr, error: actual.error?.message});
+    assert.equal(actual.status, input.expectedStatus, input.range);
+  }
+  verdict = 'pass';
 } finally {
-  rmSync(mismatchedPins, { recursive: true, force: true });
-}
-
-const mismatchedRuntime = makeRepo({
-  engines: { node: '>=24.0.0' },
-  devEngines: { runtime: { name: 'node', version: '24.17.0', onFail: 'error' } },
-}, '24.16.0');
-try {
-  assert.match(nodePolicyIssues(mismatchedRuntime).join('\n'), /devEngines\.runtime\.version/);
-} finally {
-  rmSync(mismatchedRuntime, { recursive: true, force: true });
-}
-
-const mismatchedMajor = makeRepo({ engines: { node: '>=23.0.0' } }, '24.16.0');
-try {
-  assert.match(nodePolicyIssues(mismatchedMajor).join('\n'), /same major/);
-} finally {
-  rmSync(mismatchedMajor, { recursive: true, force: true });
-}
-
-const unsupportedRange = makeRepo({ engines: { node: '^24.0.0' } }, '24.16.0');
-try {
-  assert.match(nodePolicyIssues(unsupportedRange).join('\n'), /Unsupported package\.json engines\.node range/);
-} finally {
-  rmSync(unsupportedRange, { recursive: true, force: true });
+  writeFileSync(join(dir, 'result.json'), JSON.stringify({
+    inputs: {version, cases}, expected: 'minimum and compatible newer runtimes pass; too-old runtime and unsupported policy fail',
+    actual: results, verdict, reproduce: 'bash setup/__tests__/node-policy.test.sh',
+    inspect: 'result.json and each case-*/package.json',
+  }, null, 2) + '\n');
 }
 JS
-
-echo "node policy tests passed"

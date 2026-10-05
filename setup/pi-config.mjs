@@ -4,7 +4,6 @@ import { Effect } from "effect";
 import { ok, section, skip } from "./runtime-support.mjs";
 import {
   appendOnceEffect,
-  bootstrapFileEffect,
   fileEffect,
   linkPathEffect,
   linked,
@@ -29,13 +28,7 @@ function removeLegacyRolesLinkEffect(ctx) {
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
-    yield* bootstrapFileEffect(
-      join(ctx.setupDir, "templates/settings.json"),
-      ctx.settingsFile,
-      "settings.json (exists — not overwritten)",
-      "settings.json ← setup/templates/settings.json (review and customize: defaultModel, permissionLevel)",
-    );
-    yield* applyManagedSettingsEffect(ctx);
+    yield* registerSettingsEffect(ctx);
     yield* removeLegacyRolesLinkEffect(ctx);
     yield* fileEffect("create directory", ctx.testUtilsDir, () =>
       mkdirSync(ctx.testUtilsDir, { recursive: true }),
@@ -73,25 +66,30 @@ export function configurePiEffect(ctx) {
   });
 }
 
-function applyManagedSettingsEffect(ctx) {
+function registerSettingsEffect(ctx) {
   return Effect.try({
     try: () => {
-      const result = ctx
-        .run(
-          ctx.setupNodeBin,
-          ["setup/apply-managed-settings.mjs", ctx.settingsFile, ctx.managedSettingsFile, ctx.repo],
-          { cwd: ctx.repo },
-        )
-        .stdout.trim();
+      const commandResult = ctx.run(
+        ctx.setupNodeBin,
+        [
+          "setup/apply-managed-settings.mjs",
+          ctx.settingsFile,
+          ctx.repo,
+          ...(ctx.env.PI_ENV_RESET_SETTINGS === "1" ? ["--reset"] : []),
+        ],
+        { cwd: ctx.repo },
+      );
+      if (commandResult.stderr.trim()) console.error(commandResult.stderr.trim());
+      const result = commandResult.stdout.trim();
       switch (result) {
         case "unchanged":
-          ok("managed settings and package registration");
+          ok("🤖: settings and package registration");
           break;
         case "created":
-          linked("settings.json created with managed settings and package registration");
+          linked("🤖: settings.json created with baseline and package registration");
           break;
         case "updated":
-          linked("managed settings applied to settings.json");
+          linked("🤖: settings package registration updated");
           break;
         default:
           if (result) console.log(result);

@@ -20,7 +20,7 @@ Use `scripts/extension-manifest.mjs` as the shared lifecycle contract. It normal
 
 Use `package.json` scripts as the source of truth for build, test, cleanup, and verification commands.
 
-The build runs during `nub install` or setup via `postinstall` plus an explicit setup build step. Install/setup intentionally does not run the full test suite. It stays focused on making the local Pi environment current without burning CPU on routine pulls.
+[Repository hydration](../../scripts/hydrate.mjs) owns install-time artifact preparation. See the [setup integration](../setup.md#runtime-integration) rather than duplicating its sequencing here. Install/setup does not run the full verification portfolio.
 
 ## Tool output shape
 

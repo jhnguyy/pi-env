@@ -24,6 +24,7 @@ ENV PI_ENV_HOME=/opt/pi-env \
   NPM_CONFIG_UPDATE_NOTIFIER=false
 
 USER root
+COPY package.json /tmp/pi-env-package.json
 RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get update \
   && apt-get upgrade -y \
@@ -31,10 +32,10 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     ca-certificates \
     git \
     tini \
-  && npm install --global --omit=dev @nubjs/nub@0.9.5 \
+  && npm install --global --omit=dev "$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/pi-env-package.json")).packageManager.replace("nub@", "@nubjs/nub@")')" \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
-  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /var/lib/apt/lists/* /tmp/pi-env-package.json \
   && node --version
 
 WORKDIR ${PI_ENV_HOME}
@@ -51,7 +52,6 @@ RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=100
   && nub run licenses:generate \
     --package-root /usr/local/lib/node_modules \
     --system-license node-LICENSE.txt=/usr/local/LICENSE \
-  && nub run build \
   && tini -s -- nub run verify \
   && find ${PI_ENV_HOME}/node_modules/.store \
     -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete

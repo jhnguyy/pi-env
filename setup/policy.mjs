@@ -1,5 +1,6 @@
 export const SetupMode = Object.freeze({
   Portable: 'portable',
+  LocalNix: 'local-nix',
   NixManaged: 'nix-managed',
 });
 

@@ -15,6 +15,7 @@ if [ -z "${PI_ENV_TEST_NODE_BIN:-}" ]; then
 fi
 
 SETUP_TESTS=(
+  setup/__tests__/settings-reset.test.sh
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh
   setup/__tests__/nix-managed-config.test.sh
@@ -32,5 +33,5 @@ SETUP_TESTS=(
 )
 
 for test_script in "${SETUP_TESTS[@]}"; do
-  bash "$test_script"
+  env -u PI_AGENT_DIR -u PI_CODING_AGENT_DIR -u SETTINGS_FILE bash "$test_script"
 done
