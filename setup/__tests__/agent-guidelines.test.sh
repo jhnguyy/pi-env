@@ -12,7 +12,6 @@ configure_pi() {
   REPO="$ROOT" \
   SETUP_DIR="$ROOT/setup" \
   SETTINGS_FILE="$home/.pi/agent/settings.json" \
-  MANAGED_SETTINGS_FILE="$ROOT/setup/config/managed-settings.json" \
   AGENTS_DIR="$home/.agents" \
   TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
   APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \

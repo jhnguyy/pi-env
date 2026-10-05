@@ -3,17 +3,14 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import {
-  applyManagedSettingsTransforms,
-  parseJsonRelaxedText,
-  renderSettings,
-} from "./managed-settings-core.mjs";
+import { initialSettings, parseJsonRelaxedText, renderSettings } from "./managed-settings-core.mjs";
 
-const [settingsFile, managedSettingsFile, repoPath] = process.argv.slice(2);
+const [settingsFile, repoPath, mode] = process.argv.slice(2);
+const reset = mode === "--reset";
 
-if (!settingsFile || !managedSettingsFile || !repoPath) {
+if (!settingsFile || !repoPath || (mode && !reset)) {
   console.error(
-    "usage: apply-managed-settings.mjs <agent-dir>/settings.json <managed-settings-file> <repo-path>",
+    "🤖: usage: apply-managed-settings.mjs <agent-dir>/settings.json <repo-path> [--reset]",
   );
   process.exit(2);
 }
@@ -60,20 +57,42 @@ function packageRepoPath() {
 
 const settingsExisted = fs.existsSync(settingsFile);
 const before = settingsExisted ? fs.readFileSync(settingsFile, "utf8") : "";
-const settings = parseJsonRelaxed(settingsFile);
-const managed = parseJsonRelaxed(managedSettingsFile);
-const transformedSettings = applyManagedSettingsTransforms(settings, managed);
-assertValidPackageSources(transformedSettings);
-const afterManagedSettings = renderSettings(transformedSettings);
+const settings =
+  reset || !settingsExisted
+    ? initialSettings(parseJsonRelaxed(path.join(path.dirname(settingsFile), "auth.json")))
+    : parseJsonRelaxed(settingsFile);
+if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
+  throw new Error("🤖: settings must be a JSON object");
+}
+if (settings.packages !== undefined) {
+  if (!Array.isArray(settings.packages)) throw new Error("🤖: settings.packages must be an array");
+  assertValidPackageSources(settings);
+}
 
 fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
-if (before !== afterManagedSettings) fs.writeFileSync(settingsFile, afterManagedSettings);
+if (reset && settingsExisted) {
+  const backup = `${settingsFile}.backup-${Date.now()}`;
+  fs.writeFileSync(backup, before, { flag: "wx", mode: 0o600 });
+  console.error(`🤖: Settings backup: ${backup}`);
+}
 
 const agentDir = path.dirname(settingsFile);
-const settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
-const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });
-const packagePath = packageRepoPath();
+let settingsManager;
 try {
+  let needsNormalization = false;
+  if (settingsExisted && !reset) {
+    try {
+      JSON.parse(before);
+    } catch {
+      needsNormalization = true;
+    }
+  }
+  // Pi reads strict JSON. Preserve accepted legacy preferences before registration.
+  if (reset || !settingsExisted || needsNormalization)
+    fs.writeFileSync(settingsFile, renderSettings(settings));
+  settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
+  const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });
+  const packagePath = packageRepoPath();
   await packageManager.installAndPersist(packagePath);
   if (packagePath !== repoPath) packageManager.removeSourceFromSettings(repoPath);
   await settingsManager.flush();
@@ -91,15 +110,21 @@ try {
     );
   }
 } catch (error) {
-  await settingsManager.flush();
   try {
-    if (settingsExisted) fs.writeFileSync(settingsFile, before);
-    else fs.rmSync(settingsFile, { force: true });
-  } catch (restoreError) {
-    const registrationMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Pi package registration failed and settings rollback also failed: ${registrationMessage}`, {
-      cause: restoreError,
-    });
+    await settingsManager?.flush();
+  } finally {
+    try {
+      if (settingsExisted) fs.writeFileSync(settingsFile, before);
+      else fs.rmSync(settingsFile, { force: true });
+    } catch (restoreError) {
+      const registrationMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Pi package registration failed and settings rollback also failed: ${registrationMessage}`,
+        {
+          cause: restoreError,
+        },
+      );
+    }
   }
   throw error;
 }

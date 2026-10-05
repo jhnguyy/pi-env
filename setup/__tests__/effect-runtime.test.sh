@@ -21,7 +21,6 @@ fi
 export REPO="$ROOT"
 export SETUP_DIR="$ROOT/setup"
 export SETTINGS_FILE="$tmp/settings.json"
-export MANAGED_SETTINGS_FILE="$ROOT/setup/config/managed-settings.json"
 export AGENTS_DIR="$tmp/agents"
 export TEST_UTILS_DIR="$tmp/test-utils"
 export APPEND_SRC="$ROOT/AGENTS.md"

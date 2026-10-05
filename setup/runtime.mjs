@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   RuntimeCommand,
   commandSucceeds,
@@ -12,67 +12,58 @@ import {
   runChecked,
   section,
   skip,
-} from './runtime-support.mjs';
-import { deriveSetupPolicy } from './policy.mjs';
+} from "./runtime-support.mjs";
+import { deriveSetupPolicy } from "./policy.mjs";
 
 const PiPackage = Object.freeze({
-  Name: '@earendil-works/pi-coding-agent',
-  Bin: 'pi',
+  Name: "@earendil-works/pi-coding-agent",
+  Bin: "pi",
 });
 
 const InstallStrategy = Object.freeze({
-  NubManaged: 'nub-managed',
-  PlainNodeBootstrap: 'plain-node-bootstrap',
+  NubManaged: "nub-managed",
+  PlainNodeBootstrap: "plain-node-bootstrap",
 });
 
-const repo = mustEnv('REPO');
-const piBinDir = mustEnv('PI_BIN_DIR');
+const repo = mustEnv("REPO");
+const piBinDir = mustEnv("PI_BIN_DIR");
 const setupNodeBin = process.argv[2] || process.execPath;
 const command = parseRuntimeCommand(process.argv[3]);
 
 function selectInstallStrategy() {
-  if (commandSucceeds('nub', ['run', '--no-check', '--silent', 'check:node'], { cwd: repo })) return InstallStrategy.NubManaged;
-  if (commandSucceeds('nub', ['run', '--no-check', '--node', '--ignore-scripts', '--silent', 'check:node'], { cwd: repo })) {
+  if (commandSucceeds("nub", ["run", "--no-check", "--silent", "check:node"], { cwd: repo }))
+    return InstallStrategy.NubManaged;
+  if (
+    commandSucceeds(
+      "nub",
+      ["run", "--no-check", "--node", "--ignore-scripts", "--silent", "check:node"],
+      { cwd: repo },
+    )
+  ) {
     return InstallStrategy.PlainNodeBootstrap;
   }
   return InstallStrategy.NubManaged;
 }
 
 function nubInstall(args) {
-  return run('nub', ['install', ...args, '--frozen-lockfile'], { cwd: repo }).status === 0;
-}
-
-function patchEffectTypeScript() {
-  const script = join(repo, 'scripts', 'patch-effect-language-service.mjs');
-  runChecked(setupNodeBin, [script, setupNodeBin], { cwd: repo });
+  return run("nub", ["install", ...args, "--frozen-lockfile"], { cwd: repo }).status === 0;
 }
 
 function installDependencies() {
-  section('Dependencies');
-  console.log('  —  Setup will install repository dependencies with Nub.');
+  section("Dependencies");
+  console.log("  —  Setup will install repository dependencies with Nub.");
   const strategy = selectInstallStrategy();
-  const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ['--ignore-scripts'] : [];
-  if (!nubInstall(installArgs)) fail('  ✗  Nub install failed.');
-  switch (strategy) {
-    case InstallStrategy.PlainNodeBootstrap:
-      console.log('  —  Nub cannot run Node in this environment. Setup will use plain Node for setup scripts.');
-      runChecked(setupNodeBin, ['scripts/build-extensions.mjs'], { cwd: repo });
-      break;
-    case InstallStrategy.NubManaged:
-      runChecked('nub', ['run', 'build'], { cwd: repo });
-      break;
-    default:
-      fail('unknown install strategy');
+  const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ["--ignore-scripts"] : [];
+  if (!nubInstall(installArgs)) fail("  ✗  Nub install failed.");
+  if (strategy === InstallStrategy.PlainNodeBootstrap) {
+    runChecked(setupNodeBin, ["scripts/hydrate.mjs", setupNodeBin], { cwd: repo });
   }
-  patchEffectTypeScript();
-  runChecked('sh', ['scripts/restart-lsp-daemon.sh'], { cwd: repo });
-  ok('node_modules up to date');
+  ok("node_modules up to date");
 }
 
 function readPiVersion() {
-  const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
-  return pkg.devDependencies?.[PiPackage.Name]
-    ?? pkg.dependencies?.[PiPackage.Name];
+  const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
+  return pkg.devDependencies?.[PiPackage.Name] ?? pkg.dependencies?.[PiPackage.Name];
 }
 
 function shSingleQuote(value) {
@@ -80,20 +71,41 @@ function shSingleQuote(value) {
 }
 
 function readPiPackageEntry(piPackageDir) {
-  const packageJsonPath = join(piPackageDir, 'package.json');
-  const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
-  const entry = typeof pkg.bin === 'string' ? pkg.bin : pkg.bin?.[PiPackage.Bin];
-  if (typeof entry !== 'string' || entry.length === 0) {
-    fail(`  ✗  ${PiPackage.Name} does not declare a ${PiPackage.Bin} executable in ${packageJsonPath}`);
+  const packageJsonPath = join(piPackageDir, "package.json");
+  const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  if (pkg.name !== PiPackage.Name) fail(`🤖: invalid Pi package at ${packageJsonPath}`);
+  const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[PiPackage.Bin];
+  if (typeof entry !== "string" || entry.length === 0) {
+    fail(
+      `  ✗  ${PiPackage.Name} does not declare a ${PiPackage.Bin} executable in ${packageJsonPath}`,
+    );
   }
-  return entry.replace(/^\.\//, '');
+  const relativeEntry = relative(resolve(piPackageDir), resolve(piPackageDir, entry));
+  if (!relativeEntry || relativeEntry.startsWith("..") || isAbsolute(relativeEntry)) {
+    fail(`🤖: Pi bin must be inside its package: ${entry}`);
+  }
+  return relativeEntry;
 }
 
 function writePiWrapper(piPackageDir, piPackageEntry) {
   mkdirSync(piBinDir, { recursive: true });
-  const sessionManagerStart = join(repo, '.pi', 'extensions', 'session-manager', 'dist', 'start.js');
-  const sessionManagerExtension = join(repo, '.pi', 'extensions', 'session-manager', 'dist', 'index.js');
-  const installedWrapper = join(piBinDir, 'pi');
+  const sessionManagerStart = join(
+    repo,
+    ".pi",
+    "extensions",
+    "session-manager",
+    "dist",
+    "start.js",
+  );
+  const sessionManagerExtension = join(
+    repo,
+    ".pi",
+    "extensions",
+    "session-manager",
+    "dist",
+    "index.js",
+  );
+  const installedWrapper = join(piBinDir, "pi");
   const wrapper = `#!/usr/bin/env sh
 set -eu
 DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
@@ -133,21 +145,25 @@ if [ "$#" -eq 1 ] && [ "$1" = "--start" ] && [ "\${PI_ENV_SESSION_MANAGER_BYPASS
 fi
 PI_NODE_ARGV0=pi exec "$NODE_BIN" "$PI_ENTRY" "$@"
 `;
-  const piPath = join(piBinDir, 'pi');
+  const piPath = join(piBinDir, "pi");
   writeFileSync(piPath, wrapper, { mode: 0o755 });
 }
 
 function profileHasPathEntry(profile, binDir, marker) {
   if (!existsSync(profile)) return false;
-  const content = readFileSync(profile, 'utf8');
+  const content = readFileSync(profile, "utf8");
   if (content.includes(marker)) return true;
-  if (content.includes(binDir) && content.includes('PATH')) return true;
-  if (binDir === `${process.env.HOME}/.local/bin` && /(\$HOME|~)\/\.local\/bin/.test(content) && content.includes('PATH')) return true;
+  if (content.includes(binDir) && content.includes("PATH")) return true;
+  if (
+    binDir === `${process.env.HOME}/.local/bin` &&
+    /(\$HOME|~)\/\.local\/bin/.test(content) &&
+    content.includes("PATH")
+  )
+    return true;
   return false;
 }
 
-function ensurePathInShellProfiles(binDir) {
-  const marker = '# pi-env: add user-local bin to PATH';
+function ensurePathInShellProfiles(binDir, marker = "# pi-env: add user-local bin to PATH") {
   const home = process.env.HOME;
   const profiles = [`${home}/.zshrc`, `${home}/.bashrc`, `${home}/.profile`];
   let configured = false;
@@ -160,29 +176,38 @@ function ensurePathInShellProfiles(binDir) {
       existingProfiles.push(profile);
     }
   }
-  const targets = existingProfiles.length === 0 && !configured ? [`${home}/.profile`] : existingProfiles;
+  const targets =
+    existingProfiles.length === 0 && !configured ? [`${home}/.profile`] : existingProfiles;
   for (const profile of targets) {
-    const pathExpr = binDir === `${home}/.local/bin`
-      ? 'export PATH="$HOME/.local/bin:$PATH"'
-      : `export PATH="${binDir}:$PATH"`;
+    const pathExpr =
+      binDir === `${home}/.local/bin`
+        ? 'export PATH="$HOME/.local/bin:$PATH"'
+        : `export PATH="${binDir}:$PATH"`;
     mkdirSync(dirname(profile), { recursive: true });
     const existed = existsSync(profile);
-    const prefix = existed ? '\n' : '';
-    writeFileSync(profile, `${prefix}${marker}\n${pathExpr}\n`, { flag: 'a' });
-    ok(`${profile} (${existed ? 'appended' : 'created'} PATH entry)`);
+    const prefix = existed ? "\n" : "";
+    writeFileSync(profile, `${prefix}${marker}\n${pathExpr}\n`, { flag: "a" });
+    ok(`${profile} (${existed ? "appended" : "created"} PATH entry)`);
   }
 }
 
 function installPiCli(policy) {
-  section('Pi CLI');
+  section("Pi CLI");
   const version = readPiVersion();
-  const piPackageDir = join(repo, 'node_modules', ...PiPackage.Name.split('/'));
-  if (!existsSync(join(piPackageDir, 'package.json'))) {
+  const piPackageDir = process.env.PI_PACKAGE_DIR
+    ? resolve(process.env.PI_PACKAGE_DIR)
+    : join(repo, "node_modules", ...PiPackage.Name.split("/"));
+  if (!existsSync(join(piPackageDir, "package.json"))) {
     fail(`  ✗  missing pi package after install: ${piPackageDir}`);
   }
   const piPackageEntry = readPiPackageEntry(piPackageDir);
+  const installedVersion = JSON.parse(
+    readFileSync(join(piPackageDir, "package.json"), "utf8"),
+  ).version;
+  if (installedVersion !== version)
+    fail(`Pi package version ${installedVersion} does not match the workbench (${version}).`);
   const piEntry = join(piPackageDir, piPackageEntry);
-  if (!existsSync(piEntry)) {
+  if (!existsSync(piEntry) || !statSync(piEntry).isFile()) {
     fail(`  ✗  missing pi entrypoint after install: ${piEntry}`);
   }
   if (!policy.cli.writeWrapper) {
@@ -190,12 +215,17 @@ function installPiCli(policy) {
     return;
   }
   writePiWrapper(piPackageDir, piPackageEntry);
-  ok(`pi ${version} → ${join(piBinDir, 'pi')}`);
+  ok(`pi ${version} → ${join(piBinDir, "pi")}`);
   if (!policy.path.updateShellProfiles) {
-    skip('shell profile PATH edits (managed externally)');
-  } else if (!process.env.PATH.split(':').includes(piBinDir)) {
+    skip("shell profile PATH edits (managed externally)");
+  } else if (!process.env.PATH.split(":").includes(piBinDir)) {
     console.log(`  —  ${piBinDir} is not in PATH yet. Updating shell profiles.`);
     ensurePathInShellProfiles(piBinDir);
+  }
+  if (policy.path.updateShellProfiles && policy.mode === "local-nix") {
+    const toolchainBin = join(process.env.HOME, ".local/state/pi-env/toolchain/bin");
+    if (!process.env.PATH.split(":").includes(toolchainBin))
+      ensurePathInShellProfiles(toolchainBin, "# pi-env: add local Nix toolchain to PATH");
   }
 }
 

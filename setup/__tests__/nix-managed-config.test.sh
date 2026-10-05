@@ -12,7 +12,6 @@ run_terminal_config() {
   PI_AGENT_DIR="$HOME/.pi/agent" \
   AGENTS_DIR="$HOME/.agents" \
   SETTINGS_FILE="$HOME/.pi/agent/settings.json" \
-  MANAGED_SETTINGS_FILE="$ROOT/setup/config/managed-settings.json" \
   PI_BIN_DIR="$HOME/.local/bin" \
   TMUX_CONF="$HOME/.tmux.conf" \
   TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \

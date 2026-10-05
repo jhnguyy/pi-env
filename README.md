@@ -14,22 +14,22 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-The operating environment supplies Node and Nub. `pi-env` declares the version requirements in `package.json`. `setup.sh` validates the resolved tools against those requirements.
-
-Nix can supply the declared toolchain.
+Nix supplies the workbench and packages Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
 
 | Environment | Command |
 | --- | --- |
 | Fresh machine with local Nix + flakes | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` |
 | Existing checkout with local Nix | `nix run .#setup` or `./setup.sh --use-nix` |
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
-| No Nix | `./setup.sh` |
+| No Nix | `./setup.sh --portable` |
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
 
-Portable fallback setup intentionally uses whatever tools are already on `PATH`. Setup is safe to re-run after moving between dev environments and preserves machine-local pi auth, model choices, and local overrides. It updates the pi-env guidance block in `~/.pi/agent/AGENTS.md` and preserves content outside the managed block.
+Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup selects GPT-6.1 Sol with medium thinking and enables codemode and tool search alongside Pi's default tools. Pi owns transport, retries, image handling, and appearance.
 
-Setup adds Pi's `codemode` and `tool_search` to `defaultTools` without replacing existing tool choices or explicit opt-outs. It leaves `theme` unset so Pi follows the terminal palette. Setup removes selections of the retired pi-env Pi Gruvbox themes; other themes remain unchanged. Ghostty and tmux palettes remain available through terminal setup. Setup installs Ghostty palettes under its standard Linux or macOS configuration directory when terminal setup is enabled. Set `GHOSTTY_CONFIG_DIR` to override that path. Pi no longer loads local Pi theme files.
+Run `./setup.sh --reset` to back up user settings and restore this baseline with only pi-env registered. Auth, sessions, model endpoints, MCP configuration, keybindings, and project settings remain untouched. Reinstall local adapter packages afterward. See [setup and reset](docs/setup.md).
+
+Use `pi config` to select package resources. Use `/skill:pi-update` to review a proposed upstream release before changing the workbench. Ghostty and tmux palettes remain available through terminal setup.
 
 ## Documentation
 

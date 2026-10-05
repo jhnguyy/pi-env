@@ -1,90 +1,69 @@
 # Nix support
 
-Nub is the primary path for reproducible `pi-env` JavaScript setup. Nix remains supported for host and runtime provisioning. It also remains supported on machines where Home Manager or nix-manager should own system tools and shell configuration.
+Nix owns workbench provisioning. [Pi's upstream flake](https://github.com/badlogic/pi-mono) owns packaging the executable. Pi-env overrides its Node dependency with the runtime selected from the repository compatibility requirement.
 
-With local Nix, the only bootstrap prerequisite is Nix with flakes enabled. The flake supplies baseline host tools. Setup uses Nub for Node resolution, JavaScript dependencies, and script orchestration.
+## Authorities
 
-The flake supports Linux and macOS on `x86_64` and `aarch64`.
+| Concern | Source |
+| --- | --- |
+| Pi source revision | `flake.nix` input and `flake.lock` |
+| Node compatibility floor | `package.json#engines.node` |
+| Exact provisioned toolchain | `flake.lock` |
+| Nub version | `package.json#packageManager` |
+| JavaScript dependency graph | `package.json` and `nub.lock` |
+| Pi resource selection | Pi's package manager and user/project settings |
 
-## Choosing a setup path
+Flake evaluation rejects a Node package below the compatibility floor, mismatched Pi development packages, or a Nub input that differs from the declared version. Updating Pi therefore changes the flake input and matching development packages together. There are no separate Node version files.
 
-| Environment | Command | Meaning |
-| --- | --- | --- |
-| Fresh machine with local Nix + flakes | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` | Use local Nix to provide `git`, clone, and run setup. |
-| Existing checkout with local Nix | `./setup.sh` or `nix run .#setup` | Plain setup auto-detects Nix and tries the setup app. |
-| Externally Nix-managed runtime/container | `./setup.sh` | Consume already-provisioned tools when `PI_ENV_CONFIG_MANAGED_BY_NIX=1`. Do not invoke local Nix. |
-| Persistent user-profile tools | `nix profile install .#toolchain`, then `nix run .#setup` or `./setup.sh --nix-managed` | Install the toolchain into the user profile, then hydrate mutable repo/user state. |
+The flake supports Linux and macOS on x86_64 and aarch64. Intel macOS uses the upstream Pi flake's supported nixpkgs branch.
 
-`--use-nix` means “invoke local Nix now” and re-execs `nix run .#setup`. Use it only when you want failure instead of fallback if the current user cannot realize Nix store paths.
+## Provisioning modes
 
-`--nix-managed` means “Nix/Home Manager/nix-manager already provided host tools or owns shell/terminal config.” It does not call `nix run`. It uses the existing `nub`, `node`, and `git` on `PATH` while still allowing Nub to resolve the project Node.
+- **Local Nix:** `nix run .#setup` supplies the workbench and retains it in a private profile at `~/.local/state/pi-env/toolchain`. Profile generations keep installed adapter paths valid across garbage collection and failed upgrades. Setup wraps the upstream package only for pi-env session-manager integration. Local Nix setup adds the private toolchain and adapter directories to shell profiles unless path configuration is externally managed or `--no-path` is set.
+- **Externally managed:** `./setup.sh --nix-managed` consumes supplied tools. It does not write the Nix store or invoke Nix.
+- **Portable:** `./setup.sh --portable` uses Nub's Node selection and the repository-installed Pi package. It uses the same Pi release as the Nix path.
 
-Node selection prefers `PI_ENV_NODE_BIN`, then a usable `NODE_EXECUTABLE`, then Nub's project Node. Nix-managed setup may use the host `PATH` before portable fallback probes. The executable policy lives in [`setup/node-runtime.sh`](../setup/node-runtime.sh).
+An explicitly requested Nix operation fails visibly. It does not silently select another provisioner. Use portable mode explicitly when Nix is unavailable.
 
-Source-owned setup behavior lives in [`setup.sh`](../setup.sh), [`setup/`](../setup), and [`flake.nix`](../flake.nix).
+`PI_ENV_NODE_BIN` identifies a provisioned runtime. `PI_PACKAGE_DIR` identifies the supplied Pi package. Setup validates these inputs rather than searching unrelated runtime installations.
 
-## Ownership boundaries
+## Central builds and local personalization
 
-Handled deterministically:
+Local Nix can obtain centrally built closures from a signed binary cache. Remote builders can handle cache misses. Builder access, cache trust, and activation belong to the host or infrastructure configuration, not pi-env setup.
 
-- Nix pins the host toolchain through [`flake.lock`](../flake.lock).
-- Nub pins repository JavaScript dependencies.
-- Managed pi settings are merged from [`setup/config/managed-settings.json`](../setup/config/managed-settings.json) without overwriting machine-local settings.
+An accessible local store is still required to run packages locally. A remote-only store does not make remote executable paths available on the client.
 
-Intentionally mutable/local:
+Keep settings, credentials, sessions, and local package registration mutable. Personal settings do not require rebuilding Pi. Container deployments can supply immutable toolchains while retaining a separate writable user store for optional packages.
 
-- `~/.pi/agent/auth.json`
-- sessions
-- provider/model choices
-- local-only extensions
-- machine-specific Ghostty overrides
+## Home Manager
 
-Nix-managed environments set `PI_ENV_CONFIG_MANAGED_BY_NIX=1`. Later direct `./setup.sh` runs skip duplicate PATH, tmux, and Ghostty writes. They can also set `PI_ENV_CLI_MANAGED_BY_NIX=1` so setup does not overwrite a Nix-managed `~/.local/bin/pi`.
-
-## Optional Home Manager module
-
-The flake exposes a Home Manager module for hosts where you want pi-env shell and config pieces declared through Nix while keeping the source config in this repo. In Nix-managed shells, avoid auto-activating generic `nvm` Node builds ahead of the Nix toolchain. If `nvm` is present, source it with `--no-use` and run `nvm use` only intentionally.
+The module supplies tools, the upstream Pi package location, runtime selection, and optional shell/terminal integration:
 
 ```nix
 {
   imports = [ inputs.pi-env.homeManagerModules.default ];
-
   pi-env = {
     enable = true;
     installTools = true;
     shell.enable = true;
     tmux.enable = true;
-    ghostty.enable = false; # enable on GUI hosts
+    ghostty.enable = false;
   };
 }
 ```
 
-The module can install the baseline toolchain, set the Nix ownership environment, add pi paths to the session PATH, and own tmux/Ghostty config when enabled.
+Home Manager owns the declarative host profile and terminal integration. Pi owns interactive preferences. Setup owns resource registration and repository hydration. It does not force preferences on every run.
 
-### Home Manager sync
+## Home Manager sync
 
-Set `pi-env.homeManager.sync.enable = true;` to compare the Home Manager `pi-env` input with the pi-env commit that the primary checkout has on `main`. The `post-merge` hook runs setup after each pull, so each pull of `main` reports drift. Setup does not change the lock or activate Home Manager unless you request it.
+`pi-env.homeManager.sync.enable` compares the standalone Home Manager input with the primary checkout's published main revision. Setup reports drift without activation. Explicit `./setup.sh --sync-home-manager` updates that input, verifies its revision, and switches Home Manager.
 
-Setup reads the `pi-env` revision from the Home Manager `flake.lock` and compares it to `HEAD`:
+The module's `homeManager.sync.flake` and `homeManager.sync.input` options locate the consumer. Worktrees and feature branches skip synchronization. NixOS rebuilds and image deployments retain their own activation process.
 
-- If the revisions match, setup does nothing.
-- If they differ, setup prints both revisions and the sync command.
-- If they differ and you run `./setup.sh --sync-home-manager`, setup runs `nix flake update <input> --flake <dir>`, checks that the lock contains `HEAD`, and runs `home-manager switch --flake <dir>`. Setup updates only the pi-env input. The update requires local `main` to equal its upstream, because the flake input fetches the published branch.
-- Setup skips the check in worktrees and on branches other than `main`.
+## Kubernetes follow-up
 
-This adapter applies only to a standalone user Home Manager flake. Hosts that consume pi-env through a NixOS rebuild or an image deployment keep their own activation process.
-
-| Option | Default | Use |
-| --- | --- | --- |
-| `homeManager.sync.flake` | `"${config.xdg.configHome}/home-manager"` | Directory of the Home Manager flake. |
-| `homeManager.sync.input` | `"pi-env"` | Name of the pi-env input in that flake. |
-
-The module exports `PI_ENV_HOME_MANAGER_FLAKE` and `PI_ENV_HOME_MANAGER_INPUT` for setup. Run `./setup.sh --no-home-manager` to skip the check once. Keep the Home Manager flake in Git so each lock change is recorded.
+The [Kubernetes architecture follow-up](kubernetes-agent-follow-up.md) proposes one immutable workbench artifact and one launch adapter, with personal state kept separate. It defines validation before adoption. Deployment remains an infrastructure contribution.
 
 ## Validation
 
-Use the flake apps/checks for Nix-backed validation and [`package.json`](../package.json) scripts for Nub-backed validation. Keep command details in those sources rather than duplicating them here.
-
-## What remains outside Nix
-
-Mutable user state and repo-local JavaScript dependency hydration remain script-owned. See [`setup.sh`](../setup.sh), [`setup/`](../setup), and [`scripts/`](../scripts).
+Use flake checks for provisioning and dependency-free setup contracts. Use the repository verification portfolio for JavaScript, generated artifacts, and setup workflows. Do not activate profiles or reset live settings merely to validate a contribution.

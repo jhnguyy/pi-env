@@ -45,9 +45,6 @@ setup_check_prerequisites() {
 
   echo "  —  platform: $os_label"
   echo "  —  context: $context_label"
-  if [ "${PI_ENV_AUTO_NIX_FAILED:-0}" = "1" ]; then
-    echo "  —  Nix detected, but automatic Nix setup was unavailable; using current PATH tools"
-  fi
   check_recommended_commands tmux gh rg
 
   if [ "$should_link_ghostty" -eq 1 ]; then

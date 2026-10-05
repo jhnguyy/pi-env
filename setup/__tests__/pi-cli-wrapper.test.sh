@@ -160,7 +160,7 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
 }
 
 test_pi_cli_wrapper_adds_path_profile_when_portable() {
-  local tmp old_home old_path
+  local tmp old_home old_path mode="${1:-portable}"
   tmp="$(with_temp_dir)"
   old_home="$HOME"
   old_path="$PATH"
@@ -168,14 +168,18 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   PI_ENV_NODE_BIN=$(node_bin)
   PI_ENV_TEST_NODE_BIN=$PI_ENV_NODE_BIN
   HOME="$tmp/home"
-  PATH="/usr/bin:/bin"
+  PATH="$old_path"
   mkdir -p "$HOME"
   create_stub_repo "$tmp"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE || true
-  run_pi_cli_setup
-  run_pi_cli_setup
+  PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
+  PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
 
+  if [ "$mode" = local-nix ]; then
+    assert_file_contains "$HOME/.profile" "$HOME/.local/state/pi-env/toolchain/bin"
+    assert_file_count "$HOME/.profile" "# pi-env: add local Nix toolchain to PATH" 1
+  fi
   assert_file_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
   assert_file_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
   assert_file_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
@@ -186,11 +190,32 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   rm -rf "$tmp"
 }
 
+test_pi_cli_adapter_accepts_upstream_package() {
+  local tmp upstream
+  tmp="$(with_temp_dir)"
+  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  PI_ENV_NODE_BIN=$(node_bin)
+  create_stub_repo "$tmp" "dist/upstream-cli.js"
+  upstream="$tmp/upstream"
+  mv "$REPO/node_modules/@earendil-works/pi-coding-agent" "$upstream"
+  PI_PACKAGE_DIR="$upstream" run_pi_cli_setup
+  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "🤖: adapter should execute upstream package"
+  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start | grep -qF 'stub session manager start' || fail "🤖: upstream adapter lost session manager"
+  printf '%s\n' '{"name":"wrong","bin":{"pi":"dist/upstream-cli.js"}}' > "$upstream/package.json"
+  if PI_PACKAGE_DIR="$upstream" run_pi_cli_setup 2>"$tmp/error"; then
+    fail "🤖: adapter accepted a non-Pi package"
+  fi
+  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
+test_pi_cli_adapter_accepts_upstream_package
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_uses_declared_package_entry
 test_pi_cli_wrapper_pins_configured_node
 test_pi_cli_wrapper_intercepts_only_exact_start
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
 test_pi_cli_wrapper_adds_path_profile_when_portable
+test_pi_cli_wrapper_adds_path_profile_when_portable local-nix
 
 echo "pi CLI wrapper tests passed"

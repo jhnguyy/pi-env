@@ -14,6 +14,7 @@ test_defaults_to_portable() {
   reset_setup_env
   setup_parse_args
   [ "$PI_ENV_SETUP_MODE" = "portable" ] || fail "default setup mode should be portable"
+  [ "$PI_ENV_RESET_SETTINGS" = "0" ] || fail "🤖: reset must not be implicit"
   [ "${PI_ENV_SKIP_TERMINAL:-}" = "0" ] || fail "terminal setup should default enabled"
   [ "${PI_ENV_SKIP_REPO_HOOKS:-}" = "0" ] || fail "repo hooks should default enabled"
   [ "${PI_ENV_SKIP_HOME_MANAGER:-}" = "0" ] || fail "home-manager check should default enabled"
@@ -36,7 +37,8 @@ test_nix_managed_env_selects_nix_mode() {
 
 test_granular_flags() {
   reset_setup_env
-  setup_parse_args --no-terminal --no-path --no-repo-hooks --no-home-manager --sync-home-manager
+  setup_parse_args --reset --no-terminal --no-path --no-repo-hooks --no-home-manager --sync-home-manager
+  [ "$PI_ENV_RESET_SETTINGS" = "1" ] || fail "🤖: --reset should request reset"
   [ "$PI_ENV_SKIP_TERMINAL" = "1" ] || fail "--no-terminal should set skip flag"
   [ "$PI_ENV_SKIP_PATH_PROFILE" = "1" ] || fail "--no-path should set skip flag"
   [ "$PI_ENV_SKIP_REPO_HOOKS" = "1" ] || fail "--no-repo-hooks should set skip flag"
@@ -113,6 +115,22 @@ test_terminal_config_paths() {
   rm -rf "$tmp"
 }
 
+test_nix_failure_does_not_retry_setup() {
+  local tmp status
+  tmp="$(with_temp_dir)"
+  mkdir -p "$tmp/home"
+  make_executable "$tmp/nix" '#!/bin/sh
+exit 37'
+  set +e
+  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX HOME="$tmp/home" PATH="$tmp:$PATH" "$ROOT/setup.sh" --reset >"$tmp/output" 2>&1
+  status=$?
+  set -e
+  assert_eq "$status" 37 'Nix failure remains visible'
+  [ ! -e "$tmp/home/.pi/agent/settings.json" ] || fail 'Nix failure must not retry/reset through portable setup'
+  rm -rf "$tmp"
+}
+
+test_nix_failure_does_not_retry_setup
 test_defaults_to_portable
 test_terminal_config_paths
 test_nix_managed_sets_skip_signal
