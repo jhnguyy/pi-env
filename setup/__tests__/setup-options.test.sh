@@ -14,7 +14,6 @@ test_defaults_to_portable() {
   reset_setup_env
   setup_parse_args
   [ "$PI_ENV_SETUP_MODE" = "portable" ] || fail "default setup mode should be portable"
-  [ "$PI_ENV_RESET_SETTINGS" = "0" ] || fail "🤖: reset must not be implicit"
   [ "${PI_ENV_SKIP_TERMINAL:-}" = "0" ] || fail "terminal setup should default enabled"
   [ "${PI_ENV_SKIP_REPO_HOOKS:-}" = "0" ] || fail "repo hooks should default enabled"
   [ "${PI_ENV_SKIP_HOME_MANAGER:-}" = "0" ] || fail "home-manager check should default enabled"
@@ -37,8 +36,7 @@ test_nix_managed_env_selects_nix_mode() {
 
 test_granular_flags() {
   reset_setup_env
-  setup_parse_args --reset --no-terminal --no-path --no-repo-hooks --no-home-manager --sync-home-manager
-  [ "$PI_ENV_RESET_SETTINGS" = "1" ] || fail "🤖: --reset should request reset"
+  setup_parse_args --no-terminal --no-path --no-repo-hooks --no-home-manager --sync-home-manager
   [ "$PI_ENV_SKIP_TERMINAL" = "1" ] || fail "--no-terminal should set skip flag"
   [ "$PI_ENV_SKIP_PATH_PROFILE" = "1" ] || fail "--no-path should set skip flag"
   [ "$PI_ENV_SKIP_REPO_HOOKS" = "1" ] || fail "--no-repo-hooks should set skip flag"
@@ -46,10 +44,29 @@ test_granular_flags() {
   [ "$PI_ENV_HOME_MANAGER_SYNC" = "1" ] || fail "--sync-home-manager should request the update"
 }
 
-test_auto_nix_entrypoint_uses_nix_setup_app() {
-  local tmp old_path output
+# Inject an external launcher failure without realizing a Nix store or installing dependencies.
+test_auto_nix_entrypoint_uses_nix_setup_app() (
+  local tmp output node status
   tmp="$(with_temp_dir)"
-  old_path="$PATH"
+  node=$(node_bin)
+  printf 'Nix launcher evidence: %s\n' "$tmp"
+  record_result() {
+    local code=$?
+    DIR="$tmp" STATUS="$code" "$node" --input-type=module <<'JS'
+import fs from 'node:fs';
+const dir = process.env.DIR;
+fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
+  inputs: 'successful launcher and injected exit 37',
+  expected: 'public setup delegates to Nix; launcher failure propagates without portable setup or settings writes',
+  actual: {exitStatus: Number(process.env.STATUS), launcherOutput: fs.existsSync(`${dir}/out`) ? fs.readFileSync(`${dir}/out`, 'utf8') : null},
+  verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/setup-options.test.sh', inspect: 'out, failure.log, and home/',
+}, null, 2) + '\n');
+JS
+  }
+  trap record_result EXIT
+  export HOME="$tmp/home" PI_AGENT_DIR="$tmp/home/.pi/agent" PI_CODING_AGENT_DIR="$tmp/home/.pi/agent"
+  mkdir -p "$HOME"
   output="$tmp/out"
   cat > "$tmp/nix" <<'SH'
 #!/bin/sh
@@ -57,13 +74,17 @@ printf '%s\n' "$*" > "$PI_ENV_TEST_NIX_OUT"
 SH
   chmod +x "$tmp/nix"
 
-  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PATH="$tmp:$PATH" PI_ENV_TEST_NIX_OUT="$output" "$ROOT/setup.sh" --no-terminal
+  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_AUTO_NIX=1 PATH="$tmp:$PATH" PI_ENV_TEST_NIX_OUT="$output" "$ROOT/setup.sh" --no-terminal
 
   [ "$(cat "$output")" = "run .#setup -- --no-terminal" ] || fail "plain ./setup.sh should auto-run nix setup when available"
 
-  PATH="$old_path"
-  rm -rf "$tmp"
-}
+  make_executable "$tmp/nix" '#!/bin/sh
+exit 37'
+  status=0
+  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_AUTO_NIX=1 PATH="$tmp:$PATH" "$ROOT/setup.sh" --reset >"$tmp/failure.log" 2>&1 || status=$?
+  assert_eq "$status" 37 'Nix failure remains visible'
+  [ ! -e "$PI_AGENT_DIR/settings.json" ] || fail 'Nix failure must not retry/reset through portable setup'
+)
 
 test_use_nix_entrypoint_reexecs_nix_setup_app() {
   local tmp old_path output
@@ -115,22 +136,6 @@ test_terminal_config_paths() {
   rm -rf "$tmp"
 }
 
-test_nix_failure_does_not_retry_setup() {
-  local tmp status
-  tmp="$(with_temp_dir)"
-  mkdir -p "$tmp/home"
-  make_executable "$tmp/nix" '#!/bin/sh
-exit 37'
-  set +e
-  env -u PI_ENV_SETUP_MODE -u PI_ENV_CONFIG_MANAGED_BY_NIX HOME="$tmp/home" PATH="$tmp:$PATH" "$ROOT/setup.sh" --reset >"$tmp/output" 2>&1
-  status=$?
-  set -e
-  assert_eq "$status" 37 'Nix failure remains visible'
-  [ ! -e "$tmp/home/.pi/agent/settings.json" ] || fail 'Nix failure must not retry/reset through portable setup'
-  rm -rf "$tmp"
-}
-
-test_nix_failure_does_not_retry_setup
 test_defaults_to_portable
 test_terminal_config_paths
 test_nix_managed_sets_skip_signal

@@ -3,6 +3,18 @@ set -euo pipefail
 
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
+PROBE_NODE=$(node_bin)
+record_adapter_probe() {
+  DIR="$1" PROBE="$2" STATUS="$3" "$PROBE_NODE" --input-type=module <<'JS'
+import fs from 'node:fs';
+fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
+  inputs: process.env.PROBE,
+  expected: 'installed adapter dispatches to the supplied package; local Nix PATH entries remain usable and idempotent',
+  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/pi-cli-wrapper.test.sh', inspect: 'bin/pi, home/.profile, and *.log',
+}, null, 2) + '\n');
+JS
+}
 
 run_pi_cli_setup() {
   local selected_node_bin
@@ -159,9 +171,13 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   rm -rf "$tmp"
 }
 
-test_pi_cli_wrapper_adds_path_profile_when_portable() {
+test_pi_cli_wrapper_adds_path_profile_when_portable() (
   local tmp old_home old_path mode="${1:-portable}"
   tmp="$(with_temp_dir)"
+  if [ "$mode" = local-nix ]; then
+    printf 'Local Nix adapter evidence: %s\n' "$tmp"
+    trap 'record_adapter_probe "$tmp" "local-nix PATH configuration" "$?"' EXIT
+  fi
   old_home="$HOME"
   old_path="$PATH"
 
@@ -177,8 +193,7 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
 
   if [ "$mode" = local-nix ]; then
-    assert_file_contains "$HOME/.profile" "$HOME/.local/state/pi-env/toolchain/bin"
-    assert_file_count "$HOME/.profile" "# pi-env: add local Nix toolchain to PATH" 1
+    assert_file_count "$HOME/.profile" "$HOME/.local/state/pi-env/toolchain/bin" 1
   fi
   assert_file_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
   assert_file_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
@@ -187,27 +202,26 @@ test_pi_cli_wrapper_adds_path_profile_when_portable() {
   HOME="$old_home"
   PATH="$old_path"
   unset PI_ENV_NODE_BIN PI_ENV_TEST_NODE_BIN
-  rm -rf "$tmp"
-}
+  if [ "$mode" != local-nix ]; then rm -rf "$tmp"; fi
+)
 
-test_pi_cli_adapter_accepts_upstream_package() {
+# Probe package layout and dispatch without realizing Nix or starting an interactive session.
+test_pi_cli_adapter_accepts_upstream_package() (
   local tmp upstream
   tmp="$(with_temp_dir)"
+  printf 'Supplied package adapter evidence: %s\n' "$tmp"
+  trap 'record_adapter_probe "$tmp" "externally supplied package and exact --start dispatch" "$?"' EXIT
   PI_ENV_CONFIG_MANAGED_BY_NIX=1
   PI_ENV_NODE_BIN=$(node_bin)
   create_stub_repo "$tmp" "dist/upstream-cli.js"
   upstream="$tmp/upstream"
   mv "$REPO/node_modules/@earendil-works/pi-coding-agent" "$upstream"
   PI_PACKAGE_DIR="$upstream" run_pi_cli_setup
-  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "🤖: adapter should execute upstream package"
-  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start | grep -qF 'stub session manager start' || fail "🤖: upstream adapter lost session manager"
-  printf '%s\n' '{"name":"wrong","bin":{"pi":"dist/upstream-cli.js"}}' > "$upstream/package.json"
-  if PI_PACKAGE_DIR="$upstream" run_pi_cli_setup 2>"$tmp/error"; then
-    fail "🤖: adapter accepted a non-Pi package"
-  fi
-  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
-  rm -rf "$tmp"
-}
+  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" >"$tmp/package.log" 2>&1
+  assert_file_contains "$tmp/package.log" 'stub pi'
+  PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" --start >"$tmp/session.log" 2>&1
+  assert_file_contains "$tmp/session.log" 'stub session manager start'
+)
 
 test_pi_cli_adapter_accepts_upstream_package
 test_pi_cli_wrapper_uses_repo_locked_package

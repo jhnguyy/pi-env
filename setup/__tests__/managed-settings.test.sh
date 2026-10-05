@@ -82,9 +82,25 @@ test_preserves_empty_settings_file_when_package_registration_fails() {
   rm -rf "$tmp"
 }
 
-test_registers_primary_checkout_when_run_from_worktree() {
-  local tmp settings repo worktree result
+# This boundary needs an isolated worktree rather than provisioning a second checkout.
+test_registers_primary_checkout_when_run_from_worktree() (
+  local tmp settings repo worktree result node
   tmp="$(with_temp_dir)"
+  node=$(node_bin)
+  printf 'Worktree registration evidence: %s\n' "$tmp"
+  record_result() {
+    local status=$?
+    DIR="$tmp" STATUS="$status" "$node" --input-type=module <<'JS'
+import fs from 'node:fs';
+fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
+  inputs: 'temporary primary checkout, worktree, and project settings sentinel',
+  expected: 'normal registration canonicalizes to the primary checkout; reset leaves project settings unchanged',
+  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/managed-settings.test.sh', inspect: 'normal.json, reset.json, project-before.json, repo/, worktree/',
+}, null, 2) + '\n');
+JS
+  }
+  trap record_result EXIT
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   worktree="$tmp/worktree"
@@ -106,16 +122,14 @@ JSON
   printf '%s\n' '{"customProject":true,"packages":["npm:project"]}' > "$worktree/.pi/settings.json"
   cp "$worktree/.pi/settings.json" "$tmp/project-before.json"
   result=$(apply_settings "$settings" "$worktree")
-  apply_settings "$settings" "$worktree" --reset >/dev/null
-  cmp "$worktree/.pi/settings.json" "$tmp/project-before.json" || fail "🤖: reset changed project settings"
-
+  cp "$settings" "$tmp/normal.json"
   [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
-
-  git -C "$repo" worktree remove -f "$worktree" >/dev/null 2>&1 || true
-  rm -rf "$tmp"
-}
+  apply_settings "$settings" "$worktree" --reset >"$tmp/reset.log" 2>&1
+  cp "$settings" "$tmp/reset.json"
+  cmp "$worktree/.pi/settings.json" "$tmp/project-before.json" || fail 'reset changed project settings'
+)
 
 test_rejects_noncanonical_settings_filename() {
   local tmp settings repo
@@ -138,27 +152,9 @@ test_rejects_noncanonical_settings_filename() {
   rm -rf "$tmp"
 }
 
-test_normalizes_legacy_json_without_changing_preferences() {
-  local tmp settings
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  printf '%s\n' '{ // personal settings' '  "defaultTools": [], "custom": {"keep": true},' '}' > "$settings"
-  apply_settings "$settings" "$ROOT" >/dev/null
-  [ "$(json_get "$settings" 's.defaultTools')" = "[]" ] || fail 'normalization changed tool selection'
-  [ "$(json_get "$settings" 's.custom.keep')" = true ] || fail 'normalization dropped personal settings'
-  printf '%s\n' '{ // rollback must preserve this comment' '  "defaultTools": [],' '}' > "$settings"
-  cp "$settings" "$tmp/before"
-  if apply_settings "$settings" "$tmp/missing-repo" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    fail 'legacy JSON registration failure should fail'
-  fi
-  cmp "$settings" "$tmp/before" || fail 'legacy JSON rollback did not restore exact content'
-  rm -rf "$tmp"
-}
-
-test_normalizes_legacy_json_without_changing_preferences
 test_rejects_malformed_package_entry_before_writing
 test_restores_settings_when_package_registration_fails
 test_preserves_empty_settings_file_when_package_registration_fails
 test_registers_primary_checkout_when_run_from_worktree
 test_rejects_noncanonical_settings_filename
-echo "🤖: settings registration safety tests passed"
+echo "settings registration tests passed"

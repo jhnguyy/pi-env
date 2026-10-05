@@ -22,4 +22,6 @@ Normal dependency installation relies on the shared postinstall hydration operat
 
 ## Workflow evidence
 
-Run `PI_ENV_REPO=$PWD bash setup/__tests__/settings-reset.test.sh` for isolated settings/reset evidence. It prints a retained directory containing before/after settings, backups, a workflow log, and `result.json`. Set `PI_ENV_SETUP_EVIDENCE_DIR` to choose an existing parent directory. The workflow uses a temporary home, not live user settings.
+Run `PI_ENV_REPO=$PWD bash setup/__tests__/settings-reset.test.sh` for isolated settings/reset evidence. It prints a retained directory containing before/after settings, backups, a workflow log, and `result.json`. Set `PI_ENV_SETUP_EVIDENCE_DIR` to choose an existing parent directory. The workflow uses a temporary home, not live user settings. It exercises the real configuration and registration stage without dependency provisioning or hooks. Legacy-JSON preservation and both normal/reset rollback run in this same workflow. Failure artifacts retain the phase, exit status, snapshots, and assertion log.
+
+The separate launcher, runtime, worktree, and supplied-package probes cover boundaries that cannot be induced reliably by normal setup without changing a provisioner or starting an interactive session. They retain their inputs and outputs. They do not replace full setup validation or duplicate hydration with a fake implementation.

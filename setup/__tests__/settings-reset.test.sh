@@ -1,46 +1,70 @@
 #!/usr/bin/env bash
+# Exercise settings ownership without provisioning dependencies or running hooks.
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 source "$ROOT/setup/options.sh"
 source "$ROOT/setup/context.sh"
-
+NODE=$(node_bin)
 EVIDENCE=$(mktemp -d "${PI_ENV_SETUP_EVIDENCE_DIR:-${TMPDIR:-/tmp}}/pi-env-settings-XXXXXX")
+printf 'Settings workflow evidence: %s\n' "$EVIDENCE"
+exec 3>&1
+exec >>"$EVIDENCE/workflow.log" 2>&1
+phase=initialization
+finish() {
+  local status=$?
+  EVIDENCE="$EVIDENCE" STATUS="$status" PHASE="$phase" "$NODE" --input-type=module <<'JS'
+import fs from 'node:fs';
+const {EVIDENCE: dir, STATUS: status, PHASE: phase} = process.env;
+fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
+  inputs: 'personal.json, legacy JSON settings, metadata-only auth fixtures',
+  expected: 'normal preferences survive; explicit reset replaces baseline/packages and keeps state; registration failures restore exact settings',
+  actual: {phase, exitStatus: Number(status)}, verdict: status === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/settings-reset.test.sh',
+  inspect: 'workflow.log, before/after JSON, and home/.pi/agent/settings.json.backup-*',
+}, null, 2) + '\n');
+JS
+  printf 'Settings workflow exit: %s (%s)\n' "$status" "$phase" >&3
+  exit "$status"
+}
+trap finish EXIT
 export HOME="$EVIDENCE/home"
-# Test state must never inherit an agent directory from the caller.
 export PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$HOME/.pi/agent"
 mkdir -p "$HOME"
 setup_init_context "$ROOT/setup"
 export REPO SETUP_DIR SETTINGS_FILE AGENTS_DIR TEST_UTILS_DIR APPEND_SRC APPEND_DST APPEND_MARKER PI_AGENT_DIR TMUX_CONF TMUX_SOURCE_LINE GHOSTTY_CONFIG_DIR POST_MERGE_HOOK_SRC PRE_COMMIT_HOOK_SRC
 export PI_ENV_SETUP_MODE=portable PI_ENV_SKIP_TERMINAL=1 PI_ENV_SKIP_REPO_HOOKS=1 PI_ENV_SKIP_HOME_MANAGER=1
-NODE=$(node_bin)
 configure() {
   setup_parse_args "$@" --no-terminal --no-repo-hooks --no-home-manager
-  "$NODE" "$ROOT/setup/configure.mjs" pi "$NODE" >>"$EVIDENCE/workflow.log" 2>&1
+  "$NODE" "$ROOT/setup/configure.mjs" pi "$NODE"
 }
 mkdir -p "$PI_AGENT_DIR/sessions" "$PI_AGENT_DIR/files"
 printf '%s\n' '{"openai":{"type":"oauth"},"openai-codex":{"type":"oauth"}}' > "$PI_AGENT_DIR/auth.json"
 for name in models.json mcp.json keybindings.json sessions/keep files/keep; do
   printf 'sentinel\n' > "$PI_AGENT_DIR/$name"
 done
+phase='fresh settings'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/initial.json"
-cat > "$SETTINGS_FILE" <<'JSON'
+cat > "$EVIDENCE/personal.json" <<'JSON'
 {
   "defaultProvider": "anthropic", "defaultModel": "personal", "defaultThinkingLevel": "high",
   "defaultTools": [], "npmCommand": ["npm"], "theme": "gruvbox-dark",
-  "images": {"blockImages": false}, "permissionLevel": "personal",
-  "transport": "personal", "retry": {"enabled": false}, "piUpdate": {"enabled": true},
   "extensions": ["personal"], "custom": {"keep": true}, "packages": ["npm:personal-package"]
 }
 JSON
-cp "$SETTINGS_FILE" "$EVIDENCE/personal.json"
+# The expected preferences remain plain JSON, independent of the production parser.
+"$NODE" -e 'const fs = require("fs"); const text = fs.readFileSync(process.argv[1], "utf8"); fs.writeFileSync(process.argv[2], "// legacy personal settings\n" + text.replace(/\n}\s*$/, ",\n}\n"));' "$EVIDENCE/personal.json" "$SETTINGS_FILE"
+cp "$SETTINGS_FILE" "$EVIDENCE/legacy.json"
+phase='normal legacy settings registration'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/normal.json"
+phase='explicit reset'
 configure --reset
 cp "$SETTINGS_FILE" "$EVIDENCE/reset.json"
+phase='normal rerun'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/rerun.json"
-
+phase='preference and state assertions'
 EVIDENCE="$EVIDENCE" "$NODE" --input-type=module <<'JS'
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
@@ -68,13 +92,18 @@ for (const name of ['models.json', 'mcp.json', 'keybindings.json', 'sessions/kee
   assert.equal(fs.readFileSync(path.join(agent, name), 'utf8'), 'sentinel\n');
 assert.deepEqual(JSON.parse(fs.readFileSync(path.join(agent, 'auth.json'), 'utf8')), {openai: {type: 'oauth'}, 'openai-codex': {type: 'oauth'}});
 JS
-
-cp "$SETTINGS_FILE" "$EVIDENCE/before-failure.json"
-if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" --reset >>"$EVIDENCE/workflow.log" 2>&1; then
-  fail "🤖: reset registration failure should fail"
-fi
-cmp "$SETTINGS_FILE" "$EVIDENCE/before-failure.json" || fail "🤖: failed reset did not roll back"
+cp "$EVIDENCE/legacy.json" "$SETTINGS_FILE"
+for mode in normal reset; do
+  phase="$mode registration rollback"
+  args=()
+  if [ "$mode" = reset ]; then args=(--reset); fi
+  if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" "${args[@]}"; then
+    fail 'registration failure should fail'
+  fi
+  cmp "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
+done
 for metadata in codex neither; do
+  phase="provider metadata: $metadata"
   if [ "$metadata" = codex ]; then
     printf '%s\n' '{"openai-codex":{"type":"oauth"}}' > "$PI_AGENT_DIR/auth.json"
     expected=openai-codex
@@ -86,7 +115,4 @@ for metadata in codex neither; do
   "$NODE" -e 'const s = require(process.argv[1]); if (s.defaultProvider !== process.argv[2]) process.exit(1)' "$SETTINGS_FILE" "$expected"
   cp "$SETTINGS_FILE" "$EVIDENCE/$metadata.json"
 done
-cat > "$EVIDENCE/result.json" <<'JSON'
-{"inputs":"personal.json and metadata-only auth fixtures","expected":"normal preserves choices; explicit reset backs up and replaces baseline and packages; registration failure rolls back; unrelated files remain","actual":"all workflow assertions passed","verdict":"pass","reproduce":"PI_ENV_REPO=$PWD bash setup/__tests__/settings-reset.test.sh","inspect":"Compare personal.json, normal.json, reset.json, rerun.json, codex.json, neither.json and home/.pi/agent/settings.json.backup-*; workflow.log retains failure output."}
-JSON
-printf '🤖: Settings/reset evidence: %s\n' "$EVIDENCE"
+phase=complete
