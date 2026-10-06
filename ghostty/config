@@ -1,7 +1,6 @@
 # pi-env Ghostty config
-# Linked by setup.sh to ~/.config/ghostty/config.
-# Reload Ghostty after setup; local machine-specific overrides can live in
-# ~/.config/ghostty/config.local and are imported if present.
+# Reload Ghostty after setup. Optional machine-specific overrides live in
+# config.local beside this config.
 
 font-family = JetBrains Mono
 font-size = 18
@@ -27,4 +26,4 @@ adjust-cell-height = 5%
 link-url = true
 mouse-hide-while-typing = true
 
-config-file = ?~/.config/ghostty/config.local
+config-file = ?config.local

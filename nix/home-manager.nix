@@ -105,9 +105,11 @@ in
       (lib.mkIf cfg.ghostty.enable {
         home.file = {
           "${ghosttyDirectory}/config".source = "${self}/ghostty/config";
-          "${ghosttyDirectory}/themes/pi-env-gruvbox-dark".source =
+        };
+        xdg.configFile = {
+          "ghostty/themes/pi-env-gruvbox-dark".source =
             "${self}/ghostty/themes/pi-env-gruvbox-dark";
-          "${ghosttyDirectory}/themes/pi-env-gruvbox-light".source =
+          "ghostty/themes/pi-env-gruvbox-light".source =
             "${self}/ghostty/themes/pi-env-gruvbox-light";
         };
       })
