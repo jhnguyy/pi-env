@@ -26,6 +26,7 @@ let registeredTool: any;
 const eventListeners = new Map<string, Function[]>();
 
 const mockPi = {
+  registerCommand: () => {},
   registerTool: (tool: any) => {
     if (tool.name === "subagent") registeredTool = tool;
   },
