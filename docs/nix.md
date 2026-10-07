@@ -4,6 +4,8 @@ Use the [setup choices](../README.md#setup-choices) to select a provisioning mod
 
 [flake.nix](../flake.nix) declares inputs and public outputs. [flake.lock](../flake.lock) records input revisions. Read the [Nix implementation](../nix/) for package composition, runtime bindings, applications, and checks. The [manifest](../package.json) owns repository compatibility and dependency declarations.
 
+The [toolchain](../nix/toolchain.nix) applies the [Nub lock-access patch](../nix/patches/nub-gvs-lock-read-access.patch) through Nub's existing package recipe. Portable setup does not apply Nix source patches.
+
 ## Home Manager
 
 Use the exported Home Manager module for declarative host integration. Read its [option declarations and configuration](../nix/home-manager.nix) when configuring a consumer. Do not copy defaults from this documentation.
