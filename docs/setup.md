@@ -26,13 +26,13 @@ Pi's `PI_CODING_AGENT_DIR` selects user state. Base setup also accepts the legac
 
 The Gruvbox palettes remain in [`ghostty/themes/`](../ghostty/themes/). Setup and Home Manager install them under `$XDG_CONFIG_HOME/ghostty/themes`, or `~/.config/ghostty/themes` by default. Ghostty searches this directory for named themes even when its main config lives in macOS Application Support.
 
-On macOS, the main config lives in `~/Library/Application Support/com.mitchellh.ghostty/config`. On Linux, setup uses `~/.config/ghostty/config`. Optional overrides live in `config.local` beside the main config. `GHOSTTY_CONFIG_DIR` overrides setup's main config location, not the theme search directory.
+On macOS, the main config lives in `~/Library/Application Support/com.mitchellh.ghostty/config`. On Linux, setup uses `~/.config/ghostty/config`. On both platforms, optional overrides live in `~/.config/ghostty/config.local`. Ghostty resolves relative imports from the symlink target, so the config uses this fixed path. `GHOSTTY_CONFIG_DIR` overrides setup's main config location, not the theme search directory.
 
 If Home Manager owns terminal configuration, update its pi-env input and switch the Home Manager generation. Otherwise, rerun terminal setup. Reload Ghostty after installation. Run `ghostty +validate-config` to check the active configuration.
 
 The removal in #154 deleted the legacy Pi `gruvbox.json` theme. The removal in #459 deleted Pi's separate light/dark JSON themes and adopted Pi's terminal-derived appearance. Neither change removed the Ghostty palettes. Keep terminal colors in Ghostty rather than restoring a separate Pi theme with duplicate colors.
 
-Run `bash setup/__tests__/ghostty-config.test.sh` for isolated installation evidence. It checks macOS and XDG config layouts, theme links, and repeat setup. If Ghostty is installed, it also validates theme loading, palette colors, and adjacent overrides. Set `PI_ENV_TEST_GHOSTTY_BIN` to select an executable. The printed evidence directory retains logs and `result.json`.
+Run `bash setup/__tests__/ghostty-config.test.sh` for isolated installation evidence. It checks macOS and XDG config layouts, theme links, and repeat setup. If Ghostty is installed, it loads each installed config by path and checks both palettes and the local override, with negative controls. Off macOS, it also checks palette colors through default discovery. On macOS, default discovery reads the real user config, so the workflow records that check as skipped. `result.json` reports each check separately. Set `PI_ENV_TEST_GHOSTTY_BIN` to select an executable. The printed evidence directory retains logs and `result.json`.
 
 ## Workflow evidence
 
