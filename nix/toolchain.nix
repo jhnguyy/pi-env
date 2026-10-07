@@ -54,7 +54,10 @@ let
           }
         else
           nub;
-      package = nubOutputs.packages.${pkgs.system}.default;
+      # Carry the NFS lock correction locally without changing locked inputs.
+      package = nubOutputs.packages.${pkgs.system}.default.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./patches/nub-gvs-lock-read-access.patch ];
+      });
     in
     assert pkgs.lib.assertMsg (
       manifest.packageManager == "nub@${package.version}"

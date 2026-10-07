@@ -1,0 +1,11 @@
+diff --git a/vendor/aube/crates/aube/src/commands/gvs_registry.rs b/vendor/aube/crates/aube/src/commands/gvs_registry.rs
+--- a/vendor/aube/crates/aube/src/commands/gvs_registry.rs
++++ b/vendor/aube/crates/aube/src/commands/gvs_registry.rs
+@@ -54,6 +54,7 @@ fn open_lock(global_virtual_store: &Path) -> miette::Result<std::fs::File> {
+     std::fs::OpenOptions::new()
+         .create(true)
+         .truncate(false)
++        .read(true)
+         .write(true)
+         .open(&path)
+         .map_err(|e| {
