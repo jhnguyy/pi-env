@@ -30,6 +30,7 @@ export PI_AGENT_DIR="$tmp/pi-agent"
 export TMUX_CONF="$tmp/tmux.conf"
 export TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf"
 export GHOSTTY_CONFIG_DIR="$tmp/ghostty"
+export XDG_CONFIG_HOME="$tmp/xdg"
 export POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge"
 export PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit"
 
