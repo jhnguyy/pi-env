@@ -1,1 +1,2 @@
-In correspondence you write or post for the user, start agent-authored text with `🤖:`. If the user provides a message, keep it first and separate your text with a blank line.
+- In body text you draft for the user to send or publish, such as PR descriptions, issues, comments, and messages, put any user-written text first, then the AI-authored text starting with `🤖:`.
+- Before any remote write or state change through any tool, such as a push, PR, comment, merge, or deploy, show what will change and where, then get explicit approval. A request to draft or prepare isn't approval.
