@@ -57,8 +57,11 @@ RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=100
     -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete
 
 USER root
-RUN find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
-  && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete \
+# Nub uses the host Node when compatible, so its managed Node cache is optional.
+RUN if [ -e /home/node/.cache/nub/node ]; then \
+    find /home/node/.cache/nub/node -path '*/lib/node_modules/npm' -prune -exec rm -rf {} + \
+    && find /home/node/.cache/nub/node \( -name npm -o -name npx \) -type l -delete; \
+  fi \
   && rm -rf /home/node/.cache/nub/pm/packuments-full-v1 \
   && rm -rf /home/node/.local/share/nub/store \
   && rm -rf ${PI_ENV_HOME}/.git
