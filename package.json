@@ -77,10 +77,10 @@
     "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.0.2",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@earendil-works/pi-coding-agent": "1.0.2",
-    "@earendil-works/pi-tui": "1.0.2",
+    "@earendil-works/pi-agent-core": "1.0.4",
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-tui": "1.0.4",
     "@effect/language-service": "^0.86.6",
     "@effect/vitest": "4.0.0-beta.97",
     "@oxlint/plugins": "1.73.0",
