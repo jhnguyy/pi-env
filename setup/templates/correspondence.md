@@ -1,2 +1,2 @@
 - In body text you draft for the user to send or publish, such as PR descriptions, issues, comments, and messages, put any user-written text first, then the AI-authored text starting with `🤖:`.
-- Before any remote write or state change through any tool, such as a push, PR, comment, merge, or deploy, show what will change and where, then get explicit approval. A request to draft or prepare isn't approval.
+- Before a remote write, such as a push, PR, comment, merge, or deploy, ask unless the user clearly approved it.
