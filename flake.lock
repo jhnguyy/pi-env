@@ -61,16 +61,16 @@
         "nixpkgs-darwin-x64": "nixpkgs-darwin-x64"
       },
       "locked": {
-        "lastModified": 1791074476,
-        "narHash": "sha256-DjWJE7KcCdNF/M3RrO76rKCSd6oFLo2dX9wFT0nwEXk=",
+        "lastModified": 1791228169,
+        "narHash": "sha256-twDmQRr7vsrYzhS8o3TrlqdBzRFCbOOn/4hbCXD/u3Q=",
         "owner": "badlogic",
         "repo": "pi-mono",
-        "rev": "cd32f7725fdbddbaecdff5b1e68491563394e0ca",
+        "rev": "7c10bd4337495ee613f2224843ecdf349b80d1df",
         "type": "github"
       },
       "original": {
         "owner": "badlogic",
-        "ref": "v1.0.2",
+        "ref": "v1.0.4",
         "repo": "pi-mono",
         "type": "github"
       }
