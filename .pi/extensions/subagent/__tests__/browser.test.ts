@@ -198,6 +198,124 @@ describe("registered /subagents workflow", () => {
     }
   });
 
+  it.each(["before persistence", "finalized error", "finalized abort"] as const)(
+    "shows the retained diagnostic after a child failure: %s",
+    async (failure) => {
+      const directory = await mkdtemp(join(tmpdir(), "subagent-browser-failure-"));
+      directories.push(directory);
+      const diagnostic = "429: quota exhausted";
+      const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = () =>
+        ({
+          async *[Symbol.asyncIterator]() {
+            if (failure === "before persistence") throw new Error(diagnostic);
+            yield {
+              type: "message_end",
+              message: {
+                role: "assistant",
+                content: [],
+                timestamp: Date.now(),
+                model: "test-model",
+                stopReason: failure === "finalized abort" ? "aborted" : "error",
+                errorMessage: diagnostic,
+                usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
+              },
+            };
+            yield { type: "turn_end" };
+          },
+          async result() {
+            return [];
+          },
+        }) as any;
+      const { commands, handlers, tools } = createSubagentHarness({ agentLoop });
+      let component: SubagentBrowser | undefined;
+      const ctx = {
+        cwd: directory,
+        mode: "tui",
+        hasUI: true,
+        sessionManager: SessionManager.create(directory, directory),
+        ui: {
+          theme,
+          setWidget: vi.fn(),
+          notify: vi.fn(),
+          custom: (factory: any) =>
+            new Promise<void>((resolve) => {
+              component = factory(
+                { requestRender: vi.fn(), terminal: { rows: 40 } },
+                theme,
+                {},
+                resolve,
+              );
+            }),
+        },
+        modelRegistry: {
+          find: () => ({ provider: "test", id: "test-model" }),
+          getAvailable: () => [{ provider: "test", id: "test-model", name: "Test" }],
+          getApiKeyForProvider: async () => "test-key",
+        },
+      } as any;
+      try {
+        await handlers.get("session_start")!({}, ctx);
+        const tool = tools.get("subagent");
+        const started = await tool.execute(
+          "start",
+          {
+            action: "start",
+            name: "failure",
+            task: "Inspect",
+            tools: ["read"],
+            model: "test/test-model",
+          },
+          undefined,
+          undefined,
+          ctx,
+        );
+        const result = await tool.execute(
+          "wait",
+          { action: "wait", job_id: started.details.jobId },
+          undefined,
+          undefined,
+          ctx,
+        );
+        expect(result.details.status).toBe(
+          failure === "finalized abort" ? "interrupted" : "failed",
+        );
+        expect(result.details.sessionFile).toBeTruthy();
+        const interaction = commands.get("subagents").handler("", ctx);
+        component!.handleInput("\r");
+        await vi.waitFor(() => expect(component!.render(100).join("\n")).toContain(diagnostic));
+        if (failure !== "before persistence") {
+          expect(component!.render(100).join("\n")).not.toContain(
+            "No finalized child messages yet.",
+          );
+        }
+        const artifacts = process.env.PI_ENV_SUBAGENT_BROWSER_ARTIFACT_DIR;
+        if (artifacts) {
+          await mkdir(artifacts, { recursive: true });
+          await writeFile(
+            join(artifacts, `failure-${failure.replaceAll(" ", "-")}.json`),
+            JSON.stringify(
+              {
+                input: failure,
+                expected: "retained diagnostic visible in the registered read-only browser",
+                actual: component!.render(100),
+                verdict: "pass",
+                reproduce:
+                  "PI_ENV_SUBAGENT_BROWSER_ARTIFACT_DIR=<dir> nub run test:vitest .pi/extensions/subagent/__tests__/browser.test.ts",
+              },
+              null,
+              2,
+            ),
+          );
+        }
+        component!.close();
+        await interaction;
+      } finally {
+        component?.close();
+        await handlers.get("session_shutdown")!({}, ctx);
+      }
+    },
+  );
+
   it("rejects non-TUI clients without creating a custom component", async () => {
     const { commands } = createSubagentHarness();
     const custom = vi.fn();
@@ -225,6 +343,29 @@ describe("read-only child transcript boundary", () => {
     expect(result.text).not.toMatch(/[\u0000\u0007\u001b]/);
     expect(await readFile(path, "utf8")).toBe(raw);
   });
+
+  it.each(["error", "aborted"])(
+    "preserves finalized %s diagnostics without text content",
+    async (stopReason) => {
+      const raw =
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [],
+            stopReason,
+            errorMessage: "\u001b]52;c;secret\u0007quota\u001b[2J exhausted",
+          },
+        }) + "\n";
+      const path = await transcript(raw);
+      const result = await readChildTranscript(path);
+      expect(result.text).toContain(
+        stopReason === "error" ? "Error: quota exhausted" : "Aborted: quota exhausted",
+      );
+      expect(result.text).not.toMatch(/[\u0007\u001b]/);
+      expect(await readFile(path, "utf8")).toBe(raw);
+    },
+  );
 
   it("bounds large transcripts and reports omitted history", async () => {
     const path = await transcript(
@@ -284,6 +425,42 @@ describe("subagent browser interaction", () => {
       expect(done).toHaveBeenCalledOnce();
       expect(job.controller.signal.aborted).toBe(false);
       expect(await readFile(path, "utf8")).toContain("Evidence found");
+    } finally {
+      browser.dispose();
+    }
+  });
+
+  it("distinguishes repeated jobs and bounds retained failure diagnostics", async () => {
+    const path = await transcript(message("assistant", "Earlier output"));
+    const jobs = ["11111111-one", "22222222-two"].map((id) => ({
+      id,
+      name: "review",
+      status: "failed",
+      task: "Inspect",
+      latestDetails: {
+        model: "test/model",
+        sessionFile: path,
+        errorMessage: "\u001b]52;c;secret\u0007connection failed\n" + "x".repeat(100_000),
+      },
+    })) as SubagentJob[];
+    const browser = new SubagentBrowser(
+      () => jobs,
+      { requestRender: vi.fn(), terminal: { rows: 40 } } as any,
+      theme as any,
+      vi.fn(),
+    );
+    try {
+      const picker = browser.render(100).join("\n");
+      expect(picker).toContain("11111111");
+      expect(picker).toContain("22222222");
+      browser.handleInput("\u001b[B");
+      browser.handleInput("\r");
+      await vi.waitFor(() => expect(browser.render(100).join("\n")).toContain("Earlier output"));
+      const displayed = browser.render(100).join("\n");
+      expect(displayed).toContain("22222222-two");
+      expect(displayed).toContain("connection failed");
+      expect(displayed).not.toMatch(/[\u0007\u001b]/);
+      expect(displayed).toContain("[Diagnostic truncated.]");
     } finally {
       browser.dispose();
     }

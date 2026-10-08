@@ -14,7 +14,9 @@ import {
 } from "@earendil-works/pi-tui";
 
 import type { SubagentJob } from "./jobs";
-import { plainChildText, readChildTranscript } from "./transcript";
+import { DISPLAY_CHARACTERS, plainChildText, readChildTranscript } from "./transcript";
+
+const DIAGNOSTIC_CHARACTERS = 1_024;
 
 function childMetadataLine(text: string): string {
   return plainChildText(text).replace(/\s+/g, " ").trim();
@@ -70,7 +72,7 @@ export class SubagentBrowser implements Component, Focusable {
       this.filteredJobs().map((job) => ({
         value: job.id,
         label: childMetadataLine(job.name),
-        description: `[${job.status}] ${childMetadataLine(job.latestDetails?.model ?? "")}`,
+        description: `[${job.status}] ${childMetadataLine(job.id.slice(0, 8))} ${childMetadataLine(job.latestDetails?.model ?? "")}`,
       })),
       Math.min(8, this.height),
       {
@@ -120,9 +122,10 @@ export class SubagentBrowser implements Component, Focusable {
     }
     const path = job.latestDetails?.sessionFile;
     if (!path) {
-      this.text.setText(
+      this.setTranscriptText(
+        job,
         plainChildText(
-          job.resultText ?? job.errorMessage ?? "Child transcript is not available yet.",
+          (job.resultText ?? "Child transcript is not available yet.").slice(0, DISPLAY_CHARACTERS),
         ),
       );
       return;
@@ -143,11 +146,21 @@ export class SubagentBrowser implements Component, Focusable {
         return;
       }
       this.transcriptPath = path;
-      this.text.setText(transcript.text);
+      this.setTranscriptText(current, transcript.text);
       this.tui.requestRender();
     } finally {
       this.reading = false;
     }
+  }
+
+  private setTranscriptText(job: SubagentJob, text: string): void {
+    const error = job.errorMessage || job.latestDetails?.errorMessage;
+    const diagnostic = error
+      ? `Error: ${childMetadataLine(error.slice(0, DIAGNOSTIC_CHARACTERS))}${error.length > DIAGNOSTIC_CHARACTERS ? " [Diagnostic truncated.]" : ""}`
+      : job.latestDetails?.stopReason === "aborted"
+        ? "Child run aborted."
+        : "";
+    this.text.setText([diagnostic, text].filter(Boolean).join("\n\n"));
   }
 
   handleInput(data: string): void {
@@ -202,7 +215,10 @@ export class SubagentBrowser implements Component, Focusable {
       ? `${childMetadataLine(job?.name ?? "Unretained job")} [${job?.status ?? "unknown"}] · read-only`
       : `Subagents · ${this.jobs().length} retained background jobs`;
     const context = this.selectedId
-      ? [childMetadataLine(job?.task ?? ""), childMetadataLine(this.transcriptPath ?? "")]
+      ? [
+          childMetadataLine(`Job: ${this.selectedId} · ${job?.task ?? ""}`),
+          childMetadataLine(this.transcriptPath ?? ""),
+        ]
       : [];
     return [
       this.theme.fg("accent", title),

@@ -4,7 +4,7 @@ import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { Effect } from "effect";
 
 export const TRANSCRIPT_READ_BYTES = 128 * 1024;
-const DISPLAY_CHARACTERS = 32 * 1024;
+export const DISPLAY_CHARACTERS = 32 * 1024;
 
 export interface ChildTranscript {
   readonly text: string;
@@ -33,6 +33,20 @@ function contentText(content: unknown): string {
     .join("\n");
 }
 
+function assistantDiagnostic(message: Record<string, unknown>): string {
+  if (message.role !== "assistant") return "";
+  const label =
+    message.stopReason === "error"
+      ? "Error"
+      : message.stopReason === "aborted"
+        ? "Aborted"
+        : undefined;
+  if (!label) return "";
+  return typeof message.errorMessage === "string" && message.errorMessage
+    ? `${label}: ${message.errorMessage}`
+    : `${label}.`;
+}
+
 function transcriptText(raw: string, omittedHistory: boolean): ChildTranscript {
   const messages: string[] = [];
   // Child runs are append-only. This bounded viewer is not a general session-branch reader.
@@ -44,7 +58,9 @@ function transcriptText(raw: string, omittedHistory: boolean): ChildTranscript {
       message.role === "toolResult"
         ? `Tool result: ${typeof message.toolName === "string" ? message.toolName : "unknown"}`
         : String(message.role);
-    const text = plainChildText(contentText(message.content));
+    const text = plainChildText(
+      [contentText(message.content), assistantDiagnostic(message)].filter(Boolean).join("\n"),
+    );
     if (text) messages.push(`${plainChildText(label)}\n${text}`);
   }
   const text = messages.join("\n\n");

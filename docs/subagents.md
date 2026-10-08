@@ -25,13 +25,13 @@ Collapsed TUI views omit the full delegated task and child output. Expanded view
 
 ## Interactive browser
 
-Run `/subagents` in terminal mode to inspect retained background jobs. Type to search by name, job ID, state, or model. Select a job with the arrow keys and press Enter to inspect it. Completed and failed jobs remain available until the existing retention policy evicts them.
+Run `/subagents` in terminal mode to inspect retained background jobs. Type to search by name, job ID, state, or model. Each row includes a short job ID to distinguish repeated names. Select a job with the arrow keys and press Enter to inspect it. The detail view shows the full job ID. Completed and failed jobs remain available until the existing retention policy evicts them.
 
 The read-only viewer refreshes finalized child messages once per second. Use the arrow keys or Page Up and Page Down to scroll. Home moves to the beginning of the displayed content. End follows new messages. Escape returns to the job list. Escape from the list returns to the unchanged parent draft.
 
 Opening the browser does not wait for jobs, cancel jobs, or replace the parent session. Other jobs continue under the existing supervisor. Session shutdown closes the browser.
 
-Transcript inspection reads at most the latest 128 KiB and displays at most 32,768 text characters, plus an omission notice. The viewer reports omitted history and removes terminal control sequences. It does not rewrite child files. A transcript can be unavailable before the first finalized assistant message. The viewer does not display partial streaming responses, thinking, or images.
+Transcript inspection reads at most the latest 128 KiB and displays at most 32,768 text characters, plus an omission notice. The viewer reports omitted history and removes terminal control sequences. It does not rewrite child files. A transcript can be unavailable before the first finalized assistant message. Retained job diagnostics remain visible independently of transcript availability, with a separate 1,024-character limit and truncation notice. Finalized assistant errors and aborts remain visible even when their text content is empty. The viewer does not display partial streaming responses, thinking, or images.
 
 The initial browser lists only background jobs retained in the current parent runtime. Blocking `run` calls and historical jobs after a restart are not included. Steering, continuation, nested navigation, and orchestrator mode are not implemented.
 
