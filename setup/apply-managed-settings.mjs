@@ -2,8 +2,14 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { DefaultPackageManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { initialSettings, parseJsonRelaxedText, renderSettings } from "./managed-settings-core.mjs";
+import {
+  applyManagedSettings,
+  initialSettings,
+  parseJsonRelaxedText,
+  renderSettings,
+} from "./managed-settings-core.mjs";
 
 const [settingsFile, repoPath, mode] = process.argv.slice(2);
 const reset = mode === "--reset";
@@ -57,13 +63,14 @@ function packageRepoPath() {
 
 const settingsExisted = fs.existsSync(settingsFile);
 const before = settingsExisted ? fs.readFileSync(settingsFile, "utf8") : "";
-const settings =
+const baseSettings =
   reset || !settingsExisted
     ? initialSettings(parseJsonRelaxed(path.join(path.dirname(settingsFile), "auth.json")))
     : parseJsonRelaxed(settingsFile);
-if (settings === null || typeof settings !== "object" || Array.isArray(settings)) {
+if (baseSettings === null || typeof baseSettings !== "object" || Array.isArray(baseSettings)) {
   throw new Error("🤖: settings must be a JSON object");
 }
+const settings = applyManagedSettings(baseSettings);
 if (settings.packages !== undefined) {
   if (!Array.isArray(settings.packages)) throw new Error("🤖: settings.packages must be an array");
   assertValidPackageSources(settings);
@@ -88,7 +95,12 @@ try {
     }
   }
   // Pi reads strict JSON. Preserve accepted legacy preferences before registration.
-  if (reset || !settingsExisted || needsNormalization)
+  if (
+    reset ||
+    !settingsExisted ||
+    needsNormalization ||
+    !isDeepStrictEqual(settings, baseSettings)
+  )
     fs.writeFileSync(settingsFile, renderSettings(settings));
   settingsManager = SettingsManager.create(repoPath, agentDir, { projectTrusted: false });
   const packageManager = new DefaultPackageManager({ cwd: repoPath, agentDir, settingsManager });

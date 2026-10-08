@@ -51,7 +51,9 @@ cat > "$EVIDENCE/personal.json" <<'JSON'
 {
   "defaultProvider": "anthropic", "defaultModel": "personal", "defaultThinkingLevel": "high",
   "defaultTools": [], "npmCommand": ["personal-command"], "theme": "personal-theme",
-  "extensions": ["personal"], "custom": {"keep": true}, "packages": ["npm:personal-package"]
+  "extensions": ["personal"], "custom": {"keep": true}, "packages": ["npm:personal-package"],
+  "httpIdleTimeoutMs": 0,
+  "retry": {"enabled": false, "maxAgentDelayMs": 5000, "provider": {"maxRetries": 4, "keep": true}}
 }
 JSON
 # The expected preferences remain plain JSON, independent of the production parser.
@@ -74,9 +76,18 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 const dir = process.env.EVIDENCE;
 const read = name => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+const managed = {
+  httpIdleTimeoutMs: 120000,
+  retry: {enabled: true, maxRetries: 3, baseDelayMs: 2000,
+    provider: {timeoutMs: 30000, maxRetries: 0, maxRetryDelayMs: 60000}},
+};
 const personal = read('personal.json');
 const normal = read('normal.json');
-assert.deepEqual({...normal, packages: personal.packages}, personal);
+// Managed keys win on every run; unmanaged siblings in managed objects survive.
+assert.deepEqual({...normal, packages: personal.packages}, {
+  ...personal, httpIdleTimeoutMs: managed.httpIdleTimeoutMs,
+  retry: {...managed.retry, maxAgentDelayMs: 5000, provider: {...managed.retry.provider, keep: true}},
+});
 const registeredSources = settings => settings.packages.map(source =>
   source.startsWith('npm:') ? source : path.resolve(path.dirname(process.env.SETTINGS_FILE), source)).sort();
 assert.deepEqual(registeredSources(normal), [...personal.packages, process.env.PRIMARY_REPO].sort());
@@ -84,7 +95,7 @@ const reset = read('reset.json');
 const {packages, ...baseline} = reset;
 assert.deepEqual(baseline, {
   defaultProvider: 'openai', defaultModel: 'gpt-6.1-sol', defaultThinkingLevel: 'medium',
-  defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'],
+  defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'], ...managed,
 });
 assert.deepEqual(registeredSources(reset), [process.env.PRIMARY_REPO]);
 assert.deepEqual(read('initial.json'), reset);
