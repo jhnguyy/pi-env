@@ -1,6 +1,8 @@
 # Setup settings and reset
 
-Normal setup registers pi-env through Pi's stock package manager and preserves existing personal settings. A missing user settings file receives the baseline from `setup/managed-settings-core.mjs`. There is no repeatedly applied preference overlay.
+Normal setup registers pi-env through Pi's stock package manager and preserves existing personal settings. A missing user settings file receives the baseline from `setup/managed-settings-core.mjs`.
+
+Every setup run, including reset, also reapplies the managed network and retry settings from the same file. They keep provider stalls short so Pi's agent-level retry and backoff recover them. `retry.provider.timeoutMs` bounds the wait for response headers, and `httpIdleTimeoutMs` bounds mid-stream stalls. Managed keys replace personal values. Other keys inside `retry` are preserved. Use project settings to override them.
 
 Read the [baseline owner](../setup/managed-settings-core.mjs) for initial preference values. Provider selection inspects stored authentication type metadata without resolving keys or refreshing tokens. It prefers authenticated `openai`, then authenticated `openai-codex`, and defaults to `openai` when neither is configured.
 
