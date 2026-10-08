@@ -50,7 +50,7 @@ export const managedSettings = {
   retry: {
     enabled: true,
     maxRetries: 3,
-    baseDelayMs: 2000,
+    baseDelayMs: 7500,
     provider: { timeoutMs: 30000, maxRetries: 0, maxRetryDelayMs: 60000 },
   },
 };

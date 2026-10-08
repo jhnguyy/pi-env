@@ -78,7 +78,7 @@ const dir = process.env.EVIDENCE;
 const read = name => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
 const managed = {
   httpIdleTimeoutMs: 120000,
-  retry: {enabled: true, maxRetries: 3, baseDelayMs: 2000,
+  retry: {enabled: true, maxRetries: 3, baseDelayMs: 7500,
     provider: {timeoutMs: 30000, maxRetries: 0, maxRetryDelayMs: 60000}},
 };
 const personal = read('personal.json');
