@@ -8,7 +8,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     pi = {
-      url = "github:badlogic/pi-mono/v1.0.4";
+      url = "github:earendil-works/pi/v1.1.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
