@@ -56,7 +56,10 @@ let
           nub;
       # Carry the NFS lock correction locally without changing locked inputs.
       package = nubOutputs.packages.${pkgs.system}.default.overrideAttrs (old: {
-        patches = (old.patches or [ ]) ++ [ ./patches/nub-gvs-lock-read-access.patch ];
+        patches = (old.patches or [ ]) ++ [
+          ./patches/nub-gvs-lock-read-access.patch
+          ./patches/nub-store-lock-read-access.patch
+        ];
       });
     in
     assert pkgs.lib.assertMsg (

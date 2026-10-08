@@ -1,0 +1,19 @@
+diff --git a/vendor/aube/crates/aube-store/src/lib.rs b/vendor/aube/crates/aube-store/src/lib.rs
+--- a/vendor/aube/crates/aube-store/src/lib.rs
++++ b/vendor/aube/crates/aube-store/src/lib.rs
+@@ -396,6 +396,7 @@ impl Store {
+         std::fs::OpenOptions::new()
+             .create(true)
+             .truncate(false)
++            .read(true)
+             .write(true)
+             .open(&path)
+             .map_err(|e| Error::Io(path, e))
+@@ -503,6 +504,7 @@ impl Store {
+         std::fs::OpenOptions::new()
+             .create(true)
+             .truncate(false)
++            .read(true)
+             .write(true)
+             .open(dir.join(".gc.lock"))
+             .ok()
