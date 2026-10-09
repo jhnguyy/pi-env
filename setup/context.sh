@@ -3,10 +3,10 @@ setup_init_context() {
   SETUP_DIR="$(cd "$1" && pwd)"
   REPO="$(cd "$SETUP_DIR/.." && pwd)"
 
-  PI_AGENT_DIR="${PI_AGENT_DIR:-$HOME/.pi/agent}"
+  source "$SETUP_DIR/agent-dir.sh"
+  pi_env_resolve_agent_dir || return $?
   AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
   SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
-  MANAGED_SETTINGS_FILE="$SETUP_DIR/config/managed-settings.json"
 
   PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
   PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"

@@ -1,14 +1,11 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentSettledEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agentNotificationExtension from "../index";
 import * as AgentTools from "../../_shared/agent-tools";
 
 type AgentSettledApi = Parameters<typeof agentNotificationExtension>[0];
 
-type SettledHandler = (
-  event: { type: typeof AgentTools.PiEvent.AgentSettled },
-  context: ExtensionContext,
-) => unknown;
+type SettledHandler = (event: AgentSettledEvent, context: ExtensionContext) => unknown;
 
 function settledHandler(): SettledHandler {
   let handler: SettledHandler | undefined;
@@ -41,9 +38,9 @@ describe("agent notification extension", () => {
     const handler = settledHandler();
 
     expect(emittedBytes(write)).toEqual([]);
-    handler({ type: AgentTools.PiEvent.AgentSettled }, context("tui", true));
+    handler({ type: AgentTools.PiEvent.AgentSettled, aborted: false }, context("tui", true));
     expect(emittedBytes(write)).toEqual([0x07]);
-    handler({ type: AgentTools.PiEvent.AgentSettled }, context("tui", true));
+    handler({ type: AgentTools.PiEvent.AgentSettled, aborted: true }, context("tui", true));
     expect(emittedBytes(write)).toEqual([0x07, 0x07]);
   });
 
@@ -55,7 +52,7 @@ describe("agent notification extension", () => {
     const write = vi.spyOn(process.stdout, "write").mockReturnValue(true);
     const handler = settledHandler();
 
-    handler({ type: AgentTools.PiEvent.AgentSettled }, context(mode, hasUI));
+    handler({ type: AgentTools.PiEvent.AgentSettled, aborted: false }, context(mode, hasUI));
 
     expect(emittedBytes(write)).toEqual([]);
   });

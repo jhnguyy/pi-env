@@ -25,7 +25,7 @@ Follow `docs/conventions/documentation.md` for documentation placement, README s
 
 ## Runtime requirements
 
-Use Nub with the Node.js version required by `package.json#engines.node`. Setup validates the resolved runtime against `package.json`. Node remains the runtime for pi. Nub owns dependency install and script orchestration.
+Nix owns provisioning and uses Pi's upstream package. Nub owns repository dependency install and script orchestration, and supplies the single portable fallback. `package.json#engines.node` declares compatibility, not an exact patch pin. Flake evaluation checks Node, Nub, and Pi development-package consistency.
 
 Before assuming a toolchain problem is a code problem, verify whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
 
@@ -70,7 +70,7 @@ Keep the primary working tree on `main`. Perform all branch work in a dedicated 
 After creating a worktree, run:
 
 ```bash
-nub run worktree:init
+nub run --no-check worktree:init
 ```
 
 Each worktree requires its own dependency links and extension build artifacts. Do not share `node_modules` or extension `dist` directories between worktrees.

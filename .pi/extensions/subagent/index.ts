@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
 import { discoverAgents } from "./agents";
+import { SubagentBrowser } from "./browser";
 import { formatJobMetadata, formatJobResult, type SubagentJob } from "./jobs";
 import type { SubagentParams } from "./resolver";
 import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
@@ -152,6 +153,42 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
 
   const runtime = new SubagentSessionRuntime(pi, registeredExtTools, dependencies);
   const reportedJobUsage = new Set<string>();
+  const browser: { current?: SubagentBrowser } = {};
+  const disposeBrowser = () => {
+    browser.current?.dispose();
+    browser.current = undefined;
+  };
+
+  pi.registerCommand("subagents", {
+    description: "Inspect retained background subagents without leaving the parent session",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("/subagents requires interactive terminal mode.", "warning");
+        return;
+      }
+      if (browser.current) return;
+      if (runtime.listJobs().length === 0) {
+        ctx.ui.notify("No retained background subagent jobs in this parent session.", "info");
+        return;
+      }
+      try {
+        await ctx.ui.custom<void>(
+          (tui, theme, _keybindings, done) => {
+            browser.current = new SubagentBrowser(
+              () => runtime.listJobs(),
+              tui,
+              theme,
+              () => done(),
+            );
+            return browser.current;
+          },
+          { overlay: true, overlayOptions: { width: "90%", maxHeight: "80%" } },
+        );
+      } finally {
+        disposeBrowser();
+      }
+    },
+  });
 
   const executeJobAction = async (
     params: SubagentToolParams,
@@ -255,6 +292,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
     await runtime.settleJobsBeforeTreeNavigation();
   });
   pi.on("session_shutdown", async (_event, ctx) => {
+    browser.current?.close();
     stopListeningForAgentTools();
     await runtime.shutdownSession(ctx);
   });

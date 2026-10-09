@@ -3,15 +3,22 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ExtensionRuntime,
   listExtensionDirs,
   loadExtensionManifest,
   relativeFromRepo,
 } from "./extension-manifest.mjs";
 
-const { extensionsDir } = loadExtensionManifest();
+const { extensionsDir, activeNames } = loadExtensionManifest();
+const staleOnly = process.argv.includes("--stale-only");
 let removed = 0;
 
 for (const dir of listExtensionDirs(extensionsDir)) {
+  if (
+    staleOnly &&
+    (activeNames.has(dir.name) || existsSync(join(dir.absPath, ExtensionRuntime.SourceEntry)))
+  )
+    continue;
   const dist = join(dir.absPath, "dist");
   if (existsSync(dist)) {
     rmSync(dist, { recursive: true, force: true });

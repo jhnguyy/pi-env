@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Re-runnable after pulls; preserves local auth, sessions, model choices, and extensions.
-# Only setup/config/managed-settings.json is reapplied to user settings.
 
 set -euo pipefail
 

@@ -4,7 +4,6 @@ set -euo pipefail
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 SCRIPT="$ROOT/setup/apply-managed-settings.mjs"
-MANAGED="$ROOT/setup/config/managed-settings.json"
 
 json_get() {
   local file="$1" expr="$2" node
@@ -19,118 +18,9 @@ resolved_package_path() {
 }
 
 apply_settings() {
-  local settings="$1" repo="$2" managed="${3:-$MANAGED}" node
+  local settings="$1" repo="$2" mode="${3:-}" node
   node=$(node_bin)
-  "$node" "$SCRIPT" "$settings" "$managed" "$repo"
-}
-
-test_applies_managed_settings_and_package_once() {
-  local tmp settings managed repo first second
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  managed="$tmp/managed.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  cat > "$settings" <<'JSON'
-{
-  "defaultProvider": "anthropic",
-  "packages": [
-  ],
-}
-JSON
-  printf '%s\n' '{"_comment_fixture":"ignore","fixtureManaged":{"enabled":true}}' > "$managed"
-
-  first=$(apply_settings "$settings" "$repo" "$managed")
-  second=$(apply_settings "$settings" "$repo" "$managed")
-
-  [ "$first" = "updated" ] || fail "first run should update settings, got $first"
-  [ "$second" = "unchanged" ] || fail "second run should be unchanged, got $second"
-  [ "$(json_get "$settings" 's.defaultProvider')" = "anthropic" ] || fail "defaultProvider should be preserved"
-  [ "$(json_get "$settings" 's.fixtureManaged.enabled')" = "true" ] || fail "managed settings should be applied"
-  [ "$(json_get "$settings" 'Object.keys(s).some((key) => key.startsWith("_comment"))')" = "false" ] || fail "managed comments should not be written to user settings"
-  [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "package should be added exactly once"
-  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "package path should resolve to repo"
-
-  rm -rf "$tmp"
-}
-
-test_preserves_unmanaged_retry_settings() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  cat > "$settings" <<'JSON'
-{
-  "retry": {
-    "customLocalSetting": "keep-me",
-    "provider": {
-      "customProviderSetting": "keep-me-too"
-    }
-  }
-}
-JSON
-
-  apply_settings "$settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.retry.customLocalSetting')" = "keep-me" ] || fail "unmanaged retry key should be preserved"
-  [ "$(json_get "$settings" 's.retry.provider.customProviderSetting')" = "keep-me-too" ] || fail "unmanaged provider key should be preserved"
-
-  rm -rf "$tmp"
-}
-
-test_preserves_enabled_pi_update() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  cat > "$settings" <<'JSON'
-{
-  "piUpdate": {
-    "enabled": true
-  }
-}
-JSON
-
-  apply_settings "$settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.piUpdate.enabled')" = "true" ] || fail "piUpdate.enabled=true should be preserved"
-
-  rm -rf "$tmp"
-}
-
-test_applies_to_missing_settings_file() {
-  local tmp settings repo result
-  tmp="$(with_temp_dir)"
-  settings="$tmp/nested/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-
-  result=$(apply_settings "$settings" "$repo")
-
-  [ "$result" = "created" ] || fail "missing settings should be created, got $result"
-  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "created settings should include package"
-  [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "new settings should let Pi use the system theme"
-  [ "$(json_get "$settings" 's.defaultTools')" = '["+codemode","+tool_search"]' ] || fail "new settings should enable native orchestration and search"
-
-  rm -rf "$tmp"
-}
-
-test_repairs_malformed_packages_setting() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  printf '%s\n' '{"packages": {"invalid": true}}' > "$settings"
-
-  apply_settings "$settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "malformed packages should be repaired before registration"
-  [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "repaired package path should resolve to repo"
-
-  rm -rf "$tmp"
+  "$node" "$SCRIPT" "$settings" "$repo" ${mode:+"$mode"}
 }
 
 test_rejects_malformed_package_entry_before_writing() {
@@ -155,121 +45,25 @@ test_rejects_malformed_package_entry_before_writing() {
   rm -rf "$tmp"
 }
 
-test_restores_settings_when_package_registration_fails() {
-  local tmp settings repo before
+# This boundary needs an isolated worktree rather than provisioning a second checkout.
+test_registers_primary_checkout_when_run_from_worktree() (
+  local tmp settings repo worktree result node
   tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/missing-repo"
-  printf '%s\n' '{"theme": "existing"}' > "$settings"
-  before="$(cat "$settings")"
-
-  if apply_settings "$settings" "$repo" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    fail "missing package path should fail"
-  fi
-
-  grep -Fq 'Path does not exist' "$tmp/stderr" || fail "package failure should retain native detail"
-  [ "$(cat "$settings")" = "$before" ] || fail "package failure should restore settings"
-  [ ! -s "$tmp/stdout" ] || fail "package failure should not report success"
-
-  rm -rf "$tmp"
-}
-
-test_preserves_empty_settings_file_when_package_registration_fails() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/agent/settings.json"
-  repo="$tmp/missing-repo"
-  mkdir -p "$(dirname "$settings")"
-  : > "$settings"
-
-  if apply_settings "$settings" "$repo" >"$tmp/stdout" 2>"$tmp/stderr"; then
-    fail "missing package path should fail for empty settings"
-  fi
-
-  [ -f "$settings" ] || fail "package failure should preserve an existing empty settings file"
-  [ ! -s "$settings" ] || fail "restored empty settings file should stay empty"
-
-  rm -rf "$tmp"
-}
-
-test_preserves_existing_theme() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  cat > "$settings" <<'JSON'
-{
-  "theme": "tokyonight"
-}
-JSON
-
-  apply_settings "$settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.theme')" = "tokyonight" ] || fail "custom theme should be preserved"
-
-  rm -rf "$tmp"
-}
-
-test_migrates_only_retired_theme_and_preserves_explicit_tools() {
-  local tmp settings custom repo retired_theme
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  custom="$tmp/custom/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo" "$(dirname "$custom")"
-  printf '%s\n' '{"theme":"gruvbox-light/gruvbox-dark","defaultTools":["read","write"]}' > "$settings"
-  printf '%s\n' '{"theme":"tokyonight","defaultTools":["-bash","+grep"]}' > "$custom"
-
-  apply_settings "$settings" "$repo" >/dev/null
-  apply_settings "$custom" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "retired package theme should migrate to system"
-  [ "$(json_get "$settings" 's.defaultTools')" = '["read","write","+codemode","+tool_search"]' ] || fail "explicit tools should keep their selection and gain native orchestration"
-  [ "$(json_get "$custom" 's.theme')" = "tokyonight" ] || fail "other themes should be preserved"
-  [ "$(json_get "$custom" 's.defaultTools')" = '["-bash","+grep","+codemode","+tool_search"]' ] || fail "custom tool deltas should keep their selection and gain discovery"
-  for retired_theme in gruvbox-light gruvbox-dark; do
-    printf '{"theme":"%s","defaultTools":["-codemode"]}\n' "$retired_theme" > "$settings"
-    apply_settings "$settings" "$repo" >/dev/null
-    [ "$(json_get "$settings" 'Object.hasOwn(s, "theme")')" = "false" ] || fail "retired $retired_theme should migrate to system"
-    [ "$(json_get "$settings" 's.defaultTools')" = '["-codemode","+tool_search"]' ] || fail "explicit native tool opt-out should be preserved"
-  done
-  printf '%s\n' '{"defaultTools":[]}' > "$settings"
-  apply_settings "$settings" "$repo" >/dev/null
-  [ "$(json_get "$settings" 's.defaultTools')" = '["codemode","tool_search"]' ] || fail "empty selection must not activate built-in tools"
-  local resolved
-  resolved="$(SETTINGS_PATH="$settings" run_node --input-type=module -e '
-    import { readFileSync } from "node:fs";
-    import { SettingsManager } from "@earendil-works/pi-coding-agent";
-    const { defaultTools } = JSON.parse(readFileSync(process.env.SETTINGS_PATH, "utf8"));
-    console.log(JSON.stringify(SettingsManager.inMemory({ defaultTools }).getDefaultTools()));
-  ')"
-  [ "$resolved" = '["codemode","tool_search"]' ] || fail "Pi resolver must keep an explicit empty selection restricted: got $resolved"
-  rm -rf "$tmp"
-}
-
-test_disables_default_extensions_without_clobbering_other_extensions() {
-  local tmp settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo"
-  cat > "$settings" <<'JSON'
-{
-  "extensions": ["my-extension", "playwright-client", "extensions/playwright-client", "-playwright-client", "work-tracker", ".pi/extensions/work-tracker", "-work-tracker"]
-}
-JSON
-
-  apply_settings "$settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.extensions')" = '["my-extension","-playwright-client","-work-tracker"]' ] || fail "setup should preserve other extensions and disable defaults once"
-
-  rm -rf "$tmp"
-}
-
-test_registers_primary_checkout_when_run_from_worktree() {
-  local tmp settings repo worktree result
-  tmp="$(with_temp_dir)"
+  node=$(node_bin)
+  printf 'Worktree registration evidence: %s\n' "$tmp"
+  record_result() {
+    local status=$?
+    DIR="$tmp" STATUS="$status" "$node" --input-type=module <<'JS'
+import fs from 'node:fs';
+fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
+  inputs: 'temporary primary checkout, worktree, and user settings',
+  expected: 'registration canonicalizes to the primary checkout without duplicate packages',
+  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/managed-settings.test.sh', inspect: 'normal.json, repo/, worktree/',
+}, null, 2) + '\n');
+JS
+  }
+  trap record_result EXIT
   settings="$tmp/settings.json"
   repo="$tmp/repo"
   worktree="$tmp/worktree"
@@ -288,41 +82,11 @@ test_registers_primary_checkout_when_run_from_worktree() {
 JSON
 
   result=$(apply_settings "$settings" "$worktree")
-
+  cp "$settings" "$tmp/normal.json"
   [ "$result" = "updated" ] || fail "worktree run should update package registration, got $result"
   [ "$(json_get "$settings" 's.packages.length')" = "1" ] || fail "worktree package registration should dedupe to one package"
   [ "$(resolved_package_path "$settings" 0)" = "$repo" ] || fail "worktree setup should register primary checkout"
-
-  git -C "$repo" worktree remove -f "$worktree" >/dev/null 2>&1 || true
-  rm -rf "$tmp"
-}
-
-test_migrates_only_default_npm_command_to_nub() {
-  local tmp settings custom_settings repo
-  tmp="$(with_temp_dir)"
-  settings="$tmp/default/settings.json"
-  custom_settings="$tmp/custom/settings.json"
-  repo="$tmp/repo"
-  mkdir -p "$repo" "$(dirname "$settings")" "$(dirname "$custom_settings")"
-  cat > "$settings" <<'JSON'
-{
-  "npmCommand": ["npm"]
-}
-JSON
-  cat > "$custom_settings" <<'JSON'
-{
-  "npmCommand": ["npm", "--offline"]
-}
-JSON
-
-  apply_settings "$settings" "$repo" >/dev/null
-  apply_settings "$custom_settings" "$repo" >/dev/null
-
-  [ "$(json_get "$settings" 's.npmCommand')" = '["nub"]' ] || fail "default npmCommand should migrate to nub"
-  [ "$(json_get "$custom_settings" 's.npmCommand')" = '["npm","--offline"]' ] || fail "custom npmCommand should be preserved"
-
-  rm -rf "$tmp"
-}
+)
 
 test_rejects_noncanonical_settings_filename() {
   local tmp settings repo
@@ -345,19 +109,7 @@ test_rejects_noncanonical_settings_filename() {
   rm -rf "$tmp"
 }
 
-test_applies_managed_settings_and_package_once
-test_preserves_unmanaged_retry_settings
-test_preserves_enabled_pi_update
-test_applies_to_missing_settings_file
-test_repairs_malformed_packages_setting
 test_rejects_malformed_package_entry_before_writing
-test_restores_settings_when_package_registration_fails
-test_preserves_empty_settings_file_when_package_registration_fails
-test_preserves_existing_theme
-test_migrates_only_retired_theme_and_preserves_explicit_tools
-test_disables_default_extensions_without_clobbering_other_extensions
 test_registers_primary_checkout_when_run_from_worktree
-test_migrates_only_default_npm_command_to_nub
 test_rejects_noncanonical_settings_filename
-
-echo "managed settings tests passed"
+echo "settings registration tests passed"

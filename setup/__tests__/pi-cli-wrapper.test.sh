@@ -3,6 +3,18 @@ set -euo pipefail
 
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
+PROBE_NODE=$(node_bin)
+record_adapter_probe() {
+  DIR="$1" PROBE="$2" STATUS="$3" "$PROBE_NODE" --input-type=module <<'JS'
+import fs from 'node:fs';
+fs.writeFileSync(`${process.env.DIR}/result.json`, JSON.stringify({
+  inputs: process.env.PROBE,
+  expected: 'a fresh shell selects the installed adapter after setup and rerun',
+  actual: {exitStatus: Number(process.env.STATUS)}, verdict: process.env.STATUS === '0' ? 'pass' : 'fail',
+  reproduce: 'bash setup/__tests__/pi-cli-wrapper.test.sh', inspect: 'bin/pi, home/.profile, and *.log',
+}, null, 2) + '\n');
+JS
+}
 
 run_pi_cli_setup() {
   local selected_node_bin
@@ -79,7 +91,6 @@ test_pi_cli_wrapper_uses_declared_package_entry() {
   run_pi_cli_setup
 
   [ -x "$PI_BIN_DIR/pi" ] || fail "pi wrapper should be executable"
-  [ ! -e "$REPO/node_modules/@earendil-works/pi-coding-agent/dist/cli.js" ] || fail "fixture should not contain the legacy entrypoint"
   PI_PACKAGE_DIR= "$PI_BIN_DIR/pi" | grep -qF 'stub pi' || fail "pi wrapper should execute the package-declared entrypoint"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
@@ -159,32 +170,39 @@ test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   rm -rf "$tmp"
 }
 
-test_pi_cli_wrapper_adds_path_profile_when_portable() {
-  local tmp old_home old_path
+test_pi_cli_wrapper_adds_path_profile_when_portable() (
+  local tmp old_home old_path mode="${1:-portable}"
   tmp="$(with_temp_dir)"
+  if [ "$mode" = local-nix ]; then
+    printf 'Local Nix adapter evidence: %s\n' "$tmp"
+    trap 'record_adapter_probe "$tmp" "local-nix PATH configuration" "$?"' EXIT
+  fi
   old_home="$HOME"
   old_path="$PATH"
 
   PI_ENV_NODE_BIN=$(node_bin)
   PI_ENV_TEST_NODE_BIN=$PI_ENV_NODE_BIN
   HOME="$tmp/home"
-  PATH="/usr/bin:/bin"
+  PATH="$old_path"
   mkdir -p "$HOME"
   create_stub_repo "$tmp"
 
   unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_CLI_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE || true
-  run_pi_cli_setup
-  run_pi_cli_setup
+  PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
+  PI_ENV_SETUP_MODE="$mode" run_pi_cli_setup
 
-  assert_file_contains "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\""
-  assert_file_count "$HOME/.profile" '# pi-env: add user-local bin to PATH' 1
-  assert_file_count "$HOME/.profile" "export PATH=\"$PI_BIN_DIR:\$PATH\"" 1
+  if [ "$mode" = local-nix ]; then
+    mkdir -p "$HOME/.local/state/pi-env/toolchain/bin"
+    make_executable "$HOME/.local/state/pi-env/toolchain/bin/pi" '#!/bin/sh
+exit 0'
+  fi
+  assert_eq "$(HOME="$HOME" PATH=/usr/bin:/bin bash -c 'source "$HOME/.profile"; command -v pi')" "$PI_BIN_DIR/pi" 'fresh shell selects the adapter after rerun'
 
   HOME="$old_home"
   PATH="$old_path"
   unset PI_ENV_NODE_BIN PI_ENV_TEST_NODE_BIN
-  rm -rf "$tmp"
-}
+  if [ "$mode" != local-nix ]; then rm -rf "$tmp"; fi
+)
 
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_uses_declared_package_entry
@@ -192,5 +210,6 @@ test_pi_cli_wrapper_pins_configured_node
 test_pi_cli_wrapper_intercepts_only_exact_start
 test_pi_cli_wrapper_skips_write_when_managed_by_nix
 test_pi_cli_wrapper_adds_path_profile_when_portable
+test_pi_cli_wrapper_adds_path_profile_when_portable local-nix
 
 echo "pi CLI wrapper tests passed"

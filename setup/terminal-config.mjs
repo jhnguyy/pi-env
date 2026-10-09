@@ -1,4 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { ok, section, skip } from "./runtime-support.mjs";
@@ -49,9 +50,11 @@ function configureGhosttyEffect(ctx, policy) {
       );
       return;
     }
+    const themesDir = join(ctx.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "ghostty", "themes");
     const canCreate = yield* Effect.sync(() => {
       try {
-        mkdirSync(join(ctx.ghosttyConfigDir, "themes"), { recursive: true });
+        mkdirSync(ctx.ghosttyConfigDir, { recursive: true });
+        mkdirSync(themesDir, { recursive: true });
         return true;
       } catch {
         return false;
@@ -68,13 +71,13 @@ function configureGhosttyEffect(ctx, policy) {
     );
     yield* linkPathEffect(
       join(ctx.repo, "ghostty/themes/pi-env-gruvbox-dark"),
-      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-dark"),
-      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-dark"),
+      join(themesDir, "pi-env-gruvbox-dark"),
+      join(themesDir, "pi-env-gruvbox-dark"),
     );
     yield* linkPathEffect(
       join(ctx.repo, "ghostty/themes/pi-env-gruvbox-light"),
-      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-light"),
-      join(ctx.ghosttyConfigDir, "themes/pi-env-gruvbox-light"),
+      join(themesDir, "pi-env-gruvbox-light"),
+      join(themesDir, "pi-env-gruvbox-light"),
     );
   });
 }

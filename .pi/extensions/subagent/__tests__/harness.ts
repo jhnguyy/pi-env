@@ -4,9 +4,11 @@ import type { SubagentSessionRuntimeDependencies } from "../session-runtime";
 export function createSubagentHarness(dependencies: SubagentSessionRuntimeDependencies = {}) {
   const tools = new Map<string, any>();
   const handlers = new Map<string, (...args: any[]) => any>();
+  const commands = new Map<string, any>();
   const pi = {
     appendEntry: () => {},
     registerTool: (tool: any) => tools.set(tool.name, tool),
+    registerCommand: (name: string, command: any) => commands.set(name, command),
     on: (event: string, handler: (...args: any[]) => any) => handlers.set(event, handler),
     events: {
       emit: () => {},
@@ -14,5 +16,5 @@ export function createSubagentHarness(dependencies: SubagentSessionRuntimeDepend
     },
   };
   initSubagent(pi as any, dependencies);
-  return { tools, handlers };
+  return { tools, handlers, commands };
 }

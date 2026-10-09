@@ -2,14 +2,10 @@
   "name": "pi-env",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
-  "type": "module",
   "keywords": [
     "pi-package"
   ],
-  "engines": {
-    "node": ">=24.0.0"
-  },
+  "license": "MIT",
   "workspaces": [
     ".pi/extensions/analyze",
     ".pi/extensions/general",
@@ -17,32 +13,12 @@
     ".pi/extensions/dev-tools",
     ".pi/extensions/introspection",
     ".pi/extensions/notes",
-    ".pi/extensions/pi-update",
     ".pi/extensions/review",
-    ".pi/extensions/security",
     ".pi/extensions/session-manager",
     ".pi/extensions/skill-builder",
     ".pi/extensions/subagent"
   ],
-  "pi": {
-    "extensions": [
-      ".pi/extensions/analyze",
-      ".pi/extensions/general",
-      ".pi/extensions/web-context",
-      ".pi/extensions/dev-tools",
-      ".pi/extensions/introspection",
-      ".pi/extensions/notes",
-      ".pi/extensions/pi-update",
-      ".pi/extensions/review",
-      ".pi/extensions/security",
-      ".pi/extensions/session-manager",
-      ".pi/extensions/skill-builder",
-      ".pi/extensions/subagent"
-    ],
-    "skills": [
-      ".agents/skills"
-    ]
-  },
+  "type": "module",
   "scripts": {
     "check:node": "scripts/node-run.sh scripts/check-node-version.mjs",
     "build": "scripts/node-run.sh scripts/build-extensions.mjs",
@@ -72,11 +48,11 @@
     "verify": "scripts/node-run.sh scripts/verify.mjs",
     "verify:safe": "scripts/node-run.sh scripts/verify-safe.mjs",
     "verify:pre-commit": "scripts/node-run.sh scripts/verify-pre-commit.mjs",
-    "verify:install": "nub run build && scripts/node-run.sh scripts/verify-install.mjs",
+    "verify:install": "scripts/node-run.sh scripts/verify-install.mjs",
     "verify:image-artifact": "scripts/node-run.sh scripts/verify-image-artifact.mjs",
     "verify:phase": "scripts/node-run.sh scripts/verify-phase.mjs",
-    "postinstall": "sh scripts/restart-lsp-daemon.sh && scripts/node-run.sh scripts/build-extensions.mjs",
-    "prepare": "scripts/node-run.sh scripts/patch-effect-language-service.mjs",
+    "hydrate": "scripts/node-run.sh scripts/hydrate.mjs",
+    "postinstall": "nub run hydrate",
     "prebuild": "nub run check:node",
     "pretest:unit": "nub run check:node",
     "pretest:integration": "nub run check:node",
@@ -90,18 +66,23 @@
     "security:trivy": "bash scripts/trivy-scan.sh",
     "quality:changed": "scripts/node-run.sh scripts/check-changed-quality.mjs"
   },
-  "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+  "dependencies": {
+    "@effect/opentelemetry": "4.0.0-beta.97",
+    "@effect/platform-node": "4.0.0-beta.97",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.220.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.220.0",
+    "@opentelemetry/resources": "2.9.0",
+    "@opentelemetry/sdk-logs": "0.220.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
+    "@opentelemetry/sdk-trace-node": "2.9.0",
+    "effect": "4.0.0-beta.97"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "1.0.0",
-    "@earendil-works/pi-ai": "1.0.0",
-    "@earendil-works/pi-coding-agent": "1.0.0",
-    "@earendil-works/pi-tui": "1.0.0",
+    "@earendil-works/pi-agent-core": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0",
     "@effect/language-service": "^0.86.6",
     "@effect/vitest": "4.0.0-beta.97",
     "@oxlint/plugins": "1.73.0",
@@ -117,43 +98,31 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
   "overrides": {
     "@effect/platform-node-shared": "4.0.0-beta.97",
-    "brace-expansion": "5.0.11",
+    "brace-expansion": "5.0.12",
     "dependency-cruiser": "18.0.0",
-    "minimatch": "10.2.3",
+    "minimatch": "10.2.6",
     "nanoid": "3.3.18",
     "postcss": "8.5.25",
     "protobufjs": "8.6.6",
     "smol-toml": "1.7.1",
+    "source-map-js": "1.2.2",
+    "tinypool": "2.1.2",
     "toml": "4.2.0",
     "undici": "8.10.2"
   },
-  "packageManager": "nub@0.9.5",
-  "devEngines": {
-    "packageManager": {
-      "name": "nub",
-      "version": "^0.9.5",
-      "onFail": "warn"
-    },
-    "runtime": {
-      "name": "node",
-      "version": "24.16.0",
-      "onFail": "error"
-    }
+  "engines": {
+    "node": ">=24.19.0"
   },
-  "dependencies": {
-    "@effect/opentelemetry": "4.0.0-beta.97",
-    "@effect/platform-node": "4.0.0-beta.97",
-    "@opentelemetry/api": "1.9.1",
-    "@opentelemetry/api-logs": "0.220.0",
-    "@opentelemetry/exporter-trace-otlp-http": "0.220.0",
-    "@opentelemetry/resources": "2.9.0",
-    "@opentelemetry/sdk-logs": "0.220.0",
-    "@opentelemetry/sdk-metrics": "2.9.0",
-    "@opentelemetry/sdk-trace-node": "2.9.0",
-    "effect": "4.0.0-beta.97"
-  },
+  "packageManager": "nub@0.9.6",
   "allowScripts": {
     "@google/genai": true,
     "esbuild": true,
@@ -161,5 +130,22 @@
   },
   "patchedDependencies": {
     "@effect/vitest@4.0.0-beta.97": "patches/@effect+vitest@4.0.0-beta.97.patch"
+  },
+  "pi": {
+    "extensions": [
+      ".pi/extensions/analyze",
+      ".pi/extensions/general",
+      ".pi/extensions/web-context",
+      ".pi/extensions/dev-tools",
+      ".pi/extensions/introspection",
+      ".pi/extensions/notes",
+      ".pi/extensions/review",
+      ".pi/extensions/session-manager",
+      ".pi/extensions/skill-builder",
+      ".pi/extensions/subagent"
+    ],
+    "skills": [
+      ".agents/skills"
+    ]
   }
 }

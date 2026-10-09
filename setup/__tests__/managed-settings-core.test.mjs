@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyManagedSettingsTransforms, parseJsonRelaxedText } from "../managed-settings-core.mjs";
+import { parseJsonRelaxedText } from "../managed-settings-core.mjs";
 
 describe("managed settings core", () => {
   it.each([
@@ -40,14 +40,4 @@ describe("managed settings core", () => {
     expect(() => parseJsonRelaxedText(input)).toThrow(SyntaxError);
   });
 
-  it("merges managed settings without comment keys through the aggregate transform", () => {
-    expect(
-      applyManagedSettingsTransforms(
-        { nested: { keep: true } },
-        { _comment: "ignored", nested: { add: 1 } },
-      ),
-    ).toMatchObject({
-      nested: { keep: true, add: 1 },
-    });
-  });
 });

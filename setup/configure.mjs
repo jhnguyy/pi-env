@@ -59,7 +59,6 @@ function ctxEffect() {
       repo,
       setupDir: yield* envEffect("SETUP_DIR"),
       settingsFile: yield* envEffect("SETTINGS_FILE"),
-      managedSettingsFile: yield* envEffect("MANAGED_SETTINGS_FILE"),
       agentsDir: yield* envEffect("AGENTS_DIR"),
       testUtilsDir: yield* envEffect("TEST_UTILS_DIR"),
       appendSrc: yield* envEffect("APPEND_SRC"),
