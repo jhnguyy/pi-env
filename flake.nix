@@ -40,6 +40,7 @@
         pkgs.neovim
         pkgs.ripgrep
         pkgs.tmux
+        pkgs.flock
       ];
       toolchainFor = pkgs: pkgs.symlinkJoin {
         name = "pi-env-toolchain";

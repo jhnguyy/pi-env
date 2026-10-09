@@ -46,6 +46,116 @@ async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
 }
 
 describe("tmux session host", () => {
+  // Real Pi cannot reliably pause exactly after observing a dead PID. Gate that
+  // IO here: a contender must not inspect/reclaim until the winner has verified.
+  it("serializes a dead-owner reclaim through verification", { timeout: 10_000 }, async () => {
+    const state = executor({ "@1": "dead" }, { "@1": "99" });
+    let observed!: () => void;
+    const observation = new Promise<void>((resolve) => {
+      observed = resolve;
+    });
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    let paused = false;
+    const exec: Exec = async (command, args) => {
+      const result = await state.exec(command, args);
+      if (!paused && args.includes("show-options") && args.includes("@pi_session_pid")) {
+        paused = true;
+        observed();
+        await gate;
+      }
+      return result;
+    };
+    const a = createTmuxSessionHost(exec, { ownerPid: 41, processAlive: (pid) => pid !== 99 });
+    const b = createTmuxSessionHost(exec, { ownerPid: 42, processAlive: (pid) => pid !== 99 });
+    const first = Effect.runPromise(a.bindCurrent("%1", "a"));
+    await observation;
+    const second = Effect.runPromise(Effect.result(b.bindCurrent("%2", "b")));
+    // Keep A paused until B finishes (bounded lock contention must fail closed).
+    // Without serialization B succeeds, then A erases its verified live binding.
+    const result = await second;
+    resume();
+    await first;
+    expect(result._tag).toBe("Failure");
+    expect(state.tags["@1"]).toBe("a");
+    expect(state.owners["@1"]).toBe("41");
+    expect(await failureOf(b.bindCurrent("%2", "b"))).toBeInstanceOf(WindowBindingConflict);
+  });
+
+  it("rejects same-ID foreign live bind, release and rename without mutation", async () => {
+    const state = executor({ "@1": "a" }, { "@1": "41" });
+    const host = createTmuxSessionHost(state.exec, { ownerPid: 42, processAlive: () => true });
+    for (const operation of [
+      host.bindCurrent("%1", "a"),
+      host.releaseCurrent("%1", "a"),
+      host.renameCurrent("%1", "a", "duplicate names remain allowed"),
+    ]) {
+      expect((await Effect.runPromise(Effect.result(operation)))._tag).toBe("Failure");
+    }
+    expect(state.owners["@1"]).toBe("41");
+    expect(
+      state.calls.some((call) => call.includes("set-option") || call.includes("rename-window")),
+    ).toBe(false);
+  });
+
+  it("releases serialization after a failed tmux command", async () => {
+    const state = executor({});
+    const broken: Exec = async (command, args) =>
+      args.includes("set-option")
+        ? { code: 1, stdout: "", stderr: "injected tmux failure" }
+        : state.exec(command, args);
+    expect(
+      (await Effect.runPromise(Effect.result(createTmuxSessionHost(broken).bindCurrent("%1", "a"))))
+        ._tag,
+    ).toBe("Failure");
+    await Effect.runPromise(createTmuxSessionHost(state.exec).bindCurrent("%1", "a"));
+    expect(state.tags["@1"]).toBe("a");
+  });
+
+  it("drains interrupted IO before releasing the lock", { timeout: 10_000 }, async () => {
+    const state = executor({});
+    let entered!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const exec: Exec = async (command, args) => {
+      if (args.includes("set-option") && args.includes("@pi_session_pid")) {
+        entered();
+        await gate;
+      }
+      return state.exec(command, args);
+    };
+    const controller = new AbortController();
+    const first = Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "a"), {
+      signal: controller.signal,
+    }).then(
+      () => "completed",
+      () => "interrupted",
+    );
+    await pending;
+    controller.abort();
+    const successor = createTmuxSessionHost(state.exec);
+    const blocked = await Effect.runPromise(Effect.result(successor.bindCurrent("%1", "b")));
+    resume();
+    await first;
+    expect(blocked._tag).toBe("Failure");
+    expect(state.tags["@1"]).toBe("a");
+    await Effect.runPromise(successor.bindCurrent("%1", "b"));
+    expect(state.tags["@1"]).toBe("b");
+  });
+
+  it("claims an ownerless same-ID restore tag", async () => {
+    const state = executor({ "@1": "a" });
+    await Effect.runPromise(createTmuxSessionHost(state.exec).bindCurrent("%1", "a"));
+    expect(state.owners["@1"]).toBe(String(process.pid));
+  });
+
   it("passes a user name with shell metacharacters as one argument", async () => {
     const { calls, exec } = executor({});
     const name = "quiet pine; $(touch nope)";

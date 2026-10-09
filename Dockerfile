@@ -31,6 +31,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     ca-certificates \
     git \
     tini \
+    util-linux \
   && npm install --global --omit=dev @nubjs/nub@0.9.5 \
   && nub --version \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \

@@ -286,6 +286,131 @@ describeE2E("session-manager in real tmux", () => {
   );
 
   it(
+    "arbitrates concurrent real Pi reclaimers and releases without deadlock",
+    { timeout: STEP_TIMEOUT_MS },
+    async () => {
+      await clearPane();
+      let second = "";
+      try {
+        await check(
+          "concurrent dead-owner reclaim",
+          { oneOwner: true, loserRejected: true, loserPreservedOwner: true, released: true },
+          async () => {
+            respawn();
+            await bound();
+            signalPi("SIGKILL");
+            await exited();
+            const first = format("#{pane_id}");
+            second = tmux(
+              "split-window",
+              "-d",
+              "-P",
+              "-F",
+              "#{pane_id}",
+              "-t",
+              first,
+              "-c",
+              join(root, "work"),
+              piCommand(),
+            );
+            respawn();
+            const panes = [first, second];
+            const pid = (pane: string) => tmux("display-message", "-p", "-t", pane, "#{pane_pid}");
+            const capture = (pane: string) => tmux("capture-pane", "-p", "-t", pane);
+            await until(
+              () => panes.some((pane) => capture(pane).includes("enrollment failed")),
+              Boolean,
+              "one rejected reclaimer",
+            );
+            const owner = option("@pi_session_pid");
+            const winner = panes.find((pane) => pid(pane) === owner)!;
+            const loser = panes.find((pane) => pane !== winner)!;
+            const oneOwner = panes.filter((pane) => pid(pane) === owner).length === 1;
+            const loserRejected = capture(loser).includes("enrollment failed");
+            const stop = async (pane: string) => {
+              process.kill(positivePid(pid(pane)), "SIGTERM");
+              await until(
+                () => tmux("display-message", "-p", "-t", pane, "#{pane_dead}"),
+                (dead) => dead === "1",
+                "reclaimer shutdown",
+              );
+            };
+            await stop(loser);
+            const loserPreservedOwner = option("@pi_session_pid") === owner;
+            await stop(winner);
+            return {
+              oneOwner,
+              loserRejected,
+              loserPreservedOwner,
+              released: option("@pi_session_id") === "" && option("@pi_session_pid") === "",
+            };
+          },
+        );
+      } finally {
+        if (second) tmux("kill-pane", "-t", second);
+        await clearPane();
+      }
+    },
+  );
+
+  it(
+    "keeps a same-ID live owner when a second Pi enrolls and exits",
+    { timeout: STEP_TIMEOUT_MS },
+    async () => {
+      await clearPane();
+      let contender = "";
+      try {
+        await check(
+          "same-ID exclusive live ownership",
+          { rejected: true, preservedAfterExit: true },
+          async () => {
+            respawn();
+            const incumbent = await bound();
+            contender = tmux(
+              "split-window",
+              "-d",
+              "-P",
+              "-F",
+              "#{pane_id}",
+              "-t",
+              windowId,
+              "-c",
+              join(root, "work"),
+              piCommand("--session-id", incumbent.sessionId),
+            );
+            const contenderScreen = () => tmux("capture-pane", "-p", "-t", contender);
+            await until(
+              contenderScreen,
+              (text) =>
+                text.includes("enrollment failed") ||
+                option("@pi_session_pid") !== incumbent.ownerPid,
+              "contender enrollment",
+            );
+            const rejected = contenderScreen().includes("enrollment failed");
+            const pid = tmux("display-message", "-p", "-t", contender, "#{pane_pid}");
+            process.kill(positivePid(pid), "SIGTERM");
+            await until(
+              () => tmux("display-message", "-p", "-t", contender, "#{pane_dead}"),
+              (dead) => dead === "1",
+              "contender shutdown",
+            );
+            return {
+              rejected,
+              preservedAfterExit:
+                option("@pi_session_pid") === incumbent.ownerPid &&
+                option("@pi_session_id") === incumbent.sessionId,
+            };
+          },
+        );
+      } finally {
+        if (contender) tmux("kill-pane", "-t", contender);
+        signalPi("SIGTERM");
+        await exited();
+      }
+    },
+  );
+
+  it(
     "keeps an explicit session name on the window after release",
     { timeout: STEP_TIMEOUT_MS },
     async () => {

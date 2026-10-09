@@ -1,4 +1,5 @@
 import { Data, Effect } from "effect";
+import { acquireBindingLock } from "./binding-lock.js";
 
 export type ExecResult = {
   readonly stdout: string;
@@ -126,6 +127,36 @@ export function createTmuxSessionHost(
       ),
     );
 
+  // Serialize the whole socket, including duplicate-ID checks across windows and
+  // coordinator pre-tags. Resolve only the socket before locking; inspect again
+  // inside. Do not interrupt an in-flight pi.exec and release underneath its IO.
+  const withBindingLock = <A, E>(paneId: string, operation: Effect.Effect<A, E>) =>
+    Effect.uninterruptible(
+      Effect.gen(function* () {
+        const socketPath = yield* run("resolve socket for binding lock", [
+          "display-message",
+          "-p",
+          "-t",
+          paneId,
+          "-F",
+          "#{socket_path}",
+        ]);
+        return yield* Effect.acquireUseRelease(
+          acquireBindingLock(socketPath).pipe(
+            Effect.mapError(
+              (cause) =>
+                new SessionHostFailure({
+                  operation: "lock window bindings",
+                  reason: String(cause),
+                }),
+            ),
+          ),
+          () => operation,
+          (release) => Effect.promise(release),
+        );
+      }),
+    );
+
   const inspectCurrent = (paneId: string) =>
     Effect.gen(function* () {
       const socketPath = yield* run("resolve socket", [
@@ -229,11 +260,8 @@ export function createTmuxSessionHost(
       ]),
     );
 
-  // A foreign binding is stale when its owner exited, or when this process owned it
-  // for an earlier session. Bindings without an owner are kept because liveness is unknown.
-  const reclaimStaleBinding = (window: CurrentWindow, sessionId: string) =>
+  const assertLiveOwner = (window: CurrentWindow) =>
     Effect.gen(function* () {
-      if (!window.boundSessionId || window.boundSessionId === sessionId) return window;
       const owner = yield* run("read window binding owner", [
         "-S",
         window.socketPath,
@@ -246,7 +274,22 @@ export function createTmuxSessionHost(
         OWNER_OPTION,
       ]);
       const pid = /^[1-9][0-9]*$/.test(owner) ? Number(owner) : undefined;
-      if (pid === undefined || (pid !== ownerPid && ownerAlive(pid))) return window;
+      if (pid !== undefined && pid !== ownerPid && ownerAlive(pid)) {
+        return yield* new WindowBindingConflict({
+          windowId: window.windowId,
+          existingSessionId: window.boundSessionId ?? "",
+        });
+      }
+      return pid;
+    });
+
+  // A foreign binding is stale when its owner exited, or when this process owned it
+  // for an earlier session. Bindings without an owner are kept because liveness is unknown.
+  const reclaimStaleBinding = (window: CurrentWindow, sessionId: string) =>
+    Effect.gen(function* () {
+      if (!window.boundSessionId) return window;
+      const pid = yield* assertLiveOwner(window);
+      if (pid === undefined || window.boundSessionId === sessionId) return window;
       yield* unsetBinding("release stale window binding", window);
       return {
         ...window,
@@ -315,6 +358,7 @@ export function createTmuxSessionHost(
     Effect.gen(function* () {
       const window = yield* inspectCurrent(paneId);
       yield* assertBinding(window, sessionId);
+      yield* assertLiveOwner(window);
       if (window.boundSessionId !== sessionId) {
         return yield* new SessionHostFailure({
           operation: "rename window",
@@ -345,6 +389,7 @@ export function createTmuxSessionHost(
     Effect.gen(function* () {
       const window = yield* inspectCurrent(paneId);
       yield* assertBinding(window, sessionId);
+      yield* assertLiveOwner(window);
       if (window.boundSessionId !== sessionId) return;
       yield* unsetBinding("release window binding", window);
       const windowName = yield* run("read window name", [
@@ -494,9 +539,12 @@ export function createTmuxSessionHost(
 
   return {
     inspectCurrent,
-    bindCurrent,
-    renameCurrent,
-    releaseCurrent,
-    restoreWindow,
+    bindCurrent: (paneId, sessionId, name) =>
+      withBindingLock(paneId, bindCurrent(paneId, sessionId, name)),
+    renameCurrent: (paneId, sessionId, name) =>
+      withBindingLock(paneId, renameCurrent(paneId, sessionId, name)),
+    releaseCurrent: (paneId, sessionId) =>
+      withBindingLock(paneId, releaseCurrent(paneId, sessionId)),
+    restoreWindow: (input) => withBindingLock(input.paneId, restoreWindow(input)),
   };
 }
