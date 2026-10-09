@@ -27,7 +27,7 @@ exit 0'
   set +e
   PATH="$bin:$PATH" NUB_COUNT="$count" REPO="$repo" PI_BIN_DIR="$temp/pi-bin" \
     PI_ENV_CLI_MANAGED_BY_NIX=1 PI_ENV_CONFIG_MANAGED_BY_NIX=1 \
-    "$(node_bin)" "$ROOT/setup/runtime.mjs" "$(node_bin)" all >/dev/null 2>&1
+    "$(node_bin)" "$ROOT/setup/runtime.mjs" "$(node_bin)" dependencies >/dev/null 2>&1
   status=$?
   set -e
 

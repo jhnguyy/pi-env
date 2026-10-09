@@ -83,7 +83,6 @@ function configureEffect() {
         yield* configurePiEffect(ctx, policy);
         yield* configureTerminalToolsEffect(ctx, policy);
         yield* configureRepoToolsEffect(ctx, policy);
-        yield* configureHomeManagerEffect(ctx, policy);
         break;
       case ConfigureCommand.Pi:
         yield* configurePiEffect(ctx, policy);
