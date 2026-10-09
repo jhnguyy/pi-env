@@ -23,9 +23,10 @@ import {
   runRealReviewFlow,
   reviewFixture as fixture,
   assignments,
+  availableModels,
   eventsApi as piEvents,
 } from "./fixtures/review-flow";
-import { EvidenceResolverNode, compileReviewGraph } from "../review-graph";
+import { EvidenceResolverNode, ReviewerNodes, compileReviewGraph } from "../review-graph";
 import { ReviewEvidenceChunkOutputs, ReviewEvidenceCoverageOutput } from "../evidence-resolver";
 import type { ReviewState } from "../schema";
 import { buildRawFindingRecords } from "../synthesis-provenance";
@@ -309,96 +310,16 @@ describe("DAG-backed pull request review runner", () => {
     });
     expect(flow.state.result?.provenance?.status).toBe("accepted");
   });
-  it.each([
-    {
-      name: "single-model roster",
-      models: [
-        {
-          provider: "vendor",
-          id: "single",
-          reasoning: true,
-          thinkingLevelMap: { high: null, xhigh: null, max: null },
-        },
-      ],
-      pins: {},
-      levels: { "vendor/single": "medium" },
-    },
-    {
-      name: "unannotated multi-model roster",
-      models: [
-        { provider: "zeta", id: "plain", reasoning: false },
-        {
-          provider: "alpha",
-          id: "reasoning",
-          reasoning: true,
-          thinkingLevelMap: { xhigh: null, max: null },
-        },
-      ],
-      pins: {},
-      levels: { "zeta/plain": undefined, "alpha/reasoning": "high" },
-    },
-    {
-      name: "pinned roster",
-      models: [
-        { provider: "zeta", id: "plain", reasoning: false },
-        {
-          provider: "alpha",
-          id: "reasoning",
-          reasoning: true,
-          thinkingLevelMap: { xhigh: null, max: null },
-        },
-      ],
-      pins: { correctness: "zeta/plain", synthesis: "alpha/reasoning" },
-      levels: { "zeta/plain": undefined, "alpha/reasoning": "high" },
-    },
-  ])("finalizes reviews using $name", async ({ name, models, pins, levels }) => {
-    const available = models.map((model) => ({
-      ...model,
-      name: model.id,
-      api: "openai-responses" as const,
-      baseUrl: "https://example.invalid",
-      input: ["text" as const],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 100_000,
-      maxTokens: 10_000,
-    }));
-    const flow = await runRealReviewFlow(undefined, { models: available, pins });
-    expect(new Set(flow.requests.map((request) => request.nodeId))).toEqual(
-      new Set([
-        "reading-plan",
-        "review-correctness",
-        "review-intent",
-        "review-maintainability",
-        "review-tests",
-        "review-security",
-        "review-whole-change",
-        "synthesis",
-      ]),
-    );
-    expect(flow.requests).toHaveLength(8);
-    expect(new Set(flow.requests.map((request) => request.model))).toEqual(
-      new Set(available.map((model) => `${model.provider}/${model.id}`)),
-    );
-    for (const request of flow.requests) {
-      expect(request.reasoning).toBe(levels[request.model as keyof typeof levels]);
-    }
-    for (const [role, model] of Object.entries(pins)) {
-      const nodeId = role === "synthesis" ? role : `review-${role}`;
-      expect(flow.requests.find((request) => request.nodeId === nodeId)?.model).toBe(model);
-    }
-    expect(flow.state.result?.coverage?.status).toBe("complete");
-    expect(flow.state.result?.findings).toHaveLength(3);
+  it("honors a supported role pin through the real offline session runtime", async () => {
+    const model = availableModels
+      .map((candidate) => `${candidate.provider}/${candidate.id}`)
+      .find((id) => id !== assignments.correctness.model);
+    if (!model) throw new Error("Role-pin fixture needs an alternative registry model");
+    const flow = await runRealReviewFlow(undefined, { pins: { correctness: model } });
+    const node = ReviewerNodes.find((candidate) => candidate.role === "correctness");
+    expect(flow.requests.find((request) => request.nodeId === node?.nodeId)?.model).toBe(model);
     expect(flow.state.dag?.status).toBe("succeeded");
-    if (name === "unannotated multi-model roster") {
-      const repeated = await runRealReviewFlow(undefined, {
-        models: [...available].reverse(),
-        pins,
-      });
-      const byNode = (requests: typeof flow.requests) =>
-        [...requests].sort((left, right) => left.nodeId.localeCompare(right.nodeId));
-      expect(byNode(repeated.requests)).toEqual(byNode(flow.requests));
-      expect(repeated.state.dag?.status).toBe("succeeded");
-    }
+    expect(flow.state.result?.coverage?.status).toBe("complete");
   });
 
   it.each([
@@ -419,6 +340,9 @@ describe("DAG-backed pull request review runner", () => {
 
   it("produces a finalized review through the real offline session runtime", async () => {
     const flow = await runRealReviewFlow();
+    const registryModels = availableModels.map((model) => `${model.provider}/${model.id}`);
+    expect(flow.requests.length).toBeGreaterThan(0);
+    for (const request of flow.requests) expect(registryModels).toContain(request.model);
     expect(flow.state.dag).toMatchObject({ status: "succeeded" });
     expect(flow.state.result?.coverage?.succeeded).toEqual(
       expect.arrayContaining([

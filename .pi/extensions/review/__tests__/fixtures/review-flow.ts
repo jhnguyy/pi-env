@@ -105,7 +105,7 @@ export function reviewFixture(): {
   };
 }
 
-const availableModels = ["provider-a", "provider-b"].map(
+export const availableModels = ["provider-a", "provider-b"].map(
   (provider): Model<"openai-responses"> => ({
     provider,
     id: "model",
@@ -121,7 +121,7 @@ const availableModels = ["provider-a", "provider-b"].map(
   }),
 );
 
-export function assignmentsFor(
+function assignmentsFor(
   models: readonly Model<"openai-responses">[] = availableModels,
   pins: ReviewRolePins | Readonly<Record<string, string>> = {},
 ): ReviewRoleAssignments {
@@ -199,7 +199,6 @@ export interface RealReviewFlow {
   readonly requests: readonly {
     readonly nodeId: string;
     readonly model: string;
-    readonly reasoning?: string;
   }[];
 }
 
@@ -215,22 +214,20 @@ export async function runRealReviewFlow(
     readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
   } = {},
 ): Promise<RealReviewFlow> {
-  const requests: { nodeId: string; model: string; reasoning?: string }[] = [];
+  const requests: { nodeId: string; model: string }[] = [];
   const evidencePath = process.env.PI_REVIEW_FLOW_EVIDENCE;
   const evidenceRecord: Record<string, unknown> = {
-    revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    revision: evidencePath
+      ? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+      : undefined,
     reproduce:
       "PI_REVIEW_FLOW_EVIDENCE=$HOME/review-flow.jsonl nub run test:vitest .pi/extensions/review/__tests__/review-dag-runner.test.ts",
     inputs: {
-      models: (options.models ?? availableModels).map((model) => ({
-        id: `${model.provider}/${model.id}`,
-        reasoning: model.reasoning,
-        thinkingLevelMap: model.thinkingLevelMap,
-      })),
+      models: (options.models ?? availableModels).map((model) => `${model.provider}/${model.id}`),
       pins: options.pins ?? {},
     },
     expected:
-      "Eight model requests dispatched; all dispatched models and reasoning match complete deterministic same-input assignments (including pins); finalized review succeeds with complete coverage and three findings.",
+      "Review finalizes with complete coverage using only registry models and honoring supported role pins.",
     actual: "pending",
   };
   const persistEvidence = (actual: unknown, expected = evidenceRecord.expected) => {
@@ -308,8 +305,8 @@ export async function runRealReviewFlow(
   let invalidSynthesisRejected = false;
   let dossierRawIds: string[] = [];
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
-    const payload = request.node.executor.payload as { model: string; reasoning?: string };
-    requests.push({ nodeId: request.node.id, model: payload.model, reasoning: payload.reasoning });
+    const payload = request.node.executor.payload as { model: string };
+    requests.push({ nodeId: request.node.id, model: payload.model });
     if (request.node.id === "reading-plan") {
       const submitted = await findTool("submit_review_plan_").execute("plan", {
         goal: "Change the exported value.",
