@@ -644,7 +644,8 @@ describeE2E("session-manager in real tmux", () => {
               (text) => text.includes(second.sessionId),
               "status with full session ID",
             );
-            const statusHasId = screen().includes(`shared-label (${second.sessionId})`);
+            const statusHasId =
+              screen().includes(first.name) && screen().includes(second.sessionId);
             signalPi("SIGTERM");
             await exited();
             const released = window();
@@ -753,8 +754,9 @@ describeE2E("session-manager in real tmux", () => {
                 stillFirst.ownerPid !== "" &&
                 restored.ownerPid !== stillFirst.ownerPid,
               restoreSummaryHasIds:
-                summary.includes(`shared-label (${first.sessionId})`) &&
-                summary.includes(`shared-label (${second.sessionId})`),
+                summary.includes(first.name) &&
+                summary.includes(first.sessionId) &&
+                summary.includes(second.sessionId),
               summary,
             };
           },
