@@ -2,7 +2,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 // Drives real Pi with only session-manager loaded inside an isolated tmux server.
 // Run in the container with `nub run test:e2e:session-manager:docker`.
@@ -52,6 +52,7 @@ describeE2E("session-manager in real tmux", () => {
   let windowId = "";
   let artifactPath = "";
   const cases: Case[] = [];
+  let caseStart = 0;
   const evidence: Record<string, unknown> = {
     scenario: "real Pi with session-manager in an isolated tmux server",
     repeat: "nub run test:e2e:session-manager:docker",
@@ -151,6 +152,26 @@ describeE2E("session-manager in real tmux", () => {
       .replaceAll(repoRoot, "<repo>");
     writeFileSync(artifactPath, `${text}\n`);
   }
+
+  beforeEach(() => {
+    caseStart = cases.length;
+  });
+
+  afterEach((context) => {
+    if (context.task.result?.state !== "fail") return;
+    if (cases.length === caseStart) {
+      cases.push({
+        name: context.task.name,
+        expected: { workflowAndCleanup: "complete" },
+        verdict: "incomplete",
+      });
+    }
+    for (const entry of cases.slice(caseStart)) {
+      entry.verdict = "fail";
+      entry.actual = { ...entry.actual, testErrors: context.task.result.errors };
+    }
+    if (artifactPath) saveEvidence();
+  });
 
   beforeAll(async () => {
     const parent = process.env["PI_ENV_E2E_ARTIFACT_DIR"] || tmpdir();
