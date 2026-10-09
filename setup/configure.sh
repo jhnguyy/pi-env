@@ -22,16 +22,30 @@ setup_run_configure() {
   "$setup_node_bin" "$SETUP_DIR/configure.mjs" "$1" "$setup_node_bin"
 }
 
+# The caller's environment can predate the active generation, so read its session
+# variables from the generation Home Manager reports instead of the environment.
+setup_load_home_manager_session() {
+  local generation session
+  generation=$(home-manager generations 2>/dev/null | awk '/\(current\)$/ { print $(NF - 1); exit }') || true
+  session="$generation/home-path/etc/profile.d/hm-session-vars.sh"
+  if [ -z "$generation" ] || [ ! -r "$session" ]; then
+    echo "  ✗  Setup could not read the session variables of the current Home Manager generation." >&2
+    echo "     Open a new shell, then rerun ./setup.sh." >&2
+    return 1
+  fi
+  unset __HM_SESS_VARS_SOURCED
+  set +u
+  # shellcheck source=/dev/null
+  . "$session"
+  set -u
+  ok "Home Manager session variables loaded from ${generation}"
+}
+
 setup_sync_home_manager() {
   setup_run_configure home-manager
-  # The caller's environment predates the switch; reload the activated profile's
-  # variables so later stages use the Pi and Node it supplies.
-  if [ "${PI_ENV_HOME_MANAGER_SYNC:-0}" = "1" ] && [ -r "${PI_ENV_HOME_MANAGER_SESSION_VARS:-}" ]; then
-    unset __HM_SESS_VARS_SOURCED
-    set +u
-    # shellcheck source=/dev/null
-    . "$PI_ENV_HOME_MANAGER_SESSION_VARS"
-    set -u
+  if [ "${PI_ENV_HOME_MANAGER_SYNC:-0}" = "1" ] && [ "${PI_ENV_SKIP_HOME_MANAGER:-0}" != "1" ] &&
+    [ -n "${PI_ENV_HOME_MANAGER_FLAKE:-}" ]; then
+    setup_load_home_manager_session
   fi
 }
 
