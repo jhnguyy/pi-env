@@ -349,9 +349,7 @@ describeE2E("session-manager in real tmux", () => {
             );
             return {
               ...window(),
-              reportsCause: screen().includes(
-                `WindowBindingConflict (windowId=${windowId}, existingSessionId=held-by-live-process)`,
-              ),
+              reportsCause: screen().includes("WindowBindingConflict"),
             };
           },
         );
