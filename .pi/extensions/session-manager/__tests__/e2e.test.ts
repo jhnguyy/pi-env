@@ -289,27 +289,19 @@ describeE2E("session-manager in real tmux", () => {
           }
           respawn();
           let enrollmentFailed = false;
-          let state: ReturnType<typeof window>;
-          try {
-            state = await until(
-              () => ({ state: window(), failed: screen().includes("enrollment failed") }),
-              ({ state: current, failed }) =>
-                failed ||
-                (current.sessionId !== "" &&
-                  current.sessionId !== killed.sessionId &&
-                  current.ownerPid === panePid() &&
-                  labelled(current)),
-              "reclaim enrollment outcome",
-            ).then(({ state: current, failed }) => {
-              enrollmentFailed = failed;
-              return current;
-            });
-          } catch (error) {
-            state = window();
-            throw new Error(
-              `Reclaim did not complete: ${String(error)}; state=${JSON.stringify(state)}; screen=${screen()}`,
-            );
-          }
+          const state = await until(
+            () => ({ state: window(), failed: screen().includes("enrollment failed") }),
+            ({ state: current, failed }) =>
+              failed ||
+              (current.sessionId !== "" &&
+                current.sessionId !== killed.sessionId &&
+                current.ownerPid === panePid() &&
+                labelled(current)),
+            "reclaim enrollment outcome",
+          ).then(({ state: current, failed }) => {
+            enrollmentFailed = failed;
+            return current;
+          });
           return {
             ...state,
             killedSessionId: killed.sessionId,
