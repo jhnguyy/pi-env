@@ -427,4 +427,206 @@ describeE2E("session-manager in real tmux", () => {
       );
     },
   );
+
+  it(
+    "keeps duplicate display names targeted by session ID across rename, release, and coordinator restoration",
+    { timeout: STEP_TIMEOUT_MS * 2 },
+    async () => {
+      await clearPane();
+      const firstWindow = windowId;
+      let secondWindow = "";
+      const work = join(root, "duplicate-work");
+      mkdirSync(work);
+      const launch = (...args: string[]) =>
+        tmux("respawn-pane", "-t", windowId, "-c", work, piCommand(...args));
+      const restoredWindows: string[] = [];
+      try {
+        await check(
+          "duplicate display names",
+          {
+            distinctIds: true,
+            duplicateStart: true,
+            duplicateRename: true,
+            duplicateAdopt: true,
+            statusHasId: true,
+            targetedRelease: true,
+            targetedRestore: true,
+            restoreSummaryHasIds: true,
+          },
+          async () => {
+            launch("--name", "shared-label");
+            const first = await bound();
+            secondWindow = tmux(
+              "new-window",
+              "-d",
+              "-P",
+              "-F",
+              "#{window_id}",
+              "-t",
+              "e2e:",
+              "sleep 600",
+            );
+            windowId = secondWindow;
+            tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
+            await clearPane();
+            launch("--name", "shared-label");
+            const second = await bound();
+            const duplicateStart = first.name === "shared-label" && second.name === first.name;
+            const command = (text: string) => {
+              tmux("send-keys", "-t", windowId, "-l", text);
+              tmux("send-keys", "-t", windowId, "Enter");
+            };
+            command("/name temporary-label");
+            await until(window, (state) => state.name === "temporary-label", "temporary rename");
+            command("/name shared-label");
+            const renamed = await until(
+              window,
+              (state) => state.name === first.name,
+              "duplicate rename",
+            );
+            command("/session-status");
+            await until(
+              screen,
+              (text) => text.includes(second.sessionId),
+              "status with full session ID",
+            );
+            const statusHasId = screen().includes(`shared-label (${second.sessionId})`);
+            signalPi("SIGTERM");
+            await exited();
+            const released = window();
+            const adoptedId = "12345678-1234-4123-8123-123456789abc";
+            const adoptedFile = join(root, "adopt-duplicate.jsonl");
+            writeFileSync(
+              adoptedFile,
+              `${JSON.stringify({
+                type: "session",
+                version: 3,
+                id: adoptedId,
+                cwd: work,
+                timestamp: new Date().toISOString(),
+              })}\n`,
+            );
+            launch("--session", adoptedFile, "--name", "shared-label");
+            await until(
+              screen,
+              (text) => text.includes("shared-label"),
+              "materialized session startup",
+            );
+            command("/session-adopt");
+            const adopted = await bound();
+            command("/session-done");
+            await exited();
+            windowId = firstWindow;
+            const preserved = window();
+            signalPi("SIGTERM");
+            await exited();
+            windowId = secondWindow;
+            const wrapper = join(root, "duplicate-pi");
+            writeFileSync(
+              wrapper,
+              `#!/bin/sh\nexport XDG_RUNTIME_DIR=${quote(join(root, "runtime"))}\nexec ${piCommand()} "$@"\n`,
+              { mode: 0o700 },
+            );
+            const start = join(repoRoot, ".pi/extensions/session-manager/dist/start.js");
+            tmux(
+              "respawn-pane",
+              "-t",
+              windowId,
+              "-c",
+              work,
+              [
+                "env",
+                `PI_CODING_AGENT_DIR=${quote(join(root, "agent"))}`,
+                `XDG_RUNTIME_DIR=${quote(join(root, "runtime"))}`,
+                "PI_OFFLINE=1",
+                `PI_ENV_NODE_BIN=${quote(process.execPath)}`,
+                `PI_ENV_REAL_PI_ENTRY=${quote(piCli)}`,
+                `PI_ENV_PI_WRAPPER=${quote(wrapper)}`,
+                `PI_ENV_SESSION_MANAGER_EXTENSION=${quote(extension)}`,
+                quote(process.execPath),
+                quote(start),
+              ].join(" "),
+            );
+            await until(
+              screen,
+              (text) => text.includes("Workspace restore complete."),
+              "coordinator restoration",
+            );
+            const summary = screen();
+            const restoredBindings = tmux(
+              "list-windows",
+              "-t",
+              "e2e:",
+              "-F",
+              "#{window_id} #{@pi_session_id} #{window_name}",
+            ).split("\n");
+            const restoredWindow = (id: string) => {
+              const line = restoredBindings.find((item) => item.split(" ")[1] === id);
+              if (!line) throw new Error(`No restored window for ${id}`);
+              const target = line.split(" ")[0];
+              restoredWindows.push(target);
+              windowId = target;
+              return window();
+            };
+            const restored = restoredWindow(second.sessionId);
+            const stillFirst = restoredWindow(first.sessionId);
+            return {
+              first,
+              second,
+              renamed,
+              released,
+              preserved,
+              restored,
+              stillFirst,
+              distinctIds: first.sessionId !== second.sessionId,
+              adopted,
+              duplicateAdopt: adopted.sessionId === adoptedId && adopted.name === first.name,
+              duplicateStart,
+              duplicateRename:
+                renamed.name === first.name && renamed.sessionId === second.sessionId,
+              statusHasId,
+              targetedRelease:
+                released.sessionId === "" &&
+                released.ownerPid === "" &&
+                preserved.sessionId === first.sessionId &&
+                preserved.ownerPid === first.ownerPid,
+              targetedRestore:
+                restored.sessionId === second.sessionId &&
+                restored.name === first.name &&
+                stillFirst.sessionId === first.sessionId &&
+                stillFirst.name === first.name &&
+                restored.ownerPid !== "" &&
+                stillFirst.ownerPid !== "" &&
+                restored.ownerPid !== stillFirst.ownerPid,
+              restoreSummaryHasIds:
+                summary.includes(`shared-label (${first.sessionId})`) &&
+                summary.includes(`shared-label (${second.sessionId})`),
+              summary,
+            };
+          },
+        );
+      } finally {
+        for (const target of restoredWindows) {
+          windowId = target;
+          tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
+          signalPi("SIGTERM");
+          await exited();
+          tmux("kill-window", "-t", target);
+        }
+        if (secondWindow) {
+          windowId = secondWindow;
+          if (format("#{pane_dead}") === "0") {
+            signalPi("SIGTERM");
+            await exited();
+          }
+          tmux("kill-window", "-t", secondWindow);
+        }
+        windowId = firstWindow;
+        if (format("#{pane_dead}") === "0") {
+          signalPi("SIGTERM");
+          await exited();
+        }
+      }
+    },
+  );
 });

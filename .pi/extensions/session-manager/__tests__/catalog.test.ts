@@ -123,7 +123,7 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
-  it("includes the coordinator in identity and exact active-name uniqueness", () => {
+  it("includes the coordinator in identity uniqueness", () => {
     const { desiredState: _desiredState, ...base } = openRecord({
       sessionId: "coordinator",
       name: "Fox",
@@ -152,11 +152,11 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
-  it("enforces identity, active-name, timestamp, and stable-order invariants", () => {
+  it("enforces identity, timestamp, and stable-order invariants", () => {
     expect(() =>
       validateManifest(
         manifest({
-          sessions: [openRecord(), openRecord({ sessionId: "session-b", name: "amber-fox" })],
+          sessions: [openRecord(), openRecord({ name: "different-label" })],
         }),
       ),
     ).toThrow(ManifestSemanticFailure);
