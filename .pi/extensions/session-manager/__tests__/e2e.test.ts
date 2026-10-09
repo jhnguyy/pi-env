@@ -107,11 +107,15 @@ describeE2E("session-manager in real tmux", () => {
     ].join(" ");
   const respawn = (...args: string[]) =>
     tmux("respawn-pane", "-t", windowId, "-c", join(root, "work"), piCommand(...args));
-  const bound = (previous = "") =>
+  const bound = (previous = "", name?: string) =>
     until(
       window,
-      (state) => state.sessionId !== "" && state.sessionId !== previous,
-      "a window binding",
+      (state) =>
+        state.sessionId !== "" &&
+        state.sessionId !== previous &&
+        state.ownerPid === panePid() &&
+        state.name === (name ?? `pi-${state.sessionId.slice(-6)}`),
+      "a complete window binding",
     );
   const labelled = (state: { sessionId: string; name: string }) =>
     state.name === `pi-${state.sessionId.slice(-6)}`;
@@ -129,7 +133,12 @@ describeE2E("session-manager in real tmux", () => {
       entry.verdict = "pass";
     } catch (error) {
       entry.verdict = "fail";
-      entry.actual = { ...entry.actual, error: String(error), screen: screen() };
+      entry.actual = { ...entry.actual, error: String(error) };
+      try {
+        entry.actual.screen = screen();
+      } catch (captureError) {
+        entry.actual.captureError = String(captureError);
+      }
       throw error;
     } finally {
       saveEvidence();
@@ -144,15 +153,16 @@ describeE2E("session-manager in real tmux", () => {
   }
 
   beforeAll(async () => {
-    for (const path of [piCli, extension]) {
-      if (!existsSync(path)) throw new Error(`Missing ${path}; run nub install and nub run build`);
-    }
     const parent = process.env["PI_ENV_E2E_ARTIFACT_DIR"] || tmpdir();
     mkdirSync(parent, { recursive: true });
     const evidenceDir = mkdtempSync(join(parent, "pi-session-manager-e2e-"));
     // Hosts that mount the directory may run as a different UID than the container.
     chmodSync(evidenceDir, 0o755);
     artifactPath = join(evidenceDir, "result.json");
+    saveEvidence();
+    for (const path of [piCli, extension]) {
+      if (!existsSync(path)) throw new Error(`Missing ${path}; run nub install and nub run build`);
+    }
     console.info(`Session-manager E2E evidence: ${artifactPath}`);
     root = mkdtempSync(join(tmpdir(), "smx-"));
     mkdirSync(join(root, "agent"));
@@ -175,7 +185,9 @@ describeE2E("session-manager in real tmux", () => {
 
   afterAll(() => {
     if (artifactPath) {
-      evidence.status = cases.every((entry) => entry.verdict === "pass") ? "pass" : "fail";
+      evidence.expectedCaseCount = 8;
+      evidence.status =
+        cases.length === 8 && cases.every((entry) => entry.verdict === "pass") ? "pass" : "fail";
       saveEvidence();
     }
     if (socket) {
@@ -194,10 +206,18 @@ describeE2E("session-manager in real tmux", () => {
     async () => {
       await check(
         "unnamed bind",
-        { labelled: true, automaticRename: "off", ownerIsPanePi: true },
+        {
+          sessionId: expect.any(String),
+          ownerPid: expect.any(String),
+          labelled: true,
+          automaticRename: "off",
+          ownerIsPanePi: true,
+        },
         async () => {
           respawn();
           const state = await bound();
+          if (!state.ownerPid)
+            throw new Error(`Binding has no owner PID: ${JSON.stringify(state)}`);
           return {
             ...state,
             labelled: labelled(state),
@@ -217,19 +237,47 @@ describeE2E("session-manager in real tmux", () => {
         { staleTagRemained: true, rebound: true, labelled: true, enrollmentFailed: false },
         async () => {
           const killed = window();
+          if (!killed.sessionId || !killed.ownerPid) {
+            throw new Error(`No complete pre-kill binding: ${JSON.stringify(killed)}`);
+          }
           signalPi("SIGKILL");
           await exited();
           const staleTagRemained = option("@pi_session_id") === killed.sessionId;
+          if (!staleTagRemained) {
+            throw new Error(
+              `Stale tag was not preserved after SIGKILL: ${JSON.stringify(window())}`,
+            );
+          }
           respawn();
-          const state = await bound(killed.sessionId).catch(() => window());
-          await sleep(1_000);
+          let enrollmentFailed = false;
+          let state: ReturnType<typeof window>;
+          try {
+            state = await until(
+              () => ({ state: window(), failed: screen().includes("enrollment failed") }),
+              ({ state: current, failed }) =>
+                failed ||
+                (current.sessionId !== "" &&
+                  current.sessionId !== killed.sessionId &&
+                  current.ownerPid === panePid() &&
+                  labelled(current)),
+              "reclaim enrollment outcome",
+            ).then(({ state: current, failed }) => {
+              enrollmentFailed = failed;
+              return current;
+            });
+          } catch (error) {
+            state = window();
+            throw new Error(
+              `Reclaim did not complete: ${String(error)}; state=${JSON.stringify(state)}; screen=${screen()}`,
+            );
+          }
           return {
             ...state,
             killedSessionId: killed.sessionId,
             staleTagRemained,
-            rebound: state.sessionId !== killed.sessionId,
+            rebound: state.sessionId !== "" && state.sessionId !== killed.sessionId,
             labelled: labelled(state),
-            enrollmentFailed: screen().includes("enrollment failed"),
+            enrollmentFailed,
           };
         },
       );
@@ -354,6 +402,50 @@ describeE2E("session-manager in real tmux", () => {
   );
 
   it(
+    "adopts an ownerless legacy tag and records the Pi owner",
+    { timeout: STEP_TIMEOUT_MS },
+    async () => {
+      await clearPane();
+      try {
+        await check(
+          "ownerless legacy tag adoption",
+          {
+            sessionId: "legacy-session",
+            ownerIsPanePi: true,
+            labelled: true,
+            enrollmentFailed: false,
+          },
+          async () => {
+            tmux("set-option", "-w", "-t", windowId, "@pi_session_id", "legacy-session");
+            tmux("set-option", "-w", "-u", "-t", windowId, "@pi_session_pid");
+            respawn("--session-id", "legacy-session");
+            const state = await until(
+              window,
+              (current) =>
+                (current.ownerPid === panePid() && labelled(current)) ||
+                screen().includes("enrollment failed"),
+              "ownerless tag adoption outcome",
+            );
+            return {
+              ...state,
+              ownerIsPanePi: state.ownerPid === panePid(),
+              labelled: labelled(state),
+              enrollmentFailed: screen().includes("enrollment failed"),
+            };
+          },
+        );
+      } finally {
+        if (format("#{pane_dead}") === "0") {
+          signalPi("SIGTERM");
+          await exited();
+        }
+        tmux("set-option", "-w", "-u", "-t", windowId, "@pi_session_id");
+        tmux("set-option", "-w", "-u", "-t", windowId, "@pi_session_pid");
+      }
+    },
+  );
+
+  it(
     "keeps a same-ID live owner when a second Pi enrolls and exits",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
@@ -362,7 +454,14 @@ describeE2E("session-manager in real tmux", () => {
       try {
         await check(
           "same-ID exclusive live ownership",
-          { rejected: true, preservedAfterExit: true },
+          {
+            rejected: true,
+            ownerPreservedWhileLive: true,
+            tagPreservedWhileLive: true,
+            renameRejected: true,
+            namePreserved: true,
+            preservedAfterExit: true,
+          },
           async () => {
             respawn();
             const incumbent = await bound();
@@ -381,12 +480,21 @@ describeE2E("session-manager in real tmux", () => {
             const contenderScreen = () => tmux("capture-pane", "-p", "-t", contender);
             await until(
               contenderScreen,
-              (text) =>
-                text.includes("enrollment failed") ||
-                option("@pi_session_pid") !== incumbent.ownerPid,
-              "contender enrollment",
+              (text) => text.includes("enrollment failed"),
+              "same-ID contender rejection",
             );
             const rejected = contenderScreen().includes("enrollment failed");
+            const ownerPreservedWhileLive = option("@pi_session_pid") === incumbent.ownerPid;
+            const tagPreservedWhileLive = option("@pi_session_id") === incumbent.sessionId;
+            tmux("send-keys", "-t", contender, "-l", "/name contender-label");
+            tmux("send-keys", "-t", contender, "Enter");
+            await until(
+              contenderScreen,
+              (text) => text.includes("Tmux window rename failed"),
+              "same-ID contender rename rejection",
+            );
+            const renameRejected = contenderScreen().includes("WindowBindingConflict");
+            const namePreserved = format("#{window_name}") === incumbent.name;
             const pid = tmux("display-message", "-p", "-t", contender, "#{pane_pid}");
             process.kill(positivePid(pid), "SIGTERM");
             await until(
@@ -396,6 +504,10 @@ describeE2E("session-manager in real tmux", () => {
             );
             return {
               rejected,
+              ownerPreservedWhileLive,
+              tagPreservedWhileLive,
+              renameRejected,
+              namePreserved,
               preservedAfterExit:
                 option("@pi_session_pid") === incumbent.ownerPid &&
                 option("@pi_session_id") === incumbent.sessionId,
@@ -416,13 +528,24 @@ describeE2E("session-manager in real tmux", () => {
     async () => {
       await check(
         "explicit name",
-        { boundName: "troubleshooting", releasedName: "troubleshooting", sessionId: "" },
+        {
+          boundName: "quiet pine; $(touch nope)",
+          releasedName: "quiet pine; $(touch nope)",
+          sessionId: "",
+          noShellExecution: true,
+        },
         async () => {
-          respawn("--name", "troubleshooting");
-          const state = await bound();
+          const name = "quiet pine; $(touch nope)";
+          respawn("--name", name);
+          const state = await bound("", name);
           signalPi("SIGTERM");
           await exited();
-          return { ...window(), boundName: state.name, releasedName: format("#{window_name}") };
+          return {
+            ...window(),
+            boundName: state.name,
+            releasedName: format("#{window_name}"),
+            noShellExecution: !existsSync(join(root, "work", "nope")),
+          };
         },
       );
     },

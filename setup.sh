@@ -8,12 +8,16 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PI_ENV_REPO="$SCRIPT_DIR"
+# Resolve selectors before a Nix re-exec changes the working directory.
+source "$SCRIPT_DIR/setup/agent-dir.sh"
+pi_env_resolve_agent_dir
 
 has_explicit_setup_mode() {
   [ -n "${PI_ENV_SETUP_MODE:-}" ] && return 0
   for arg in "$@"; do
     case "$arg" in
-      --use-nix|--nix-managed|--portable) return 0 ;;
+      --use-nix|--nix-managed|--portable|-h|--help) return 0 ;;
     esac
   done
   return 1
@@ -31,11 +35,7 @@ fi
 
 if ! has_explicit_setup_mode "$@" && [ "${PI_ENV_AUTO_NIX:-1}" = "1" ] && [ "${PI_ENV_CONFIG_MANAGED_BY_NIX:-0}" != "1" ] && command -v nix >/dev/null 2>&1; then
   cd "$SCRIPT_DIR"
-  if nix run .#setup -- "$@"; then
-    exit 0
-  fi
-  echo "./setup.sh: automatic Nix setup failed; falling back to portable setup." >&2
-  export PI_ENV_AUTO_NIX_FAILED=1
+  exec nix run .#setup -- "$@"
 fi
 
 exec "$SCRIPT_DIR/setup/main.sh" "$@"

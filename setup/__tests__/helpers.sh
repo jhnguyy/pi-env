@@ -5,7 +5,7 @@ setup_test_root() {
   cd "$(dirname "${BASH_SOURCE[1]}")/../.." && pwd
 }
 
-ROOT="${ROOT:-$(setup_test_root)}"
+ROOT="$(setup_test_root)"
 
 fail() {
   echo "FAIL: $*" >&2

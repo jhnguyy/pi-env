@@ -1,12 +1,12 @@
 # pi-env prerequisites
 
-[`setup.sh`](../setup.sh) is the executable authority for prerequisite checks, setup modes, Node/Nub selection, and fallback behavior.
+Nix supplies the workbench through [the upstream packaging boundary](nix.md). Without Nix, portable setup requires Git and Nub; Nub selects the Node runtime from `package.json#engines.node`.
 
-Nub is the canonical JavaScript toolchain boundary. Setup runs one frozen dependency installation and reports its result. It does not delete `node_modules` or retry after an installation failure.
+Setup performs one frozen dependency installation. The shared hydration operation patches the Effect language service, builds extensions, and restarts the LSP daemon after artifacts are ready. Setup does not delete dependencies or retry a failed installation.
 
-Local-Nix setup requires Nix with flakes. Externally managed setup consumes the provisioned toolchain. Portable setup checks host commands but does not install system packages.
+Local Nix needs flakes and a usable store. Externally managed setup consumes supplied tools without invoking Nix. Neither path changes system packages or remote-builder configuration through portable setup.
 
-Setup choices and ownership boundaries are documented in [`nix.md`](nix.md). Source-owned configuration and scripts live in [`package.json`](../package.json), [`nub.jsonc`](../nub.jsonc), [`flake.nix`](../flake.nix), and [`setup/`](../setup).
+Personal defaults and explicit reset behavior are described in [setup](setup.md). Resource enablement belongs to Pi's stock package manager.
 
 ## tmux session ownership
 

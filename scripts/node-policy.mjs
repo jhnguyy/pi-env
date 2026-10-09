@@ -1,142 +1,49 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 export function readPackageJson(repo = process.cwd()) {
-  return JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+  return JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
 }
 
 export function readNodeRequirement(repo = process.cwd()) {
-  const pkg = readPackageJson(repo);
-  return pkg.engines?.node ?? null;
-}
-
-export function readNodeRuntimePin(repo = process.cwd()) {
-  const runtime = readPackageJson(repo).devEngines?.runtime;
-  if (!runtime) return null;
-  if (typeof runtime === 'string') return runtime;
-  if (runtime.name && runtime.name !== 'node') {
-    throw new Error(`package.json devEngines.runtime must name node, found: ${runtime.name}`);
-  }
-  return runtime.version ?? null;
-}
-
-export function readNodePin(path) {
-  return readFileSync(path, 'utf8').trim();
+  return readPackageJson(repo).engines?.node ?? null;
 }
 
 export function minimumNodeVersion(repo = process.cwd()) {
   const requirement = readNodeRequirement(repo);
   if (!requirement) return null;
-  return parseMinimumRequirement(requirement);
+  const match = requirement.match(/^>=\s*(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) throw new Error(`Unsupported package.json engines.node range: ${requirement}`);
+  return match.slice(1).map(Number);
 }
 
 export function nodePolicyIssues(repo = process.cwd()) {
-  const issues = [];
-  const requirement = readNodeRequirement(repo);
-  let minimum = null;
   try {
-    minimum = minimumNodeVersion(repo);
-  } catch (err) {
-    issues.push(err instanceof Error ? err.message : String(err));
+    minimumNodeVersion(repo);
+    return [];
+  } catch (error) {
+    return [error.message];
   }
-
-  let runtimePin = null;
-  try {
-    runtimePin = readNodeRuntimePin(repo);
-  } catch (err) {
-    issues.push(err instanceof Error ? err.message : String(err));
-  }
-  if (runtimePin && !parseVersionStrict(runtimePin)) {
-    issues.push(`package.json devEngines.runtime.version must contain a plain semver version, found: ${runtimePin}`);
-  }
-
-  const nodeVersion = readVersionFile(repo, '.node-version', issues);
-  const nvmrc = readVersionFile(repo, '.nvmrc', issues);
-
-  if (runtimePin && nodeVersion && runtimePin !== nodeVersion) {
-    issues.push(`package.json devEngines.runtime.version (${runtimePin}) and .node-version (${nodeVersion}) must match`);
-  }
-
-  if (nodeVersion && nvmrc && nodeVersion !== nvmrc) {
-    issues.push(`.node-version (${nodeVersion}) and .nvmrc (${nvmrc}) must match`);
-  }
-
-  if (nodeVersion && minimum) {
-    const pinned = parseVersion(nodeVersion);
-    if (pinned[0] !== minimum[0]) {
-      issues.push(`.node-version (${nodeVersion}) and package.json engines.node (${requirement}) must use the same major`);
-    } else if (compareSemver(pinned, minimum) < 0) {
-      issues.push(`.node-version (${nodeVersion}) must satisfy package.json engines.node (${requirement})`);
-    }
-  }
-
-  return issues;
 }
 
 export function assertNodePolicy(repo = process.cwd()) {
   const issues = nodePolicyIssues(repo);
-  if (issues.length > 0) {
-    throw new Error(`Node policy mismatch:\n${issues.map((issue) => `- ${issue}`).join('\n')}`);
-  }
+  if (issues.length > 0) throw new Error(issues.join("\n"));
 }
 
 export function nodeVersionSatisfies(version, repo = process.cwd()) {
-  const runtimePin = readNodeRuntimePin(repo);
-  if (runtimePin && parseVersionStrict(runtimePin)) {
-    return compareSemver(parseVersion(version), parseVersion(runtimePin)) === 0;
-  }
   const minimum = minimumNodeVersion(repo);
   if (!minimum) return true;
-  return compareSemver(parseVersion(version), minimum) >= 0;
+  const match = String(version).match(/^v?(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) return false;
+  const actual = match.slice(1).map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    if (actual[index] !== minimum[index]) return actual[index] > minimum[index];
+  }
+  return true;
 }
 
 export function esbuildNodeTarget(repo = process.cwd()) {
   const minimum = minimumNodeVersion(repo);
-  if (!minimum) return 'node24';
-  const [major, minor] = minimum;
-  return `node${major}.${minor}`;
-}
-
-function readVersionFile(repo, name, issues) {
-  try {
-    const version = readNodePin(join(repo, name));
-    if (!parseVersionStrict(version)) {
-      issues.push(`${name} must contain a plain semver version, found: ${version}`);
-      return null;
-    }
-    return version;
-  } catch (err) {
-    issues.push(`Missing or unreadable ${name}: ${err instanceof Error ? err.message : String(err)}`);
-    return null;
-  }
-}
-
-function parseMinimumRequirement(range) {
-  const minimum = parseMinimum(range);
-  if (!minimum) {
-    throw new Error(`Unsupported package.json engines.node range: ${range}`);
-  }
-  return minimum;
-}
-
-function parseMinimum(range) {
-  const match = String(range).trim().match(/^>=\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?$/);
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
-}
-
-function parseVersionStrict(version) {
-  return String(version).match(/^\d+\.\d+\.\d+$/);
-}
-
-function parseVersion(version) {
-  const [major = 0, minor = 0, patch = 0] = String(version).split('.').map((part) => Number(part) || 0);
-  return [major, minor, patch];
-}
-
-function compareSemver(left, right) {
-  for (let i = 0; i < 3; i += 1) {
-    if (left[i] !== right[i]) return left[i] - right[i];
-  }
-  return 0;
+  return minimum ? `node${minimum[0]}.${minimum[1]}` : "node24";
 }

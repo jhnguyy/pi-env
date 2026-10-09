@@ -11,8 +11,13 @@ setup_parse_args() {
   PI_ENV_SKIP_HOME_MANAGER="${PI_ENV_SKIP_HOME_MANAGER:-0}"
   PI_ENV_HOME_MANAGER_SYNC="${PI_ENV_HOME_MANAGER_SYNC:-0}"
 
+  PI_ENV_RESET_SETTINGS=0
+
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --reset)
+        PI_ENV_RESET_SETTINGS=1
+        ;;
       --nix-managed)
         PI_ENV_SETUP_MODE="nix-managed"
         PI_ENV_CONFIG_MANAGED_BY_NIX=1
@@ -40,10 +45,11 @@ setup_parse_args() {
         cat <<'EOF'
 Usage: ./setup.sh [options]
 
-When Nix is available, plain ./setup.sh automatically tries the recommended
-Nix setup app before falling back to portable setup.
+When Nix is available, plain ./setup.sh selects the Nix setup app.
+If that operation fails, use --portable explicitly to select Nub instead.
 
 Options:
+  --reset          🤖: Back up and replace user settings with the initial baseline.
   --nix-managed    Force Nix/Home Manager ownership of shell and terminal config.
                    Skips PATH profile edits, tmux writes, and Ghostty writes.
   --portable       Force portable setup. Setup may update shell profiles and link
@@ -73,6 +79,7 @@ EOF
     shift
   done
 
+  export PI_ENV_RESET_SETTINGS
   export PI_ENV_SETUP_MODE PI_ENV_SKIP_TERMINAL PI_ENV_SKIP_REPO_HOOKS PI_ENV_SKIP_HOME_MANAGER PI_ENV_HOME_MANAGER_SYNC
   export PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_SKIP_PATH_PROFILE
 }
