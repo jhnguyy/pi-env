@@ -1,6 +1,6 @@
 ---
 name: testing-practices
-description: Designs E2E-first tests and repeatable evidence. Use when adding or reviewing tests, fixing a regression, deciding whether isolated tests are necessary, or choosing what a test double may replace.
+description: Designs E2E-first tests and repeatable evidence. Use when adding or reviewing tests, fixing a regression, deciding whether isolated tests are necessary, choosing what a test double may replace, or retiring tests when a feature changes.
 ---
 
 # Testing Practices
@@ -15,3 +15,4 @@ Read the repository testing policy and requirements.
    - a failure that you cannot induce otherwise, such as a timeout or a 5xx response.
 
    Replace at the outermost boundary, such as the HTTP session, a local server, or an adapter port, not at the code's own internal methods. Assert on results and on what crossed the boundary, not on the calls a double received. Every double encodes an assumption about the real dependency. Name the check that confirms that assumption: a contract test, a sandbox run, or a recorded response. Label characterization tests of third-party code as change detectors. Their expectations come from the current implementation.
+5. **Retain current contracts.** When removing or simplifying a feature, delete assertions and fixtures that serve only retired requirements. Keep coverage for current outcomes and integrity requirements, including compatibility and expected failures. Preserve safety coverage until replacement evidence detects failures of those current contracts. Leave temporary catching tests uncommitted. Keep regression tests for current contracts.
