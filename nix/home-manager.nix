@@ -83,6 +83,7 @@ in
         home.sessionVariables = {
           PI_ENV_HOME_MANAGER_FLAKE = cfg.homeManager.sync.flake;
           PI_ENV_HOME_MANAGER_INPUT = cfg.homeManager.sync.input;
+          PI_ENV_HOME_MANAGER_SESSION_VARS = "${config.home.profileDirectory}/etc/profile.d/hm-session-vars.sh";
         };
       })
 

@@ -159,8 +159,115 @@ test_update_mismatch_fails_before_switch() {
   teardown_fixture
 }
 
+write_pi_package() {
+  local dir="$1" version="$2"
+  mkdir -p "$dir/dist"
+  printf '{"name":"@earendil-works/pi-coding-agent","version":"%s","bin":{"pi":"dist/cli.js"}}\n' "$version" > "$dir/package.json"
+  : > "$dir/dist/cli.js"
+}
+
+# Runs the real runtime stage sequence against the fixture: Nub install is stubbed,
+# and Home Manager supplies Pi through PI_PACKAGE_DIR like the exported module.
+run_setup_runtime() {
+  (
+    # shellcheck source=setup/lib.sh
+    source "$ROOT/setup/lib.sh"
+    # shellcheck source=setup/install.sh
+    source "$ROOT/setup/install.sh"
+    # shellcheck source=setup/configure.sh
+    source "$ROOT/setup/configure.sh"
+    REPO="$REPO_DIR" SETUP_DIR="$ROOT/setup" PI_BIN_DIR="$TMP/home/.local/bin"
+    PI_AGENT_DIR="$TMP/home/.pi/agent" AGENTS_DIR="$TMP/home/.agents"
+    SETTINGS_FILE="$PI_AGENT_DIR/settings.json" TMUX_CONF="$TMP/home/.tmux.conf"
+    TMUX_SOURCE_LINE=unused GHOSTTY_CONFIG_DIR="$TMP/home/ghostty" APPEND_SRC=unused
+    APPEND_DST=unused APPEND_MARKER=unused TEST_UTILS_DIR=unused
+    POST_MERGE_HOOK_SRC=unused PRE_COMMIT_HOOK_SRC=unused
+    PATH="$STUB_DIR:$PATH"
+    setup_install_runtime
+  )
+}
+
+# Sets the workbench to Pi 1.2.3 while the active Home Manager profile supplies 1.0.0.
+setup_pi_bump_fixture() {
+  setup_fixture
+  local node
+  node="$(node_bin)"
+  mkdir -p "$REPO_DIR/scripts" "$REPO_DIR/node_modules/@earendil-works"
+  cp "$ROOT/scripts/check-node-version.mjs" "$ROOT/scripts/node-policy.mjs" "$REPO_DIR/scripts/"
+  printf '{"engines":{"node":">=%s"},"devDependencies":{"@earendil-works/pi-coding-agent":"1.2.3"}}\n' \
+    "$("$node" -p 'process.versions.node')" > "$REPO_DIR/package.json"
+  write_pi_package "$REPO_DIR/node_modules/@earendil-works/pi-coding-agent" 1.2.3
+  write_pi_package "$TMP/profile-old/pi" 1.0.0
+  write_pi_package "$TMP/profile-new/pi" 1.2.3
+  write_lock "$FLAKE_DIR" 0000000000000000000000000000000000000000
+  make_executable "$STUB_DIR/nub" '#!/bin/sh
+exit 0'
+  make_executable "$STUB_DIR/home-manager" '#!/bin/sh
+echo "home-manager $*" >> "$PI_ENV_TEST_LOG"
+printf '\''[ -n "$__HM_SESS_VARS_SOURCED" ] && return\nexport __HM_SESS_VARS_SOURCED=1\nexport PI_PACKAGE_DIR="%s"\n'\'' "$PI_ENV_TEST_NEW_PI" > "$PI_ENV_HOME_MANAGER_SESSION_VARS"'
+  export PI_ENV_NODE_BIN="$node" PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  export PI_PACKAGE_DIR="$TMP/profile-old/pi" PI_ENV_TEST_NEW_PI="$TMP/profile-new/pi"
+  export PI_ENV_HOME_MANAGER_SESSION_VARS="$TMP/profile/hm-session-vars.sh" __HM_SESS_VARS_SOURCED=1
+  mkdir -p "$TMP/profile"
+  : > "$PI_ENV_HOME_MANAGER_SESSION_VARS"
+}
+
+# Retains the setup output, Home Manager calls, lock, and installed adapter per scenario.
+record_pi_bump_evidence() {
+  local name="$1" expected="$2" verdict="$3" output="$4" dir
+  dir="$EVIDENCE/$name"
+  mkdir -p "$dir"
+  printf '%s\n' "$output" > "$dir/setup.log"
+  cp "$LOG" "$dir/calls.log"
+  cp "$FLAKE_DIR/flake.lock" "$dir/flake.lock"
+  cp "$TMP/home/.local/bin/pi" "$dir/pi" 2>/dev/null || true
+  printf '{\n  "inputs": "workbench Pi 1.2.3, active profile Pi 1.0.0, stale Home Manager lock",\n  "expected": "%s",\n  "verdict": "%s",\n  "reproduce": "bash setup/__tests__/home-manager-sync.test.sh",\n  "inspect": "setup.log, calls.log, flake.lock, pi"\n}\n' "$expected" "$verdict" > "$dir/result.json"
+}
+
+teardown_pi_bump_fixture() {
+  unset PI_ENV_NODE_BIN PI_ENV_CONFIG_MANAGED_BY_NIX PI_PACKAGE_DIR PI_ENV_TEST_NEW_PI \
+    PI_ENV_HOME_MANAGER_SESSION_VARS __HM_SESS_VARS_SOURCED || true
+  teardown_fixture
+}
+
+test_sync_supplies_bumped_pi_before_cli_check() {
+  local output
+  setup_pi_bump_fixture
+  export PI_ENV_HOME_MANAGER_SYNC=1 PI_ENV_TEST_UPDATED_REV
+  PI_ENV_TEST_UPDATED_REV="$(head_rev "$REPO_DIR")"
+
+  local status=0 verdict=fail
+  output="$(run_setup_runtime 2>&1)" || status=$?
+  if [ "$status" -eq 0 ] && grep -qF "DEFAULT_PI_PACKAGE_DIR='$TMP/profile-new/pi'" "$TMP/home/.local/bin/pi"; then verdict=pass; fi
+  record_pi_bump_evidence sync-supplies-bumped-pi "sync switches, then the adapter uses the activated profile's Pi 1.2.3" "$verdict" "$output"
+
+  [ "$verdict" = pass ] || fail "sync should install the activated profile's Pi (evidence: $EVIDENCE/sync-supplies-bumped-pi)"
+  teardown_pi_bump_fixture
+}
+
+test_drift_report_precedes_pi_mismatch() {
+  local status=0 output
+  setup_pi_bump_fixture
+
+  local verdict=fail
+  output="$(run_setup_runtime 2>&1)" || status=$?
+  if [ "$status" -ne 0 ] &&
+    printf '%s' "$output" | grep -qF 'run ./setup.sh --sync-home-manager' &&
+    printf '%s' "$output" | grep -qF 'PI_PACKAGE_DIR supplies it'; then verdict=pass; fi
+  record_pi_bump_evidence drift-report-precedes-mismatch "setup reports drift, then fails the CLI check and names PI_PACKAGE_DIR" "$verdict" "$output"
+
+  [ "$verdict" = pass ] || fail "drift and mismatch source should be reported (evidence: $EVIDENCE/drift-report-precedes-mismatch)"
+  assert_no_calls "setup without --sync-home-manager should not update or switch"
+  teardown_pi_bump_fixture
+}
+
+EVIDENCE=$(mktemp -d "${PI_ENV_SETUP_EVIDENCE_DIR:-${TMPDIR:-/tmp}}/pi-env-home-manager-sync-XXXXXX")
+printf 'Home Manager sync evidence: %s\n' "$EVIDENCE"
+
 test_stale_lock_reports_without_sync_request
 test_sync_request_updates_and_switches
+test_sync_supplies_bumped_pi_before_cli_check
+test_drift_report_precedes_pi_mismatch
 test_matching_lock_is_noop
 test_skip_conditions
 test_update_mismatch_fails_before_switch
