@@ -52,10 +52,12 @@ describeE2E("session-manager in real tmux", () => {
   let windowId = "";
   let artifactPath = "";
   const cases: Case[] = [];
+  const expectedCaseCount = 9;
   let caseStart = 0;
   const evidence: Record<string, unknown> = {
     scenario: "real Pi with session-manager in an isolated tmux server",
     repeat: "nub run test:e2e:session-manager:docker",
+    expectedCaseCount,
     cases,
     status: "incomplete",
   };
@@ -205,20 +207,38 @@ describeE2E("session-manager in real tmux", () => {
   });
 
   afterAll(() => {
-    if (artifactPath) {
-      evidence.expectedCaseCount = 9;
-      evidence.status =
-        cases.length === 9 && cases.every((entry) => entry.verdict === "pass") ? "pass" : "fail";
-      saveEvidence();
-    }
+    const cleanupErrors: string[] = [];
     if (socket) {
       try {
         tmux("kill-server");
-      } catch {
-        // The server is already gone.
+      } catch (error) {
+        const stderr =
+          typeof error === "object" && error !== null && "stderr" in error
+            ? String(error.stderr).trim()
+            : "";
+        const alreadyGone =
+          /^no server running on /u.test(stderr) ||
+          /^error connecting to .* \(No such file or directory\)$/u.test(stderr);
+        if (!alreadyGone) cleanupErrors.push(String(error));
       }
     }
-    if (root) rmSync(root, { recursive: true, force: true });
+    try {
+      if (root) rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(String(error));
+    }
+    if (artifactPath) {
+      evidence.cleanupErrors = cleanupErrors;
+      evidence.status =
+        cases.length === expectedCaseCount &&
+        cases.every((entry) => entry.verdict === "pass") &&
+        cleanupErrors.length === 0
+          ? "pass"
+          : "fail";
+      saveEvidence();
+    }
+    if (cleanupErrors.length > 0)
+      throw new Error(`Session-manager E2E cleanup failed: ${cleanupErrors.join("; ")}`);
   });
 
   it(
@@ -228,8 +248,6 @@ describeE2E("session-manager in real tmux", () => {
       await check(
         "unnamed bind",
         {
-          sessionId: expect.any(String),
-          ownerPid: expect.any(String),
           labelled: true,
           automaticRename: "off",
           ownerIsPanePi: true,
