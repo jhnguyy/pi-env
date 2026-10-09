@@ -105,7 +105,7 @@ async function assertCoordinatorOffline(
     }
     if (processAlive(metadata.pid)) {
       throw new Error(
-        `CoordinatorUnresponsive: ${coordinator.name ?? coordinator.sessionId} process ${metadata.pid} is still alive at ${paths.socketPath}`,
+        `CoordinatorUnresponsive: ${coordinator.sessionId} process ${metadata.pid} is still alive at ${paths.socketPath}`,
       );
     }
   } catch (error) {
@@ -117,7 +117,7 @@ async function assertCoordinatorOffline(
   );
   if (coordinatorWindows.length > 0) {
     throw new Error(
-      `CoordinatorUnresponsive: ${coordinator.name ?? coordinator.sessionId} is bound to ${coordinatorWindows.map((item) => item.windowId).join(", ")} at ${paths.socketPath}`,
+      `CoordinatorUnresponsive: ${coordinator.sessionId} is bound to ${coordinatorWindows.map((item) => item.windowId).join(", ")} at ${paths.socketPath}`,
     );
   }
 }

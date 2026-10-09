@@ -22,7 +22,7 @@ export class SessionIdentityConflict extends Data.TaggedError("SessionIdentityCo
   sessionId: string;
   reason: string;
 }> {}
-export class SessionNameConflict extends Data.TaggedError("SessionNameConflict")<{
+export class SessionNameInvalid extends Data.TaggedError("SessionNameInvalid")<{
   name: string;
 }> {}
 export class SessionBindingFailed extends Data.TaggedError("SessionBindingFailed")<{
@@ -37,7 +37,7 @@ export type SessionLifecycleDomainError =
   | SessionNotManaged
   | SessionAlreadyClosed
   | SessionIdentityConflict
-  | SessionNameConflict;
+  | SessionNameInvalid;
 export type SessionLifecycleError =
   | SessionLifecycleDomainError
   | SessionCatalogFailure
@@ -99,7 +99,7 @@ const isDomainError = (value: unknown): value is SessionLifecycleDomainError =>
   value instanceof SessionNotManaged ||
   value instanceof SessionAlreadyClosed ||
   value instanceof SessionIdentityConflict ||
-  value instanceof SessionNameConflict;
+  value instanceof SessionNameInvalid;
 const unwrapDomain = (
   error: SessionCatalogFailure,
 ): SessionCatalogFailure | SessionLifecycleDomainError =>
@@ -207,15 +207,6 @@ export function createSessionLifecycle(options: {
           }
           const requestedName = input.sessionName?.trim();
           const name = requestedName || undefined;
-          if (
-            name &&
-            (manifest.coordinator?.name === name ||
-              manifest.sessions.some(
-                (record) => record.desiredState === "open" && record.name === name,
-              ))
-          ) {
-            throw new SessionNameConflict({ name });
-          }
           selected = {
             version: 1,
             sessionId: input.sessionId,
@@ -269,14 +260,6 @@ export function createSessionLifecycle(options: {
           const name =
             requestedName ||
             (found?.role === "work" && found.explicitName ? found.name : undefined);
-          const collision = manifest.sessions.some(
-            (record) =>
-              record.sessionId !== input.sessionId &&
-              record.desiredState === "open" &&
-              record.name === name,
-          );
-          if (name && (manifest.coordinator?.name === name || collision))
-            throw new SessionNameConflict({ name });
           selected = {
             version: 1,
             sessionId: input.sessionId,
@@ -333,7 +316,7 @@ export function createSessionLifecycle(options: {
   const rename = (session: ManagedSession, name: string) =>
     Effect.gen(function* () {
       const normalized = name.trim();
-      if (!normalized) return yield* new SessionNameConflict({ name });
+      if (!normalized) return yield* new SessionNameInvalid({ name });
       if (normalized === session.record.name && session.record.explicitName) return session;
       let selected: OpenSessionRecord | undefined;
       const committed = yield* catalog
@@ -342,15 +325,6 @@ export function createSessionLifecycle(options: {
           if (!found || found.role !== "work" || found.desiredState !== "open") {
             throw new SessionNotManaged({ sessionId: session.record.sessionId });
           }
-          const collision =
-            manifest.coordinator?.name === normalized ||
-            manifest.sessions.some(
-              (record) =>
-                record.sessionId !== found.sessionId &&
-                record.desiredState === "open" &&
-                record.name === normalized,
-            );
-          if (collision) throw new SessionNameConflict({ name: normalized });
           selected = { ...found, name: normalized, explicitName: true };
           return replaceWorkRecord(manifest, selected);
         })
