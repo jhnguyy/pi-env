@@ -420,6 +420,8 @@ describe("session-manager extension", () => {
     expect(renamedWindows).toEqual(["investigate-resume"]);
   });
 
+  // E2E cannot pause enrollment while session_shutdown waits. A late successful
+  // enrollment must release its binding before shutdown completes.
   it("releases a binding that completes after shutdown begins", async () => {
     const root = await mkdtemp(join(tmpdir(), "session-extension-shutdown-"));
     roots.push(root);

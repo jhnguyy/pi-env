@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Effect } from "effect";
 import {
   DuplicateWindowBinding,
@@ -7,10 +10,17 @@ import {
   type Exec,
 } from "../host.js";
 
+function testSocket(): string {
+  const root = mkdtempSync(join(tmpdir(), "pi-session-host-"));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  return join(root, "tmux.sock");
+}
+
 function executor(
   initialTags: Readonly<Record<string, string>>,
   initialOwners: Readonly<Record<string, string>> = {},
 ) {
+  const socketPath = testSocket();
   const options: Record<string, Record<string, string>> = {
     "@pi_session_id": { ...initialTags },
     "@pi_session_pid": { ...initialOwners },
@@ -22,7 +32,7 @@ function executor(
     calls.push([command, ...args]);
     const format = args.at(-1);
     if (args.includes("list-windows")) return { code: 0, stdout: "@1\n@2\n", stderr: "" };
-    if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
+    if (format === "#{socket_path}") return { code: 0, stdout: `${socketPath}\n`, stderr: "" };
     if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
     if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
     const windowId = args[args.indexOf("-t") + 1];
@@ -84,22 +94,8 @@ describe("tmux session host", () => {
     expect(await failureOf(b.bindCurrent("%2", "b"))).toBeInstanceOf(WindowBindingConflict);
   });
 
-  it("rejects same-ID foreign live bind, release and rename without mutation", async () => {
-    const state = executor({ "@1": "a" }, { "@1": "41" });
-    const host = createTmuxSessionHost(state.exec, { ownerPid: 42, processAlive: () => true });
-    for (const operation of [
-      host.bindCurrent("%1", "a"),
-      host.releaseCurrent("%1", "a"),
-      host.renameCurrent("%1", "a", "duplicate names remain allowed"),
-    ]) {
-      expect((await Effect.runPromise(Effect.result(operation)))._tag).toBe("Failure");
-    }
-    expect(state.owners["@1"]).toBe("41");
-    expect(
-      state.calls.some((call) => call.includes("set-option") || call.includes("rename-window")),
-    ).toBe(false);
-  });
-
+  // E2E cannot inject a command failure inside a held lock. A failed mutation
+  // must release ownership so the next transaction can complete.
   it("releases serialization after a failed tmux command", async () => {
     const state = executor({});
     const broken: Exec = async (command, args) =>
@@ -114,6 +110,8 @@ describe("tmux session host", () => {
     expect(state.tags["@1"]).toBe("a");
   });
 
+  // E2E cannot pause an uncancellable tmux command while aborting its Effect.
+  // The lock must remain held until that command completes.
   it("drains interrupted IO before releasing the lock", { timeout: 10_000 }, async () => {
     const state = executor({});
     let entered!: () => void;
@@ -148,37 +146,6 @@ describe("tmux session host", () => {
     expect(state.tags["@1"]).toBe("a");
     await Effect.runPromise(successor.bindCurrent("%1", "b"));
     expect(state.tags["@1"]).toBe("b");
-  });
-
-  it("claims an ownerless same-ID restore tag", async () => {
-    const state = executor({ "@1": "a" });
-    await Effect.runPromise(createTmuxSessionHost(state.exec).bindCurrent("%1", "a"));
-    expect(state.owners["@1"]).toBe(String(process.pid));
-  });
-
-  it("passes a user name with shell metacharacters as one argument", async () => {
-    const { calls, exec } = executor({});
-    const name = "quiet pine; $(touch nope)";
-    await Effect.runPromise(createTmuxSessionHost(exec).bindCurrent("%1", "session-a", name));
-    expect(calls.find((call) => call.includes("rename-window"))?.at(-1)).toBe(name);
-  });
-
-  it("releases only the current session's owned window binding", async () => {
-    const { calls, exec } = executor({ "@1": "session-a" });
-
-    await Effect.runPromise(createTmuxSessionHost(exec).releaseCurrent("%1", "session-a"));
-
-    expect(calls).toContainEqual([
-      "tmux",
-      "-S",
-      "/tmp/tmux.sock",
-      "set-option",
-      "-w",
-      "-u",
-      "-t",
-      "@1",
-      "@pi_session_id",
-    ]);
   });
 
   it("restores a pending session once and reuses its binding", async () => {
@@ -225,10 +192,11 @@ describe("tmux session host", () => {
 
   it("accepts a child that wins the window-tag race only when it writes the expected identity", async () => {
     const tags: Record<string, string> = {};
+    const socketPath = testSocket();
     const exec: Exec = async (_command, args) => {
       const format = args.at(-1);
       if (args.includes("list-windows")) return { code: 0, stdout: "@1\n@3\n", stderr: "" };
-      if (format === "#{socket_path}") return { code: 0, stdout: "/tmp/tmux.sock\n", stderr: "" };
+      if (format === "#{socket_path}") return { code: 0, stdout: `${socketPath}\n`, stderr: "" };
       if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
       if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
       if (args.includes("new-window")) return { code: 0, stdout: "@3\n", stderr: "" };
@@ -275,6 +243,8 @@ describe("tmux session host", () => {
     expect(duplicate.calls.some((call) => call.includes("set-option"))).toBe(false);
   });
 
+  // E2E cannot leave an earlier binding through the normal session transition,
+  // which releases it. A leftover owned by this live PID must still be reclaimed.
   it("reclaims a binding left by an earlier session in the same Pi process", async () => {
     const earlier = executor({ "@1": "earlier-session" }, { "@1": "42" });
     const host = createTmuxSessionHost(earlier.exec, { ownerPid: 42, processAlive: () => true });
