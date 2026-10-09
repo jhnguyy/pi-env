@@ -185,9 +185,9 @@ describeE2E("session-manager in real tmux", () => {
 
   afterAll(() => {
     if (artifactPath) {
-      evidence.expectedCaseCount = 8;
+      evidence.expectedCaseCount = 9;
       evidence.status =
-        cases.length === 8 && cases.every((entry) => entry.verdict === "pass") ? "pass" : "fail";
+        cases.length === 9 && cases.every((entry) => entry.verdict === "pass") ? "pass" : "fail";
       saveEvidence();
     }
     if (socket) {
@@ -578,7 +578,7 @@ describeE2E("session-manager in real tmux", () => {
           },
           async () => {
             launch("--name", "shared-label");
-            const first = await bound();
+            const first = await bound("", "shared-label");
             secondWindow = tmux(
               "new-window",
               "-d",
@@ -593,7 +593,7 @@ describeE2E("session-manager in real tmux", () => {
             tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
             await clearPane();
             launch("--name", "shared-label");
-            const second = await bound();
+            const second = await bound("", "shared-label");
             const duplicateStart = first.name === "shared-label" && second.name === first.name;
             const command = (text: string) => {
               tmux("send-keys", "-t", windowId, "-l", text);
@@ -636,7 +636,7 @@ describeE2E("session-manager in real tmux", () => {
               "materialized session startup",
             );
             command("/session-adopt");
-            const adopted = await bound();
+            const adopted = await bound("", "shared-label");
             command("/session-done");
             await exited();
             windowId = firstWindow;
