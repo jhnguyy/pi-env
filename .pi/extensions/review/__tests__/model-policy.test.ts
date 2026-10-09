@@ -1,11 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import {
-  PR_REVIEW_APPROVAL_ANNOTATION,
-  resolvePrReviewModelPolicy,
-  type AgentSettingsLike,
-  type ReviewModelPolicyError,
-} from "../model-policy.ts";
+import { resolvePrReviewModelPolicy, type ReviewModelPolicyError } from "../model-policy.ts";
 
 function model(
   provider: string,
@@ -26,43 +21,37 @@ function model(
     ...options,
   };
 }
-function settings(...approved: string[]): AgentSettingsLike {
-  return {
-    modelAnnotations: Object.fromEntries(
-      approved.map((id) => [id, [PR_REVIEW_APPROVAL_ANNOTATION]]),
-    ),
-  };
-}
-
 const models = [model("anthropic", "claude"), model("openai", "gpt")];
 
 describe("resolvePrReviewModelPolicy", () => {
-  it("rejects an available roster without exact model approval", () => {
-    expect(() =>
-      resolvePrReviewModelPolicy(
-        { modelAnnotations: { "anthropic/claude": ["reviewer-extra"] } },
-        models,
-      ),
-    ).toThrow(
-      expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "no_approved_models" }),
+  it("requires an available model roster", () => {
+    expect(() => resolvePrReviewModelPolicy([])).toThrow(
+      expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "no_available_models" }),
     );
   });
 
-  it("assigns every role when only one approved model is available", () => {
-    const result = resolvePrReviewModelPolicy(settings("openai/model"), [model("openai", "model")]);
+  it("uses all available models without reviewer annotations", () => {
+    const result = resolvePrReviewModelPolicy(models);
+    expect(result.availableRoster.map((candidate) => candidate.fqid)).toEqual([
+      "anthropic/claude",
+      "openai/gpt",
+    ]);
+  });
+
+  it("assigns every role when only one model is available", () => {
+    const result = resolvePrReviewModelPolicy([model("openai", "model")]);
     expect(new Set(Object.values(result.assignments).map((assignment) => assignment.fqid))).toEqual(
       new Set(["openai/model"]),
     );
   });
 
-  it("returns deterministic complete assignments from the bounded approved roster", () => {
+  it("returns deterministic complete assignments from the available roster", () => {
     const available = [
       model("openai", "gpt-5"),
       model("anthropic", "claude-4"),
       model("google", "gemini-2.5"),
     ];
-    const approved = settings("openai/gpt-5", "anthropic/claude-4", "google/gemini-2.5");
-    const result = resolvePrReviewModelPolicy(approved, available);
+    const result = resolvePrReviewModelPolicy(available);
     expect(Object.keys(result.assignments)).toEqual([
       "reading-plan",
       "correctness",
@@ -73,7 +62,7 @@ describe("resolvePrReviewModelPolicy", () => {
       "whole-change",
       "synthesis",
     ]);
-    expect(result.approvedRoster.map((candidate) => candidate.fqid)).toEqual([
+    expect(result.availableRoster.map((candidate) => candidate.fqid)).toEqual([
       "anthropic/claude-4",
       "google/gemini-2.5",
       "openai/gpt-5",
@@ -92,35 +81,31 @@ describe("resolvePrReviewModelPolicy", () => {
       "whole-change": "openai/gpt-5",
       synthesis: "openai/gpt-5",
     });
-    expect(resolvePrReviewModelPolicy(approved, [...available].reverse()).assignments).toEqual(
+    expect(resolvePrReviewModelPolicy([...available].reverse()).assignments).toEqual(
       result.assignments,
     );
   });
 
-  it("rejects unknown, unavailable, and unapproved pins", () => {
+  it("rejects unknown and unavailable pins while allowing any available model", () => {
     expect(() =>
-      resolvePrReviewModelPolicy(settings("anthropic/claude", "openai/gpt"), models, {
+      resolvePrReviewModelPolicy(models, {
         invented: "openai/gpt",
       }),
     ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "invalid_pin" }),
     );
     expect(() =>
-      resolvePrReviewModelPolicy(settings("anthropic/claude", "openai/gpt"), models, {
+      resolvePrReviewModelPolicy(models, {
         security: "google/gemini",
       }),
     ).toThrow(
       expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "invalid_pin" }),
     );
-    expect(() =>
-      resolvePrReviewModelPolicy(
-        settings("anthropic/claude", "openai/gpt"),
-        [...models, model("google", "gemini")],
-        { security: "google/gemini" },
-      ),
-    ).toThrow(
-      expect.objectContaining<Partial<ReviewModelPolicyError>>({ code: "unapproved_model" }),
-    );
+    expect(
+      resolvePrReviewModelPolicy([...models, model("google", "gemini")], {
+        security: "google/gemini",
+      }).assignments.security.fqid,
+    ).toBe("google/gemini");
   });
 
   it("derives the highest reasoning level from model metadata", () => {
@@ -132,10 +117,7 @@ describe("resolvePrReviewModelPolicy", () => {
         thinkingLevelMap: { high: null, xhigh: null, max: null },
       }),
     ];
-    const result = resolvePrReviewModelPolicy(
-      settings("anthropic/smart-name", "openai/plain-name"),
-      available,
-    );
+    const result = resolvePrReviewModelPolicy(available);
     expect(result.assignments["reading-plan"].reasoning).toBe("high");
     expect(result.assignments.intent.reasoning).toBe("medium");
   });

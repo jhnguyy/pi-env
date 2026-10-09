@@ -5,6 +5,7 @@ import { onTestFinished } from "vitest";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
+import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
   DagNodeStatus,
@@ -27,7 +28,8 @@ import {
   ReviewEvidenceExecutorKind,
   ReviewEvidenceResolverKey,
 } from "../../evidence-resolver";
-import { EvidenceResolverNode, ReviewRoles, type ReviewRoleAssignments } from "../../review-graph";
+import { EvidenceResolverNode, type ReviewRoleAssignments } from "../../review-graph";
+import { resolvePrReviewModelPolicy } from "../../model-policy";
 import { runReviewDag } from "../../review-dag-runner";
 
 export function reviewFixture(): {
@@ -96,13 +98,29 @@ export function reviewFixture(): {
   };
 }
 
+const availableModels = ["provider-a", "provider-b"].map(
+  (provider): Model<"openai-responses"> => ({
+    provider,
+    id: "model",
+    name: "model",
+    api: "openai-responses",
+    baseUrl: "https://example.invalid",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: null, max: null },
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 32_000,
+  }),
+);
+
 export const assignments = Object.fromEntries(
-  ReviewRoles.map((role, index) => [
+  Object.entries(resolvePrReviewModelPolicy(availableModels).assignments).map(([role, candidate]) => [
     role,
     {
-      model: index % 2 ? "provider-b/model" : "provider-a/model",
-      reasoning: "high",
-      contextWindow: 272_000,
+      model: candidate.fqid,
+      reasoning: candidate.reasoning,
+      contextWindow: candidate.contextWindow,
     },
   ]),
 ) as ReviewRoleAssignments;
