@@ -173,6 +173,67 @@ describe("session lifecycle", () => {
     expect(refreshed.record.persistence.state).toBe("materialized");
   });
 
+  it("reuses a name held by open sessions and a legacy named coordinator", async () => {
+    const { root, cwd, catalog, lifecycle, input } = await fixture();
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      catalog.update(cwd, (manifest) => ({
+        ...manifest,
+        coordinator: {
+          version: 1,
+          sessionId: "coordinator",
+          cwd: manifest.canonicalCwd,
+          name: "shared",
+          persistence: { state: "pending" },
+          createdAt: now,
+          lastOpenedAt: now,
+          role: "coordinator",
+        },
+      })),
+    );
+    const session = (id: string) => ({
+      ...input,
+      sessionId: id,
+      sessionFile: join(root, `${id}.jsonl`),
+    });
+
+    const started = await Effect.runPromise(
+      lifecycle.start({ ...session("session-a"), sessionName: "shared" }),
+    );
+    const duplicate = await Effect.runPromise(
+      lifecycle.start({ ...session("session-b"), sessionName: "shared" }),
+    );
+    await writeFile(
+      session("session-c").sessionFile,
+      `${JSON.stringify({ type: "session", version: 3, id: "session-c", cwd })}\n`,
+    );
+    const adopted = await Effect.runPromise(
+      lifecycle.adopt({ ...session("session-c"), sessionName: "shared" }),
+    );
+    const unnamed = await Effect.runPromise(lifecycle.start(session("session-d")));
+    if (unnamed.state !== "managed") throw new Error("expected managed session");
+    const renamed = await Effect.runPromise(lifecycle.rename(unnamed.session, "shared"));
+
+    expect([started.state, duplicate.state]).toEqual(["managed", "managed"]);
+    expect(adopted.record.name).toBe("shared");
+    expect(renamed.record.name).toBe("shared");
+    const manifest = await Effect.runPromise(catalog.read(cwd));
+    expect(manifest?.coordinator?.name).toBe("shared");
+    expect(
+      manifest?.sessions.map(({ sessionId, name, desiredState }) => ({
+        sessionId,
+        name,
+        desiredState,
+      })),
+    ).toEqual(
+      ["session-a", "session-b", "session-c", "session-d"].map((sessionId) => ({
+        sessionId,
+        name: "shared",
+        desiredState: "open",
+      })),
+    );
+  });
+
   it("writes the closure source without changing history persistence", async () => {
     const { cwd, catalog, lifecycle, input } = await fixture();
     const started = await Effect.runPromise(lifecycle.start(input));

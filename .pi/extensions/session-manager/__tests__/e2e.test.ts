@@ -91,7 +91,8 @@ describeE2E("session-manager in real tmux", () => {
     tmux("respawn-pane", "-k", "-t", windowId, "true");
     await exited();
   };
-  const piCommand = (...args: string[]) =>
+  // Pi without session-manager. Restoration must forward the extension itself.
+  const piBaseCommand = (...args: string[]) =>
     [
       "env",
       `PI_CODING_AGENT_DIR=${quote(join(root, "agent"))}`,
@@ -104,10 +105,9 @@ describeE2E("session-manager in real tmux", () => {
       "--no-prompt-templates",
       "--no-themes",
       "--no-context-files",
-      "-e",
-      quote(extension),
       ...args.map(quote),
     ].join(" ");
+  const piCommand = (...args: string[]) => piBaseCommand("-e", extension, ...args);
   const respawn = (...args: string[]) =>
     tmux("respawn-pane", "-t", windowId, "-c", join(root, "work"), piCommand(...args));
   const bound = (previous = "", name?: string) =>
@@ -592,6 +592,9 @@ describeE2E("session-manager in real tmux", () => {
       const launch = (...args: string[]) =>
         tmux("respawn-pane", "-t", windowId, "-c", work, piCommand(...args));
       const restoredWindows: string[] = [];
+      const lineWith = (text: string, ...parts: string[]) =>
+        text.split("\n").find((line) => parts.every((part) => line.includes(part)));
+      let completed = false;
       try {
         await check(
           "duplicate display names",
@@ -603,7 +606,9 @@ describeE2E("session-manager in real tmux", () => {
             statusHasId: true,
             targetedRelease: true,
             targetedRestore: true,
-            restoreSummaryHasIds: true,
+            restoredBindingsLive: true,
+            restoreOutcomesSucceeded: true,
+            closedDuplicateNotRestored: true,
           },
           async () => {
             launch("--name", "shared-label");
@@ -637,13 +642,17 @@ describeE2E("session-manager in real tmux", () => {
               "duplicate rename",
             );
             command("/session-status");
-            await until(
-              screen,
-              (text) => text.includes(second.sessionId),
-              "status with full session ID",
+            // Earlier /name commands leave the name on screen, so require one line with both.
+            const statusLine = lineWith(
+              await until(
+                screen,
+                (text) => lineWith(text, first.name, second.sessionId) !== undefined,
+                "status with the name beside the full session ID",
+              ),
+              first.name,
+              second.sessionId,
             );
-            const statusHasId =
-              screen().includes(first.name) && screen().includes(second.sessionId);
+            const statusHasId = statusLine !== undefined;
             signalPi("SIGTERM");
             await exited();
             const released = window();
@@ -677,7 +686,7 @@ describeE2E("session-manager in real tmux", () => {
             const wrapper = join(root, "duplicate pi");
             writeFileSync(
               wrapper,
-              `#!/bin/sh\nexport XDG_RUNTIME_DIR=${quote(join(root, "runtime"))}\nexec ${piCommand()} "$@"\n`,
+              `#!/bin/sh\nexport XDG_RUNTIME_DIR=${quote(join(root, "runtime"))}\nexec ${piBaseCommand()} "$@"\n`,
               { mode: 0o700 },
             );
             const start = join(repoRoot, ".pi/extensions/session-manager/dist/start.js");
@@ -713,16 +722,26 @@ describeE2E("session-manager in real tmux", () => {
               "-F",
               "#{window_id} #{@pi_session_id} #{window_name}",
             ).split("\n");
-            const restoredWindow = (id: string) => {
+            const restoredWindow = async (id: string) => {
               const line = restoredBindings.find((item) => item.split(" ")[1] === id);
               if (!line) throw new Error(`No restored window for ${id}`);
               const target = line.split(" ")[0];
               restoredWindows.push(target);
               windowId = target;
-              return window();
+              const state = await until(
+                () => ({ ...window(), panePid: panePid(), dead: format("#{pane_dead}") }),
+                (current) => current.dead === "0" && current.ownerPid === current.panePid,
+                `a live owner for restored session ${id}`,
+              );
+              return { ...state, live: true };
             };
-            const restored = restoredWindow(second.sessionId);
-            const stillFirst = restoredWindow(first.sessionId);
+            const restored = await restoredWindow(second.sessionId);
+            const stillFirst = await restoredWindow(first.sessionId);
+            // Each outcome line must name the session and report success, not merely mention it.
+            const outcome = (id: string) => lineWith(summary, first.name, id)?.trim() ?? "";
+            const succeeded = (line: string) =>
+              line.startsWith("\u2713") && /\s(restored|active)$/u.test(line);
+            const outcomes = [outcome(first.sessionId), outcome(second.sessionId)];
             return {
               first,
               second,
@@ -748,37 +767,43 @@ describeE2E("session-manager in real tmux", () => {
                 restored.name === first.name &&
                 stillFirst.sessionId === first.sessionId &&
                 stillFirst.name === first.name &&
-                restored.ownerPid !== "" &&
-                stillFirst.ownerPid !== "" &&
                 restored.ownerPid !== stillFirst.ownerPid,
-              restoreSummaryHasIds:
-                summary.includes(first.name) &&
-                summary.includes(first.sessionId) &&
-                summary.includes(second.sessionId),
+              restoredBindingsLive: restored.live && stillFirst.live,
+              outcomes,
+              restoreOutcomesSucceeded:
+                outcomes.every(succeeded) && summary.includes("2 active, 0 failed"),
+              closedDuplicateNotRestored:
+                !summary.includes(adoptedId) &&
+                restoredBindings.every((line) => line.split(" ")[1] !== adoptedId),
               summary,
             };
           },
         );
+        completed = true;
       } finally {
-        for (const target of restoredWindows) {
-          windowId = target;
-          tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
-          signalPi("SIGTERM");
-          await exited();
-          tmux("kill-window", "-t", target);
-        }
-        if (secondWindow) {
-          windowId = secondWindow;
-          if (format("#{pane_dead}") === "0") {
-            signalPi("SIGTERM");
-            await exited();
+        // Best-effort teardown must not replace the workflow's own failure.
+        const cleanupErrors: string[] = [];
+        const stop = async (target: string, kill: boolean) => {
+          try {
+            windowId = target;
+            if (format("#{pane_dead}") === "0") {
+              tmux("set-option", "-w", "-t", target, "remain-on-exit", "on");
+              signalPi("SIGTERM");
+              await exited();
+            }
+            if (kill) tmux("kill-window", "-t", target);
+          } catch (error) {
+            cleanupErrors.push(`${target}: ${String(error)}`);
           }
-          tmux("kill-window", "-t", secondWindow);
-        }
+        };
+        for (const target of restoredWindows) await stop(target, true);
+        if (secondWindow) await stop(secondWindow, true);
+        await stop(firstWindow, false);
         windowId = firstWindow;
-        if (format("#{pane_dead}") === "0") {
-          signalPi("SIGTERM");
-          await exited();
+        if (cleanupErrors.length > 0) {
+          evidence.duplicateNameCleanupErrors = cleanupErrors;
+          saveEvidence();
+          if (completed) throw new Error(`Cleanup failed: ${cleanupErrors.join("; ")}`);
         }
       }
     },

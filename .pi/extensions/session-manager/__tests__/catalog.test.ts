@@ -39,6 +39,16 @@ function closedRecord(overrides: Partial<ClosedSessionRecord> = {}): ClosedSessi
   };
 }
 
+function semanticReason(value: unknown): string {
+  try {
+    validateManifest(value);
+  } catch (error) {
+    if (error instanceof ManifestSemanticFailure) return error.reason;
+    throw error;
+  }
+  throw new Error("expected a semantic manifest failure");
+}
+
 function manifest(overrides: Partial<SessionManifest> = {}): SessionManifest {
   return {
     version: 1,
@@ -132,9 +142,17 @@ describe("session manifest v1", () => {
     const valid = {
       ...manifest(),
       coordinator,
-      sessions: [openRecord({ sessionId: "work", name: "fox" })],
+      sessions: [
+        openRecord({ sessionId: "work-a", name: "Fox" }),
+        openRecord({ sessionId: "work-b", name: "Fox", explicitName: true }),
+        closedRecord({ sessionId: "work-c", name: "Fox" }),
+      ],
     };
-    expect(validateManifest(valid).sessions).toHaveLength(1);
+    expect(validateManifest(valid).sessions.map((record) => record.name)).toEqual([
+      "Fox",
+      "Fox",
+      "Fox",
+    ]);
     expect(() =>
       validateManifest({
         ...valid,
@@ -153,13 +171,17 @@ describe("session manifest v1", () => {
   });
 
   it("enforces identity, timestamp, and stable-order invariants", () => {
-    expect(() =>
-      validateManifest(
+    const later = "2025-01-02T00:00:00.000Z";
+    expect(
+      semanticReason(
         manifest({
-          sessions: [openRecord(), openRecord({ name: "different-label" })],
+          sessions: [
+            openRecord(),
+            openRecord({ name: "different-label", createdAt: later, lastOpenedAt: later }),
+          ],
         }),
       ),
-    ).toThrow(ManifestSemanticFailure);
+    ).toBe("duplicate session id");
     expect(() =>
       validateManifest(
         manifest({
