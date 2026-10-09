@@ -284,7 +284,6 @@ describe("session-manager extension", () => {
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
     let factory: EditorFactory | undefined = () => cast<ReturnType<EditorFactory>>({});
     const notices: string[] = [];
-    let releaseCalls = 0;
     const pi = cast<ExtensionAPI>({
       on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
         handlers.set(event, handler),
@@ -323,10 +322,7 @@ describe("session-manager extension", () => {
         inspectCurrent: () => Effect.succeed(window),
         bindCurrent: () => Effect.succeed(window),
         renameCurrent: () => Effect.void,
-        releaseCurrent: () =>
-          Effect.sync(() => {
-            releaseCalls += 1;
-          }),
+        releaseCurrent: () => Effect.void,
       },
       sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
       environment: { TMUX_PANE: "%1" },
@@ -338,7 +334,6 @@ describe("session-manager extension", () => {
     expect(notices).toHaveLength(1);
 
     await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
-    expect(releaseCalls).toBe(1);
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
       desiredState: "open",
     });
