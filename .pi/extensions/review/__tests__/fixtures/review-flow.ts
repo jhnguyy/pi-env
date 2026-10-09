@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { onTestFinished } from "vitest";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -29,7 +36,7 @@ import {
   ReviewEvidenceResolverKey,
 } from "../../evidence-resolver";
 import { EvidenceResolverNode, type ReviewRoleAssignments } from "../../review-graph";
-import { resolvePrReviewModelPolicy } from "../../model-policy";
+import { resolvePrReviewModelPolicy, type ReviewRolePins } from "../../model-policy";
 import { runReviewDag } from "../../review-dag-runner";
 
 export function reviewFixture(): {
@@ -114,16 +121,24 @@ const availableModels = ["provider-a", "provider-b"].map(
   }),
 );
 
-export const assignments = Object.fromEntries(
-  Object.entries(resolvePrReviewModelPolicy(availableModels).assignments).map(([role, candidate]) => [
-    role,
-    {
-      model: candidate.fqid,
-      reasoning: candidate.reasoning,
-      contextWindow: candidate.contextWindow,
-    },
-  ]),
-) as ReviewRoleAssignments;
+export function assignmentsFor(
+  models: readonly Model<"openai-responses">[] = availableModels,
+  pins: ReviewRolePins | Readonly<Record<string, string>> = {},
+): ReviewRoleAssignments {
+  const resolved = resolvePrReviewModelPolicy(models, pins);
+  return Object.fromEntries(
+    Object.entries(resolved.assignments).map(([role, candidate]) => [
+      role,
+      {
+        model: candidate.fqid,
+        reasoning: candidate.reasoning,
+        contextWindow: candidate.contextWindow,
+      },
+    ]),
+  ) as ReviewRoleAssignments;
+}
+
+export const assignments = assignmentsFor();
 
 export function eventsApi(): any {
   const handlers = new Map<string, Set<(data: unknown) => void>>();
@@ -181,6 +196,11 @@ export interface RealReviewFlow {
   readonly registeredTools: number;
   readonly unregisteredTools: number;
   readonly serviceDisposals: number;
+  readonly requests: readonly {
+    readonly nodeId: string;
+    readonly model: string;
+    readonly reasoning?: string;
+  }[];
 }
 
 /** Run the real DAG with scripted model output and in-memory host adapters. */
@@ -190,7 +210,49 @@ export async function runRealReviewFlow(
     request: Parameters<DagEffectExecutor>[0];
     inspect: (signal?: AbortSignal) => Promise<any>;
   }) => Promise<void>,
+  options: {
+    readonly models?: readonly Model<"openai-responses">[];
+    readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
+  } = {},
 ): Promise<RealReviewFlow> {
+  const requests: { nodeId: string; model: string; reasoning?: string }[] = [];
+  const evidencePath = process.env.PI_REVIEW_FLOW_EVIDENCE;
+  const evidenceRecord: Record<string, unknown> = {
+    revision: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+    reproduce:
+      "PI_REVIEW_FLOW_EVIDENCE=$HOME/review-flow.jsonl nub run test:vitest .pi/extensions/review/__tests__/review-dag-runner.test.ts",
+    inputs: {
+      models: (options.models ?? availableModels).map((model) => ({
+        id: `${model.provider}/${model.id}`,
+        reasoning: model.reasoning,
+        thinkingLevelMap: model.thinkingLevelMap,
+      })),
+      pins: options.pins ?? {},
+    },
+    expected:
+      "Eight model requests dispatched; all dispatched models and reasoning match complete deterministic same-input assignments (including pins); finalized review succeeds with complete coverage and three findings.",
+    actual: "pending",
+  };
+  const persistEvidence = (actual: unknown, expected = evidenceRecord.expected) => {
+    if (!evidencePath) return;
+    mkdirSync(path.dirname(evidencePath), { recursive: true });
+    appendFileSync(evidencePath, `${JSON.stringify({ ...evidenceRecord, expected, actual })}\n`);
+  };
+  let resolvedAssignments: ReviewRoleAssignments;
+  try {
+    resolvedAssignments = assignmentsFor(options.models, options.pins);
+  } catch (error) {
+    persistEvidence(
+      {
+        status: "rejected",
+        stage: "model-admission",
+        error: error instanceof Error ? error.message : String(error),
+        requests,
+      },
+      "Invalid model configuration is rejected before model dispatch.",
+    );
+    throw error;
+  }
   const { root, artifactRoot, ctx, state: initial } = reviewFixture();
   const { worktree, diffPath } = initial.snapshot;
   const sessionDir = ctx.sessionManager.getSessionDir();
@@ -246,6 +308,8 @@ export async function runRealReviewFlow(
   let invalidSynthesisRejected = false;
   let dossierRawIds: string[] = [];
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
+    const payload = request.node.executor.payload as { model: string; reasoning?: string };
+    requests.push({ nodeId: request.node.id, model: payload.model, reasoning: payload.reasoning });
     if (request.node.id === "reading-plan") {
       const submitted = await findTool("submit_review_plan_").execute("plan", {
         goal: "Change the exported value.",
@@ -363,7 +427,7 @@ export async function runRealReviewFlow(
       pi,
       ctx,
       service: services[0].service,
-      assignments,
+      assignments: resolvedAssignments,
       deckPath: deck.path,
       state: initial,
       save: (next) => {
@@ -376,11 +440,24 @@ export async function runRealReviewFlow(
         });
       },
     });
+  } catch (error) {
+    persistEvidence({
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+      requests,
+    });
+    throw error;
   } finally {
     await runtime.dispose();
     stopRuntimeListener();
     unregisterDagExecutor(evidenceRegistration);
   }
+  persistEvidence({
+    status: state.result?.coverage?.status,
+    dag: state.dag?.status,
+    requests,
+    findings: state.result?.findings.length,
+  });
   return {
     root,
     sessionDir,
@@ -394,5 +471,6 @@ export async function runRealReviewFlow(
     registeredTools,
     unregisteredTools,
     serviceDisposals,
+    requests,
   };
 }
