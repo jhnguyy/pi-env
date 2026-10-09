@@ -579,7 +579,7 @@ describeE2E("session-manager in real tmux", () => {
       await clearPane();
       const firstWindow = windowId;
       let secondWindow = "";
-      const work = join(root, "duplicate-work");
+      const work = join(root, "duplicate work");
       mkdirSync(work);
       const launch = (...args: string[]) =>
         tmux("respawn-pane", "-t", windowId, "-c", work, piCommand(...args));
@@ -665,7 +665,7 @@ describeE2E("session-manager in real tmux", () => {
             signalPi("SIGTERM");
             await exited();
             windowId = secondWindow;
-            const wrapper = join(root, "duplicate-pi");
+            const wrapper = join(root, "duplicate pi");
             writeFileSync(
               wrapper,
               `#!/bin/sh\nexport XDG_RUNTIME_DIR=${quote(join(root, "runtime"))}\nexec ${piCommand()} "$@"\n`,
