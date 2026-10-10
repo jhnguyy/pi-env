@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import { deriveSetupPolicyEffect } from "./policy-effect.mjs";
 import { configureHomeManagerEffect } from "./home-manager.mjs";
+import { fileEffect } from "./file-ops.mjs";
 import { configurePiEffect } from "./pi-config.mjs";
 import { configureRepoToolsEffect } from "./repo-tools.mjs";
 import { configureTerminalToolsEffect } from "./terminal-config.mjs";
@@ -93,9 +95,16 @@ function configureEffect() {
       case ConfigureCommand.RepoTools:
         yield* configureRepoToolsEffect(ctx, policy);
         break;
-      case ConfigureCommand.HomeManager:
-        yield* configureHomeManagerEffect(ctx, policy);
+      case ConfigureCommand.HomeManager: {
+        const outcome = yield* configureHomeManagerEffect(ctx, policy);
+        const outcomeFile = env.PI_ENV_HOME_MANAGER_OUTCOME_FILE;
+        if (outcomeFile) {
+          yield* fileEffect("record Home Manager outcome", outcomeFile, () =>
+            writeFileSync(outcomeFile, outcome),
+          );
+        }
         break;
+      }
       default:
         return yield* Effect.fail(new SetupUsageError(`unknown configure command: ${command}`, 2));
     }

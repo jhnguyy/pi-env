@@ -19,6 +19,7 @@ setup_run_configure() {
   PRE_COMMIT_HOOK_SRC="$PRE_COMMIT_HOOK_SRC" \
   SHOULD_LINK_GHOSTTY="${should_link_ghostty:-0}" \
   CONTEXT_LABEL="${context_label:-}" \
+  PI_ENV_HOME_MANAGER_OUTCOME_FILE="${home_manager_outcome_file:-}" \
   "$setup_node_bin" "$SETUP_DIR/configure.mjs" "$1" "$setup_node_bin"
 }
 
@@ -41,11 +42,18 @@ setup_load_home_manager_session() {
   ok "Home Manager session variables loaded from ${generation}"
 }
 
+# A skipped sync keeps the caller's environment. A current input also reloads, so a
+# rerun from the shell of an earlier, partly failed sync picks up the activated profile.
 setup_sync_home_manager() {
+  local home_manager_outcome_file outcome
+  home_manager_outcome_file=$(mktemp "${TMPDIR:-/tmp}/pi-env-home-manager-outcome.XXXXXX")
   setup_run_configure home-manager
-  if [ "${PI_ENV_HOME_MANAGER_SYNC:-0}" = "1" ] && [ "${PI_ENV_SKIP_HOME_MANAGER:-0}" != "1" ] &&
-    [ -n "${PI_ENV_HOME_MANAGER_FLAKE:-}" ]; then
-    setup_load_home_manager_session
+  outcome=$(cat "$home_manager_outcome_file")
+  rm -f "$home_manager_outcome_file"
+  if [ "${PI_ENV_HOME_MANAGER_SYNC:-0}" = "1" ]; then
+    case "$outcome" in
+      switched | current) setup_load_home_manager_session ;;
+    esac
   fi
 }
 

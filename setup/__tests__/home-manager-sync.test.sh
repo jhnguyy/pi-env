@@ -263,7 +263,7 @@ run_pi_bump_scenario() {
   cp "$TMP/home/.local/bin/pi" "$dir/pi" 2>/dev/null || true
   NAME="$name" EXPECTED="$expected" VERDICT="$verdict" STATUS="$STATUS" DIR="$dir" \
     REVISION="$(git -C "$ROOT" rev-parse HEAD)$(git -C "$ROOT" diff --quiet HEAD || echo '+dirty')" \
-    SELECTED="$(adapter_package)" "$(node_bin)" --input-type=module <<'JS'
+    SELECTED="$(adapter_package)" BRANCH="$(git -C "$REPO_DIR" branch --show-current)" "$(node_bin)" --input-type=module <<'JS'
 import fs from "node:fs";
 const env = process.env;
 const log = fs.readFileSync(`${env.DIR}/setup.log`, "utf8");
@@ -275,6 +275,7 @@ fs.writeFileSync(`${env.DIR}/result.json`, JSON.stringify({
     callerPiPackageDir: env.PI_PACKAGE_DIR,
     callerSessionGuard: env.__HM_SESS_VARS_SOURCED ?? null,
     syncRequested: env.PI_ENV_HOME_MANAGER_SYNC === "1",
+    checkoutBranch: env.BRANCH,
     nubInstallStatus: env.PI_ENV_TEST_NUB_INSTALL_STATUS ?? "0",
     switchStatus: env.PI_ENV_TEST_SWITCH_STATUS ?? "0",
     generationsReported: !env.PI_ENV_TEST_NO_GENERATIONS,
@@ -305,6 +306,38 @@ test_sync_from_old_session_installs_activated_pi() {
   run_pi_bump_scenario sync-from-old-session \
     "the shell predates the generation; sync switches, reloads it, and installs its Pi 1.2.3" \
     check_old_session_sync
+  teardown_pi_bump_fixture
+}
+
+check_skipped_sync_keeps_caller_pi() {
+  [ "$STATUS" -eq 0 ] && [ "$(adapter_package)" = "$TMP/pi-1.2.3" ] && [ -z "$(home_manager_calls)" ] &&
+    printf '%s' "$OUTPUT" | grep -qF 'not main'
+}
+
+test_skipped_sync_keeps_caller_pi() {
+  setup_pi_bump_fixture
+  git -C "$REPO_DIR" switch -q -c feature/review-probe
+  export PI_ENV_HOME_MANAGER_SYNC=1 PI_PACKAGE_DIR="$TMP/pi-1.2.3"
+  run_pi_bump_scenario skipped-sync-keeps-caller-pi \
+    "a sync skipped off main keeps the caller's compatible Pi 1.2.3 and does not load the old generation" \
+    check_skipped_sync_keeps_caller_pi
+  teardown_pi_bump_fixture
+}
+
+check_current_input_reloads() {
+  [ "$STATUS" -eq 0 ] && [ "$(adapter_package)" = "$TMP/pi-1.2.3" ] &&
+    [ "$(home_manager_calls)" = "home-manager generations" ]
+}
+
+# A sync that switched but failed in a later stage leaves the old shell behind; rerunning must recover.
+test_current_input_reloads_old_session() {
+  setup_pi_bump_fixture
+  write_lock "$FLAKE_DIR" "$(head_rev "$REPO_DIR")"
+  echo "$TMP/generations/new" > "$TMP/generations/current"
+  export PI_ENV_HOME_MANAGER_SYNC=1
+  run_pi_bump_scenario current-input-reloads-old-session \
+    "when the input already matches main, a sync request reloads the current generation and installs its Pi 1.2.3" \
+    check_current_input_reloads
   teardown_pi_bump_fixture
 }
 
@@ -370,6 +403,8 @@ printf 'Home Manager sync evidence: %s\n' "$EVIDENCE"
 test_stale_lock_reports_without_sync_request
 test_sync_request_updates_and_switches
 test_sync_from_old_session_installs_activated_pi
+test_skipped_sync_keeps_caller_pi
+test_current_input_reloads_old_session
 test_drift_report_precedes_pi_mismatch
 test_dependency_failure_stops_before_home_manager
 test_switch_failure_stops_before_pi_cli
