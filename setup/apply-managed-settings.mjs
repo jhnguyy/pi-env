@@ -16,7 +16,7 @@ const reset = mode === "--reset";
 
 if (!settingsFile || !repoPath || (mode && !reset)) {
   console.error(
-    "🤖: usage: apply-managed-settings.mjs <agent-dir>/settings.json <repo-path> [--reset]",
+    "usage: apply-managed-settings.mjs <agent-dir>/settings.json <repo-path> [--reset]",
   );
   process.exit(2);
 }
@@ -68,11 +68,11 @@ const baseSettings =
     ? initialSettings(parseJsonRelaxed(path.join(path.dirname(settingsFile), "auth.json")))
     : parseJsonRelaxed(settingsFile);
 if (baseSettings === null || typeof baseSettings !== "object" || Array.isArray(baseSettings)) {
-  throw new Error("🤖: settings must be a JSON object");
+  throw new Error("settings must be a JSON object");
 }
 const settings = applyManagedSettings(baseSettings);
 if (settings.packages !== undefined) {
-  if (!Array.isArray(settings.packages)) throw new Error("🤖: settings.packages must be an array");
+  if (!Array.isArray(settings.packages)) throw new Error("settings.packages must be an array");
   assertValidPackageSources(settings);
 }
 
@@ -80,7 +80,7 @@ fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
 if (reset && settingsExisted) {
   const backup = `${settingsFile}.backup-${Date.now()}`;
   fs.writeFileSync(backup, before, { flag: "wx", mode: 0o600 });
-  console.error(`🤖: Settings backup: ${backup}`);
+  console.error(`Settings backup: ${backup}`);
 }
 
 const agentDir = path.dirname(settingsFile);

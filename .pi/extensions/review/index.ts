@@ -9,17 +9,13 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Effect, PartitionedSemaphore, Schema } from "effect";
-import { decodeGlobalAgentSettingsSnapshotEffect } from "../_shared/agent-settings";
 import { PiEvent } from "../_shared/agent-tools";
 import {
   listenForDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
-import {
-  decodeSettingsBlockFromSnapshotEffect,
-  loadSettingsSnapshotEffect,
-} from "../_shared/settings";
+import { loadSettingsSnapshotEffect, decodeSettingsBlockFromSnapshotEffect } from "../_shared/settings";
 import { registerPublicTool } from "../_shared/tool-render";
 import {
   Disclosure,
@@ -595,16 +591,12 @@ async function createReviewAttempt(
     registration = currentRegistration;
     stage = "settings";
     const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
-    const [agentSettings, reviewSettings] = await Effect.runPromise(
-      Effect.all([
-        decodeGlobalAgentSettingsSnapshotEffect(settingsSnapshot),
-        decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
-      ]),
+    const reviewSettings = await Effect.runPromise(
+      decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
     );
     await assertActivePreparationScope(pi, state, coordinatorScope);
     stage = "model-policy";
     const policy = resolvePrReviewModelPolicy(
-      agentSettings,
       ctx.modelRegistry.getAvailable(),
       reviewSettings.roleModels ?? {},
     );

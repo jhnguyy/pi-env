@@ -73,7 +73,7 @@ function shSingleQuote(value) {
 function readPiPackageEntry(piPackageDir) {
   const packageJsonPath = join(piPackageDir, "package.json");
   const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (pkg.name !== PiPackage.Name) fail(`🤖: invalid Pi package at ${packageJsonPath}`);
+  if (pkg.name !== PiPackage.Name) fail(`invalid Pi package at ${packageJsonPath}`);
   const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[PiPackage.Bin];
   if (typeof entry !== "string" || entry.length === 0) {
     fail(
@@ -82,7 +82,7 @@ function readPiPackageEntry(piPackageDir) {
   }
   const relativeEntry = relative(resolve(piPackageDir), resolve(piPackageDir, entry));
   if (!relativeEntry || relativeEntry.startsWith("..") || isAbsolute(relativeEntry)) {
-    fail(`🤖: Pi bin must be inside its package: ${entry}`);
+    fail(`Pi bin must be inside its package: ${entry}`);
   }
   return relativeEntry;
 }
