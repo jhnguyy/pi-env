@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import {
-  appendFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -215,41 +214,7 @@ export async function runRealReviewFlow(
   } = {},
 ): Promise<RealReviewFlow> {
   const requests: { nodeId: string; model: string }[] = [];
-  const evidencePath = process.env.PI_REVIEW_FLOW_EVIDENCE;
-  const evidenceRecord: Record<string, unknown> = {
-    revision: evidencePath
-      ? execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-      : undefined,
-    reproduce:
-      "PI_REVIEW_FLOW_EVIDENCE=$HOME/review-flow.jsonl nub run test:vitest .pi/extensions/review/__tests__/review-dag-runner.test.ts",
-    inputs: {
-      models: (options.models ?? availableModels).map((model) => `${model.provider}/${model.id}`),
-      pins: options.pins ?? {},
-    },
-    expected:
-      "Review finalizes with complete coverage using only registry models and honoring supported role pins.",
-    actual: "pending",
-  };
-  const persistEvidence = (actual: unknown, expected = evidenceRecord.expected) => {
-    if (!evidencePath) return;
-    mkdirSync(path.dirname(evidencePath), { recursive: true });
-    appendFileSync(evidencePath, `${JSON.stringify({ ...evidenceRecord, expected, actual })}\n`);
-  };
-  let resolvedAssignments: ReviewRoleAssignments;
-  try {
-    resolvedAssignments = assignmentsFor(options.models, options.pins);
-  } catch (error) {
-    persistEvidence(
-      {
-        status: "rejected",
-        stage: "model-admission",
-        error: error instanceof Error ? error.message : String(error),
-        requests,
-      },
-      "Invalid model configuration is rejected before model dispatch.",
-    );
-    throw error;
-  }
+  const resolvedAssignments = assignmentsFor(options.models, options.pins);
   const { root, artifactRoot, ctx, state: initial } = reviewFixture();
   const { worktree, diffPath } = initial.snapshot;
   const sessionDir = ctx.sessionManager.getSessionDir();
@@ -437,24 +402,11 @@ export async function runRealReviewFlow(
         });
       },
     });
-  } catch (error) {
-    persistEvidence({
-      status: "failed",
-      error: error instanceof Error ? error.message : String(error),
-      requests,
-    });
-    throw error;
   } finally {
     await runtime.dispose();
     stopRuntimeListener();
     unregisterDagExecutor(evidenceRegistration);
   }
-  persistEvidence({
-    status: state.result?.coverage?.status,
-    dag: state.dag?.status,
-    requests,
-    findings: state.result?.findings.length,
-  });
   return {
     root,
     sessionDir,
