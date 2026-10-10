@@ -48,12 +48,26 @@ type EditorWithCtrlD = ReturnType<EditorFactory> & {
   onCtrlD?: () => void;
 };
 
+const errorField = (value: unknown): string | undefined =>
+  typeof value === "string" || typeof value === "number"
+    ? `${value}`
+    : Array.isArray(value) && value.every((item) => typeof item === "string")
+      ? value.join(",")
+      : undefined;
+
 function errorMessage(error: unknown): string {
-  if (typeof error === "object" && error !== null && "_tag" in error) {
-    const tagged = error as { _tag: string; reason?: string; name?: string };
-    return [tagged._tag, tagged.reason ?? tagged.name].filter(Boolean).join(": ");
+  if (typeof error !== "object" || error === null || !("_tag" in error)) {
+    return error instanceof Error ? error.message : String(error);
   }
-  return error instanceof Error ? error.message : String(error);
+  const { _tag, reason, cause, ...fields } = error as Record<string, unknown>;
+  const details = Object.entries(fields).flatMap(([key, value]) => {
+    const rendered = errorField(value);
+    return rendered === undefined ? [] : [`${key}=${rendered}`];
+  });
+  const summary = `${_tag}${details.length > 0 ? ` (${details.join(", ")})` : ""}${
+    typeof reason === "string" ? `: ${reason}` : ""
+  }`;
+  return cause === undefined ? summary : `${summary}: ${errorMessage(cause)}`;
 }
 
 function startInput(
@@ -111,6 +125,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
   let readinessScope: Scope.Closeable | undefined;
   let coordinatorBinding: { readonly paneId: string; readonly sessionId: string } | undefined;
   let launchIntent: LaunchIntent | undefined;
+  let workStartup: Promise<void> | undefined;
 
   const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
   const queue = <A>(operation: () => Promise<A>): Promise<A> => {
@@ -384,7 +399,12 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
     const launch = parsedLaunch.success;
     launchIntent = launch;
     if (launch.kind === "coordinator") await startCoordinatorSession(ctx, launch);
-    else await startWorkSession(ctx, launch, startGeneration);
+    else {
+      const startup = startWorkSession(ctx, launch, startGeneration);
+      workStartup = startup;
+      await startup;
+      if (workStartup === startup) workStartup = undefined;
+    }
   });
 
   pi.on("agent_end", async (_event, ctx) => {
@@ -533,6 +553,9 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 
   pi.on("session_shutdown", async (_event, ctx) => {
     generation += 1;
+    // An in-flight enrollment releases its own binding once it sees the new generation.
+    await workStartup;
+    workStartup = undefined;
     if (readinessScope) await run(Scope.close(readinessScope, Exit.void));
     readinessScope = undefined;
     await runtimeBus?.close().catch(() => undefined);
