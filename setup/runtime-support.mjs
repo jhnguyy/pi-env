@@ -1,13 +1,9 @@
 import { spawnSync } from 'node:child_process';
 
 export const RuntimeCommand = Object.freeze({
-  All: 'all',
+  Dependencies: 'dependencies',
   PiCli: 'pi-cli',
 });
-
-export function parseRuntimeCommand(value) {
-  return value || RuntimeCommand.All;
-}
 
 export function mustEnv(name) {
   const value = process.env[name];

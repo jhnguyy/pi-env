@@ -61,7 +61,8 @@ Options:
                    Skip the Home Manager pi-env input check.
   --sync-home-manager
                    Update the Home Manager pi-env input to main and run
-                   home-manager switch. Without it, setup only reports drift.
+                   home-manager switch before the Pi CLI check. Later stages use
+                   the activated profile. Without it, setup only reports drift.
   -h, --help       Show this help.
 
 Entrypoint-only options/env:
