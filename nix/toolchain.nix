@@ -80,6 +80,7 @@ let
     pkgs.neovim
     pkgs.ripgrep
     pkgs.tmux
+    pkgs.flock
   ];
   toolchainFor =
     pkgs:
