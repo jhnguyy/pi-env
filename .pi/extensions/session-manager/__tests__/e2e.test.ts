@@ -149,9 +149,12 @@ describeE2E("session-manager in real tmux", () => {
   }
 
   function saveEvidence() {
-    const text = JSON.stringify(evidence, null, 2)
-      .replaceAll(root, "<root>")
-      .replaceAll(repoRoot, "<repo>");
+    const serialized = JSON.stringify(evidence, null, 2);
+    // Setup can fail before root exists; replacing "" would corrupt the JSON.
+    const text = (root ? serialized.replaceAll(root, "<root>") : serialized).replaceAll(
+      repoRoot,
+      "<repo>",
+    );
     writeFileSync(artifactPath, `${text}\n`);
   }
 
@@ -230,11 +233,13 @@ describeE2E("session-manager in real tmux", () => {
     if (artifactPath) {
       evidence.cleanupErrors = cleanupErrors;
       evidence.status =
-        cases.length === expectedCaseCount &&
-        cases.every((entry) => entry.verdict === "pass") &&
-        cleanupErrors.length === 0
-          ? "pass"
-          : "fail";
+        cases.length === 0
+          ? "incomplete"
+          : cases.length === expectedCaseCount &&
+              cases.every((entry) => entry.verdict === "pass") &&
+              cleanupErrors.length === 0
+            ? "pass"
+            : "fail";
       saveEvidence();
     }
     if (cleanupErrors.length > 0)
