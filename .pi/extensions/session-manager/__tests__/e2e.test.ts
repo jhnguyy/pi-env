@@ -4,6 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { Effect } from "effect";
+import { createTmuxSessionHost, type Exec } from "../host.js";
+import { createSessionLifecycle } from "../lifecycle.js";
+import { nodeSessionFileProbe } from "../session-file.js";
+import { createFileSessionCatalog } from "../storage.js";
+
 // Drives real Pi with only session-manager loaded inside an isolated tmux server.
 // Run in the container with `nub run test:e2e:session-manager:docker`.
 const describeE2E = process.env["E2E"] === "1" ? describe : describe.skip;
@@ -52,7 +58,7 @@ describeE2E("session-manager in real tmux", () => {
   let windowId = "";
   let artifactPath = "";
   const cases: Case[] = [];
-  const expectedCaseCount = 9;
+  const expectedCaseCount = 10;
   let caseStart = 0;
   const evidence: Record<string, unknown> = {
     scenario: "real Pi with session-manager in an isolated tmux server",
@@ -809,6 +815,100 @@ describeE2E("session-manager in real tmux", () => {
           evidence.duplicateNameCleanupErrors = cleanupErrors;
           saveEvidence();
           if (completed) throw new Error(`Cleanup failed: ${cleanupErrors.join("; ")}`);
+        }
+      }
+    },
+  );
+
+  // Named E2E gap: Pi startup migrates away coordinator names. Call the actual
+  // lifecycle with a legacy catalog so that migration cannot hide name rejection.
+  // This still requires real tmux, so it belongs in the qualification suite, not
+  // ordinary integration tests (the published runtime deliberately has no tmux).
+  it(
+    "starts work with a legacy coordinator's name without changing its identity",
+    { timeout: STEP_TIMEOUT_MS },
+    async () => {
+      await clearPane();
+      const cwd = join(root, "legacy work");
+      mkdirSync(cwd);
+      const catalog = createFileSessionCatalog(join(root, "legacy agent"));
+      const exec: Exec = async (command, args) => ({
+        stdout: execFileSync(command, ["-S", socket, "-f", "/dev/null", ...args], {
+          encoding: "utf8",
+          env: piEnv,
+        }),
+        stderr: "",
+        code: 0,
+      });
+      const host = createTmuxSessionHost(exec);
+      const lifecycle = createSessionLifecycle({
+        catalog,
+        host,
+        sessionFiles: nodeSessionFileProbe,
+      });
+      const paneId = format("#{pane_id}");
+      const sessionId = "legacy-name-work";
+      let completed = false;
+      try {
+        await check(
+          "legacy named-coordinator gap",
+          {
+            state: "managed",
+            coordinatorUnchanged: true,
+            workCount: 1,
+            work: { sessionId, name: "shared", desiredState: "open" },
+            binding: { sessionId, name: "shared", ownerPid: String(process.pid) },
+          },
+          async () => {
+            const now = new Date().toISOString();
+            await Effect.runPromise(
+              catalog.update(cwd, (manifest) => ({
+                ...manifest,
+                coordinator: {
+                  version: 1,
+                  sessionId: "legacy-coordinator",
+                  cwd: manifest.canonicalCwd,
+                  name: "shared",
+                  persistence: { state: "pending" },
+                  createdAt: now,
+                  lastOpenedAt: now,
+                  role: "coordinator",
+                },
+              })),
+            );
+            const before = (await Effect.runPromise(catalog.read(cwd)))?.coordinator;
+            const started = await Effect.runPromise(
+              lifecycle.start({
+                mode: "tui",
+                cwd,
+                paneId,
+                sessionId,
+                sessionName: "shared",
+                sessionFile: join(root, "legacy-work.jsonl"),
+              }),
+            );
+            const manifest = await Effect.runPromise(catalog.read(cwd));
+            return {
+              state: started.state,
+              coordinatorUnchanged:
+                JSON.stringify(manifest?.coordinator) === JSON.stringify(before),
+              coordinator: manifest?.coordinator,
+              workCount: manifest?.sessions.length,
+              work: manifest?.sessions[0],
+              binding: window(),
+            };
+          },
+        );
+        completed = true;
+      } finally {
+        // Record cleanup failures without replacing the original regression failure.
+        try {
+          await Effect.runPromise(host.releaseCurrent(paneId, sessionId));
+          await clearPane();
+        } catch (error) {
+          evidence.legacyNameCleanupError = String(error);
+          saveEvidence();
+          if (completed) throw error;
         }
       }
     },

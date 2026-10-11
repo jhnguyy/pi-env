@@ -1,12 +1,10 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { CloseSource } from "../domain.js";
-import { createTmuxSessionHost, type Exec, type CurrentWindow, type SessionHostShape } from "../host.js";
+import type { CurrentWindow, SessionHostShape } from "../host.js";
 import {
   SessionAlreadyClosed,
   createSessionLifecycle,
@@ -15,7 +13,6 @@ import {
 import { SessionFileInvalid, nodeSessionFileProbe } from "../session-file.js";
 import { createFileSessionCatalog } from "../storage.js";
 
-const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 const window: CurrentWindow = {
   socketPath: "/tmp/tmux.sock",
@@ -174,57 +171,6 @@ describe("session lifecycle", () => {
       lifecycle.refreshMaterialization(started.session, input.sessionFile),
     );
     expect(refreshed.record.persistence.state).toBe("materialized");
-  });
-
-  // Pi startup removes coordinator names. Seed the legacy catalog directly so
-  // a name-collision regression cannot hide behind that migration in the E2E.
-  it("starts work with a legacy coordinator's name without changing its identity", async () => {
-    const { root, cwd, catalog, input } = await fixture();
-    const socket = join(root, "tmux.sock");
-    const exec: Exec = async (command, args) => {
-      const { stdout, stderr } = await execFileAsync(command, ["-S", socket, ...args]);
-      return { stdout, stderr, code: 0 };
-    };
-    try {
-      await exec("tmux", ["-f", "/dev/null", "new-session", "-d", "-s", "legacy", "sleep", "300"]);
-      const lifecycle = createSessionLifecycle({
-        catalog,
-        host: createTmuxSessionHost(exec),
-        sessionFiles: nodeSessionFileProbe,
-      });
-      const now = new Date().toISOString();
-      await Effect.runPromise(
-        catalog.update(cwd, (manifest) => ({
-          ...manifest,
-          coordinator: {
-            version: 1,
-            sessionId: "coordinator",
-            cwd: manifest.canonicalCwd,
-            name: "shared",
-            persistence: { state: "pending" },
-            createdAt: now,
-            lastOpenedAt: now,
-            role: "coordinator",
-          },
-        })),
-      );
-      const started = await Effect.runPromise(
-        lifecycle.start({ ...input, paneId: "legacy:0.0", sessionName: "shared" }),
-      );
-      expect(started.state).toBe("managed");
-      const manifest = await Effect.runPromise(catalog.read(cwd));
-      expect(manifest?.coordinator).toMatchObject({ sessionId: "coordinator", name: "shared" });
-      expect(manifest?.sessions).toHaveLength(1);
-      expect(manifest?.sessions[0]).toMatchObject({
-        sessionId: input.sessionId,
-        name: "shared",
-        desiredState: "open",
-      });
-      expect((await exec("tmux", ["show-options", "-wqv", "-t", "legacy:0", "@pi_session_id"])).stdout.trim()).toBe(input.sessionId);
-      expect((await exec("tmux", ["display-message", "-p", "-t", "legacy:0", "#{window_name}"])).stdout.trim()).toBe("shared");
-    } finally {
-      await exec("tmux", ["kill-server"]);
-    }
   });
 
   it("writes the closure source without changing history persistence", async () => {
