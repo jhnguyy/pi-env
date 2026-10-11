@@ -1,2 +1,2 @@
-- In body text you draft for the user to send or publish, such as PR descriptions, issues, comments, and messages, put any user-written text first, then the AI-authored text starting with `🤖:`.
-- Before a remote write, such as a push, PR, comment, merge, or deploy, ask unless the user clearly approved it.
+- Use `🤖:` only for AI-authored text in conversational comments, review replies, and chat or email messages sent on the user's behalf. Put any user-provided text first, unchanged, then begin your contribution with `🤖:`.
+- Before any remote write, such as a push, PR creation or update, comment, merge, or deploy, ask for approval unless the user has clearly authorized that action.

@@ -49,7 +49,7 @@ When Nix is available, plain ./setup.sh selects the Nix setup app.
 If that operation fails, use --portable explicitly to select Nub instead.
 
 Options:
-  --reset          🤖: Back up and replace user settings with the initial baseline.
+  --reset          Back up and replace user settings with the initial baseline.
   --nix-managed    Force Nix/Home Manager ownership of shell and terminal config.
                    Skips PATH profile edits, tmux writes, and Ghostty writes.
   --portable       Force portable setup. Setup may update shell profiles and link
@@ -61,7 +61,8 @@ Options:
                    Skip the Home Manager pi-env input check.
   --sync-home-manager
                    Update the Home Manager pi-env input to main and run
-                   home-manager switch. Without it, setup only reports drift.
+                   home-manager switch before the Pi CLI check. Later stages use
+                   the activated profile. Without it, setup only reports drift.
   -h, --help       Show this help.
 
 Entrypoint-only options/env:

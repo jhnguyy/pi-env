@@ -133,7 +133,9 @@ describe("session manifest v1", () => {
     ).toThrow(ManifestSemanticFailure);
   });
 
-  it("includes the coordinator in identity uniqueness", () => {
+  // Public workflows cannot create corrupt duplicate IDs or retain a named coordinator.
+  // Legacy labels must decode, but duplicate identities must still fail validation.
+  it("accepts a legacy coordinator label but rejects coordinator identity reuse", () => {
     const { desiredState: _desiredState, ...base } = openRecord({
       sessionId: "coordinator",
       name: "Fox",
@@ -144,15 +146,9 @@ describe("session manifest v1", () => {
       coordinator,
       sessions: [
         openRecord({ sessionId: "work-a", name: "Fox" }),
-        openRecord({ sessionId: "work-b", name: "Fox", explicitName: true }),
-        closedRecord({ sessionId: "work-c", name: "Fox" }),
       ],
     };
-    expect(validateManifest(valid).sessions.map((record) => record.name)).toEqual([
-      "Fox",
-      "Fox",
-      "Fox",
-    ]);
+    expect(validateManifest(valid).sessions[0]?.name).toBe("Fox");
     expect(() =>
       validateManifest({
         ...valid,
@@ -162,12 +158,12 @@ describe("session manifest v1", () => {
         },
       }),
     ).toThrow(ManifestMalformed);
-    expect(() =>
-      validateManifest({
+    expect(
+      semanticReason({
         ...valid,
         sessions: [openRecord({ sessionId: "coordinator", name: "other" })],
       }),
-    ).toThrow(ManifestSemanticFailure);
+    ).toBe("duplicate session id");
   });
 
   it("enforces identity, timestamp, and stable-order invariants", () => {
