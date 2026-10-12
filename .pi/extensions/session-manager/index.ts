@@ -539,7 +539,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
         }
         const status = await run(lifecycle.status(ctx.cwd, ctx.sessionManager.getSessionId()));
         const current = status.current
-          ? `${status.current.name ?? status.current.sessionId} ${status.current.persistence.state}`
+          ? `${status.current.name ? `${status.current.name} (${status.current.sessionId})` : status.current.sessionId} ${status.current.persistence.state}`
           : "unmanaged";
         ctx.ui.notify(
           `Session ${current}. Workspace: ${status.open} open, ${status.closed} closed. Revision ${status.revision}.`,

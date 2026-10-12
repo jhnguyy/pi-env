@@ -55,7 +55,7 @@ PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run test:e2e:real-workspa
 
 Each run writes a `pi-dev-tools-canary-*/result.json` with the revision, public request, expected destination, actual result, and verdict. Keep this directory for review. Without the environment variable, evidence goes to temporary storage.
 
-Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux server and covers window binding, stale-binding reclaim after `kill -9`, release, and labels:
+Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux server and covers window binding, stale-binding reclaim after `kill -9`, release, labels, and duplicate-name restoration. See [session identity and display names](docs/session-manager.md) for the behavioral contract:
 
 ```bash
 nub run test:e2e:session-manager:docker
