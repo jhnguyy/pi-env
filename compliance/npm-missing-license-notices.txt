@@ -1,7 +1,7 @@
 Supplemental MIT notices for installed packages that omit a license file
 ============================================================================
 
-@earendil-works/chord, @earendil-works/pi-agent-core,
+@earendil-works/pi-agent-core,
 @earendil-works/pi-ai, @earendil-works/pi-codemode,
 @earendil-works/pi-coding-agent, @earendil-works/pi-mcp,
 @earendil-works/pi-telemetry, and @earendil-works/pi-tui:
@@ -9,13 +9,6 @@ Copyright (c) 2025 Mario Zechner
 
 standardwebhooks:
 Copyright (c) 2023 Svix (https://www.svix.com)
-
-@mariozechner/clipboard and its platform packages:
-Copyright (c) Mario Zechner
-
-oxc-resolver and @oxc-resolver platform packages:
-Copyright (c) 2024-present VoidZero Inc. & Contributors
-Copyright (c) 2023 Boshen
 
 bash-language-server:
 Copyright (c) 2018 Mads Hartmann
@@ -28,9 +21,6 @@ Copyright (c) Nathan Rajlich
 
 stackback:
 Copyright (c) Roman Shtylman
-
-tr46:
-Copyright (c) Sebastian Mayr
 
 MIT License
 
