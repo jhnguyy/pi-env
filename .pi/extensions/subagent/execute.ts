@@ -4,7 +4,6 @@
 
 import { agentLoop as defaultAgentLoop } from "@earendil-works/pi-agent-core";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type {
   AgentContext,
   AgentEvent,
@@ -197,6 +196,7 @@ function runResolvedSubagentWorkflow(
     } = run;
     const name = run.name;
     const maxTurns = run.maxTurns;
+    const systemMessage = { role: "system", content: systemPrompt, timestamp: Date.now() } as const;
     const childSession = yield* diagnostics.span(
       SubagentSpanName.Session,
       { operation: SubagentOperation.Session, mode },
@@ -212,6 +212,7 @@ function runResolvedSubagentWorkflow(
             (resolvedModel as AgentLoopConfig["model"]).provider,
             (resolvedModel as AgentLoopConfig["model"]).id,
           );
+          session.manager.appendMessage(systemMessage);
           if (run.reasoning) session.manager.appendThinkingLevelChange(run.reasoning);
           return session;
         },
@@ -238,13 +239,12 @@ function runResolvedSubagentWorkflow(
       reasoning: run.reasoning,
       sessionId: childSession.id,
       convertToLlm,
-      getApiKey: (provider) => ctx.modelRegistry.getApiKeyForProvider(provider),
       headers: { "X-Initiator": "agent" },
       finishTurn: () =>
         hasReachedTurnLimit(accumulator.usage.turns, maxTurns) ? { action: "end" } : undefined,
     };
     const agentContext: AgentContext = {
-      messages: [{ role: "system", content: systemPrompt, timestamp: Date.now() }],
+      messages: [systemMessage],
       tools: resolvedTools,
     };
     const prompts: AgentMessage[] = [
@@ -274,7 +274,8 @@ function runResolvedSubagentWorkflow(
             agentContext,
             config,
             signal,
-            streamSimple,
+            (model, context, streamOptions) =>
+              ctx.modelRegistry.streamSimple(model, context, streamOptions),
           );
           for await (const event of stream) {
             const ev = event;

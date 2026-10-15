@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   CONFIG_DIR_NAME,
+  DefaultPackageManager,
   getAgentDir,
   parseFrontmatter,
   SettingsManager,
@@ -32,12 +33,13 @@ export interface AgentDiscoveryResult {
   projectAgentsDir: string | null;
 }
 
-function commaList(value: string | undefined): string[] | undefined {
-  const values = value
-    ?.split(",")
+function parseToolList(value: unknown): string[] | undefined {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const values = raw
+    .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
-  return values && values.length > 0 ? values : undefined;
+  return values.length > 0 ? values : undefined;
 }
 
 function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | undefined {
@@ -47,14 +49,14 @@ function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | und
   } catch {
     return undefined;
   }
-  const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-  if (!frontmatter.name || !frontmatter.description) return undefined;
+  const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+  if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string") return undefined;
   return {
     name: frontmatter.name,
     description: frontmatter.description,
-    tools: commaList(frontmatter.tools),
-    capabilities: commaList(frontmatter.capabilities),
-    model: frontmatter.model,
+    tools: parseToolList(frontmatter.tools),
+    capabilities: parseToolList(frontmatter.capabilities),
+    model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
     systemPrompt: body,
     source,
     filePath,
@@ -85,22 +87,16 @@ function isDirectory(p: string): boolean {
   }
 }
 
-/**
- * Load agent definitions from all registered pi packages (settings.json `packages`).
- * This mirrors how extensions and skills are discovered from packages — enabling
- * a repo like pi-env to ship agent definitions that are globally available once
- * the repo is registered as a package, without requiring symlinks or cwd proximity.
- */
-function loadAgentsFromPackages(cwd: string): AgentConfig[] {
+function loadAgentsFromPackages(cwd: string, scope: AgentScope): AgentConfig[] {
   const agents: AgentConfig[] = [];
   try {
-    const settings = SettingsManager.create(cwd);
-    const packages = settings.getPackages();
-    for (const pkg of packages) {
-      const source = typeof pkg === "string" ? pkg : pkg.source;
-      if (!source || !fs.existsSync(source)) continue;
-      const agentsDir = path.join(source, CONFIG_DIR_NAME, "agents");
-      agents.push(...loadAgentsFromDir(agentsDir, "package"));
+    const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: scope === "project" });
+    const packageManager = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: settings });
+    // Named agents are extension-owned, not a native package resource type.
+    for (const pkg of packageManager.listConfiguredPackages()) {
+      if (pkg.scope !== scope || !pkg.installedPath) continue;
+      const agentsDir = path.join(pkg.installedPath, CONFIG_DIR_NAME, "agents");
+      agents.push(...loadAgentsFromDir(agentsDir, scope === "user" ? "package" : "project"));
     }
   } catch {
     // settings.json unavailable or malformed — skip package scanning
@@ -125,12 +121,12 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
   const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
   const userAgents = scope === "user" ? loadAgentsFromDir(userDir, "user") : [];
-  const packageAgents = scope === "user" ? loadAgentsFromPackages(cwd) : [];
+  const packageAgents = loadAgentsFromPackages(cwd, scope);
   const projectAgents =
     scope === "project" && projectAgentsDir ? loadAgentsFromDir(projectAgentsDir, "project") : [];
 
   const agentMap = new Map<string, AgentConfig>();
-  for (const agent of scope === "project" ? projectAgents : packageAgents) {
+  for (const agent of [...packageAgents, ...projectAgents]) {
     agentMap.set(agent.name, agent);
   }
   for (const agent of userAgents) agentMap.set(agent.name, agent);

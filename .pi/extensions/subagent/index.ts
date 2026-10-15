@@ -300,7 +300,6 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
   pi.on(PiEvent.SessionStart, async (_event, ctx) => {
     if (!(await runtime.startSession(ctx))) return;
     const settings = readOptionalAgentSettings(undefined, ctx.cwd);
-    const enabledModelIds = Array.isArray(settings?.enabledModels) ? settings.enabledModels : [];
     const modelAnnotations = settings?.modelAnnotations ?? {};
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{
       provider: string;
@@ -318,7 +317,6 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
       publicExtTools.map(([name, registration]) => [name, registration.capabilities]),
     );
     const description = buildDynamicDescription(
-      enabledModelIds,
       availableModels,
       agents,
       extToolNames,

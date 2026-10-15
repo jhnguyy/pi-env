@@ -49,7 +49,7 @@ Overlay order is global then project with shallow replacement only. `readSetting
 
 Schema decoding should happen once at the consumer boundary with `decodeSettingsBlockEffect`/`decodeSettingsBlockSync` or a snapshot decode helper. Block schema failures are overlay errors that include the block `key` and both participating paths. JSON or root failures remain exact-source local errors. Compatibility sync wrappers may throw these typed errors. Let them reach existing rendering boundaries.
 
-Agent settings use Effect Schema for `enabledModels`, `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Model annotations can be model-selection guidance or machine policy. Generic subagent tool descriptions omit known machine-policy annotations such as `reviewer`. Domain consumers can enforce these annotations without adding them to model prompts. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
+Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Pi owns model availability and native model-selection settings. Subagents advertise the complete available registry roster. Model annotations are descriptive selection guidance, not approval tags or delegation permissions. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
 
 ## Cross-host tool registration
 
@@ -70,9 +70,9 @@ registerCrossHostTool(pi, {
 
 Use `closeout` as a shared-contract example. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
 
-Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration exposes eligible tools to subagents. Pi's native `codemode` calls registered Pi tools through `ctx.executeTool()` instead of the AgentTool channel.
+Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use the resolved child `cwd`, even when a parent context is supplied; cancellation signals and progress updates forward through both adapters; and AgentTool registration exposes eligible tools to subagents. Pi's native `codemode` calls registered Pi tools through `ctx.executeTool()` instead of the AgentTool channel.
 
-Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start` and `subagent`.
+Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current orchestration exceptions are `review` and `subagent`. Review's private submission tools remain run-scoped.
 
 The public test boundary for shared cross-host tools is the helper contract in `.pi/extensions/__tests__/register-cross-host-tool.test.ts` plus representative tool coverage such as `.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts`: schema identity, capabilities, cwd/context behavior, cancellation, progress, Pi-only metadata, and unregister lifecycle. Safety-sensitive descriptions must state side effects and operational boundaries.
 

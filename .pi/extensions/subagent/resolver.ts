@@ -1,7 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, ProjectTrustStore, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Data } from "effect";
 
 import { discoverAgents, type AgentScope } from "./agents";
@@ -359,12 +359,23 @@ export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentC
   );
 }
 
+export function isProjectTrustedForCwd(ctx: ExtensionContext, cwd: string): boolean {
+  const parentCwd = resolveEffectiveCwd({ task: "" }, ctx.cwd);
+  if (isResolutionOk(parentCwd) && parentCwd.value === cwd) {
+    return ctx.isProjectTrusted?.() === true;
+  }
+  return new ProjectTrustStore(getAgentDir()).get(cwd) === true;
+}
+
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
   ctx: ExtensionContext,
   registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
 ): ResolutionResult<SubagentExecutionPlan> {
-  if (params.agent && params.agent_scope === "project" && ctx.isProjectTrusted?.() !== true) {
+  const effectiveCwd = resolveEffectiveCwd(params, ctx.cwd);
+  if (!isResolutionOk(effectiveCwd)) return effectiveCwd;
+
+  if (params.agent && params.agent_scope === "project" && !isProjectTrustedForCwd(ctx, effectiveCwd.value)) {
     return resolutionError({
       reason: ResolutionErrorReason.UntrustedProjectAgent,
       message: "Project agents require an explicit project scope and a trusted project.",
@@ -372,9 +383,6 @@ export function resolveSubagentExecutionPlan(
       modelOverride: params.model,
     });
   }
-
-  const effectiveCwd = resolveEffectiveCwd(params, ctx.cwd);
-  if (!isResolutionOk(effectiveCwd)) return effectiveCwd;
 
   const agent = resolveAgentConfig(params, effectiveCwd.value);
   if (!isResolutionOk(agent)) return agent;

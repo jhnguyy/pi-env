@@ -2,7 +2,7 @@
 
 The subagent extension runs child agents in the parent Pi process. Each child has an isolated context and a linked persistent session transcript.
 
-By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive pi-env introspection can still list and read child transcripts. Use `pi --session <path>` to resume a child by its exact path.
+By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive pi-env introspection can still list and read child transcripts. Use `pi --session <path>` to resume a child by its exact path only after its current owner has settled and released the session. Do not open the same child transcript in another Pi process while the child is running.
 
 ## Actions
 
@@ -37,9 +37,23 @@ The initial browser lists only background jobs retained in the current parent ru
 
 ## Agent definitions and trust
 
-The default `agent_scope` is `user`. This scope includes user agents and agents from installed packages.
+The default `agent_scope` is `user`. This scope includes user agents and agents from packages registered in global settings. Packages declared in project settings do not enter the default scope.
 
-Set `agent_scope` to `project` to use a project agent. Pi must trust the project before the extension resolves the agent. The project scope contains project agents only.
+Set `agent_scope` to `project` to use project agents or agents from project-declared packages. The target directory must be trusted before the extension resolves the agent. The current session's trust decision applies only to its own canonical directory. For a different target directory, the extension requires a saved trust grant from Pi's native `ProjectTrustStore`. A saved denial or an unknown decision rejects the request. This baseline does not prompt for new trust grants.
+
+Model selection uses Pi's configured registry. The subagent tool advertises every available model, regardless of the native `enabledModels` cycling selection. Model annotations are descriptive guidance. They do not approve, restrict, or reserve models for particular roles.
+
+## Execution boundaries
+
+Built-in and shared cross-host tools use the resolved child working directory. A parent context does not override that directory. Child model requests use the configured model registry's streaming method. The initial system prompt is retained in the child transcript.
+
+Children run through the [low-level executor](../.pi/extensions/subagent/execute.ts), not a complete Pi SDK session. They do not automatically load context resources, extension hooks, native codemode, tool search, or MCP. Parent tool permission hooks do not govern direct child calls.
+
+### Named agent discovery
+
+Named agent definitions are extension-owned configuration, not the `AGENTS.md` context files supplied by Pi's resource loader. See [agent discovery](../.pi/extensions/subagent/agents.ts) for accepted fields and source precedence, and [execution-plan resolution](../.pi/extensions/subagent/resolver.ts) for selection and trust checks.
+
+Native package resource filters and `pi config` do not control named-agent candidates. Discovery considers configured, installed packages in the selected scope, but not temporary `pi -e` sources. It does not install packages or automatically apply discovered agent instructions.
 
 ## Resource limits
 
