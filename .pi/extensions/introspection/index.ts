@@ -1,9 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "@earendil-works/pi-coding-agent";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
-import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
   registerPublicTool,
   renderCompactToolCall,
@@ -143,23 +141,4 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(content[0]?.text ?? "No matching pi sessions found.", "info");
     },
   });
-
-  const listTool: AgentTool<any, any> = {
-    name: "list_sessions",
-    label: "List Sessions",
-    description: "List pi sessions as compact navigation digests. Safe, read-only, no raw tool output.",
-    parameters: LIST_SCHEMA,
-    execute: async (_id, params, signal) => executeListSessions(params as ListSessionsParams, signal),
-  };
-  const readTool: AgentTool<any, any> = {
-    name: "read_session",
-    label: "Read Session",
-    description: "Read one pi session as sparse metadata, user prompts, tool errors, labels, branch summaries, and compactions.",
-    parameters: READ_SCHEMA,
-    execute: async (_id, params, signal) => executeReadSession(params as ReadSessionParams, signal),
-  };
-  registerAgentToolsOnSessionStart(pi, [
-    { tool: listTool, capabilities: [ToolCapability.Read] },
-    { tool: readTool, capabilities: [ToolCapability.Read] },
-  ]);
 }

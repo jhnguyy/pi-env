@@ -9,7 +9,7 @@ import {
   parseDagSubagentPayload,
   type DagSubagentRuntimeRequest,
 } from "../../../../src/dag/index.js";
-import { ToolCapability } from "../types";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const shared = {
   calls: [] as any[],
@@ -81,14 +81,14 @@ async function failure(effect: Effect.Effect<string, unknown>): Promise<any> {
 }
 
 const executeResolved: NonNullable<
-  Parameters<typeof makeDagSubagentRuntime>[2]["executeResolved"]
+  Parameters<typeof makeDagSubagentRuntime>[1]["executeResolved"]
 > = (run, _ctx, options) => {
   shared.calls.push({ run, options });
   return Effect.succeed(shared.result);
 };
 
-function adapter(ctx: any, tools: ReadonlyMap<string, any> = new Map()) {
-  return makeDagSubagentRuntime(ctx, tools, { executeResolved });
+function adapter(ctx: any, tools: readonly ToolDefinition[] = []) {
+  return makeDagSubagentRuntime(ctx, { executeResolved, customToolsForRun: () => tools });
 }
 
 describe("DAG shared subagent runtime adapter", () => {
@@ -103,7 +103,7 @@ describe("DAG shared subagent runtime adapter", () => {
     expect(shared.calls[0].run).toMatchObject({
       modelOverride: "test/model",
       toolNames: [],
-      tools: [],
+      customTools: [],
       cwd,
       workspaceAccess: "read",
       reasoning: "high",
@@ -128,61 +128,25 @@ describe("DAG shared subagent runtime adapter", () => {
     expect(shared.calls).toHaveLength(1);
   });
 
-  it("materializes an explicitly assigned DAG-only extension tool", async () => {
+  it("passes explicitly assigned run-local custom tools", async () => {
     const cwd = root();
     const reviewTool = {
-      tool: {
-        name: "review_private",
-        description: "private review tool",
-        parameters: {},
-        execute: async () => ({ content: [] }),
-      },
-      capabilities: [ToolCapability.Read],
-      audience: "dag" as const,
+      name: "review_private",
+      label: "Review",
+      description: "private review tool",
+      parameters: {},
+      execute: async () => ({ content: [] }),
     } as any;
     const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
     await expect(
       Effect.runPromise(
-        adapter(ctx, new Map([["review_private", reviewTool]])).run(
+        adapter(ctx, [reviewTool]).run(
           request(cwd, { tools: ["review_private"] }),
         ),
       ),
     ).resolves.toBe("complete result");
     expect(shared.calls.at(-1)?.run.toolNames).toEqual(["review_private"]);
-  });
-
-  it("rejects unknown tools, access mismatches, and unavailable models before execution", async () => {
-    const cwd = root();
-    const readTool = {
-      tool: {
-        name: "notes",
-        description: "notes",
-        parameters: {},
-        execute: async () => ({ content: [] }),
-      },
-      capabilities: [ToolCapability.Read],
-    } as any;
-    const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
-
-    expect((await failure(adapter(ctx).run(request(cwd, { tools: ["missing"] })))).phase).toBe(
-      "resolution",
-    );
-    expect(
-      (
-        await failure(
-          adapter(ctx, new Map([["notes", readTool]])).run(
-            request(cwd, {
-              tools: ["notes"],
-              workspace: { cwd, access: "write" },
-            }),
-          ),
-        )
-      ).phase,
-    ).toBe("resolution");
-    expect((await failure(adapter(context(cwd, undefined)).run(request(cwd)))).phase).toBe(
-      "resolution",
-    );
-    expect(shared.calls).toHaveLength(0);
+    expect(shared.calls.at(-1)?.run.customTools).toEqual([reviewTool]);
   });
 
   it("rejects a cwd outside the parent workspace", async () => {
@@ -201,26 +165,13 @@ describe("DAG shared subagent runtime adapter", () => {
     const managed = root();
     const outside = root();
     const ctx = context(parent, { provider: "test", id: "model", contextWindow: 32_000 });
-    const runtime = makeDagSubagentRuntime(ctx, new Map(), {
+    const runtime = makeDagSubagentRuntime(ctx, {
       workspaceRootForRun: (runId) => (runId === "run" ? managed : undefined),
       executeResolved,
     });
 
     await expect(Effect.runPromise(runtime.run(request(managed)))).resolves.toBe("complete result");
     expect((await failure(runtime.run(request(outside)))).phase).toBe("resolution");
-  });
-
-  it("fails closed for missing or insufficient model context metadata", async () => {
-    const cwd = root();
-    for (const model of [
-      { provider: "test", id: "model" },
-      { provider: "test", id: "model", contextWindow: 4_096 },
-      { provider: "test", id: "model", contextWindow: 4_100 },
-    ]) {
-      const error = await failure(adapter(context(cwd, model)).run(request(cwd)));
-      expect(error.phase).toBe("resolution");
-    }
-    expect(shared.calls).toHaveLength(0);
   });
 
   it("requires trust for project agents and uses only their system prompt", async () => {
@@ -256,7 +207,7 @@ describe("DAG shared subagent runtime adapter", () => {
   it("registers only the versioned subagent executor key", async () => {
     const cwd = root();
     const ctx = context(cwd, { provider: "test", id: "model", contextWindow: 32_000 });
-    const registry = createDagSubagentExecutorRegistry(ctx, new Map(), cwd, "generation", {});
+    const registry = createDagSubagentExecutorRegistry(ctx, cwd, "generation", {});
 
     await expect(
       Effect.runPromise(registry.lookup(DagExecutorKind.Subagent, DagSubagentExecutorKey)),

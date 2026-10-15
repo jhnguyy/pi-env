@@ -94,23 +94,14 @@ describe("playwright-client config", () => {
 });
 
 describe("playwright-client extension registration", () => {
-  it("emits browser on agent-tools:register for subagent discovery", () => {
-    const sessionStartHandlers: Array<() => void> = [];
-    const emitted: unknown[] = [];
-    const pi = {
-      registerTool: () => undefined,
-      registerCommand: () => undefined,
-      on: (event: string, handler: () => void) => {
-        if (event === "session_start") sessionStartHandlers.push(handler);
-      },
-      events: { emit: (_event: string, payload: unknown) => emitted.push(payload) },
-    };
-
-    playwrightClientExtension(pi as never);
-    for (const handler of sessionStartHandlers) handler();
-
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]).toMatchObject({ tool: { name: "browser" }, capabilities: ["read", "write", "execute"] });
+  it("registers the native browser tool", () => {
+    const tools: any[] = [];
+    playwrightClientExtension({
+      registerTool: (tool: any) => tools.push(tool),
+      registerCommand() {},
+    } as never);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ name: "browser" });
   });
 });
 

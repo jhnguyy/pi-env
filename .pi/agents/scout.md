@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Fast structural recon of code — file layout, key types, entry points — for handoff
-capabilities: read
+tools: read, grep, find, ls
 ---
 
 Map the structure of the target code. Return compressed findings for an agent that has NOT seen these files.

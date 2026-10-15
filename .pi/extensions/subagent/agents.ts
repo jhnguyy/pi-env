@@ -39,7 +39,7 @@ function parseToolList(value: unknown): string[] | undefined {
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
-  return values.length > 0 ? values : undefined;
+  return values.length > 0 || Array.isArray(value) ? values : undefined;
 }
 
 function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | undefined {

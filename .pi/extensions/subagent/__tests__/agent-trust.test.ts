@@ -28,23 +28,28 @@ function writeAgent(directory: string, name: string): void {
   mkdirSync(directory, { recursive: true });
   writeFileSync(
     join(directory, `${name}.md`),
-    `---\nname: ${name}\ndescription: ${name} agent\ncapabilities: read\nmodel: test/model\n---\nRead only.\n`,
+    `---\nname: ${name}\ndescription: ${name} agent\ntools: read\nmodel: test/model\n---\nRead only.\n`,
   );
 }
 
 function context(cwd: string, trusted: boolean) {
-  return {
-    cwd,
-    isProjectTrusted: () => trusted,
-    modelRegistry: {
-      find: (provider: string, id: string) =>
-        provider === "test" && id === "model" ? { provider, id } : undefined,
-      getAvailable: () => [{ provider: "test", id: "model" }],
-    },
-  } as any;
+  return { cwd, isProjectTrusted: () => trusted };
 }
 
 describe("subagent agent source and trust policy", () => {
+  it("preserves explicit no-tools agents and rejects silent legacy capability broadening", () => {
+    const cwd = root();
+    const directory = join(cwd, ".pi", "agents");
+    mkdirSync(directory, {recursive:true});
+    const params = {task:"task", agent:"legacy", agent_scope:"project" as const};
+    writeFileSync(join(directory,"legacy.md"), "---\nname: legacy\ndescription: legacy\ncapabilities: read\n---\nRead only.");
+    const legacy = resolveSubagentExecutionPlan(params, context(cwd,true));
+    expect(legacy).toMatchObject({_tag:ResolutionResultTag.Error,error:{reason:ResolutionErrorReason.InvalidTools}});
+    expect(resolveSubagentExecutionPlan({...params,tools:[]},context(cwd,true))).toMatchObject({_tag:ResolutionResultTag.Ok,value:{toolNames:[]}});
+    writeFileSync(join(directory,"empty.md"), "---\nname: empty\ndescription: empty\ntools: []\n---\nNo tools.");
+    expect(resolveSubagentExecutionPlan({...params,agent:"empty"},context(cwd,true))).toMatchObject({_tag:ResolutionResultTag.Ok,value:{toolNames:[]}});
+  });
+
   it("requires explicit scope and project trust for project agents", () => {
     const cwd = root();
     writeAgent(join(cwd, ".pi", "agents"), "project-only");
@@ -52,7 +57,6 @@ describe("subagent agent source and trust policy", () => {
     const implicit = resolveSubagentExecutionPlan(
       { name: "implicit", agent: "project-only", task: "task" },
       context(cwd, true),
-      new Map(),
     );
     expect(implicit._tag).toBe(ResolutionResultTag.Error);
     if (implicit._tag === ResolutionResultTag.Error) {
@@ -67,7 +71,6 @@ describe("subagent agent source and trust policy", () => {
         task: "task",
       },
       context(cwd, false),
-      new Map(),
     );
     expect(untrusted._tag).toBe(ResolutionResultTag.Error);
     if (untrusted._tag === ResolutionResultTag.Error) {
@@ -82,7 +85,6 @@ describe("subagent agent source and trust policy", () => {
         task: "task",
       },
       context(cwd, true),
-      new Map(),
     );
     expect(trusted._tag).toBe(ResolutionResultTag.Ok);
   });
@@ -94,7 +96,6 @@ describe("subagent agent source and trust policy", () => {
     const result = resolveSubagentExecutionPlan(
       { name: "target", task: "task", agent: "target-agent", agent_scope: "project", cwd: target },
       context(parent, true),
-      new Map(),
     );
     expect(result._tag).toBe(ResolutionResultTag.Error);
     if (result._tag === ResolutionResultTag.Error) {
@@ -110,7 +111,6 @@ describe("subagent agent source and trust policy", () => {
     const resolve = () => resolveSubagentExecutionPlan(
       { name: "target", task: "task", agent: "saved-trust-agent", agent_scope: "project", cwd: target },
       context(parent, true),
-      new Map(),
     );
     store.set(target, true);
     expect(resolve()._tag).toBe(ResolutionResultTag.Ok);
@@ -139,7 +139,7 @@ describe("subagent agent source and trust policy", () => {
     ]));
     const resolve = (agent: string, trusted: boolean, agent_scope?: "project") =>
       resolveSubagentExecutionPlan({ name: "package", task: "task", agent, agent_scope },
-        context(cwd, trusted), new Map());
+        context(cwd, trusted));
     expect(resolve("global-package-agent", false)._tag).toBe(ResolutionResultTag.Ok);
     const denied = resolve("project-package-agent", false, "project");
     expect(denied._tag).toBe(ResolutionResultTag.Error);

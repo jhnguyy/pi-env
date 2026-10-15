@@ -28,7 +28,6 @@ import {
   type DagRuntimeSubmissionAuthority,
   type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
-import type { ExtToolRegistration } from "../_shared/agent-tools";
 import {
   DEFAULT_SUBAGENT_CONFIG,
   type SubagentSessionStorage,
@@ -36,7 +35,6 @@ import {
 import type { SubagentRunSupervisor } from "./control";
 import { createDagSubagentExecutorRegistry } from "./dag-runtime";
 import { createDagSessionStore, persistedDagRunIds } from "./dag-session-store";
-import type { RunSubagentOptions } from "./execute";
 import type { SubagentUsageLedger } from "./usage";
 
 export type DagSubagentExecutorRegistryFactory = typeof createDagSubagentExecutorRegistry;
@@ -49,7 +47,6 @@ interface DagSessionRuntimeDependencies {
   readonly sessionStorage?: SubagentSessionStorage;
   readonly executorRegistry?: DagExecutorRegistryService;
   readonly executorRegistryFactory?: DagSubagentExecutorRegistryFactory;
-  readonly agentLoop?: RunSubagentOptions["agentLoop"];
 }
 
 export class DagSessionRuntime {
@@ -65,7 +62,7 @@ export class DagSessionRuntime {
     private readonly scope: Scope.Closeable,
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
     private readonly claimedRunIds: Set<string>,
-    private readonly workspaceRoots: Map<string, string>,
+    private readonly authorities: Map<string, DagRuntimeSubmissionAuthority>,
     private readonly supervisor: SubagentRunSupervisor,
     private readonly parentSessionId: string,
     private readonly sessionGeneration: string,
@@ -77,6 +74,13 @@ export class DagSessionRuntime {
         authority?: DagRuntimeSubmissionAuthority,
       ) => this.submit(graph, authority),
       reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
+      closeChildren: async (runId: string): Promise<void> => {
+        const prefix = dagUsagePrefix(runId);
+        const children = [...this.supervisor.children.values()].filter((child) => child.runId.startsWith(prefix));
+        const outcomes = await Promise.allSettled(children.map((child) => child.close()));
+        const failures = outcomes.filter((outcome) => outcome.status === "rejected");
+        if (failures.length) throw new AggregateError(failures.map((failure) => failure.reason), "Review child shutdown failed.");
+      },
       usage: (runId: string): DagRuntimeUsage => {
         const prefix = dagUsagePrefix(runId);
         return Object.freeze(this.supervisor.usage(prefix));
@@ -92,7 +96,6 @@ export class DagSessionRuntime {
   static async create(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
-    registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     dependencies: DagSessionRuntimeDependencies,
   ): Promise<DagSessionRuntime> {
     const parentSessionId = ctx.sessionManager.getSessionId();
@@ -101,22 +104,22 @@ export class DagSessionRuntime {
       "dag-artifacts",
       parentSessionId,
     );
-    const workspaceRoots = new Map<string, string>();
+    const authorities = new Map<string, DagRuntimeSubmissionAuthority>();
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
     const registry =
       dependencies.executorRegistry ??
       (dependencies.executorRegistryFactory ?? createDagSubagentExecutorRegistry)(
         ctx,
-        registeredExtTools,
         artifactRoot,
         dependencies.sessionGeneration,
         {
-          workspaceRootForRun: (runId) => workspaceRoots.get(runId),
+          workspaceRootForRun: (runId) => authorities.get(runId)?.workspaceRoot,
+          customToolsForRun: (runId) => authorities.get(runId)?.customTools ?? [],
+          onChild: (child) => dependencies.supervisor.retainChild(child),
           ledger: dependencies.ledger,
           supervisor: dependencies.supervisor,
           telemetryRuntime: dependencies.telemetryRuntime,
           sessionStorage: dependencies.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
-          agentLoop: dependencies.agentLoop,
         },
       );
     const scope = await Effect.runPromise(Scope.make());
@@ -131,7 +134,7 @@ export class DagSessionRuntime {
         scope,
         Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
         persistedDagRunIds(store),
-        workspaceRoots,
+        authorities,
         dependencies.supervisor,
         parentSessionId,
         dependencies.sessionGeneration,
@@ -162,7 +165,7 @@ export class DagSessionRuntime {
         await Effect.runPromise(Scope.close(this.scope, Exit.void));
       } finally {
         this.activeRuns.clear();
-        this.workspaceRoots.clear();
+        this.authorities.clear();
         removeDagExecutorsForSessionGeneration(this.parentSessionId, this.sessionGeneration);
         try {
           unregisterDagRuntimeService(this.pi, this.registration);
@@ -193,7 +196,7 @@ export class DagSessionRuntime {
         );
       }
       this.claimedRunIds.add(graph.runId);
-      if (authority?.workspaceRoot) this.workspaceRoots.set(graph.runId, authority.workspaceRoot);
+      if (authority) this.authorities.set(graph.runId, authority);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;
@@ -213,7 +216,7 @@ export class DagSessionRuntime {
               Effect.sync(() => {
                 if (!graphPersisted) {
                   this.claimedRunIds.delete(graph.runId);
-                  this.workspaceRoots.delete(graph.runId);
+                  this.authorities.delete(graph.runId);
                 }
               }),
             ),
@@ -233,7 +236,7 @@ export class DagSessionRuntime {
                 Effect.onExit(() =>
                   Effect.sync(() => {
                     this.activeRuns.delete(handle);
-                    this.workspaceRoots.delete(graph.runId);
+                    this.authorities.delete(graph.runId);
                   }),
                 ),
                 Effect.forkIn(this.scope),
@@ -249,7 +252,7 @@ export class DagSessionRuntime {
                   ? Effect.void
                   : Effect.sync(() => {
                       this.activeRuns.delete(handle);
-                      this.workspaceRoots.delete(graph.runId);
+                      this.authorities.delete(graph.runId);
                     }),
               ),
             );

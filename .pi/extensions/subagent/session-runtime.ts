@@ -7,7 +7,7 @@ import {
   createToolingTelemetryRuntime,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
-import type { ExtToolRegistration } from "../_shared/agent-tools";
+import type { NativeInputMode } from "./child-types";
 import {
   DEFAULT_SUBAGENT_CONFIG,
   loadSubagentRuntimeConfig,
@@ -25,7 +25,6 @@ import {
   buildErrorDetails,
   runSubagentEffect,
   SUBAGENT_TELEMETRY_SERVICE_NAME,
-  type RunSubagentOptions,
 } from "./execute";
 import { SubagentJobManager, type SubagentJob } from "./jobs";
 import { isResolutionOk, resolveEffectiveCwd, type SubagentParams } from "./resolver";
@@ -39,7 +38,6 @@ import {
 import { formatUsageCompact, SubagentUsageLedger } from "./usage";
 
 export interface SubagentSessionRuntimeDependencies {
-  readonly agentLoop?: RunSubagentOptions["agentLoop"];
   readonly telemetryRuntimeFactory?: typeof createToolingTelemetryRuntime;
   readonly dagExecutorRegistryFactory?: DagSubagentExecutorRegistryFactory;
 }
@@ -102,7 +100,6 @@ export class SubagentSessionRuntime {
 
   constructor(
     private readonly pi: ExtensionAPI,
-    private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
     private readonly dependencies: SubagentSessionRuntimeDependencies = {},
   ) {}
 
@@ -116,20 +113,25 @@ export class SubagentSessionRuntime {
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<SubagentDetails> | undefined,
     ctx: ExtensionContext,
-  ): Promise<AgentToolResult<SubagentDetails>> =>
-    Effect.runPromise(
+  ): Promise<AgentToolResult<SubagentDetails>> => {
+    const supervisor = this.supervisor;
+    if (this.sessionState !== SubagentSessionState.Active || !supervisor) {
+      const details = buildErrorDetails(params, [], params.model, "inactive");
+      return Promise.resolve({ content: [{ type: "text", text: "Parent subagent session is not active." }], details });
+    }
+    return Effect.runPromise(
       Effect.catch(
-        runSubagentEffect(params, ctx, this.registeredExtTools, {
+        runSubagentEffect(params, ctx, {
           signal,
           onUpdate,
           ledger: this.ledger,
           runId: toolCallId,
-          supervisor: this.supervisor,
+          supervisor,
+          onChild: (child) => supervisor.retainChild(child),
           sessionStorage:
             this.sessionState === SubagentSessionState.Active ? this.sessionStorage : undefined,
           telemetryRuntime:
             this.sessionState === SubagentSessionState.Active ? this.telemetryRuntime : undefined,
-          agentLoop: this.dependencies.agentLoop,
         }),
         (error) => {
           const reason =
@@ -143,6 +145,28 @@ export class SubagentSessionRuntime {
         },
       ),
     );
+  };
+
+  listChildren() {
+    return [...(this.supervisor?.children.values() ?? [])].map((child) => child.summary());
+  }
+
+  inspectChild(id: string) {
+    return this.supervisor?.children.get(id)?.inspect();
+  }
+
+  inputChild(id: string, text: string, mode: NativeInputMode) {
+    if (this.sessionState !== SubagentSessionState.Active) throw new Error("Parent subagent session is not active.");
+    const child = this.supervisor?.children.get(id);
+    if (!child) throw new Error("Child session is no longer retained.");
+    return child.input(text, mode);
+  }
+
+  cancelChild(id: string) {
+    const child = this.supervisor?.children.get(id);
+    if (!child) throw new Error("Child session is no longer retained.");
+    return child.cancel();
+  }
 
   startSession(ctx: ExtensionContext): Promise<boolean> {
     const generation = ++this.lifecycleGeneration;
@@ -175,25 +199,21 @@ export class SubagentSessionRuntime {
 
       const jobs = new SubagentJobManager(
         this.pi,
-        this.registeredExtTools,
-        undefined,
         this.ledger,
         nextRuntime,
         config,
         supervisor,
         (jobs) => this.updateJobStatusSlot(jobs, ctx),
-        this.dependencies.agentLoop,
       );
       let dagRuntime: DagSessionRuntime;
       try {
-        dagRuntime = await DagSessionRuntime.create(this.pi, ctx, this.registeredExtTools, {
+        dagRuntime = await DagSessionRuntime.create(this.pi, ctx, {
           sessionGeneration: randomUUID(),
           supervisor,
           telemetryRuntime: nextRuntime,
           ledger: this.ledger,
           sessionStorage: config.sessionStorage,
           executorRegistryFactory: this.dependencies.dagExecutorRegistryFactory,
-          agentLoop: this.dependencies.agentLoop,
         });
       } catch (cause) {
         await disposeSubagentRunSupervisor(sessionId);

@@ -1,15 +1,17 @@
+import { join } from "node:path";
+import { getChildContext } from "../_shared/child-context";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Effect } from "effect";
 
 import { loadNotesSettingsEffect } from "./config";
-import type { SettingsEnv } from "../_shared/settings";
+import { defaultSettingsEnv, type SettingsEnv } from "../_shared/settings";
 import { createNotesContract, type NotesToolDetails } from "./contract";
 import { createConfiguredBuiltinProvider } from "./provider";
 import { registerNotesProviderEventBridge } from "./provider-events";
 import { resolveNotesProvider } from "./provider-registry";
-import { PiEvent, ToolCapability } from "../_shared/agent-tools";
-import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
+import { PiEvent } from "../_shared/agent-tools";
+import { registerContractTool } from "../_shared/register-contract-tool";
 
 export { NotesProviderError } from "./domain";
 export { NotesProviderEvent } from "./provider-events";
@@ -37,9 +39,14 @@ export default function (pi: ExtensionAPI) {
 
 export async function activateNotesExtension(
   pi: ExtensionAPI,
-  cwd = process.cwd(),
+  cwd = getChildContext()?.cwd ?? process.cwd(),
   settingsEnv?: SettingsEnv,
 ): Promise<void> {
+  const child = getChildContext();
+  settingsEnv ??= child ? {
+    ...defaultSettingsEnv,
+    globalSettingsPath: () => join(child.agentDir, "settings.json"),
+  } : undefined;
   const settings = await Effect.runPromise(loadNotesSettingsEffect(cwd, settingsEnv));
   if (settings === null) return;
 
@@ -48,9 +55,8 @@ export async function activateNotesExtension(
   pi.on(PiEvent.SessionShutdown, unregisterExternal);
   const contract = createNotesContract(() => builtin ?? resolveNotesProvider(settings.provider));
 
-  registerCrossHostTool(pi, {
+  registerContractTool(pi, {
     contract,
-    capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: {
       promptSnippet: "Maintain Inbox, Projects, Wiki, Worklog, and other Markdown notes",
       promptGuidelines: [

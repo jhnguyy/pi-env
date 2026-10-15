@@ -5,14 +5,13 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
-import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
+import { disposeSubagentRunSupervisor, getOrCreateSubagentRunSupervisor, getSubagentRunSupervisor, SubagentRunSupervisor, WorkspaceAccess } from "../control";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
   return {
     ...DEFAULT_SUBAGENT_CONFIG,
     maxConcurrentRuns: 2,
     maxPendingRuns: 2,
-    cancellationGraceMs: 10,
     ...overrides,
   };
 }
@@ -25,6 +24,26 @@ function request(
 }
 
 describe("shared subagent run supervisor", () => {
+  it("coalesces parent disposal until held work settles without reopening admission", async () => {
+    // Hold admission directly: this isolates coordinator disposal, not native SDK execution.
+    const supervisor = getOrCreateSubagentRunSupervisor("coalesced-dispose", config());
+    const lease = await supervisor.acquire(request("/coalesced"));
+    let secondFinished = false;
+    const first = disposeSubagentRunSupervisor("coalesced-dispose");
+    const second = disposeSubagentRunSupervisor("coalesced-dispose").then(() => { secondFinished = true; });
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondFinished).toBe(false);
+      expect(getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(supervisor);
+      await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({reason:"closed"});
+    } finally {
+      lease.release();
+      await Promise.all([first,second]);
+    }
+    expect(getSubagentRunSupervisor("coalesced-dispose")).toBeUndefined();
+  });
+
   it("bounds shared admission and removes an aborted pending run", async () => {
     const supervisor = new SubagentRunSupervisor(
       "session",

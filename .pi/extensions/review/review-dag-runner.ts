@@ -9,9 +9,13 @@ import {
   type DagTextArtifactReference,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
-import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
+import type {
+  ActiveDagRuntimeService,
+  DagRuntimeSubmissionAuthority,
+  DagRuntimeUsage,
+} from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
-import { registerReviewDagTools } from "./dag-tools";
+import { createReviewDagTools } from "./dag-tools";
 import { readVerifiedPinnedDiff } from "./snapshot";
 import { selectedFindings } from "./decision";
 import {
@@ -250,13 +254,13 @@ export interface ReviewDagProgress {
 async function awaitSubmittedGraph(
   service: ActiveDagRuntimeService,
   graph: ValidatedDagDefinition<unknown>,
-  workspaceRoot: string,
+  authority: DagRuntimeSubmissionAuthority,
   reviewId: string,
   onSubmitted: () => void,
   onProgress?: (progress: ReviewDagProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
+  const handle = await Effect.runPromise(service.submit(graph, authority));
   let pollActive = false;
   const reportProgress = async () => {
     if (!onProgress || pollActive) return;
@@ -587,8 +591,7 @@ export async function runReviewDag(options: {
       ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
     ),
   };
-  const tools = registerReviewDagTools({
-    pi: options.pi,
+  const tools = createReviewDagTools({
     reviewId: state.snapshot.id,
     runId,
     deckPath: options.deckPath,
@@ -620,7 +623,7 @@ export async function runReviewDag(options: {
     await awaitSubmittedGraph(
       options.service,
       graph,
-      state.snapshot.worktree,
+      { workspaceRoot: state.snapshot.worktree, customTools: tools.customTools },
       state.snapshot.id,
       () => {
         state = { ...state, dag: { ...state.dag!, submitted: true } };
@@ -654,7 +657,5 @@ export async function runReviewDag(options: {
     );
     options.save(next);
     throw cause;
-  } finally {
-    tools.unregister();
   }
 }

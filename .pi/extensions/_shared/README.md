@@ -4,9 +4,9 @@
 |---|---|---|
 | Read and decode global/project settings | `loadSettingsSnapshotEffect()`, `readSettingsBlockEffect()`, `decodeSettingsBlockEffect()` | `settings.ts` |
 | Read optional agent model/work-tracker settings | `readOptionalAgentSettings()` | `agent-settings.ts` |
-| Register or observe extension tools | `registerAgentTools()`, `registerAgentToolsOnSessionStart()`, `listenForAgentTools()` | `agent-tools.ts` |
-| Adapt one domain tool contract to Pi and AgentTool | `ToolContract`, `toPiTool()`, `toAgentTool()` | `tool-contract.ts` |
-| Resolve built-in tool factories/capabilities | `BUILT_IN_TOOL_CONTRACTS` | `built-in-tools.ts` |
+| Native tool registration with domain context and UI metadata | `registerContractTool()`, `ToolContract`, `toPiTool()` | `register-contract-tool.ts`, `tool-contract.ts` |
+| Native lifecycle event and action-capability names | `PiEvent`, `ToolCapability` | `agent-tools.ts` |
+| Async-local target cwd/agentDir during native child loading and execution | `getChildContext()`, `withChildContext()` | `child-context.ts` |
 | Resolve Node executables | `findNodeBinaryLite()` | `node-bin-lite.ts` |
 | Normalize names and generate IDs | `slugify()`, `generateId()` | `slug.ts`, `id.ts` |
 | Format and parse session milestones | `formatTodoSessionMilestone()`, `parseSessionMilestoneLabel()` | `session-milestones.ts` |

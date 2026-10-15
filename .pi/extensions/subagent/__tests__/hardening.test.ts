@@ -1,158 +1,56 @@
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { withChildContext } from "../../_shared/child-context";
+import { SubagentSessionRuntime } from "../session-runtime";
 
-import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
-import {
-  formatJobMetadata,
-  formatJobResult,
-  SubagentJobManager,
-  type SubagentJobRunner,
-  type SubagentJobsChanged,
-} from "../jobs";
-import { zeroUsage } from "../usage";
-
-function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
-  return {
-    ...DEFAULT_SUBAGENT_CONFIG,
-    cancellationGraceMs: 50,
-    ...overrides,
-  };
-}
-
-function result(name: string, output = "done") {
-  return {
-    content: [{ type: "text" as const, text: output }],
-    details: {
-      name,
-      task: "task",
-      toolNames: ["read"],
-      modelOverride: "test/model",
-      finalOutput: output,
-      toolCallCount: 0,
-      usage: zeroUsage(),
-      isError: false,
-      turnLimitExceeded: false,
-    },
-  };
-}
-
-function manager(
-  runner: SubagentJobRunner,
-  overrides: Partial<SubagentRuntimeConfig> = {},
-  onJobsChanged?: SubagentJobsChanged,
-) {
-  return new SubagentJobManager(
-    { appendEntry: () => {} } as any,
-    new Map(),
-    runner,
-    undefined,
-    undefined,
-    config(overrides),
-    undefined,
-    onJobsChanged,
-  );
-}
-
-describe("asynchronous subagent hardening", () => {
-  it("bounds terminal retention and explicit result retrieval", async () => {
-    const output = "x".repeat(10_000);
-    const jobs = manager((params) => Effect.succeed(result(params.name ?? "large", output)), {
-      maxResultBytes: 128,
-      maxRetainedJobs: 2,
+// Real time is deliberately bounded here: this proves native abort reaches a cooperative
+// tool, not merely that an isolated supervisor timer flips an AbortSignal.
+it("bounds native root admission and settles active and pending children on timeout and shutdown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "native-root-limits-"));
+  const runtime = new SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any);
+  try {
+    mkdirSync(join(root, ".pi"));
+    const extension = join(root, ".pi", "provider.mjs");
+    writeFileSync(extension, `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+import { writeFileSync } from 'node:fs';
+export default function(pi) {
+ const p = fauxProvider({provider:'bounded'});
+ p.setResponses([fauxAssistantMessage(fauxToolCall('wait_for_abort',{}),{stopReason:'toolUse'}),fauxAssistantMessage('settled')]);
+ pi.registerProvider(p.provider);
+ pi.registerTool({name:'wait_for_abort',label:'Wait',description:'Cooperative test wait',parameters:{type:'object',properties:{}},
+ async execute(id,params,signal) {
+   writeFileSync(${JSON.stringify(join(root, "entered"))},'entered');
+   await new Promise(resolve => { if(signal.aborted) resolve(); else signal.addEventListener('abort',resolve,{once:true}); });
+   writeFileSync(${JSON.stringify(join(root, "aborted"))},'aborted');
+   return {content:[{type:'text',text:'settled'}],details:{}};
+ }});
+}`);
+    writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension], subagent: { maxConcurrentRuns: 1, maxPendingRuns: 1, maxRunMs: 1000 } }));
+    const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
+    await withChildContext({ cwd: root, agentDir: join(root, "agent") }, async () => {
+      await runtime.startSession(ctx);
+      const params = { name: "bounded", task: "wait", model: "bounded/faux-1", tools: ["wait_for_abort"] };
+      const running = runtime.execute("timed", params, undefined, undefined, ctx);
+      await expect.poll(() => existsSync(join(root, "entered"))).toBe(true);
+      const queued = runtime.execute("queued", params, undefined, undefined, ctx);
+      await expect.poll(() => runtime.listChildren().filter(child => child.state === "queued").length).toBe(1);
+      const rejected = await runtime.execute("overflow", params, undefined, undefined, ctx);
+      expect(rejected.details.isError).toBe(true);
+      expect(rejected.details.stopReason).toContain("admission");
+      const timed = await running;
+      expect(timed.details.isError).toBe(true);
+      expect(existsSync(join(root, "aborted"))).toBe(true);
+      await runtime.shutdownSession();
+      expect((await queued).details.isError).toBe(true);
+      expect(runtime.listChildren()).toEqual([]);
+      expect(runtime.usageText()).toBe("No subagent usage recorded.");
+      expect((await runtime.execute("late", params, undefined, undefined, ctx)).details.stopReason).toBe("inactive");
     });
-    const started = Array.from({ length: 3 }, (_, index) =>
-      jobs.start({ name: `large-${index}`, task: "task" }, {} as any),
-    );
-    await Promise.all(started.map((job) => jobs.wait(job.id)));
-
-    expect(jobs.list()).toHaveLength(2);
-    const retained = jobs.list().at(-1)!;
-    expect(formatJobMetadata(retained)).not.toContain("x".repeat(20));
-    expect(formatJobResult(retained)).toContain("Output truncated");
-    expect(Buffer.byteLength(retained.resultText ?? "", "utf8")).toBeLessThan(512);
-    expect(retained.resultTruncated).toBe(true);
-    await jobs.shutdown();
-  });
-
-  it("reports cancelling until settlement and interrupts after the deadline", async () => {
-    let settle!: () => void;
-    const cooperative: SubagentJobRunner = (params, _ctx, _tools, options) =>
-      Effect.callback((resume) => {
-        settle = () => resume(Effect.succeed(result(params.name ?? "cancel")));
-        options.signal?.addEventListener("abort", () => {}, { once: true });
-      });
-    const cooperativeJobs = manager(cooperative, { cancellationGraceMs: 1_000 });
-    const cooperativeJob = cooperativeJobs.start({ name: "cancel", task: "task" }, {} as any);
-    await expect.poll(() => cooperativeJob.status).toBe("running");
-    cooperativeJobs.cancel(cooperativeJob.id);
-    expect(cooperativeJob.status).toBe("cancelling");
-    settle();
-    await cooperativeJobs.wait(cooperativeJob.id);
-    expect(cooperativeJob.status).toBe("cancelled");
-    await cooperativeJobs.shutdown();
-
-    const stuckJobs = manager(() => Effect.callback(() => Effect.void), {
-      cancellationGraceMs: 10,
-    });
-    const stuck = stuckJobs.start({ name: "stuck", task: "task" }, {} as any);
-    await expect.poll(() => stuck.status).toBe("running");
-    stuckJobs.cancel(stuck.id);
-    await stuckJobs.wait(stuck.id);
-    expect(stuck.status).toBe("interrupted");
-    await stuckJobs.shutdown();
-  });
-
-  it("reports each state transition for persistent status rendering", async () => {
-    let settle!: () => void;
-    const states: string[][] = [];
-    const jobs = manager(
-      (params, _ctx, _tools, options) =>
-        Effect.callback((resume) => {
-          settle = () => resume(Effect.succeed(result(params.name ?? "status")));
-          options.signal?.addEventListener("abort", () => {}, { once: true });
-        }),
-      { cancellationGraceMs: 1_000 },
-      (current) => states.push(current.map((job) => job.status)),
-    );
-
-    const started = jobs.start({ name: "status", task: "task" }, {} as any);
-    await expect.poll(() => started.status).toBe("running");
-    jobs.cancel(started.id);
-    settle();
-    await jobs.wait(started.id);
-
-    expect(states).toContainEqual(["queued"]);
-    expect(states).toContainEqual(["running"]);
-    expect(states).toContainEqual(["cancelling"]);
-    expect(states).toContainEqual(["cancelled"]);
-    await jobs.shutdown();
-  });
-
-  it("settles active jobs and does not launch an already aborted start", async () => {
-    const activeJobs = manager(() => Effect.callback(() => Effect.void), {
-      cancellationGraceMs: 10,
-    });
-    const active = activeJobs.start({ name: "branch", task: "task" }, {} as any);
-    await expect.poll(() => active.status).toBe("running");
-    await activeJobs.settle();
-    expect(active.status).toBe("interrupted");
-    await activeJobs.shutdown();
-
-    let runCount = 0;
-    const abortedJobs = manager(() => {
-      runCount++;
-      return Effect.succeed(result("unexpected"));
-    });
-    const controller = new AbortController();
-    controller.abort();
-    const aborted = abortedJobs.start(
-      { name: "aborted", task: "task" },
-      {} as any,
-      controller.signal,
-    );
-    await abortedJobs.wait(aborted.id);
-    expect(aborted.status).toBe("cancelled");
-    expect(runCount).toBe(0);
-    await abortedJobs.shutdown();
-  });
-});
+  } finally {
+    await runtime.shutdownSession();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15000);

@@ -7,12 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { activateNotesExtension, NotesProviderEvent } from "../index";
 import type { NotesProvider } from "../domain";
 import { resolveNotesProvider } from "../provider-registry";
-import {
-  AgentToolEvent,
-  PiEvent,
-  ToolCapability,
-  type ExtToolRegistration,
-} from "../../_shared/agent-tools";
+import { PiEvent } from "../../_shared/agent-tools";
 import type { SettingsEnv } from "../../_shared/settings";
 
 const roots: string[] = [];
@@ -36,13 +31,11 @@ function settingsEnv(document: unknown): SettingsEnv {
 
 function harness() {
   const tools: any[] = [];
-  const registrations: ExtToolRegistration[] = [];
   const sessionHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
   const shutdownHandlers: Array<(event: unknown, ctx: ExtensionContext) => void> = [];
   const eventHandlers = new Map<string, Array<(payload: unknown) => void>>();
   const testHarness = {
     tools,
-    registrations,
     pi: {
       registerTool(tool: any) {
         tools.push(tool);
@@ -58,7 +51,6 @@ function harness() {
           };
         },
         emit(event: string, payload: unknown) {
-          if (event === AgentToolEvent.Register) registrations.push(payload as ExtToolRegistration);
           for (const handler of eventHandlers.get(event) ?? []) handler(payload);
         },
       },
@@ -185,7 +177,7 @@ describe("notes extension", () => {
     testHarness.pi.events.emit(NotesProviderEvent.Register, { provider: first });
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
   });
-  it("registers the configured Obsidian provider across Pi and AgentTool hosts", async () => {
+  it("registers the configured Obsidian provider as a native Pi tool", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pi-notes-extension-"));
     roots.push(root);
     const vault = path.join(root, "vault");
@@ -203,11 +195,6 @@ describe("notes extension", () => {
 
     expect(testHarness.tools).toHaveLength(1);
     expect(testHarness.tools[0].name).toBe("notes");
-    expect(testHarness.registrations).toHaveLength(1);
-    expect(testHarness.registrations[0].capabilities).toEqual([
-      ToolCapability.Read,
-      ToolCapability.Write,
-    ]);
     await expect(
       testHarness.tools[0].execute("call", { action: "index" }, undefined, undefined, {
         cwd: "/repo",

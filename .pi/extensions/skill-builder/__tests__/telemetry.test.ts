@@ -166,7 +166,7 @@ describe("skill-builder tooling telemetry", () => {
       outcome: "success",
       verdict: "pass",
       finding_count: 0,
-      provider: "test-provider",
+      provider: "unknown",
       model: "test-model",
       cost_model: "api",
     });

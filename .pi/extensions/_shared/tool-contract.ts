@@ -1,9 +1,5 @@
-import type {
-  AgentTool,
-  AgentToolResult,
-  AgentToolUpdateCallback,
-} from "@earendil-works/pi-agent-core";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
 export type ToolProgress = (message: string) => void;
@@ -55,27 +51,5 @@ export function toPiTool<Params, Details = unknown, Schema extends TSchema = TSc
       });
     },
     ...ui,
-  };
-}
-
-type AgentToolContextProvider = () => Pick<ExtensionContext, "cwd">;
-
-export function toAgentTool<Params, Details = unknown>(
-  contract: ToolContract<Params, Details>,
-  getContext: AgentToolContextProvider,
-): AgentTool<any, any> {
-  return {
-    name: contract.name,
-    label: contract.label,
-    description: contract.description,
-    parameters: contract.parameters,
-    execute: async (_toolCallId, params, signal, onUpdate?: AgentToolUpdateCallback) => {
-      const context = getContext();
-      return contract.execute(params as Params, {
-        cwd: context.cwd,
-        signal,
-        progress: (message) => onUpdate?.(progressResult(message) as AgentToolResult<Details>),
-      });
-    },
   };
 }

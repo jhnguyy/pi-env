@@ -15,7 +15,6 @@ export const DEFAULT_SUBAGENT_LIMITS = {
   maxRetainedJobs: 32,
   maxResultBytes: 50 * 1024,
   maxRunMs: 30 * 60 * 1000,
-  cancellationGraceMs: 500,
 } as const;
 
 export const DEFAULT_SUBAGENT_CONFIG = {
@@ -29,7 +28,6 @@ export const SubagentSettingsSchema = Schema.Struct({
   maxRetainedJobs: Schema.optionalKey(Schema.Number),
   maxResultBytes: Schema.optionalKey(Schema.Number),
   maxRunMs: Schema.optionalKey(Schema.Number),
-  cancellationGraceMs: Schema.optionalKey(Schema.Number),
   sessionStorage: Schema.optionalKey(Schema.Literals(["nested", "sibling"])),
 });
 
@@ -39,7 +37,6 @@ export interface SubagentRuntimeConfig {
   readonly maxRetainedJobs: number;
   readonly maxResultBytes: number;
   readonly maxRunMs: number;
-  readonly cancellationGraceMs: number;
   readonly sessionStorage: SubagentSessionStorage;
 }
 
@@ -68,10 +65,6 @@ export function resolveSubagentRuntimeConfig(
       DEFAULT_SUBAGENT_LIMITS.maxResultBytes,
     ),
     maxRunMs: positiveInteger(settings.maxRunMs, DEFAULT_SUBAGENT_LIMITS.maxRunMs),
-    cancellationGraceMs: positiveInteger(
-      settings.cancellationGraceMs,
-      DEFAULT_SUBAGENT_LIMITS.cancellationGraceMs,
-    ),
     sessionStorage: settings.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
   };
 }

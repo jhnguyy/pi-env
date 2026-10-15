@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +10,10 @@ import {
   SettingsManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import { activateNotesExtension } from "../index";
+import notesExtension from "../index";
+import { getChildContext, withChildContext } from "../../_shared/child-context";
+import reviewExtension from "../../review/index";
+import sessionManagerExtension from "../../session-manager/index";
 
 // Only inference is scripted. Resource loading, native tool dispatch, session files, and vaults
 // are real. The native provider extension is loaded separately for each owner.
@@ -40,11 +42,15 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       await writeFile(
         join(agentDir, "settings.json"),
         JSON.stringify({
-          notes: { provider: "obsidian", vaultPath: vault },
+          notes: { provider: "obsidian" },
         }),
       );
+      await mkdir(join(cwd, ".pi"));
+      await writeFile(join(cwd, ".pi", "settings.json"), JSON.stringify({
+        notes: { vaultPath: vault },
+      }));
       const provider = fauxProvider({ provider: `notes-${name}` });
-      const services = await createAgentSessionServices({
+      const services = await withChildContext({ cwd, agentDir }, () => createAgentSessionServices({
         cwd,
         agentDir,
         settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted: false }),
@@ -58,16 +64,14 @@ it("keeps simultaneous native owners' configured vaults independent through shut
             },
             {
               name: "notes",
-              factory: (pi) =>
-                activateNotesExtension(pi, cwd, {
-                  globalSettingsPath: () => join(agentDir, "settings.json"),
-                  projectSettingsPath: () => join(cwd, ".pi", "settings.json"),
-                  readFile: readFileSync,
-                }),
+              factory: notesExtension,
             },
+            { name: "review", factory: reviewExtension },
+            { name: "session-manager", factory: sessionManagerExtension },
           ],
         },
-      });
+      }));
+      expect(getChildContext()).toBeUndefined();
       expect(services.diagnostics.filter((item) => item.type === "error")).toEqual([]);
       const { session, extensionsResult } = await createAgentSessionFromServices({
         services,
@@ -77,11 +81,19 @@ it("keeps simultaneous native owners' configured vaults independent through shut
       });
       sessions.push(session);
       expect(extensionsResult.errors).toEqual([]);
+      // Both root factories loaded successfully but installed no root-only resources.
+      const rootExtensions = extensionsResult.extensions.filter((extension) =>
+        extension.path.includes("review") || extension.path.includes("session-manager"));
+      expect(rootExtensions).toHaveLength(2);
+      for (const extension of rootExtensions) {
+        expect(extension.handlers.size).toBe(0);
+        expect(extension.tools.size).toBe(0);
+        expect(extension.commands.size).toBe(0);
+      }
       await session.bindExtensions({ mode: "print" });
       return { session, provider };
     };
-    const first = await create("first");
-    const second = await create("second");
+    const [first, second] = await Promise.all([create("first"), create("second")]);
     const read = async ({ session, provider }: Awaited<ReturnType<typeof create>>) => {
       const start = session.messages.length;
       provider.setResponses([

@@ -1,5 +1,3 @@
-export { formatCapabilities, ToolCapability } from "../_shared/agent-tools";
-
 export const SubagentJobStatus = {
   Queued: "queued",
   Running: "running",
@@ -28,10 +26,7 @@ export type SubagentJobToolStatus =
 
 export const ResolutionErrorReason = {
   AgentNotFound: "agent_not_found",
-  NoTools: "no_tools",
   InvalidTools: "invalid_tools",
-  NoModel: "no_model",
-  ModelNotFound: "model_not_found",
   InvalidCwd: "invalid_cwd",
   UntrustedProjectAgent: "untrusted_project_agent",
 } as const;

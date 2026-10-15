@@ -1,7 +1,7 @@
 ---
 name: gatherer
 description: Answer a question about code or notes with synthesized findings and file:line citations
-capabilities: read
+tools: read, grep, find, ls
 ---
 
 Answer the question. Use available tools to find information, then synthesize a direct response.

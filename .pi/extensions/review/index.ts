@@ -1,3 +1,4 @@
+import { getChildContext } from "../_shared/child-context";
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1449,6 +1450,9 @@ async function finishReviewCleanup(
   state: ReviewState,
   scope: ReviewCoordinatorScope,
 ): Promise<string> {
+  if (state.dag) await coordinator.dagRegistration?.service.closeChildren?.(state.dag.runId);
+  if (!coordinator.isScopeActive(scope) || coordinator.review(state.snapshot.id) !== state)
+    return "The review session changed during cleanup. Resources remain available for recovery.";
   const cleaned = await removeManagedWorktree(pi, state, coordinator.operationSignal(scope));
   if (!cleaned) throw new Error("git worktree prune failed.");
   const reviewId = state.snapshot.id;
@@ -1564,6 +1568,7 @@ export function reviewProgressResult(progress: ReviewDagProgress) {
 }
 
 export default function reviewExtension(pi: ExtensionAPI) {
+  if (getChildContext()) return;
   let stopDagRuntimeListener: (() => void) | undefined;
   const ensureDagRuntimeListener = () => {
     if (stopDagRuntimeListener || !(pi as { events?: unknown }).events) return;

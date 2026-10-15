@@ -5,7 +5,6 @@ import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, expect, it } from "vitest";
 import { describeIfEnabled } from "../../__tests__/test-utils";
-import { AgentToolEvent, PiEvent, ToolCapability } from "../../_shared/agent-tools";
 import {
   closeoutPullRequest,
   parseCloseoutArgs,
@@ -169,10 +168,8 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     };
     registerDevTools({
       exec,
-      events: { emit() {} },
       registerCommand() {},
       registerTool,
-      on() {},
     });
     const tool = tools.find(({ name }) => name === "closeout");
     expect(tool).toBeDefined();
@@ -210,9 +207,8 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     });
   });
 
-  it("uses the actual session generation in the child factory, preserves capabilities, and propagates cancellation", async () => {
-    const registrations: any[] = [];
-    const sessionStartHandlers: Array<(...args: any[]) => void> = [];
+  it("uses native session cwd and propagates cancellation", async () => {
+    const tools: any[] = [];
     let started!: () => void;
     const commandStarted = new Promise<void>((resolve) => {
       started = resolve;
@@ -235,33 +231,18 @@ describeIfEnabled("dev-tools", "/closeout command", () => {
     const { registerDevTools } = await import("../index");
     registerDevTools({
       exec,
-      events: {
-        emit(event: string, registration: unknown) {
-          if (event === AgentToolEvent.Register) registrations.push(registration);
-        },
-      },
       registerCommand() {},
-      registerTool() {},
-      on(event: string, handler: (...args: any[]) => void) {
-        if (event === PiEvent.SessionStart) sessionStartHandlers.push(handler);
-      },
+      registerTool(tool) { tools.push(tool); },
     });
-    for (const handler of sessionStartHandlers) handler(undefined, { cwd: "/session" });
-    const registration = registrations.find(({ tool }) => tool.name === "closeout");
-    expect(registration.capabilities).toEqual([
-      ToolCapability.Write,
-      ToolCapability.Execute,
-    ]);
-    const tool = registration.createTool({
-      cwd: "/child",
-      sessionGeneration: registration.sessionGeneration,
-    });
+    const tool = tools.find((tool) => tool.name === "closeout");
     const controller = new AbortController();
 
     const execution = tool.execute(
       "agent-closeout-call",
       { pr: "42", repo: "repo" },
       controller.signal,
+      undefined,
+      { cwd: "/child" },
     );
     const rejected = expect(execution).rejects.toThrow();
     await commandStarted;

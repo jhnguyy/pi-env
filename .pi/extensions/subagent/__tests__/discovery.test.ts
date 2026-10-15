@@ -4,7 +4,19 @@ import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { fauxProvider } from "@earendil-works/pi-ai";
 import { ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { createSubagentHarness } from "./harness";
+import initSubagent from "../index";
+function createHarness() {
+  const tools = new Map<string, any>();
+  const handlers = new Map<string, any>();
+  initSubagent({
+    getAllTools: () => [], appendEntry: () => {}, registerCommand: () => {},
+    registerTool: (tool: any) => tools.set(tool.name, tool),
+    on: (name: string, handler: any) => handlers.set(name, handler),
+    events: { emit: () => {}, on: () => {} },
+  } as any);
+  return { tools, handlers };
+}
+
 
 it("registers the entire native available roster and descriptive tags despite restrictive cycling settings", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-subagent-roster-"));
@@ -14,7 +26,7 @@ it("registers the entire native available roster and descriptive tags despite re
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   vi.stubEnv("OTEL_SDK_DISABLED", "true");
-  const harness = createSubagentHarness();
+  const harness = createHarness();
   const ctx: any = { cwd, sessionManager: SessionManager.create(cwd, join(root, "sessions")) };
   try {
     writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enabledModels: ["roster/quick"] }));
