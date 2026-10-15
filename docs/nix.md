@@ -14,6 +14,6 @@ Host profile activation, builder access, and binary-cache trust belong in the co
 
 ## Validation
 
-Inspect outputs with `nix flake show`. Run `nix flake check` for flake checks and the [repository verification portfolio](../scripts/verification-phases.mjs) for dependency-backed workflows.
+Inspect outputs with `nix flake show`. Run `nix flake check` to build Pi and run its upstream install checks, plus the setup checks. Use `nix build .#pi --no-link` for a focused package check. Run the [repository verification portfolio](../scripts/verification-phases.mjs) for dependency-backed workflows.
 
 Use isolated homes and agent directories for setup validation. Do not activate a live host profile or reset live settings to validate a contribution.
