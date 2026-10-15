@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -25,9 +25,14 @@ it("runs a registered child through the configured native provider and reopens i
     runtime.registerNativeProvider(faux.provider);
     await runtime.getAvailable();
     ctx.modelRegistry = new ModelRegistry(runtime);
+    const agentsDir = join(root, "package", ".pi", "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(root, "settings.json"), JSON.stringify({ packages: ["./package"] }));
+    writeFileSync(join(agentsDir, "configured.md"),
+      "---\nname: configured-agent\ndescription: Configured child\ntools: [read]\nmodel: configured/local\n---\nRead only.\n");
     await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
     const result = await harness.tools.get("subagent").execute("configured-run", {
-      action: "run", name: "configured", task: "task", tools: ["read"], model: "configured/local",
+      action: "run", name: "configured", task: "task", agent: "configured-agent",
       system_prompt: "exact initial prompt\n",
     }, undefined, undefined, ctx);
     expect(result.details.isError).toBe(false);

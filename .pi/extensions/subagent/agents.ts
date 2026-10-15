@@ -33,12 +33,13 @@ export interface AgentDiscoveryResult {
   projectAgentsDir: string | null;
 }
 
-function commaList(value: string | undefined): string[] | undefined {
-  const values = value
-    ?.split(",")
+function parseToolList(value: unknown): string[] | undefined {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const values = raw
+    .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter(Boolean);
-  return values && values.length > 0 ? values : undefined;
+  return values.length > 0 ? values : undefined;
 }
 
 function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | undefined {
@@ -48,14 +49,14 @@ function loadAgentFile(filePath: string, source: AgentSource): AgentConfig | und
   } catch {
     return undefined;
   }
-  const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-  if (!frontmatter.name || !frontmatter.description) return undefined;
+  const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+  if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string") return undefined;
   return {
     name: frontmatter.name,
     description: frontmatter.description,
-    tools: commaList(frontmatter.tools),
-    capabilities: commaList(frontmatter.capabilities),
-    model: frontmatter.model,
+    tools: parseToolList(frontmatter.tools),
+    capabilities: parseToolList(frontmatter.capabilities),
+    model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
     systemPrompt: body,
     source,
     filePath,
@@ -90,14 +91,11 @@ function loadAgentsFromPackages(cwd: string, scope: AgentScope): AgentConfig[] {
   const agents: AgentConfig[] = [];
   try {
     const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: scope === "project" });
-    const packages = (scope === "user" ? settings.getGlobalSettings() : settings.getProjectSettings()).packages ?? [];
     const packageManager = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: settings });
-    for (const pkg of packages) {
-      const source = typeof pkg === "string" ? pkg : pkg.source;
-      if (!source) continue;
-      const packageRoot = packageManager.getInstalledPath(source, scope);
-      if (!packageRoot) continue;
-      const agentsDir = path.join(packageRoot, CONFIG_DIR_NAME, "agents");
+    // Named agents are extension-owned, not a native package resource type.
+    for (const pkg of packageManager.listConfiguredPackages()) {
+      if (pkg.scope !== scope || !pkg.installedPath) continue;
+      const agentsDir = path.join(pkg.installedPath, CONFIG_DIR_NAME, "agents");
       agents.push(...loadAgentsFromDir(agentsDir, scope === "user" ? "package" : "project"));
     }
   } catch {
