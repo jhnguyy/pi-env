@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { loadNotesSettingsEffect } from "./config";
 import type { SettingsEnv } from "../_shared/settings";
 import { createNotesContract, type NotesToolDetails } from "./contract";
-import { registerConfiguredBuiltinProvider } from "./provider";
+import { createConfiguredBuiltinProvider } from "./provider";
 import { registerNotesProviderEventBridge } from "./provider-events";
 import { resolveNotesProvider } from "./provider-registry";
 import { PiEvent, ToolCapability } from "../_shared/agent-tools";
@@ -43,13 +43,10 @@ export async function activateNotesExtension(
   const settings = await Effect.runPromise(loadNotesSettingsEffect(cwd, settingsEnv));
   if (settings === null) return;
 
+  const builtin = await createConfiguredBuiltinProvider(settings);
   const unregisterExternal = registerNotesProviderEventBridge(pi);
-  const unregisterBuiltin = await registerConfiguredBuiltinProvider(settings);
-  pi.on(PiEvent.SessionShutdown, () => {
-    unregisterBuiltin();
-    unregisterExternal();
-  });
-  const contract = createNotesContract(() => resolveNotesProvider(settings.provider));
+  pi.on(PiEvent.SessionShutdown, unregisterExternal);
+  const contract = createNotesContract(() => builtin ?? resolveNotesProvider(settings.provider));
 
   registerCrossHostTool(pi, {
     contract,

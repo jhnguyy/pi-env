@@ -1,18 +1,17 @@
 import type { NotesSettings } from "./config";
-import { NotesProviderError } from "./domain";
+import { NotesProviderError, type NotesProvider } from "./domain";
 import { createObsidianProvider } from "./obsidian-provider";
-import { registerNotesProvider } from "./provider-registry";
 
-/** Register built-in providers. Other extension bundles register their own providers. */
-export async function registerConfiguredBuiltinProvider(
+/** Configured built-ins belong to one extension owner; external providers use the registry. */
+export async function createConfiguredBuiltinProvider(
   settings: NotesSettings,
-): Promise<() => void> {
-  if (settings.provider !== "obsidian") return () => {};
+): Promise<NotesProvider | undefined> {
+  if (settings.provider !== "obsidian") return undefined;
   if (settings.vaultPath === undefined) {
     throw new NotesProviderError({
       code: "invalid-provider",
       message: "The Obsidian notes provider requires an absolute vaultPath.",
     });
   }
-  return registerNotesProvider(await createObsidianProvider(settings.vaultPath));
+  return createObsidianProvider(settings.vaultPath);
 }
