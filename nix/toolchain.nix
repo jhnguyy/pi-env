@@ -35,33 +35,13 @@ let
     (builtins.fromJSON (builtins.readFile "${pi}/packages/coding-agent/package.json")).version;
   piFor =
     pkgs:
-    let
-      package = pi.packages.${pkgs.system}.default.override { nodejs_22 = nodeFor pkgs; };
-      obsoleteEsbuildCheck = ''
-        ${nodeFor pkgs}/bin/node -e \
-          "require('$out/lib/pi/node_modules/esbuild').transformSync('const value: number = 1', { loader: 'ts' })"
-      '';
-    in
     assert pkgs.lib.assertMsg (builtins.all (name: manifest.devDependencies.${name} == piVersion) [
       "@earendil-works/pi-coding-agent"
       "@earendil-works/pi-agent-core"
       "@earendil-works/pi-ai"
       "@earendil-works/pi-tui"
     ]) "Pi development dependencies must match the upstream Pi flake";
-    # Pi 1.2.0 removed runtime esbuild but retained its upstream install check.
-    # Preserve the remaining checks and stop applying this fix after that release.
-    if piVersion == "1.2.0" then
-      package.overrideAttrs (old: {
-        installCheckPhase =
-          let
-            phase = pkgs.lib.replaceStrings [ obsoleteEsbuildCheck ] [ "" ] old.installCheckPhase;
-          in
-          assert pkgs.lib.assertMsg (phase != old.installCheckPhase)
-            "Pi 1.2.0's obsolete esbuild install check changed; review the workaround";
-          phase;
-      })
-    else
-      package;
+    pi.packages.${pkgs.system}.default.override { nodejs_22 = nodeFor pkgs; };
   nubFor =
     pkgs:
     let
