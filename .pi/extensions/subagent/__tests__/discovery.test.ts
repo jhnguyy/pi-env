@@ -1,61 +1,49 @@
-import { expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
-import { buildDynamicDescription } from "../discovery";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, it, vi } from "vitest";
+import { fauxProvider } from "@earendil-works/pi-ai";
+import { ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createSubagentHarness } from "./harness";
 
-describeIfEnabled("subagent", "dynamic model guidance", () => {
-  const availableModels = [
-    { provider: "test", id: "quick", name: "Quick" },
-    { provider: "test", id: "coder", name: "Coder" },
-    { provider: "test", id: "deep", name: "Deep" },
-    { provider: "test", id: "offline", name: "Offline" },
-    { provider: "test", id: "excluded", name: "Excluded" },
-  ];
-
-  const annotations = {
-    "test/quick": ["preferred", "fast", "experimental"],
-    "test/coder": ["codex"],
-    "test/deep": ["heavy", "reviewer"],
-    "test/offline": ["local", "free"],
-    "test/excluded": ["heavy", "free"],
-  };
-
-  it("treats all model annotations as descriptive guidance", () => {
-    const description = buildDynamicDescription(
-      availableModels,
-      [],
-      undefined,
-      undefined,
-      annotations,
-    );
-
-    expect(description).toContain("Available models (use 'provider/model-id' format):");
-    expect(description).toContain("test/quick — Quick [preferred, fast, experimental]");
-    expect(description).toContain("test/deep — Deep [heavy, reviewer]");
-    expect(description).toContain(
-      "[preferred] Cost-effective gathering, summarization, and mechanical edits.",
-    );
-    expect(description).toContain("[fast] Latency-sensitive read-only scouting.");
-    expect(description).toContain("[codex] Code-focused reasoning and implementation.");
-    expect(description).toContain("[heavy] Judgment, adversarial review, and subtle reasoning.");
-    expect(description).toContain("[local] Local execution when remote providers are unnecessary.");
-    expect(description).toContain("[free] No-cost iteration.");
-    expect(description.match(/experimental/g)).toHaveLength(1);
-    expect(description).toContain("test/excluded — Excluded [heavy, free]");
-    expect(description).toContain("Always pass model explicitly — there is no default.");
-  });
-
-  it("derives model guidance from the complete native available roster", () => {
-    const description = buildDynamicDescription(
-      [availableModels[1]],
-      [],
-      undefined,
-      undefined,
-      annotations,
-    );
-
-    expect(description).toContain("[codex] Code-focused reasoning and implementation.");
-    expect(description).not.toContain("[preferred] Cost-effective gathering");
-    expect(description).not.toContain("[heavy] Judgment");
-    expect(description).not.toContain("test/quick");
-  });
+it("registers the entire native available roster and descriptive tags despite restrictive cycling settings", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-subagent-roster-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  mkdirSync(agentDir);
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+  vi.stubEnv("OTEL_SDK_DISABLED", "true");
+  const harness = createSubagentHarness();
+  const ctx: any = { cwd, sessionManager: SessionManager.create(cwd, join(root, "sessions")) };
+  try {
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ enabledModels: ["roster/quick"] }));
+    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({
+      modelAnnotations: { "roster/quick": ["preferred", "experimental"], "roster/deep": ["heavy", "reviewer"],
+        "roster/unavailable": ["local"] },
+    }));
+    const faux = fauxProvider({ provider: "roster", models: [
+      { id: "quick", name: "Quick" }, { id: "deep", name: "Deep" }, { id: "plain", name: "Plain" },
+    ] });
+    const runtime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    await runtime.getAvailable();
+    ctx.modelRegistry = new ModelRegistry(runtime);
+    expect(SettingsManager.create(cwd, agentDir).getEnabledModels()).toEqual(["roster/quick"]);
+    await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    const description = harness.tools.get("subagent").description;
+    // Real native availability and real settings cross the extension-start registration boundary.
+    for (const model of ctx.modelRegistry.getAvailable()) {
+      expect(description).toContain(`${model.provider}/${model.id} — ${model.name}`);
+    }
+    expect(description).toContain("roster/quick — Quick [preferred, experimental]");
+    expect(description).toContain("roster/deep — Deep [heavy, reviewer]");
+    expect(description).toContain("roster/plain — Plain");
+    expect(description).not.toContain("roster/unavailable");
+    expect(description).not.toContain("[local]");
+  } finally {
+    await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

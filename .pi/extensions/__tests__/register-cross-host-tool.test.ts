@@ -137,42 +137,25 @@ describe("registerCrossHostTool contract", () => {
     expect(removed).toEqual(["cross_host_sample"]);
   });
 
-  it("uses child cwd even when a parent context is available", async () => {
-    const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
+  it("returns main or resolved child cwd, regardless of conflicting parent context", async () => {
     const harness = createPiHarness();
     registerCrossHostTool(harness.pi as any, {
-      contract: createContract(seen),
+      contract: createContract([]),
       capabilities: [ToolCapability.Read],
       piOptions: PI_OPTIONS,
     });
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
-    const createTool = harness.registrations[0].createTool!;
-
-    await createTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
-    await createTool({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
-
-    expect(seen.map((entry) => entry.cwd)).toEqual(["/child", "/child"]);
-  });
-
-  it("uses main-session cwd for the main AgentTool and child cwd for child tools without parent context", async () => {
-    const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
-    const harness = createPiHarness();
-    registerCrossHostTool(harness.pi as any, {
-      contract: createContract(seen),
-      capabilities: [ToolCapability.Read],
-      piOptions: PI_OPTIONS,
-    });
-
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main-session" });
-
     const active = harness.registrations[0];
-    await active.tool.execute("main", { value: "x" }, undefined);
-    await active.createTool!({
-      cwd: "/child-session",
-      sessionGeneration: active.sessionGeneration!,
-    }).execute("child", { value: "x" }, undefined);
-
-    expect(seen.map((entry) => entry.cwd)).toEqual(["/main-session", "/child-session"]);
+    const results = await Promise.all([
+      active.tool.execute("main", { value: "x" }, undefined),
+      active.createTool!({ cwd: "/child", sessionGeneration: active.sessionGeneration! })
+        .execute("child", { value: "x" }, undefined),
+      active.createTool!({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext,
+        sessionGeneration: active.sessionGeneration! }).execute("child-parent", { value: "x" }, undefined),
+    ]);
+    expect(results.map((result) => result.details)).toEqual([
+      { cwd: "/main" }, { cwd: "/child" }, { cwd: "/child" },
+    ]);
   });
 
   it("forwards cancellation signal and progress in both adapters", async () => {

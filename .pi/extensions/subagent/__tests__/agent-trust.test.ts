@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { getAgentDir, ProjectTrustStore } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -115,59 +115,37 @@ describe("subagent agent source and trust policy", () => {
     store.set(target, true);
     expect(resolve()._tag).toBe(ResolutionResultTag.Ok);
     store.set(target, false);
-    expect(resolve()._tag).toBe(ResolutionResultTag.Error);
+    const denied = resolve();
+    expect(denied._tag).toBe(ResolutionResultTag.Error);
+    if (denied._tag === ResolutionResultTag.Error) {
+      expect(denied.error.reason).toBe(ResolutionErrorReason.UntrustedProjectAgent);
+    }
   });
 
-  it("keeps user-installed package agents in default scope", () => {
+  it("preserves global/project package source authority with relative settings paths", () => {
     const cwd = root();
-    const packageRoot = root();
-    writeAgent(join(packageRoot, ".pi", "agents"), "user-package-agent");
-    writeFileSync(join(getAgentDir(), "settings.json"), JSON.stringify({ packages: [packageRoot] }));
-    expect(discoverAgents(cwd, "user").agents).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "user-package-agent", source: "package" }),
-    ]));
-  });
-
-  it("resolves project package paths from the target settings directory, not the process directory", () => {
-    const cwd = root();
-    const relative = `./${basename(cwd)}`;
-    const packageRoot = join(cwd, ".pi", relative);
-    const decoy = join(process.cwd(), relative);
-    roots.push(decoy);
-    writeAgent(join(packageRoot, ".pi", "agents"), "target-relative-agent");
-    writeAgent(join(decoy, ".pi", "agents"), "parent-decoy-agent");
-    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: [relative] }));
-    const agents = discoverAgents(cwd, "project").agents;
-    expect(agents.some((agent) => agent.name === "target-relative-agent")).toBe(true);
-    expect(agents.some((agent) => agent.name === "parent-decoy-agent")).toBe(false);
-  });
-
-  it("resolves global package paths from the native agent directory", () => {
-    const cwd = root();
-    const packageRoot = join(getAgentDir(), "relative-user-package");
-    writeAgent(join(packageRoot, ".pi", "agents"), "relative-user-agent");
-    writeFileSync(join(getAgentDir(), "settings.json"), JSON.stringify({ packages: ["./relative-user-package"] }));
-    expect(discoverAgents(cwd, "user").agents).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "relative-user-agent", source: "package" }),
-    ]));
-  });
-
-  it("keeps project packages out of user scope and discovers them in explicit project scope", () => {
-    const cwd = root();
-    const packageRoot = root();
-    writeAgent(join(packageRoot, ".pi", "agents"), "package-agent");
+    writeAgent(join(getAgentDir(), "global-package", ".pi", "agents"), "global-package-agent");
+    writeAgent(join(cwd, ".pi", "project-package", ".pi", "agents"), "project-package-agent");
     writeAgent(join(cwd, ".pi", "agents"), "project-agent");
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: [packageRoot] }));
+    writeFileSync(join(getAgentDir(), "settings.json"), JSON.stringify({ packages: ["./global-package"] }));
+    writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ packages: ["./project-package"] }));
 
-    const defaultAgents = discoverAgents(cwd, "user");
-    expect(defaultAgents.agents.some((agent) => agent.name === "package-agent")).toBe(false);
-    expect(defaultAgents.agents.some((agent) => agent.name === "project-agent")).toBe(false);
-
-    const projectAgents = discoverAgents(cwd, "project");
-    expect(projectAgents.agents).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "package-agent", source: "project" }),
+    expect(discoverAgents(cwd, "user").agents).toEqual([
+      expect.objectContaining({ name: "global-package-agent", source: "package" }),
+    ]);
+    expect(discoverAgents(cwd, "project").agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "project-package-agent", source: "project" }),
       expect.objectContaining({ name: "project-agent", source: "project" }),
     ]));
+    const resolve = (agent: string, trusted: boolean, agent_scope?: "project") =>
+      resolveSubagentExecutionPlan({ name: "package", task: "task", agent, agent_scope },
+        context(cwd, trusted), new Map());
+    expect(resolve("global-package-agent", false)._tag).toBe(ResolutionResultTag.Ok);
+    const denied = resolve("project-package-agent", false, "project");
+    expect(denied._tag).toBe(ResolutionResultTag.Error);
+    if (denied._tag === ResolutionResultTag.Error) {
+      expect(denied.error.reason).toBe(ResolutionErrorReason.UntrustedProjectAgent);
+    }
+    expect(resolve("project-package-agent", true, "project")._tag).toBe(ResolutionResultTag.Ok);
   });
 });

@@ -1,54 +1,49 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
-import { createAssistantMessageEventStream, type AssistantMessage, type Context } from "@earendil-works/pi-ai";
-import { SessionManager, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { runResolvedSubagentEffect } from "../execute";
+import { expect, it, vi } from "vitest";
+import { fauxAssistantMessage, fauxProvider, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
+import { ModelRegistry, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { createSubagentHarness } from "./harness";
 
-// No credentials/network: replace only the inference boundary, retaining the native loop and persistence.
-describe("configured child inference", () => {
-  it("uses the configured registry and retains exactly one initial system message on exact-path reopen", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-configured-child-"));
-    try {
-      const requests: Context[] = [];
-      const registry = {
-        getApiKeyForProvider: async () => "test-key",
-        streamSimple(_model: unknown, context: Context) {
-          expect(this).toBe(registry);
-          requests.push(context);
-          const stream = createAssistantMessageEventStream();
-          const message: AssistantMessage = {
-            role: "assistant", content: [{ type: "text", text: "configured answer" }],
-            api: "test", provider: "configured", model: "local", stopReason: "stop", timestamp: 1,
-            usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-          };
-          stream.push({ type: "start", partial: message });
-          stream.push({ type: "done", reason: "stop", message });
-          stream.end();
-          return stream;
-        },
-      } satisfies Pick<ExtensionContext["modelRegistry"], "streamSimple" | "getApiKeyForProvider">;
-      const result = await Effect.runPromise(runResolvedSubagentEffect({
-        name: "configured", task: "task", tools: [], toolNames: [],
-        model: { provider: "configured", id: "local", api: "test" },
-        systemPrompt: "exact initial prompt\n", cwd: root,
-      }, { cwd: root, sessionManager: SessionManager.create(root, root), modelRegistry: registry } as any,
-      { env: { OTEL_SDK_DISABLED: "true" } }));
-      expect(result.details.isError).toBe(false);
-      expect(result.details.finalOutput).toBe("configured answer");
-      expect(requests).toHaveLength(1);
-      expect(requests[0].messages[0]).toMatchObject({ role: "system", content: "exact initial prompt\n" });
-      const reopened = SessionManager.open(result.details.sessionFile!);
-      const messages = reopened.buildSessionContext().messages;
-      expect(messages.filter((message) => message.role === "system")).toEqual([
-        { role: "system", content: "exact initial prompt\n", timestamp: expect.any(Number) },
-      ]);
-      expect(messages.map((message) => message.role)).toEqual(["system", "user", "assistant"]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+// Only inference is scripted: native fauxProvider's documented response factory observes the
+// provider transcript. ModelRuntime/ModelRegistry, public run, loop and persistence remain real.
+it("runs a registered child through the configured native provider and reopens its exact transcript", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-configured-child-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", root);
+  vi.stubEnv("OTEL_SDK_DISABLED", "true");
+  const harness = createSubagentHarness();
+  const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")) };
+  try {
+    const requests: TranscriptContext[] = [];
+    const faux = fauxProvider({ provider: "configured", models: [{ id: "local" }] });
+    faux.setResponses([(context) => {
+      requests.push(context);
+      return fauxAssistantMessage("configured answer");
+    }]);
+    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    await runtime.getAvailable();
+    ctx.modelRegistry = new ModelRegistry(runtime);
+    await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    const result = await harness.tools.get("subagent").execute("configured-run", {
+      action: "run", name: "configured", task: "task", tools: ["read"], model: "configured/local",
+      system_prompt: "exact initial prompt\n",
+    }, undefined, undefined, ctx);
+    expect(result.details.isError).toBe(false);
+    expect(result.details.finalOutput).toBe("configured answer");
+    expect(requests.some((request) => request.messages.some((message) =>
+      message.role === "system" && message.content === "exact initial prompt\n"))).toBe(true);
+    expect(requests.some((request) => getCurrentTools(request.messages).some((tool) => tool.name === "read"))).toBe(true);
+    const reopened = SessionManager.open(result.details.sessionFile);
+    const messages = reopened.buildSessionContext().messages;
+    expect(messages.filter((message) => message.role === "system" && message.content === "exact initial prompt\n")).toHaveLength(1);
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "configured answer" }] }),
+    ]));
+  } finally {
+    await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

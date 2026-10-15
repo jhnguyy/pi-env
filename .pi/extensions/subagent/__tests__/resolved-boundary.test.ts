@@ -6,62 +6,27 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { runResolvedSubagentEffect, type RunSubagentOptions } from "../execute";
 
-const captured = {
-  prompts: undefined as any,
-  context: undefined as any,
-  config: undefined as any,
-  multiTurn: false,
-  stopAfterFirst: undefined as boolean | undefined,
-};
-const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (prompts, context, config) => {
-  captured.prompts = prompts;
+// Direct resolved callers (e.g. review) supply private tools without agent-file discovery.
+// The public registered workflow covers prompt persistence; this adapter check retains
+// the distinct supplied-tool and child session-affinity contract without running inference.
+const captured = { context: undefined as any, config: undefined as any };
+const agentLoop: NonNullable<RunSubagentOptions["agentLoop"]> = (_prompts, context, config) => {
   captured.context = context;
   captured.config = config;
   return {
-    async *[Symbol.asyncIterator]() {
-      if (!captured.multiTurn) return;
-      yield {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "working" }],
-          timestamp: Date.now(),
-          model: "m",
-          stopReason: "toolUse",
-          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
-        },
-      };
-      captured.stopAfterFirst = (await config.finishTurn?.({} as any))?.action === "end";
-      if (captured.stopAfterFirst) return;
-      yield {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "done" }],
-          timestamp: Date.now(),
-          model: "m",
-          stopReason: "stop",
-          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } },
-        },
-      };
-    },
-    async result() {
-      return [];
-    },
+    async *[Symbol.asyncIterator]() {},
+    async result() { return []; },
   } as any;
 };
 const temps: string[] = [];
 afterEach(() => {
   for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
-  captured.prompts = undefined;
   captured.context = undefined;
   captured.config = undefined;
-  captured.multiTurn = false;
-  captured.stopAfterFirst = undefined;
 });
 
 describe("resolved subagent boundary", () => {
-  it("starts with a transcript-backed system prompt and supplied tools without project-agent resolution", async () => {
+  it("uses supplied private tools and child session affinity without project-agent resolution", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-subagent-resolved-"));
     temps.push(cwd);
     const sessionManager = SessionManager.create(cwd, cwd);
@@ -91,10 +56,6 @@ describe("resolved subagent boundary", () => {
         { env: { OTEL_SDK_DISABLED: "true" }, agentLoop },
       ),
     );
-    expect(captured.prompts).toMatchObject([{ role: "user" }]);
-    expect(captured.context.messages).toEqual([
-      { role: "system", content: "sys", timestamp: expect.any(Number) },
-    ]);
     expect(captured.context.tools).toEqual([tool]);
     expect(captured.config.sessionId).toBe(result.details.sessionId);
   });

@@ -1,8 +1,7 @@
 import { it } from "@effect/vitest";
-import { Effect, Result, Schema } from "effect";
+import { Effect } from "effect";
 import { describe, expect, it as vitestIt } from "vitest";
 import {
-  AgentSettingsSchema,
   decodeAgentSettingsSnapshotEffect,
   readOptionalAgentSettings,
   type AgentSettingsEnv,
@@ -26,11 +25,11 @@ describe("agent settings", () => {
     Effect.gen(function* () {
       const snapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({
         "/global/settings.json": JSON.stringify({
-          enabledModels: ["global/model"],
           modelAnnotations: { "provider/model": ["preferred"] },
+          extensions: ["global-extension"],
           workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         }),
-        "/repo/.pi/settings.json": JSON.stringify({ enabledModels: ["project/model"], extensions: ["web-context"] }),
+        "/repo/.pi/settings.json": JSON.stringify({ extensions: ["web-context"] }),
       }));
       const settings = yield* decodeAgentSettingsSnapshotEffect(snapshot);
 
@@ -39,36 +38,6 @@ describe("agent settings", () => {
         workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         extensions: ["web-context"],
       });
-    }),
-  );
-
-  it.effect("leaves native model selection settings to Pi", () =>
-    Effect.gen(function* () {
-      const settings = yield* Schema.decodeUnknownEffect(AgentSettingsSchema)({
-        enabledModels: ["test/selected"],
-        modelAnnotations: { "test/available": ["reviewer"] },
-      });
-      expect(settings).toEqual({ modelAnnotations: { "test/available": ["reviewer"] } });
-    }),
-  );
-
-  it.effect("accepts an absent root key and rejects a present undefined root key", () =>
-    Effect.gen(function* () {
-      expect(yield* Schema.decodeUnknownEffect(AgentSettingsSchema)({})).toEqual({});
-      const presentUndefined = yield* Effect.result(
-        Schema.decodeUnknownEffect(AgentSettingsSchema)({ modelAnnotations: undefined }),
-      );
-      expect(Result.isFailure(presentUndefined)).toBe(true);
-    }),
-  );
-
-  it.effect("accepts an absent nested key and rejects a present undefined nested key", () =>
-    Effect.gen(function* () {
-      expect(yield* Schema.decodeUnknownEffect(AgentSettingsSchema)({ workTracker: {} })).toEqual({ workTracker: {} });
-      const presentUndefined = yield* Effect.result(
-        Schema.decodeUnknownEffect(AgentSettingsSchema)({ workTracker: { repos: undefined } }),
-      );
-      expect(Result.isFailure(presentUndefined)).toBe(true);
     }),
   );
 
