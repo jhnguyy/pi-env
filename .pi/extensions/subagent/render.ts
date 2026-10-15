@@ -9,22 +9,13 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
-import {
-  SubagentJobStatus,
-  type SubagentDetails,
-  type SubagentJobRenderDetails,
-  type SubagentJobRenderStatus,
-} from "./types";
-import {
-  shortDescription,
-  toolExpandHint,
-  toolResultText,
-} from "../_shared/tool-render";
+import * as Types from "./types";
+import * as ToolRender from "../_shared/tool-render";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatPromptPreview(task: string): string {
-  return shortDescription(task, { oneLine: true });
+  return ToolRender.shortDescription(task, { oneLine: true });
 }
 
 function formatTokens(count: number): string {
@@ -34,7 +25,7 @@ function formatTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`;
 }
 
-export function formatUsageStats(usage: SubagentDetails["usage"], model?: string): string {
+export function formatUsageStats(usage: Types.SubagentDetails["usage"], model?: string): string {
   const parts: string[] = [];
   if (usage.turns) parts.push(`${usage.turns} turn${usage.turns !== 1 ? "s" : ""}`);
   if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
@@ -51,7 +42,6 @@ export function formatUsageStats(usage: SubagentDetails["usage"], model?: string
 interface SubagentCallArgs {
   action?: string;
   name?: string;
-  agent?: string;
   task?: string;
   tools?: string[];
   model?: string;
@@ -61,7 +51,6 @@ interface SubagentCallArgs {
 export function renderSubagentCall(args: SubagentCallArgs, theme: any, _ctx?: unknown) {
   const preview = formatPromptPreview(args.task ?? "");
   const nameStr = args.name ? `${theme.fg("accent", args.name)} ` : "";
-  const agentStr = args.agent ? theme.fg("accent", args.agent) + " " : "";
   const tools = args.tools;
   const toolsStr = tools ? `[${tools.join(", ")}]` : "";
   const modelStr = args.model ? ` (${args.model})` : "";
@@ -69,7 +58,6 @@ export function renderSubagentCall(args: SubagentCallArgs, theme: any, _ctx?: un
   const text =
     theme.fg("toolTitle", theme.bold(`subagent${actionStr} `)) +
     nameStr +
-    agentStr +
     theme.fg("dim", `${toolsStr}${modelStr}`) +
     "\n  " +
     theme.fg("toolOutput", preview);
@@ -78,20 +66,19 @@ export function renderSubagentCall(args: SubagentCallArgs, theme: any, _ctx?: un
 
 // ─── renderResult ──────────────────────────────────────────────────────────────
 
-function subagentResultIcon(details: SubagentDetails, theme: any): string {
+function subagentResultIcon(details: Types.SubagentDetails, theme: any): string {
   if (details.isError) return theme.fg("error", "✗");
   if (details.turnLimitExceeded) return theme.fg("warning", "⚠");
   return theme.fg("success", "✓");
 }
 
-function toolCallSummary(details: SubagentDetails): string {
+function toolCallSummary(details: Types.SubagentDetails): string {
   if (details.toolCallCount <= 0) return "";
   return `${details.toolCallCount} tool call${details.toolCallCount !== 1 ? "s" : ""}`;
 }
 
-function expandedSubagentHeader(details: SubagentDetails, icon: string, theme: any): string {
+function expandedSubagentHeader(details: Types.SubagentDetails, icon: string, theme: any): string {
   let header = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
-  if (details.agent) header += ` ${theme.fg("accent", details.agent)}`;
   if (details.isError && details.stopReason) {
     header += ` ${theme.fg("error", `[${details.stopReason}]`)}`;
   }
@@ -101,7 +88,7 @@ function expandedSubagentHeader(details: SubagentDetails, icon: string, theme: a
   return header;
 }
 
-function expandedSubagentStats(details: SubagentDetails, tools: string): string[] {
+function expandedSubagentStats(details: Types.SubagentDetails, tools: string): string[] {
   const parts: string[] = [];
   if (tools) parts.push(tools);
   if (details.modelOverride) parts.push(`model: ${details.modelOverride}`);
@@ -112,7 +99,7 @@ function expandedSubagentStats(details: SubagentDetails, tools: string): string[
 
 function appendExpandedSubagentOutput(
   container: Container,
-  details: SubagentDetails,
+  details: Types.SubagentDetails,
   theme: any,
 ): void {
   container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
@@ -128,7 +115,7 @@ function appendExpandedSubagentOutput(
 }
 
 function renderExpandedSubagentResult(
-  details: SubagentDetails,
+  details: Types.SubagentDetails,
   icon: string,
   usage: string,
   tools: string,
@@ -156,7 +143,7 @@ function renderExpandedSubagentResult(
 }
 
 function renderCollapsedSubagentResult(
-  details: SubagentDetails,
+  details: Types.SubagentDetails,
   icon: string,
   usage: string,
   tools: string,
@@ -164,7 +151,6 @@ function renderCollapsedSubagentResult(
 ): Text {
   // The call renderer already shows the truncated task; full output belongs in the expanded view.
   let text = `${icon} ${theme.fg("toolTitle", theme.bold("subagent"))}`;
-  if (details.agent) text += ` ${theme.fg("accent", details.agent)}`;
   if (details.isError) {
     const message = details.errorMessage || details.stopReason || "error";
     text += ` ${theme.fg("error", `[${message}]`)}`;
@@ -176,17 +162,17 @@ function renderCollapsedSubagentResult(
   if (usage) stats.push(usage);
   if (details.sessionName) stats.push(details.sessionName);
   if (stats.length > 0) text += `\n${theme.fg("dim", stats.join(" · "))}`;
-  text += `\n${toolExpandHint(theme)}`;
+  text += `\n${ToolRender.toolExpandHint(theme)}`;
   return new Text(text, 0, 0);
 }
 
 export function renderSubagentResult(
-  result: AgentToolResult<SubagentDetails>,
+  result: AgentToolResult<Types.SubagentDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
   _ctx?: unknown,
 ) {
-  const details = result.details as SubagentDetails | undefined;
+  const details = result.details as Types.SubagentDetails | undefined;
   if (!details) {
     const text = result.content[0];
     return new Text(text?.type === "text" ? text.text : "(no output)", 0, 0);
@@ -205,22 +191,22 @@ interface ToolRenderContext {
 }
 
 const JobStatusPresentation: Partial<
-  Record<SubagentJobRenderStatus, { readonly color: string; readonly icon: string }>
+  Record<Types.SubagentJobRenderStatus, { readonly color: string; readonly icon: string }>
 > = {
-  [SubagentJobStatus.Completed]: { color: "success", icon: "✓" },
-  [SubagentJobStatus.Failed]: { color: "error", icon: "✗" },
-  [SubagentJobStatus.Rejected]: { color: "error", icon: "✗" },
-  [SubagentJobStatus.Cancelling]: { color: "warning", icon: "…" },
-  [SubagentJobStatus.Cancelled]: { color: "warning", icon: "⚠" },
-  [SubagentJobStatus.Interrupted]: { color: "warning", icon: "⚠" },
+  [Types.SubagentJobStatus.Completed]: { color: "success", icon: "✓" },
+  [Types.SubagentJobStatus.Failed]: { color: "error", icon: "✗" },
+  [Types.SubagentJobStatus.Rejected]: { color: "error", icon: "✗" },
+  [Types.SubagentJobStatus.Cancelling]: { color: "warning", icon: "…" },
+  [Types.SubagentJobStatus.Cancelled]: { color: "warning", icon: "⚠" },
+  [Types.SubagentJobStatus.Interrupted]: { color: "warning", icon: "⚠" },
 };
 
-function jobStatusIcon(status: SubagentJobRenderDetails["status"], theme: any): string {
+function jobStatusIcon(status: Types.SubagentJobRenderDetails["status"], theme: any): string {
   const presentation = status === undefined ? undefined : JobStatusPresentation[status];
   return presentation ? theme.fg(presentation.color, presentation.icon) : theme.fg("accent", "•");
 }
 
-function appendJobStats(parts: string[], details: SubagentJobRenderDetails): void {
+function appendJobStats(parts: string[], details: Types.SubagentJobRenderDetails): void {
   if (details.toolCallCount) {
     parts.push(`${details.toolCallCount} tool call${details.toolCallCount === 1 ? "" : "s"}`);
   }
@@ -235,14 +221,14 @@ function appendJobStats(parts: string[], details: SubagentJobRenderDetails): voi
 
 /** Keep accepted background starts out of the tool summary. Their live state appears below the editor. */
 export function renderSubagentStartResult(
-  result: AgentToolResult<SubagentJobRenderDetails>,
+  result: AgentToolResult<Types.SubagentJobRenderDetails>,
   _options: { expanded?: boolean },
   theme: any,
 ) {
   const details = result.details;
   if (
-    details?.status === SubagentJobStatus.Queued ||
-    details?.status === SubagentJobStatus.Running
+    details?.status === Types.SubagentJobStatus.Queued ||
+    details?.status === Types.SubagentJobStatus.Running
   ) {
     return new Container();
   }
@@ -251,7 +237,7 @@ export function renderSubagentStartResult(
   let text = theme.fg("toolTitle", theme.bold("subagent start"));
   if (details?.name) text += ` ${theme.fg("accent", details.name)}`;
   if (status) text += ` ${theme.fg("error", `[${status}]`)}`;
-  const output = toolResultText(result);
+  const output = ToolRender.toolResultText(result);
   if (output) text += `\n${theme.fg("error", output)}`;
   return new Text(text, 0, 0);
 }
@@ -276,7 +262,7 @@ export function renderSubagentJobCall(
 
 /** Render async job inspection compactly while preserving full content on expansion. */
 export function renderSubagentJobResult(
-  result: AgentToolResult<SubagentJobRenderDetails>,
+  result: AgentToolResult<Types.SubagentJobRenderDetails>,
   { expanded }: { expanded: boolean },
   theme: any,
 ) {
@@ -290,13 +276,13 @@ export function renderSubagentJobResult(
 
   const statParts: string[] = [];
   appendJobStats(statParts, details);
-  const output = toolResultText(result);
+  const output = ToolRender.toolResultText(result);
 
   if (!expanded) {
     let text = header;
     if (details.task) text += `\n${theme.fg("toolOutput", formatPromptPreview(details.task))}`;
     if (statParts.length > 0) text += `\n${theme.fg("dim", statParts.join(" · "))}`;
-    text += `\n${toolExpandHint(theme)}`;
+    text += `\n${ToolRender.toolExpandHint(theme)}`;
     return new Text(text, 0, 0);
   }
 
@@ -332,7 +318,7 @@ export function renderSubagentToolCall(
 }
 
 export function renderSubagentToolResult(
-  result: AgentToolResult<SubagentDetails | SubagentJobRenderDetails>,
+  result: AgentToolResult<Types.SubagentDetails | Types.SubagentJobRenderDetails>,
   options: { expanded?: boolean },
   theme: any,
   context?: ToolRenderContext,
@@ -345,7 +331,7 @@ export function renderSubagentToolResult(
     return renderSubagentJobResult(result, { expanded: options.expanded ?? false }, theme);
   }
   return renderSubagentResult(
-    result as AgentToolResult<SubagentDetails>,
+    result as AgentToolResult<Types.SubagentDetails>,
     { expanded: options.expanded ?? false },
     theme,
     context,

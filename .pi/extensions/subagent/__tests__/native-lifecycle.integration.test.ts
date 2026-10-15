@@ -6,11 +6,11 @@ import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { withChildContext } from "../../_shared/child-context";
-import { runResolvedSubagentEffect, type ResolvedSubagentRun } from "../execute";
-import type { NativeChildSession } from "../child-types";
-import { resolveSubagentRuntimeConfig } from "../config";
-import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
+import * as ChildContext from "../../_shared/child-context";
+import * as Execute from "../execute";
+import * as ChildTypes from "../child-types";
+import * as Config from "../config";
+import * as Control from "../control";
 
 async function fixture(body: string, maxRunMs = 5000) {
   const root = await mkdtemp(join(tmpdir(), "native-lifecycle-"));
@@ -27,13 +27,13 @@ export default function(pi) {
  ${body}
 }`);
   await writeFile(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension], defaultProvider: "lifecycle-provider", defaultModel: "faux-1" }));
-  const supervisor = new SubagentRunSupervisor("lifecycle", resolveSubagentRuntimeConfig({ maxRunMs }));
+  const supervisor = new Control.SubagentRunSupervisor("lifecycle", Config.resolveSubagentRuntimeConfig({ maxRunMs }));
   const parent = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
-  let child: NativeChildSession | undefined;
+  let child: ChildTypes.NativeChildSession | undefined;
   return {
     root, supervisor,
     child: () => child!,
-    execute: (run: Partial<ResolvedSubagentRun> = {}) => withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => Effect.runPromise(runResolvedSubagentEffect({ name: "lifecycle", task: "initial", cwd: root, ...run }, parent, { supervisor, onChild: (value) => { child = value; } }))),
+    execute: (run: Partial<Execute.ResolvedSubagentRun> = {}) => ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => Effect.runPromise(Execute.runResolvedSubagentEffect({ name: "lifecycle", task: "initial", cwd: root, ...run }, parent, { supervisor, onChild: (value) => { child = value; } }))),
     async dispose() {
       await writeFile(join(root, "release"), "release");
       await supervisor.shutdown();
@@ -63,7 +63,7 @@ it.each([
     if (initial) work = f.execute({ task: "delayed input" });
     else {
       expect((await f.execute()).details.isError).toBe(false);
-      work = f.child().input("delayed input", "prompt");
+      work = f.child().input("delayed input", ChildTypes.NativeInputMode.Prompt);
     }
     await vi.waitFor(() => expect(existsSync(join(f.root, "entered"))).toBe(true));
     if (cancellation === "deadline") await new Promise((resolve) => setTimeout(resolve, 5100));
@@ -89,7 +89,7 @@ it.each(["model", "session"] as const)("unwinds loaded extension resources exact
     const failed = expect(f.execute(phase === "model" ? { modelOverride: "unavailable/model" } : { customTools: [invalidTool] })).rejects.toThrow();
     await vi.waitFor(() => expect(existsSync(join(f.root, "closing"))).toBe(true));
     let competingAdmitted = false;
-    const competing = f.supervisor.acquire({ cwd: f.root, workspaceAccess: WorkspaceAccess.Write }).then((lease) => { competingAdmitted = true; lease.release(); });
+    const competing = f.supervisor.acquire({ cwd: f.root, workspaceAccess: Control.WorkspaceAccess.Write }).then((lease) => { competingAdmitted = true; lease.release(); });
     await Promise.resolve();
     expect(competingAdmitted).toBe(false);
     await writeFile(join(f.root, "release"), "release");

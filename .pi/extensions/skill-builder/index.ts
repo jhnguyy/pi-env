@@ -8,6 +8,7 @@
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import * as NativeUsage from "../_shared/native-usage";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "fs";
 import { basename, join, resolve } from "path";
@@ -19,8 +20,8 @@ import {
   renderCompactToolCall,
   renderTextToolResult,
 } from "../_shared/tool-render";
-import { disposeSubagentRunSupervisor, WorkspaceAccess } from "../subagent/control";
-import { getChildContext } from "../_shared/child-context";
+import * as Control from "../subagent/control";
+import * as ChildContext from "../_shared/child-context";
 import {
   runResolvedSubagentEffect,
   type ResolvedSubagentRun,
@@ -353,29 +354,6 @@ export function modelConfigFromModel(model: any, actualModel?: string): EvalMode
   };
 }
 
-function toolUsage(usage: {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-}): Usage {
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: usage.cost,
-    },
-  };
-}
-
 function appendEvaluationSummary(
   lines: string[],
   result: AgentToolResult<any>,
@@ -425,7 +403,7 @@ function evaluationRun(
     toolNames: [],
     systemPrompt: EVALUATOR_SYSTEM_PROMPT,
     cwd: skillDir,
-    workspaceAccess: WorkspaceAccess.Read,
+    workspaceAccess: Control.WorkspaceAccess.Read,
   };
 }
 
@@ -561,7 +539,7 @@ function runExistingSkillWorkflowEffect(
             isError: result.details.isError,
           },
         },
-        toolUsage(result.details.usage),
+        NativeUsage.toNestedToolUsage(result.details.usage),
       );
     }),
   );
@@ -600,7 +578,7 @@ export function runSkillBuild(
 export default function (pi: ExtensionAPI) {
   // Evaluation can run without the subagent extension. Close its standalone
   // coordinator on native shutdown; shared coordinators coalesce settlement.
-  pi.on("session_shutdown", (_event, ctx) => disposeSubagentRunSupervisor(ctx.sessionManager.getSessionId()));
+  pi.on("session_shutdown", (_event, ctx) => Control.disposeSubagentRunSupervisor(ctx.sessionManager.getSessionId()));
   registerPublicTool(pi, {
     name: "skill_build",
     label: "Skill Build",
@@ -617,7 +595,7 @@ export default function (pi: ExtensionAPI) {
         cwd: ctx.cwd,
         signal,
         ctx,
-        allowEvaluation: getChildContext() === undefined,
+        allowEvaluation: ChildContext.getChildContext() === undefined,
       });
     },
     renderCall: (params, theme) =>

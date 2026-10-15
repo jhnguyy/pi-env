@@ -3,8 +3,8 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
-import type { ToolContract } from "../_shared/tool-contract";
-import { registerContractTool } from "../_shared/register-contract-tool";
+import type * as ToolContractApi from "../_shared/tool-contract";
+import * as RegisterContractTool from "../_shared/register-contract-tool";
 
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
@@ -14,7 +14,7 @@ const PI_OPTIONS = {
   renderResult: () => ({ kind: "result" }) as any,
 };
 
-function createContract(seen: Array<{ cwd: string; signal?: AbortSignal }>): ToolContract<Params, Details, typeof PARAMETERS> {
+function createContract(seen: Array<{ cwd: string; signal?: AbortSignal }>): ToolContractApi.ToolContract<Params, Details, typeof PARAMETERS> {
   return {
     name: "native_sample",
     label: "Cross Host Sample",
@@ -41,7 +41,7 @@ describe("registerContractTool native contract", () => {
     const renderCall = () => ({ kind: "call" }) as any;
     const renderResult = () => ({ kind: "result" }) as any;
 
-    registerContractTool(harness.pi as any, {
+    RegisterContractTool.registerContractTool(harness.pi, {
       contract: createContract([]),
       piOptions: { promptSnippet, promptGuidelines, renderCall, renderResult, exposure: "deferred", namespace: { name: "pi-env" } },
     });
@@ -59,7 +59,7 @@ describe("registerContractTool native contract", () => {
     const harness = createPiHarness();
     const signal = new AbortController().signal;
     const piUpdates: AgentToolResult<unknown>[] = [];
-    registerContractTool(harness.pi as any, {
+    RegisterContractTool.registerContractTool(harness.pi, {
       contract: createContract(seen),
       piOptions: PI_OPTIONS,
     });

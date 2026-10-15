@@ -7,7 +7,7 @@ import {
   createToolingTelemetryRuntime,
   type ToolingTelemetryRuntime,
 } from "../../../src/telemetry/tooling";
-import type { NativeInputMode } from "./child-types";
+import type * as ChildTypes from "./child-types";
 import {
   DEFAULT_SUBAGENT_CONFIG,
   loadSubagentRuntimeConfig,
@@ -155,7 +155,7 @@ export class SubagentSessionRuntime {
     return this.supervisor?.children.get(id)?.inspect();
   }
 
-  inputChild(id: string, text: string, mode: NativeInputMode) {
+  inputChild(id: string, text: string, mode: ChildTypes.NativeInputMode) {
     if (this.sessionState !== SubagentSessionState.Active) throw new Error("Parent subagent session is not active.");
     const child = this.supervisor?.children.get(id);
     if (!child) throw new Error("Child session is no longer retained.");

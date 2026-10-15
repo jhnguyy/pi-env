@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { activateNotesExtension, NotesProviderEvent } from "../index";
 import type { NotesProvider } from "../domain";
 import { resolveNotesProvider } from "../provider-registry";
-import { PiEvent } from "../../_shared/agent-tools";
+import * as AgentTools from "../../_shared/agent-tools";
 import type { SettingsEnv } from "../../_shared/settings";
 
 const roots: string[] = [];
@@ -55,20 +55,20 @@ function harness() {
         },
       },
       on(event: string, handler: (event: unknown, ctx: ExtensionContext) => void) {
-        if (event === PiEvent.SessionStart) sessionHandlers.push(handler);
-        if (event === PiEvent.SessionShutdown) shutdownHandlers.push(handler);
+        if (event === AgentTools.PiEvent.SessionStart) sessionHandlers.push(handler);
+        if (event === AgentTools.PiEvent.SessionShutdown) shutdownHandlers.push(handler);
       },
     },
     startSession() {
       for (const handler of sessionHandlers) {
-        handler({ type: PiEvent.SessionStart, reason: "startup" }, {
+        handler({ type: AgentTools.PiEvent.SessionStart, reason: "startup" }, {
           cwd: "/repo",
         } as ExtensionContext);
       }
     },
     shutdownSession() {
       for (const handler of shutdownHandlers) {
-        handler({ type: PiEvent.SessionShutdown, reason: "reload" }, {
+        handler({ type: AgentTools.PiEvent.SessionShutdown, reason: "reload" }, {
           cwd: "/repo",
         } as ExtensionContext);
       }

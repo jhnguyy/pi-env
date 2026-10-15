@@ -7,7 +7,7 @@
 
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import * as TestUtils from "../../__tests__/test-utils";
 import { Container, type Text } from "@earendil-works/pi-tui";
 import initSubagent from "../index";
 
@@ -49,7 +49,7 @@ function extractText(component: Text | Container): string {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describeIfEnabled("subagent", "subagent extension", () => {
+TestUtils.describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
@@ -146,7 +146,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       stopReason: "end_turn",
       isError: false,
       turnLimitExceeded: false,
-      agent: "scout",
       sessionName: "sub-schema-audit",
       sessionFile: "/sessions/sub-schema-audit.jsonl",
     };
@@ -159,7 +158,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
             task: longTask,
             tools: ["read", "grep"],
             model: "anthropic/claude-haiku-4-5",
-            agent: "scout",
             system_prompt: "private context",
           },
           mockTheme,
@@ -167,7 +165,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
 
       expect(rendered).toContain("subagent");
-      expect(rendered).toContain("scout");
       expect(rendered).toContain("read");
       expect(rendered).toContain("grep");
       expect(rendered).toContain("anthropic/claude-haiku-4-5");
@@ -181,7 +178,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
         registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme),
       );
 
-      expect(rendered).toContain("scout");
       expect(rendered).toContain("3 tool calls");
       expect(rendered).toContain("2 turns");
       expect(rendered).toContain("sub-schema-audit");

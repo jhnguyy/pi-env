@@ -5,7 +5,7 @@ import { Data, Effect } from "effect";
 
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
-import type { NativeChildSession } from "./child-types";
+import * as ChildTypes from "./child-types";
 import { addUsage, zeroUsage } from "./usage";
 
 export const WorkspaceAccess = {
@@ -98,8 +98,10 @@ export class SubagentRunSupervisor {
   private readonly activeWorkspaceWriters = new Set<string>();
   private readonly totalUsage = zeroUsage();
   private readonly usageByRun = new Map<string, UsageStats>();
-  readonly children = new Map<string, NativeChildSession>();
+  readonly children = new Map<string, ChildTypes.NativeChildSession>();
   private readonly evicting = new Set<string>();
+  private readonly evictionFailures: Error[] = [];
+  private omittedEvictionFailures = 0;
   private closed = false;
   private shutdownPromise: Promise<void> | undefined;
 
@@ -165,7 +167,7 @@ export class SubagentRunSupervisor {
     );
   }
 
-  retainChild(child: NativeChildSession): void {
+  retainChild(child: ChildTypes.NativeChildSession): void {
     if (this.closed) throw new Error("Parent subagent session is shutting down.");
     this.children.set(child.id, child);
   }
@@ -176,12 +178,18 @@ export class SubagentRunSupervisor {
     for (const child of this.children.values()) {
       if (excess <= 0) break;
       const state = child.summary().state;
-      if (this.evicting.has(child.id) || (state !== "idle" && state !== "closed")) continue;
+      if (this.evicting.has(child.id) || (state !== ChildTypes.NativeChildState.Idle && state !== ChildTypes.NativeChildState.Closed)) continue;
       excess--;
       this.evicting.add(child.id);
       void child.close().then(
         () => { this.children.delete(child.id); this.evicting.delete(child.id); },
-        () => { if (child.summary().state === "closed") this.children.delete(child.id); this.evicting.delete(child.id); },
+        (cause) => {
+          if (this.evictionFailures.length < this.config.maxRetainedJobs) {
+            this.evictionFailures.push(new Error(`Child ${child.id} eviction cleanup failed.`, { cause }));
+          } else this.omittedEvictionFailures++;
+          if (child.summary().state === ChildTypes.NativeChildState.Closed) this.children.delete(child.id);
+          this.evicting.delete(child.id);
+        },
       );
     }
   }
@@ -207,9 +215,13 @@ export class SubagentRunSupervisor {
     await Promise.all(activeRuns.map(([, active]) => active.done));
     const outcomes = await closingChildren;
     this.children.clear();
-    const failures = outcomes.filter((outcome) => outcome.status === "rejected");
+    const failures = [
+      ...this.evictionFailures,
+      ...outcomes.filter((outcome) => outcome.status === "rejected").map((failure) => failure.reason),
+    ];
     if (failures.length) {
-      throw new AggregateError(failures.map((failure) => failure.reason), "Child shutdown failed.");
+      const omitted = this.omittedEvictionFailures > 0 ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.` : "";
+      throw new AggregateError(failures, `Child shutdown failed.${omitted}`);
     }
   }
 

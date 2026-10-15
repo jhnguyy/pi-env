@@ -4,16 +4,10 @@ import {
   parseDagSubagentPayload,
 } from "../../../../src/dag/index.js";
 import { describe, expect, it } from "vitest";
-import {
-  EvidenceResolverNode,
-  ReviewRoles,
-  ReviewerNodes,
-  compileReviewGraph,
-  type ReviewRoleAssignments,
-} from "../review-graph";
+import * as ReviewGraph from "../review-graph";
 
 const assignments = Object.fromEntries(
-  ReviewRoles.map((role, index) => [
+  ReviewGraph.ReviewRoles.map((role, index) => [
     role,
     {
       model: index % 2 ? "provider-b/model" : "provider-a/model",
@@ -21,7 +15,7 @@ const assignments = Object.fromEntries(
       contextWindow: 272_000,
     },
   ]),
-) as ReviewRoleAssignments;
+) as ReviewGraph.ReviewRoleAssignments;
 const tools = {
   deck: "review_deck_run",
   read: [
@@ -48,7 +42,7 @@ const evidence = {
   reviewerContextWindow: 272_000,
 };
 function graph(runId = "review-run") {
-  return compileReviewGraph({ runId, cwd: "/workspace", assignments, tools, evidence });
+  return ReviewGraph.compileReviewGraph({ runId, cwd: "/workspace", assignments, tools, evidence });
 }
 
 function subagentPayload(node: ReturnType<typeof graph>["nodes"][number]) {
@@ -58,20 +52,20 @@ function subagentPayload(node: ReturnType<typeof graph>["nodes"][number]) {
 describe("fixed pull request review graph", () => {
   it("orders evidence resolution and permits synthesis after settled reviewer outcomes", () => {
     const compiled = graph();
-    const resolver = compiled.nodes.find((node) => node.id === EvidenceResolverNode.nodeId)!;
+    const resolver = compiled.nodes.find((node) => node.id === ReviewGraph.EvidenceResolverNode.nodeId)!;
     expect(resolver.dependencies).toEqual([
       { nodeId: "reading-plan", mode: DagDependencyMode.Required },
     ]);
 
     for (const reviewer of compiled.nodes.filter((node) => node.id.startsWith("review-"))) {
       expect(reviewer.dependencies).toContainEqual({
-        nodeId: EvidenceResolverNode.nodeId,
+        nodeId: ReviewGraph.EvidenceResolverNode.nodeId,
         mode: DagDependencyMode.Required,
       });
     }
 
     const synthesis = compiled.nodes.find((node) => node.id === "synthesis")!;
-    const reviewerIds: string[] = ReviewerNodes.map((node) => node.nodeId);
+    const reviewerIds: string[] = ReviewGraph.ReviewerNodes.map((node) => node.nodeId);
     expect(
       synthesis.dependencies
         .filter((dependency) => reviewerIds.includes(dependency.nodeId))
@@ -100,7 +94,7 @@ describe("fixed pull request review graph", () => {
             ? [tools.deck, tools.resultReferences, tools.synthesisSubmission]
             : [],
       );
-      expect(payload.agent).toBeUndefined();
+      expect(payload).not.toHaveProperty("agent");
       expect(payload.reasoning).toBe("high");
     }
   });

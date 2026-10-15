@@ -5,7 +5,7 @@ import { Data, Effect, Schema } from "effect";
 import { Type, type Static } from "typebox";
 import { execEffect } from "../_shared/exec";
 import { parseGitHubPullRequestUrl } from "../_shared/github";
-import { registerContractTool } from "../_shared/register-contract-tool";
+import * as RegisterContractTool from "../_shared/register-contract-tool";
 import { txt } from "../_shared/result";
 import type { ToolContract } from "../_shared/tool-contract";
 import { renderCompactToolCall, renderTextToolResult } from "../_shared/tool-render";
@@ -498,7 +498,7 @@ export function registerCloseout(pi: CloseoutRegistrationApi): void {
   const contract = createCloseoutToolContract((command, args, options) =>
     pi.exec(command, args, options),
   );
-  registerContractTool(pi, {
+  RegisterContractTool.registerContractTool(pi, {
     contract,
     piOptions: {
       exposure: "model-only",

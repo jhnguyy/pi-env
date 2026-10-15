@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { withChildContext } from "../../_shared/child-context";
-import { SubagentSessionRuntime } from "../session-runtime";
+import * as ChildContext from "../../_shared/child-context";
+import * as SessionRuntime from "../session-runtime";
 
 // Real time is deliberately bounded here: this proves native abort reaches a cooperative
 // tool, not merely that an isolated supervisor timer flips an AbortSignal.
 it("bounds native root admission and settles active and pending children on timeout and shutdown", async () => {
   const root = mkdtempSync(join(tmpdir(), "native-root-limits-"));
-  const runtime = new SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any);
+  const runtime = new SessionRuntime.SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any);
   try {
     mkdirSync(join(root, ".pi"));
     const extension = join(root, ".pi", "provider.mjs");
@@ -30,7 +30,7 @@ export default function(pi) {
 }`);
     writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension], subagent: { maxConcurrentRuns: 1, maxPendingRuns: 1, maxRunMs: 1000 } }));
     const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
-    await withChildContext({ cwd: root, agentDir: join(root, "agent") }, async () => {
+    await ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, async () => {
       await runtime.startSession(ctx);
       const params = { name: "bounded", task: "wait", model: "bounded/faux-1", tools: ["wait_for_abort"] };
       const running = runtime.execute("timed", params, undefined, undefined, ctx);

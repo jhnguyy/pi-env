@@ -25,10 +25,8 @@ export type SubagentJobToolStatus =
   (typeof SubagentJobToolStatus)[keyof typeof SubagentJobToolStatus];
 
 export const ResolutionErrorReason = {
-  AgentNotFound: "agent_not_found",
   InvalidTools: "invalid_tools",
   InvalidCwd: "invalid_cwd",
-  UntrustedProjectAgent: "untrusted_project_agent",
 } as const;
 export type ResolutionErrorReason =
   (typeof ResolutionErrorReason)[keyof typeof ResolutionErrorReason];
@@ -65,7 +63,6 @@ export type SubagentJobRenderStatus =
 export interface SubagentDetails {
   name: string;
   task: string;
-  agent?: string;
   toolNames: string[];
   modelOverride: string | undefined;
   maxTurns?: number;

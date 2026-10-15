@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { runSubagentEffect } from "../execute";
+import * as Execute from "../execute";
 
 function inMemoryExporter(finished: ReadableSpan[]): SpanExporter {
   return {
@@ -26,7 +26,7 @@ describe("subagent tooling telemetry privacy", () => {
     try {
       for (const enabled of [true, false]) {
         const finished: ReadableSpan[] = [];
-        const result = await Effect.runPromise(runSubagentEffect(
+        const result = await Effect.runPromise(Execute.runSubagentEffect(
           { name: "private-name", task: "private-task", cwd: "relative-private-path" },
           { cwd: root, sessionManager: SessionManager.inMemory(root) } as any,
           { env: enabled ? { PI_ENV_TOOLING_OTEL_ENABLED: "true", PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318" } : {}, telemetryExporter: inMemoryExporter(finished) },

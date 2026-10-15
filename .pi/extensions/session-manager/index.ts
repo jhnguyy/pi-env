@@ -1,4 +1,4 @@
-import { getChildContext } from "../_shared/child-context";
+import * as ChildContext from "../_shared/child-context";
 import {
   CustomEditor,
   getAgentDir,
@@ -589,7 +589,7 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 }
 
 export default async function sessionManager(pi: ExtensionAPI): Promise<void> {
-  if (getChildContext()) return;
+  if (ChildContext.getChildContext()) return;
   registerSessionManager(pi, {
     catalog: createFileSessionCatalog(getAgentDir()),
     host: createTmuxSessionHost((command, args) => pi.exec(command, args)),

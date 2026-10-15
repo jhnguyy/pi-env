@@ -1,14 +1,14 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 
-import { toPiTool, type PublicPiToolUi, type ToolContract } from "./tool-contract";
-import { registerPublicTool, type PublicPiToolDefinition } from "./tool-render";
+import * as ToolContractApi from "./tool-contract";
+import * as ToolRender from "./tool-render";
 
 interface PiRegistrationHost {
   registerTool(tool: ToolDefinition<any, any, any>): void;
 }
 
-type PiOnlyOptions<Schema extends TSchema, Details> = PublicPiToolUi<Schema, Details> & {
+type PiOnlyOptions<Schema extends TSchema, Details> = ToolContractApi.PublicPiToolUi<Schema, Details> & {
   promptSnippet?: string;
   promptGuidelines?: string[];
   exposure?: ToolDefinition["exposure"];
@@ -18,13 +18,13 @@ type PiOnlyOptions<Schema extends TSchema, Details> = PublicPiToolUi<Schema, Det
 export function registerContractTool<Params, Details = unknown, Schema extends TSchema = TSchema>(
   pi: PiRegistrationHost,
   options: {
-    contract: ToolContract<Params, Details, Schema>;
+    contract: ToolContractApi.ToolContract<Params, Details, Schema>;
     piOptions: PiOnlyOptions<Schema, Details>;
   },
 ): void {
   const { contract, piOptions } = options;
-  const piTool: PublicPiToolDefinition<Schema, Details, any> = {
-    ...toPiTool(contract, piOptions),
+  const piTool: ToolRender.PublicPiToolDefinition<Schema, Details, any> = {
+    ...ToolContractApi.toPiTool(contract, piOptions),
     promptSnippet: piOptions.promptSnippet,
     promptGuidelines: piOptions.promptGuidelines,
     exposure: piOptions.exposure,
@@ -33,5 +33,5 @@ export function registerContractTool<Params, Details = unknown, Schema extends T
     renderResult: piOptions.renderResult,
   };
 
-  registerPublicTool(pi, piTool);
+  ToolRender.registerPublicTool(pi, piTool);
 }

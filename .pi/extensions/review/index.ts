@@ -1,8 +1,9 @@
-import { getChildContext } from "../_shared/child-context";
+import * as ChildContext from "../_shared/child-context";
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Usage } from "@earendil-works/pi-ai";
+import * as NativeUsage from "../_shared/native-usage";
 import {
   getAgentDir,
   type ExtensionAPI,
@@ -86,20 +87,7 @@ const coordinator = new ReviewCoordinator();
 function nestedReviewUsage(state: ReviewState): Usage | undefined {
   const usage = state.metrics?.usage;
   if (!usage) return undefined;
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: usage.cost,
-    },
-  };
+  return NativeUsage.toNestedToolUsage(usage);
 }
 
 export function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
@@ -1568,7 +1556,7 @@ export function reviewProgressResult(progress: ReviewDagProgress) {
 }
 
 export default function reviewExtension(pi: ExtensionAPI) {
-  if (getChildContext()) return;
+  if (ChildContext.getChildContext()) return;
   let stopDagRuntimeListener: (() => void) | undefined;
   const ensureDagRuntimeListener = () => {
     if (stopDagRuntimeListener || !(pi as { events?: unknown }).events) return;

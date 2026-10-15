@@ -5,36 +5,20 @@ import {
 import { Effect } from "effect";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import {
-  withToolingTelemetryRuntime,
-  type ToolingTelemetryRuntime,
-} from "../../../src/telemetry/tooling";
-import { slugify } from "../_shared/slug";
-import {
-  loadSubagentRuntimeConfig,
-  resolveSubagentRuntimeConfig,
-  SubagentSessionStorage,
-  type SubagentSessionStorage as SubagentSessionStorageValue,
-} from "./config";
-import {
-  getOrCreateSubagentRunSupervisor,
-  SubagentAdmissionError,
-  type SubagentRunSupervisor,
-} from "./control";
-import { SubagentExecutionError, SubagentExecutionPhase } from "./errors";
-import { isResolutionOk, resolveSubagentExecutionPlan, type SubagentParams } from "./resolver";
-import type { SubagentDetails } from "./types";
-import {
-  recordSubagentResult,
-  SubagentUsageMode,
-  zeroUsage,
-} from "./usage";
-import { NativeChildOwner } from "./native-child";
+import * as Tooling from "../../../src/telemetry/tooling";
+import * as Slug from "../_shared/slug";
+import * as Config from "./config";
+import * as Control from "./control";
+import * as Errors from "./errors";
+import * as Resolver from "./resolver";
+import type * as Types from "./types";
+import * as Usage from "./usage";
+import * as NativeChild from "./native-child";
 export type { NativeChildSession } from "./child-types";
 
 export const SUBAGENT_TELEMETRY_SERVICE_NAME = "pi-env-subagent" as const;
 function getSubagentSessionName(name: string): string {
-  return `sub-${slugify(name, { fallback: "agent" })}`;
+  return `sub-${Slug.slugify(name, { fallback: "agent" })}`;
 }
 interface PersistentSubagentSession {
   manager: SessionManager;
@@ -43,7 +27,7 @@ interface PersistentSubagentSession {
   name: string;
 }
 
-function childSessionDirectory(ctx: SubagentParentContext): string | undefined {
+function childSessionDirectory(ctx: ExecutionTypes.SubagentParentContext): string | undefined {
   const parentDirectory = ctx.sessionManager.getSessionDir();
   if (!parentDirectory) return undefined;
 
@@ -57,12 +41,12 @@ function childSessionDirectory(ctx: SubagentParentContext): string | undefined {
 
 export function createPersistentSubagentSession(
   name: string,
-  ctx: SubagentParentContext,
+  ctx: ExecutionTypes.SubagentParentContext,
   cwd = ctx.cwd,
-  sessionStorage: SubagentSessionStorageValue = SubagentSessionStorage.Nested,
+  sessionStorage: Config.SubagentSessionStorage = Config.SubagentSessionStorage.Nested,
 ): PersistentSubagentSession {
   const sessionDir =
-    sessionStorage === SubagentSessionStorage.Nested
+    sessionStorage === Config.SubagentSessionStorage.Nested
       ? childSessionDirectory(ctx)
       : ctx.sessionManager.getSessionDir();
   const manager = SessionManager.create(cwd, sessionDir, {
@@ -74,21 +58,20 @@ export function createPersistentSubagentSession(
 }
 
 export function buildErrorDetails(
-  params: SubagentParams,
+  params: Resolver.SubagentParams,
   toolNames: string[],
   modelOverride: string | undefined,
   reason: string,
-): SubagentDetails {
+): Types.SubagentDetails {
   return {
     name: params.name ?? "unnamed",
     task: params.task,
-    agent: params.agent,
     toolNames,
     modelOverride,
     cwd: params.cwd,
     finalOutput: "",
     toolCallCount: 0,
-    usage: zeroUsage(),
+    usage: Usage.zeroUsage(),
     stopReason: reason,
     isError: true,
     turnLimitExceeded: false,
@@ -96,53 +79,53 @@ export function buildErrorDetails(
 }
 
 export type { RunSubagentOptions, ResolvedSubagentRun, SubagentParentContext } from "./execution-types";
-import type { RunSubagentOptions, ResolvedSubagentRun, SubagentParentContext } from "./execution-types";
-function executionError(phase: SubagentExecutionPhase, cause?: unknown): SubagentExecutionError {
-  return new SubagentExecutionError({
+import type * as ExecutionTypes from "./execution-types";
+function executionError(phase: Errors.SubagentExecutionPhase, cause?: unknown): Errors.SubagentExecutionError {
+  return new Errors.SubagentExecutionError({
     phase,
     message: cause instanceof Error ? cause.message : `Subagent ${phase} failed`,
   });
 }
-function resolveSessionStorage(ctx: SubagentParentContext): SubagentSessionStorageValue {
+function resolveSessionStorage(ctx: ExecutionTypes.SubagentParentContext): Config.SubagentSessionStorage {
   try {
-    return loadSubagentRuntimeConfig(ctx.cwd).sessionStorage;
+    return Config.loadSubagentRuntimeConfig(ctx.cwd).sessionStorage;
   } catch {
-    return SubagentSessionStorage.Nested;
+    return Config.SubagentSessionStorage.Nested;
   }
 }
 
 function resolveSupervisor(
-  ctx: SubagentParentContext,
-  options: RunSubagentOptions,
-): SubagentRunSupervisor {
+  ctx: ExecutionTypes.SubagentParentContext,
+  options: ExecutionTypes.RunSubagentOptions,
+): Control.SubagentRunSupervisor {
   if (options.supervisor) return options.supervisor;
   const sessionId = ctx.sessionManager.getSessionId();
   let config;
   try {
-    config = loadSubagentRuntimeConfig(ctx.cwd);
+    config = Config.loadSubagentRuntimeConfig(ctx.cwd);
   } catch {
-    config = resolveSubagentRuntimeConfig({});
+    config = Config.resolveSubagentRuntimeConfig({});
   }
-  return getOrCreateSubagentRunSupervisor(sessionId, config);
+  return Control.getOrCreateSubagentRunSupervisor(sessionId, config);
 }
 
 function withSubagentTelemetry(
-  options: RunSubagentOptions,
+  options: ExecutionTypes.RunSubagentOptions,
   workflowWith: (
-    runtime: ToolingTelemetryRuntime,
+    runtime: Tooling.ToolingTelemetryRuntime,
   ) => Effect.Effect<
-    AgentToolResult<SubagentDetails>,
-    SubagentExecutionError | SubagentAdmissionError
+    AgentToolResult<Types.SubagentDetails>,
+    Errors.SubagentExecutionError | Control.SubagentAdmissionError
   >,
 ): Effect.Effect<
-  AgentToolResult<SubagentDetails>,
-  SubagentExecutionError | SubagentAdmissionError
+  AgentToolResult<Types.SubagentDetails>,
+  Errors.SubagentExecutionError | Control.SubagentAdmissionError
 > {
   if (options.telemetryRuntime) {
     return options.telemetryRuntime.provide(workflowWith(options.telemetryRuntime));
   }
 
-  return withToolingTelemetryRuntime(
+  return Tooling.withToolingTelemetryRuntime(
     {
       env: options.env ?? process.env,
       exporter: options.telemetryExporter,
@@ -151,28 +134,28 @@ function withSubagentTelemetry(
     workflowWith,
   ).pipe(
     Effect.catchTag("ToolingOtelConfigError", () =>
-      Effect.fail(executionError(SubagentExecutionPhase.Session)),
+      Effect.fail(executionError(Errors.SubagentExecutionPhase.Session)),
     ),
   );
 }
 
 export function runResolvedSubagentEffect(
-  run: ResolvedSubagentRun,
-  ctx: SubagentParentContext,
-  options: RunSubagentOptions = {},
+  run: ExecutionTypes.ResolvedSubagentRun,
+  ctx: ExecutionTypes.SubagentParentContext,
+  options: ExecutionTypes.RunSubagentOptions = {},
 ): Effect.Effect<
-  AgentToolResult<SubagentDetails>,
-  SubagentExecutionError | SubagentAdmissionError
+  AgentToolResult<Types.SubagentDetails>,
+  Errors.SubagentExecutionError | Control.SubagentAdmissionError
 > {
   return withSubagentTelemetry(options, (runtime) =>
     runtime.diagnostics.span(
       "tooling.subagent.run",
-      { operation: "run", mode: options.executionMode ?? SubagentUsageMode.Sync },
+      { operation: "run", mode: options.executionMode ?? Usage.SubagentUsageMode.Sync },
       Effect.callback<
-        AgentToolResult<SubagentDetails>,
-        SubagentExecutionError | SubagentAdmissionError
+        AgentToolResult<Types.SubagentDetails>,
+        Errors.SubagentExecutionError | Control.SubagentAdmissionError
       >((resume) => {
-        let child: NativeChildOwner | undefined;
+        let child: NativeChild.NativeChildOwner | undefined;
         const work = (async () => {
           const persistent = createPersistentSubagentSession(
             run.name,
@@ -181,15 +164,15 @@ export function runResolvedSubagentEffect(
             options.sessionStorage ?? resolveSessionStorage(ctx),
           );
           const supervisor = resolveSupervisor(ctx, options);
-          child = new NativeChildOwner(run, ctx, persistent.manager, supervisor, options);
+          child = new NativeChild.NativeChildOwner(run, ctx, persistent.manager, supervisor, options);
           try {
             supervisor.retainChild(child);
             options.onChild?.(child);
             const result = await child.runInitial();
-            return recordSubagentResult(
+            return Usage.recordSubagentResult(
               options.ledger,
               options.runId,
-              options.executionMode ?? SubagentUsageMode.Sync,
+              options.executionMode ?? Usage.SubagentUsageMode.Sync,
               result,
             );
           } catch (error) {
@@ -202,9 +185,9 @@ export function runResolvedSubagentEffect(
           (error) =>
             resume(
               Effect.fail(
-                error instanceof SubagentAdmissionError
+                error instanceof Control.SubagentAdmissionError
                   ? error
-                  : executionError(SubagentExecutionPhase.Session, error),
+                  : executionError(Errors.SubagentExecutionPhase.Session, error),
               ),
             ),
         );
@@ -219,16 +202,16 @@ export function runResolvedSubagentEffect(
 }
 
 export function runSubagentEffect(
-  params: SubagentParams,
-  ctx: SubagentParentContext,
-  options: RunSubagentOptions = {},
+  params: Resolver.SubagentParams,
+  ctx: ExecutionTypes.SubagentParentContext,
+  options: ExecutionTypes.RunSubagentOptions = {},
 ): Effect.Effect<
-  AgentToolResult<SubagentDetails>,
-  SubagentExecutionError | SubagentAdmissionError
+  AgentToolResult<Types.SubagentDetails>,
+  Errors.SubagentExecutionError | Control.SubagentAdmissionError
 > {
   return Effect.suspend(() => {
-    const plan = resolveSubagentExecutionPlan(params, ctx);
-    if (!isResolutionOk(plan))
+    const plan = Resolver.resolveSubagentExecutionPlan(params, ctx);
+    if (!Resolver.isResolutionOk(plan))
       return Effect.succeed({
         content: [{ type: "text" as const, text: plan.error.message }],
         details: buildErrorDetails(

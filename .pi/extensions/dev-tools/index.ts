@@ -16,7 +16,7 @@ import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
 import { txt } from "../_shared/result";
 import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
-import { DEV_TOOLS_ACTIONS, buildClientRequest } from "./request";
+import * as Request from "./request";
 import {
   createDevToolsParameterSchema,
   DEV_TOOLS_TOOL_DESCRIPTIONS,
@@ -47,7 +47,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = createDevToolsParameterSchema(
-    StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+    StringEnum(Request.DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
   );
 
   type DevToolsToolParameters = typeof toolParameters;
@@ -55,7 +55,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
   /** Execute the native dev-tools action, including rename. */
   async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
     try {
-      const result = await client.call(buildClientRequest(params));
+      const result = await client.call(Request.buildClientRequest(params));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
       return { content: [txt(formatError(e))], details: null, isError: true };

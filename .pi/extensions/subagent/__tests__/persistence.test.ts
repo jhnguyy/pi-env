@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import { createPersistentSubagentSession } from "../execute";
-import { SubagentSessionStorage } from "../config";
+import * as Config from "../config";
 
 describe("persistent subagent sessions", () => {
   it("stores a named child below its parent session ID and preserves its linked transcript", () => {
@@ -112,7 +112,7 @@ describe("persistent subagent sessions", () => {
         "audit",
         { cwd: "/tmp/project", sessionManager: parent } as any,
         "/tmp/project",
-        SubagentSessionStorage.Sibling,
+        Config.SubagentSessionStorage.Sibling,
       );
 
       expect(child.manager.getSessionDir()).toBe(parent.getSessionDir());

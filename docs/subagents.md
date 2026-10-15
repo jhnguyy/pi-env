@@ -14,11 +14,13 @@ The `subagent` tool uses one `action` parameter:
 - `cancel` requests cancellation of the job's current initial operation.
 - `usage` reports aggregate child usage, including subsequent human prompts.
 
-Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration. An explicit empty tool list selects no tools. Old AgentTool aliases, such as `dev-tools-edit`, are not native tool names. Capability-only agent definitions must select native tools explicitly; the extension rejects them rather than silently broadening their tool selection.
+Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration. An explicit empty tool list selects no tools. Old AgentTool aliases, such as `dev-tools-edit`, are not native tool names.
+
+Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.
 
 The model roster in the tool description describes the parent configuration for selection guidance. A child does not copy the parent's runtime-only providers, transient CLI configuration, or model catalog. Model annotations are descriptive, not delegation permissions.
 
-`system_prompt` replaces the named agent's additional instructions, not Pi's native system/context loading. The child appends those delegated instructions to its native prompt. Native context files, skills, input hooks, and configured extensions still apply.
+`system_prompt` supplies additional delegated instructions, not a replacement for Pi's native system/context loading. The child appends those delegated instructions to its native prompt. Native context files, skills, input hooks, and configured extensions still apply.
 
 A completed initial result stays unchanged when a human continues the child. Use the native session for later messages. Job handles and live owners do not survive a parent restart.
 
@@ -52,13 +54,11 @@ Use `pi --session <exact-path>` only **after the previous owner closes**, such a
 
 Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must find children beside their parent. The default is `"nested"`.
 
-## Agent definitions and trust
+## Native context and trust
 
-Named agents are a thin extension-owned configuration bridge, distinct from native `AGENTS.md` context. See [discovery](../.pi/extensions/subagent/agents.ts) for fields and precedence, and [resolution](../.pi/extensions/subagent/resolver.ts) for selection and trust.
+Custom named-agent definitions are no longer supported. The extension does not scan user, project, or package `.pi/agents` directories. The public `agent` and `agent_scope` parameters and DAG payload `agent` field are rejected, not ignored. Supply explicit `model`, `tools`, and `system_prompt` overrides instead, or omit them for native target defaults.
 
-The default `agent_scope: "user"` includes user agents and installed packages declared in global settings. Project agents and project-declared packages require explicit `agent_scope: "project"` and target trust. Parent trust applies only to the same canonical cwd. A different target requires a saved grant in Pi's native `ProjectTrustStore`; a denial or unknown decision rejects project-agent selection. Child startup does not prompt for new trust grants.
-
-Named-agent candidates do not follow native package resource filters or `pi config`. Discovery lists configured installed roots without installing packages and excludes temporary `pi -e` sources. Native resource loading separately governs executable extensions and native resources.
+Native `AGENTS.md` context loading is unchanged. Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
 
 ## Limits and cancellation
 

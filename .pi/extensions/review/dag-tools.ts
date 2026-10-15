@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import { Effect } from "effect";
 import type { ActiveDagRuntimeService } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
-import { toPiTool } from "../_shared/tool-contract";
+import * as ToolContract from "../_shared/tool-contract";
 import { validatePlan } from "./core";
 import {
   preflightReviewEvidence,
@@ -71,7 +71,7 @@ export function createReviewDagTools(options: {
 }): ReviewDagTools {
   const suffix = suffixFor(options.reviewId);
   const base = buildReviewReadToolContracts(options.store).map((contract) =>
-    renamed(toPiTool(contract), suffix),
+    renamed(ToolContract.toPiTool(contract), suffix),
   );
   const deckName = `review_deck_${suffix}`;
   const planName = `submit_review_plan_${suffix}`;
@@ -94,7 +94,7 @@ export function createReviewDagTools(options: {
     }));
   const getReviewerDossier = async (signal?: AbortSignal) =>
     (await admittedReview(signal)).reviewers;
-  const deckTool = toPiTool<unknown, unknown>({
+  const deckTool = ToolContract.toPiTool<unknown, unknown>({
     name: deckName,
     label: "Review Deck",
     description: "Read the bounded review deck for this pinned review run.",
@@ -107,7 +107,7 @@ export function createReviewDagTools(options: {
       return { content: [txt(text)], details: { bytes: Buffer.byteLength(text, "utf8") } };
     },
   });
-  const planTool = toPiTool<unknown, unknown>({
+  const planTool = ToolContract.toPiTool<unknown, unknown>({
     name: planName,
     label: "Submit Review Plan",
     description: "Validate and return the canonical reading plan for this pinned snapshot.",
@@ -148,7 +148,7 @@ export function createReviewDagTools(options: {
       }
     },
   });
-  const referencesTool = toPiTool<unknown, unknown>({
+  const referencesTool = ToolContract.toPiTool<unknown, unknown>({
     name: referencesName,
     label: "Review Result References",
     description:
@@ -168,7 +168,7 @@ export function createReviewDagTools(options: {
       };
     },
   });
-  const synthesisTool = toPiTool<unknown, unknown>({
+  const synthesisTool = ToolContract.toPiTool<unknown, unknown>({
     name: synthesisName,
     label: "Submit Review Synthesis",
     description: "Validate v2 editorial consolidation with exactly-once raw finding accounting.",

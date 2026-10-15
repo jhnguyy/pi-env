@@ -11,7 +11,7 @@ import {
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
 import notesExtension from "../index";
-import { getChildContext, withChildContext } from "../../_shared/child-context";
+import * as ChildContext from "../../_shared/child-context";
 import reviewExtension from "../../review/index";
 import sessionManagerExtension from "../../session-manager/index";
 
@@ -50,7 +50,7 @@ it("keeps simultaneous native owners' configured vaults independent through shut
         notes: { vaultPath: vault },
       }));
       const provider = fauxProvider({ provider: `notes-${name}` });
-      const services = await withChildContext({ cwd, agentDir }, () => createAgentSessionServices({
+      const services = await ChildContext.withChildContext({ cwd, agentDir }, () => createAgentSessionServices({
         cwd,
         agentDir,
         settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted: false }),
@@ -71,7 +71,7 @@ it("keeps simultaneous native owners' configured vaults independent through shut
           ],
         },
       }));
-      expect(getChildContext()).toBeUndefined();
+      expect(ChildContext.getChildContext()).toBeUndefined();
       expect(services.diagnostics.filter((item) => item.type === "error")).toEqual([]);
       const { session, extensionsResult } = await createAgentSessionFromServices({
         services,

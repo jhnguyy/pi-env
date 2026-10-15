@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { createAgentSessionFromServices, createAgentSessionServices, SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
-import { getSubagentRunSupervisor, disposeSubagentRunSupervisor } from "../../subagent/control";
+import * as Control from "../../subagent/control";
 import skillBuilder from "../index";
 
 // Only inference is scripted. SDK loading, the registered public tool, advisory
@@ -34,18 +34,18 @@ export default function(pi) {
     await parent.prompt("evaluate fixture");
     const result = parent.messages.find(message=>message.role==='toolResult' && message.toolName==='skill_build');
     expect(result).toMatchObject({isError:false,details:{evaluation:{verdict:"needs-revision",findings:[{message:"Explain the result format."}]}}});
-    const supervisor = getSubagentRunSupervisor(parent.sessionManager.getSessionId())!;
+    const supervisor = Control.getSubagentRunSupervisor(parent.sessionManager.getSessionId())!;
     const children = [...supervisor.children.values()];
     expect(children).toHaveLength(1);
     expect(children[0].inspect()).toMatchObject({model:"skill-eval-provider/faux-1",initialResult:{isError:false}});
     expect(children[0].summary().state).toBe("idle");
     await parent.extensionRunner.emit({type:"session_shutdown",reason:"quit"});
     expect(children[0].summary().state).toBe("closed");
-    expect(getSubagentRunSupervisor(parent.sessionManager.getSessionId())).toBeUndefined();
+    expect(Control.getSubagentRunSupervisor(parent.sessionManager.getSessionId())).toBeUndefined();
   } finally {
     if(parent) {
       await parent.abort();
-      await disposeSubagentRunSupervisor(parent.sessionManager.getSessionId());
+      await Control.disposeSubagentRunSupervisor(parent.sessionManager.getSessionId());
       parent.dispose();
     }
     vi.unstubAllEnvs();

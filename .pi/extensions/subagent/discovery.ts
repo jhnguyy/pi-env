@@ -1,5 +1,3 @@
-import type { AgentConfig } from "./agents";
-
 type AvailableModel = { provider: string; id: string; name: string };
 
 const DESCRIPTION_INTRO = [
@@ -13,7 +11,6 @@ const DESCRIPTION_INTRO = [
   "",
   "Children load native configuration and resources for their target cwd and agent directory.",
   "Omit model or tools to use child-native defaults. Explicit unavailable selections fail without substitution.",
-  "Agent files can supply tools, model, and additional system instructions. User and installed package agents are the default; project agents require explicit project scope and trust.",
   "The required name creates a sub-<name> transcript. /subagents inspects retained children and sends human input directly, without switching the parent session.",
   "Public runs have no turn-count limit. The configured run-time limit still applies.",
 ] as const;
@@ -31,7 +28,6 @@ const MODEL_TAG_GUIDANCE = {
 
 export function buildDynamicDescription(
   availableModels: AvailableModel[],
-  agents: AgentConfig[],
   toolNames: string[] = [],
   modelAnnotations?: Record<string, string[]>,
 ): string {
@@ -47,12 +43,6 @@ export function buildDynamicDescription(
     const tags = new Set(availableModels.flatMap((model) => modelAnnotations?.[`${model.provider}/${model.id}`] ?? []));
     const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => tags.has(tag));
     if (guidance.length) lines.push("", "Model tag guidance:", ...guidance.map(([tag, intent]) => `  - [${tag}] ${intent}.`));
-  }
-  if (agents.length) {
-    lines.push("", "Available agents:", ...agents.map((agent) => {
-      const defaults = [agent.tools?.length ? `tools: ${agent.tools.join(", ")}` : "tools: child defaults", agent.model ? `model: ${agent.model}` : "model: child default"];
-      return `  ${agent.name} (${agent.source}): ${agent.description} [${defaults.join(" | ")}]`;
-    }));
   }
   return lines.join("\n");
 }

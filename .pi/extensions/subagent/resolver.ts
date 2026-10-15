@@ -6,28 +6,19 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-import { discoverAgents, type AgentScope } from "./agents";
-import { WorkspaceAccess, type WorkspaceAccess as WorkspaceAccessValue } from "./control";
-import {
-  ResolutionErrorReason,
-  type ResolutionErrorReason as ResolutionErrorReasonValue,
-} from "./types";
+import * as Control from "./control";
+import * as Types from "./types";
 
 export interface SubagentParams {
   /** Human-readable child-session name; required by the public tool schema and persisted as `sub-<slug>`. */
   name?: string;
-  agent?: string;
   task: string;
   tools?: string[];
   model?: string;
   system_prompt?: string;
   /** Optional absolute working directory for child discovery, tools, and execution. */
   cwd?: string;
-  /** Project agents require both explicit project scope and a trusted project. */
-  agent_scope?: AgentScope;
 }
-
-export type AgentConfig = ReturnType<typeof discoverAgents>["agents"][number];
 
 export { ResolutionErrorReason } from "./types";
 
@@ -38,7 +29,7 @@ export const ResolutionResultTag = {
 export type ResolutionResultTag = (typeof ResolutionResultTag)[keyof typeof ResolutionResultTag];
 
 export interface ResolutionError {
-  reason: ResolutionErrorReasonValue;
+  reason: Types.ResolutionErrorReason;
   message: string;
   toolNames: string[];
   modelOverride?: string;
@@ -62,17 +53,12 @@ export function isResolutionOk<T>(
   return result._tag === ResolutionResultTag.Ok;
 }
 
-export interface AgentResolution {
-  agentConfig?: AgentConfig;
-}
-
 export interface SubagentExecutionPlan {
-  agentConfig?: AgentConfig;
   toolNames?: readonly string[];
   modelOverride?: string;
   systemPrompt?: string;
   effectiveCwd: string;
-  workspaceAccess: WorkspaceAccessValue;
+  workspaceAccess: Control.WorkspaceAccess;
 }
 
 export function resolveEffectiveCwd(
@@ -88,7 +74,7 @@ export function resolveEffectiveCwd(
   }
   if (!isAbsolute(params.cwd)) {
     return resolutionError({
-      reason: ResolutionErrorReason.InvalidCwd,
+      reason: Types.ResolutionErrorReason.InvalidCwd,
       message: `Invalid cwd: "${params.cwd}" is not an absolute path.`,
       toolNames: params.tools ?? [],
       modelOverride: params.model,
@@ -98,7 +84,7 @@ export function resolveEffectiveCwd(
     const canonical = realpathSync(params.cwd);
     if (!statSync(canonical).isDirectory()) {
       return resolutionError({
-        reason: ResolutionErrorReason.InvalidCwd,
+        reason: Types.ResolutionErrorReason.InvalidCwd,
         message: `Invalid cwd: "${params.cwd}" is not a directory.`,
         toolNames: params.tools ?? [],
         modelOverride: params.model,
@@ -108,33 +94,12 @@ export function resolveEffectiveCwd(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return resolutionError({
-      reason: ResolutionErrorReason.InvalidCwd,
+      reason: Types.ResolutionErrorReason.InvalidCwd,
       message: `Invalid cwd: "${params.cwd}" could not be resolved: ${message}`,
       toolNames: params.tools ?? [],
       modelOverride: params.model,
     });
   }
-}
-
-export function resolveAgentConfig(
-  params: SubagentParams,
-  cwd: string,
-): ResolutionResult<AgentResolution> {
-  if (!params.agent) return resolutionOk({});
-
-  const discovery = discoverAgents(cwd, params.agent_scope ?? "user");
-  const agentConfig = discovery.agents.find((candidate) => candidate.name === params.agent);
-  if (!agentConfig) {
-    const available = discovery.agents.map((a) => a.name).join(", ") || "none";
-    return resolutionError({
-      reason: ResolutionErrorReason.AgentNotFound,
-      message: `Agent not found: "${params.agent}". Available: ${available}`,
-      toolNames: [],
-      modelOverride: params.model,
-    });
-  }
-
-  return resolutionOk({ agentConfig });
 }
 
 export function isProjectTrustedForCwd(ctx: Pick<ExtensionContext, "cwd" | "isProjectTrusted">, cwd: string): boolean {
@@ -145,32 +110,18 @@ export function isProjectTrustedForCwd(ctx: Pick<ExtensionContext, "cwd" | "isPr
   return new ProjectTrustStore(getAgentDir()).get(cwd) === true;
 }
 
-/** Discovery only; native child services own tool and model resolution. */
+/** Native child services own tool and model resolution. */
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
   ctx: Pick<ExtensionContext, "cwd" | "isProjectTrusted">,
 ): ResolutionResult<SubagentExecutionPlan> {
   const cwd = resolveEffectiveCwd(params, ctx.cwd);
   if (!isResolutionOk(cwd)) return cwd;
-  if (params.agent && params.agent_scope === "project" && !isProjectTrustedForCwd(ctx, cwd.value)) {
-    return resolutionError({
-      reason: ResolutionErrorReason.UntrustedProjectAgent,
-      message: "Project agents require an explicit project scope and a trusted project.",
-      toolNames: [],
-    });
-  }
-  const agent = resolveAgentConfig(params, cwd.value);
-  if (!isResolutionOk(agent)) return agent;
-  const config = agent.value.agentConfig;
-  if (params.tools === undefined && config?.tools === undefined && config?.capabilities?.length) {
-    return resolutionError({ reason: ResolutionErrorReason.InvalidTools, message: `Agent "${config.name}" uses legacy capabilities without native tools. Select tools explicitly; capabilities do not limit native defaults.`, toolNames: [] });
-  }
   return resolutionOk({
-    agentConfig: config,
-    toolNames: params.tools ?? config?.tools,
-    modelOverride: params.model ?? config?.model,
-    systemPrompt: params.system_prompt ?? config?.systemPrompt,
+    toolNames: params.tools,
+    modelOverride: params.model,
+    systemPrompt: params.system_prompt,
     effectiveCwd: cwd.value,
-    workspaceAccess: WorkspaceAccess.Write,
+    workspaceAccess: Control.WorkspaceAccess.Write,
   });
 }

@@ -1,18 +1,19 @@
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { Effect } from "effect";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { runResolvedSubagentEffect } from "../execute";
-import type { NativeChildSession } from "../native-child";
-import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
-import { resolveSubagentRuntimeConfig } from "../config";
-import { withChildContext } from "../../_shared/child-context";
+import * as Execute from "../execute";
+import * as ChildTypes from "../child-types";
+import * as Control from "../control";
+import * as Config from "../config";
+import * as ChildContext from "../../_shared/child-context";
 
-function execute(...args: Parameters<typeof runResolvedSubagentEffect>) {
-  return withChildContext({ cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") }, () =>
-    Effect.runPromise(runResolvedSubagentEffect(...args)),
+function execute(...args: Parameters<typeof Execute.runResolvedSubagentEffect>) {
+  return ChildContext.withChildContext({ cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") }, () =>
+    Effect.runPromise(Execute.runResolvedSubagentEffect(...args)),
   );
 }
 
@@ -20,7 +21,7 @@ function execute(...args: Parameters<typeof runResolvedSubagentEffect>) {
 // model selection, hooks, dispatch and persistence without a parent registry or loop seam.
 it("owns target configuration, tools, input provenance and persisted followups", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-child-"));
-  let child: NativeChildSession | undefined;
+  let child: ChildTypes.NativeChildSession | undefined;
   try {
     await mkdir(join(root, ".pi"), { recursive: true });
     const extension = join(root, ".pi", "provider.mjs");
@@ -80,10 +81,10 @@ export default function(pi) {
         ]),
       }),
     );
-    expect(await child!.input("verbatim human", "prompt")).toEqual({ outcome: "started" });
+    expect(await child!.input("verbatim human", ChildTypes.NativeInputMode.Prompt)).toEqual({ outcome: "started" });
     expect(child!.inspect().initialResult).toEqual(result.details);
     expect(child!.inspect().inputs.map((i) => i.source)).toEqual(["coordinator", "human"]);
-    expect(await child!.input("handled human", "prompt")).toEqual({ outcome: "handled" });
+    expect(await child!.input("handled human", ChildTypes.NativeInputMode.Prompt)).toEqual({ outcome: "handled" });
     const reopened = SessionManager.open(child!.inspect().sessionFile!);
     expect(reopened.buildSessionContext().messages).toEqual(child!.inspect().messages);
     expect(reopened.getEntries()).toContainEqual(
@@ -94,7 +95,7 @@ export default function(pi) {
       }),
     );
     expect(parent.buildSessionContext().messages).toEqual([]);
-    await expect(child!.input("invalid idle steer", "steer")).rejects.toThrow();
+    await expect(child!.input("invalid idle steer", ChildTypes.NativeInputMode.Steer)).rejects.toThrow();
   } finally {
     await child?.close();
     await rm(root, { recursive: true, force: true });
@@ -103,13 +104,13 @@ export default function(pi) {
 
 it("queues native steering/followup and close waits a cooperative tool before releasing ownership", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-child-active-"));
-  let child: NativeChildSession | undefined;
+  let child: ChildTypes.NativeChildSession | undefined;
   const { Type } = await import("typebox");
-  const supervisor = new SubagentRunSupervisor("native-test", resolveSubagentRuntimeConfig({}));
+  const supervisor = new Control.SubagentRunSupervisor("native-test", Config.resolveSubagentRuntimeConfig({}));
   const blocker = await supervisor.acquire({
     runId: "blocker",
     cwd: root,
-    workspaceAccess: WorkspaceAccess.Write,
+    workspaceAccess: Control.WorkspaceAccess.Write,
   });
   let retained!: () => void;
   const retention = new Promise<void>((resolve) => {
@@ -183,12 +184,12 @@ export default function(pi) {
     );
     await retention;
     expect(child!.inspect().state).toBe("queued");
-    await expect(child!.input("not yet streaming", "prompt")).rejects.toThrow();
+    await expect(child!.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     blocker.release();
     await entered;
-    expect(await child!.input("steer verbatim", "steer")).toEqual({ outcome: "queued" });
-    expect(await child!.input("follow verbatim", "followUp")).toEqual({ outcome: "queued" });
-    await expect(child!.input("overlap", "prompt")).rejects.toThrow();
+    expect(await child!.input("steer verbatim", ChildTypes.NativeInputMode.Steer)).toEqual({ outcome: "queued" });
+    expect(await child!.input("follow verbatim", ChildTypes.NativeInputMode.FollowUp)).toEqual({ outcome: "queued" });
+    await expect(child!.input("overlap", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     let closed = false;
     const closing = child!.close().then(() => {
       closed = true;
@@ -196,7 +197,7 @@ export default function(pi) {
     await sawAbort;
     let competingAdmitted = false;
     const competing = supervisor
-      .acquire({ runId: "competing", cwd: root, workspaceAccess: WorkspaceAccess.Write })
+      .acquire({ runId: "competing", cwd: root, workspaceAccess: Control.WorkspaceAccess.Write })
       .then((lease) => {
         competingAdmitted = true;
         lease.release();
@@ -205,7 +206,7 @@ export default function(pi) {
     expect(competingAdmitted).toBe(false);
     expect(closed).toBe(false);
     expect(child!.inspect().state).toBe("closing");
-    await expect(child!.input("too late", "prompt")).rejects.toThrow();
+    await expect(child!.input("too late", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     release();
     await closing;
     await running;
@@ -240,7 +241,7 @@ export default function(pi) {
 
 it("rejects unavailable explicit model/tools and treats [] as no tools, not native defaults", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-child-selection-"));
-  const children: NativeChildSession[] = [];
+  const children: ChildTypes.NativeChildSession[] = [];
   try {
     await mkdir(join(root, ".pi"), { recursive: true });
     await mkdir(join(root, "agent"));
@@ -250,7 +251,8 @@ it("rejects unavailable explicit model/tools and treats [] as no tools, not nati
     await writeFile(
       extension,
       `import { fauxProvider, fauxAssistantMessage } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
-export default function(pi) { const p = fauxProvider({provider:'selection-child'}); p.setResponses([fauxAssistantMessage('complete')]); pi.registerProvider(p.provider); }`,
+import { writeFileSync } from 'node:fs';
+export default function(pi) { const p = fauxProvider({provider:'selection-child'}); p.setResponses([fauxAssistantMessage('complete')]); pi.registerProvider(p.provider); pi.on('session_start',()=>{ writeFileSync(${JSON.stringify(join(root, "started"))},'started'); pi.registerTool({name:'late_fixture',label:'Late native tool',description:'Registered by the supported native startup hook',parameters:{type:'object',properties:{}},async execute(){return {content:[{type:'text',text:'late native result'}],details:{}}}}); }); }`,
     );
     await writeFile(
       join(root, ".pi", "settings.json"),
@@ -266,20 +268,30 @@ export default function(pi) { const p = fauxProvider({provider:'selection-child'
       sessionManager: SessionManager.create(root, join(root, "sessions")),
       isProjectTrusted: () => true,
     };
-    const run = (overrides: Partial<Parameters<typeof runResolvedSubagentEffect>[0]>) =>
+    const run = (overrides: Partial<Parameters<typeof Execute.runResolvedSubagentEffect>[0]>) =>
       execute({ name: "selection", task: "respond", cwd: root, ...overrides }, ctx, {
         onChild: (c) => children.push(c),
       });
     await expect(run({ modelOverride: "selection-child/faux" })).rejects.toThrow("unavailable");
-    await expect(run({ toolNames: ["not_a_tool"] })).rejects.toThrow();
     await expect(run({ toolNames: ["r*"] })).rejects.toThrow("unavailable");
+    expect(existsSync(join(root, "started"))).toBe(false);
+    await expect(run({ toolNames: ["not_a_tool"] })).rejects.toThrow();
+    // Exact availability follows necessary native discovery. Startup hooks may
+    // have run, but the invalid selection never starts a model turn.
+    expect(existsSync(join(root, "started"))).toBe(true);
     const empty = await run({ toolNames: [] });
     expect(empty.details.isError, JSON.stringify(empty)).toBe(false);
+    expect(existsSync(join(root, "started"))).toBe(true);
     expect(children.at(-1)!.inspect().activeTools).toEqual([]);
     expect(children.at(-1)!.inspect().callableTools).toEqual([]);
+    const late = await run({ toolNames: ["late_fixture"] });
+    expect(late.details.isError, JSON.stringify(late)).toBe(false);
+    expect(children.at(-1)!.inspect().activeTools).toEqual(["late_fixture"]);
+    expect(children.at(-1)!.inspect().callableTools).toEqual(["late_fixture"]);
     const defaults = await run({});
     expect(defaults.details.isError, JSON.stringify(defaults)).toBe(false);
-    expect(children.at(-1)!.inspect().activeTools).toEqual(["read"]);
+    // Native defaults activate newly registered direct tools at session startup.
+    expect(children.at(-1)!.inspect().activeTools).toEqual(["read", "late_fixture"]);
     expect(children.slice(0, 3).every((c) => c.inspect().state === "closed")).toBe(true);
   } finally {
     await Promise.all(children.map((c) => c.close()));

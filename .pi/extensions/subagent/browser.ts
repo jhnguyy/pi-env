@@ -1,17 +1,26 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, Input, Key, matchesKey, ScrollView, SelectList, Text, truncateToWidth, type Component, type Focusable, type TUI } from "@earendil-works/pi-tui";
-import type { NativeInputMode } from "./child-types";
-import type { SubagentSessionRuntime } from "./session-runtime";
-import { childMessagesText, plainChildText } from "./transcript";
+import * as ChildTypes from "./child-types";
+import type * as SessionRuntime from "./session-runtime";
+import * as Transcript from "./transcript";
 
-type BrowserSource = Pick<SubagentSessionRuntime, "listChildren" | "inspectChild" | "cancelChild">;
+type BrowserSource = Pick<SessionRuntime.SubagentSessionRuntime, "listChildren" | "inspectChild" | "cancelChild">;
 type Child = NonNullable<ReturnType<BrowserSource["inspectChild"]>>;
 type ChildSummary = ReturnType<BrowserSource["listChildren"]>[number];
 const VIEWS = ["conversation", "instructions", "configuration", "provenance"] as const;
 type View = typeof VIEWS[number];
 
 function oneLine(text: string): string {
-  return plainChildText(text).replace(/\s+/g, " ").trim();
+  return Transcript.plainChildText(text).replace(/\s+/g, " ").trim();
+}
+
+function inputMode(data: string): ChildTypes.NativeInputMode | undefined {
+  switch (data) {
+    case "p": return ChildTypes.NativeInputMode.Prompt;
+    case "s": return ChildTypes.NativeInputMode.Steer;
+    case "f": return ChildTypes.NativeInputMode.FollowUp;
+    default: return undefined;
+  }
 }
 
 /** A view onto retained owners. Closing this view never stops a child or switches the parent. */
@@ -35,7 +44,7 @@ export class SubagentBrowser implements Component, Focusable {
     private readonly tui: TUI,
     private readonly theme: Theme,
     private readonly done: () => void,
-    private readonly compose: (id: string, mode: NativeInputMode) => Promise<void>,
+    private readonly compose: (id: string, mode: ChildTypes.NativeInputMode) => Promise<void>,
   ) {
     this.list = this.createList();
     this.timer = setInterval(() => {
@@ -104,7 +113,7 @@ export class SubagentBrowser implements Component, Focusable {
       case "provenance":
         return child.inputs.map((input) => `${input.source} · ${input.mode} · ${input.at}\n${input.text}`).join("\n\n") || "No recorded inputs.";
       case "conversation":
-        return `Native conversation (compaction may summarize earlier messages)\n\n${childMessagesText(child.messages)}`;
+        return `Native conversation (compaction may summarize earlier messages)\n\n${Transcript.childMessagesText(child.messages)}`;
     }
   }
 
@@ -138,12 +147,12 @@ export class SubagentBrowser implements Component, Focusable {
       else this.scroll.scrollTo(0, { disableFollow: true });
       return;
     }
-    const mode = ({ p: "prompt", s: "steer", f: "followUp" } as const)[data as "p" | "s" | "f"];
+    const mode = inputMode(data);
     if (mode) {
       const child = this.source.inspectChild(id);
       if (!child) throw new Error("Child session is no longer retained.");
-      if (mode === "prompt" ? child.state !== "idle" : child.state !== "running") {
-        throw new Error(mode === "prompt" ? "Use prompt only when idle; use steer or follow-up while running." : "Steer and follow-up require a running child; use prompt when idle.");
+      if (mode === ChildTypes.NativeInputMode.Prompt ? child.state !== ChildTypes.NativeChildState.Idle : child.state !== ChildTypes.NativeChildState.Running) {
+        throw new Error(mode === ChildTypes.NativeInputMode.Prompt ? "Use prompt only when idle; use steer or follow-up while running." : "Steer and follow-up require a running child; use prompt when idle.");
       }
       void this.compose(id, mode).catch((error) => this.showStatus(error instanceof Error ? error.message : String(error)));
       return;
@@ -168,7 +177,7 @@ export class SubagentBrowser implements Component, Focusable {
     try {
       this.updateRoster();
       const child = this.selectedId ? this.source.inspectChild(this.selectedId) : undefined;
-      const text = child ? plainChildText(this.contents(child)) : "This child is no longer retained. Its native transcript has not been deleted.";
+      const text = child ? Transcript.plainChildText(this.contents(child)) : "This child is no longer retained. Its native transcript has not been deleted.";
       if (text !== this.bodyText) { this.bodyText = text; this.text.setText(text); }
       const body = this.selectedId ? this.renderChild(width) : [...this.search.render(width), ...this.list.render(width)];
       const title = child ? `${oneLine(child.name)} [${child.state}] · ${this.view}` : `Subagents · ${this.source.listChildren().length} retained sessions`;
