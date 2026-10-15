@@ -47,49 +47,13 @@ Model selection uses Pi's configured registry. The subagent tool advertises ever
 
 Built-in and shared cross-host tools use the resolved child working directory. A parent context does not override that directory. Child model requests use the configured model registry's streaming method. The initial system prompt is retained in the child transcript.
 
-The current child runtime still uses the low-level agent loop, not a complete Pi SDK session. It does not automatically load context resources, extension hooks, native codemode, tool search, or MCP. Parent tool permission hooks do not govern direct child calls. Native-session adoption is a separate migration.
+Children run through the [low-level executor](../.pi/extensions/subagent/execute.ts), not a complete Pi SDK session. They do not automatically load context resources, extension hooks, native codemode, tool search, or MCP. Parent tool permission hooks do not govern direct child calls.
 
-### Named agents are not native package resources
+### Named agent discovery
 
-Pi loads extensions, skills, prompt templates, and themes as package resources. Named agent definitions (`agents/*.md`) are an extension convention, also used by [Pi's subagent example](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/examples/extensions/subagent/agents.ts). They are not the `AGENTS.md` context files returned by native `ResourceLoader.getAgentsFiles()`.
+Named agent definitions are extension-owned configuration, not the `AGENTS.md` context files supplied by Pi's resource loader. See [agent discovery](../.pi/extensions/subagent/agents.ts) for accepted fields and source precedence, and [execution-plan resolution](../.pi/extensions/subagent/resolver.ts) for selection and trust checks.
 
-`loadAgentsFromPackages` remains a pi-env adapter for packaged named agents. It uses native `DefaultPackageManager.listConfiguredPackages()` for package inventory and installed roots, then reads `<package>/.pi/agents/*.md` in the selected scope. Relative project package paths resolve from the target directory's `.pi` directory. Relative global package paths resolve from Pi's agent directory. Discovery does not install or update packages.
-
-This is not native enabled-resource discovery. Pi's package manifest, resource filters, `autoload`, and `pi config` do not define selection rules for named agents. This adapter scans configured, installed packages in the selected scope regardless of native resource selections. Discovery makes named agents available for explicit selection. It does not append their instructions to a session automatically. Temporary `pi -e` sources are not included. Agent files accept comma-separated strings or YAML arrays for tool lists, following the upstream example. pi-env also accepts either form for capability lists.
-
-## Native-session migration contract (not implemented)
-
-The current baseline fixes execution boundaries without replacing the child runtime. The following decisions govern the separate native-session migration. They do not describe capabilities shipped by this baseline.
-
-- Use Pi's public SDK services and native session runtime for each child. Let Pi own model execution, messages, persistence, retries, compaction, resource loading, and extension lifecycle. Use `DefaultResourceLoader` with explicit child-safe configuration rather than reproducing native resource discovery or indiscriminately reloading every parent extension.
-- Supply native settings with the target directory's resolved trust state. The SDK's default settings assume project trust. Do not mistake that default for the CLI's trust handshake or transfer trust from another working directory. Native context loading already includes target `AGENTS.md` files. Do not append them a second time. Context-file discovery is distinct from executable-package trust.
-- Keep one pi-env root coordinator for admission, workspace writer leases, lineage, jobs, and aggregate usage. Native sessions do not replace those scheduling contracts. All execution paths, including review DAG and skill evaluation, must use the same child executor.
-- Include the native tool migration needed to remove duplicate execution ownership. Retire the separate AgentTool publication channel and raw child loop when their consumers migrate. Do not keep two permanent execution backends. Optional output-contract improvements and recursion remain separate work.
-- Preserve configured providers, credentials, and virtual models through public APIs. Prove the runtime handoff before cutover. Do not introduce model-access permissions or substitute physical models for virtual models.
-- Verify the complete callable tool surface, including direct, deferred, codemode, MCP, and late registrations. Active-tool visibility alone does not enforce that boundary. Preserve tool-free evaluation and run-local review tools.
-- Await active-operation settlement and native shutdown hooks during cleanup. A timeout or session disposal does not prove that external side effects stopped. Do not release a writer lease while conflicting effects can continue.
-
-### Direct user access to children
-
-Direct interaction is a migration requirement, not an extension of the current read-only browser:
-
-- Inspect each child's actual delegated task, resolved instructions, model, working directory, and tools. Distinguish coordinator-authored instructions from user-authored text.
-- Preserve user-authored briefs and interventions verbatim. Keep coordinator additions separate. Allow optional review or editing before delegation, without requiring approval for every child.
-- Send user input directly to the selected child's native session without coordinator rewriting or approval. Use native prompting, steering, and follow-up behavior. Distinguish queued steering from immediate cancellation. Native prompt expansion and extension input hooks still apply. Retain the original input and expose effective transformations rather than claiming that native input processing is bypassed.
-- Navigate between parent, children, and descendants without replacing or shutting down the parent runtime. Include synchronous children and persisted history, not only retained background jobs.
-- Keep one execution owner per child. Live interaction uses that owner's session. Standalone continuation by exact path requires the prior owner to settle and release the session file first.
-
-Acceptance evidence must cover direct input without coordinator rewriting, prompt provenance, intact parent state, single-owner live interaction, and continuation from native persisted history. These controls preserve authorship and visibility. They do not guarantee model compliance with every instruction.
-
-### Native references
-
-The migration targets the repository's pinned Pi 1.2.0 APIs at upstream commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff`:
-
-- [Package resources and filters](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/docs/packages.md)
-- [Package inventory and resolution](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/src/core/package-manager.ts)
-- [SDK ownership, resource loading, input, and completion](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/docs/sdk.md)
-- [Services-based session creation](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/src/core/agent-session-services.ts)
-- [Native session-runtime example](https://github.com/earendil-works/pi/blob/06a466935536f8c9bcacb2d5efc0fc021be1bdff/packages/coding-agent/examples/sdk/13-session-runtime.ts)
+Native package resource filters and `pi config` do not control named-agent candidates. Discovery considers configured, installed packages in the selected scope, but not temporary `pi -e` sources. It does not install packages or automatically apply discovered agent instructions.
 
 ## Resource limits
 

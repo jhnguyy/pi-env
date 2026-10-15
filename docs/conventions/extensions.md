@@ -53,8 +53,6 @@ Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` 
 
 ## Cross-host tool registration
 
-This section describes the existing low-level child host, not the target native-session architecture. Maintain these adapters until their consumers migrate. The [native-session migration contract](../subagents.md#native-session-migration-contract-not-implemented) requires native tool definitions and removal of the separate AgentTool publication channel. Do not extend this channel for the native child runtime or add another permanent execution backend.
-
 Generally reusable tools that should behave the same in Pi and AgentTool hosts should register through `.pi/extensions/_shared/register-cross-host-tool.ts` via the canonical shape:
 
 ```ts
