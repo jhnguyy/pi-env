@@ -4,7 +4,6 @@ import { describe, expect, it as vitestIt } from "vitest";
 import {
   AgentSettingsSchema,
   decodeAgentSettingsSnapshotEffect,
-  decodeGlobalAgentSettingsSnapshotEffect,
   readOptionalAgentSettings,
   type AgentSettingsEnv,
 } from "../_shared/agent-settings";
@@ -36,7 +35,6 @@ describe("agent settings", () => {
       const settings = yield* decodeAgentSettingsSnapshotEffect(snapshot);
 
       expect(settings).toEqual({
-        enabledModels: ["project/model"],
         modelAnnotations: { "provider/model": ["preferred"] },
         workTracker: { repos: ["/repo"], protectedBranches: ["main"] },
         extensions: ["web-context"],
@@ -44,15 +42,13 @@ describe("agent settings", () => {
     }),
   );
 
-  it.effect("decodes machine policy from global settings only", () =>
+  it.effect("leaves native model selection settings to Pi", () =>
     Effect.gen(function* () {
-      const env = envWith({
-        "/global/settings.json": JSON.stringify({ modelAnnotations: { "approved/model": ["reviewer"] } }),
-        "/repo/.pi/settings.json": JSON.stringify({ modelAnnotations: { "project/model": ["reviewer"] } }),
+      const settings = yield* Schema.decodeUnknownEffect(AgentSettingsSchema)({
+        enabledModels: ["test/selected"],
+        modelAnnotations: { "test/available": ["reviewer"] },
       });
-      const snapshot = yield* loadSettingsSnapshotEffect("/repo", env);
-      const settings = yield* decodeGlobalAgentSettingsSnapshotEffect(snapshot);
-      expect(settings.modelAnnotations).toEqual({ "approved/model": ["reviewer"] });
+      expect(settings).toEqual({ modelAnnotations: { "test/available": ["reviewer"] } });
     }),
   );
 
@@ -60,7 +56,7 @@ describe("agent settings", () => {
     Effect.gen(function* () {
       expect(yield* Schema.decodeUnknownEffect(AgentSettingsSchema)({})).toEqual({});
       const presentUndefined = yield* Effect.result(
-        Schema.decodeUnknownEffect(AgentSettingsSchema)({ enabledModels: undefined }),
+        Schema.decodeUnknownEffect(AgentSettingsSchema)({ modelAnnotations: undefined }),
       );
       expect(Result.isFailure(presentUndefined)).toBe(true);
     }),
@@ -88,7 +84,7 @@ describe("agent settings", () => {
   it.effect("reports typed errors for required settings", () =>
     Effect.gen(function* () {
       const malformed = yield* Effect.result(loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": "not json" })));
-      const invalidSnapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": JSON.stringify({ enabledModels: [123] }) }));
+      const invalidSnapshot = yield* loadSettingsSnapshotEffect("/repo", envWith({ "/global/settings.json": JSON.stringify({ modelAnnotations: { "test/model": [123] } }) }));
       const invalid = yield* Effect.result(decodeAgentSettingsSnapshotEffect(invalidSnapshot));
 
       expect(malformed._tag).toBe("Failure");

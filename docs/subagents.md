@@ -37,9 +37,19 @@ The initial browser lists only background jobs retained in the current parent ru
 
 ## Agent definitions and trust
 
-The default `agent_scope` is `user`. This scope includes user agents and agents from installed packages.
+The default `agent_scope` is `user`. This scope includes user agents and agents from packages registered in global settings. Packages declared in project settings do not enter the default scope.
 
-Set `agent_scope` to `project` to use a project agent. Pi must trust the project before the extension resolves the agent. The project scope contains project agents only.
+Set `agent_scope` to `project` to use project agents or agents from project-declared packages. The target directory must be trusted before the extension resolves the agent. The current session's trust decision applies only to its own canonical directory. For a different target directory, the extension requires a saved trust grant from Pi's native `ProjectTrustStore`. A saved denial or an unknown decision rejects the request. This baseline does not prompt for new trust grants.
+
+Model selection uses Pi's configured registry. The subagent tool advertises every available model, regardless of the native `enabledModels` cycling selection. Model annotations are descriptive guidance. They do not approve, restrict, or reserve models for particular roles.
+
+## Execution boundaries
+
+Built-in and shared cross-host tools use the resolved child working directory. A parent context does not override that directory. Child model requests use the configured model registry's streaming method. The initial system prompt is retained in the child transcript.
+
+The current child runtime still uses the low-level agent loop, not a complete Pi SDK session. It does not automatically load context resources, extension hooks, native codemode, tool search, or MCP. Parent tool permission hooks do not govern direct child calls. Native-session adoption is a separate migration.
+
+Agent package discovery uses Pi's native installed-package lookup. Relative project package paths resolve from the target directory's `.pi` directory. Relative global package paths resolve from Pi's agent directory. Discovery does not install or update packages.
 
 ## Resource limits
 

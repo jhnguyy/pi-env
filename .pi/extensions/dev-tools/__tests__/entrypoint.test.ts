@@ -42,3 +42,35 @@ describeIfEnabled("dev-tools", "extension entrypoint", () => {
     expect(closeoutPiTool).toBeTruthy();
   });
 });
+
+// Daemon connection failures cannot be produced reliably by the live LSP E2E.
+describe("dev-tools execution failures", () => {
+  it("marks failures as errors in Pi and both child tool channels", async () => {
+    const tools: any[] = [];
+    const registrations: any[] = [];
+    const starts: Array<() => void> = [];
+    const { registerDevTools } = await import("../index");
+    registerDevTools({
+      registerCommand() {},
+      registerTool: (tool: any) => tools.push(tool),
+      on: (event: string, handler: () => void) => {
+        if (event === PiEvent.SessionStart) starts.push(handler);
+      },
+      events: { emit: (event: string, data: any) => {
+        if (event === AgentToolEvent.Register) registrations.push(data);
+      } },
+    } as any, { call: async () => { throw new Error("daemon unavailable"); } } as any);
+    starts.forEach((start) => start());
+    const channels = [tools.find((tool) => tool.name === "dev-tools"),
+      ...registrations.flatMap(({ tool }) => tool.name.startsWith("dev-tools") ? [tool] : [])];
+    expect(channels).toHaveLength(3);
+    for (const tool of channels) {
+      const result = await tool.execute("failure", {
+        action: tool.name === "dev-tools-edit" ? "rename" : "hover",
+        path: "/tmp/x.ts", line: 1, character: 1, newName: "renamed",
+      });
+      expect(result).toMatchObject({ isError: true, details: null });
+      expect(result.content[0].text).toContain("daemon unavailable");
+    }
+  });
+});

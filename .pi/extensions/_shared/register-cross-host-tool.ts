@@ -45,7 +45,7 @@ export function registerCrossHostTool<Params, Details = unknown, Schema extends 
   };
 
   const createAgentTool = (context: AgentToolFactoryContext) =>
-    toAgentTool(contract, () => context.parentContext ?? { cwd: context.cwd });
+    toAgentTool(contract, () => ({ cwd: context.cwd }));
 
   registerPublicTool(pi, piTool);
   registerAgentToolsOnSessionStart(pi, (_sessionGeneration, ctx) => ({

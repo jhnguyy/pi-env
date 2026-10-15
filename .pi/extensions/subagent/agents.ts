@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   CONFIG_DIR_NAME,
+  DefaultPackageManager,
   getAgentDir,
   parseFrontmatter,
   SettingsManager,
@@ -85,22 +86,19 @@ function isDirectory(p: string): boolean {
   }
 }
 
-/**
- * Load agent definitions from all registered pi packages (settings.json `packages`).
- * This mirrors how extensions and skills are discovered from packages — enabling
- * a repo like pi-env to ship agent definitions that are globally available once
- * the repo is registered as a package, without requiring symlinks or cwd proximity.
- */
-function loadAgentsFromPackages(cwd: string): AgentConfig[] {
+function loadAgentsFromPackages(cwd: string, scope: AgentScope): AgentConfig[] {
   const agents: AgentConfig[] = [];
   try {
-    const settings = SettingsManager.create(cwd);
-    const packages = settings.getPackages();
+    const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted: scope === "project" });
+    const packages = (scope === "user" ? settings.getGlobalSettings() : settings.getProjectSettings()).packages ?? [];
+    const packageManager = new DefaultPackageManager({ cwd, agentDir: getAgentDir(), settingsManager: settings });
     for (const pkg of packages) {
       const source = typeof pkg === "string" ? pkg : pkg.source;
-      if (!source || !fs.existsSync(source)) continue;
-      const agentsDir = path.join(source, CONFIG_DIR_NAME, "agents");
-      agents.push(...loadAgentsFromDir(agentsDir, "package"));
+      if (!source) continue;
+      const packageRoot = packageManager.getInstalledPath(source, scope);
+      if (!packageRoot) continue;
+      const agentsDir = path.join(packageRoot, CONFIG_DIR_NAME, "agents");
+      agents.push(...loadAgentsFromDir(agentsDir, scope === "user" ? "package" : "project"));
     }
   } catch {
     // settings.json unavailable or malformed — skip package scanning
@@ -125,12 +123,12 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
   const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
   const userAgents = scope === "user" ? loadAgentsFromDir(userDir, "user") : [];
-  const packageAgents = scope === "user" ? loadAgentsFromPackages(cwd) : [];
+  const packageAgents = loadAgentsFromPackages(cwd, scope);
   const projectAgents =
     scope === "project" && projectAgentsDir ? loadAgentsFromDir(projectAgentsDir, "project") : [];
 
   const agentMap = new Map<string, AgentConfig>();
-  for (const agent of scope === "project" ? projectAgents : packageAgents) {
+  for (const agent of [...packageAgents, ...projectAgents]) {
     agentMap.set(agent.name, agent);
   }
   for (const agent of userAgents) agentMap.set(agent.name, agent);

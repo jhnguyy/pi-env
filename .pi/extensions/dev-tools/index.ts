@@ -70,7 +70,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
       const result = await client.call(buildClientRequest(params));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
-      return { content: [txt(formatError(e))], details: null };
+      return { content: [txt(formatError(e))], details: null, isError: true };
     }
   }
 

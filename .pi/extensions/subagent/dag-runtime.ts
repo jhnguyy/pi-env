@@ -23,7 +23,7 @@ import {
   type RunSubagentOptions,
 } from "./execute";
 import { discoverAgents } from "./agents";
-import { BUILT_IN_TOOLS, resolveEffectiveCwd, resolveModel, isResolutionOk } from "./resolver";
+import { BUILT_IN_TOOLS, resolveEffectiveCwd, resolveModel, isResolutionOk, isProjectTrustedForCwd } from "./resolver";
 import { ToolCapability } from "./types";
 
 export const DagSubagentExecutorKey = "pi/subagent-v1" as const;
@@ -85,7 +85,7 @@ function resolveAgentPrompt(
   ctx: ExtensionContext,
 ): string | undefined {
   if (!requestAgent) return undefined;
-  if (requestAgent.scope === "project" && ctx.isProjectTrusted?.() !== true) {
+  if (requestAgent.scope === "project" && !isProjectTrustedForCwd(ctx, cwd)) {
     throw new DagSubagentAdapterFailure({
       phase: "resolution",
       message: "Project DAG subagents require project scope and trusted project context.",

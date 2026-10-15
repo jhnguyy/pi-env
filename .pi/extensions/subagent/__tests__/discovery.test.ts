@@ -19,9 +19,8 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
     "test/excluded": ["heavy", "free"],
   };
 
-  it("maps routing tags without exposing policy annotations", () => {
+  it("treats all model annotations as descriptive guidance", () => {
     const description = buildDynamicDescription(
-      ["test/quick", "test/coder", "test/deep", "test/offline"],
       availableModels,
       [],
       undefined,
@@ -31,7 +30,7 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
 
     expect(description).toContain("Available models (use 'provider/model-id' format):");
     expect(description).toContain("test/quick — Quick [preferred, fast, experimental]");
-    expect(description).toContain("test/deep — Deep [heavy]");
+    expect(description).toContain("test/deep — Deep [heavy, reviewer]");
     expect(description).toContain(
       "[preferred] Cost-effective gathering, summarization, and mechanical edits.",
     );
@@ -41,14 +40,13 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
     expect(description).toContain("[local] Local execution when remote providers are unnecessary.");
     expect(description).toContain("[free] No-cost iteration.");
     expect(description.match(/experimental/g)).toHaveLength(1);
-    expect(description).not.toContain("reviewer");
+    expect(description).toContain("test/excluded — Excluded [heavy, free]");
     expect(description).toContain("Always pass model explicitly — there is no default.");
   });
 
-  it("omits routing guidance for tags that occur only on filtered models", () => {
+  it("derives model guidance from the complete native available roster", () => {
     const description = buildDynamicDescription(
-      ["test/coder"],
-      availableModels,
+      [availableModels[1]],
       [],
       undefined,
       undefined,
@@ -58,6 +56,6 @@ describeIfEnabled("subagent", "dynamic model guidance", () => {
     expect(description).toContain("[codex] Code-focused reasoning and implementation.");
     expect(description).not.toContain("[preferred] Cost-effective gathering");
     expect(description).not.toContain("[heavy] Judgment");
-    expect(description).not.toContain("test/excluded");
+    expect(description).not.toContain("test/quick");
   });
 });

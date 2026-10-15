@@ -137,7 +137,7 @@ describe("registerCrossHostTool contract", () => {
     expect(removed).toEqual(["cross_host_sample"]);
   });
 
-  it("uses the parent context when a child tool has one", async () => {
+  it("uses child cwd even when a parent context is available", async () => {
     const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
     const harness = createPiHarness();
     registerCrossHostTool(harness.pi as any, {
@@ -151,7 +151,7 @@ describe("registerCrossHostTool contract", () => {
     await createTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
     await createTool({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
 
-    expect(seen.map((entry) => entry.cwd)).toEqual(["/child", "/parent"]);
+    expect(seen.map((entry) => entry.cwd)).toEqual(["/child", "/child"]);
   });
 
   it("uses main-session cwd for the main AgentTool and child cwd for child tools without parent context", async () => {
