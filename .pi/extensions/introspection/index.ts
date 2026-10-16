@@ -4,6 +4,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
+import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
+import { SEARCH_SCHEMA, searchSessions, type SearchSessionsParams, type SessionSearchResult } from "./search";
 import {
   registerPublicTool,
   renderCompactToolCall,
@@ -102,6 +104,28 @@ function executeReadSession(
 }
 
 export default function (pi: ExtensionAPI) {
+  registerCrossHostTool<SearchSessionsParams, SessionSearchResult, typeof SEARCH_SCHEMA>(pi, {
+    contract: {
+      name: "search_sessions",
+      label: "Search Sessions",
+      description:
+        "Search local pi session user and assistant text for a literal phrase. Read-only. Returns bounded snippets with file, JSONL line, session ID, entry ID, and parent ID. Searches all branches, not just the active path. Excludes tool outputs, thinking, and generated summaries. Defaults to all cwd values and parent/child sessions. Filesystem traversal order, not relevance or recency order. Use list_sessions for metadata navigation and read_session for a sparse session view.",
+      parameters: SEARCH_SCHEMA,
+      async execute(params, { signal }) {
+        const result = await searchSessions(params, { signal });
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+      },
+    },
+    capabilities: [ToolCapability.Read],
+    piOptions: {
+      exposure: "deferred",
+      namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
+      renderCall: (params, theme) => renderCompactToolCall("search_sessions", params.term, theme),
+      renderResult: (result, options, theme, context) =>
+        renderTextToolResult("search_sessions", result, options, theme, context),
+    },
+  });
+
   registerPublicTool(pi, {
     name: "list_sessions",
     label: "List Sessions",

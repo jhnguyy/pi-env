@@ -2,7 +2,7 @@
 
 The subagent extension runs child agents in the parent Pi process. Each child has an isolated context and a linked persistent session transcript.
 
-By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive pi-env introspection can still list and read child transcripts. Use `pi --session <path>` to resume a child by its exact path.
+By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive [session introspection](introspection.md) can still list, read, and search child transcripts. Use `pi --session <path>` to resume a child by its exact path.
 
 ## Actions
 
