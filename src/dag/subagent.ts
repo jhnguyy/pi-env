@@ -58,7 +58,6 @@ export interface DagSubagentPayloadV1 {
   readonly name: string;
   readonly instructions: string;
   readonly model: string;
-  readonly agent?: { readonly name: string; readonly scope: "user" | "project" };
   readonly tools: readonly string[];
   readonly workspace: { readonly cwd: string; readonly access: "read" | "write" };
   readonly context: { readonly outputs: readonly string[] };
@@ -167,7 +166,6 @@ function payloadKeys(value: Record<string, unknown>): readonly string[] {
     "workspace",
     "context",
     "output",
-    ...(Object.hasOwn(value, "agent") ? ["agent"] : []),
     ...(Object.hasOwn(value, "maxTurns") ? ["maxTurns"] : []),
     ...(Object.hasOwn(value, "reasoning") ? ["reasoning"] : []),
   ];
@@ -188,16 +186,6 @@ function parseOutput(value: unknown): DagSubagentPayloadV1["output"] {
   if (!isRecord(value) || !exact(value, ["name"]) || !validIdentifier(value.name))
     throw new Error("invalid output");
   return Object.freeze({ name: value.name });
-}
-function parseAgent(value: unknown): NonNullable<DagSubagentPayloadV1["agent"]> {
-  if (
-    !isRecord(value) ||
-    !exact(value, ["name", "scope"]) ||
-    !validIdentifier(value.name) ||
-    (value.scope !== "user" && value.scope !== "project")
-  )
-    throw new Error("invalid agent");
-  return Object.freeze({ name: value.name, scope: value.scope });
 }
 function parseMaxTurns(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1 || value > 64)
@@ -221,11 +209,9 @@ function parseModel(value: unknown): string {
 }
 function optionalPayloadFields(value: Record<string, unknown>) {
   const fields: {
-    agent?: NonNullable<DagSubagentPayloadV1["agent"]>;
     maxTurns?: number;
     reasoning?: DagSubagentReasoningLevel;
   } = {};
-  if (Object.hasOwn(value, "agent")) fields.agent = parseAgent(value.agent);
   if (Object.hasOwn(value, "maxTurns")) fields.maxTurns = parseMaxTurns(value.maxTurns);
   if (Object.hasOwn(value, "reasoning")) fields.reasoning = parseReasoning(value.reasoning);
   return fields;

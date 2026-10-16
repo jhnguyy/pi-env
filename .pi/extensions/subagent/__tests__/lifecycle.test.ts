@@ -4,7 +4,18 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-import { createSubagentHarness as createHarness } from "./harness";
+import initSubagent from "../index";
+function createHarness() {
+  const tools = new Map<string, any>();
+  const handlers = new Map<string, any>();
+  initSubagent({
+    getAllTools: () => [], appendEntry: () => {}, registerCommand: () => {},
+    registerTool: (tool: any) => tools.set(tool.name, tool),
+    on: (name: string, handler: any) => handlers.set(name, handler),
+    events: { emit: () => {}, on: () => {} },
+  } as any);
+  return { tools, handlers };
+}
 import { SubagentJobManager } from "../jobs";
 
 const temporaryDirectories: string[] = [];

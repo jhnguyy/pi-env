@@ -1,15 +1,17 @@
+import { join } from "node:path";
+import * as ChildContext from "../_shared/child-context";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Effect } from "effect";
 
 import { loadNotesSettingsEffect } from "./config";
-import type { SettingsEnv } from "../_shared/settings";
+import * as Settings from "../_shared/settings";
 import { createNotesContract, type NotesToolDetails } from "./contract";
-import { registerConfiguredBuiltinProvider } from "./provider";
+import * as Provider from "./provider";
 import { registerNotesProviderEventBridge } from "./provider-events";
 import { resolveNotesProvider } from "./provider-registry";
-import { PiEvent, ToolCapability } from "../_shared/agent-tools";
-import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
+import * as AgentTools from "../_shared/agent-tools";
+import * as RegisterContractTool from "../_shared/register-contract-tool";
 
 export { NotesProviderError } from "./domain";
 export { NotesProviderEvent } from "./provider-events";
@@ -37,23 +39,24 @@ export default function (pi: ExtensionAPI) {
 
 export async function activateNotesExtension(
   pi: ExtensionAPI,
-  cwd = process.cwd(),
-  settingsEnv?: SettingsEnv,
+  cwd = ChildContext.getChildContext()?.cwd ?? process.cwd(),
+  settingsEnv?: Settings.SettingsEnv,
 ): Promise<void> {
+  const child = ChildContext.getChildContext();
+  settingsEnv ??= child ? {
+    ...Settings.defaultSettingsEnv,
+    globalSettingsPath: () => join(child.agentDir, "settings.json"),
+  } : undefined;
   const settings = await Effect.runPromise(loadNotesSettingsEffect(cwd, settingsEnv));
   if (settings === null) return;
 
+  const builtin = await Provider.createConfiguredBuiltinProvider(settings);
   const unregisterExternal = registerNotesProviderEventBridge(pi);
-  const unregisterBuiltin = await registerConfiguredBuiltinProvider(settings);
-  pi.on(PiEvent.SessionShutdown, () => {
-    unregisterBuiltin();
-    unregisterExternal();
-  });
-  const contract = createNotesContract(() => resolveNotesProvider(settings.provider));
+  pi.on(AgentTools.PiEvent.SessionShutdown, unregisterExternal);
+  const contract = createNotesContract(() => builtin ?? resolveNotesProvider(settings.provider));
 
-  registerCrossHostTool(pi, {
+  RegisterContractTool.registerContractTool(pi, {
     contract,
-    capabilities: [ToolCapability.Read, ToolCapability.Write],
     piOptions: {
       promptSnippet: "Maintain Inbox, Projects, Wiki, Worklog, and other Markdown notes",
       promptGuidelines: [

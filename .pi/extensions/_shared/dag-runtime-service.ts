@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Effect } from "effect";
 import type {
   DagRunHandle,
@@ -22,6 +23,8 @@ export function dagUsagePrefix(runId: string): string {
 
 export interface DagRuntimeSubmissionAuthority {
   readonly workspaceRoot?: string;
+  /** Run-local executable authority; never serialize into graph or artifacts. */
+  readonly customTools?: readonly ToolDefinition[];
 }
 export interface DagRuntimeUsage {
   readonly input: number;
@@ -39,6 +42,8 @@ export interface ActiveDagRuntimeService {
   readonly reconstruct: (
     runId: string,
   ) => Effect.Effect<DagSessionReconstruction, DagSessionFailure>;
+  /** Close retained native children before the caller removes run resources. */
+  readonly closeChildren?: (runId: string) => Promise<void>;
   readonly usage?: (runId: string) => DagRuntimeUsage;
 }
 

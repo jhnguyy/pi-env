@@ -28,7 +28,7 @@ const E2E = process.env["E2E"] === "1";
 const describeE2E = E2E ? describe : describe.skip;
 const repoRoot = process.cwd();
 const analyzeFile = `${repoRoot}/.pi/extensions/analyze/index.ts`;
-const sharedApiFile = `${repoRoot}/.pi/extensions/_shared/agent-tools.ts`;
+const sharedApiFile = `${repoRoot}/.pi/extensions/_shared/tool-render.ts`;
 const TEST_TIMEOUT_MS = 60_000;
 
 function fixtureClient(socketPath: string): LspClient {
@@ -58,8 +58,6 @@ function registeredTool(client: LspClient) {
     exec: async () => {
       throw new Error("Definition lookup must not run unrelated commands");
     },
-    events: { emit: () => {} },
-    on: () => {},
   }, client);
   const tool = tools.get("dev-tools");
   if (!tool) throw new Error("Public dev-tools tool was not registered");
@@ -140,7 +138,7 @@ describeE2E("real workspace semantic canary", () => {
     scenario: "registered dev-tools definition lookup and real-workspace restart",
     repeat: "nub run test:e2e:real-workspace-canary",
     expected: {
-      symbol: "registerAgentToolsOnSessionStart",
+      symbol: "registerPublicTool",
       destination: relative(repoRoot, sharedApiFile),
     },
     status: "incomplete",
@@ -198,13 +196,13 @@ describeE2E("real workspace semantic canary", () => {
       try {
         const position = sourcePosition(
           analyzeFile,
-          'from "../_shared/agent-tools"',
-          "registerAgentToolsOnSessionStart",
+          '  registerPublicTool,',
+          "registerPublicTool",
         );
         const target = sourcePosition(
           sharedApiFile,
-          "export function registerAgentToolsOnSessionStart",
-          "registerAgentToolsOnSessionStart",
+          "export function registerPublicTool",
+          "registerPublicTool",
         );
         evidence.expectedLine = target.line;
         const request = { action: "definition", path: analyzeFile, ...position };
@@ -222,7 +220,7 @@ describeE2E("real workspace semantic canary", () => {
         ]);
         expect(
           publicResult.content.some(
-            (item) => item.type === "text" && item.text.includes("agent-tools.ts"),
+            (item) => item.type === "text" && item.text.includes("tool-render.ts"),
           ),
         ).toBe(true);
 
@@ -231,7 +229,7 @@ describeE2E("real workspace semantic canary", () => {
         );
         expect(hoverResult.action).toBe("hover");
         expect((hoverResult as HoverResult).signature).toContain(
-          "registerAgentToolsOnSessionStart",
+          "registerPublicTool",
         );
 
         await fixture.restartDaemon();
@@ -245,22 +243,22 @@ describeE2E("real workspace semantic canary", () => {
           fixture.callDaemon({ action: "symbols", path: sharedApiFile }),
         );
         const workspaceSymbols = await measured("workspace symbols", () =>
-          fixture.callDaemon({ action: "symbols", query: "ToolCapability" }),
+          fixture.callDaemon({ action: "symbols", query: "registerPublicTool" }),
         );
-        expectSymbol(workspaceSymbols, "ToolCapability");
+        expectSymbol(workspaceSymbols, "registerPublicTool");
         await sleep(3_000);
         const referencesResult = await measured("shared API references", () =>
           fixture.callDaemon({
             action: "references",
             path: sharedApiFile,
-            ...sourcePosition(sharedApiFile, "export const ToolCapability", "ToolCapability"),
+            ...sourcePosition(sharedApiFile, "export function registerPublicTool", "registerPublicTool"),
           }),
         );
         expect(referencesResult.action).toBe("references");
         const references = referencesResult as ReferencesResult;
         evidence.references = references;
-        expect(references.total).toBeGreaterThan(20);
-        expect(references.items.some((item) => item.absolutePath !== sharedApiFile)).toBe(true);
+        expect(references.total).toBeGreaterThan(1);
+        expect(references.items.some((item) => item.absolutePath === analyzeFile)).toBe(true);
         expect(references.items.some((item) => item.absolutePath === sharedApiFile)).toBe(true);
 
         await measured("reference project diagnostics warmup", () =>

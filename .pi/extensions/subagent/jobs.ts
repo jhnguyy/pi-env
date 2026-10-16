@@ -1,16 +1,14 @@
 /** Session-scoped asynchronous subagent jobs with bounded retention and shared admission. */
 
 import { randomUUID } from "node:crypto";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
   truncateHead,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Cause, Data, Deferred, Effect } from "effect";
+import { Cause, Deferred, Effect } from "effect";
 
 import type { ToolingTelemetryRuntime } from "../../../src/telemetry/tooling";
-import type { ExtToolRegistration } from "../_shared/agent-tools";
 import {
   DEFAULT_SUBAGENT_CONFIG,
   DEFAULT_SUBAGENT_LIMITS,
@@ -19,9 +17,7 @@ import {
 import {
   getOrCreateSubagentRunSupervisor,
   SubagentAdmissionError,
-  WorkspaceAccess,
   type SubagentRunSupervisor,
-  type WorkspaceAccess as WorkspaceAccessValue,
 } from "./control";
 import { SubagentJobWaitInterrupted } from "./errors";
 import { runSubagentEffect, type RunSubagentOptions } from "./execute";
@@ -37,8 +33,6 @@ import { formatUsageCompact, SubagentUsageMode } from "./usage";
 export const MAX_CONCURRENT_SUBAGENT_JOBS = DEFAULT_SUBAGENT_LIMITS.maxConcurrentRuns;
 export { SubagentJobStatus } from "./types";
 
-class SubagentCancellationDeadline extends Data.TaggedError("SubagentCancellationDeadline")<{}> {}
-
 export interface SubagentJob {
   readonly id: string;
   readonly name: string;
@@ -49,21 +43,12 @@ export interface SubagentJob {
   resultText?: string;
   resultTruncated?: boolean;
   errorMessage?: string;
-  workspaceAccess?: WorkspaceAccessValue;
   readonly done: Deferred.Deferred<void>;
-  readonly cancelRequested: Deferred.Deferred<void>;
   readonly controller: AbortController;
   readonly createdAt: string;
   finishedAt?: string;
   startSignalCleanup?: () => void;
 }
-
-export type SubagentJobRunner = (
-  params: SubagentParams,
-  ctx: ExtensionContext,
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  options: RunSubagentOptions,
-) => Effect.Effect<AgentToolResult<SubagentDetails>, unknown>;
 
 export type SubagentJobsChanged = (jobs: readonly SubagentJob[]) => void;
 
@@ -76,7 +61,6 @@ function failureFromCause(cause: Cause.Cause<unknown>): unknown {
 
 function safeJobFailureMessage(error: unknown): string {
   if (error instanceof SubagentAdmissionError) return error.message;
-  if (error instanceof SubagentCancellationDeadline) return error._tag;
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = String(error._tag);
     if (/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(tag)) return tag;
@@ -142,14 +126,11 @@ export class SubagentJobManager {
 
   constructor(
     private readonly pi: ExtensionAPI,
-    private readonly registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-    private readonly runJob: SubagentJobRunner = runSubagentEffect,
     private readonly ledger?: SubagentUsageLedger,
     private readonly telemetryRuntime?: ToolingTelemetryRuntime,
     private readonly config: SubagentRuntimeConfig = { ...DEFAULT_SUBAGENT_CONFIG },
     supervisor?: SubagentRunSupervisor,
     private readonly onJobsChanged?: SubagentJobsChanged,
-    private readonly agentLoop?: RunSubagentOptions["agentLoop"],
   ) {
     this.supervisor =
       supervisor ?? getOrCreateSubagentRunSupervisor(`jobs-${randomUUID()}`, this.config);
@@ -157,9 +138,7 @@ export class SubagentJobManager {
 
   start(params: SubagentParams, ctx: ExtensionContext, signal?: AbortSignal): SubagentJob {
     const id = randomUUID();
-    const [done, cancelRequested] = Effect.runSync(
-      Effect.all([Deferred.make<void>(), Deferred.make<void>()]),
-    );
+    const done = Effect.runSync(Deferred.make<void>());
     const controller = new AbortController();
     const rejected = this.shutdownStarted;
     const job: SubagentJob = {
@@ -170,7 +149,6 @@ export class SubagentJobManager {
       status: rejected ? SubagentJobStatus.Rejected : SubagentJobStatus.Queued,
       errorMessage: rejected ? "Parent subagent session is shutting down." : undefined,
       done,
-      cancelRequested,
       controller,
       createdAt: new Date().toISOString(),
       finishedAt: rejected ? new Date().toISOString() : undefined,
@@ -178,7 +156,6 @@ export class SubagentJobManager {
     this.jobs.set(id, job);
     this.record(job);
     if (rejected) {
-      Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
       Effect.runSync(Deferred.succeed(job.done, undefined));
       this.pruneTerminalJobs();
       return job;
@@ -240,13 +217,11 @@ export class SubagentJobManager {
         job.finishedAt = new Date().toISOString();
         job.errorMessage = "Cancelled before launch.";
         job.controller.abort();
-        Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
         this.finish(job);
         break;
       case SubagentJobStatus.Running:
         job.status = SubagentJobStatus.Cancelling;
         job.controller.abort();
-        Effect.runSync(Deferred.succeed(job.cancelRequested, undefined));
         this.record(job);
         break;
       default:
@@ -277,10 +252,6 @@ export class SubagentJobManager {
     params: SubagentParams,
     ctx: ExtensionContext,
   ): Effect.Effect<void> {
-    const cancellationDeadline = Deferred.await(job.cancelRequested).pipe(
-      Effect.andThen(Effect.sleep(this.config.cancellationGraceMs)),
-      Effect.flatMap(() => Effect.fail(new SubagentCancellationDeadline())),
-    );
     const onAdmitted = () => {
       if (job.status !== SubagentJobStatus.Queued) return;
       job.status = SubagentJobStatus.Running;
@@ -298,35 +269,9 @@ export class SubagentJobManager {
       sessionStorage: this.config.sessionStorage,
       onAdmitted,
       onUsage,
-      agentLoop: this.agentLoop,
+      onChild: (child) => this.supervisor.retainChild(child),
     };
-    const run = (
-      this.runJob === runSubagentEffect
-        ? this.runJob(params, ctx, this.registeredExtTools, options)
-        : Effect.acquireUseRelease(
-            this.supervisor.acquireEffect({
-              runId: job.id,
-              cwd: job.cwd || process.cwd(),
-              workspaceAccess: job.workspaceAccess ?? WorkspaceAccess.Read,
-              signal: job.controller.signal,
-            }),
-            (lease) =>
-              Effect.sync(onAdmitted).pipe(
-                Effect.andThen(
-                  this.runJob(params, ctx, this.registeredExtTools, {
-                    ...options,
-                    signal: lease.signal,
-                    onUsage: (details) => {
-                      lease.updateUsage(details.usage);
-                      onUsage(details);
-                    },
-                  }),
-                ),
-                Effect.tap((result) => Effect.sync(() => lease.updateUsage(result.details.usage))),
-              ),
-            (lease) => Effect.sync(() => lease.release()),
-          )
-    ).pipe(Effect.raceFirst(cancellationDeadline));
+    const run = runSubagentEffect(params, ctx, options);
 
     return Effect.acquireUseRelease(
       Effect.void,
@@ -365,11 +310,9 @@ export class SubagentJobManager {
                 ? job.controller.signal.aborted
                   ? SubagentJobStatus.Cancelled
                   : SubagentJobStatus.Rejected
-                : error instanceof SubagentCancellationDeadline
-                  ? SubagentJobStatus.Interrupted
-                  : job.controller.signal.aborted
-                    ? SubagentJobStatus.Cancelled
-                    : SubagentJobStatus.Failed;
+                : job.controller.signal.aborted
+                  ? SubagentJobStatus.Cancelled
+                  : SubagentJobStatus.Failed;
             job.errorMessage = safeJobFailureMessage(error);
           },
         }),

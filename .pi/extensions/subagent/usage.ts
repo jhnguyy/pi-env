@@ -1,9 +1,9 @@
 import type { AgentEvent, AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
-import type { SubagentDetails, UsageStats } from "./types";
+import type * as Types from "./types";
 
-export const zeroUsage = (): UsageStats => ({
+export const zeroUsage = (): Types.UsageStats => ({
   input: 0,
   output: 0,
   cacheRead: 0,
@@ -13,9 +13,9 @@ export const zeroUsage = (): UsageStats => ({
 });
 
 export function addUsage(
-  target: UsageStats,
-  addition: Partial<UsageStats> | undefined,
-): UsageStats {
+  target: Types.UsageStats,
+  addition: Partial<Types.UsageStats> | undefined,
+): Types.UsageStats {
   if (!addition) return target;
   target.input += addition.input ?? 0;
   target.output += addition.output ?? 0;
@@ -26,28 +26,11 @@ export function addUsage(
   return target;
 }
 
-export function cloneUsage(usage: UsageStats): UsageStats {
+export function cloneUsage(usage: Types.UsageStats): Types.UsageStats {
   return { ...usage };
 }
 
-export function toNestedToolUsage(usage: UsageStats): Usage {
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: usage.cost,
-    },
-  };
-}
-
-export function formatUsageCompact(usage: UsageStats): string {
+export function formatUsageCompact(usage: Types.UsageStats): string {
   const cost = Number.isFinite(usage.cost) && usage.cost > 0 ? ` $${usage.cost.toFixed(4)}` : "";
   return `${usage.turns}t in:${usage.input} out:${usage.output} cache:${usage.cacheRead}/${usage.cacheWrite}${cost}`;
 }
@@ -68,7 +51,6 @@ export function getFinalOutput(messages: AgentMessage[]): string {
 export interface SubagentRunMetadata {
   name: string;
   task: string;
-  agent?: string;
   toolNames: string[];
   modelOverride: string | undefined;
   maxTurns?: number;
@@ -107,12 +89,12 @@ export class SubagentRunAccumulator {
     return getFinalOutput(messages);
   }
 
-  progressResult(): AgentToolResult<SubagentDetails> {
+  progressResult(): AgentToolResult<Types.SubagentDetails> {
     const output = this.output() || "(running...)";
     return { content: [{ type: "text", text: output }], details: this.details(output, false) };
   }
 
-  failure(error: unknown, aborted: boolean): AgentToolResult<SubagentDetails> {
+  failure(error: unknown, aborted: boolean): AgentToolResult<Types.SubagentDetails> {
     const errorMessage = error instanceof Error ? error.message : String(error);
     this.lastErrorMessage = aborted ? undefined : errorMessage;
     this.lastStopReason = aborted ? "aborted" : "error";
@@ -120,7 +102,7 @@ export class SubagentRunAccumulator {
     return { content: [{ type: "text", text }], details: this.details(this.output(), true) };
   }
 
-  success(finalMessages: AgentMessage[]): AgentToolResult<SubagentDetails> {
+  success(finalMessages: AgentMessage[]): AgentToolResult<Types.SubagentDetails> {
     const output = this.output(finalMessages.length > 0 ? finalMessages : this.transcript);
     const isError =
       this.lastStopReason === "error" ||
@@ -132,7 +114,7 @@ export class SubagentRunAccumulator {
     return { content: [{ type: "text", text }], details: this.details(text, isError) };
   }
 
-  private details(finalOutput: string, isError: boolean): SubagentDetails {
+  private details(finalOutput: string, isError: boolean): Types.SubagentDetails {
     return {
       ...this.metadata,
       finalOutput,
@@ -185,15 +167,15 @@ export interface SubagentUsageRecord {
   id: string;
   name: string;
   mode: SubagentUsageMode;
-  usage: UsageStats;
+  usage: Types.UsageStats;
 }
 
 export function recordSubagentResult(
   ledger: SubagentUsageLedger | undefined,
   id: string | undefined,
   mode: SubagentUsageMode,
-  result: AgentToolResult<SubagentDetails>,
-): AgentToolResult<SubagentDetails> {
+  result: AgentToolResult<Types.SubagentDetails>,
+): AgentToolResult<Types.SubagentDetails> {
   if (ledger && id) ledger.record(id, mode, result.details);
   return result;
 }
@@ -201,7 +183,7 @@ export function recordSubagentResult(
 export class SubagentUsageLedger {
   private readonly records = new Map<string, SubagentUsageRecord>();
 
-  record(id: string, mode: SubagentUsageMode, details: SubagentDetails): void {
+  record(id: string, mode: SubagentUsageMode, details: Types.SubagentDetails): void {
     if (this.records.has(id)) return;
     this.records.set(id, {
       id,
@@ -219,7 +201,7 @@ export class SubagentUsageLedger {
     return [...this.records.values()];
   }
 
-  total(): UsageStats {
+  total(): Types.UsageStats {
     return this.rows().reduce((total, record) => addUsage(total, record.usage), zeroUsage());
   }
 

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { getFinalOutput, SubagentRunAccumulator, SubagentUsageLedger, toNestedToolUsage, zeroUsage } from "../usage";
-import type { SubagentDetails } from "../types";
+import * as Usage from "../usage";
+import type * as Types from "../types";
+import * as NativeUsage from "../../_shared/native-usage";
 
-function details(name: string, input: number, output: number): SubagentDetails {
+function details(name: string, input: number, output: number): Types.SubagentDetails {
   return {
     name,
     task: "x",
@@ -11,7 +12,7 @@ function details(name: string, input: number, output: number): SubagentDetails {
     modelOverride: undefined,
     finalOutput: "done",
     toolCallCount: 0,
-    usage: { ...zeroUsage(), input, output, turns: 1 },
+    usage: { ...Usage.zeroUsage(), input, output, turns: 1 },
     isError: false,
     turnLimitExceeded: false,
   };
@@ -19,13 +20,12 @@ function details(name: string, input: number, output: number): SubagentDetails {
 
 describe("subagent usage accumulation", () => {
   it("converts nested work into parent-session tool usage", () => {
-    expect(toNestedToolUsage({
+    expect(NativeUsage.toNestedToolUsage({
       input: 2,
       output: 3,
       cacheRead: 5,
       cacheWrite: 7,
       cost: 1.25,
-      turns: 4,
     })).toEqual({
       input: 2,
       output: 3,
@@ -37,7 +37,7 @@ describe("subagent usage accumulation", () => {
   });
 
   it("aggregates sync and async records exactly and idempotently", () => {
-    const ledger = new SubagentUsageLedger();
+    const ledger = new Usage.SubagentUsageLedger();
     ledger.record("sync-1", "sync", details("scout", 2, 3));
     ledger.record("job-1", "async", details("builder", 5, 7));
     ledger.record("job-1", "async", details("builder", 50, 70));
@@ -52,7 +52,7 @@ describe("subagent usage accumulation", () => {
 
   it("retains every text part from only the latest assistant message", () => {
     expect(
-      getFinalOutput([
+      Usage.getFinalOutput([
         { role: "assistant", content: [{ type: "text", text: "earlier answer" }] },
         { role: "user", content: [{ type: "text", text: "follow-up" }] },
         {
@@ -68,7 +68,7 @@ describe("subagent usage accumulation", () => {
   });
 
   it("accumulates transcript, usage, tool count, and turn-limit state", () => {
-    const accumulator = new SubagentRunAccumulator({
+    const accumulator = new Usage.SubagentRunAccumulator({
       name: "scout",
       task: "x",
       toolNames: [],

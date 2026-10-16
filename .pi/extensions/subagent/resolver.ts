@@ -1,46 +1,24 @@
 import { realpathSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { getAgentDir, ProjectTrustStore, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Data } from "effect";
-
-import { discoverAgents, type AgentScope } from "./agents";
-import type { ExtToolRegistration } from "../_shared/agent-tools";
-import { WorkspaceAccess, type WorkspaceAccess as WorkspaceAccessValue } from "./control";
-import { BUILT_IN_TOOL_CONTRACTS } from "../_shared/built-in-tools";
 import {
-  ResolutionErrorReason,
-  ToolCapability,
-  type ResolutionErrorReason as ResolutionErrorReasonValue,
-} from "./types";
+  getAgentDir,
+  ProjectTrustStore,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+
+import * as Control from "./control";
+import * as Types from "./types";
 
 export interface SubagentParams {
   /** Human-readable child-session name; required by the public tool schema and persisted as `sub-<slug>`. */
   name?: string;
-  agent?: string;
   task: string;
   tools?: string[];
   model?: string;
   system_prompt?: string;
   /** Optional absolute working directory for child discovery, tools, and execution. */
   cwd?: string;
-  /** Project agents require both explicit project scope and a trusted project. */
-  agent_scope?: AgentScope;
 }
-
-export interface ToolDef {
-  factory: (cwd: string) => AgentTool<any, any>;
-  capabilities: ToolCapability[];
-}
-
-export const BUILT_IN_TOOLS: Record<string, ToolDef> = Object.fromEntries(
-  Object.entries(BUILT_IN_TOOL_CONTRACTS).map(([name, contract]) => [
-    name,
-    { factory: contract.agentFactory, capabilities: [...contract.capabilities] },
-  ]),
-);
-
-export type AgentConfig = ReturnType<typeof discoverAgents>["agents"][number];
 
 export { ResolutionErrorReason } from "./types";
 
@@ -51,7 +29,7 @@ export const ResolutionResultTag = {
 export type ResolutionResultTag = (typeof ResolutionResultTag)[keyof typeof ResolutionResultTag];
 
 export interface ResolutionError {
-  reason: ResolutionErrorReasonValue;
+  reason: Types.ResolutionErrorReason;
   message: string;
   toolNames: string[];
   modelOverride?: string;
@@ -75,29 +53,12 @@ export function isResolutionOk<T>(
   return result._tag === ResolutionResultTag.Ok;
 }
 
-export interface AgentResolution {
-  agentConfig?: AgentConfig;
-}
-
-export interface ToolResolution {
-  tools: AgentTool<any, any>[];
-  toolNames: string[];
-  workspaceAccess: WorkspaceAccessValue;
-}
-
-export interface ModelResolution {
-  model: unknown;
-  modelStr: string;
-}
-
 export interface SubagentExecutionPlan {
-  agentConfig?: AgentConfig;
-  tools: AgentTool<any, any>[];
-  toolNames: string[];
-  model: unknown;
-  systemPrompt: string;
+  toolNames?: readonly string[];
+  modelOverride?: string;
+  systemPrompt?: string;
   effectiveCwd: string;
-  workspaceAccess: WorkspaceAccessValue;
+  workspaceAccess: Control.WorkspaceAccess;
 }
 
 export function resolveEffectiveCwd(
@@ -113,7 +74,7 @@ export function resolveEffectiveCwd(
   }
   if (!isAbsolute(params.cwd)) {
     return resolutionError({
-      reason: ResolutionErrorReason.InvalidCwd,
+      reason: Types.ResolutionErrorReason.InvalidCwd,
       message: `Invalid cwd: "${params.cwd}" is not an absolute path.`,
       toolNames: params.tools ?? [],
       modelOverride: params.model,
@@ -123,7 +84,7 @@ export function resolveEffectiveCwd(
     const canonical = realpathSync(params.cwd);
     if (!statSync(canonical).isDirectory()) {
       return resolutionError({
-        reason: ResolutionErrorReason.InvalidCwd,
+        reason: Types.ResolutionErrorReason.InvalidCwd,
         message: `Invalid cwd: "${params.cwd}" is not a directory.`,
         toolNames: params.tools ?? [],
         modelOverride: params.model,
@@ -133,7 +94,7 @@ export function resolveEffectiveCwd(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return resolutionError({
-      reason: ResolutionErrorReason.InvalidCwd,
+      reason: Types.ResolutionErrorReason.InvalidCwd,
       message: `Invalid cwd: "${params.cwd}" could not be resolved: ${message}`,
       toolNames: params.tools ?? [],
       modelOverride: params.model,
@@ -141,225 +102,7 @@ export function resolveEffectiveCwd(
   }
 }
 
-export function resolveAgentConfig(
-  params: SubagentParams,
-  cwd: string,
-): ResolutionResult<AgentResolution> {
-  if (!params.agent) return resolutionOk({});
-
-  const discovery = discoverAgents(cwd, params.agent_scope ?? "user");
-  const agentConfig = discovery.agents.find((candidate) => candidate.name === params.agent);
-  if (!agentConfig) {
-    const available = discovery.agents.map((a) => a.name).join(", ") || "none";
-    return resolutionError({
-      reason: ResolutionErrorReason.AgentNotFound,
-      message: `Agent not found: "${params.agent}". Available: ${available}`,
-      toolNames: [],
-      modelOverride: params.model,
-    });
-  }
-
-  return resolutionOk({ agentConfig });
-}
-
-type ToolCatalogEntry =
-  | { _tag: "built-in"; definition: ToolDef }
-  | { _tag: "extension"; registration: ExtToolRegistration };
-const ToolCatalogEntryVariant = Data.taggedEnum<ToolCatalogEntry>();
-
-type ToolCatalog = {
-  byName: Map<string, ToolCatalogEntry>;
-  availableNames: string[];
-};
-
-function buildToolCatalog(
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-): ToolCatalog {
-  const byName = new Map<string, ToolCatalogEntry>();
-  for (const [name, definition] of Object.entries(BUILT_IN_TOOLS)) {
-    byName.set(name, ToolCatalogEntryVariant["built-in"]({ definition }));
-  }
-  for (const [name, registration] of registeredExtTools) {
-    if (!byName.has(name)) {
-      byName.set(name, ToolCatalogEntryVariant.extension({ registration }));
-    }
-  }
-  return {
-    byName,
-    availableNames: [...Object.keys(BUILT_IN_TOOLS), ...registeredExtTools.keys()],
-  };
-}
-
-function hasRequestedCapabilities(
-  capabilities: readonly ToolCapability[],
-  requested: ReadonlySet<string>,
-): boolean {
-  for (const capability of capabilities) {
-    if (!requested.has(capability)) return false;
-  }
-  return true;
-}
-
-function collectToolNames(
-  explicitNames: readonly string[],
-  requestedCapabilities: readonly string[],
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-): Set<string> {
-  const names = new Set<string>();
-  if (requestedCapabilities.length > 0) {
-    const requested = new Set(requestedCapabilities);
-    for (const [name, definition] of Object.entries(BUILT_IN_TOOLS)) {
-      if (hasRequestedCapabilities(definition.capabilities, requested)) names.add(name);
-    }
-    for (const [name, registration] of registeredExtTools) {
-      if (hasRequestedCapabilities(registration.capabilities, requested)) names.add(name);
-    }
-  }
-  for (const name of explicitNames) names.add(name);
-  return names;
-}
-
-function materializeTool(
-  entry: ToolCatalogEntry,
-  cwd: string,
-  parentContext: ExtensionContext,
-): AgentTool<any, any> {
-  if (entry._tag === "built-in") return entry.definition.factory(cwd);
-  return (
-    entry.registration.createTool?.({
-      cwd,
-      sessionGeneration: entry.registration.sessionGeneration ?? "legacy",
-      parentContext,
-    }) ?? { ...entry.registration.tool }
-  );
-}
-
-function entryCapabilities(entry: ToolCatalogEntry): readonly ToolCapability[] {
-  return entry._tag === "built-in"
-    ? entry.definition.capabilities
-    : entry.registration.capabilities;
-}
-
-function materializeToolResolution(
-  names: ReadonlySet<string>,
-  explicitNames: readonly string[],
-  catalog: ToolCatalog,
-  cwd: string,
-  modelOverride: string | undefined,
-  parentContext: ExtensionContext,
-): ResolutionResult<ToolResolution> {
-  const explicitNameSet = new Set(explicitNames);
-  const tools: AgentTool<any, any>[] = [];
-  const capabilities = new Set<ToolCapability>();
-  const unknownExplicitNames: string[] = [];
-
-  for (const name of names) {
-    const entry = catalog.byName.get(name);
-    if (entry) {
-      tools.push(materializeTool(entry, cwd, parentContext));
-      for (const capability of entryCapabilities(entry)) capabilities.add(capability);
-    } else if (explicitNameSet.has(name)) {
-      unknownExplicitNames.push(name);
-    }
-  }
-
-  if (unknownExplicitNames.length > 0) {
-    return resolutionError({
-      reason: ResolutionErrorReason.InvalidTools,
-      message: `Unknown tools: ${unknownExplicitNames.join(", ")}. Available: ${catalog.availableNames.join(", ")}`,
-      toolNames: [...explicitNames],
-      modelOverride,
-    });
-  }
-  const workspaceAccess =
-    capabilities.has(ToolCapability.Write) || capabilities.has(ToolCapability.Execute)
-      ? WorkspaceAccess.Write
-      : WorkspaceAccess.Read;
-  return resolutionOk({ tools, toolNames: [...names], workspaceAccess });
-}
-
-export function resolveTools(
-  params: SubagentParams,
-  agentConfig: AgentConfig | undefined,
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
-  cwd: string,
-  parentContext?: ExtensionContext,
-): ResolutionResult<ToolResolution> {
-  // Two mechanisms, unioned when both present:
-  //   capabilities: include all tools whose capability tags are a subset of the requested set.
-  //   tools: include specific tools by name.
-  const requestedCapabilities = agentConfig?.capabilities ?? [];
-  const explicitNames = agentConfig?.tools ?? params.tools ?? [];
-  if (explicitNames.length === 0 && requestedCapabilities.length === 0) {
-    return resolutionError({
-      reason: ResolutionErrorReason.NoTools,
-      message:
-        "No tools or capabilities specified. Provide tools/capabilities in the agent file or pass the tools parameter.",
-      toolNames: [],
-      modelOverride: params.model,
-    });
-  }
-
-  const publicExtTools = new Map(
-    [...registeredExtTools].filter(([, registration]) => registration.audience !== "dag"),
-  );
-  const names = collectToolNames(explicitNames, requestedCapabilities, publicExtTools);
-  const catalog = buildToolCatalog(publicExtTools);
-  return materializeToolResolution(
-    names,
-    explicitNames,
-    catalog,
-    cwd,
-    params.model,
-    parentContext ?? ({ cwd } as ExtensionContext),
-  );
-}
-
-export function resolveModel(
-  modelStr: string | undefined,
-  modelRegistry: ExtensionContext["modelRegistry"],
-  toolNames: string[],
-): ResolutionResult<ModelResolution> {
-  if (!modelStr) {
-    return resolutionError({
-      reason: ResolutionErrorReason.NoModel,
-      message: "No model specified. Provide model in the agent file or pass the model parameter.",
-      toolNames,
-    });
-  }
-
-  let model: unknown;
-  const slashIdx = modelStr.indexOf("/");
-  if (slashIdx !== -1) {
-    model = modelRegistry.find(modelStr.slice(0, slashIdx), modelStr.slice(slashIdx + 1));
-  } else {
-    const available = modelRegistry.getAvailable ? modelRegistry.getAvailable() : [];
-    model = available.find(
-      (candidate: any) => candidate.id === modelStr || candidate.id.includes(modelStr),
-    );
-  }
-
-  if (!model) {
-    return resolutionError({
-      reason: ResolutionErrorReason.ModelNotFound,
-      message: `Model not found: "${modelStr}". Check the model ID and provider name.`,
-      toolNames,
-      modelOverride: modelStr,
-    });
-  }
-
-  return resolutionOk({ model, modelStr });
-}
-
-export function resolveSystemPrompt(params: SubagentParams, agentConfig?: AgentConfig): string {
-  return (
-    params.system_prompt ??
-    agentConfig?.systemPrompt ??
-    "Complete the task using only the tools provided. Be concise and direct."
-  );
-}
-
-export function isProjectTrustedForCwd(ctx: ExtensionContext, cwd: string): boolean {
+export function isProjectTrustedForCwd(ctx: Pick<ExtensionContext, "cwd" | "isProjectTrusted">, cwd: string): boolean {
   const parentCwd = resolveEffectiveCwd({ task: "" }, ctx.cwd);
   if (isResolutionOk(parentCwd) && parentCwd.value === cwd) {
     return ctx.isProjectTrusted?.() === true;
@@ -367,49 +110,18 @@ export function isProjectTrustedForCwd(ctx: ExtensionContext, cwd: string): bool
   return new ProjectTrustStore(getAgentDir()).get(cwd) === true;
 }
 
+/** Native child services own tool and model resolution. */
 export function resolveSubagentExecutionPlan(
   params: SubagentParams,
-  ctx: ExtensionContext,
-  registeredExtTools: ReadonlyMap<string, ExtToolRegistration>,
+  ctx: Pick<ExtensionContext, "cwd" | "isProjectTrusted">,
 ): ResolutionResult<SubagentExecutionPlan> {
-  const effectiveCwd = resolveEffectiveCwd(params, ctx.cwd);
-  if (!isResolutionOk(effectiveCwd)) return effectiveCwd;
-
-  if (params.agent && params.agent_scope === "project" && !isProjectTrustedForCwd(ctx, effectiveCwd.value)) {
-    return resolutionError({
-      reason: ResolutionErrorReason.UntrustedProjectAgent,
-      message: "Project agents require an explicit project scope and a trusted project.",
-      toolNames: [],
-      modelOverride: params.model,
-    });
-  }
-
-  const agent = resolveAgentConfig(params, effectiveCwd.value);
-  if (!isResolutionOk(agent)) return agent;
-
-  const tools = resolveTools(
-    params,
-    agent.value.agentConfig,
-    registeredExtTools,
-    effectiveCwd.value,
-    ctx,
-  );
-  if (!isResolutionOk(tools)) return tools;
-
-  const model = resolveModel(
-    params.model ?? agent.value.agentConfig?.model,
-    ctx.modelRegistry,
-    tools.value.toolNames,
-  );
-  if (!isResolutionOk(model)) return model;
-
+  const cwd = resolveEffectiveCwd(params, ctx.cwd);
+  if (!isResolutionOk(cwd)) return cwd;
   return resolutionOk({
-    agentConfig: agent.value.agentConfig,
-    tools: tools.value.tools,
-    toolNames: tools.value.toolNames,
-    model: model.value.model,
-    systemPrompt: resolveSystemPrompt(params, agent.value.agentConfig),
-    effectiveCwd: effectiveCwd.value,
-    workspaceAccess: tools.value.workspaceAccess,
+    toolNames: params.tools,
+    modelOverride: params.model,
+    systemPrompt: params.system_prompt,
+    effectiveCwd: cwd.value,
+    workspaceAccess: Control.WorkspaceAccess.Write,
   });
 }

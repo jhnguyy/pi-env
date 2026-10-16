@@ -65,6 +65,8 @@ describe("DAG subagent executor", () => {
   it("rejects strict v1 payload violations", async () => {
     const root = await tempRoot();
     expect(() => parseDagSubagentPayload(payload(root))).not.toThrow();
+    expect(() => parseDagSubagentPayload(payload(root, { agent: { name: "scout", scope: "user" } }))).toThrow(DagSubagentPayloadFailure);
+    expect(() => parseDagSubagentPayload(payload(root, { agent_scope: "project" }))).toThrow(DagSubagentPayloadFailure);
     expect(() => parseDagSubagentPayload(payload(root, { extra: true }))).toThrow(
       DagSubagentPayloadFailure,
     );

@@ -1,54 +1,53 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it, vi } from "vitest";
-import { fauxAssistantMessage, fauxProvider, getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
-import { ModelRegistry, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
-import { createSubagentHarness } from "./harness";
+import { expect, it } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import * as ChildContext from "../../_shared/child-context";
+import type { ReadableSpan } from "@opentelemetry/sdk-trace-node";
+import * as Tooling from "../../../../src/telemetry/tooling";
+import * as SessionRuntime from "../session-runtime";
 
-// Only inference is scripted: native fauxProvider's documented response factory observes the
-// provider transcript. ModelRuntime/ModelRegistry, public run, loop and persistence remain real.
-it("runs a registered child through the configured native provider and reopens its exact transcript", async () => {
+// Native target configuration and inference boundary; no parent model catalog or loop injection.
+it("runs native target configuration with explicit overrides through the public runtime", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-configured-child-"));
-  vi.stubEnv("PI_CODING_AGENT_DIR", root);
-  vi.stubEnv("OTEL_SDK_DISABLED", "true");
-  const harness = createSubagentHarness();
-  const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")) };
+  const spans: ReadableSpan[] = [];
+  const runtime = new SessionRuntime.SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any, {
+    telemetryRuntimeFactory: () => Tooling.createToolingTelemetryRuntime({
+      serviceName: "native-contract", env: { PI_ENV_TOOLING_OTEL_ENABLED: "true", PI_ENV_TOOLING_OTEL_ENDPOINT: "http://collector:4318" },
+      exporter: { export: (finished, callback) => { spans.push(...finished); callback({ code: 0 }); }, shutdown: async () => {}, forceFlush: async () => {} },
+    }),
+  });
   try {
-    const requests: TranscriptContext[] = [];
-    const faux = fauxProvider({ provider: "configured", models: [{ id: "local" }] });
-    faux.setResponses([(context) => {
-      requests.push(context);
-      return fauxAssistantMessage("configured answer");
-    }]);
-    const runtime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: null, refreshOnCreate: false });
-    runtime.registerNativeProvider(faux.provider);
-    await runtime.getAvailable();
-    ctx.modelRegistry = new ModelRegistry(runtime);
-    const agentsDir = join(root, "package", ".pi", "agents");
-    mkdirSync(agentsDir, { recursive: true });
-    writeFileSync(join(root, "settings.json"), JSON.stringify({ packages: ["./package"] }));
-    writeFileSync(join(agentsDir, "configured.md"),
-      "---\nname: configured-agent\ndescription: Configured child\ntools: [read]\nmodel: configured/local\n---\nRead only.\n");
-    await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
-    const result = await harness.tools.get("subagent").execute("configured-run", {
-      action: "run", name: "configured", task: "task", agent: "configured-agent",
-      system_prompt: "exact initial prompt\n",
-    }, undefined, undefined, ctx);
-    expect(result.details.isError).toBe(false);
-    expect(result.details.finalOutput).toBe("configured answer");
-    expect(requests.some((request) => request.messages.some((message) =>
-      message.role === "system" && message.content === "exact initial prompt\n"))).toBe(true);
-    expect(requests.some((request) => getCurrentTools(request.messages).some((tool) => tool.name === "read"))).toBe(true);
-    const reopened = SessionManager.open(result.details.sessionFile);
-    const messages = reopened.buildSessionContext().messages;
-    expect(messages.filter((message) => message.role === "system" && message.content === "exact initial prompt\n")).toHaveLength(1);
-    expect(messages).toEqual(expect.arrayContaining([
-      expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "configured answer" }] }),
-    ]));
+    mkdirSync(join(root, ".pi"), { recursive: true });
+    const extension = join(root, ".pi", "provider.mjs");
+    writeFileSync(extension, `import { fauxProvider, fauxAssistantMessage } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+export default function(pi) {
+ const p = fauxProvider({provider:'configured'});
+ p.setResponses([fauxAssistantMessage('configured answer')]);
+ pi.registerProvider(p.provider);
+}`);
+    writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension] }));
+    const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
+    await ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, async () => {
+      await runtime.startSession(ctx);
+      const params = { name: "configured", task: "private task", tools: [], model: "configured/faux-1", system_prompt: "Explicit delegated instruction" };
+      const updates: string[] = [];
+      const result = await runtime.execute("configured-run", params, undefined, update => updates.push(JSON.stringify(update.content)), ctx);
+      expect(result.details.isError, JSON.stringify(result)).toBe(false);
+      expect(result.details.finalOutput).toBe("configured answer");
+      expect(updates.join("\n")).toContain("configured answer");
+      expect(result.details.toolNames).toEqual([]);
+      const reopened = SessionManager.open(result.details.sessionFile!);
+      expect(reopened.buildSessionContext().messages).toContainEqual(expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "configured answer" }] }));
+      expect(ctx.sessionManager.buildSessionContext().messages).toEqual([]);
+      await runtime.shutdownSession();
+      expect(spans.map(span => span.name)).toContain("tooling.subagent.run");
+      const exported = JSON.stringify(spans.map(span => ({ name: span.name, attributes: span.attributes, events: span.events })));
+      for (const secret of [root, "private task", "configured answer", "Explicit delegated instruction"]) expect(exported).not.toContain(secret);
+    });
   } finally {
-    await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
-    vi.unstubAllEnvs();
+    await runtime.shutdownSession();
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 30000);

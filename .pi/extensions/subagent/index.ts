@@ -2,19 +2,22 @@ import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
+import type { OverlayHandle } from "@earendil-works/pi-tui";
 
-import { discoverAgents } from "./agents";
-import { SubagentBrowser } from "./browser";
-import { formatJobMetadata, formatJobResult, type SubagentJob } from "./jobs";
-import type { SubagentParams } from "./resolver";
-import { buildDynamicDescription, STATIC_DESCRIPTION } from "./discovery";
-import { renderSubagentToolCall, renderSubagentToolResult } from "./render";
-import { SubagentJobStatus, SubagentJobToolStatus, type SubagentJobRenderDetails } from "./types";
-import { SubagentSessionRuntime, type SubagentSessionRuntimeDependencies } from "./session-runtime";
-import { toNestedToolUsage } from "./usage";
-import { listenForAgentTools, PiEvent, type ExtToolRegistration } from "../_shared/agent-tools";
-import { readOptionalAgentSettings } from "../_shared/agent-settings";
-import { registerPublicTool } from "../_shared/tool-render";
+import * as Browser from "./browser";
+import * as ChildTypes from "./child-types";
+import * as Jobs from "./jobs";
+import type * as Resolver from "./resolver";
+import * as Discovery from "./discovery";
+import * as Render from "./render";
+import * as Types from "./types";
+import * as SessionRuntime from "./session-runtime";
+import * as NativeUsage from "../_shared/native-usage";
+import * as AgentTools from "../_shared/agent-tools";
+import * as ChildContext from "../_shared/child-context";
+import * as Transcript from "./transcript";
+import * as AgentSettings from "../_shared/agent-settings";
+import * as ToolRender from "../_shared/tool-render";
 export {
   DagSubagentAdapterFailure,
   DagSubagentExecutorKey,
@@ -46,40 +49,28 @@ const SUBAGENT_PARAMETERS = Type.Object(
           "Human-readable child-session name. Required for run/start. Stored as a `sub-` prefixed session name.",
       }),
     ),
-    agent: Type.Optional(
-      Type.String({
-        description:
-          "Agent name for run/start. Resolves to an agent definition with tools, model, and system prompt configuration.",
-      }),
-    ),
     task: Type.Optional(Type.String({ description: "Task to delegate. Required for run/start." })),
     tools: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Tool whitelist for run/start. Required when not using an agent file.",
+        description: "Explicit child tool selection. Omit for native defaults; [] selects no tools.",
       }),
     ),
     model: Type.Optional(
       Type.String({
         description:
-          "Model as 'provider/model-id' for run/start. Required when not using an agent file.",
+          "Model as 'provider/model-id' for run/start. Omit for the child-native default.",
       }),
     ),
     system_prompt: Type.Optional(
       Type.String({
         description:
-          "System prompt override for run/start. Agent files can provide the prompt instead.",
+          "Additional delegated system instructions. Native context and resources still load normally.",
       }),
     ),
     cwd: Type.Optional(
       Type.String({
         description:
           "Absolute working directory for run/start. Resolved with realpath and must be an existing directory.",
-      }),
-    ),
-    agent_scope: Type.Optional(
-      StringEnum(["user", "project"] as const, {
-        description:
-          "Agent definition scope for run/start. Defaults to user and installed package agents. Project agents require explicit scope and project trust.",
       }),
     ),
     job_id: Type.Optional(
@@ -93,35 +84,33 @@ const SUBAGENT_PARAMETERS = Type.Object(
 
 type SubagentToolParams = Static<typeof SUBAGENT_PARAMETERS>;
 
-function requireRunParams(params: SubagentToolParams): SubagentParams {
+function requireRunParams(params: SubagentToolParams): Resolver.SubagentParams {
   if (!params.name) throw new Error(`name is required for subagent ${params.action}.`);
   if (!params.task) throw new Error(`task is required for subagent ${params.action}.`);
   return {
     name: params.name,
-    agent: params.agent,
     task: params.task,
     tools: params.tools,
     model: params.model,
     system_prompt: params.system_prompt,
     cwd: params.cwd,
-    agent_scope: params.agent_scope,
   };
 }
 
-function completedJobUsageOnce(reportedJobUsage: Set<string>, job: SubagentJob) {
+function completedJobUsageOnce(reportedJobUsage: Set<string>, job: Jobs.SubagentJob) {
   if (
-    job.status === SubagentJobStatus.Queued ||
-    job.status === SubagentJobStatus.Running ||
-    job.status === SubagentJobStatus.Cancelling ||
+    job.status === Types.SubagentJobStatus.Queued ||
+    job.status === Types.SubagentJobStatus.Running ||
+    job.status === Types.SubagentJobStatus.Cancelling ||
     reportedJobUsage.has(job.id) ||
     !job.latestDetails?.usage
   )
     return {};
   reportedJobUsage.add(job.id);
-  return { usage: toNestedToolUsage(job.latestDetails.usage) };
+  return { usage: NativeUsage.toNestedToolUsage(job.latestDetails.usage) };
 }
 
-function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
+function getJobRenderDetails(job: Jobs.SubagentJob): Types.SubagentJobRenderDetails {
   const details = job.latestDetails;
   return {
     jobId: job.id,
@@ -137,53 +126,79 @@ function getJobRenderDetails(job: SubagentJob): SubagentJobRenderDetails {
   };
 }
 
-export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeDependencies = {}) {
-  const registeredExtTools = new Map<string, ExtToolRegistration>();
-  const stopListeningForAgentTools = listenForAgentTools(
-    pi,
-    (registration) => {
-      registeredExtTools.set(registration.tool.name, registration);
-    },
-    (registration) => {
-      if (registeredExtTools.get(registration.tool.name) === registration) {
-        registeredExtTools.delete(registration.tool.name);
-      }
-    },
-  );
+function inputOutcomeFeedback(outcome: ChildTypes.NativeInputOutcome, mode: ChildTypes.NativeInputMode): string {
+  switch (outcome) {
+    case ChildTypes.NativeInputOutcome.Queued:
+      return `${mode === ChildTypes.NativeInputMode.Steer ? "Steering" : "Follow-up"} queued for native processing.`;
+    case ChildTypes.NativeInputOutcome.Handled:
+      return "Handled by a child input hook; no model turn started.";
+    case ChildTypes.NativeInputOutcome.Started:
+      return "Native prompt settled.";
+  }
+}
 
-  const runtime = new SubagentSessionRuntime(pi, registeredExtTools, dependencies);
+export default function (pi: ExtensionAPI, dependencies: SessionRuntime.SubagentSessionRuntimeDependencies = {}) {
+  if (ChildContext.getChildContext()) return;
+  const runtime = new SessionRuntime.SubagentSessionRuntime(pi, dependencies);
   const reportedJobUsage = new Set<string>();
-  const browser: { current?: SubagentBrowser } = {};
+  const browser: { current?: Browser.SubagentBrowser } = {};
   const disposeBrowser = () => {
     browser.current?.dispose();
     browser.current = undefined;
   };
 
   pi.registerCommand("subagents", {
-    description: "Inspect retained background subagents without leaving the parent session",
+    description: "Inspect and interact with retained native children without switching the parent",
     handler: async (_args, ctx) => {
       if (ctx.mode !== "tui") {
         ctx.ui.notify("/subagents requires interactive terminal mode.", "warning");
         return;
       }
       if (browser.current) return;
-      if (runtime.listJobs().length === 0) {
-        ctx.ui.notify("No retained background subagent jobs in this parent session.", "info");
+      if (runtime.listChildren().length === 0) {
+        ctx.ui.notify("No retained child sessions in this parent session.", "info");
         return;
       }
+      const drafts = new Map<string, string>();
+      let handle: OverlayHandle | undefined;
+      let composing = false;
       try {
-        await ctx.ui.custom<void>(
-          (tui, theme, _keybindings, done) => {
-            browser.current = new SubagentBrowser(
-              () => runtime.listJobs(),
-              tui,
-              theme,
-              () => done(),
-            );
-            return browser.current;
-          },
-          { overlay: true, overlayOptions: { width: "90%", maxHeight: "80%" } },
-        );
+        await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
+          let component: Browser.SubagentBrowser;
+          component = new Browser.SubagentBrowser(runtime, tui, theme, () => done(), async (id, mode) => {
+            if (composing || browser.current !== component) return;
+            const child = runtime.inspectChild(id);
+            if (!child) throw new Error("Child session is no longer retained.");
+            const key = `${id}:${mode}`;
+            const name = Transcript.plainChildText(child.name).replace(/\s+/g, " ").trim();
+            composing = true;
+            let text: string | undefined;
+            // Native editor dialogs occupy the parent editor container. Hide this overlay
+            // while the dialog owns focus; the parent's editor object and draft stay intact.
+            handle?.setHidden(true);
+            try {
+              text = await ctx.ui.editor(`Human → ${name} · ${mode}`, drafts.get(key));
+            } finally {
+              composing = false;
+              if (browser.current === component) handle?.setHidden(false);
+            }
+            if (text === undefined || browser.current !== component) return;
+            drafts.set(key, text);
+            component.showStatus(`${name}: submitting ${mode}.`);
+            const submitted = text;
+            void Promise.resolve().then(() => runtime.inputChild(id, submitted, mode)).then(({ outcome }) => {
+              if (drafts.get(key) === submitted) drafts.delete(key);
+              const feedback = inputOutcomeFeedback(outcome, mode);
+              component.showStatus(`${name}: ${feedback}`);
+            }, (error) => component.showStatus(`${name}: ${error instanceof Error ? error.message : String(error)} Draft retained; open the same input mode to retry.`));
+          });
+          browser.current = component;
+          return component;
+        }, {
+          overlay: true,
+          overlayOptions: { width: "90%", maxHeight: "80%" },
+          onHandle: (overlay) => { handle = overlay; },
+        });
       } finally {
         disposeBrowser();
       }
@@ -193,19 +208,19 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
   const executeJobAction = async (
     params: SubagentToolParams,
     signal?: AbortSignal,
-  ): Promise<AgentToolResult<SubagentJobRenderDetails>> => {
+  ): Promise<AgentToolResult<Types.SubagentJobRenderDetails>> => {
     if (params.action === SubagentAction.Usage) {
       return {
         content: [{ type: "text", text: runtime.usageText() }],
-        details: { status: SubagentJobToolStatus.Usage },
+        details: { status: Types.SubagentJobToolStatus.Usage },
       };
     }
     if (params.action === SubagentAction.List) {
       const activeJobs = runtime.listJobs();
-      const output = activeJobs.map(formatJobMetadata).join("\n") || "No subagent jobs.";
+      const output = activeJobs.map(Jobs.formatJobMetadata).join("\n") || "No subagent jobs.";
       return {
         content: [{ type: "text", text: output }],
-        details: { status: SubagentJobToolStatus.List, count: activeJobs.length },
+        details: { status: Types.SubagentJobToolStatus.List, count: activeJobs.length },
       };
     }
     if (!params.job_id) throw new Error("job_id is required for status, wait, result, and cancel.");
@@ -221,12 +236,12 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
           ],
           details: waited.job
             ? getJobRenderDetails(waited.job)
-            : { jobId: params.job_id, status: SubagentJobStatus.Running },
+            : { jobId: params.job_id, status: Types.SubagentJobStatus.Running },
         };
       }
       if (!waited.job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
-        content: [{ type: "text", text: formatJobResult(waited.job) }],
+        content: [{ type: "text", text: Jobs.formatJobResult(waited.job) }],
         details: getJobRenderDetails(waited.job),
         ...completedJobUsageOnce(reportedJobUsage, waited.job),
       };
@@ -235,7 +250,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
       const job = runtime.getJob(params.job_id);
       if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
       return {
-        content: [{ type: "text", text: formatJobResult(job) }],
+        content: [{ type: "text", text: Jobs.formatJobResult(job) }],
         details: getJobRenderDetails(job),
         ...completedJobUsageOnce(reportedJobUsage, job),
       };
@@ -246,19 +261,23 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
         : runtime.getJob(params.job_id);
     if (!job) throw new Error(`Unknown subagent job: ${params.job_id}`);
     return {
-      content: [{ type: "text", text: formatJobMetadata(job) }],
+      content: [{ type: "text", text: Jobs.formatJobMetadata(job) }],
       details: getJobRenderDetails(job),
     };
   };
 
   const registerSubagentTool = (description: string) =>
-    registerPublicTool(pi, {
+    ToolRender.registerPublicTool(pi, {
       name: "subagent",
       label: "Subagent",
       exposure: "model-only",
       description,
       parameters: SUBAGENT_PARAMETERS,
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        // Direct extension callers must not silently discard obsolete instructions.
+        if (Object.hasOwn(params, "agent") || Object.hasOwn(params, "agent_scope")) {
+          throw new Error("Named agent definitions are no longer supported. Use explicit model, tools, and system_prompt overrides.");
+        }
         if (params.action === SubagentAction.Run) {
           const result = await runtime.execute(
             toolCallId,
@@ -267,7 +286,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
             onUpdate,
             ctx,
           );
-          return { ...result, usage: toNestedToolUsage(result.details.usage) };
+          return { ...result, usage: NativeUsage.toNestedToolUsage(result.details.usage) };
         }
         if (params.action === SubagentAction.Start) {
           if (signal?.aborted) throw new Error("Subagent start aborted.");
@@ -276,7 +295,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
         return executeJobAction(params, signal);
       },
       renderCall: (args, theme, context) =>
-        renderSubagentToolCall(
+        Render.renderSubagentToolCall(
           args,
           theme,
           context,
@@ -284,22 +303,21 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
             ? runtime.getJob(args.job_id)?.name
             : undefined,
         ),
-      renderResult: renderSubagentToolResult,
+      renderResult: Render.renderSubagentToolResult,
     });
 
-  registerSubagentTool(STATIC_DESCRIPTION);
-  pi.on(PiEvent.SessionBeforeTree, async () => {
+  registerSubagentTool(Discovery.STATIC_DESCRIPTION);
+  pi.on(AgentTools.PiEvent.SessionBeforeTree, async () => {
     await runtime.settleJobsBeforeTreeNavigation();
   });
   pi.on("session_shutdown", async (_event, ctx) => {
     browser.current?.close();
-    stopListeningForAgentTools();
     await runtime.shutdownSession(ctx);
   });
 
-  pi.on(PiEvent.SessionStart, async (_event, ctx) => {
+  pi.on(AgentTools.PiEvent.SessionStart, async (_event, ctx) => {
     if (!(await runtime.startSession(ctx))) return;
-    const settings = readOptionalAgentSettings(undefined, ctx.cwd);
+    const settings = AgentSettings.readOptionalAgentSettings(undefined, ctx.cwd);
     const modelAnnotations = settings?.modelAnnotations ?? {};
     const availableModels = ctx.modelRegistry.getAvailable() as Array<{
       provider: string;
@@ -307,22 +325,7 @@ export default function (pi: ExtensionAPI, dependencies: SubagentSessionRuntimeD
       name: string;
     }>;
 
-    const { agents } = discoverAgents(ctx.cwd, "user");
-
-    const publicExtTools = [...registeredExtTools].filter(
-      ([, registration]) => registration.audience !== "dag",
-    );
-    const extToolNames = publicExtTools.map(([name]) => name);
-    const extToolCaps = new Map(
-      publicExtTools.map(([name, registration]) => [name, registration.capabilities]),
-    );
-    const description = buildDynamicDescription(
-      availableModels,
-      agents,
-      extToolNames,
-      extToolCaps,
-      modelAnnotations,
-    );
+    const description = Discovery.buildDynamicDescription(availableModels, pi.getAllTools().map((tool) => tool.name), modelAnnotations);
     registerSubagentTool(description);
   });
 }

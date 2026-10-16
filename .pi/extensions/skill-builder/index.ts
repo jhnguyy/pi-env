@@ -6,21 +6,22 @@
  *   for a skill
  */
 
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum, type Usage } from "@earendil-works/pi-ai";
+import * as NativeUsage from "../_shared/native-usage";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "fs";
 import { basename, join, resolve } from "path";
 import { Type } from "typebox";
 import type { SpanExporter } from "@opentelemetry/sdk-trace-node";
 import { Data, Effect, Result } from "effect";
-import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
   registerPublicTool,
   renderCompactToolCall,
   renderTextToolResult,
 } from "../_shared/tool-render";
-import { WorkspaceAccess } from "../subagent/control";
+import * as Control from "../subagent/control";
+import * as ChildContext from "../_shared/child-context";
 import {
   runResolvedSubagentEffect,
   type ResolvedSubagentRun,
@@ -343,48 +344,13 @@ interface EvaluationSummaryMetadata {
   readonly errorKind?: string;
 }
 
-function configuredModel(ctx: ExtensionContext): any {
-  const current = (ctx as ExtensionContext & { model?: unknown }).model;
-  if (current) return current;
-  const fallback = ctx.modelRegistry.getAvailable()[0];
-  if (!fallback) throw new Error("No usable model is available for skill evaluation.");
-  return fallback;
-}
-
-function modelString(model: any): string | undefined {
-  return model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
-}
-
 export function modelConfigFromModel(model: any, actualModel?: string): EvalModelConfig {
   return {
-    provider: model?.provider || "unknown",
-    model: actualModel || model?.id || "unknown",
-    costModel: model ? "api" : "self-hosted",
+    provider: actualModel?.includes("/") ? actualModel.slice(0, actualModel.indexOf("/")) : model?.provider || "unknown",
+    model: actualModel?.includes("/") ? actualModel.slice(actualModel.indexOf("/") + 1) : actualModel || model?.id || "unknown",
+    costModel: model || actualModel ? "api" : "self-hosted",
     costPerMillionInputTokens: model?.cost?.input || 0,
     costPerMillionOutputTokens: model?.cost?.output || 0,
-  };
-}
-
-function toolUsage(usage: {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-}): Usage {
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: usage.cost,
-    },
   };
 }
 
@@ -430,18 +396,14 @@ function evaluationRun(
   skillName: string,
   prompt: string,
   skillDir: string,
-  model: any,
 ): ResolvedSubagentRun {
   return {
     name: `skill-evaluation-${skillName}`,
     task: prompt,
-    tools: [],
     toolNames: [],
-    model,
-    modelOverride: modelString(model),
     systemPrompt: EVALUATOR_SYSTEM_PROMPT,
     cwd: skillDir,
-    workspaceAccess: WorkspaceAccess.Read,
+    workspaceAccess: Control.WorkspaceAccess.Read,
   };
 }
 
@@ -511,46 +473,16 @@ function runExistingSkillWorkflowEffect(
         }),
       );
       const prompt = buildEvalPrompt(skillContent, skillName, mode.goal, diff.diff);
-      const modelResult = yield* Effect.result(
-        Effect.try({
-          try: () => configuredModel(options.ctx!),
-          catch: (cause) =>
-            operationalFailure(
-              SkillBuildOperation.Evaluate,
-              "Skill evaluation model resolution failed",
-              cause,
-            ),
-        }),
-      );
-      if (Result.isFailure(modelResult)) {
-        lines.push("");
-        lines.push("Advisory evaluation unavailable for user review: no model is available.");
-        yield* diagnostics.annotate({
-          operation: SkillBuildOperation.Run,
-          mode: mode._tag,
-          outcome: "success",
-          error_kind: "model",
-          ...validationCounts(validation),
-        });
-        return textResult(lines.join("\n"), {
-          skillDir,
-          validation,
-          diffSource: diff.source,
-        });
-      }
-      const model = modelResult.success;
       const child = yield* Effect.result(
         diagnostics.span(
           SkillBuildSpanName.Evaluate,
           {
             operation: SkillBuildOperation.Run,
             mode: mode._tag,
-            provider: model.provider,
-            model: model.id,
             cost_model: "subagent",
           },
           (options.evaluationRunner ?? runResolvedSubagentEffect)(
-            evaluationRun(skillName, prompt, skillDir, model),
+            evaluationRun(skillName, prompt, skillDir),
             options.ctx,
             evaluationOptions(options),
           ).pipe(
@@ -578,7 +510,8 @@ function runExistingSkillWorkflowEffect(
       }
 
       const result = child.success;
-      const summary = appendEvaluationSummary(lines, result, skillName, model);
+      const modelConfig = modelConfigFromModel(undefined, result.details.model);
+      const summary = appendEvaluationSummary(lines, result, skillName, undefined);
       yield* diagnostics.annotate({
         operation: SkillBuildOperation.Run,
         mode: mode._tag,
@@ -586,9 +519,9 @@ function runExistingSkillWorkflowEffect(
         error_kind: summary.errorKind,
         verdict: summary.evaluation?.verdict,
         finding_count: summary.findingCount,
-        provider: model.provider,
-        model: result.details.model || model.id,
-        cost_model: modelConfigFromModel(model).costModel,
+        provider: modelConfig.provider,
+        model: modelConfig.model,
+        cost_model: modelConfig.costModel,
         ...validationCounts(validation),
       });
       return textResult(
@@ -606,7 +539,7 @@ function runExistingSkillWorkflowEffect(
             isError: result.details.isError,
           },
         },
-        toolUsage(result.details.usage),
+        NativeUsage.toNestedToolUsage(result.details.usage),
       );
     }),
   );
@@ -625,7 +558,7 @@ export function executeSkillBuildEffect(
     : runExistingSkillWorkflowEffect(pi, resolution.mode, options, diagnostics);
 }
 
-/** Promise compatibility boundary for Pi and AgentTool execute callbacks. */
+/** Promise compatibility boundary for Pi execute callbacks. */
 export function runSkillBuild(
   pi: ExtensionAPI,
   params: SkillBuildParams,
@@ -643,6 +576,9 @@ export function runSkillBuild(
 }
 
 export default function (pi: ExtensionAPI) {
+  // Evaluation can run without the subagent extension. Close its standalone
+  // coordinator on native shutdown; shared coordinators coalesce settlement.
+  pi.on("session_shutdown", (_event, ctx) => Control.disposeSubagentRunSupervisor(ctx.sessionManager.getSessionId()));
   registerPublicTool(pi, {
     name: "skill_build",
     label: "Skill Build",
@@ -659,6 +595,7 @@ export default function (pi: ExtensionAPI) {
         cwd: ctx.cwd,
         signal,
         ctx,
+        allowEvaluation: ChildContext.getChildContext() === undefined,
       });
     },
     renderCall: (params, theme) =>
@@ -670,29 +607,4 @@ export default function (pi: ExtensionAPI) {
     renderResult: (result, options, theme, context) =>
       renderTextToolResult("skill_build", result, options, theme, context),
   });
-
-  const createSkillBuildAgentTool = (
-    cwd: string,
-    parentContext?: ExtensionContext,
-  ): AgentTool<any, any> => ({
-    name: "skill_build",
-    label: "Skill Build",
-    description:
-      "Create or validate a pi skill. Advisory evaluation must run from the parent session.",
-    parameters: SKILL_BUILD_PARAMETERS,
-    execute: async (_toolCallId, params, signal) =>
-      runSkillBuild(pi, params as SkillBuildParams, {
-        cwd,
-        signal,
-        ctx: parentContext,
-        allowEvaluation: false,
-      }),
-  });
-  registerAgentToolsOnSessionStart(pi, [
-    {
-      tool: createSkillBuildAgentTool(process.cwd()),
-      createTool: ({ cwd, parentContext }) => createSkillBuildAgentTool(cwd, parentContext),
-      capabilities: [ToolCapability.Read, ToolCapability.Write],
-    },
-  ]);
 }

@@ -1,67 +1,68 @@
 # Subagents
 
-The subagent extension runs child agents in the parent Pi process. Each child has an isolated context and a linked persistent session transcript.
+The subagent extension delegates work to native Pi SDK sessions in the parent process. Each child loads configuration and resources for its target working directory. Pi owns its model execution, tools, messages, persistence, retry, and compaction. See the [common entrypoint](../.pi/extensions/subagent/execute.ts) and [native owner](../.pi/extensions/subagent/native-child.ts).
 
-By default, the extension stores each child of a persistent parent below `_children/<parent-session-id>/` in the parent's session directory. A child of an in-memory parent uses Pi's native default session directory. Native Pi session discovery does not recurse into the nested child directory. This keeps the native resume picker focused on parent sessions. Recursive pi-env introspection can still list and read child transcripts. Use `pi --session <path>` to resume a child by its exact path only after its current owner has settled and released the session. Do not open the same child transcript in another Pi process while the child is running.
+## Delegation and results
 
-## Actions
+The `subagent` tool uses one `action` parameter:
 
-The `subagent` tool uses one `action` parameter for blocking runs and background job management.
+- `run` waits for the child's initial result.
+- `start` starts a background job and returns a volatile job ID.
+- `list` and `status` return retained job metadata.
+- `wait` waits for a terminal job state. Completed jobs return their bounded initial answer; other terminal states return metadata.
+- `result` returns the bounded initial answer of a completed job.
+- `cancel` requests cancellation of the job's current initial operation.
+- `usage` reports aggregate child usage, including subsequent human prompts.
 
-Use `action: "run"` when the parent must wait for the child result.
+Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration. An explicit empty tool list selects no tools. Old AgentTool aliases, such as `dev-tools-edit`, are not native tool names.
 
-Use `action: "start"` to start a session-scoped job and continue parent work. The tool returns a volatile job ID. Use these actions to manage the job:
+Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.
 
-- `list` returns bounded metadata for retained jobs.
-- `status` returns metadata for one job.
-- `wait` waits for a terminal state. A successfully completed job returns its bounded retained final answer directly. Other terminal states return status metadata.
-- `result` returns only the bounded retained final answer for a completed job. Job, usage, session, and truncation metadata remain available in tool details and the TUI.
-- `cancel` requests cancellation.
-- `usage` returns aggregate subagent usage for the parent session.
+The model roster in the tool description describes the parent configuration for selection guidance. A child does not copy the parent's runtime-only providers, transient CLI configuration, or model catalog. Model annotations are descriptive, not delegation permissions.
 
-Use the child session file when you need the complete transcript. Live job handles do not survive a restart. The extension does not retry interrupted work automatically.
+`system_prompt` supplies additional delegated instructions, not a replacement for Pi's native system/context loading. The child appends those delegated instructions to its native prompt. Native context files, skills, input hooks, and configured extensions still apply.
 
-Collapsed TUI views omit the full delegated task and child output. Expanded views show the task and available child output. Tool call summaries never show an inline system prompt. Each active background child has one brief line in the lower status area immediately above the built-in footer. The line disappears when the child reaches a terminal state.
+A completed initial result stays unchanged when a human continues the child. Use the native session for later messages. Job handles and live owners do not survive a parent restart.
 
-## Interactive browser
+## Direct interaction
 
-Run `/subagents` in terminal mode to inspect retained background jobs. Type to search by name, job ID, state, or model. Each row includes a short job ID to distinguish repeated names. Select a job with the arrow keys and press Enter to inspect it. The detail view shows the full job ID. Completed and failed jobs remain available until the existing retention policy evicts them.
+Run `/subagents` in terminal mode. The roster includes retained blocking children, background children, and internal native children such as review nodes. Type to search; use the arrow keys and Enter to select a child.
 
-The read-only viewer refreshes finalized child messages once per second. Use the arrow keys or Page Up and Page Down to scroll. Home moves to the beginning of the displayed content. End follows new messages. Escape returns to the job list. Escape from the list returns to the unchanged parent draft.
+In a child view:
 
-Opening the browser does not wait for jobs, cancel jobs, or replace the parent session. Other jobs continue under the existing supervisor. Session shutdown closes the browser.
+- **Tab** cycles through conversation, instructions, configuration, and input provenance.
+- **p** opens the native multiline editor for an idle prompt.
+- **s** opens it for steering a running child.
+- **f** opens it for a follow-up to a running child.
+- **c** requests cancellation of the current operation.
+- **Arrow keys / Page Up / Page Down** scroll. **Home** moves to the beginning; **End** follows new output.
+- **Escape** returns to the roster, then to the parent.
 
-Transcript inspection reads at most the latest 128 KiB and displays at most 32,768 text characters, plus an omission notice. The viewer reports omitted history and removes terminal control sequences. It does not rewrite child files. A transcript can be unavailable before the first finalized assistant message. Retained job diagnostics remain visible independently of transcript availability, with a separate 1,024-character limit and truncation notice. Finalized assistant errors and aborts remain visible even when their text content is empty. The viewer does not display partial streaming responses, thinking, or images.
+The native editor uses the user's Pi editor bindings, including external-editor support. The browser temporarily hides its overlay while that editor owns focus. It does not replace the parent session or change the parent draft. Cancelling the editor sends nothing. A rejected submission retains its text for retry in the same child/input mode while the browser remains open.
 
-The initial browser lists only background jobs retained in the current parent runtime. Blocking `run` calls and historical jobs after a restart are not included. Steering, continuation, nested navigation, and orchestrator mode are not implemented.
+Human text goes directly to the existing child owner. The coordinator does not rewrite or approve it. Native input hooks, commands, and expansions can still handle or transform it. Provenance records the original coordinator task and human inputs separately from the resulting native conversation. Queued steering or follow-up is not a claim that the model has already consumed it. Input mode is revalidated when submitted.
 
-## Agent definitions and trust
+Configuration inspection separates active tools from callable tools. Instructions and provenance preserve multiline text and remove terminal controls for display. Conversation display shows finalized native context messages, with a 32,768-character display limit and an omission notice. Native compaction can summarize earlier messages. The browser does not display partial streaming responses, thinking, or images. Inspect the native session file for retained history.
 
-The default `agent_scope` is `user`. This scope includes user agents and agents from packages registered in global settings. Packages declared in project settings do not enter the default scope.
+Closing the browser does not cancel or close children. Parent shutdown closes the browser and its retained owners. This browser does not reopen historical sessions or provide nested delegation.
 
-Set `agent_scope` to `project` to use project agents or agents from project-declared packages. The target directory must be trusted before the extension resolves the agent. The current session's trust decision applies only to its own canonical directory. For a different target directory, the extension requires a saved trust grant from Pi's native `ProjectTrustStore`. A saved denial or an unknown decision rejects the request. This baseline does not prompt for new trust grants.
+## Persistence and ownership
 
-Model selection uses Pi's configured registry. The subagent tool advertises every available model, regardless of the native `enabledModels` cycling selection. Model annotations are descriptive guidance. They do not approve, restrict, or reserve models for particular roles.
+For a persistent parent, children normally live under `_children/<parent-session-id>/` in the parent's session directory. Native Pi discovery does not recurse into that directory. Recursive pi-env introspection can find these files. Children of in-memory parents use Pi's default session directory.
 
-## Execution boundaries
+Use `pi --session <exact-path>` only **after the previous owner closes**, such as after parent shutdown or retention eviction. Completion, idleness, or a cancellation request alone does not release a retained owner. Do not attach another transcript writer to a live child. Eviction does not delete its native session file.
 
-Built-in and shared cross-host tools use the resolved child working directory. A parent context does not override that directory. Child model requests use the configured model registry's streaming method. The initial system prompt is retained in the child transcript.
+Set `subagent.sessionStorage` to `"sibling"` only when native Pi discovery must find children beside their parent. The default is `"nested"`.
 
-Children run through the [low-level executor](../.pi/extensions/subagent/execute.ts), not a complete Pi SDK session. They do not automatically load context resources, extension hooks, native codemode, tool search, or MCP. Parent tool permission hooks do not govern direct child calls.
+## Native context and trust
 
-### Named agent discovery
+Custom named-agent definitions are no longer supported. The extension does not scan user, project, or package `.pi/agents` directories. The public `agent` and `agent_scope` parameters and DAG payload `agent` field are rejected, not ignored. Supply explicit `model`, `tools`, and `system_prompt` overrides instead, or omit them for native target defaults.
 
-Named agent definitions are extension-owned configuration, not the `AGENTS.md` context files supplied by Pi's resource loader. See [agent discovery](../.pi/extensions/subagent/agents.ts) for accepted fields and source precedence, and [execution-plan resolution](../.pi/extensions/subagent/resolver.ts) for selection and trust checks.
+Native `AGENTS.md` context loading is unchanged. Pi loads target configuration, context, skills, and extensions through its native resource loader. Parent trust applies only to the same canonical cwd. A different target uses its saved decision in Pi's native `ProjectTrustStore`; unknown or denied targets do not receive project trust. Child startup does not prompt for new grants. See [target trust resolution](../.pi/extensions/subagent/resolver.ts) and [native child startup](../.pi/extensions/subagent/native-child.ts).
 
-Native package resource filters and `pi config` do not control named-agent candidates. Discovery considers configured, installed packages in the selected scope, but not temporary `pi -e` sources. It does not install packages or automatically apply discovered agent instructions.
+## Limits and cancellation
 
-## Resource limits
-
-One supervisor controls admission for blocking jobs, asynchronous jobs, and direct child-runtime callers. The supervisor controls concurrency, pending runs, workspace writers, and run time.
-
-Public `run` and `start` actions do not have a turn-count limit. The configured run-time limit still applies.
-
-Configure limits in the `subagent` settings block:
+One parent supervisor controls blocking runs, background jobs, internal DAG children, and idle continuations. Configure its limits in the `subagent` settings block:
 
 ```json
 {
@@ -71,18 +72,13 @@ Configure limits in the `subagent` settings block:
     "maxRetainedJobs": 32,
     "maxResultBytes": 51200,
     "maxRunMs": 1800000,
-    "cancellationGraceMs": 500,
     "sessionStorage": "nested"
   }
 }
 ```
 
-The supervisor bounds pending admission. Write-capable runs serialize by canonical Git workspace. Retention eviction removes the volatile job handle but does not delete its child session transcript.
+All native operations conservatively acquire a workspace write lease. Native callable surfaces can exceed initial active-tool visibility, so a read-only label is not sufficient evidence for concurrent writers. Operations in the same canonical Git workspace serialize. Retention bounds settled owners and job handles; result truncation does not truncate the native transcript. Public runs have no turn-count limit. Internal callers can impose an initial-operation turn limit.
 
-Set `sessionStorage` to `"sibling"` only when native Pi must discover child transcripts beside their parent. The default is `"nested"`.
+Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
 
-## Cancellation states
-
-A running job changes to `cancelling` after a cancellation request. A cooperative child changes to `cancelled` after it settles. If the child does not settle before the cancellation deadline, the job changes to `interrupted`.
-
-Parent session shutdown rejects new jobs, cancels queued jobs, and drains running jobs within the configured cancellation boundary. Before parent tree navigation, the extension settles active jobs so a late result cannot attach to the selected branch.
+Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Review tools are supplied directly to their own native nodes, not published process-wide. Explicit review cleanup closes those retained nodes before deleting their private resources.
