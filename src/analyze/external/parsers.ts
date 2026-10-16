@@ -124,14 +124,15 @@ function diagnostic(value: unknown, context: string): OxlintDiagnostic {
   const severity = string(item.severity, `${context}.severity`);
   if (severity !== "error" && severity !== "warning" && severity !== "info") invalidOxlintJson(`${context}.severity is not supported`);
   if (!Array.isArray(item.labels) || item.labels.length === 0) invalidOxlintJson(`${context}.labels must be a non-empty array`);
-  if (!Array.isArray(item.related)) invalidOxlintJson(`${context}.related must be an array`);
+  const related = item.related === undefined ? [] : item.related;
+  if (!Array.isArray(related)) invalidOxlintJson(`${context}.related must be an array`);
   return {
     message: string(item.message, `${context}.message`),
     code: string(item.code, `${context}.code`),
     severity,
     filename: string(item.filename, `${context}.filename`),
     labels: item.labels.map((label, index) => ({ span: position(object(label, `${context}.labels[${index}]`).span, `${context}.labels[${index}].span`) })),
-    related: item.related.map((related, index) => diagnostic(related, `${context}.related[${index}]`)),
+    related: related.map((entry, index) => diagnostic(entry, `${context}.related[${index}]`)),
   };
 }
 
