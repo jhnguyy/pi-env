@@ -14,6 +14,14 @@ Reinstall local adapters after reset. Their setup can invoke the base setup firs
 
 Package registration uses the primary checkout when setup runs from a temporary worktree. Pi's stock `pi config` owns resource selection, including extension and skill toggles.
 
+## System instructions
+
+Setup reconciles the philosophy from [the repository source](../.pi/agent/APPEND_SYSTEM.md) into a bounded `pi-env:append-system` block in the agent directory's `APPEND_SYSTEM.md`. It updates that block on each setup run and preserves text outside it. Legacy unbounded instructions and markers remain untouched because they can contain personal edits.
+
+Pi reads the installed file at startup or `/reload`; it does not synchronize it from this repository. After updating pi-env, rerun setup to install guidance changes, then reload or start a new session. A trusted project `.pi/APPEND_SYSTEM.md` overrides the agent-directory file rather than combining with it.
+
+Correspondence rules use a separate managed block in the same file. Working standards and writing guidance use a managed block in the agent directory's `AGENTS.md`.
+
 ## Runtime integration
 
 Normal dependency installation relies on the shared postinstall hydration operation. When Nub cannot execute the selected runtime, setup installs with `--ignore-scripts` and invokes the same hydration operation through the provisioned Node. Setup does not separately repeat builds or daemon restarts.

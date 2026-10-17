@@ -63,7 +63,6 @@ function ctxEffect() {
       testUtilsDir: yield* envEffect("TEST_UTILS_DIR"),
       appendSrc: yield* envEffect("APPEND_SRC"),
       appendDst: yield* envEffect("APPEND_DST"),
-      appendMarker: yield* envEffect("APPEND_MARKER"),
       piAgentDir: yield* envEffect("PI_AGENT_DIR"),
       tmuxConf: yield* envEffect("TMUX_CONF"),
       tmuxSourceLine: yield* envEffect("TMUX_SOURCE_LINE"),

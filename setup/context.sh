@@ -24,7 +24,6 @@ setup_init_context() {
 
   APPEND_SRC="$REPO/.pi/agent/APPEND_SYSTEM.md"
   APPEND_DST="$PI_AGENT_DIR/APPEND_SYSTEM.md"
-  APPEND_MARKER="<!-- pi-env:append-system -->"
 
   TEST_UTILS_DIR="$PI_AGENT_DIR/extensions/__tests__"
   POST_MERGE_HOOK_SRC="$SETUP_DIR/hooks/post-merge"
