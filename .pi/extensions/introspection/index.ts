@@ -5,7 +5,6 @@ import { Type } from "typebox";
 
 import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
-import { SEARCH_SCHEMA, searchSessions, type SearchSessionsParams, type SessionSearchResult } from "./search";
 import {
   registerPublicTool,
   renderCompactToolCall,
@@ -13,12 +12,14 @@ import {
 } from "../_shared/tool-render";
 import {
   DEFAULT_SESSION_DIR,
+  SESSION_SEARCH_LIMIT,
   assertUnderSessionDir,
   formatDigestList,
   formatSessionView,
   inspectLines,
   listSessionDigests,
   readSessionFile,
+  searchSessionMessages,
 } from "./sessions";
 
 const LIST_SCHEMA = Type.Object({
@@ -29,6 +30,11 @@ const LIST_SCHEMA = Type.Object({
 
 const READ_SCHEMA = Type.Object({
   path: Type.String({ description: `Absolute path to a session .jsonl file under ${DEFAULT_SESSION_DIR}/.` }),
+});
+
+const SEARCH_SCHEMA = Type.Object({
+  term: Type.String({ minLength: 1, maxLength: 200, description: "Literal word or phrase to find. Case-insensitive, not a regex." }),
+  cwd: LIST_SCHEMA.properties.cwd,
 });
 
 type ListSessionsParams = { cwd?: string; query?: string; limit?: number };
@@ -104,16 +110,17 @@ function executeReadSession(
 }
 
 export default function (pi: ExtensionAPI) {
-  registerCrossHostTool<SearchSessionsParams, SessionSearchResult, typeof SEARCH_SCHEMA>(pi, {
+  registerCrossHostTool<{ term: string; cwd?: string }, Awaited<ReturnType<typeof searchSessionMessages>>, typeof SEARCH_SCHEMA>(pi, {
     contract: {
       name: "search_sessions",
       label: "Search Sessions",
       description:
-        "Search local pi session user and assistant text for a literal phrase. Read-only. Returns bounded snippets with file, JSONL line, session ID, entry ID, and parent ID. Searches all branches, not just the active path. Excludes tool outputs, thinking, and generated summaries. Defaults to all cwd values and parent/child sessions. Filesystem traversal order, not relevance or recency order. Use list_sessions for metadata navigation and read_session for a sparse session view.",
+        `Search local pi session user and assistant text, including nested sessions and alternate branches. Read-only. Returns at most ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool output, thinking, and summaries. Use list_sessions for metadata navigation and read_session for a sparse session view.`,
       parameters: SEARCH_SCHEMA,
       async execute(params, { signal }) {
-        const result = await searchSessions(params, { signal });
-        return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
+        const result = await searchSessionMessages({ ...params, signal });
+        const output = truncatedText(JSON.stringify(result));
+        return { content: [{ type: "text", text: output.text }], details: { ...result, truncated: result.truncated || output.truncated } };
       },
     },
     capabilities: [ToolCapability.Read],

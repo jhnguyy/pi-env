@@ -7,10 +7,11 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { setImmediate } from "node:timers/promises";
 import { parseSessionMilestoneLabel } from "../_shared/session-milestones";
 
-export const DEFAULT_SESSION_DIR = resolve(getAgentDir(), "sessions");
+export const DEFAULT_SESSION_DIR = resolve(homedir(), ".pi/agent/sessions");
 
 export const SessionEntryType = {
   Session: "session",
@@ -337,6 +338,57 @@ export function listSessionDigests(options: {
   return results;
 }
 
+
+export const SESSION_SEARCH_LIMIT = 20;
+
+export interface SessionMatch {
+  file: string;
+  entryId?: string;
+  role: "user" | "assistant";
+  snippet: string;
+}
+
+function matchSessionMessage(line: string, term: RegExp): Omit<SessionMatch, "file"> | undefined {
+  const entry = parseLine(line);
+  const message = entry?.type === SessionEntryType.Message ? entry.message : undefined;
+  if (!message || message.role !== MessageRole.User && message.role !== MessageRole.Assistant) return;
+  const text = textFromContent(message.content);
+  const match = term.exec(text);
+  if (!match) return;
+  const start = Math.max(0, match.index - 80);
+  const end = Math.min(text.length, match.index + match[0].length + 80);
+  return {
+    entryId: entry?.id,
+    role: message.role,
+    snippet: `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`,
+  };
+}
+
+export async function searchSessionMessages(options: {
+  term: string;
+  cwd?: string;
+  sessionDir?: string;
+  signal?: AbortSignal;
+}): Promise<{ matches: SessionMatch[]; truncated: boolean }> {
+  const needle = options.term.trim();
+  if (!needle) throw new Error("Search term must contain text.");
+  const term = new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu");
+  const cwd = options.cwd ? resolve(options.cwd) : undefined;
+  const matches: SessionMatch[] = [];
+  options.signal?.throwIfAborted();
+  for (const file of listSessionFiles(options.sessionDir)) {
+    await setImmediate(undefined, { signal: options.signal });
+    const { lines } = readSessionFile(file);
+    if (cwd && resolve(digestLines(lines, file).cwd ?? dirname(file)) !== cwd) continue;
+    for (const line of lines) {
+      const match = matchSessionMessage(line, term);
+      if (!match) continue;
+      if (matches.length === SESSION_SEARCH_LIMIT) return { matches, truncated: true };
+      matches.push({ file, ...match });
+    }
+  }
+  return { matches, truncated: false };
+}
 
 class MarkdownBuilder {
   private readonly lines: string[] = [];
