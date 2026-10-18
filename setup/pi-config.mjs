@@ -83,13 +83,13 @@ function registerSettingsEffect(ctx) {
       const result = commandResult.stdout.trim();
       switch (result) {
         case "unchanged":
-          ok("🤖: settings and package registration");
+          ok("settings and package registration");
           break;
         case "created":
-          linked("🤖: settings.json created with baseline and package registration");
+          linked("settings.json created with baseline and package registration");
           break;
         case "updated":
-          linked("🤖: settings package registration updated");
+          linked("settings package registration updated");
           break;
         default:
           if (result) console.log(result);

@@ -25,7 +25,7 @@ Nix supplies the workbench and packages Pi through its upstream flake. Nub insta
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
 
-Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Pi owns transport, retries, image handling, and appearance.
+Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Every run reapplies managed stall timeouts and retry settings so hung provider requests fail fast into Pi's retry. Pi owns transport, image handling, and appearance.
 
 Run `./setup.sh --reset` to back up user settings and restore this baseline with only pi-env registered. Auth, sessions, model endpoints, MCP configuration, keybindings, and project settings remain untouched. Reinstall local adapter packages afterward. See [setup and reset](docs/setup.md).
 

@@ -36,8 +36,7 @@
     "session-manager": [
       {
         "entry": "start.ts",
-        "outfile": "dist/start.js",
-        "banner": false
+        "outfile": "dist/start.js"
       }
     ]
   }

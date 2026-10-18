@@ -63,13 +63,6 @@ export const DEV_TOOLS_ACTION_CONTRACTS = {
 } as const satisfies Record<DevToolsAction, DevToolsActionContract>;
 
 export const DEV_TOOLS_ACTIONS = Object.values(DevToolsAction);
-export const DEV_TOOLS_READ_ACTIONS = DEV_TOOLS_ACTIONS.filter(
-  (action) => DEV_TOOLS_ACTION_CONTRACTS[action].capability === "read",
-);
-export const DEV_TOOLS_WRITE_ACTIONS = DEV_TOOLS_ACTIONS.filter(
-  (action) => DEV_TOOLS_ACTION_CONTRACTS[action].capability === "write",
-);
-
 export const DEV_TOOLS_TOOL_DESCRIPTIONS = {
   action: "Action to perform",
   path:

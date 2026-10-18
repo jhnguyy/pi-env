@@ -9,9 +9,9 @@ import {
   type DagTextArtifactReference,
   type ValidatedDagDefinition,
 } from "../../../src/dag/index.js";
-import type { ActiveDagRuntimeService, DagRuntimeUsage } from "../_shared/dag-runtime-service";
+import type * as DagRuntimeService from "../_shared/dag-runtime-service";
 import { validateFindingAnchors, validatePlan } from "./core";
-import { registerReviewDagTools } from "./dag-tools";
+import * as DagTools from "./dag-tools";
 import { readVerifiedPinnedDiff } from "./snapshot";
 import { selectedFindings } from "./decision";
 import {
@@ -212,7 +212,7 @@ function reviewMetrics(input: {
   readonly result?: ReviewResult;
   readonly evidence?: ReviewEvidenceCoverage;
   readonly reviewerAttempts?: number;
-  readonly usage?: DagRuntimeUsage;
+  readonly usage?: DagRuntimeService.DagRuntimeUsage;
 }): NonNullable<ReviewState["metrics"]> {
   const findings = input.result?.findings ?? [];
   return {
@@ -244,19 +244,19 @@ export interface ReviewDagProgress {
   readonly reviewId: string;
   readonly runId: string;
   readonly nodes: Readonly<Record<string, string>>;
-  readonly usage?: DagRuntimeUsage;
+  readonly usage?: DagRuntimeService.DagRuntimeUsage;
 }
 
 async function awaitSubmittedGraph(
-  service: ActiveDagRuntimeService,
+  service: DagRuntimeService.ActiveDagRuntimeService,
   graph: ValidatedDagDefinition<unknown>,
-  workspaceRoot: string,
+  authority: DagRuntimeService.DagRuntimeSubmissionAuthority,
   reviewId: string,
   onSubmitted: () => void,
   onProgress?: (progress: ReviewDagProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const handle = await Effect.runPromise(service.submit(graph, { workspaceRoot }));
+  const handle = await Effect.runPromise(service.submit(graph, authority));
   let pollActive = false;
   const reportProgress = async () => {
     if (!onProgress || pollActive) return;
@@ -350,7 +350,7 @@ interface FinalizeReviewInput {
   readonly runId: string;
   readonly state: ReviewState;
   readonly reconstruction: DagSessionReconstruction;
-  readonly service: ActiveDagRuntimeService;
+  readonly service: DagRuntimeService.ActiveDagRuntimeService;
   readonly startedAt: number;
   readonly admission?: Promise<ReviewAdmission>;
   readonly synthesisProtocol: 2 | "legacy" | "unsupported";
@@ -495,7 +495,7 @@ function failedRunState(
   runId: string,
   cause: unknown,
   startedAt: number,
-  service: ActiveDagRuntimeService,
+  service: DagRuntimeService.ActiveDagRuntimeService,
   aborted: boolean,
 ): ReviewState {
   const references = state.dag?.rawResultReferences ?? [];
@@ -525,7 +525,7 @@ function failedRunState(
 
 export async function reconstructReviewDagState(options: {
   readonly ctx: ExtensionContext;
-  readonly service: ActiveDagRuntimeService;
+  readonly service: DagRuntimeService.ActiveDagRuntimeService;
   readonly state: ReviewState;
   readonly reconstruction: DagSessionReconstruction;
 }): Promise<ReviewState> {
@@ -551,7 +551,7 @@ export async function runReviewDag(options: {
   readonly pi: ExtensionAPI;
   readonly ctx: ExtensionContext;
   readonly signal?: AbortSignal;
-  readonly service: ActiveDagRuntimeService;
+  readonly service: DagRuntimeService.ActiveDagRuntimeService;
   readonly assignments: ReviewRoleAssignments;
   readonly deckPath: string;
   readonly state: ReviewState;
@@ -587,8 +587,7 @@ export async function runReviewDag(options: {
       ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
     ),
   };
-  const tools = registerReviewDagTools({
-    pi: options.pi,
+  const tools = DagTools.createReviewDagTools({
     reviewId: state.snapshot.id,
     runId,
     deckPath: options.deckPath,
@@ -620,7 +619,7 @@ export async function runReviewDag(options: {
     await awaitSubmittedGraph(
       options.service,
       graph,
-      state.snapshot.worktree,
+      { workspaceRoot: state.snapshot.worktree, customTools: tools.customTools },
       state.snapshot.id,
       () => {
         state = { ...state, dag: { ...state.dag!, submitted: true } };
@@ -654,7 +653,5 @@ export async function runReviewDag(options: {
     );
     options.save(next);
     throw cause;
-  } finally {
-    tools.unregister();
   }
 }

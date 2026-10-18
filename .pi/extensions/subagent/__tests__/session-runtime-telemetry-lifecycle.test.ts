@@ -54,7 +54,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
       on: () => {},
       events: { emit: () => {}, on: () => {} },
     };
-    return new SubagentSessionRuntime(pi as any, new Map(), { telemetryRuntimeFactory });
+    return new SubagentSessionRuntime(pi as any, { telemetryRuntimeFactory });
   }
 
   function sessionContext() {

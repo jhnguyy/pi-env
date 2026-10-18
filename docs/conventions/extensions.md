@@ -30,7 +30,7 @@ Keep tool output context-economical:
 - Use opt-in detail views for larger data.
 - Never return raw generated artifacts, large logs, or full session JSONL unless that is explicitly the tool's purpose and truncation is enforced.
 
-Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.ts` or a shared registration helper that uses it. Each public tool must provide its complete model-facing `description`, a compact `renderCall`, and a `renderResult` for collapsed and expanded output. Run-scoped and child-only `AgentTool` definitions do not own parent transcript rows and do not need these renderers.
+Register each model-facing Pi tool through `.pi/extensions/_shared/tool-render.ts` or a shared registration helper that uses it. Each public tool must provide its complete model-facing `description`, a compact `renderCall`, and a `renderResult` for collapsed and expanded output. Run-scoped native `ToolDefinition` values do not own parent transcript rows and do not need these renderers.
 
 Use the shared short-description helper for compact prose. Its default limit is 70 content characters plus `...`. Keep the source text unchanged for expanded output. Apply ANSI-safe viewport truncation at the component render boundary.
 
@@ -49,16 +49,15 @@ Overlay order is global then project with shallow replacement only. `readSetting
 
 Schema decoding should happen once at the consumer boundary with `decodeSettingsBlockEffect`/`decodeSettingsBlockSync` or a snapshot decode helper. Block schema failures are overlay errors that include the block `key` and both participating paths. JSON or root failures remain exact-source local errors. Compatibility sync wrappers may throw these typed errors. Let them reach existing rendering boundaries.
 
-Agent settings use Effect Schema for `enabledModels`, `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Model annotations can be model-selection guidance or machine policy. Generic subagent tool descriptions omit known machine-policy annotations such as `reviewer`. Domain consumers can enforce these annotations without adding them to model prompts. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
+Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Pi owns model availability and native model-selection settings. Subagents advertise the complete available registry roster. Model annotations are descriptive selection guidance, not approval tags or delegation permissions. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
 
-## Cross-host tool registration
+## Native tool registration
 
-Generally reusable tools that should behave the same in Pi and AgentTool hosts should register through `.pi/extensions/_shared/register-cross-host-tool.ts` via the canonical shape:
+Use native Pi registration for public tools. When a domain contract needs the shared cwd, cancellation, and progress adapter, use [registerContractTool](../../.pi/extensions/_shared/register-contract-tool.ts):
 
 ```ts
-registerCrossHostTool(pi, {
+registerContractTool(pi, {
   contract,
-  capabilities: [ToolCapability.Read],
   piOptions: {
     promptSnippet,
     promptGuidelines,
@@ -68,13 +67,13 @@ registerCrossHostTool(pi, {
 });
 ```
 
-Use `closeout` as a shared-contract example. Require a non-empty capability classification for every cross-host registration. Pi-only prompt and render metadata belong in `piOptions`; the shared contract remains host-neutral.
+The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
-Runtime behavior is defined by the helper and its tests: the main-session AgentTool uses the session `cwd`; child tools use `parentContext ?? { cwd }`; cancellation signals and progress updates forward through both adapters; and AgentTool registration exposes eligible tools to subagents. Pi's native `codemode` calls registered Pi tools through `ctx.executeTool()` instead of the AgentTool channel.
+Pass review-private definitions through the existing [DAG submission authority](../../.pi/extensions/_shared/dag-runtime-service.ts). Do not publish run-bound callbacks globally or serialize functions into graph artifacts. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
 
-Keep the lower-level helpers (`toPiTool`, `toAgentTool`, `registerAgentToolsOnSessionStart`) for main-only, run-scoped, or custom-context tools. If a generally reusable tool stays Pi-only, document an adjacent reason. Current run-scoped exceptions are `pr_review_start` and `subagent`.
+Use the [registration contract test](../../.pi/extensions/__tests__/register-contract-tool.test.ts) and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for schema, context, cancellation, progress, and rendering metadata. State side effects and operational limits in safety-sensitive descriptions.
 
-The public test boundary for shared cross-host tools is the helper contract in `.pi/extensions/__tests__/register-cross-host-tool.test.ts` plus representative tool coverage such as `.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts`: schema identity, capabilities, cwd/context behavior, cancellation, progress, Pi-only metadata, and unregister lifecycle. Safety-sensitive descriptions must state side effects and operational boundaries.
+[Child creation context](../../.pi/extensions/_shared/child-context.ts) identifies target cwd and agentDir across native loading and independently bundled extensions. Root orchestration factories return early in that scope. Do not change process cwd or environment variables to identify a child.
 
 ## Cross-extension singletons
 

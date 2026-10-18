@@ -27,22 +27,10 @@ const execute = async (
 };
 
 describe("analyze tool", () => {
-  it("registers the same capability for agents and subagents", () => {
+  it("registers the native analyze tool", () => {
     const registerTool = vi.fn();
-    const emit = vi.fn();
-    let onSessionStart: (() => void) | undefined;
-    analyzeExtension({
-      registerTool,
-      events: { emit },
-      on: (event: string, handler: () => void) => { if (event === "session_start") onSessionStart = handler; },
-    } as never);
-
+    analyzeExtension({ registerTool } as never);
     expect(registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: "analyze" }));
-    onSessionStart?.();
-    expect(emit).toHaveBeenCalledWith("agent-tools:register", expect.objectContaining({
-      tool: expect.objectContaining({ name: "analyze" }),
-      capabilities: ["read", "execute"],
-    }));
   });
 
   it("points the engine at the requested worktree and keeps output compact", async () => {

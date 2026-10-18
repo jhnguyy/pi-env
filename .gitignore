@@ -25,3 +25,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Exported Docker E2E evidence
+.e2e-evidence/

@@ -16,7 +16,6 @@ export const WorkTrackerSettingsSchema = Schema.Struct({
 });
 
 export const AgentSettingsSchema = Schema.Struct({
-  enabledModels: Schema.optionalKey(StringArraySchema),
   modelAnnotations: Schema.optionalKey(Schema.Record(Schema.String, StringArraySchema)),
   workTracker: Schema.optionalKey(WorkTrackerSettingsSchema),
   extensions: Schema.optionalKey(StringArraySchema),
@@ -45,22 +44,6 @@ export function readOptionalAgentSettings(
   cwd = process.cwd(),
 ): AgentSettings | null {
   return Effect.runSync(readOptionalAgentSettingsEffect(env, cwd));
-}
-
-export function decodeGlobalAgentSettingsSnapshotEffect(
-  snapshot: SettingsSnapshot,
-): Effect.Effect<AgentSettings, SettingsDecodeError> {
-  return Schema.decodeUnknownEffect(AgentSettingsSchema)(snapshot.global).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SettingsDecodeError({
-          source: SettingsSource.Global,
-          path: snapshot.paths.global,
-          paths: snapshot.paths,
-          cause,
-        }),
-    ),
-  );
 }
 
 export function decodeAgentSettingsSnapshotEffect(

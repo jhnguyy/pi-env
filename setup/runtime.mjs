@@ -7,7 +7,6 @@ import {
   fail,
   mustEnv,
   ok,
-  parseRuntimeCommand,
   run,
   runChecked,
   section,
@@ -29,7 +28,7 @@ const InstallStrategy = Object.freeze({
 const repo = mustEnv("REPO");
 const piBinDir = mustEnv("PI_BIN_DIR");
 const setupNodeBin = process.argv[2] || process.execPath;
-const command = parseRuntimeCommand(process.argv[3]);
+const command = process.argv[3];
 
 function selectInstallStrategy() {
   if (commandSucceeds("nub", ["run", "--no-check", "--silent", "check:node"], { cwd: repo }))
@@ -74,7 +73,7 @@ function shSingleQuote(value) {
 function readPiPackageEntry(piPackageDir) {
   const packageJsonPath = join(piPackageDir, "package.json");
   const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  if (pkg.name !== PiPackage.Name) fail(`🤖: invalid Pi package at ${packageJsonPath}`);
+  if (pkg.name !== PiPackage.Name) fail(`invalid Pi package at ${packageJsonPath}`);
   const entry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[PiPackage.Bin];
   if (typeof entry !== "string" || entry.length === 0) {
     fail(
@@ -83,7 +82,7 @@ function readPiPackageEntry(piPackageDir) {
   }
   const relativeEntry = relative(resolve(piPackageDir), resolve(piPackageDir, entry));
   if (!relativeEntry || relativeEntry.startsWith("..") || isAbsolute(relativeEntry)) {
-    fail(`🤖: Pi bin must be inside its package: ${entry}`);
+    fail(`Pi bin must be inside its package: ${entry}`);
   }
   return relativeEntry;
 }
@@ -229,6 +228,17 @@ function ensureLocalNixPathInShellProfiles() {
   }
 }
 
+function assertPiVersion(piPackageDir, version) {
+  const installedVersion = JSON.parse(
+    readFileSync(join(piPackageDir, "package.json"), "utf8"),
+  ).version;
+  if (installedVersion === version) return;
+  const source = process.env.PI_PACKAGE_DIR
+    ? " PI_PACKAGE_DIR supplies it; update its provisioner (Home Manager: ./setup.sh --sync-home-manager)."
+    : "";
+  fail(`Pi package version ${installedVersion} does not match the workbench (${version}).${source}`);
+}
+
 function installPiCli(policy) {
   section("Pi CLI");
   const version = readPiVersion();
@@ -239,11 +249,7 @@ function installPiCli(policy) {
     fail(`  ✗  missing pi package after install: ${piPackageDir}`);
   }
   const piPackageEntry = readPiPackageEntry(piPackageDir);
-  const installedVersion = JSON.parse(
-    readFileSync(join(piPackageDir, "package.json"), "utf8"),
-  ).version;
-  if (installedVersion !== version)
-    fail(`Pi package version ${installedVersion} does not match the workbench (${version}).`);
+  assertPiVersion(piPackageDir, version);
   const piEntry = join(piPackageDir, piPackageEntry);
   if (!existsSync(piEntry) || !statSync(piEntry).isFile()) {
     fail(`  ✗  missing pi entrypoint after install: ${piEntry}`);
@@ -270,9 +276,8 @@ function installPiCli(policy) {
 
 const policy = deriveSetupPolicy(process.env);
 switch (command) {
-  case RuntimeCommand.All:
+  case RuntimeCommand.Dependencies:
     installDependencies();
-    installPiCli(policy);
     break;
   case RuntimeCommand.PiCli:
     installPiCli(policy);

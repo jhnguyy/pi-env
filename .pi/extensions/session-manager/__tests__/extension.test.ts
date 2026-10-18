@@ -284,7 +284,6 @@ describe("session-manager extension", () => {
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
     let factory: EditorFactory | undefined = () => cast<ReturnType<EditorFactory>>({});
     const notices: string[] = [];
-    let releaseCalls = 0;
     const pi = cast<ExtensionAPI>({
       on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
         handlers.set(event, handler),
@@ -323,10 +322,7 @@ describe("session-manager extension", () => {
         inspectCurrent: () => Effect.succeed(window),
         bindCurrent: () => Effect.succeed(window),
         renameCurrent: () => Effect.void,
-        releaseCurrent: () =>
-          Effect.sync(() => {
-            releaseCalls += 1;
-          }),
+        releaseCurrent: () => Effect.void,
       },
       sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
       environment: { TMUX_PANE: "%1" },
@@ -338,7 +334,6 @@ describe("session-manager extension", () => {
     expect(notices).toHaveLength(1);
 
     await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
-    expect(releaseCalls).toBe(1);
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
       desiredState: "open",
     });
@@ -418,5 +413,71 @@ describe("session-manager extension", () => {
 
     expect(displayName).toBeUndefined();
     expect(renamedWindows).toEqual(["investigate-resume"]);
+  });
+
+  // E2E cannot pause enrollment while session_shutdown waits. A late successful
+  // enrollment must release its binding before shutdown completes.
+  it("releases a binding that completes after shutdown begins", async () => {
+    const root = await mkdtemp(join(tmpdir(), "session-extension-shutdown-"));
+    roots.push(root);
+    const cwd = join(root, "workspace");
+    await mkdir(cwd);
+    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+    const pi = cast<ExtensionAPI>({
+      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
+        handlers.set(event, handler),
+      registerCommand: () => {},
+      getSessionName: () => undefined,
+      setSessionName: () => {},
+    });
+    const window: CurrentWindow = {
+      socketPath: "/tmp/tmux.sock",
+      tmuxSessionId: "$1",
+      windowId: "@1",
+      bindings: [],
+    };
+    let bind!: () => void;
+    let bindStarted!: () => void;
+    const binding = new Promise<void>((resolve) => {
+      bindStarted = resolve;
+    });
+    const released: string[] = [];
+    registerSessionManager(pi, {
+      catalog: createFileSessionCatalog(join(root, "agent")),
+      host: {
+        inspectCurrent: () => Effect.succeed(window),
+        bindCurrent: () =>
+          Effect.callback<CurrentWindow>((resume) => {
+            bind = () => resume(Effect.succeed(window));
+            bindStarted();
+          }),
+        renameCurrent: () => Effect.void,
+        releaseCurrent: (_paneId, sessionId) =>
+          Effect.sync(() => {
+            released.push(sessionId);
+          }),
+      },
+      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
+      environment: { TMUX_PANE: "%1" },
+    });
+    const ctx = cast<ExtensionContext>({
+      mode: "tui",
+      cwd,
+      sessionManager: { getSessionId: () => "session-a", getSessionFile: () => undefined },
+      ui: {
+        getEditorComponent: () => undefined,
+        setEditorComponent: () => {},
+        notify: () => {},
+      },
+      shutdown: () => {},
+    });
+
+    void handlers.get("session_start")?.({} as never, ctx);
+    await binding;
+    const shutdown = handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
+    bind();
+    await shutdown;
+
+    expect(released).toEqual(["session-a"]);
   });
 });

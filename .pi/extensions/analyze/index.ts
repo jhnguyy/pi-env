@@ -1,10 +1,8 @@
 import { realpath, stat } from "node:fs/promises";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { isAbsolute } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { registerAgentToolsOnSessionStart, ToolCapability } from "../_shared/agent-tools";
 import {
   registerPublicTool,
   renderCompactToolCall,
@@ -108,16 +106,4 @@ export function createAnalyzeTool(
 export default function (pi: ExtensionAPI) {
   const tool = createAnalyzeTool();
   registerPublicTool(pi, tool);
-  const agentTool: AgentTool<any, AnalyzeToolDetails> = {
-    name: tool.name,
-    label: tool.label,
-    description: tool.description,
-    parameters: tool.parameters,
-    execute: (id, params, signal, onUpdate) =>
-      tool.execute(id, params as never, signal, onUpdate, {} as never),
-  };
-  registerAgentToolsOnSessionStart(pi, {
-    tool: agentTool,
-    capabilities: [ToolCapability.Read, ToolCapability.Execute],
-  });
 }

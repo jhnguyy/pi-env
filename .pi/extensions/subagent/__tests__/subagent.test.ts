@@ -2,12 +2,12 @@
  * Tests for the subagent extension.
  *
  * Focus: synchronous / unit-testable paths — error returns, render functions,
- * parameter validation. We do NOT invoke agentLoop (requires real API keys).
+ * parameter validation. Native execution is covered by integrated provider tests.
  */
 
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import * as TestUtils from "../../__tests__/test-utils";
 import { Container, type Text } from "@earendil-works/pi-tui";
 import initSubagent from "../index";
 
@@ -22,24 +22,14 @@ const mockTheme = {
 
 let registeredTool: any;
 
-// Event listener map for testing agent-tools:register protocol
-const eventListeners = new Map<string, Function[]>();
-
 const mockPi = {
+  getAllTools: () => [],
   registerCommand: () => {},
   registerTool: (tool: any) => {
     if (tool.name === "subagent") registeredTool = tool;
   },
   on: () => {},
-  events: {
-    on: (channel: string, handler: Function) => {
-      if (!eventListeners.has(channel)) eventListeners.set(channel, []);
-      eventListeners.get(channel)!.push(handler);
-    },
-    emit: (channel: string, data: any) => {
-      for (const handler of eventListeners.get(channel) ?? []) handler(data);
-    },
-  },
+  events: { on: () => {}, emit: () => {} },
 } as any;
 
 // Initialize once — captures the tool registration and event listeners
@@ -47,32 +37,7 @@ initSubagent(mockPi);
 
 // ─── Mock ctx for execute ─────────────────────────────────────────────────────
 
-const mockCtx = {
-  cwd: "/tmp/test",
-  model: { provider: "anthropic", id: "claude-sonnet-4-6", api: "anthropic" },
-  modelRegistry: {
-    find: (provider: string, id: string) => {
-      if (provider === "anthropic" && id === "claude-haiku-4-5") {
-        return { provider: "anthropic", id: "claude-haiku-4-5", api: "anthropic" };
-      }
-      if (provider === "anthropic" && id === "claude-sonnet-4-6") {
-        return { provider: "anthropic", id: "claude-sonnet-4-6", api: "anthropic" };
-      }
-      return undefined;
-    },
-    getAvailable: () => [
-      { provider: "anthropic", id: "claude-haiku-4-5", api: "anthropic" },
-      { provider: "anthropic", id: "claude-sonnet-4-6", api: "anthropic" },
-    ],
-    getApiKeyForProvider: async () => "test-key",
-  },
-} as any;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function runParams(params: Record<string, unknown>) {
-  return { action: "run", name: "test-run", ...params };
-}
+const mockCtx = { cwd: "/tmp/test" } as any;
 
 /** Extract text string from a Text or Container component. */
 function extractText(component: Text | Container): string {
@@ -84,7 +49,7 @@ function extractText(component: Text | Container): string {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describeIfEnabled("subagent", "subagent extension", () => {
+TestUtils.describeIfEnabled("subagent", "subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {
@@ -98,208 +63,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
       expect(result.content[0].text).toBe("No subagent usage recorded.");
       expect(result.details.status).toBe("usage");
-    });
-  });
-
-  // ─── Extension tool registration ─────────────────────────────────────────
-
-  describe("extension tool registration", () => {
-    it("registered extension tool resolves and is available for subagents", async () => {
-      // Emit a mock extension tool
-      const mockExtTool = {
-        name: "notes",
-        label: "Notes",
-        description: "Access vault notes",
-        parameters: {},
-        execute: async () => ({ content: [{ type: "text", text: "ok" }], details: null }),
-      };
-      mockPi.events.emit("agent-tools:register", {
-        tool: mockExtTool,
-        capabilities: ["read", "write"],
-      });
-
-      // Verify: using it in tools param succeeds tool resolution (fails at model, not tools)
-      const result = await registeredTool.execute(
-        "call-ext-1",
-        runParams({ task: "do something", tools: ["notes"], model: "anthropic/nonexistent" }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      // Should fail at model_not_found, not invalid_tools — meaning "notes" resolved
-      expect(result.details.stopReason).toBe("model_not_found");
-      expect(result.content[0].text).not.toContain("Unknown tools");
-    });
-
-    it("includes registered extension tool names in unknown-tool error", async () => {
-      // notes was already registered above
-      const result = await registeredTool.execute(
-        "call-ext-2",
-        runParams({ task: "do something", tools: ["fakeTool"] }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("Available:");
-      expect(result.content[0].text).toContain("notes");
-    });
-  });
-
-  // ─── execute: no-tools / no-model validation ─────────────────────────────
-
-  describe("execute — required param validation", () => {
-    it("returns error when no tools specified and no agent file", async () => {
-      const result = await registeredTool.execute(
-        "call-v1",
-        runParams({ task: "do something" }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("No tools or capabilities specified");
-      expect(result.details.stopReason).toBe("no_tools");
-      expect(result.details.isError).toBe(true);
-      expect(result.usage).toEqual({
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-      });
-    });
-
-    it("returns error when tools is empty array", async () => {
-      const result = await registeredTool.execute(
-        "call-v2",
-        runParams({ task: "do something", tools: [] }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("No tools or capabilities specified");
-      expect(result.details.stopReason).toBe("no_tools");
-    });
-
-    it("returns error when tools provided but no model", async () => {
-      const result = await registeredTool.execute(
-        "call-v3",
-        runParams({ task: "do something", tools: ["read"] }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("No model specified");
-      expect(result.details.stopReason).toBe("no_model");
-      expect(result.details.isError).toBe(true);
-    });
-  });
-
-  // ─── execute: tool resolution ────────────────────────────────────────────
-
-  describe("execute — tool resolution", () => {
-    it("returns error for unknown tool names", async () => {
-      const result = await registeredTool.execute(
-        "call-1",
-        runParams({
-          task: "do something",
-          tools: ["read", "nonexistent"],
-          model: "anthropic/claude-haiku-4-5",
-        }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("Unknown tools");
-      expect(result.content[0].text).toContain("nonexistent");
-    });
-
-    it("includes available tools in the error message", async () => {
-      const result = await registeredTool.execute(
-        "call-2",
-        runParams({
-          task: "do something",
-          tools: ["fakeTool"],
-          model: "anthropic/claude-haiku-4-5",
-        }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("Available:");
-    });
-
-    it("error details have correct shape for unknown tools", async () => {
-      const result = await registeredTool.execute(
-        "call-3",
-        runParams({
-          task: "test task",
-          tools: ["unknown"],
-          model: "anthropic/claude-haiku-4-5",
-        }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      const details = result.details;
-      expect(details.isError).toBe(true);
-      expect(details.task).toBe("test task");
-      expect(details.toolNames).toContain("unknown");
-      expect(details.stopReason).toBe("invalid_tools");
-      expect(details.turnLimitExceeded).toBe(false);
-      expect(details.toolCallCount).toBe(0);
-    });
-  });
-
-  // ─── execute: model parsing ──────────────────────────────────────────────
-
-  describe("execute — model parsing", () => {
-    it("returns error when model is not found in registry (provider/id format)", async () => {
-      const result = await registeredTool.execute(
-        "call-6",
-        runParams({
-          task: "do something",
-          tools: ["read"],
-          model: "anthropic/nonexistent-model",
-        }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("Model not found");
-      expect(result.content[0].text).toContain("anthropic/nonexistent-model");
-      expect(result.details.stopReason).toBe("model_not_found");
-    });
-
-    it("bare model name not found returns model_not_found", async () => {
-      const result = await registeredTool.execute(
-        "call-11",
-        runParams({ task: "task", tools: ["read"], model: "completely-unknown-model" }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.details.stopReason).toBe("model_not_found");
-    });
-
-  });
-
-  // ─── execute: agent file resolution ─────────────────────────────────────
-
-  describe("execute — agent file resolution", () => {
-    it("returns error when named agent is not found", async () => {
-      // discoverAgents reads real filesystem — "nonexistent-agent" won't be found
-      const result = await registeredTool.execute(
-        "call-a1",
-        runParams({ task: "do something", agent: "nonexistent-agent" }),
-        undefined,
-        undefined,
-        mockCtx,
-      );
-      expect(result.content[0].text).toContain("Agent not found");
-      expect(result.content[0].text).toContain("nonexistent-agent");
-      expect(result.content[0].text).toContain("Available:");
-      expect(result.details.stopReason).toBe("agent_not_found");
     });
   });
 
@@ -383,7 +146,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       stopReason: "end_turn",
       isError: false,
       turnLimitExceeded: false,
-      agent: "scout",
       sessionName: "sub-schema-audit",
       sessionFile: "/sessions/sub-schema-audit.jsonl",
     };
@@ -396,7 +158,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
             task: longTask,
             tools: ["read", "grep"],
             model: "anthropic/claude-haiku-4-5",
-            agent: "scout",
             system_prompt: "private context",
           },
           mockTheme,
@@ -404,7 +165,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
       );
 
       expect(rendered).toContain("subagent");
-      expect(rendered).toContain("scout");
       expect(rendered).toContain("read");
       expect(rendered).toContain("grep");
       expect(rendered).toContain("anthropic/claude-haiku-4-5");
@@ -418,7 +178,6 @@ describeIfEnabled("subagent", "subagent extension", () => {
         registeredTool.renderResult({ content: [], details: successDetails }, {}, mockTheme),
       );
 
-      expect(rendered).toContain("scout");
       expect(rendered).toContain("3 tool calls");
       expect(rendered).toContain("2 turns");
       expect(rendered).toContain("sub-schema-audit");

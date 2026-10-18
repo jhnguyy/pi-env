@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { onTestFinished } from "vitest";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
   DagNodeStatus,
@@ -27,7 +29,8 @@ import {
   ReviewEvidenceExecutorKind,
   ReviewEvidenceResolverKey,
 } from "../../evidence-resolver";
-import { EvidenceResolverNode, ReviewRoles, type ReviewRoleAssignments } from "../../review-graph";
+import { EvidenceResolverNode, type ReviewRoleAssignments } from "../../review-graph";
+import { resolvePrReviewModelPolicy, type ReviewRolePins } from "../../model-policy";
 import { runReviewDag } from "../../review-dag-runner";
 
 export function reviewFixture(): {
@@ -96,16 +99,40 @@ export function reviewFixture(): {
   };
 }
 
-export const assignments = Object.fromEntries(
-  ReviewRoles.map((role, index) => [
-    role,
-    {
-      model: index % 2 ? "provider-b/model" : "provider-a/model",
-      reasoning: "high",
-      contextWindow: 272_000,
-    },
-  ]),
-) as ReviewRoleAssignments;
+export const availableModels = ["provider-a", "provider-b"].map(
+  (provider): Model<"openai-responses"> => ({
+    provider,
+    id: "model",
+    name: "model",
+    api: "openai-responses",
+    baseUrl: "https://example.invalid",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: null, max: null },
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 32_000,
+  }),
+);
+
+function assignmentsFor(
+  models: readonly Model<"openai-responses">[] = availableModels,
+  pins: ReviewRolePins | Readonly<Record<string, string>> = {},
+): ReviewRoleAssignments {
+  const resolved = resolvePrReviewModelPolicy(models, pins);
+  return Object.fromEntries(
+    Object.entries(resolved.assignments).map(([role, candidate]) => [
+      role,
+      {
+        model: candidate.fqid,
+        reasoning: candidate.reasoning,
+        contextWindow: candidate.contextWindow,
+      },
+    ]),
+  ) as ReviewRoleAssignments;
+}
+
+export const assignments = assignmentsFor();
 
 export function eventsApi(): any {
   const handlers = new Map<string, Set<(data: unknown) => void>>();
@@ -163,16 +190,31 @@ export interface RealReviewFlow {
   readonly registeredTools: number;
   readonly unregisteredTools: number;
   readonly serviceDisposals: number;
+  readonly requests: readonly {
+    readonly nodeId: string;
+    readonly model: string;
+  }[];
 }
 
-/** Run the real DAG with scripted model output and in-memory host adapters. */
+/**
+ * Isolation gap: no credentialed native model session in this portfolio. Keep the real
+ * DAG, artifact IO, evidence resolver and native tool definitions; script only the
+ * model executor boundary. Submission authority supplies the private tools directly,
+ * independent of the runtime's pending native-session integration.
+ */
 export async function runRealReviewFlow(
   beforeSynthesis?: (boundary: {
     artifactRoot: string;
     request: Parameters<DagEffectExecutor>[0];
     inspect: (signal?: AbortSignal) => Promise<any>;
   }) => Promise<void>,
+  options: {
+    readonly models?: readonly Model<"openai-responses">[];
+    readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
+  } = {},
 ): Promise<RealReviewFlow> {
+  const requests: { nodeId: string; model: string }[] = [];
+  const resolvedAssignments = assignmentsFor(options.models, options.pins);
   const { root, artifactRoot, ctx, state: initial } = reviewFixture();
   const { worktree, diffPath } = initial.snapshot;
   const sessionDir = ctx.sessionManager.getSessionDir();
@@ -220,14 +262,20 @@ export async function runRealReviewFlow(
     key: ReviewEvidenceResolverKey,
     executor: reviewEvidenceResolverExecutor({ artifactRoot }),
   });
+  let customTools: readonly ToolDefinition[] = [];
   const findTool = (prefix: string) => {
-    const tool = [...pi.tools.values()].find((candidate) => candidate.name.startsWith(prefix));
+    const tool = customTools.find((candidate) => candidate.name.startsWith(prefix));
     if (!tool) throw new Error(`Missing run-scoped tool ${prefix}`);
-    return tool;
+    return {
+      execute: (id: string, params: any, signal?: AbortSignal) =>
+        tool.execute(id, params, signal, undefined, ctx),
+    };
   };
   let invalidSynthesisRejected = false;
   let dossierRawIds: string[] = [];
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
+    const payload = request.node.executor.payload as { model: string };
+    requests.push({ nodeId: request.node.id, model: payload.model });
     if (request.node.id === "reading-plan") {
       const submitted = await findTool("submit_review_plan_").execute("plan", {
         goal: "Change the exported value.",
@@ -239,7 +287,10 @@ export async function runRealReviewFlow(
         evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 12, purpose: "patch" }],
       });
       if (submitted.isError) throw new Error("Reading plan was rejected");
-      return submitted.content[0].text;
+      return submitted.content
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n");
     }
     if (request.node.id.startsWith("review-")) {
       const coverageNode = request.graphState.nodes.find(
@@ -266,7 +317,12 @@ export async function runRealReviewFlow(
       await beforeSynthesis?.({ artifactRoot, request, inspect });
       const refs = await inspect();
       if (refs.isError) throw new Error("Reviewer dossier was unavailable");
-      const dossier = JSON.parse(refs.content[0].text);
+      const dossier = JSON.parse(
+        refs.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n"),
+      );
       const raw = Object.fromEntries(
         dossier.succeeded.map((item: any) => [item.role, item.rawFindings[0]]),
       );
@@ -304,7 +360,10 @@ export async function runRealReviewFlow(
         ],
       });
       if (submitted.isError) throw new Error("Valid semantic consolidation was rejected");
-      return submitted.content[0].text;
+      return submitted.content
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n");
     }
     throw new Error(`Unexpected scripted node ${request.node.id}`);
   };
@@ -329,7 +388,7 @@ export async function runRealReviewFlow(
           : lookupRegisteredDagExecutor(sessionId, generation, kind, key),
       ),
   };
-  const runtime = await DagSessionRuntime.create(pi, ctx, new Map(), {
+  const runtime = await DagSessionRuntime.create(pi, ctx, {
     sessionGeneration: generation,
     supervisor: {
       usage: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }),
@@ -344,8 +403,14 @@ export async function runRealReviewFlow(
     state = await runReviewDag({
       pi,
       ctx,
-      service: services[0].service,
-      assignments,
+      service: {
+        ...services[0].service,
+        submit: (graph, authority) => {
+          customTools = authority?.customTools ?? [];
+          return services[0].service.submit(graph, authority);
+        },
+      },
+      assignments: resolvedAssignments,
       deckPath: deck.path,
       state: initial,
       save: (next) => {
@@ -376,5 +441,6 @@ export async function runRealReviewFlow(
     registeredTools,
     unregisteredTools,
     serviceDisposals,
+    requests,
   };
 }

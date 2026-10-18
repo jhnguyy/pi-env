@@ -38,3 +38,6 @@ Thumbs.db
 *~
 .cache
 .tmp
+
+# Exported E2E evidence would invalidate the build cache.
+.e2e-evidence

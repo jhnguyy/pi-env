@@ -129,19 +129,9 @@ function validateRecordDetails(record: SessionRecord, path: string): void {
   }
 }
 
-function addUniqueIdentity(
-  record: SessionRecord,
-  ids: Set<string>,
-  activeNames: Set<string>,
-  path: string,
-): void {
+function addUniqueIdentity(record: SessionRecord, ids: Set<string>, path: string): void {
   if (ids.has(record.sessionId)) semantic(path, "duplicate session id");
   ids.add(record.sessionId);
-  if (record.role === "work" && record.desiredState !== "open") return;
-  if (record.name !== undefined) {
-    if (activeNames.has(record.name)) semantic(path, "duplicate active name");
-    activeNames.add(record.name);
-  }
 }
 
 function validateUpdatedAt(record: SessionRecord, updatedAt: string, path: string): void {
@@ -169,18 +159,17 @@ export function validateManifest(value: unknown, path = "manifest"): SessionMani
   const manifest = decodeManifest(value, path);
   validateMetadata(manifest, path);
   const ids = new Set<string>();
-  const activeNames = new Set<string>();
   if (manifest.coordinator) {
     validateRecordBase(manifest.coordinator, manifest.canonicalCwd, path);
     validateRecordDetails(manifest.coordinator, path);
-    addUniqueIdentity(manifest.coordinator, ids, activeNames, path);
+    addUniqueIdentity(manifest.coordinator, ids, path);
     validateUpdatedAt(manifest.coordinator, manifest.updatedAt, path);
   }
   let previous: SessionManifest["sessions"][number] | undefined;
   for (const record of manifest.sessions) {
     validateRecordBase(record, manifest.canonicalCwd, path);
     validateRecordDetails(record, path);
-    addUniqueIdentity(record, ids, activeNames, path);
+    addUniqueIdentity(record, ids, path);
     validateSessionOrder(previous, record, path);
     validateUpdatedAt(record, manifest.updatedAt, path);
     previous = record;
