@@ -102,7 +102,7 @@ for mode in normal reset; do
   if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" "${args[@]}"; then
     fail 'registration failure should fail'
   fi
-  cmp "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
+  "$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
 done
 for metadata in codex neither; do
   phase="provider metadata: $metadata"
@@ -121,5 +121,5 @@ phase='conflicting agent directories'
 if PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$EVIDENCE/selected-agent" "$ROOT/setup.sh" --reset --help; then
   fail 'conflicting agent directories must fail before provisioning or writes'
 fi
-cmp "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json" || fail 'setup changed the unselected settings'
+"$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json" || fail 'setup changed the unselected settings'
 phase=complete
