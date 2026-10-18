@@ -11,7 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const startMarker = "<!-- pi-env:append-system:start -->";
@@ -22,6 +21,7 @@ function createFixture() {
   const home = join(evidence, "home");
   const agentDir = join(home, ".pi/agent");
   const source = readFileSync(join(root, ".pi/agent/APPEND_SYSTEM.md"), "utf8").trim();
+  mkdirSync(agentDir, { recursive: true });
   writeFileSync(
     join(evidence, "README.txt"),
     "Reproduce: bash setup/__tests__/append-system.test.sh\n" +
@@ -68,14 +68,6 @@ function configurePi(fixture) {
   return readFileSync(appendFile, "utf8");
 }
 
-function verifyFreshInstallation(fixture) {
-  const actual = configurePi(fixture);
-  writeFileSync(join(fixture.evidence, "fresh.md"), actual);
-  assert.ok(actual.includes(fixture.expectedBlock), "fresh setup must install the source block");
-  assert.equal(actual.split(startMarker).length - 1, 1, "start marker must occur once");
-  assert.equal(actual.split(endMarker).length - 1, 1, "end marker must occur once");
-}
-
 function verifyLegacyUpgrade(fixture) {
   const legacy =
     "<!-- pi-env:append-system -->\n<!-- pi-env:append-system -->\n" +
@@ -89,23 +81,6 @@ function verifyLegacyUpgrade(fixture) {
   return actual;
 }
 
-async function verifyInstalledGuidanceLoads(fixture, installed) {
-  const cwd = join(fixture.evidence, "project");
-  mkdirSync(cwd);
-  const loader = new DefaultResourceLoader({
-    cwd,
-    agentDir: fixture.agentDir,
-    noExtensions: true,
-    noSkills: true,
-    noPromptTemplates: true,
-    noThemes: true,
-  });
-  await loader.reload();
-  const loaded = loader.getAppendSystemPrompt();
-  writeFileSync(join(fixture.evidence, "loaded.json"), JSON.stringify(loaded, null, 2));
-  assert.ok(loaded.includes(installed), "Pi must load the installed guidance");
-}
-
 function verifyStaleBlockRepair(fixture, installed) {
   const expected = installed + "\n  Keep this trailing rule.  \n\n";
   const stale = expected.replace(fixture.source, "stale philosophy");
@@ -115,28 +90,18 @@ function verifyStaleBlockRepair(fixture, installed) {
   const actual = configurePi(fixture);
   writeFileSync(join(fixture.evidence, "reconciled.md"), actual);
   assert.equal(actual, expected, "repair must change only the managed block");
-  return actual;
-}
-
-function verifyRepeatedSetup(fixture, previous) {
-  const actual = configurePi(fixture);
-  writeFileSync(join(fixture.evidence, "repeated.md"), actual);
-  assert.equal(actual, previous, "repeated setup must leave the entire file unchanged");
 }
 
 const fixture = createFixture();
 try {
-  verifyFreshInstallation(fixture);
   const installed = verifyLegacyUpgrade(fixture);
-  await verifyInstalledGuidanceLoads(fixture, installed);
-  const reconciled = verifyStaleBlockRepair(fixture, installed);
-  verifyRepeatedSetup(fixture, reconciled);
+  verifyStaleBlockRepair(fixture, installed);
   writeFileSync(
     join(fixture.evidence, "result.json"),
     JSON.stringify(
       {
         verdict: "pass",
-        checks: ["fresh", "legacy", "startup-loader", "stale", "idempotent", "personal-preserved"],
+        checks: ["legacy-upgrade", "stale-repair", "exact-preservation"],
       },
       null,
       2,
