@@ -1,10 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { afterEach, expect, it } from "vitest";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   assertUnderSessionDir,
   formatDigestList,
@@ -17,18 +15,19 @@ function lines(...entries: object[]): string[] {
   return entries.map((entry) => JSON.stringify(entry));
 }
 
-function digestLines(entries: string[], filename: string, _bytes = 0) {
-  const root = join(tmpdir(), `introspection-digest-${randomUUID()}`);
-  mkdirSync(root);
-  try {
-    writeFileSync(join(root, filename), `${entries.join("\n")}\n`);
-    return listSessionDigests({ sessionDir: root })[0];
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+function temporarySessionDir(): string {
+  const root = mkdtempSync(join(tmpdir(), "introspection-sessions-"));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
+  return root;
 }
 
-describeIfEnabled("introspection", "session timestamp parsing", () => {
+function digestLines(entries: string[], filename: string) {
+  const root = temporarySessionDir();
+  writeFileSync(join(root, filename), `${entries.join("\n")}\n`);
+  return listSessionDigests({ sessionDir: root })[0];
+}
+
+describe("session timestamp parsing", () => {
   it("converts pi session filenames to readable ISO timestamps", () => {
     const result = digestLines(
       lines({ type: "session", id: "s1", cwd: "/repo" }),
@@ -38,7 +37,7 @@ describeIfEnabled("introspection", "session timestamp parsing", () => {
   });
 });
 
-describeIfEnabled("introspection", "session digests", () => {
+describe("session digests", () => {
   it("extracts compact navigation metadata without tool output", () => {
     const result = digestLines(
       lines(
@@ -49,7 +48,6 @@ describeIfEnabled("introspection", "session digests", () => {
         { type: "label", targetId: "u1", label: "checkpoint" },
       ),
       "2026-03-06T23-15-17-780Z_abc123.jsonl",
-      123,
     );
 
     expect(result.cwd).toBe("/repo");
@@ -68,7 +66,6 @@ describeIfEnabled("introspection", "session digests", () => {
         { type: "label", targetId: "u1", label: "todo: implement navigation" },
       ),
       "2026-03-06T23-15-17-780Z_abc123.jsonl",
-      123,
     );
 
     const text = formatDigestList([result]);
@@ -84,7 +81,6 @@ describeIfEnabled("introspection", "session digests", () => {
         JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "Valid prompt" }] } }),
       ],
       "x.jsonl",
-      0,
     );
 
     expect(result.cwd).toBe("/repo");
@@ -92,7 +88,7 @@ describeIfEnabled("introspection", "session digests", () => {
   });
 });
 
-describeIfEnabled("introspection", "session views", () => {
+describe("session views", () => {
   it("includes user prompts and tool error summaries while omitting assistant prose", () => {
     const view = inspectLines(
       lines(
@@ -124,14 +120,16 @@ describeIfEnabled("introspection", "session views", () => {
     );
 
     const text = formatSessionView(view);
-    expect(text).toContain("### Milestones");
-    expect(text).toContain("implement navigation → u1");
-    expect(text).toContain("### Labels");
-    expect(text).toContain("manual-checkpoint → u1");
+    const milestones = text.match(/### Milestones\n([\s\S]*?)(?=\n### |$)/)?.[1];
+    const labels = text.match(/### Labels\n([\s\S]*?)(?=\n### |$)/)?.[1];
+    expect(milestones).toContain("implement navigation → u1");
+    expect(milestones).not.toContain("manual-checkpoint");
+    expect(labels).toContain("manual-checkpoint → u1");
+    expect(labels).not.toContain("implement navigation");
   });
 });
 
-describeIfEnabled("introspection", "session directory guard", () => {
+describe("session directory guard", () => {
   it("accepts files under the configured session directory", () => {
     expect(assertUnderSessionDir("/tmp/sessions/project/a.jsonl", "/tmp/sessions")).toBe("/tmp/sessions/project/a.jsonl");
   });
@@ -145,19 +143,9 @@ describeIfEnabled("introspection", "session directory guard", () => {
   });
 });
 
-describeIfEnabled("introspection", "session listing", () => {
-  const roots: string[] = [];
-
-  afterEach(() => {
-    for (const root of roots) {
-      if (existsSync(root)) rmSync(root, { recursive: true, force: true });
-    }
-    roots.length = 0;
-  });
-
+describe("session listing", () => {
   it("lists sessions from a session directory and filters by query", () => {
-    const root = join(tmpdir(), `introspection-sessions-${Date.now()}`);
-    roots.push(root);
+    const root = temporarySessionDir();
     const projectDir = join(root, "--repo--");
     mkdirSync(projectDir, { recursive: true });
     writeFileSync(
@@ -177,8 +165,7 @@ describeIfEnabled("introspection", "session listing", () => {
   });
 
   it("discovers child sessions below a parent-specific nested directory", () => {
-    const root = join(tmpdir(), `introspection-child-sessions-${Date.now()}`);
-    roots.push(root);
+    const root = temporarySessionDir();
     const childDir = join(root, "--repo--", "_children", "parent-1");
     mkdirSync(childDir, { recursive: true });
     writeFileSync(

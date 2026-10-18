@@ -8,7 +8,7 @@ import * as RegisterContractTool from "../_shared/register-contract-tool";
 
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
-type Details = { cwd: string };
+type Details = { cwd: string; value: string };
 const PI_OPTIONS = {
   renderCall: () => ({ kind: "call" }) as any,
   renderResult: () => ({ kind: "result" }) as any,
@@ -20,10 +20,13 @@ function createContract(seen: Array<{ cwd: string; signal?: AbortSignal }>): Too
     label: "Cross Host Sample",
     description: "Shared native contract",
     parameters: PARAMETERS,
-    async execute(_params, context) {
+    async execute(params, context) {
       seen.push({ cwd: context.cwd, signal: context.signal });
       context.progress?.(`cwd:${context.cwd}`);
-      return { content: [{ type: "text", text: context.cwd }], details: { cwd: context.cwd } };
+      return {
+        content: [{ type: "text", text: `${context.cwd}:${params.value}` }],
+        details: { cwd: context.cwd, value: params.value },
+      };
     },
   };
 }
@@ -66,7 +69,10 @@ describe("registerContractTool native contract", () => {
 
     const result = await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionToolContext);
 
-    expect(result.details).toEqual({ cwd: "/pi" });
+    expect(result).toEqual({
+      content: [{ type: "text", text: "/pi:p" }],
+      details: { cwd: "/pi", value: "p" },
+    });
     expect(harness.tools[0].parameters).toBe(PARAMETERS);
     expect(seen.map((entry) => entry.signal)).toEqual([signal]);
     expect(piUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/pi" }], details: { phase: "cwd:/pi" } }]);

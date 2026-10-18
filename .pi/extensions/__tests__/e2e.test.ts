@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,6 +26,7 @@ const bundles = ["analyze", "web-context", "dev-tools", "notes", "skill-builder"
 describe("native tool workflows", () => {
   it("discovers tools and composes safe nested calls through a scripted provider", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "pi-native-tools-"));
+    onTestFinished(() => rmSync(workspace, { recursive: true, force: true }));
     const evidenceDir = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
     mkdirSync(evidenceDir, { recursive: true });
     const artifact = join(mkdtempSync(join(evidenceDir, "pi-native-tools-")), "result.json");
@@ -246,8 +247,37 @@ describe("native tool workflows", () => {
         else process.env.PI_TELEMETRY = previousTelemetry;
         writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
         console.info(`Native tool evidence: ${artifact}`);
-        rmSync(workspace, { recursive: true, force: true });
       }
     }
   });
+});
+
+it("runs the named session search scenarios in an isolated HOME", () => {
+  const home = mkdtempSync(join(tmpdir(), "pi-session-search-"));
+  onTestFinished(() => rmSync(home, { recursive: true, force: true }));
+  const evidenceRoot = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
+  mkdirSync(evidenceRoot, { recursive: true });
+  const artifact = join(mkdtempSync(join(evidenceRoot, "pi-session-search-")), "result.json");
+  const evidence = {
+    revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
+    bundleHash: createHash("sha256").update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js"))).digest("hex"),
+    repeat: "nub run build && nub run test:e2e:native-tools",
+    input: "synthetic transcripts and a scripted provider in fixtures/search-workflow.ts",
+    expected: "all named public-workflow scenarios pass, including model-visible truncation",
+    actual: "", verdict: "failed",
+  };
+  try {
+    // Native homedir() needs process-level isolation. The child owns typed setup and assertions.
+    evidence.actual = execFileSync(process.execPath, [
+      "--test", "--test-reporter=tap",
+      join(repo, ".pi/extensions/introspection/__tests__/fixtures/search-workflow.ts"),
+    ], { cwd: repo, env: { ...process.env, HOME: home, PI_CODING_AGENT_DIR: join(home, ".pi/agent"), PI_TELEMETRY: "0" }, encoding: "utf8", timeout: 25_000 });
+    evidence.verdict = "passed";
+  } catch (error) {
+    if (error instanceof Error && "stdout" in error) evidence.actual = String(error.stdout);
+    throw error;
+  } finally {
+    writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
+    console.info(`Session search evidence: ${artifact}\n${evidence.actual}`);
+  }
 });
