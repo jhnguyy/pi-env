@@ -119,7 +119,10 @@ export default function (pi: ExtensionAPI) {
       parameters: SEARCH_SCHEMA,
       async execute(params, { signal }) {
         const result = await searchSessionMessages({ ...params, signal });
-        const output = truncatedText(JSON.stringify(result));
+        const output = truncatedText([
+          JSON.stringify({ matchCount: result.matches.length, moreMatches: result.truncated }),
+          ...result.matches.map((match) => JSON.stringify(match)),
+        ].join("\n"));
         return { content: [{ type: "text", text: output.text }], details: { ...result, truncated: result.truncated || output.truncated } };
       },
     },

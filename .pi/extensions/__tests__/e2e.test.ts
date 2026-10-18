@@ -332,6 +332,13 @@ it("discovers session search and returns bounded text matches from real transcri
     expect(bounded.details.truncated).toBe(true);
     expect(bounded.content[0].text).toContain("Output truncated");
     expect(Buffer.byteLength(bounded.content[0].text)).toBeLessThan(51 * 1024);
+    const retained = bounded.content[0].text.split("\n")
+      .filter((line: string) => line.startsWith("{") && line.includes('"entryId":'))
+      .map((line: string) => JSON.parse(line));
+    expect(retained).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: join(longPath, "output.jsonl"), entryId: "output-0", snippet: expect.stringContaining("\u0000".repeat(200)) }),
+    ]));
+    expect(retained.length).toBeLessThan(20);
     evidence.verdict = "passed";
   } finally {
     writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
