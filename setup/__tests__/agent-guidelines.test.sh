@@ -16,7 +16,6 @@ configure_pi() {
   TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
   APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
   APPEND_DST="$home/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_MARKER='<!-- test:append-system -->' \
   PI_AGENT_DIR="$home/.pi/agent" \
   TMUX_CONF="$home/.tmux.conf" \
   TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \

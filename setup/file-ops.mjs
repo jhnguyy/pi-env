@@ -1,5 +1,4 @@
 import {
-  appendFileSync,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -90,22 +89,5 @@ export function linkPathEffect(src, target, label) {
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(src, target);
     linked(label);
-  });
-}
-
-export function appendOnceEffect(src, dst, marker, label) {
-  return fileEffect("append file", dst, () => {
-    if (!existsSync(dst)) {
-      mkdirSync(dirname(dst), { recursive: true });
-      writeFileSync(dst, `${marker}\n`);
-      appendFileSync(dst, readFileSync(src));
-      ok(`${label} (created with repo block)`);
-    } else if (readFileSync(dst, "utf8").includes(marker)) {
-      ok(`${label} (repo block already present)`);
-    } else {
-      appendFileSync(dst, `\n${marker}\n`);
-      appendFileSync(dst, readFileSync(src));
-      ok(`${label} (appended repo block)`);
-    }
   });
 }

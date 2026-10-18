@@ -36,7 +36,7 @@ cp "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json"
 phase='native agent-directory selection'
 setup_init_context "$ROOT/setup"
 assert_eq "$SETTINGS_FILE" "$PI_CODING_AGENT_DIR/settings.json" 'base settings use native agent directory'
-export REPO SETUP_DIR SETTINGS_FILE AGENTS_DIR TEST_UTILS_DIR APPEND_SRC APPEND_DST APPEND_MARKER PI_AGENT_DIR TMUX_CONF TMUX_SOURCE_LINE GHOSTTY_CONFIG_DIR POST_MERGE_HOOK_SRC PRE_COMMIT_HOOK_SRC
+export REPO SETUP_DIR SETTINGS_FILE AGENTS_DIR TEST_UTILS_DIR APPEND_SRC APPEND_DST PI_AGENT_DIR TMUX_CONF TMUX_SOURCE_LINE GHOSTTY_CONFIG_DIR POST_MERGE_HOOK_SRC PRE_COMMIT_HOOK_SRC
 export PI_ENV_SETUP_MODE=portable PI_ENV_SKIP_TERMINAL=1 PI_ENV_SKIP_REPO_HOOKS=1 PI_ENV_SKIP_HOME_MANAGER=1
 configure() {
   setup_parse_args "$@" --no-terminal --no-repo-hooks --no-home-manager
@@ -113,7 +113,7 @@ for mode in normal reset; do
   if "$NODE" "$ROOT/setup/apply-managed-settings.mjs" "$SETTINGS_FILE" "$EVIDENCE/missing-repo" "${args[@]}"; then
     fail 'registration failure should fail'
   fi
-  cmp "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
+  "$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$SETTINGS_FILE" "$EVIDENCE/legacy.json" || fail 'registration failure did not restore exact legacy settings'
 done
 for metadata in codex neither; do
   phase="provider metadata: $metadata"
@@ -132,5 +132,5 @@ phase='conflicting agent directories'
 if PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$EVIDENCE/selected-agent" "$ROOT/setup.sh" --reset --help; then
   fail 'conflicting agent directories must fail before provisioning or writes'
 fi
-cmp "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json" || fail 'setup changed the unselected settings'
+"$NODE" "$ROOT/setup/__tests__/assert-files-equal.mjs" "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json" || fail 'setup changed the unselected settings'
 phase=complete

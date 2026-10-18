@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { ok, section, skip } from "./runtime-support.mjs";
 import {
-  appendOnceEffect,
   fileEffect,
   linkPathEffect,
   linked,
@@ -43,10 +42,11 @@ export function configurePiEffect(ctx) {
       join(ctx.testUtilsDir, "loader.test.ts"),
       "~/.pi/agent/extensions/__tests__/loader.test.ts",
     );
-    yield* appendOnceEffect(
+    yield* managedBlockEffect(
       ctx.appendSrc,
       ctx.appendDst,
-      ctx.appendMarker,
+      "<!-- pi-env:append-system:start -->",
+      "<!-- pi-env:append-system:end -->",
       "~/.pi/agent/APPEND_SYSTEM.md",
     );
     yield* managedBlockEffect(

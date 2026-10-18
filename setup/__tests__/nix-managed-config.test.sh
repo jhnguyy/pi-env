@@ -18,7 +18,6 @@ run_terminal_config() {
   GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty" \
   APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
   APPEND_DST="$HOME/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_MARKER="<!-- pi-env:append-system -->" \
   TEST_UTILS_DIR="$HOME/.pi/agent/extensions/__tests__" \
   POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
   PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
