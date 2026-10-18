@@ -16,7 +16,7 @@ import { registerCrossHostTool } from "../_shared/register-cross-host-tool";
 
 const PARAMETERS = Type.Object({ value: Type.String() });
 type Params = Static<typeof PARAMETERS>;
-type Details = { cwd: string };
+type Details = { cwd: string; value: string };
 const PI_OPTIONS = {
   renderCall: () => ({ kind: "call" }) as any,
   renderResult: () => ({ kind: "result" }) as any,
@@ -28,10 +28,13 @@ function createContract(seen: Array<{ cwd: string; signal?: AbortSignal }>): Too
     label: "Cross Host Sample",
     description: "Shared cross-host contract",
     parameters: PARAMETERS,
-    async execute(_params, context) {
+    async execute(params, context) {
       seen.push({ cwd: context.cwd, signal: context.signal });
       context.progress?.(`cwd:${context.cwd}`);
-      return { content: [{ type: "text", text: context.cwd }], details: { cwd: context.cwd } };
+      return {
+        content: [{ type: "text", text: `${context.cwd}:${params.value}` }],
+        details: { cwd: context.cwd, value: params.value },
+      };
     },
   };
 }
@@ -79,7 +82,7 @@ function createPiHarness() {
 }
 
 describe("registerCrossHostTool contract", () => {
-  it("requires non-empty capability classification and preserves it", () => {
+  it("preserves declared capability classifications", () => {
     const harness = createPiHarness();
     registerCrossHostTool(harness.pi as any, {
       contract: createContract([]),
@@ -105,6 +108,7 @@ describe("registerCrossHostTool contract", () => {
       piOptions: { promptSnippet, promptGuidelines, renderCall, renderResult, exposure: "deferred", namespace: { name: "pi-env" } },
     });
 
+    expect(harness.tools[0]?.parameters).toBe(PARAMETERS);
     expect(harness.tools[0]?.promptSnippet).toBe(promptSnippet);
     expect(harness.tools[0]?.promptGuidelines).toBe(promptGuidelines);
     expect(harness.tools[0]?.renderCall).toBe(renderCall);
@@ -137,42 +141,25 @@ describe("registerCrossHostTool contract", () => {
     expect(removed).toEqual(["cross_host_sample"]);
   });
 
-  it("uses the parent context when a child tool has one", async () => {
-    const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
+  it.each([
+    { name: "main-session cwd", child: undefined, cwd: "/main-session" },
+    { name: "child fallback cwd", child: { cwd: "/child", sessionGeneration: "g1" }, cwd: "/child" },
+    { name: "parent-context precedence", child: { cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }, cwd: "/parent" },
+  ])("uses $name in the returned result", async ({ child, cwd }) => {
     const harness = createPiHarness();
     registerCrossHostTool(harness.pi as any, {
-      contract: createContract(seen),
+      contract: createContract([]),
       capabilities: [ToolCapability.Read],
       piOptions: PI_OPTIONS,
     });
-    harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main" });
-    const createTool = harness.registrations[0].createTool!;
-
-    await createTool({ cwd: "/child", sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
-    await createTool({ cwd: "/child", parentContext: { cwd: "/parent" } as ExtensionContext, sessionGeneration: "g1" }).execute("child", { value: "x" }, undefined);
-
-    expect(seen.map((entry) => entry.cwd)).toEqual(["/child", "/parent"]);
-  });
-
-  it("uses main-session cwd for the main AgentTool and child cwd for child tools without parent context", async () => {
-    const seen: Array<{ cwd: string; signal?: AbortSignal }> = [];
-    const harness = createPiHarness();
-    registerCrossHostTool(harness.pi as any, {
-      contract: createContract(seen),
-      capabilities: [ToolCapability.Read],
-      piOptions: PI_OPTIONS,
-    });
-
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/main-session" });
+    const registration = harness.registrations[0];
+    const tool = child ? registration.createTool!(child) : registration.tool;
 
-    const active = harness.registrations[0];
-    await active.tool.execute("main", { value: "x" }, undefined);
-    await active.createTool!({
-      cwd: "/child-session",
-      sessionGeneration: active.sessionGeneration!,
-    }).execute("child", { value: "x" }, undefined);
-
-    expect(seen.map((entry) => entry.cwd)).toEqual(["/main-session", "/child-session"]);
+    expect(await tool.execute("context", { value: "x" }, undefined)).toEqual({
+      content: [{ type: "text", text: `${cwd}:x` }],
+      details: { cwd, value: "x" },
+    });
   });
 
   it("forwards cancellation signal and progress in both adapters", async () => {
@@ -189,9 +176,11 @@ describe("registerCrossHostTool contract", () => {
 
     harness.pi.trigger(PiEvent.SessionStart, { type: PiEvent.SessionStart }, { cwd: "/agent" });
 
-    await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionToolContext);
-    await harness.registrations[0].tool.execute("agent", { value: "a" }, signal, (update) => agentUpdates.push(update));
+    const piResult = await harness.tools[0].execute("pi", { value: "p" }, signal, (update) => piUpdates.push(update as AgentToolResult<unknown>), { cwd: "/pi" } as ExtensionToolContext);
+    const agentResult = await harness.registrations[0].tool.execute("agent", { value: "a" }, signal, (update) => agentUpdates.push(update));
 
+    expect(piResult).toEqual({ content: [{ type: "text", text: "/pi:p" }], details: { cwd: "/pi", value: "p" } });
+    expect(agentResult).toEqual({ content: [{ type: "text", text: "/agent:a" }], details: { cwd: "/agent", value: "a" } });
     expect(seen.map((entry) => entry.signal)).toEqual([signal, signal]);
     expect(piUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/pi" }], details: { phase: "cwd:/pi" } }]);
     expect(agentUpdates).toEqual([{ content: [{ type: "text", text: "cwd:/agent" }], details: { phase: "cwd:/agent" } }]);

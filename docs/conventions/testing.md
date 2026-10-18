@@ -6,4 +6,16 @@
 
 Keep existing safety coverage until replacement evidence detects the same failures. Temporary catching tests remain uncommitted.
 
+## Test structure and review
+
+E2E-first selects the workflow boundary. It does not require one large test. Split independent outcomes into named scenarios with shared setup where appropriate. Scenarios must not depend on the order of earlier assertions or responses.
+
+Use a subprocess when the contract or isolation requires a separate process. Keep its launcher thin. Put substantial test programs in normal, type-checked source files rather than command strings. Reuse fixtures for a common lifecycle, not to build a general test framework.
+
+Assert observable results at the chosen boundary. For model-facing tools, check the content the model receives. Metadata or a truncation notice alone does not prove that useful output survives. Keep test names consistent with what assertions establish. Distinguish compile-time restrictions from runtime behavior.
+
+Use unique temporary directories and register cleanup immediately. Tests with explicit inputs must not depend on personal settings unless settings integration is the contract under test.
+
+During review, distinguish duplicate execution from distinct contracts. Check that each case adds failure detection rather than mirroring implementation steps.
+
 E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
