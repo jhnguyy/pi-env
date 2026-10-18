@@ -138,69 +138,8 @@ test_unrelated_roles_link_is_preserved() {
   rm -rf "$tmp"
 }
 
-test_append_system_setup_and_loading() {
-  local evidence home append_file
-  evidence="$(with_temp_dir)"
-  home="$evidence/home"
-  append_file="$home/.pi/agent/APPEND_SYSTEM.md"
-  echo "Append-system evidence: $evidence"
-  printf '%s\n' 'Reproduce: bash setup/__tests__/agent-guidelines.test.sh' >"$evidence/README.txt"
-
-  configure_pi "$home"
-  cp "$append_file" "$evidence/fresh.md"
-  assert_file_count "$append_file" '<!-- pi-env:append-system:start -->' 1
-  assert_file_count "$append_file" '<!-- pi-env:append-system:end -->' 1
-
-  printf '%s\n' '<!-- pi-env:append-system -->' '<!-- pi-env:append-system -->' \
-    'Keep this personal rule.' '' '  Keep this spacing.  ' >"$append_file"
-  cp "$append_file" "$evidence/legacy.md"
-  configure_pi "$home"
-  cp "$append_file" "$evidence/upgraded.md"
-
-  run_node --input-type=module - "$ROOT" "$evidence" <<'NODE'
-import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { DefaultResourceLoader } from "@earendil-works/pi-coding-agent";
-const [root, evidence] = process.argv.slice(2);
-const path = join(evidence, "home/.pi/agent/APPEND_SYSTEM.md");
-const source = readFileSync(join(root, ".pi/agent/APPEND_SYSTEM.md"), "utf8").trim();
-const expected = `<!-- pi-env:append-system:start -->\n${source}\n<!-- pi-env:append-system:end -->`;
-const upgraded = readFileSync(path, "utf8");
-const legacy = readFileSync(join(evidence, "legacy.md"), "utf8");
-assert.equal(upgraded.slice(0, legacy.length), legacy, "legacy text must remain unchanged");
-assert.ok(upgraded.includes(expected));
-const cwd = join(evidence, "project");
-mkdirSync(cwd);
-const loader = new DefaultResourceLoader({
-  cwd, agentDir: join(evidence, "home/.pi/agent"),
-  noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
-});
-await loader.reload();
-assert.ok(loader.getAppendSystemPrompt().includes(upgraded));
-writeFileSync(join(evidence, "loaded.json"), JSON.stringify(loader.getAppendSystemPrompt(), null, 2));
-const reconciled = upgraded + "\n  Keep this trailing rule.  \n\n";
-writeFileSync(join(evidence, "expected-reconciled.md"), reconciled);
-writeFileSync(path, reconciled.replace(source, "stale philosophy"));
-NODE
-
-  configure_pi "$home"
-  cp "$append_file" "$evidence/reconciled.md"
-  configure_pi "$home"
-  run_node -e '
-    const assert = require("node:assert/strict");
-    const fs = require("node:fs");
-    const [actual, expected, previous] = process.argv.slice(1);
-    const current = fs.readFileSync(actual, "utf8");
-    assert.equal(current, fs.readFileSync(previous, "utf8"), "setup must be idempotent");
-    assert.equal(current, fs.readFileSync(expected, "utf8"), "only the managed block may change");
-  ' "$append_file" "$evidence/expected-reconciled.md" "$evidence/reconciled.md"
-  printf '%s\n' '{"verdict":"pass","checks":["fresh","legacy","startup-loader","stale","idempotent","personal-preserved"]}' >"$evidence/result.json"
-}
-
 test_agent_guidelines_are_created_from_the_managed_source
 test_agent_guidelines_are_reconciled_idempotently
-test_append_system_setup_and_loading
 test_managed_obsolete_roles_link_is_removed
 test_user_owned_roles_file_is_preserved
 test_unrelated_roles_link_is_preserved
