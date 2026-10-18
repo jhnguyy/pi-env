@@ -152,10 +152,9 @@ test_append_system_setup_and_loading() {
   assert_file_count "$append_file" '<!-- pi-env:append-system:end -->' 1
 
   printf '%s\n' '<!-- pi-env:append-system -->' '<!-- pi-env:append-system -->' \
-    'Keep this personal rule.' >"$append_file"
+    'Keep this personal rule.' '' '  Keep this spacing.  ' >"$append_file"
   cp "$append_file" "$evidence/legacy.md"
   configure_pi "$home"
-  assert_file_contains "$append_file" 'Keep this personal rule.'
   cp "$append_file" "$evidence/upgraded.md"
 
   run_node --input-type=module - "$ROOT" "$evidence" <<'NODE'
@@ -168,6 +167,8 @@ const path = join(evidence, "home/.pi/agent/APPEND_SYSTEM.md");
 const source = readFileSync(join(root, ".pi/agent/APPEND_SYSTEM.md"), "utf8").trim();
 const expected = `<!-- pi-env:append-system:start -->\n${source}\n<!-- pi-env:append-system:end -->`;
 const upgraded = readFileSync(path, "utf8");
+const legacy = readFileSync(join(evidence, "legacy.md"), "utf8");
+assert.equal(upgraded.slice(0, legacy.length), legacy, "legacy text must remain unchanged");
 assert.ok(upgraded.includes(expected));
 const cwd = join(evidence, "project");
 mkdirSync(cwd);
@@ -178,13 +179,12 @@ const loader = new DefaultResourceLoader({
 await loader.reload();
 assert.ok(loader.getAppendSystemPrompt().includes(upgraded));
 writeFileSync(join(evidence, "loaded.json"), JSON.stringify(loader.getAppendSystemPrompt(), null, 2));
-writeFileSync(path, upgraded.replace(source, "stale philosophy") + "\nKeep this trailing rule.\n");
-writeFileSync(join(evidence, "expected-block.md"), expected);
+const reconciled = upgraded + "\n  Keep this trailing rule.  \n\n";
+writeFileSync(join(evidence, "expected-reconciled.md"), reconciled);
+writeFileSync(path, reconciled.replace(source, "stale philosophy"));
 NODE
 
   configure_pi "$home"
-  assert_file_contains "$append_file" 'Keep this personal rule.'
-  assert_file_contains "$append_file" 'Keep this trailing rule.'
   cp "$append_file" "$evidence/reconciled.md"
   configure_pi "$home"
   run_node -e '
@@ -193,8 +193,8 @@ NODE
     const [actual, expected, previous] = process.argv.slice(1);
     const current = fs.readFileSync(actual, "utf8");
     assert.equal(current, fs.readFileSync(previous, "utf8"), "setup must be idempotent");
-    assert.ok(current.includes(fs.readFileSync(expected, "utf8")));
-  ' "$append_file" "$evidence/expected-block.md" "$evidence/reconciled.md"
+    assert.equal(current, fs.readFileSync(expected, "utf8"), "only the managed block may change");
+  ' "$append_file" "$evidence/expected-reconciled.md" "$evidence/reconciled.md"
   printf '%s\n' '{"verdict":"pass","checks":["fresh","legacy","startup-loader","stale","idempotent","personal-preserved"]}' >"$evidence/result.json"
 }
 
