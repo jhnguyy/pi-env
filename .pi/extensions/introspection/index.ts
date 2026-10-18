@@ -118,7 +118,7 @@ export default function (pi: ExtensionAPI) {
         `Search local pi session user and assistant text, including nested sessions and alternate branches. Read-only. Returns at most ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool output, thinking, and summaries. Use list_sessions for metadata navigation and read_session for a sparse session view.`,
       parameters: SEARCH_SCHEMA,
       async execute(params, { signal }) {
-        const result = await searchSessionMessages({ ...params, signal });
+        const result = await searchSessionMessages({ term: params.term, cwd: params.cwd, signal });
         const output = truncatedText([
           JSON.stringify({ matchCount: result.matches.length, moreMatches: result.truncated }),
           ...result.matches.map((match) => JSON.stringify(match)),
