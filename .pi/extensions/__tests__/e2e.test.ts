@@ -44,8 +44,8 @@ describe("native tool workflows", () => {
       },
       expected: {
         activeBefore: ["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"],
-        callableBefore: ["analyze", "web_fetch", "notes"],
-        notCallable: ["closeout", "skill_build", "subagent"],
+        callableBefore: ["analyze", "web_fetch", "notes", "subagent"],
+        notCallable: ["closeout", "skill_build"],
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         composition: "nested read and Bash results combined with session context",
@@ -108,8 +108,8 @@ describe("native tool workflows", () => {
       evidence.actual = { activeBefore, callableBefore };
       expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"]));
       expect(activeBefore).not.toContain("web_fetch");
-      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "notes"]));
-      for (const name of ["tool_search", "closeout", "skill_build", "subagent"]) expect(callableBefore).not.toContain(name);
+      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "notes", "subagent"]));
+      for (const name of ["tool_search", "closeout", "skill_build"]) expect(callableBefore).not.toContain(name);
 
       const webUrl = "https://example.invalid/pi-env-fixture";
       globalThis.fetch = async (input) => {

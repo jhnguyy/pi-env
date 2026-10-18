@@ -14,6 +14,8 @@ The `subagent` tool uses one `action` parameter:
 - `cancel` requests cancellation of the job's current initial operation.
 - `usage` reports aggregate child usage, including subsequent human prompts.
 
+The parent can call `subagent` directly or through native codemode with `tools.subagent(...)`. Pi owns nested-call events, usage aggregation, and cancellation signals. Children can use their own native codemode when their settings or explicit tool selection enable it. Child scripts reach the child's native callable tools, not the parent's registry. The root `subagent` tool is not registered in children, so neither direct calls nor codemode scripts can delegate recursively. Pi also excludes codemode itself from script-callable tools.
+
 Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use child-native defaults. Explicit model and tool names must be available in the child's configuration. An explicit empty tool list selects no tools. Old AgentTool aliases, such as `dev-tools-edit`, are not native tool names.
 
 Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.

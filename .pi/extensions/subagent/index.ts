@@ -270,7 +270,6 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
     ToolRender.registerPublicTool(pi, {
       name: "subagent",
       label: "Subagent",
-      exposure: "model-only",
       description,
       parameters: SUBAGENT_PARAMETERS,
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
