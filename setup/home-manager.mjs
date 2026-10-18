@@ -5,17 +5,24 @@ import { ok, section, skip } from "./runtime-support.mjs";
 import { fileEffect } from "./file-ops.mjs";
 import { SetupStateError } from "./setup-errors.mjs";
 
+// The shell reloads the generation's session variables only after these outcomes.
+export const HomeManagerOutcome = Object.freeze({
+  Switched: "switched",
+  Current: "current",
+  Skipped: "skipped",
+});
+
 export function configureHomeManagerEffect(ctx, policy) {
   return Effect.gen(function* () {
     section("Home Manager");
     if (!policy.homeManager.sync) {
       skip("home-manager sync (disabled by setup option)");
-      return;
+      return HomeManagerOutcome.Skipped;
     }
     const flakeDir = ctx.env.PI_ENV_HOME_MANAGER_FLAKE;
     if (!flakeDir) {
       skip("home-manager sync (pi-env.homeManager.sync.enable is not set)");
-      return;
+      return HomeManagerOutcome.Skipped;
     }
     const input = ctx.env.PI_ENV_HOME_MANAGER_INPUT || "pi-env";
 
@@ -27,12 +34,12 @@ export function configureHomeManagerEffect(ctx, policy) {
     ]);
     if (gitDir !== gitCommonDir) {
       skip("home-manager sync (worktree checkout — the primary checkout owns sync)");
-      return;
+      return HomeManagerOutcome.Skipped;
     }
     const branch = yield* gitEffect(ctx, ["branch", "--show-current"]);
     if (branch !== "main") {
       skip(`home-manager sync (checkout is on ${branch || "a detached HEAD"}, not main)`);
-      return;
+      return HomeManagerOutcome.Skipped;
     }
 
     const head = yield* gitEffect(ctx, ["rev-parse", "HEAD"]);
@@ -40,11 +47,11 @@ export function configureHomeManagerEffect(ctx, policy) {
     const locked = yield* lockedRevEffect(lockFile, input);
     if (locked.skip) {
       skip(`home-manager sync (${locked.skip})`);
-      return;
+      return HomeManagerOutcome.Skipped;
     }
     if (locked.rev === head) {
       ok(`home-manager ${input} input matches main (${head.slice(0, 7)})`);
-      return;
+      return HomeManagerOutcome.Current;
     }
 
     // Setup also runs from the post-merge hook; activation stays an explicit request.
@@ -52,7 +59,7 @@ export function configureHomeManagerEffect(ctx, policy) {
       console.log(
         `  —  home-manager ${input} input is ${locked.rev.slice(0, 7)}, main is ${head.slice(0, 7)}; run ./setup.sh --sync-home-manager`,
       );
-      return;
+      return HomeManagerOutcome.Skipped;
     }
 
     // The input fetches the published branch, so update only when local main equals its upstream.
@@ -63,7 +70,7 @@ export function configureHomeManagerEffect(ctx, policy) {
       skip(
         `home-manager sync (local main ${head.slice(0, 7)} differs from its upstream; push or pull first)`,
       );
-      return;
+      return HomeManagerOutcome.Skipped;
     }
 
     console.log(`  —  Updating ${input} input ${locked.rev.slice(0, 7)} → ${head.slice(0, 7)}`);
@@ -78,6 +85,7 @@ export function configureHomeManagerEffect(ctx, policy) {
     }
     yield* commandEffect(ctx, "home-manager", ["switch", "--flake", flakeDir]);
     ok(`home-manager switched with ${input} ${head.slice(0, 7)}`);
+    return HomeManagerOutcome.Switched;
   });
 }
 

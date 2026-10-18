@@ -1,18 +1,11 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { AgentTool } from "@earendil-works/pi-agent-core";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Effect } from "effect";
-import {
-  registerAgentTools,
-  unregisterAgentTools,
-  ToolCapability,
-  type AgentToolEvents,
-  type ExtToolRegistration,
-} from "../_shared/agent-tools";
 import type { ActiveDagRuntimeService } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
-import { toAgentTool, type ToolContract } from "../_shared/tool-contract";
+import * as ToolContract from "../_shared/tool-contract";
 import { validatePlan } from "./core";
 import {
   preflightReviewEvidence,
@@ -45,12 +38,8 @@ function suffixFor(reviewId: string): string {
   return createHash("sha256").update(reviewId).digest("hex").slice(0, 12);
 }
 
-function renamed(tool: AgentTool<any, any>, suffix: string): AgentTool<any, any> {
+function renamed(tool: ToolDefinition, suffix: string): ToolDefinition {
   return { ...tool, name: `${tool.name}_${suffix}` };
-}
-
-function customTool(contract: ToolContract<any, any>, cwd: string): AgentTool<any, any> {
-  return toAgentTool(contract, () => ({ cwd }));
 }
 
 function canonical(value: unknown): string {
@@ -67,13 +56,11 @@ function boundedSubmission(value: unknown): string {
 
 export interface ReviewDagTools {
   readonly names: ReviewGraphToolNames;
-  readonly registrations: readonly ExtToolRegistration[];
+  readonly customTools: readonly ToolDefinition[];
   readonly admission: (signal?: AbortSignal) => Promise<ReviewAdmission>;
-  unregister(): void;
 }
 
-export function registerReviewDagTools(options: {
-  readonly pi: AgentToolEvents;
+export function createReviewDagTools(options: {
   readonly reviewId: string;
   readonly runId: string;
   readonly deckPath: string;
@@ -84,7 +71,7 @@ export function registerReviewDagTools(options: {
 }): ReviewDagTools {
   const suffix = suffixFor(options.reviewId);
   const base = buildReviewReadToolContracts(options.store).map((contract) =>
-    renamed(customTool(contract, options.store.state.snapshot.worktree), suffix),
+    renamed(ToolContract.toPiTool(contract), suffix),
   );
   const deckName = `review_deck_${suffix}`;
   const planName = `submit_review_plan_${suffix}`;
@@ -107,129 +94,109 @@ export function registerReviewDagTools(options: {
     }));
   const getReviewerDossier = async (signal?: AbortSignal) =>
     (await admittedReview(signal)).reviewers;
-  const deckTool = customTool(
-    {
-      name: deckName,
-      label: "Review Deck",
-      description: "Read the bounded review deck for this pinned review run.",
-      parameters: EmptySchema,
-      async execute(_params, context) {
-        if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const text = readFileSync(options.deckPath, "utf8");
-        if (Buffer.byteLength(text, "utf8") > MAX_DECK_BYTES)
-          throw new Error("Review deck exceeds the tool byte limit.");
-        return { content: [txt(text)], details: { bytes: Buffer.byteLength(text, "utf8") } };
-      },
+  const deckTool = ToolContract.toPiTool<unknown, unknown>({
+    name: deckName,
+    label: "Review Deck",
+    description: "Read the bounded review deck for this pinned review run.",
+    parameters: EmptySchema,
+    async execute(_params, context) {
+      if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
+      const text = readFileSync(options.deckPath, "utf8");
+      if (Buffer.byteLength(text, "utf8") > MAX_DECK_BYTES)
+        throw new Error("Review deck exceeds the tool byte limit.");
+      return { content: [txt(text)], details: { bytes: Buffer.byteLength(text, "utf8") } };
     },
-    options.store.state.snapshot.worktree,
-  );
-  const planTool = customTool(
-    {
-      name: planName,
-      label: "Submit Review Plan",
-      description: "Validate and return the canonical reading plan for this pinned snapshot.",
-      parameters: PlanSchema,
-      async execute(params, context) {
-        if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const plan = params as ReviewPlan;
-        const validation = validatePlan(plan, options.store.state.snapshot.metadata.changedFiles);
-        if (!validation.ok)
-          return { content: [txt(validation.message)], isError: true, details: validation };
-        try {
-          const resolved = await preflightReviewEvidence(
-            options.evidence,
-            plan,
-            context.signal ?? new AbortController().signal,
-          );
-          return {
-            content: [txt(boundedSubmission(plan))],
-            details: {
-              ...validation,
-              dossierBytes: resolved.coverage.dossierBytes,
-              omissions: resolved.coverage.omissions.length,
-            },
-          };
-        } catch (cause) {
-          if (!(cause instanceof ReviewEvidenceResolutionFailure)) throw cause;
-          return {
-            content: [txt(`${cause.code}: ${cause.message}`)],
-            isError: true,
-            details: {
-              code: cause.code,
-              message: cause.message,
-              actual: cause.actual,
-              limit: cause.limit,
-              path: cause.path,
-            },
-          };
-        }
-      },
-    },
-    options.store.state.snapshot.worktree,
-  );
-  const referencesTool = customTool(
-    {
-      name: referencesName,
-      label: "Review Result References",
-      description:
-        "Read admitted raw findings with stable IDs and explicit failed and malformed node names.",
-      parameters: EmptySchema,
-      async execute(_params, context) {
-        if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const dossier = await getReviewerDossier(context.signal);
-        const text = serializeReviewerDossierContext(dossier);
+  });
+  const planTool = ToolContract.toPiTool<unknown, unknown>({
+    name: planName,
+    label: "Submit Review Plan",
+    description: "Validate and return the canonical reading plan for this pinned snapshot.",
+    parameters: PlanSchema,
+    async execute(params, context) {
+      if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
+      const plan = params as ReviewPlan;
+      const validation = validatePlan(plan, options.store.state.snapshot.metadata.changedFiles);
+      if (!validation.ok)
+        return { content: [txt(validation.message)], isError: true, details: validation };
+      try {
+        const resolved = await preflightReviewEvidence(
+          options.evidence,
+          plan,
+          context.signal ?? new AbortController().signal,
+        );
         return {
-          content: [txt(text)],
+          content: [txt(boundedSubmission(plan))],
           details: {
-            succeeded: dossier.admitted.length,
-            failed: dossier.failed.length,
-            malformed: dossier.malformed.length,
+            ...validation,
+            dossierBytes: resolved.coverage.dossierBytes,
+            omissions: resolved.coverage.omissions.length,
           },
         };
-      },
-    },
-    options.store.state.snapshot.worktree,
-  );
-  const synthesisTool = customTool(
-    {
-      name: synthesisName,
-      label: "Submit Review Synthesis",
-      description: "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
-      parameters: ConsolidationReviewV2Schema,
-      async execute(params, context) {
-        if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
-        const raw = params as ConsolidationReviewV2;
-        const dossier = await getReviewerDossier(context.signal);
-        if (
-          !validateConsolidationReviewV2Shape(raw) ||
-          !validConsolidationAccounting(raw, dossier.rawFindings)
-        )
-          return {
-            content: [
-              txt(
-                "Synthesis provenance is invalid. Account for every admitted raw finding ID exactly once in a retained group or a dismissal with a nonblank reason.",
-              ),
-            ],
-            isError: true,
-            details: { ok: false, reason: "invalid-provenance-accounting" },
-          };
+      } catch (cause) {
+        if (!(cause instanceof ReviewEvidenceResolutionFailure)) throw cause;
         return {
-          content: [txt(boundedSubmission(raw))],
-          details: { ok: true, findings: raw.findings.length, status: raw.coverage.status },
+          content: [txt(`${cause.code}: ${cause.message}`)],
+          isError: true,
+          details: {
+            code: cause.code,
+            message: cause.message,
+            actual: cause.actual,
+            limit: cause.limit,
+            path: cause.path,
+          },
         };
-      },
+      }
     },
-    options.store.state.snapshot.worktree,
-  );
+  });
+  const referencesTool = ToolContract.toPiTool<unknown, unknown>({
+    name: referencesName,
+    label: "Review Result References",
+    description:
+      "Read admitted raw findings with stable IDs and explicit failed and malformed node names.",
+    parameters: EmptySchema,
+    async execute(_params, context) {
+      if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
+      const dossier = await getReviewerDossier(context.signal);
+      const text = serializeReviewerDossierContext(dossier);
+      return {
+        content: [txt(text)],
+        details: {
+          succeeded: dossier.admitted.length,
+          failed: dossier.failed.length,
+          malformed: dossier.malformed.length,
+        },
+      };
+    },
+  });
+  const synthesisTool = ToolContract.toPiTool<unknown, unknown>({
+    name: synthesisName,
+    label: "Submit Review Synthesis",
+    description: "Validate v2 editorial consolidation with exactly-once raw finding accounting.",
+    parameters: ConsolidationReviewV2Schema,
+    async execute(params, context) {
+      if (context.signal?.aborted) throw new Error("Review tool execution cancelled.");
+      const raw = params as ConsolidationReviewV2;
+      const dossier = await getReviewerDossier(context.signal);
+      if (
+        !validateConsolidationReviewV2Shape(raw) ||
+        !validConsolidationAccounting(raw, dossier.rawFindings)
+      )
+        return {
+          content: [
+            txt(
+              "Synthesis provenance is invalid. Account for every admitted raw finding ID exactly once in a retained group or a dismissal with a nonblank reason.",
+            ),
+          ],
+          isError: true,
+          details: { ok: false, reason: "invalid-provenance-accounting" },
+        };
+      return {
+        content: [txt(boundedSubmission(raw))],
+        details: { ok: true, findings: raw.findings.length, status: raw.coverage.status },
+      };
+    },
+  });
   const tools = [...base, deckTool, planTool, referencesTool, synthesisTool];
-  const registrations = registerAgentTools(
-    options.pi,
-    tools.map((tool) => ({
-      tool,
-      capabilities: [ToolCapability.Read],
-      audience: "dag" as const,
-    })),
-  );
   const names: ReviewGraphToolNames = {
     deck: deckName,
     read: base.map((tool) => tool.name),
@@ -239,8 +206,7 @@ export function registerReviewDagTools(options: {
   };
   return {
     names,
-    registrations,
+    customTools: tools,
     admission: admittedReview,
-    unregister: () => unregisterAgentTools(options.pi, registrations),
   };
 }

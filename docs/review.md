@@ -15,7 +15,7 @@ Within one parent session, a create request for the same pull request and pinned
 
 ## Review and inspection
 
-GitHub access uses `gh`. To run a review, annotate an available model with the exact `reviewer` value under its fully qualified `modelAnnotations` ID. One approved model can fill every role. Optional `prReview.roleModels` entries can pin individual roles to available, annotated models. The obsolete `prReview.model` setting has no effect.
+GitHub access uses `gh`. The review uses models in Pi's available model registry; model annotations do not restrict review eligibility. One available model can fill every role. Optional `prReview.roleModels` entries can pin individual roles to available models. Unavailable pins fail validation.
 
 A review pins the pull request head, base, changed-file manifest, and diff before the agents read evidence. The extension prepares a managed worktree at the reviewed head. It limits and verifies evidence from that snapshot. Review children cannot use unrestricted filesystem, shell, or network tools. Focused reviewers receive admitted evidence, not filesystem tools.
 

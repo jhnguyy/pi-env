@@ -5,6 +5,7 @@ import { Data, Effect } from "effect";
 
 import type { SubagentRuntimeConfig } from "./config";
 import type { UsageStats } from "./types";
+import * as ChildTypes from "./child-types";
 import { addUsage, zeroUsage } from "./usage";
 
 export const WorkspaceAccess = {
@@ -97,7 +98,12 @@ export class SubagentRunSupervisor {
   private readonly activeWorkspaceWriters = new Set<string>();
   private readonly totalUsage = zeroUsage();
   private readonly usageByRun = new Map<string, UsageStats>();
+  readonly children = new Map<string, ChildTypes.NativeChildSession>();
+  private readonly evicting = new Set<string>();
+  private readonly evictionFailures: Error[] = [];
+  private omittedEvictionFailures = 0;
   private closed = false;
+  private shutdownPromise: Promise<void> | undefined;
 
   constructor(
     readonly sessionId: string,
@@ -161,8 +167,38 @@ export class SubagentRunSupervisor {
     );
   }
 
-  async shutdown(): Promise<void> {
+  retainChild(child: ChildTypes.NativeChildSession): void {
+    if (this.closed) throw new Error("Parent subagent session is shutting down.");
+    this.children.set(child.id, child);
+  }
+
+  pruneChildren(): void {
     if (this.closed) return;
+    let excess = this.children.size - this.evicting.size - this.config.maxRetainedJobs;
+    for (const child of this.children.values()) {
+      if (excess <= 0) break;
+      const state = child.summary().state;
+      if (this.evicting.has(child.id) || (state !== ChildTypes.NativeChildState.Idle && state !== ChildTypes.NativeChildState.Closed)) continue;
+      excess--;
+      this.evicting.add(child.id);
+      void child.close().then(
+        () => { this.children.delete(child.id); this.evicting.delete(child.id); },
+        (cause) => {
+          if (this.evictionFailures.length < this.config.maxRetainedJobs) {
+            this.evictionFailures.push(new Error(`Child ${child.id} eviction cleanup failed.`, { cause }));
+          } else this.omittedEvictionFailures++;
+          if (child.summary().state === ChildTypes.NativeChildState.Closed) this.children.delete(child.id);
+          this.evicting.delete(child.id);
+        },
+      );
+    }
+  }
+
+  shutdown(): Promise<void> {
+    return this.shutdownPromise ??= this.shutdownOwnedRuns();
+  }
+
+  private async shutdownOwnedRuns(): Promise<void> {
     this.closed = true;
     const error = new SubagentAdmissionError({
       reason: "closed",
@@ -174,11 +210,19 @@ export class SubagentRunSupervisor {
     }
     for (const active of this.active.values()) active.controller.abort(error);
     const activeRuns = [...this.active.entries()];
-    await Promise.race([
-      Promise.allSettled(activeRuns.map(([, active]) => active.done)),
-      new Promise<void>((resolve) => setTimeout(resolve, this.config.cancellationGraceMs)),
-    ]);
-    for (const [runId] of activeRuns) this.release(runId);
+    const closingChildren = Promise.allSettled([...this.children.values()].map((child) => child.close()));
+    // Abort requests do not prove that tools or remote effects have settled.
+    await Promise.all(activeRuns.map(([, active]) => active.done));
+    const outcomes = await closingChildren;
+    this.children.clear();
+    const failures = [
+      ...this.evictionFailures,
+      ...outcomes.filter((outcome) => outcome.status === "rejected").map((failure) => failure.reason),
+    ];
+    if (failures.length) {
+      const omitted = this.omittedEvictionFailures > 0 ? ` ${this.omittedEvictionFailures} additional eviction failure causes omitted.` : "";
+      throw new AggregateError(failures, `Child shutdown failed.${omitted}`);
+    }
   }
 
   private rejection(request: SubagentAdmissionRequest): SubagentAdmissionError | undefined {
@@ -287,6 +331,7 @@ export class SubagentRunSupervisor {
       this.activeWorkspaceWriters.delete(active.request.cwd);
     }
     active.finish();
+    if (!this.closed) this.pruneChildren();
     this.drain();
   }
 }
@@ -311,6 +356,6 @@ export async function disposeSubagentRunSupervisor(sessionId: string): Promise<v
   const store = registry().supervisors;
   const supervisor = store.get(sessionId);
   if (!supervisor) return;
-  store.delete(sessionId);
   await supervisor.shutdown();
+  if (store.get(sessionId) === supervisor) store.delete(sessionId);
 }

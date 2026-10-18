@@ -180,7 +180,7 @@ export function renderRestoreSummary(summary: RestoreSummary): string {
   if (summary.outcomes.length === 0) return "Workspace restore complete.\n\n0 active";
   const lines = summary.outcomes.map((outcome) => {
     const marker = outcome.state === "failed" || outcome.state === "timed-out" ? "✗" : "✓";
-    return `${marker} ${(outcome.name ?? outcome.sessionId).padEnd(24)} ${outcome.state}${outcome.reason ? `: ${outcome.reason}` : ""}`;
+    return `${marker} ${(outcome.name ? `${outcome.name} (${outcome.sessionId})` : outcome.sessionId).padEnd(24)} ${outcome.state}${outcome.reason ? `: ${outcome.reason}` : ""}`;
   });
   const active = summary.outcomes.filter(
     (outcome) => outcome.state === "active" || outcome.state === "restored",

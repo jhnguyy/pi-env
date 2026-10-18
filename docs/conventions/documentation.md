@@ -9,7 +9,9 @@ This file owns repository documentation policy. Other files can point here. Do n
 - The [`code-contribution` skill](../../.agents/skills/code-contribution/SKILL.md) owns the portable contribution method.
 - `CONTRIBUTING.md` owns pi-env-specific contribution requirements.
 - `AGENTS.md` owns coding-agent navigation.
-- Area-specific contracts and durable decisions belong under `docs/`.
+- Code defines implemented behavior. Executable tests check behavioral expectations. Documentation augments these sources with non-obvious contracts, constraints, and operating guidance.
+- Keep roadmaps, proposed architecture, migration sequencing, research, and open decisions in project notes, not usage or convention docs.
+- When documenting a behavioral requirement, distinguish it from implemented support.
 
 ## Navigation and cross-links
 

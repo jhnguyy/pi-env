@@ -1,7 +1,9 @@
+import * as ChildContext from "../_shared/child-context";
 import { randomUUID } from "node:crypto";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Usage } from "@earendil-works/pi-ai";
+import * as NativeUsage from "../_shared/native-usage";
 import {
   getAgentDir,
   type ExtensionAPI,
@@ -9,17 +11,13 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Effect, PartitionedSemaphore, Schema } from "effect";
-import { decodeGlobalAgentSettingsSnapshotEffect } from "../_shared/agent-settings";
 import { PiEvent } from "../_shared/agent-tools";
 import {
   listenForDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
-import {
-  decodeSettingsBlockFromSnapshotEffect,
-  loadSettingsSnapshotEffect,
-} from "../_shared/settings";
+import { loadSettingsSnapshotEffect, decodeSettingsBlockFromSnapshotEffect } from "../_shared/settings";
 import { registerPublicTool } from "../_shared/tool-render";
 import {
   Disclosure,
@@ -89,20 +87,7 @@ const coordinator = new ReviewCoordinator();
 function nestedReviewUsage(state: ReviewState): Usage | undefined {
   const usage = state.metrics?.usage;
   if (!usage) return undefined;
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead,
-    cacheWrite: usage.cacheWrite,
-    totalTokens: usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: usage.cost,
-    },
-  };
+  return NativeUsage.toNestedToolUsage(usage);
 }
 
 export function withoutNestedUsage(result: ReviewActionResult): ReviewActionResult {
@@ -595,16 +580,12 @@ async function createReviewAttempt(
     registration = currentRegistration;
     stage = "settings";
     const settingsSnapshot = await Effect.runPromise(loadSettingsSnapshotEffect(ctx.cwd));
-    const [agentSettings, reviewSettings] = await Effect.runPromise(
-      Effect.all([
-        decodeGlobalAgentSettingsSnapshotEffect(settingsSnapshot),
-        decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
-      ]),
+    const reviewSettings = await Effect.runPromise(
+      decodeSettingsBlockFromSnapshotEffect(settingsSnapshot, "prReview", PrReviewSettingsSchema),
     );
     await assertActivePreparationScope(pi, state, coordinatorScope);
     stage = "model-policy";
     const policy = resolvePrReviewModelPolicy(
-      agentSettings,
       ctx.modelRegistry.getAvailable(),
       reviewSettings.roleModels ?? {},
     );
@@ -1457,6 +1438,9 @@ async function finishReviewCleanup(
   state: ReviewState,
   scope: ReviewCoordinatorScope,
 ): Promise<string> {
+  if (state.dag) await coordinator.dagRegistration?.service.closeChildren?.(state.dag.runId);
+  if (!coordinator.isScopeActive(scope) || coordinator.review(state.snapshot.id) !== state)
+    return "The review session changed during cleanup. Resources remain available for recovery.";
   const cleaned = await removeManagedWorktree(pi, state, coordinator.operationSignal(scope));
   if (!cleaned) throw new Error("git worktree prune failed.");
   const reviewId = state.snapshot.id;
@@ -1572,6 +1556,7 @@ export function reviewProgressResult(progress: ReviewDagProgress) {
 }
 
 export default function reviewExtension(pi: ExtensionAPI) {
+  if (ChildContext.getChildContext()) return;
   let stopDagRuntimeListener: (() => void) | undefined;
   const ensureDagRuntimeListener = () => {
     if (stopDagRuntimeListener || !(pi as { events?: unknown }).events) return;

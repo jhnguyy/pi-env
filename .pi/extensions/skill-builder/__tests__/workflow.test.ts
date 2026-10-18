@@ -259,10 +259,9 @@ it("uses the in-process subagent with the user goal and automatic Git diff", asy
     Effect.sync(() => {
       expect(run.task).toContain("Reduce recurring context.");
       expect(run.task).toContain("+ changed instruction");
-      expect(run.tools).toEqual([]);
       expect(run.toolNames).toEqual([]);
       expect(run.workspaceAccess).toBe("read");
-      expect(run.modelOverride).toBe("test-provider/configured-model");
+      expect(run.modelOverride).toBeUndefined();
       expect(options.signal).toBe(controller.signal);
       return successfulChild();
     }),
@@ -283,7 +282,7 @@ it("uses the in-process subagent with the user goal and automatic Git diff", asy
     evaluation: {
       verdict: "needs-revision",
       tokenEconomy: {
-        provider: "test-provider",
+        provider: "unknown",
         model: "actual-model",
         inputTokens: 120,
         outputTokens: 30,
@@ -331,11 +330,11 @@ it("returns subagent failure as unavailable advisory review", async () => {
   expect(result.content[0]?.text).toContain("✓ Validate: passed");
 });
 
-it("returns validation when advisory evaluation has no available model", async () => {
+it("delegates model selection to the child when the parent catalog is empty", async () => {
   const root = tempRoot();
   writeSkill(root);
   const exec = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
-  const runner = vi.fn();
+  const runner = vi.fn(() => Effect.succeed(successfulChild()));
   const ctx = { cwd: root, modelRegistry: { getAvailable: () => [] } } as any;
 
   const result = await runSkillBuild(
@@ -345,8 +344,7 @@ it("returns validation when advisory evaluation has no available model", async (
   );
 
   expect(result.content[0]?.text).toContain("✓ Validate: passed");
-  expect(result.content[0]?.text).toContain("no model is available");
-  expect(runner).not.toHaveBeenCalled();
+  expect(runner).toHaveBeenCalledOnce();
 });
 
 it("does not start nested advisory evaluation from a subagent tool", async () => {

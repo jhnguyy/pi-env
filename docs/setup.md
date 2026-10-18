@@ -1,6 +1,8 @@
 # Setup reference
 
-For installation modes and commands, start with [README](../README.md#setup-choices). Normal setup preserves personal settings and registers pi-env. [Managed settings](../setup/managed-settings-core.mjs) owns the initial baseline; use `pi config` to select package resources.
+For installation modes and commands, start with [README](../README.md#setup-choices). Normal setup registers pi-env and preserves personal settings except managed network and retry keys, which are reapplied on every run. Use project settings to override those keys.
+
+[Managed settings](../setup/managed-settings-core.mjs) owns the initial baseline and managed keys; use `pi config` to select package resources.
 
 ## Explicit reset
 

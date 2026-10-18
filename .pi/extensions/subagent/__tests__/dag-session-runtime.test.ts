@@ -4,14 +4,12 @@ import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Cause, Effect, Fiber, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExtToolRegistration } from "../../_shared/agent-tools";
 
 const state = {
   adapterCalls: [] as Array<{
     ctx: unknown;
-    tools: unknown;
     artifactRoot: string;
-    options: Parameters<DagSubagentExecutorRegistryFactory>[4];
+    options: Parameters<DagSubagentExecutorRegistryFactory>[3];
   }>,
   executor: undefined as (() => Effect.Effect<Record<string, unknown>>) | undefined,
   telemetry: undefined as Record<string, unknown> | undefined,
@@ -59,12 +57,11 @@ const telemetryRuntimeFactory: NonNullable<
 
 const dagExecutorRegistryFactory: DagSubagentExecutorRegistryFactory = (
   ctx,
-  tools,
   artifactRoot,
   _sessionGeneration,
   options,
 ) => {
-  state.adapterCalls.push({ ctx, tools, artifactRoot, options });
+  state.adapterCalls.push({ ctx, artifactRoot, options });
   return { lookup: () => Effect.succeed(state.executor) };
 };
 
@@ -159,8 +156,7 @@ describe("session-owned DAG runtime composition", () => {
     tempDirectories.push(cwd);
     const pi = makePi();
     const ctx = makeContext(cwd);
-    const tools = new Map<string, ExtToolRegistration>();
-    const runtime = new SubagentSessionRuntime(pi, tools, runtimeDependencies);
+    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
 
     await runtime.startSession(ctx);
     const registrations: DagRuntimeServiceRegistration[] = [];
@@ -169,7 +165,6 @@ describe("session-owned DAG runtime composition", () => {
 
     const adapter = state.adapterCalls[0];
     expect(adapter.ctx).toBe(ctx);
-    expect(adapter.tools).toBe(tools);
     expect(adapter.options.supervisor).toBeDefined();
     expect(adapter.options.telemetryRuntime).toBe(state.telemetry);
     expect(adapter.artifactRoot).toBe(
@@ -249,7 +244,7 @@ describe("session-owned DAG runtime composition", () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-append-failure-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, new Map(), runtimeDependencies);
+    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(pi, (active) => {
@@ -297,7 +292,7 @@ describe("session-owned DAG runtime composition", () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-shutdown-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, new Map(), runtimeDependencies);
+    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(

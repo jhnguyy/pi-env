@@ -73,6 +73,7 @@ in
       program = pkgs.lib.getExe verifyInstallApp;
     };
   };
+  checks.pi-package = pi;
   checks.setup-tests = pkgs.runCommand "pi-env-setup-tests" {
     nativeBuildInputs = [
       node

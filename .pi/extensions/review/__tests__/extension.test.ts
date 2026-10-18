@@ -711,6 +711,62 @@ describe("review extension pull request surface", () => {
     expect(existsSync(state.snapshot.artifactDir)).toBe(false);
   });
 
+  it.each([false, true])(
+    "awaits retained children before cleanup (close failure: %s)",
+    async (failClose) => {
+      tempRoot();
+      const state: ReviewState = {
+        ...sampleState("retained", []),
+        dag: { runId: "retained-run", status: "succeeded", rawResultReferences: [] },
+      };
+      mkdirSync(state.snapshot.cache!.repoDir, { recursive: true });
+      mkdirSync(state.snapshot.worktree, { recursive: true });
+      mkdirSync(state.snapshot.artifactDir, { recursive: true });
+      const pi = extensionPi();
+      const ctx = {
+        sessionManager: {
+          getSessionId: () => "parent",
+          getSessionDir: () => agentDir,
+          getBranch: () => [custom(state)],
+        },
+        ui: { notify() {} },
+      } as any;
+      pi.handlers.session_start({}, ctx);
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const closing: string[] = [];
+      registerDagRuntimeService(pi, {
+        parentSessionId: "parent",
+        sessionGeneration: "generation",
+        service: {
+          submit: () => Effect.die("unexpected submission"),
+          reconstruct: () => Effect.die("unexpected reconstruction"),
+          closeChildren: async (runId) => {
+            closing.push(runId);
+            await blocked;
+            if (failClose) throw new Error("child close failed");
+          },
+        },
+      });
+      pi.exec = async (_cmd: string, args: string[]) => {
+        if (args[1] === "remove") rmSync(args[3], { recursive: true, force: true });
+        return { code: 0, stdout: "", stderr: "" };
+      };
+      const cleaning = pi.command("pr cleanup retained", ctx);
+      await vi.waitFor(() => expect(closing).toEqual(["retained-run"]));
+      expect(existsSync(state.snapshot.worktree)).toBe(true);
+      expect(existsSync(state.snapshot.artifactDir)).toBe(true);
+      expect(pi.appended).toHaveLength(0);
+      release();
+      await cleaning;
+      expect(existsSync(state.snapshot.worktree)).toBe(failClose);
+      expect(existsSync(state.snapshot.artifactDir)).toBe(failClose);
+      expect(pi.appended).toHaveLength(failClose ? 0 : 1);
+    },
+  );
+
   it("retains replacement-session artifacts after blocked cleanup rotates sessions", async () => {
     tempRoot();
     const original = sampleState("r", []);

@@ -5,28 +5,69 @@ import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
-import { SubagentRunSupervisor, WorkspaceAccess } from "../control";
+import * as Control from "../control";
+import * as ChildTypes from "../child-types";
 
 function config(overrides: Partial<SubagentRuntimeConfig> = {}): SubagentRuntimeConfig {
   return {
     ...DEFAULT_SUBAGENT_CONFIG,
     maxConcurrentRuns: 2,
     maxPendingRuns: 2,
-    cancellationGraceMs: 10,
     ...overrides,
   };
 }
 
 function request(
   cwd: string,
-  workspaceAccess: (typeof WorkspaceAccess)[keyof typeof WorkspaceAccess] = WorkspaceAccess.Read,
+  workspaceAccess: (typeof Control.WorkspaceAccess)[keyof typeof Control.WorkspaceAccess] = Control.WorkspaceAccess.Read,
 ) {
   return { cwd, workspaceAccess };
 }
 
 describe("shared subagent run supervisor", () => {
+  it.each([true, false])("reports rejected eviction cleanup at shutdown even when closed=%s", async (closedAfterFailure) => {
+    // Native shutdown hooks report through the SDK instead of reliably rejecting dispose.
+    // Inject that failure at the owner's existing close port to test supervisor recovery.
+    const supervisor = new Control.SubagentRunSupervisor("eviction-failure", config({ maxRetainedJobs: 1 }));
+    const failure = new Error("native disposal failed");
+    let closed = false;
+    const child = (id: string, broken: boolean) => ({
+      id, runId: id,
+      summary: () => ({ id, runId: id, name: id, task: "task", cwd: "/fixture", sessionFile: undefined, model: undefined, state: broken && closed ? ChildTypes.NativeChildState.Closed : ChildTypes.NativeChildState.Idle }),
+      inspect: () => { throw new Error("unused inspection"); },
+      input: async () => { throw new Error("unused input"); },
+      cancel: async () => {},
+      close: async () => { if (broken) { closed = closedAfterFailure; throw failure; } },
+    });
+    supervisor.retainChild(child("broken", true));
+    supervisor.retainChild(child("retained", false));
+    supervisor.pruneChildren();
+    await Promise.resolve();
+    await Promise.resolve();
+    await expect(supervisor.shutdown()).rejects.toMatchObject({ errors: expect.arrayContaining([expect.objectContaining({ cause: failure })]) });
+  });
+  it("coalesces parent disposal until held work settles without reopening admission", async () => {
+    // Hold admission directly: this isolates coordinator disposal, not native SDK execution.
+    const supervisor = Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config());
+    const lease = await supervisor.acquire(request("/coalesced"));
+    let secondFinished = false;
+    const first = Control.disposeSubagentRunSupervisor("coalesced-dispose");
+    const second = Control.disposeSubagentRunSupervisor("coalesced-dispose").then(() => { secondFinished = true; });
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondFinished).toBe(false);
+      expect(Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(supervisor);
+      await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({reason:"closed"});
+    } finally {
+      lease.release();
+      await Promise.all([first,second]);
+    }
+    expect(Control.getSubagentRunSupervisor("coalesced-dispose")).toBeUndefined();
+  });
+
   it("bounds shared admission and removes an aborted pending run", async () => {
-    const supervisor = new SubagentRunSupervisor(
+    const supervisor = new Control.SubagentRunSupervisor(
       "session",
       config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
     );
@@ -47,7 +88,7 @@ describe("shared subagent run supervisor", () => {
   });
 
   it("removes a pending admission when its Effect is interrupted", async () => {
-    const supervisor = new SubagentRunSupervisor(
+    const supervisor = new Control.SubagentRunSupervisor(
       "session",
       config({ maxConcurrentRuns: 1, maxPendingRuns: 1 }),
     );
@@ -69,11 +110,11 @@ describe("shared subagent run supervisor", () => {
     const child = join(workspace, "packages", "child");
     mkdirSync(join(workspace, ".git"));
     mkdirSync(child, { recursive: true });
-    const supervisor = new SubagentRunSupervisor("session", config());
+    const supervisor = new Control.SubagentRunSupervisor("session", config());
 
-    const firstWrite = await supervisor.acquire(request(workspace, WorkspaceAccess.Write));
+    const firstWrite = await supervisor.acquire(request(workspace, Control.WorkspaceAccess.Write));
     let secondWriteStarted = false;
-    const secondWrite = supervisor.acquire(request(child, WorkspaceAccess.Write)).then((lease) => {
+    const secondWrite = supervisor.acquire(request(child, Control.WorkspaceAccess.Write)).then((lease) => {
       secondWriteStarted = true;
       return lease;
     });
@@ -90,7 +131,7 @@ describe("shared subagent run supervisor", () => {
   });
 
   it("reports aggregate usage across sibling runs without enforcing a limit", async () => {
-    const supervisor = new SubagentRunSupervisor("session", config());
+    const supervisor = new Control.SubagentRunSupervisor("session", config());
     const first = await supervisor.acquire({ ...request("/first"), runId: "dag:first" });
     const second = await supervisor.acquire({ ...request("/second"), runId: "dag:second" });
     first.updateUsage({ input: 40, output: 10, cacheRead: 0, cacheWrite: 0, cost: 2, turns: 2 });
@@ -106,7 +147,7 @@ describe("shared subagent run supervisor", () => {
   it("aborts a run at its wall-time limit", async () => {
     vi.useFakeTimers();
     try {
-      const supervisor = new SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
+      const supervisor = new Control.SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
       const lease = await supervisor.acquire(request("/timed"));
       expect(lease.signal.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(20);

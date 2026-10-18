@@ -5,7 +5,6 @@
  * hierarchy, and symbols. Diagnostics are useful before commit or review.
  */
 
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Static } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -14,17 +13,13 @@ import { LspClient } from "./client";
 import { formatResult } from "./formatters";
 import { registerDevToolsLifecycle } from "./lifecycle";
 import { renderDevToolsCall, renderDevToolsResult } from "./renderers";
-import type { LspResult } from "./protocol";
-import { registerAgentToolsOnSessionStart, ToolCapability, type AgentToolEvents } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
 import { registerPublicTool } from "../_shared/tool-render";
 import { formatError } from "../_shared/errors";
-import { DEV_TOOLS_ACTIONS, type DevToolsParams, buildClientRequest } from "./request";
+import * as Request from "./request";
 import {
   createDevToolsParameterSchema,
-  DEV_TOOLS_READ_ACTIONS,
   DEV_TOOLS_TOOL_DESCRIPTIONS,
-  DEV_TOOLS_WRITE_ACTIONS,
 } from "./action-contract";
 import { registerCleanupCommand } from "./cleanup";
 import { registerCloseout } from "./closeout";
@@ -34,7 +29,7 @@ import { registerCloseout } from "./closeout";
 type DevToolsRegistrationApi = Pick<
   ExtensionAPI,
   "exec" | "registerCommand" | "registerTool"
-> & AgentToolEvents;
+>;
 
 export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspClient()) {
   registerCleanupCommand(pi);
@@ -52,47 +47,20 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 
   const toolParameters = createDevToolsParameterSchema(
-    StringEnum(DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
-  );
-
-  const readAgentParameters = createDevToolsParameterSchema(
-    StringEnum(DEV_TOOLS_READ_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
-  );
-  const writeAgentParameters = createDevToolsParameterSchema(
-    StringEnum(DEV_TOOLS_WRITE_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
+    StringEnum(Request.DEV_TOOLS_ACTIONS, { description: DEV_TOOLS_TOOL_DESCRIPTIONS.action }),
   );
 
   type DevToolsToolParameters = typeof toolParameters;
 
-  /** Shared execute — used by both registerTool and AgentTool registration. */
+  /** Execute the native dev-tools action, including rename. */
   async function executeDevTools(_toolCallId: string, params: Static<DevToolsToolParameters>) {
     try {
-      const result = await client.call(buildClientRequest(params));
+      const result = await client.call(Request.buildClientRequest(params));
       return { content: [txt(formatResult(result))], details: result };
     } catch (e) {
-      return { content: [txt(formatError(e))], details: null };
+      return { content: [txt(formatError(e))], details: null, isError: true };
     }
   }
-
-  const readAgentTool: AgentTool<typeof readAgentParameters, LspResult | null> = {
-    name: "dev-tools",
-    label: "Dev Tools",
-    description:
-      "Language-server-backed diagnostics and code intelligence for supported coding languages.",
-    parameters: readAgentParameters,
-    execute: executeDevTools,
-  };
-  const writeAgentTool: AgentTool<typeof writeAgentParameters, LspResult | null> = {
-    name: "dev-tools-edit",
-    label: "Dev Tools Edit",
-    description: "Language-server-backed code edits. Renames symbols across supported files.",
-    parameters: writeAgentParameters,
-    execute: executeDevTools,
-  };
-  registerAgentToolsOnSessionStart(pi, [
-    { tool: readAgentTool, capabilities: [ToolCapability.Read] },
-    { tool: writeAgentTool, capabilities: [ToolCapability.Write] },
-  ]);
 
   registerPublicTool(pi, {
     name: "dev-tools",
