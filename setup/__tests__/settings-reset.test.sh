@@ -17,7 +17,7 @@ import fs from 'node:fs';
 const {EVIDENCE: dir, STATUS: status, PHASE: phase} = process.env;
 fs.writeFileSync(`${dir}/result.json`, JSON.stringify({
   inputs: 'personal.json, legacy JSON settings, metadata-only auth fixtures',
-  expected: 'normal preferences survive; explicit reset replaces baseline/packages; registration failures restore exact settings',
+  expected: 'package themes load; normal preferences survive; reset replaces baseline/packages; registration failures restore exact settings',
   actual: {phase, exitStatus: Number(status)}, verdict: status === '0' ? 'pass' : 'fail',
   reproduce: 'bash setup/__tests__/settings-reset.test.sh',
   inspect: 'workflow.log, before/after JSON, and home/.pi/agent/settings.json.backup-*',
@@ -47,6 +47,8 @@ printf '%s\n' '{"openai":{"type":"oauth"},"openai-codex":{"type":"oauth"}}' > "$
 phase='fresh settings'
 configure
 cp "$SETTINGS_FILE" "$EVIDENCE/initial.json"
+phase='package theme loading'
+"$NODE" "$ROOT/setup/__tests__/assert-package-themes.mjs"
 cat > "$EVIDENCE/personal.json" <<'JSON'
 {
   "defaultProvider": "anthropic", "defaultModel": "personal", "defaultThinkingLevel": "high",

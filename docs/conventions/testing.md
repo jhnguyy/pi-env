@@ -16,6 +16,8 @@ Assert observable results at the chosen boundary. For model-facing tools, check 
 
 Use unique temporary directories and register cleanup immediately. Tests with explicit inputs must not depend on personal settings unless settings integration is the contract under test.
 
-During review, distinguish duplicate execution from distinct contracts. Check that each case adds failure detection rather than mirroring implementation steps.
+Give each behavior one owning workflow. Extend that workflow instead of repeating its setup and assertions in a feature-specific test. Check idempotency by rerunning an operation and comparing persisted state, not by testing each implementation step.
+
+Share fixture lifecycle and evidence handling when multiple workflows need the same contract. Keep scenario actions and expected outcomes explicit.
 
 E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
