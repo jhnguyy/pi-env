@@ -16,6 +16,7 @@ fi
 
 SETUP_TESTS=(
   setup/__tests__/settings-reset.test.sh
+  setup/__tests__/themes.test.sh
   setup/__tests__/managed-settings.test.sh
   setup/__tests__/agent-guidelines.test.sh
   setup/__tests__/append-system.test.sh

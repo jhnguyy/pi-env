@@ -95,7 +95,8 @@ const reset = read('reset.json');
 const {packages, ...baseline} = reset;
 assert.deepEqual(baseline, {
   defaultProvider: 'openai', defaultModel: 'gpt-6.1-sol', defaultThinkingLevel: 'medium',
-  defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'], ...managed,
+  defaultTools: ['+codemode', '+tool_search'], npmCommand: ['nub'],
+  theme: 'gruvbox-light/gruvbox-dark', ...managed,
 });
 assert.deepEqual(registeredSources(reset), [process.env.PRIMARY_REPO]);
 assert.deepEqual(read('initial.json'), reset);

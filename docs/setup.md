@@ -22,11 +22,11 @@ See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../
 
 [Nix bindings](../nix/outputs.nix) provide the managed runtime. The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching; [hydration](../scripts/hydrate.mjs) owns dependency-install preparation.
 
-## Ghostty and Gruvbox
+## Gruvbox themes
 
-Keep personal overrides in `~/.config/ghostty/config.local`. If Home Manager owns terminal configuration, update its pi-env input and switch generations; otherwise, rerun terminal setup. Reload Ghostty and run `ghostty +validate-config`.
+Setup makes Gruvbox themes available through the Pi package. Fresh setup and explicit reset select `gruvbox-light/gruvbox-dark`. Ordinary setup preserves personal theme choices.
 
-See [terminal configuration](../setup/terminal-config.mjs) for paths and installation, and [Ghostty palettes](../ghostty/themes/) for colors. Pi uses terminal-derived appearance.
+See [themes](themes.md) for Pi selection, terminal installation, Home Manager ownership, and Slack reference strings.
 
 ## Workflow evidence
 
@@ -34,6 +34,7 @@ Run the focused workflow for the behavior under investigation:
 
 - Settings/reset: `bash setup/__tests__/settings-reset.test.sh`
 - Guidance updates: `bash setup/__tests__/append-system.test.sh`
+- Pi themes: `bash setup/__tests__/themes.test.sh`
 - Ghostty: `bash setup/__tests__/ghostty-config.test.sh`
 
 Each prints a retained evidence directory. See [setup testing](../setup/__tests__/README.md) and [verification requirements](../CONTRIBUTING.md#testing-and-review) for broader checks.
