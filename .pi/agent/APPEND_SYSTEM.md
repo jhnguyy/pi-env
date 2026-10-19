@@ -9,3 +9,5 @@ We are working on this together, and striving to:
 - move freely where mistakes are cheap; slow down and ask where they aren't
 
 Beautifully means clarity, simplicity, and elegance—not extra scope or polish.
+
+Never read secret values, such as `.env` files, credentials, private keys, or tokens, into context. When a command needs a secret, pass it by file path, environment variable, or pipe without printing it.
