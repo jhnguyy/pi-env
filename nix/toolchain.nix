@@ -41,13 +41,13 @@ let
       "@earendil-works/pi-ai"
       "@earendil-works/pi-tui"
     ]) "Pi development dependencies must match the upstream Pi flake";
-    pi.packages.${pkgs.system}.default.override { nodejs_22 = nodeFor pkgs; };
+    pi.packages.${pkgs.stdenv.hostPlatform.system}.default.override { nodejs_22 = nodeFor pkgs; };
   nubFor =
     pkgs:
     let
       # Reuse Nub's upstream packaging with Pi's supported Intel macOS input.
       nubOutputs =
-        if pkgs.system == "x86_64-darwin" then
+        if pkgs.stdenv.hostPlatform.system == "x86_64-darwin" then
           (import "${nub}/flake.nix").outputs {
             self = nub;
             nixpkgs = pi.inputs.nixpkgs-darwin-x64;
@@ -55,7 +55,7 @@ let
         else
           nub;
       # Carry the NFS lock correction locally without changing locked inputs.
-      package = nubOutputs.packages.${pkgs.system}.default.overrideAttrs (old: {
+      package = nubOutputs.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/nub-gvs-lock-read-access.patch
           ./patches/nub-store-lock-read-access.patch
