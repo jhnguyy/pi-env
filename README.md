@@ -25,11 +25,11 @@ Nix supplies the workbench and packages Pi through its upstream flake. Nub insta
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
 
-Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Every run reapplies managed stall timeouts and retry settings so hung provider requests fail fast into Pi's retry. Pi owns transport, image handling, and appearance.
+Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Every run reapplies managed stall timeouts and retry settings so hung provider requests fail fast into Pi's retry. Pi owns transport, image handling, and theme selection.
 
 Run `./setup.sh --reset` to back up user settings and restore this baseline with only pi-env registered. Auth, sessions, model endpoints, MCP configuration, keybindings, and project settings remain untouched. Reinstall local adapter packages afterward. See [setup and reset](docs/setup.md).
 
-Use `pi config` to select package resources. Use `/skill:pi-update` to review a proposed upstream release before changing the workbench. Ghostty and tmux palettes remain available through terminal setup.
+Use `pi config` to select package resources. Use `/skill:pi-update` to review a proposed upstream release before changing the workbench.
 
 ## Documentation
 
@@ -39,10 +39,3 @@ Repository conventions and area-specific documentation live under `docs/`.
 
 pi-env is available under the [MIT License](LICENSE).
 See [third-party notices](THIRD_PARTY_NOTICES.md) for incorporated material.
-
-## Theme snippets
-
-Slack custom theme strings:
-
-- Gruvbox Dark: `#282828,#3c3836,#fe8019,#282828,#504945,#ebdbb2,#b8bb26,#fb4934,#1d2021,#ebdbb2`
-- Gruvbox Light: `#fbf1c7,#ebdbb2,#af3a03,#fbf1c7,#d5c4a1,#3c3836,#79740e,#9d0006,#f9f5d7,#3c3836`

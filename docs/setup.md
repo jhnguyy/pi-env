@@ -22,17 +22,15 @@ See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../
 
 [Nix bindings](../nix/outputs.nix) provide the managed runtime. The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching; [hydration](../scripts/hydrate.mjs) owns dependency-install preparation.
 
-## Ghostty and Gruvbox
+## Gruvbox themes
 
-Keep personal overrides in `~/.config/ghostty/config.local`. If Home Manager owns terminal configuration, update its pi-env input and switch generations; otherwise, rerun terminal setup. Reload Ghostty and run `ghostty +validate-config`.
-
-See [terminal configuration](../setup/terminal-config.mjs) for paths and installation, and [Ghostty palettes](../ghostty/themes/) for colors. Pi uses terminal-derived appearance.
+See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
 
 ## Workflow evidence
 
 Run the focused workflow for the behavior under investigation:
 
-- Settings/reset: `bash setup/__tests__/settings-reset.test.sh`
+- Settings, reset, and Pi themes: `bash setup/__tests__/settings-reset.test.sh`
 - Guidance updates: `bash setup/__tests__/append-system.test.sh`
 - Ghostty: `bash setup/__tests__/ghostty-config.test.sh`
 

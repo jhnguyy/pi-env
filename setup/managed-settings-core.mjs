@@ -38,6 +38,7 @@ export function initialSettings(auth = {}) {
         : "openai",
     defaultModel: "gpt-6.1-sol",
     defaultThinkingLevel: "medium",
+    theme: "gruvbox-light/gruvbox-dark",
     defaultTools: ["+codemode", "+tool_search"],
     npmCommand: ["nub"],
   };
