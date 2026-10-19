@@ -66,12 +66,11 @@ let
       manifest.packageManager == "nub@${package.version}"
     ) "Nub flake must match package.json#packageManager";
     package;
-  toolchainPackages = pkgs: [
+  toolsPackages = pkgs: [
     pkgs.git
     pkgs.gh
     (nodeFor pkgs)
     (nubFor pkgs)
-    (piFor pkgs)
     pkgs.coreutils
     pkgs.findutils
     pkgs.gawk
@@ -82,11 +81,11 @@ let
     pkgs.tmux
     pkgs.flock
   ];
-  toolchainFor =
-    pkgs:
+  toolchainPackages = pkgs: toolsPackages pkgs ++ [ (piFor pkgs) ];
+  packageFor =
+    pkgs: name: paths:
     pkgs.symlinkJoin {
-      name = "pi-env-toolchain";
-      paths = toolchainPackages pkgs;
+      inherit name paths;
       meta = {
         description = "Baseline command-line tools for setting up and developing pi-env";
         license = with pkgs.lib.licenses; [
@@ -100,6 +99,8 @@ let
         platforms = systems;
       };
     };
+  toolsFor = pkgs: packageFor pkgs "pi-env-tools" (toolsPackages pkgs);
+  toolchainFor = pkgs: packageFor pkgs "pi-env-toolchain" (toolchainPackages pkgs);
 in
 {
   inherit
@@ -107,6 +108,7 @@ in
     pkgsFor
     nodeFor
     piFor
+    toolsFor
     toolchainPackages
     toolchainFor
     ;
