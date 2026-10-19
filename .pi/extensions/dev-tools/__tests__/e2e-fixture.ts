@@ -1,26 +1,32 @@
 import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  noopToolingTelemetryRuntime,
+  type ToolingTelemetryRuntime,
+} from "../../../../src/telemetry/tooling.js";
 import { LspClient } from "../client";
 import { LspDaemon } from "../daemon";
 import type { DaemonRequest, LspResult } from "../protocol";
 
-export interface LspDaemonE2EFixture {
-  tmpDir: string;
-  socketPath: string;
-  pidPath: string;
+export interface LspDaemonFixture {
+  start(): Promise<void>;
   withClient<T>(run: (client: LspClient) => Promise<T>): Promise<T>;
   callDaemon(req: Omit<DaemonRequest, "id">): Promise<LspResult>;
   restartDaemon(): Promise<void>;
   cleanup(): Promise<void>;
 }
 
-export async function createLspDaemonE2EFixture(
-  prepareProject?: (tmpDir: string) => void,
-): Promise<LspDaemonE2EFixture> {
-  const tmpDir = mkdtempSync(join(tmpdir(), "lsp-e2e-"));
-  const socketPath = join(tmpDir, "t.sock");
-  const pidPath = join(tmpDir, "t.pid");
+export function createLspDaemonFixture(): LspDaemonFixture;
+export function createLspDaemonFixture<Project>(
+  prepareProject: (directory: string) => Project,
+  telemetry?: ToolingTelemetryRuntime,
+): LspDaemonFixture & { project: Project };
+export function createLspDaemonFixture<Project>(
+  prepareProject?: (directory: string) => Project,
+  telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
+): LspDaemonFixture & { project: Project | undefined } {
+  const directory = mkdtempSync(join(tmpdir(), "lsp-e2e-"));
   const clients = new Set<LspClient>();
   let daemon: LspDaemon | undefined;
 
@@ -28,31 +34,40 @@ export async function createLspDaemonE2EFixture(
     for (const client of clients) client.close();
     clients.clear();
   };
-  const startDaemon = async () => {
-    daemon = new LspDaemon(socketPath, pidPath, 5 * 60_000);
+  const start = async () => {
+    daemon = new LspDaemon(
+      join(directory, "t.sock"),
+      join(directory, "t.pid"),
+      5 * 60_000,
+      telemetry,
+    );
     await daemon.start();
   };
+  const removeProjectAndReportFailures = (failures: unknown[]) => {
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length > 1) throw new AggregateError(failures, "LSP fixture cleanup failed");
+    if (failures.length === 1) throw failures[0];
+  };
   const cleanup = async () => {
-    closeClients();
+    const failures: unknown[] = [];
+    try {
+      closeClients();
+    } catch (error) {
+      failures.push(error);
+    }
     try {
       await daemon?.shutdown();
-    } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
     }
-  };
-  const cleanupAfterFailure = async (error: unknown): Promise<never> => {
-    try {
-      await cleanup();
-    } catch (cleanupError) {
-      // oxlint-disable-next-line eslint/preserve-caught-error -- AggregateError takes cause in its third argument and retains both failures.
-      throw new AggregateError([error, cleanupError], "LSP fixture failed and cleanup failed", {
-        cause: error,
-      });
-    }
-    throw error;
+    removeProjectAndReportFailures(failures);
   };
   const withClient = async <T>(run: (client: LspClient) => Promise<T>): Promise<T> => {
-    const client = new LspClient(socketPath, undefined, {
+    const client = new LspClient(join(directory, "t.sock"), undefined, {
       spawnDaemon: () => {
         throw new Error("E2E requests must use the fixture-owned daemon");
       },
@@ -67,60 +82,41 @@ export async function createLspDaemonE2EFixture(
   };
 
   try {
-    prepareProject?.(tmpDir);
-    await startDaemon();
+    const project = prepareProject?.(directory);
     return {
-      tmpDir,
-      socketPath,
-      pidPath,
+      project,
+      start,
       withClient,
       callDaemon: (req) => withClient((client) => client.call(req)),
       async restartDaemon() {
         closeClients();
-        try {
-          await daemon?.shutdown();
-          await startDaemon();
-        } catch (error) {
-          await cleanupAfterFailure(error);
-        }
+        await daemon?.shutdown();
+        await start();
       },
       cleanup,
     };
   } catch (error) {
-    return cleanupAfterFailure(error);
+    removeProjectAndReportFailures([error]);
+    throw error;
   }
 }
 
-export interface TypeScriptE2EProject {
-  tmpDir: string;
-  socketPath: string;
-  pidPath: string;
+export interface TypeScriptLspFixture extends LspDaemonFixture {
   typesFile: string;
   mainFile: string;
   effectFile: string;
-}
-
-export interface LspE2EFixture extends TypeScriptE2EProject {
   callDaemon(req: Omit<DaemonRequest, "id">): Promise<any>;
   writeFile(relativePath: string, lines: string[] | string): string;
-  cleanup(): Promise<void>;
 }
 
-export async function createLspE2EFixture(): Promise<LspE2EFixture> {
-  let tmpDir: string;
-  let typesFile: string;
-  let mainFile: string;
-  let effectFile: string;
-
-  const writeFile = (relativePath: string, lines: string[] | string): string => {
-    const filePath = join(tmpDir, relativePath);
-    writeFileSync(filePath, Array.isArray(lines) ? lines.join("\n") : lines, "utf8");
-    return filePath;
-  };
-
-  const fixture = await createLspDaemonE2EFixture((projectDir) => {
-    tmpDir = projectDir;
-    symlinkSync(join(process.cwd(), "node_modules"), join(tmpDir, "node_modules"), "dir");
+export function createTypeScriptLspFixture(): TypeScriptLspFixture {
+  const { project, ...fixture } = createLspDaemonFixture((directory) => {
+    const writeFile = (relativePath: string, lines: string[] | string): string => {
+      const filePath = join(directory, relativePath);
+      writeFileSync(filePath, Array.isArray(lines) ? lines.join("\n") : lines, "utf8");
+      return filePath;
+    };
+    symlinkSync(join(process.cwd(), "node_modules"), join(directory, "node_modules"), "dir");
     writeFile(
       "tsconfig.json",
       JSON.stringify(
@@ -138,7 +134,7 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
       ),
     );
 
-    typesFile = writeFile("types.ts", [
+    const typesFile = writeFile("types.ts", [
       "export interface User {",
       "  name: string;",
       "  age: number;",
@@ -149,8 +145,7 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
       "  return `Hello, ${user.name}!`;",
       "}",
     ]);
-
-    mainFile = writeFile("main.ts", [
+    const mainFile = writeFile("main.ts", [
       'import type { User } from "./types";',
       'import { greet } from "./types";',
       "",
@@ -162,16 +157,13 @@ export async function createLspE2EFixture(): Promise<LspE2EFixture> {
       "",
       "console.log(greet(bob));",
     ]);
-    effectFile = writeFile("effect.ts", ['import { Effect } from "effect";', "Effect.succeed(1);"]);
+    const effectFile = writeFile("effect.ts", [
+      'import { Effect } from "effect";',
+      "Effect.succeed(1);",
+    ]);
+    return { typesFile, mainFile, effectFile, writeFile };
   });
-
-  return {
-    ...fixture,
-    typesFile: typesFile!,
-    mainFile: mainFile!,
-    effectFile: effectFile!,
-    writeFile,
-  };
+  return { ...fixture, ...project };
 }
 
 export function sleep(ms: number): Promise<void> {

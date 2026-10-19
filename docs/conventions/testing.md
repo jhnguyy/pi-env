@@ -10,14 +10,20 @@ Follow the [`testing-practices` skill](../../.agents/skills/testing-practices/SK
 
 E2E-first selects the workflow boundary. It does not require one large test. Split independent outcomes into named scenarios with shared setup where appropriate. Scenarios must not depend on the order of earlier assertions or responses.
 
+Use parameterized cases when each row keeps setup and expected outcomes explicit. Split cases when parameters select different setup workflows or expectation logic.
+
 Use a subprocess when the contract or isolation requires a separate process. Keep its launcher thin. Put substantial test programs in normal, type-checked source files rather than command strings. Reuse fixtures for a common lifecycle, not to build a general test framework.
 
 Assert observable results at the chosen boundary. For model-facing tools, check the content the model receives. Metadata or a truncation notice alone does not prove that useful output survives. Keep test names consistent with what assertions establish. Distinguish compile-time restrictions from runtime behavior.
 
-Use unique temporary directories and register cleanup immediately. Tests with explicit inputs must not depend on personal settings unless settings integration is the contract under test.
+Use unique temporary directories and register cleanup immediately. When the test runner owns teardown, separate allocation from asynchronous startup. Keep allocation failure-safe. Assign the fixture before starting it so registered teardown owns resources after failed startup or restart attempts.
+
+Attempt every cleanup step even when an earlier step fails. Preserve operation failures and all cleanup failures instead of replacing them.
+
+Tests with explicit inputs must not depend on personal settings unless settings integration is the contract under test.
 
 Give each behavior one owning workflow. Extend that workflow instead of repeating its setup and assertions in a feature-specific test. Check idempotency by rerunning an operation and comparing persisted state, not by testing each implementation step.
 
-Share fixture lifecycle and evidence handling when multiple workflows need the same contract. Keep scenario actions and expected outcomes explicit.
+Share fixture lifecycle and evidence handling when multiple workflows need the same contract. Name each fixture for the resources or responsibility it owns. Keep scenario actions and expected outcomes explicit.
 
 E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).

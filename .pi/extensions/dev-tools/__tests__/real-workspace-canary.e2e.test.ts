@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { registerDevTools } from "../index";
-import { createLspDaemonE2EFixture, type LspDaemonE2EFixture, sleep } from "./e2e-fixture";
+import { createLspDaemonFixture, type LspDaemonFixture, sleep } from "./e2e-fixture";
 import type { LspClient } from "../client";
 import type {
   DefinitionResult,
@@ -59,13 +59,18 @@ async function measured<T>(label: string, run: () => Promise<T>): Promise<T> {
   }
 }
 
+function failureMessages(error: unknown): string[] {
+  const failures = error instanceof AggregateError ? error.errors : [error];
+  return failures.slice(0, 8).map((failure) => String(failure).slice(0, 2000));
+}
+
 function expectSymbol(result: LspResult, name: string): void {
   expect(result.action).toBe("symbols");
   expect((result as SymbolsResult).items.map((item) => item.name)).toContain(name);
 }
 
 describeE2E("real workspace semantic canary", () => {
-  let fixture: LspDaemonE2EFixture;
+  let fixture: LspDaemonFixture;
   let artifactPath: string;
   const evidence: Record<string, unknown> = {
     scenario: "registered dev-tools definition lookup and real-workspace restart",
@@ -109,9 +114,12 @@ describeE2E("real workspace semantic canary", () => {
           .length > 0;
       evidence.node = process.version;
       saveEvidence();
-      fixture = await createLspDaemonE2EFixture();
+      fixture = createLspDaemonFixture();
+      await fixture.start();
     } catch (error) {
+      evidence.status = "failed";
       evidence.error = String(error).slice(0, 4000);
+      evidence.failures = failureMessages(error);
       saveEvidence();
       throw error;
     }
@@ -123,6 +131,7 @@ describeE2E("real workspace semantic canary", () => {
     } catch (error) {
       evidence.status = "failed";
       evidence.cleanupError = String(error).slice(0, 4000);
+      evidence.cleanupFailures = failureMessages(error);
       saveEvidence();
       throw error;
     }
@@ -212,6 +221,7 @@ describeE2E("real workspace semantic canary", () => {
       } catch (error) {
         evidence.status = "failed";
         evidence.error = String(error).slice(0, 4000);
+        evidence.failures = failureMessages(error);
         throw error;
       } finally {
         saveEvidence();
