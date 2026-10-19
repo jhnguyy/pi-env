@@ -17,15 +17,21 @@ export interface LspDaemonFixture {
   cleanup(): Promise<void>;
 }
 
+interface LspDaemonFixtureDependencies {
+  readonly telemetry?: ToolingTelemetryRuntime;
+  readonly removeDirectory?: typeof rmSync;
+}
+
 export function createLspDaemonFixture(): LspDaemonFixture;
 export function createLspDaemonFixture<Project>(
   prepareProject: (directory: string) => Project,
-  telemetry?: ToolingTelemetryRuntime,
+  dependencies?: LspDaemonFixtureDependencies,
 ): LspDaemonFixture & { project: Project };
 export function createLspDaemonFixture<Project>(
   prepareProject?: (directory: string) => Project,
-  telemetry: ToolingTelemetryRuntime = noopToolingTelemetryRuntime,
+  dependencies: LspDaemonFixtureDependencies = {},
 ): LspDaemonFixture & { project: Project | undefined } {
+  const { telemetry = noopToolingTelemetryRuntime, removeDirectory = rmSync } = dependencies;
   const directory = mkdtempSync(join(tmpdir(), "lsp-e2e-"));
   const clients = new Set<LspClient>();
   let daemon: LspDaemon | undefined;
@@ -43,15 +49,17 @@ export function createLspDaemonFixture<Project>(
     );
     await daemon.start();
   };
-  const removeProjectAndReportFailures = (failures: unknown[]) => {
+  function removeProjectAndReportFailures(failures: [unknown, ...unknown[]]): never;
+  function removeProjectAndReportFailures(failures: unknown[]): void;
+  function removeProjectAndReportFailures(failures: unknown[]): void {
     try {
-      rmSync(directory, { recursive: true, force: true });
+      removeDirectory(directory, { recursive: true, force: true });
     } catch (error) {
       failures.push(error);
     }
     if (failures.length > 1) throw new AggregateError(failures, "LSP fixture cleanup failed");
     if (failures.length === 1) throw failures[0];
-  };
+  }
   const cleanup = async () => {
     const failures: unknown[] = [];
     try {
@@ -97,7 +105,6 @@ export function createLspDaemonFixture<Project>(
     };
   } catch (error) {
     removeProjectAndReportFailures([error]);
-    throw error;
   }
 }
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { expect, it, onTestFinished, vi } from "vitest";
@@ -8,7 +8,8 @@ import type { LspClient } from "../client";
 import { createLspDaemonFixture } from "./e2e-fixture";
 
 // These failures happen before semantic requests reach a language server.
-// Use real daemon sockets and filesystem errors rather than replacing their IO.
+// Keep sockets and filesystem operations real. Inject only failures that the
+// host cannot reliably induce. The other lifecycle cases check normal removal.
 it("removes allocated resources when project preparation fails", () => {
   let directory = "";
   onTestFinished(() => {
@@ -79,20 +80,30 @@ it("leaves a failed daemon replacement's project owned by registered teardown", 
 
 it("preserves a restart failure and reports shutdown and removal failures together", async () => {
   const shutdownError = new Error("Telemetry disposal failed");
+  const removalError = new Error("Directory removal failed");
   let failDisposal = false;
-  // Socket shutdown is real. Only the otherwise infallible telemetry disposal
-  // boundary fails; the existing telemetry integration suite checks its contract.
+  let failRemoval = true;
+  // Telemetry integration checks own the normal disposal contract. The socket
+  // lifecycle remains real even when disposal and directory removal fail.
   const fixture = createLspDaemonFixture((directory) => directory, {
-    ...noopToolingTelemetryRuntime,
-    disposeEffect: Effect.suspend(() => (failDisposal ? Effect.die(shutdownError) : Effect.void)),
+    telemetry: {
+      ...noopToolingTelemetryRuntime,
+      disposeEffect: Effect.suspend(() => (failDisposal ? Effect.die(shutdownError) : Effect.void)),
+    },
+    removeDirectory: (directory, options) => {
+      if (failRemoval) throw removalError;
+      rmSync(directory, options);
+    },
   });
   onTestFinished(async () => {
-    if (existsSync(fixture.project)) chmodSync(fixture.project, 0o700);
-    failDisposal = false;
-    // The daemon retains its rejected shutdown promise. Cleanup must still
-    // retry project removal without losing that original shutdown failure.
-    await expect(fixture.cleanup()).rejects.toThrow("Telemetry disposal failed");
-    expect(existsSync(fixture.project)).toBe(false);
+    failRemoval = false;
+    try {
+      await fixture.cleanup();
+    } catch (error) {
+      // A failed shutdown is cached by the daemon. Still release the project,
+      // but do not suppress any unexpected cleanup failure.
+      if (error !== shutdownError) throw error;
+    }
   });
   await fixture.start();
   const pidPath = join(fixture.project, "t.pid");
@@ -100,34 +111,36 @@ it("preserves a restart failure and reports shutdown and removal failures togeth
   mkdirSync(pidPath);
   await expect(fixture.restartDaemon()).rejects.toMatchObject({ code: "EISDIR" });
   failDisposal = true;
-  chmodSync(fixture.project, 0);
-  await expect(fixture.cleanup()).rejects.toMatchObject({
-    errors: [
-      expect.objectContaining({ message: "Telemetry disposal failed" }),
-      expect.objectContaining({ code: "EACCES" }),
-    ],
-  });
+  await expect(fixture.cleanup()).rejects.toMatchObject({ errors: [shutdownError, removalError] });
+  expect(existsSync(fixture.project)).toBe(true);
+  failRemoval = false;
+  // The cached shutdown failure must not prevent retrying real removal.
+  await expect(fixture.cleanup()).rejects.toBe(shutdownError);
+  expect(existsSync(fixture.project)).toBe(false);
 });
 
 it("preserves preparation and removal failures when allocation cannot return a fixture", () => {
   let directory = "";
   const preparationError = new Error("Project preparation failed");
+  const removalError = new Error("Directory removal failed");
   onTestFinished(() => {
-    if (directory && existsSync(directory)) {
-      chmodSync(directory, 0o700);
-      rmSync(directory, { recursive: true, force: true });
-    }
+    if (directory) rmSync(directory, { recursive: true, force: true });
   });
   expect(() =>
-    createLspDaemonFixture((tmpDir) => {
-      directory = tmpDir;
-      writeFileSync(join(directory, "project.ts"), "export {};");
-      chmodSync(directory, 0);
-      throw preparationError;
-    }),
-  ).toThrow(
-    expect.objectContaining({
-      errors: [preparationError, expect.objectContaining({ code: "EACCES" })],
-    }),
-  );
+    createLspDaemonFixture(
+      (tmpDir) => {
+        directory = tmpDir;
+        writeFileSync(join(directory, "project.ts"), "export {};");
+        throw preparationError;
+      },
+      {
+        removeDirectory: () => {
+          throw removalError;
+        },
+      },
+    ),
+  ).toThrow(expect.objectContaining({ errors: [preparationError, removalError] }));
+  expect(existsSync(directory)).toBe(true);
+  rmSync(directory, { recursive: true, force: true });
+  expect(existsSync(directory)).toBe(false);
 });
