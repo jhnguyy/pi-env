@@ -81,6 +81,8 @@ One parent supervisor controls blocking runs, background jobs, internal DAG chil
 
 All native operations conservatively acquire a workspace write lease. Native callable surfaces can exceed initial active-tool visibility, so a read-only label is not sufficient evidence for concurrent writers. Operations in the same canonical Git workspace serialize. Retention bounds settled owners and job handles; result truncation does not truncate the native transcript. Public runs have no turn-count limit. Internal callers can impose an initial-operation turn limit.
 
+Pi separately limits [live codemode workers](https://github.com/earendil-works/pi/blob/v1.3.0/packages/coding-agent/docs/codemode.md#limits) to two across all sessions in one process. Parent and child scripts share those slots. A parent script waiting for children occupies one slot, leaving one for child scripts. At capacity, a new script fails immediately rather than queues. Cancelled workers occupy their slots until they exit. `maxConcurrentRuns` does not raise this upstream limit.
+
 Cancellation aborts native execution and waits for known tools and input hooks to settle. A running job remains `cancelling` until settlement. There is no grace-period force release or hard-kill guarantee. A run-time deadline requests abort; it does not prove that a remote effect stopped. Parent shutdown rejects new work and waits for owned work before releasing coordination.
 
 Native children do not initialize the root subagent, review, or session-manager interfaces. Advisory skill evaluation also remains a parent operation. Review tools are supplied directly to their own native nodes, not published process-wide. Explicit review cleanup closes those retained nodes before deleting their private resources.
