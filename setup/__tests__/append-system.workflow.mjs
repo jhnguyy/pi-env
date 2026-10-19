@@ -35,10 +35,6 @@ function createFixture() {
     appendFile: join(agentDir, "APPEND_SYSTEM.md"),
     source,
     expectedBlock: `${startMarker}\n${source}\n${endMarker}`,
-    boundariesBlock: `<!-- pi-env:boundaries:start -->\n${readFileSync(
-      join(root, "setup/templates/boundaries.md"),
-      "utf8",
-    ).trim()}\n<!-- pi-env:boundaries:end -->`,
   };
 }
 
@@ -82,7 +78,6 @@ function verifyLegacyUpgrade(fixture) {
   writeFileSync(join(fixture.evidence, "upgraded.md"), actual);
   assert.equal(actual.slice(0, legacy.length), legacy, "legacy text must remain unchanged");
   assert.ok(actual.includes(fixture.expectedBlock), "legacy setup must install the source block");
-  assert.ok(actual.includes(fixture.boundariesBlock), "setup must install the boundaries block");
   return actual;
 }
 

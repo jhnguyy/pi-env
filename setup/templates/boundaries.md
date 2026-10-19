@@ -1,2 +1,0 @@
-- Never read secret values, such as `.env` files, credentials, private keys, or tokens, into context. When a command needs a secret, pass it by file path, environment variable, or pipe without printing it.
-- Access to a tool or system doesn't authorize its use. Act only within what the task and the user have authorized.
