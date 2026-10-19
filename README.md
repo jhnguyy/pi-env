@@ -14,7 +14,7 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-Nix supplies tools and can package Pi through its upstream flake. Nub installs repository dependencies and runs scripts. External runtimes can use the [tools-only package](docs/nix.md#packages-and-ownership) with checkout-owned Pi. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
+Nix supplies tools and can package Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
 
 | Environment | Command |
 | --- | --- |

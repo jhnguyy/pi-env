@@ -24,7 +24,7 @@ See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../
 
 ### Externally managed tools with checkout-owned Pi
 
-An external provisioner can supply Node, Nub, and command-line tools through [`packages.<system>.tools`](nix.md). Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.
+An external provisioner can supply Node, Nub, and command-line tools through [`packages.<system>.tools`](nix.md#packages-and-ownership). Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.
 
 For a container that exposes Node at the stable path `/bin/node`, run setup from the writable checkout:
 
@@ -37,9 +37,9 @@ export NODE_EXECUTABLE=/bin/node
 
 The provisioner must make `/bin/node` executable and put Nub and the other tools on `PATH`. For another layout, use its stable Node path for both variables. Setup records that path in the Pi wrapper. Do not supply a generation-specific Nix store path for this mode.
 
-Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequent sessions. Do not enable `PI_ENV_CLI_MANAGED_BY_NIX`: setup must write the user-local Pi wrapper. The provisioner must put `${PI_BIN_DIR:-$HOME/.local/bin}` before other Pi executables on `PATH`. `--nix-managed` leaves shell profiles and terminal configuration to the provisioner. It still installs repository dependencies, builds extensions, and registers Pi settings.
+Leave `PI_PACKAGE_DIR` and `PI_ENV_PI_EXECUTABLE` unset during setup and subsequent sessions. Do not enable `PI_ENV_CLI_MANAGED_BY_NIX`: setup must write the user-local Pi wrapper. The provisioner must put `${PI_BIN_DIR:-$HOME/.local/bin}` before other Pi executables on `PATH`. `--nix-managed` leaves shell profiles and terminal configuration to the provisioner. See [runtime integration](#runtime-integration) for setup implementation owners.
 
-After updating the application checkout, rerun the same setup command. Nub uses the checkout's manifest and lockfile, and setup checks the installed Pi version against the manifest. No separate Pi installer or release manager is required. An application update can reuse the tools package while those tools satisfy the checkout's requirements. The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
+After updating the application checkout, rerun the same setup command. Reuse the tools package while it satisfies the checkout's [runtime requirements](../CONTRIBUTING.md#runtime-requirements). The consumer owns source revision selection, persistent state, setup sequencing, and session restarts. Existing sessions do not reload the updated runtime automatically.
 
 ## Ghostty and Gruvbox
 
