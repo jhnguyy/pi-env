@@ -53,7 +53,11 @@ The pinned Effect declarations, repository typecheck, and runtime tests are auth
 
 ## Tests
 
-- Use `@effect/vitest`'s `it.effect` for Effect-native tests. Use `it.live` only when real time or live runtime services are the behavior under test. Keep regular Vitest tests for plain TypeScript and compatibility adapters.
-- Substitute Effect-owned dependencies with explicit services/layers or existing seams instead of mutating global process state.
-- Use `TestClock` for Effect time and deterministic primitives such as `Deferred`, `Queue`, `Latch`, or `Ref` for fiber coordination. Do not add arbitrary sleeps to make concurrency tests pass.
-- When relevant to the behavior, assert typed failures, interruption, finalization, retry bounds, and idempotency. Repository-wide test classifications and verification policy still apply.
+Follow [testing conventions](testing.md) for test selection and permitted doubles. For Effect-native tests:
+
+- Use `@effect/vitest`'s `it.effect`, which provides test services and a scope. Use `it.live` only when live runtime services are the behavior under test. Keep regular Vitest tests for plain TypeScript and compatibility adapters.
+- Provide dependencies through existing services/layers or explicit adapter seams, not mutable global overrides. Create mutable scenario state per test. Use `it.layer` for intentional suite-shared acquisition, with independent scenario state.
+- Use `TestClock` from `effect/testing` for Effect time. Coordinate fibers through explicit events using `Deferred`, `Queue`, or `Latch`, not arbitrary sleeps. Advancing `TestClock` does not advance native timers or external processes.
+- Test domain policy, not Effect internals. When relevant, assert typed failures, retry eligibility, bounds and exhaustion, cancellation outcomes, and conflicting versus independent work.
+- To prove cleanup, close the resource's owning scope or interrupt and await its owning fiber before asserting release. Use an inner `Effect.scoped` when assertions must follow scope closure. Automatic test teardown alone does not prove production cleanup.
+- Keep real-adapter evidence for subprocess termination, persisted state, and remote effects. Fiber interruption alone does not prove that external work stopped.
