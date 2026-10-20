@@ -57,3 +57,22 @@ jobs:
       - name: Verify safe Analyze canary
         shell: bash
         run: nub run --node analyze -- --checks complexity src/analyze/policy.ts
+
+  nix-flake-check:
+    name: Nix flake check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+
+      - name: Check flake
+        shell: bash
+        run: nix flake check --print-build-logs
