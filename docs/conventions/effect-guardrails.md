@@ -53,7 +53,7 @@ The pinned Effect declarations, repository typecheck, and runtime tests are auth
 
 ## Tests
 
-Follow [testing conventions](testing.md) for test selection and permitted doubles. For Effect-native tests:
+For Effect-native tests:
 
 - Use `@effect/vitest`'s `it.effect`, which provides test services and a scope. Use `it.live` only when live runtime services are the behavior under test. Keep regular Vitest tests for plain TypeScript and compatibility adapters.
 - Provide dependencies through existing services/layers or explicit adapter seams, not mutable global overrides. Create mutable scenario state per test. Use `it.layer` for intentional suite-shared acquisition, with independent scenario state.
