@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { ManifestCommitFailure } from "../contracts.js";
 import { ensureCoordinator } from "../coordinator.js";
-import type { CurrentWindow, SessionHostShape } from "../host.js";
+import { type CurrentWindow, type SessionHostShape, WindowBindingConflict } from "../host.js";
 import { registerSessionManager } from "../index.js";
 import { workspaceId as workspaceIdFor } from "../runtime-path.js";
 import type { SessionFileProbe } from "../session-file.js";
@@ -339,13 +339,21 @@ describe("session-manager extension", () => {
     });
   });
 
-  it("leaves the Pi session unnamed while explicit renames sync to tmux", async () => {
+  // E2E cannot hold enrollment open for an exact name-event interleaving.
+  it("keeps native sessions unnamed and applies renames delivered during enrollment", async () => {
     const root = await mkdtemp(join(tmpdir(), "session-extension-name-"));
     roots.push(root);
     const cwd = join(root, "workspace");
     await mkdir(cwd);
     const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
     let displayName: string | undefined;
+    let sessionId = "session-a";
+    let holdBinding = false;
+    let bind!: () => void;
+    let bindStarted!: () => void;
+    const binding = new Promise<void>((resolve) => {
+      bindStarted = resolve;
+    });
     const renamedWindows: string[] = [];
     let editorFactory: EditorFactory | undefined = () =>
       cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
@@ -362,7 +370,7 @@ describe("session-manager extension", () => {
       mode: "tui",
       cwd,
       sessionManager: {
-        getSessionId: () => "session-a",
+        getSessionId: () => sessionId,
         getSessionFile: () => undefined,
       },
       ui: {
@@ -385,7 +393,13 @@ describe("session-manager extension", () => {
       catalog,
       host: {
         inspectCurrent: () => Effect.succeed(currentWindow),
-        bindCurrent: () => Effect.succeed(currentWindow),
+        bindCurrent: () =>
+          holdBinding
+            ? Effect.callback<CurrentWindow>((resume) => {
+                bind = () => resume(Effect.succeed(currentWindow));
+                bindStarted();
+              })
+            : Effect.succeed(currentWindow),
         renameCurrent: (_paneId, _sessionId, name) =>
           Effect.sync(() => {
             renamedWindows.push(name);
@@ -400,12 +414,25 @@ describe("session-manager extension", () => {
     expect(displayName).toBeUndefined();
     expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
 
+    await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
+    sessionId = "session-b";
+    holdBinding = true;
+    const starting = handlers.get("session_start")?.({} as never, ctx);
+    await binding;
     displayName = "investigate-resume";
-    await handlers.get("session_info_changed")?.(cast<never>({ name: "investigate-resume" }), ctx);
-
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBe(
-      "investigate-resume",
+    const renaming = handlers.get("session_info_changed")?.(
+      cast<never>({ name: "investigate-resume" }),
+      ctx,
     );
+    bind();
+    await Promise.all([starting, renaming]);
+
+    expect(displayName).toBe("investigate-resume");
+    expect(
+      (await Effect.runPromise(catalog.read(cwd)))?.sessions.find(
+        (record) => record.sessionId === sessionId,
+      )?.name,
+    ).toBe("investigate-resume");
     expect(renamedWindows).toEqual(["investigate-resume"]);
 
     displayName = undefined;
@@ -415,69 +442,120 @@ describe("session-manager extension", () => {
     expect(renamedWindows).toEqual(["investigate-resume"]);
   });
 
-  // E2E cannot pause enrollment while session_shutdown waits. A late successful
-  // enrollment must release its binding before shutdown completes.
-  it("releases a binding that completes after shutdown begins", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-shutdown-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: () => {},
-    });
-    const window: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    let bind!: () => void;
-    let bindStarted!: () => void;
-    const binding = new Promise<void>((resolve) => {
-      bindStarted = resolve;
-    });
-    const released: string[] = [];
-    registerSessionManager(pi, {
-      catalog: createFileSessionCatalog(join(root, "agent")),
-      host: {
-        inspectCurrent: () => Effect.succeed(window),
-        bindCurrent: () =>
-          Effect.callback<CurrentWindow>((resume) => {
-            bind = () => resume(Effect.succeed(window));
-            bindStarted();
-          }),
-        renameCurrent: () => Effect.void,
-        releaseCurrent: (_paneId, sessionId) =>
-          Effect.sync(() => {
-            released.push(sessionId);
-          }),
-      },
-      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      environment: { TMUX_PANE: "%1" },
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: { getSessionId: () => "session-a", getSessionFile: () => undefined },
-      ui: {
-        getEditorComponent: () => undefined,
-        setEditorComponent: () => {},
-        notify: () => {},
-      },
-      shutdown: () => {},
-    });
+  // E2E cannot hold enrollment across shutdown or session replacement. Late work
+  // must not rename or release the replacement session's binding.
+  it.each(["shutdown", "session replacement"] as const)(
+    "discards pending renames and preserves binding ownership after %s",
+    async (transition) => {
+      const root = await mkdtemp(join(tmpdir(), "session-extension-shutdown-"));
+      roots.push(root);
+      const cwd = join(root, "workspace");
+      await mkdir(cwd);
+      const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+      const pi = cast<ExtensionAPI>({
+        on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
+          handlers.set(event, handler),
+        registerCommand: () => {},
+        getSessionName: () => undefined,
+        setSessionName: () => {},
+      });
+      const window: CurrentWindow = {
+        socketPath: "/tmp/tmux.sock",
+        tmuxSessionId: "$1",
+        windowId: "@1",
+        bindings: [],
+      };
+      let bind!: () => void;
+      let bindStarted!: () => void;
+      const binding = new Promise<void>((resolve) => {
+        bindStarted = resolve;
+      });
+      let boundSessionId: string | undefined;
+      const released: string[] = [];
+      const renamedWindows: string[] = [];
+      const catalog = createFileSessionCatalog(join(root, "agent"));
+      registerSessionManager(pi, {
+        catalog,
+        host: {
+          inspectCurrent: () => Effect.sync(() => ({ ...window, boundSessionId })),
+          bindCurrent: (_paneId, sessionId) =>
+            Effect.gen(function* () {
+              boundSessionId = sessionId;
+              if (sessionId === "session-a") {
+                yield* Effect.callback<void>((resume) => {
+                  bind = () => resume(Effect.void);
+                  bindStarted();
+                });
+              }
+              return { ...window, boundSessionId: sessionId };
+            }),
+          renameCurrent: (_paneId, _sessionId, name) =>
+            Effect.sync(() => {
+              renamedWindows.push(name);
+            }),
+          releaseCurrent: (_paneId, sessionId) =>
+            Effect.gen(function* () {
+              if (boundSessionId && boundSessionId !== sessionId) {
+                return yield* new WindowBindingConflict({
+                  windowId: window.windowId,
+                  existingSessionId: boundSessionId,
+                });
+              }
+              if (boundSessionId === sessionId) {
+                boundSessionId = undefined;
+                released.push(sessionId);
+              }
+            }),
+        },
+        sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
+        environment: { TMUX_PANE: "%1" },
+      });
+      const ctx = cast<ExtensionContext>({
+        mode: "tui",
+        cwd,
+        sessionManager: { getSessionId: () => "session-a", getSessionFile: () => undefined },
+        ui: {
+          getEditorComponent: () => undefined,
+          setEditorComponent: () => {},
+          notify: () => {},
+        },
+        shutdown: () => {},
+      });
 
-    void handlers.get("session_start")?.({} as never, ctx);
-    await binding;
-    const shutdown = handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
-    bind();
-    await shutdown;
+      const starting = handlers.get("session_start")?.({} as never, ctx);
+      await binding;
+      const renaming = handlers.get("session_info_changed")?.(
+        cast<never>({ name: "obsolete-label" }),
+        ctx,
+      );
+      const replacementCtx = cast<ExtensionContext>({
+        ...ctx,
+        sessionManager: {
+          getSessionId: () => "session-b",
+          getSessionFile: () => undefined,
+        },
+      });
+      const ending =
+        transition === "shutdown"
+          ? handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx)
+          : handlers.get("session_start")?.({} as never, replacementCtx);
+      bind();
+      await Promise.all([starting, renaming, ending]);
 
-    expect(released).toEqual(["session-a"]);
-  });
+      expect(boundSessionId).toBe(transition === "shutdown" ? undefined : "session-b");
+      expect(released).toEqual(transition === "shutdown" ? ["session-a"] : []);
+      expect(renamedWindows).toEqual([]);
+      const manifest = await Effect.runPromise(catalog.read(cwd));
+      expect(manifest?.sessions.every((record) => record.name === undefined)).toBe(true);
+      if (transition === "session replacement") {
+        expect(manifest?.sessions.map((record) => record.sessionId)).toEqual([
+          "session-a",
+          "session-b",
+        ]);
+        await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), replacementCtx);
+        expect(boundSessionId).toBeUndefined();
+        expect(released).toEqual(["session-b"]);
+      }
+    },
+  );
 });
