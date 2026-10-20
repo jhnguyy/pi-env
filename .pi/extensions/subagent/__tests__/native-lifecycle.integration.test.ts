@@ -63,6 +63,7 @@ it.each([
     if (initial) work = f.execute({ task: "delayed input" });
     else {
       expect((await f.execute()).details.isError).toBe(false);
+      await expect(f.child().input("invalid idle steer", ChildTypes.NativeInputMode.Steer)).rejects.toThrow("requires a streaming child");
       work = f.child().input("delayed input", ChildTypes.NativeInputMode.Prompt);
     }
     await vi.waitFor(() => expect(existsSync(join(f.root, "entered"))).toBe(true));
