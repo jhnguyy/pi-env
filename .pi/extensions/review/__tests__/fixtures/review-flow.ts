@@ -9,10 +9,12 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
+  DagExecutorFailed,
   DagNodeStatus,
   materializeDagTextArtifact,
   publishDagSubagentTextResult,
   type DagEffectExecutor,
+  type DagSessionReconstruction,
 } from "../../../../../src/dag/index.js";
 import { DagSessionRuntime } from "../../../subagent/dag-session-runtime";
 import {
@@ -20,7 +22,10 @@ import {
   registerDagExecutor,
   unregisterDagExecutor,
 } from "../../../_shared/dag-executor-registration";
-import { listenForDagRuntimeService } from "../../../_shared/dag-runtime-service";
+import {
+  listenForDagRuntimeService,
+  type DagRuntimeServiceRegistration,
+} from "../../../_shared/dag-runtime-service";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import { buildReviewDeck } from "../../deck";
 import {
@@ -31,7 +36,10 @@ import {
 } from "../../evidence-resolver";
 import { EvidenceResolverNode, type ReviewRoleAssignments } from "../../review-graph";
 import { resolvePrReviewModelPolicy, type ReviewRolePins } from "../../model-policy";
-import { runReviewDag } from "../../review-dag-runner";
+import { reconstructReviewDagState, runReviewDag } from "../../review-dag-runner";
+import type { reviewerDossierContext } from "../../reviewer-dossier";
+
+export type ModelDossier = ReturnType<typeof reviewerDossierContext>;
 
 export function reviewFixture(): {
   root: string;
@@ -184,9 +192,15 @@ export interface RealReviewFlow {
   readonly artifactRoot: string;
   readonly state: ReviewState;
   readonly saved: readonly ReviewState[];
+  readonly submissionState?: ReviewState;
+  readonly workspaceRoot?: string;
+  readonly progress: readonly unknown[];
+  readonly rebuild: (state?: ReviewState) => Promise<ReviewState>;
+  readonly readDeck: (signal?: AbortSignal) => Promise<any>;
   readonly entries: readonly unknown[];
   readonly invalidSynthesisRejected: boolean;
   readonly dossierRawIds: readonly string[];
+  readonly dossier?: ModelDossier;
   readonly registeredTools: number;
   readonly unregisteredTools: number;
   readonly serviceDisposals: number;
@@ -211,8 +225,13 @@ export async function runRealReviewFlow(
   options: {
     readonly models?: readonly Model<"openai-responses">[];
     readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
+    readonly reviewerOutput?: (role: string, text: string) => string;
+    readonly synthesisOutput?: (dossier: ModelDossier) => string;
+    readonly beforeCollection?: (artifactRoot: string, value: DagSessionReconstruction) => void;
+    readonly onSave?: (state: ReviewState) => void;
   } = {},
 ): Promise<RealReviewFlow> {
+  await using cleanup = new AsyncDisposableStack();
   const requests: { nodeId: string; model: string }[] = [];
   const resolvedAssignments = assignmentsFor(options.models, options.pins);
   const { root, artifactRoot, ctx, state: initial } = reviewFixture();
@@ -243,7 +262,7 @@ export async function runRealReviewFlow(
   initial.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
   const deck = buildReviewDeck({ snapshot: initial.snapshot });
   const pi = eventsApi();
-  const services: any[] = [];
+  const services: DagRuntimeServiceRegistration[] = [];
   let serviceDisposals = 0;
   let registeredTools = 0;
   let unregisteredTools = 0;
@@ -252,6 +271,7 @@ export async function runRealReviewFlow(
     (service) => services.push(service),
     () => serviceDisposals++,
   );
+  cleanup.defer(stopRuntimeListener);
   pi.events.on("agent-tools:register", () => registeredTools++);
   pi.events.on("agent-tools:unregister", () => unregisteredTools++);
   const generation = "review-scenario";
@@ -262,6 +282,7 @@ export async function runRealReviewFlow(
     key: ReviewEvidenceResolverKey,
     executor: reviewEvidenceResolverExecutor({ artifactRoot }),
   });
+  cleanup.defer(() => unregisterDagExecutor(evidenceRegistration));
   let customTools: readonly ToolDefinition[] = [];
   const findTool = (prefix: string) => {
     const tool = customTools.find((candidate) => candidate.name.startsWith(prefix));
@@ -273,6 +294,7 @@ export async function runRealReviewFlow(
   };
   let invalidSynthesisRejected = false;
   let dossierRawIds: string[] = [];
+  let dossier: ModelDossier | undefined;
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
     const payload = request.node.executor.payload as { model: string };
     requests.push({ nodeId: request.node.id, model: payload.model });
@@ -309,7 +331,8 @@ export async function runRealReviewFlow(
         ),
       );
       const role = request.node.id.slice("review-".length);
-      return reviewer(role, JSON.parse(coverage.text).digest);
+      const text = reviewer(role, JSON.parse(coverage.text).digest);
+      return options.reviewerOutput?.(role, text) ?? text;
     }
     if (request.node.id === "synthesis") {
       const inspect = (signal?: AbortSignal) =>
@@ -317,16 +340,17 @@ export async function runRealReviewFlow(
       await beforeSynthesis?.({ artifactRoot, request, inspect });
       const refs = await inspect();
       if (refs.isError) throw new Error("Reviewer dossier was unavailable");
-      const dossier = JSON.parse(
+      dossier = JSON.parse(
         refs.content
           .filter((item) => item.type === "text")
           .map((item) => item.text)
           .join("\n"),
-      );
+      ) as ModelDossier;
+      dossierRawIds = dossier.succeeded.flatMap((item) => item.rawFindings.map((raw) => raw.id));
+      if (options.synthesisOutput) return options.synthesisOutput(dossier);
       const raw = Object.fromEntries(
         dossier.succeeded.map((item: any) => [item.role, item.rawFindings[0]]),
       );
-      dossierRawIds = dossier.succeeded.map((item: any) => item.rawFindings[0].id);
       const invalid = await findTool("submit_review_synthesis_").execute("synthesis", {
         v: 2,
         verdict: "invalid accounting",
@@ -344,20 +368,22 @@ export async function runRealReviewFlow(
           failed: [],
           malformed: [],
         },
-        findings: [
-          { ...raw.correctness.finding, rawFindingIds: [raw.correctness.id, raw.intent.id] },
-          {
-            ...raw.maintainability.finding,
-            rawFindingIds: [raw.maintainability.id, raw.tests.id],
+        findings: [["correctness", "intent"], ["maintainability", "tests"], ["security"]].flatMap(
+          (roles) => {
+            const group = roles.flatMap((role) => (raw[role] ? [raw[role]] : []));
+            return group.length === 0
+              ? []
+              : [{ ...group[0].finding, rawFindingIds: group.map((item) => item.id) }];
           },
-          { ...raw.security.finding, rawFindingIds: [raw.security.id] },
-        ],
-        dismissals: [
-          {
-            rawFindingId: raw["whole-change"].id,
-            reason: "The formatting concern is outside this change's actionable scope.",
-          },
-        ],
+        ),
+        dismissals: raw["whole-change"]
+          ? [
+              {
+                rawFindingId: raw["whole-change"].id,
+                reason: "The formatting concern is outside this change's actionable scope.",
+              },
+            ]
+          : [],
       });
       if (submitted.isError) throw new Error("Valid semantic consolidation was rejected");
       return submitted.content
@@ -368,7 +394,10 @@ export async function runRealReviewFlow(
     throw new Error(`Unexpected scripted node ${request.node.id}`);
   };
   const scriptedSubagent: DagEffectExecutor = (request) =>
-    Effect.promise(() => scriptedText(request)).pipe(
+    Effect.tryPromise({
+      try: () => scriptedText(request),
+      catch: (error) => new DagExecutorFailed({ message: String(error), error }),
+    }).pipe(
       Effect.flatMap((text) =>
         publishDagSubagentTextResult(
           artifactRoot,
@@ -397,37 +426,49 @@ export async function runRealReviewFlow(
     ledger: {} as any,
     executorRegistry: registry,
   });
+  cleanup.defer(() => runtime.dispose());
   const saved: ReviewState[] = [];
-  let state: ReviewState;
-  try {
-    state = await runReviewDag({
-      pi,
-      ctx,
-      service: {
-        ...services[0].service,
-        submit: (graph, authority) => {
-          customTools = authority?.customTools ?? [];
-          return services[0].service.submit(graph, authority);
-        },
+  const progress: unknown[] = [];
+  let submissionState: ReviewState | undefined;
+  let workspaceRoot: string | undefined;
+  let reconstruction: DagSessionReconstruction;
+  const state = await runReviewDag({
+    pi,
+    ctx,
+    service: {
+      ...services[0].service,
+      submit: (graph, authority) => {
+        customTools = authority?.customTools ?? [];
+        workspaceRoot = authority?.workspaceRoot;
+        submissionState = saved.at(-1);
+        return services[0].service.submit(graph, authority);
       },
-      assignments: resolvedAssignments,
-      deckPath: deck.path,
-      state: initial,
-      save: (next) => {
-        const persisted = structuredClone(next);
-        saved.push(persisted);
-        entries.push({
-          type: "custom",
-          customType: REVIEW_ENTRY_TYPE,
-          data: { reviewId: persisted.snapshot.id, state: persisted },
-        });
-      },
-    });
-  } finally {
-    await runtime.dispose();
-    stopRuntimeListener();
-    unregisterDagExecutor(evidenceRegistration);
-  }
+      reconstruct: (runId) =>
+        services[0].service.reconstruct(runId).pipe(
+          Effect.tap((value: DagSessionReconstruction) =>
+            Effect.sync(() => {
+              options.beforeCollection?.(artifactRoot, value);
+            }),
+          ),
+        ),
+    },
+    assignments: resolvedAssignments,
+    deckPath: deck.path,
+    state: initial,
+    onProgress: (update) => progress.push(update),
+    save: (next) => {
+      const persisted = structuredClone(next);
+      options.onSave?.(persisted);
+      saved.push(persisted);
+      entries.push({
+        type: "custom",
+        customType: REVIEW_ENTRY_TYPE,
+        data: { reviewId: persisted.snapshot.id, state: persisted },
+      });
+    },
+  });
+  reconstruction = await Effect.runPromise(services[0].service.reconstruct(state.dag!.runId));
+  await cleanup.disposeAsync();
   return {
     root,
     sessionDir,
@@ -435,9 +476,21 @@ export async function runRealReviewFlow(
     artifactRoot,
     state,
     saved,
+    submissionState,
+    workspaceRoot,
+    progress,
+    rebuild: (persisted = { ...initial, dag: state.dag }) =>
+      reconstructReviewDagState({
+        ctx,
+        service: services[0].service,
+        state: persisted,
+        reconstruction,
+      }),
+    readDeck: (signal) => findTool("review_deck_").execute("retained-deck", {}, signal),
     entries,
     invalidSynthesisRejected,
     dossierRawIds,
+    dossier,
     registeredTools,
     unregisteredTools,
     serviceDisposals,

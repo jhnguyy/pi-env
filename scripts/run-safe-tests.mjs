@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { relative } from "node:path";
 import { Effect, Result } from "effect";
 import { runInheritedProcess, runProcess } from "../src/process/platform.ts";
 
@@ -32,19 +33,28 @@ process.on("SIGTERM", onSigterm);
 
 async function testFiles(portfolio) {
   const result = await Effect.runPromise(
-    runProcess("scripts/node-run.sh", ["node_modules/vitest/vitest.mjs", "list", "--filesOnly"], {
-      env: { ...process.env, PI_ENV_TEST_PORTFOLIO: portfolio },
-    }),
+    runProcess(
+      "scripts/node-run.sh",
+      ["node_modules/vitest/vitest.mjs", "list", "--filesOnly", "--json"],
+      {
+        env: { ...process.env, PI_ENV_TEST_PORTFOLIO: portfolio },
+      },
+    ),
     { signal: controller.signal },
   );
   if (result.exitCode !== 0) {
     throw new Error(result.stderr || `Vitest discovery exited with ${result.exitCode}`);
   }
-  return result.stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .sort();
+  const entries = JSON.parse(result.stdout);
+  if (
+    !Array.isArray(entries) ||
+    entries.some(
+      (entry) => !entry || typeof entry.file !== "string" || entry.projectName !== portfolio,
+    )
+  ) {
+    throw new Error(`Invalid Vitest discovery for ${portfolio}`);
+  }
+  return entries.map((entry) => relative(process.cwd(), entry.file)).sort();
 }
 
 try {
