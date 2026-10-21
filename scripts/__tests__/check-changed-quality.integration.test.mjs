@@ -91,6 +91,14 @@ describe("changed-code quality workflow", { timeout: 30_000 }, () => {
     expect(ignored.status, `${ignored.stdout}\n${ignored.stderr}`).toBe(0);
   });
 
+  it("accepts changes selected only by sensor exclusions", async ({ qualityWorkspace }) => {
+    await writeFile(join(qualityWorkspace, "src/readiness.test.ts"), "export const ready = true;\n");
+
+    const result = run(qualityWorkspace);
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  });
+
   it("excludes deleted source files", async ({ qualityWorkspace }) => {
     await rm(join(qualityWorkspace, "src/existing.ts"));
 
