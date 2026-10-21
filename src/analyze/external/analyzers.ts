@@ -89,7 +89,6 @@ export function eslintAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
     );
     const batches = yield* Effect.try({ try: () => argumentBatches(files, [launcher, ...fixed]), catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Eslint, message: cause instanceof Error ? cause.message : String(cause) }) });
     const findings: Finding[] = [];
-    // analyze: allow-sequential
     for (const batch of batches) {
       const parsed = yield* runProcess(command, [launcher, ...fixed, ...batch], nativeProcessOptions(cwd, timeoutMs)).pipe(
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Eslint, "Oxlint", () => parseOxlintJson(stdout, cwd))),
@@ -112,7 +111,6 @@ export function dependencyAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb:
     const suffix = ["--output-type", "json", "--progress", "none"];
     const batches = yield* Effect.try({ try: () => argumentBatches(targets, [script, ...suffix]), catch: (cause) => new AnalyzerRunError({ analyzer: AnalyzerName.Dependencies, message: cause instanceof Error ? cause.message : String(cause) }) });
     const findings: Finding[] = [];
-    // analyze: allow-sequential
     for (const batch of batches) {
       const parsed = yield* runProcess(resolve(cwd, "scripts/node-run.sh"), [script, ...batch, ...suffix], nodeProcessOptions(cwd, maxMemoryMb, timeoutMs)).pipe(
         Effect.flatMap(({ stdout }) => parseEffect(AnalyzerName.Dependencies, "dependency-cruiser", () => parseDependencyCruiserJson(stdout))),

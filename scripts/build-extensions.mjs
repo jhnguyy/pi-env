@@ -42,7 +42,7 @@ async function buildFile(entry, outfile, options = {}) {
   });
 }
 
-// analyze: allow-sequential
+/* oxlint-disable no-await-in-loop -- Serial builds bound peak memory. */
 for (const ext of selectedExtensions) {
   const outdir = join(ext.absPath, "dist");
   if (!existsSync(ext.sourceEntry)) {
@@ -69,6 +69,7 @@ for (const ext of selectedExtensions) {
     fail += 1;
   }
 }
+/* oxlint-enable no-await-in-loop */
 console.log("");
 if (fail === 0) {
   console.log(`All ${ok} extensions built successfully.`);

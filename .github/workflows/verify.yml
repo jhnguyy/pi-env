@@ -56,7 +56,7 @@ jobs:
 
       - name: Verify safe Analyze canary
         shell: bash
-        run: nub run --node analyze -- --checks complexity src/analyze/policy.ts
+        run: nub run --node analyze -- --checks async-risk src/analyze/policy.ts
 
   nix-flake-check:
     name: Nix flake check

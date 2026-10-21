@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "./analyzers.js";
+import { asyncRisksEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "./analyzers.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, eslintAnalyzerEffect, knipAnalyzerEffect } from "./external.js";
 import { AnalyzerName, AnalyzerRunError, type Finding } from "./model.js";
 import { SyntaxSourceSelection, type SyntaxProject, type TypeProject } from "./program.js";
@@ -64,14 +64,6 @@ const internalEffect = (name: AnalyzerName, operation: Effect.Effect<Finding[], 
   operation.pipe(Effect.mapError((cause) => analyzerError(name, cause)));
 
 const ANALYZERS = {
-  [AnalyzerName.Complexity]: {
-    name: AnalyzerName.Complexity,
-    defaultEnabled: true,
-    minimumTotalMemoryMb: 512,
-    capability: "syntax",
-    sourceSelection: SyntaxSourceSelection.Production,
-    run: (context) => internalEffect(AnalyzerName.Complexity, complexityEffect(context.project, context.cwd, context.scope)),
-  },
   [AnalyzerName.Duplicates]: {
     name: AnalyzerName.Duplicates,
     defaultEnabled: true,
@@ -134,7 +126,6 @@ const ANALYZERS = {
 } satisfies Readonly<Record<AnalyzerName, AnalyzerDescriptor>>;
 
 const ANALYZER_ORDER: readonly AnalyzerName[] = [
-  AnalyzerName.Complexity,
   AnalyzerName.Duplicates,
   AnalyzerName.TestDuplicates,
   AnalyzerName.Types,
