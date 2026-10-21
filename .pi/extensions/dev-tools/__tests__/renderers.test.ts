@@ -1,6 +1,5 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
 import type { DiagnosticsResult, HoverResult } from "../protocol";
 import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
@@ -24,7 +23,7 @@ function text(rendered: unknown): string {
   return rendered.text;
 }
 
-describeIfEnabled("dev-tools", "Renderers", () => {
+describe("Renderers", () => {
   // ─── renderDevToolsCall ───────────────────────────────────────────────────────
 
   describe("renderDevToolsCall", () => {

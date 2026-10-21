@@ -1,8 +1,7 @@
-import { expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { describe, expect, it } from "vitest";
 import { formatTodoMilestoneLabel } from "../milestones";
 
-describeIfEnabled("work-tracker", "todo milestones", () => {
+describe("todo milestones", () => {
   it("formats a single completed todo as a session label", () => {
     expect(formatTodoMilestoneLabel([{ id: 1, text: "Implement session navigation" }])).toBe(
       "todo: Implement session navigation",

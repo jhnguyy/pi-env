@@ -7,7 +7,6 @@
 
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
-import * as TestUtils from "../../__tests__/test-utils";
 import { Container, type Text } from "@earendil-works/pi-tui";
 import initSubagent from "../index";
 
@@ -49,7 +48,7 @@ function extractText(component: Text | Container): string {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-TestUtils.describeIfEnabled("subagent", "subagent extension", () => {
+describe("subagent extension", () => {
   // ─── Tool registration ───────────────────────────────────────────────────
 
   describe("tool registration", () => {

@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { asyncRisksEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { runBenchmarkEffect } from "../benchmark.js";
 import { analyze, analyzeEffect } from "../engine.js";
@@ -19,7 +19,12 @@ import { resolveNodeCommand } from "../../process/platform.js";
 const allScope: Scope = { mode: ScopeMode.All, files: [], hunks: new Map() };
 const pathScope = (files: readonly string[], hunks = new Map<string, { start: number; end: number }[]>()): Scope => ({ mode: ScopeMode.Paths, files, hunks });
 const node = resolveNodeCommand();
-const fixtureRoot = (): string => mkdtempSync(join(tmpdir(), "pi-analyze-"));
+function fixtureRoot(): string {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-analyze-"));
+  // Register before project writes or startup so failed setup is owned too.
+  onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
+  return cwd;
+}
 const zeroRuntime = { now: () => 0, memory: () => ({ rssBytes: 0, heapUsedBytes: 0, externalBytes: 0 }) };
 const createProjectEffect = (cwd: string) => createTypeProjectEffect(cwd);
 const testCloneBody = `
@@ -60,7 +65,7 @@ function writeProject(files: Record<string, string>): string {
 const finding: Finding = { id: "", analyzer: AnalyzerName.Duplicates, kind: FindingKind.Duplicate, severity: Severity.Warning, message: "x", location: { path: "a.ts", line: 2, column: 1 }, related: [{ path: "b.ts", line: 3, column: 1 }] };
 const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ ...finding, id: "finding-id" }], analyzerFailures: [], benchmarks: [] };
 
-describe("analyze contracts", () => {
+describe("analysis failures and process compatibility", () => {
   it("keeps missing tsconfig typed in analyzeEffect and reports it in analyze", async () => {
     const cwd = fixtureRoot();
     const typed = await Effect.runPromise(Effect.result(analyzeEffect({ cwd, scope: ScopeMode.All })));
@@ -113,6 +118,14 @@ describe("analyze contracts", () => {
     expect(result.analyzerFailures).toEqual([]);
   });
 
+  it("returns a structured result when tsconfig is missing", async () => {
+    const cwd = fixtureRoot();
+    const missing = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
+    expect(missing.analyzerFailures[0]?.analyzer).toBe("program");
+  });
+});
+
+describe("bounded and stable analysis results", () => {
   it("caps aggregate findings and reports dropped results", async () => {
     const diagnostics = Array.from({ length: 2_001 }, (_, index) => ({
       code: "typescript(no-floating-promises)",
@@ -143,6 +156,9 @@ describe("analyze contracts", () => {
     ]);
   });
 
+});
+
+describe("benchmark execution", () => {
   it("preserves typed benchmark failures", async () => {
     const outcome = await Effect.runPromise(Effect.result(runBenchmarkEffect({ command: node, args: ["-e", "process.exit(1)"], runs: 1 }).pipe(Effect.provide(processServiceLayer()))));
     expect(Result.isFailure(outcome)).toBe(true);
@@ -159,6 +175,23 @@ describe("analyze contracts", () => {
     expect(first.runs).toHaveLength(1);
     expect(second.runs).toHaveLength(1);
   });
+
+  it.each([
+    [{ runs: 0 }, /runs must be an integer between 1 and 100/],
+    [{ timeoutMs: 0 }, /timeoutMs must be an integer between 1 and 300000/],
+    [{ cwd: 42 }, /cwd must be a string/],
+    [{ warmups: 11 }, /warmups must be an integer between 0 and 10/],
+    [{ runs: 101 }, /runs must be an integer between 1 and 100/],
+    [{ timeoutMs: 300_001 }, /timeoutMs must be an integer between 1 and 300000/],
+  ])("rejects invalid benchmark configuration %j", async (invalid, message) => {
+    const benchmark = runBenchmarkEffect({ command: "echo", args: [], ...invalid } as any).pipe(
+      Effect.provide(processServiceLayer()),
+    );
+    await expect(Effect.runPromise(benchmark)).rejects.toThrow(message);
+  });
+});
+
+describe("analysis output and fail policy", () => {
   it("formats related locations in each output mode", () => {
     expect(formatResult(result, OutputMode.Compact)).toContain("warning\tduplicates\ta.ts:2:1");
     expect(formatResult(result, OutputMode.Pretty)).toContain("related: b.ts:3:1");
@@ -169,7 +202,9 @@ describe("analyze contracts", () => {
     expect(shouldFail(result, FailPolicy.Warning)).toBe(true);
     expect(shouldFail(result, FailPolicy.Error)).toBe(false);
   });
+});
 
+describe("diff scope integrity", () => {
   it("parses and intersects hunks", () => {
     const hunks = parseUnifiedHunks("+++ b/a.ts\n@@ -1,2 +10,3 @@").get("a.ts");
     expect(hunks).toEqual([{ start: 10, end: 12 }]);
@@ -205,6 +240,9 @@ describe("analyze contracts", () => {
     ]);
   });
 
+});
+
+describe("analysis budgets and capability loading", () => {
   it("rejects impossible analyzer budgets before capability loading while allowing eligible checks", async () => {
     const runtime = zeroRuntime;
     const rejectedInternal = await Effect.runPromise(analyzeEffect({
@@ -317,7 +355,9 @@ describe("analyze contracts", () => {
     expect(childHeapLimitMb(2048, 512 * 1024 * 1024)).toBe(1024);
     expect(childHeapLimitMb(1024, 400 * 1024 * 1024)).toBe(112);
   });
+});
 
+describe("project source selection and bounds", () => {
   it("keeps scoped syntax loading within the selected paths", async () => {
     const cwd = writeProject({
       "src/changed.ts": "export const changed = 1;",
@@ -429,12 +469,6 @@ describe("analyze contracts", () => {
     )));
     expect(Result.isFailure(outcome) ? outcome.failure.message : "").toContain("resolves outside cwd");
   });
-
-  it("returns a structured result when tsconfig is missing", async () => {
-    const cwd = fixtureRoot();
-    const missing = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
-    expect(missing.analyzerFailures[0]?.analyzer).toBe("program");
-  });
 });
 
 describe("structural type similarity", () => {
@@ -514,7 +548,7 @@ describe("ast analyzers", () => {
       export function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
       export function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
     ` });
-    const findings = await Effect.runPromise(duplicatesEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope));
+    const findings = await Effect.runPromise(duplicatesEffect(await Effect.runPromise(createSyntaxProjectEffect(cwd, allScope)), cwd, allScope));
     expect(findings).toHaveLength(1);
     expect(findings[0]?.location.line).toBe(2);
     expect(findings[0]?.related).toHaveLength(1);
@@ -645,7 +679,7 @@ describe("ast analyzers", () => {
         }
       }
     ` });
-    const messages = (await Effect.runPromise(asyncRisksEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope))).map((item) => item.message);
+    const messages = (await Effect.runPromise(asyncRisksEffect(await Effect.runPromise(createSyntaxProjectEffect(cwd, allScope)), cwd, allScope))).map((item) => item.message);
     expect(messages).not.toContain("filter call inside loop may repeat a scan");
     expect(messages).not.toContain("Await inside loop may serialize work");
     expect(messages).toContain("sort call inside loop may repeat a scan");
@@ -658,20 +692,6 @@ describe("external analyzers and parsers", () => {
     expect(parseDependencyCruiserJson(JSON.stringify({ summary: { violations: [{ from: "src/a.ts", to: "src/b.ts", rule: { name: "no-cycle", severity: "error" } }] } }))[0]?.severity).toBe(Severity.Error);
     expect(parseKnipOutput("Unused files (1)\nUnlisted dependencies (1)")[0]?.message).toContain("Unused files");
     expect(normalizeBundleMetafile({ inputs: { "src/a.ts": { bytes: 1, imports: [{ path: "pkg", kind: "import-statement", external: true }] }, "node_modules/pkg/index.js": { bytes: 2, imports: [] } }, outputs: { "out.js": { bytes: 100, inputs: {}, imports: [], exports: [], entryPoint: "src/a.ts" } } }).packageInputCount).toBe(1);
-  });
-
-  it.each([
-    [{ runs: 0 }, /runs must be an integer between 1 and 100/],
-    [{ timeoutMs: 0 }, /timeoutMs must be an integer between 1 and 300000/],
-    [{ cwd: 42 }, /cwd must be a string/],
-    [{ warmups: 11 }, /warmups must be an integer between 0 and 10/],
-    [{ runs: 101 }, /runs must be an integer between 1 and 100/],
-    [{ timeoutMs: 300_001 }, /timeoutMs must be an integer between 1 and 300000/],
-  ])("rejects invalid benchmark configuration %j", async (invalid, message) => {
-    const benchmark = runBenchmarkEffect({ command: "echo", args: [], ...invalid } as any).pipe(
-      Effect.provide(processServiceLayer()),
-    );
-    await expect(Effect.runPromise(benchmark)).rejects.toThrow(message);
   });
 
   it("strictly parses configured Oxlint diagnostics and preserves labels", () => {
@@ -806,7 +826,7 @@ describe("bundle entrypoints", () => {
   });
 });
 
-describe("bounded hardening", () => {
+describe("explicit path scope integrity and bounds", () => {
   it("bounds explicit path walking to analyzable files and skipped directories", async () => {
     const cwd = writeProject({
       "src/a.ts": "export const a = 1;",
@@ -849,6 +869,9 @@ describe("bounded hardening", () => {
     expect(symlinkDirectory._tag === "Failure" && symlinkDirectory.failure.message).toMatch(/outside cwd/);
   });
 
+});
+
+describe("duplicate canonicalization bounds", () => {
   it("skips duplicate candidates that exceed canonicalization bounds", async () => {
     const cwd = fixtureRoot();
     const expression = `${"value + ".repeat(6_000)}1`;
@@ -866,6 +889,4 @@ describe("bounded hardening", () => {
     );
     expect(findings).toEqual([]);
   });
-
-
 });

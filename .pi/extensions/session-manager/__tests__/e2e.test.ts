@@ -55,7 +55,7 @@ async function until<T>(read: () => T, done: (value: T) => boolean, what: string
 describeE2E("session-manager in real tmux", () => {
   let root = "";
   let socket = "";
-  let windowId = "";
+  let fixture: ReturnType<typeof windowFixture>;
   let artifactPath = "";
   const cases: Case[] = [];
   const expectedCaseCount = 10;
@@ -73,30 +73,64 @@ describeE2E("session-manager in real tmux", () => {
       encoding: "utf8",
       env: piEnv,
     }).trim();
-  const option = (name: string) => tmux("show-options", "-w", "-q", "-v", "-t", windowId, name);
-  const format = (value: string) => tmux("display-message", "-p", "-t", windowId, value);
-  const screen = () => tmux("capture-pane", "-p", "-t", windowId);
-  const window = () => ({
-    sessionId: option("@pi_session_id"),
-    ownerPid: option("@pi_session_pid"),
-    name: format("#{window_name}"),
-    automaticRename: option("automatic-rename") || "inherited",
-  });
-  const panePid = () => format("#{pane_pid}");
-  const signalPi = (signal: NodeJS.Signals) => {
-    if (format("#{pane_dead}") !== "0") throw new Error("No live Pi process in the pane");
-    process.kill(positivePid(panePid()), signal);
-  };
-  const exited = () =>
-    until(
-      () => format("#{pane_dead}"),
-      (dead) => dead === "1",
-      "Pi to exit",
-    );
-  const clearPane = async () => {
-    tmux("respawn-pane", "-k", "-t", windowId, "true");
-    await exited();
-  };
+  function windowFixture(target: string) {
+    const option = (name: string) => tmux("show-options", "-w", "-q", "-v", "-t", target, name);
+    const format = (value: string) => tmux("display-message", "-p", "-t", target, value);
+    const screen = () => tmux("capture-pane", "-p", "-t", target);
+    const window = () => {
+      const [panePid, dead, sessionId, ownerPid, name] = format(
+        "#{pane_pid}\t#{pane_dead}\t#{@pi_session_id}\t#{@pi_session_pid}\t#{window_name}",
+      ).split("\t");
+      return {
+        sessionId,
+        ownerPid,
+        name,
+        panePid,
+        dead,
+        automaticRename: option("automatic-rename") || "inherited",
+      };
+    };
+    const panePid = () => format("#{pane_pid}");
+    const signalPi = (signal: NodeJS.Signals) => {
+      if (format("#{pane_dead}") !== "0") throw new Error("No live Pi process in the pane");
+      process.kill(positivePid(panePid()), signal);
+    };
+    const exited = () =>
+      until(
+        () => format("#{pane_dead}"),
+        (dead) => dead === "1",
+        "Pi to exit",
+      );
+    const clearPane = async () => {
+      tmux("respawn-pane", "-k", "-t", target, "true");
+      await exited();
+    };
+    const respawn = (...args: string[]) =>
+      tmux("respawn-pane", "-t", target, "-c", join(root, "work"), piCommand(...args));
+    const bound = (previous = "", name?: string) =>
+      until(
+        window,
+        (state) =>
+          state.sessionId !== "" &&
+          state.sessionId !== previous &&
+          state.ownerPid === state.panePid &&
+          state.name === (name ?? `pi-${state.sessionId.slice(-6)}`),
+        "a complete window binding",
+      );
+    return {
+      target,
+      option,
+      format,
+      screen,
+      window,
+      panePid,
+      signalPi,
+      exited,
+      clearPane,
+      respawn,
+      bound,
+    };
+  }
   // Pi without session-manager. Restoration must forward the extension itself.
   const piBaseCommand = (...args: string[]) =>
     [
@@ -114,18 +148,6 @@ describeE2E("session-manager in real tmux", () => {
       ...args.map(quote),
     ].join(" ");
   const piCommand = (...args: string[]) => piBaseCommand("-e", extension, ...args);
-  const respawn = (...args: string[]) =>
-    tmux("respawn-pane", "-t", windowId, "-c", join(root, "work"), piCommand(...args));
-  const bound = (previous = "", name?: string) =>
-    until(
-      window,
-      (state) =>
-        state.sessionId !== "" &&
-        state.sessionId !== previous &&
-        state.ownerPid === panePid() &&
-        state.name === (name ?? `pi-${state.sessionId.slice(-6)}`),
-      "a complete window binding",
-    );
   const labelled = (state: { sessionId: string; name: string }) =>
     state.name === `pi-${state.sessionId.slice(-6)}`;
 
@@ -144,7 +166,7 @@ describeE2E("session-manager in real tmux", () => {
       entry.verdict = "fail";
       entry.actual = { ...entry.actual, error: String(error) };
       try {
-        entry.actual.screen = screen();
+        entry.actual.screen = fixture.screen();
       } catch (captureError) {
         entry.actual.captureError = String(captureError);
       }
@@ -164,12 +186,23 @@ describeE2E("session-manager in real tmux", () => {
     writeFileSync(artifactPath, `${text}\n`);
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     caseStart = cases.length;
+    fixture = windowFixture(
+      tmux("new-window", "-d", "-P", "-F", "#{window_id}", "-t", "e2e:", "sleep 600"),
+    );
+    tmux("set-option", "-w", "-t", fixture.target, "remain-on-exit", "on");
+    await fixture.clearPane();
   });
 
   afterEach((context) => {
-    if (context.task.result?.state !== "fail") return;
+    let cleanupError: unknown;
+    try {
+      if (fixture) tmux("kill-window", "-t", fixture.target);
+    } catch (error) {
+      cleanupError = error;
+    }
+    if (context.task.result?.state !== "fail" && !cleanupError) return;
     if (cases.length === caseStart) {
       cases.push({
         name: context.task.name,
@@ -179,9 +212,14 @@ describeE2E("session-manager in real tmux", () => {
     }
     for (const entry of cases.slice(caseStart)) {
       entry.verdict = "fail";
-      entry.actual = { ...entry.actual, testErrors: context.task.result.errors };
+      entry.actual = {
+        ...entry.actual,
+        testErrors: context.task.result?.errors,
+        ...(cleanupError ? { windowCleanupError: String(cleanupError) } : {}),
+      };
     }
     if (artifactPath) saveEvidence();
+    if (cleanupError) throw cleanupError;
   });
 
   beforeAll(async () => {
@@ -209,9 +247,6 @@ describeE2E("session-manager in real tmux", () => {
       env: piEnv,
     }).trim();
     tmux("new-session", "-d", "-s", "e2e", "-x", "160", "-y", "40", "sleep 600");
-    windowId = tmux("display-message", "-p", "-t", "e2e:", "#{window_id}");
-    tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
-    await clearPane();
     saveEvidence();
   });
 
@@ -253,9 +288,10 @@ describeE2E("session-manager in real tmux", () => {
   });
 
   it(
-    "binds an unnamed session and labels the window with its session ID suffix",
+    "binds and labels an unnamed session, reclaims after a crash, and releases gracefully",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
+      const { respawn, bound, panePid, window, signalPi, exited, option, screen } = fixture;
       await check(
         "unnamed bind",
         {
@@ -275,13 +311,6 @@ describeE2E("session-manager in real tmux", () => {
           };
         },
       );
-    },
-  );
-
-  it(
-    "reclaims the window after the owning Pi is killed",
-    { timeout: STEP_TIMEOUT_MS },
-    async () => {
       await check(
         "reclaim after kill -9",
         { staleTagRemained: true, rebound: true, labelled: true, enrollmentFailed: false },
@@ -306,7 +335,7 @@ describeE2E("session-manager in real tmux", () => {
               failed ||
               (current.sessionId !== "" &&
                 current.sessionId !== killed.sessionId &&
-                current.ownerPid === panePid() &&
+                current.ownerPid === current.panePid &&
                 labelled(current)),
             "reclaim enrollment outcome",
           ).then(({ state: current, failed }) => {
@@ -323,28 +352,25 @@ describeE2E("session-manager in real tmux", () => {
           };
         },
       );
+      await check(
+        "graceful release",
+        { sessionId: "", ownerPid: "", automaticRename: "inherited" },
+        async () => {
+          signalPi("SIGTERM");
+          await exited();
+          return window();
+        },
+      );
     },
   );
-
-  it("releases the window when Pi exits gracefully", { timeout: STEP_TIMEOUT_MS }, async () => {
-    await check(
-      "graceful release",
-      { sessionId: "", ownerPid: "", automaticRename: "inherited" },
-      async () => {
-        signalPi("SIGTERM");
-        await exited();
-        return window();
-      },
-    );
-  });
 
   it(
     "refuses a window bound by a live process and reports the cause",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
+      const { clearPane, respawn, screen, window, target: windowId } = fixture;
       let holder: ChildProcess | undefined;
       try {
-        await clearPane();
         await check(
           "live owner conflict",
           { sessionId: "held-by-live-process", reportsCause: true },
@@ -377,7 +403,7 @@ describeE2E("session-manager in real tmux", () => {
     "arbitrates concurrent real Pi reclaimers and releases without deadlock",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
-      await clearPane();
+      const { clearPane, respawn, bound, signalPi, exited, format, option } = fixture;
       let second = "";
       try {
         await check(
@@ -445,7 +471,16 @@ describeE2E("session-manager in real tmux", () => {
     "adopts an ownerless legacy tag and records the Pi owner",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
-      await clearPane();
+      const {
+        respawn,
+        window,
+        panePid,
+        screen,
+        format,
+        signalPi,
+        exited,
+        target: windowId,
+      } = fixture;
       try {
         await check(
           "ownerless legacy tag adoption",
@@ -462,7 +497,7 @@ describeE2E("session-manager in real tmux", () => {
             const state = await until(
               window,
               (current) =>
-                (current.ownerPid === panePid() && labelled(current)) ||
+                (current.ownerPid === current.panePid && labelled(current)) ||
                 screen().includes("enrollment failed"),
               "ownerless tag adoption outcome",
             );
@@ -489,7 +524,7 @@ describeE2E("session-manager in real tmux", () => {
     "keeps a same-ID live owner when a second Pi enrolls and exits",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
-      await clearPane();
+      const { respawn, bound, option, format, signalPi, exited, target: windowId } = fixture;
       let contender = "";
       try {
         await check(
@@ -566,6 +601,7 @@ describeE2E("session-manager in real tmux", () => {
     "keeps an explicit session name on the window after release",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
+      const { respawn, bound, signalPi, exited, window, format } = fixture;
       await check(
         "explicit name",
         {
@@ -595,13 +631,12 @@ describeE2E("session-manager in real tmux", () => {
     "keeps duplicate display names targeted by session ID across rename, release, and coordinator restoration",
     { timeout: STEP_TIMEOUT_MS * 2 },
     async () => {
-      await clearPane();
-      const firstWindow = windowId;
+      const firstWindow = fixture;
       let secondWindow = "";
       const work = join(root, "duplicate work");
       mkdirSync(work);
-      const launch = (...args: string[]) =>
-        tmux("respawn-pane", "-t", windowId, "-c", work, piCommand(...args));
+      const launch = (target: string, ...args: string[]) =>
+        tmux("respawn-pane", "-t", target, "-c", work, piCommand(...args));
       const restoredWindows: string[] = [];
       const lineWith = (text: string, ...parts: string[]) =>
         text.split("\n").find((line) => parts.every((part) => line.includes(part)));
@@ -622,8 +657,8 @@ describeE2E("session-manager in real tmux", () => {
             closedDuplicateNotRestored: true,
           },
           async () => {
-            launch("--name", "shared-label");
-            const first = await bound("", "shared-label");
+            launch(firstWindow.target, "--name", "shared-label");
+            const first = await firstWindow.bound("", "shared-label");
             secondWindow = tmux(
               "new-window",
               "-d",
@@ -634,21 +669,25 @@ describeE2E("session-manager in real tmux", () => {
               "e2e:",
               "sleep 600",
             );
-            windowId = secondWindow;
-            tmux("set-option", "-w", "-t", windowId, "remain-on-exit", "on");
-            await clearPane();
-            launch("--name", "shared-label");
-            const second = await bound("", "shared-label");
+            const secondFixture = windowFixture(secondWindow);
+            tmux("set-option", "-w", "-t", secondWindow, "remain-on-exit", "on");
+            await secondFixture.clearPane();
+            launch(secondWindow, "--name", "shared-label");
+            const second = await secondFixture.bound("", "shared-label");
             const duplicateStart = first.name === "shared-label" && second.name === first.name;
             const command = (text: string) => {
-              tmux("send-keys", "-t", windowId, "-l", text);
-              tmux("send-keys", "-t", windowId, "Enter");
+              tmux("send-keys", "-t", secondWindow, "-l", text);
+              tmux("send-keys", "-t", secondWindow, "Enter");
             };
             command("/name temporary-label");
-            await until(window, (state) => state.name === "temporary-label", "temporary rename");
+            await until(
+              secondFixture.window,
+              (state) => state.name === "temporary-label",
+              "temporary rename",
+            );
             command("/name shared-label");
             const renamed = await until(
-              window,
+              secondFixture.window,
               (state) => state.name === first.name,
               "duplicate rename",
             );
@@ -656,7 +695,7 @@ describeE2E("session-manager in real tmux", () => {
             // Earlier /name commands leave the name on screen, so require one line with both.
             const statusLine = lineWith(
               await until(
-                screen,
+                secondFixture.screen,
                 (text) => lineWith(text, first.name, second.sessionId) !== undefined,
                 "status with the name beside the full session ID",
               ),
@@ -664,9 +703,9 @@ describeE2E("session-manager in real tmux", () => {
               second.sessionId,
             );
             const statusHasId = statusLine !== undefined;
-            signalPi("SIGTERM");
-            await exited();
-            const released = window();
+            secondFixture.signalPi("SIGTERM");
+            await secondFixture.exited();
+            const released = secondFixture.window();
             const adoptedId = "12345678-1234-4123-8123-123456789abc";
             const adoptedFile = join(root, "adopt-duplicate.jsonl");
             writeFileSync(
@@ -679,21 +718,19 @@ describeE2E("session-manager in real tmux", () => {
                 timestamp: new Date().toISOString(),
               })}\n`,
             );
-            launch("--session", adoptedFile, "--name", "shared-label");
+            launch(secondWindow, "--session", adoptedFile, "--name", "shared-label");
             await until(
-              screen,
+              secondFixture.screen,
               (text) => text.includes("shared-label"),
               "materialized session startup",
             );
             command("/session-adopt");
-            const adopted = await bound("", "shared-label");
+            const adopted = await secondFixture.bound("", "shared-label");
             command("/session-done");
-            await exited();
-            windowId = firstWindow;
-            const preserved = window();
-            signalPi("SIGTERM");
-            await exited();
-            windowId = secondWindow;
+            await secondFixture.exited();
+            const preserved = firstWindow.window();
+            firstWindow.signalPi("SIGTERM");
+            await firstWindow.exited();
             const wrapper = join(root, "duplicate pi");
             writeFileSync(
               wrapper,
@@ -704,7 +741,7 @@ describeE2E("session-manager in real tmux", () => {
             tmux(
               "respawn-pane",
               "-t",
-              windowId,
+              secondWindow,
               "-c",
               work,
               [
@@ -721,11 +758,11 @@ describeE2E("session-manager in real tmux", () => {
               ].join(" "),
             );
             await until(
-              screen,
+              secondFixture.screen,
               (text) => text.includes("Workspace restore complete."),
               "coordinator restoration",
             );
-            const summary = screen();
+            const summary = secondFixture.screen();
             const restoredBindings = tmux(
               "list-windows",
               "-t",
@@ -738,9 +775,9 @@ describeE2E("session-manager in real tmux", () => {
               if (!line) throw new Error(`No restored window for ${id}`);
               const target = line.split(" ")[0];
               restoredWindows.push(target);
-              windowId = target;
+              const restoredFixture = windowFixture(target);
               const state = await until(
-                () => ({ ...window(), panePid: panePid(), dead: format("#{pane_dead}") }),
+                restoredFixture.window,
                 (current) => current.dead === "0" && current.ownerPid === current.panePid,
                 `a live owner for restored session ${id}`,
               );
@@ -796,11 +833,11 @@ describeE2E("session-manager in real tmux", () => {
         const cleanupErrors: string[] = [];
         const stop = async (target: string, kill: boolean) => {
           try {
-            windowId = target;
-            if (format("#{pane_dead}") === "0") {
+            const cleanupFixture = windowFixture(target);
+            if (cleanupFixture.format("#{pane_dead}") === "0") {
               tmux("set-option", "-w", "-t", target, "remain-on-exit", "on");
-              signalPi("SIGTERM");
-              await exited();
+              cleanupFixture.signalPi("SIGTERM");
+              await cleanupFixture.exited();
             }
             if (kill) tmux("kill-window", "-t", target);
           } catch (error) {
@@ -809,8 +846,7 @@ describeE2E("session-manager in real tmux", () => {
         };
         for (const target of restoredWindows) await stop(target, true);
         if (secondWindow) await stop(secondWindow, true);
-        await stop(firstWindow, false);
-        windowId = firstWindow;
+        await stop(firstWindow.target, false);
         if (cleanupErrors.length > 0) {
           evidence.duplicateNameCleanupErrors = cleanupErrors;
           saveEvidence();
@@ -828,7 +864,7 @@ describeE2E("session-manager in real tmux", () => {
     "starts work with a legacy coordinator's name without changing its identity",
     { timeout: STEP_TIMEOUT_MS },
     async () => {
-      await clearPane();
+      const { clearPane, format, window } = fixture;
       const cwd = join(root, "legacy work");
       mkdirSync(cwd);
       const catalog = createFileSessionCatalog(join(root, "legacy agent"));

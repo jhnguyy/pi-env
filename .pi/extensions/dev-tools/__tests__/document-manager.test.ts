@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import { DocumentManager } from "../document-manager";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +8,7 @@ function testResolveLanguageId(): string {
   return "typescript";
 }
 
-describeIfEnabled("dev-tools", "DocumentManager", () => {
+describe("DocumentManager", () => {
   let tmpDir: string;
   let dm: DocumentManager;
 

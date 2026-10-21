@@ -3,8 +3,7 @@ import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { afterEach, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   closeoutPullRequest,
   parseCloseoutArgs,
@@ -144,7 +143,7 @@ function request(repoPath: string): CloseoutRequest {
   return { pr: "42", repoPath };
 }
 
-describeIfEnabled("dev-tools", "/closeout command", () => {
+describe("/closeout command", () => {
   it("parses an optional PR reference and repository path", () => {
     expect(parseCloseoutArgs(undefined)).toEqual({ pr: undefined, repoPath: undefined });
     expect(parseCloseoutArgs("42")).toEqual({ pr: "42", repoPath: undefined });

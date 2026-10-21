@@ -8,7 +8,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import "../register-actions"; // populate action registry for daemon dispatch
 import { LspDaemon } from "../daemon";
 import { connect, type Socket } from "node:net";
@@ -17,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serializeRequest, parseResponse, type DaemonRequest } from "../protocol";
 
-describeIfEnabled("dev-tools", "LspDaemon", () => {
+describe("LspDaemon", () => {
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   let tmpDir: string;

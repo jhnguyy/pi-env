@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -22,6 +21,8 @@ import {
   reviewGitExec,
 } from "../snapshot";
 
+import { git, reviewRepo } from "./fixtures/review-repo";
+
 const mocked = { agentDir: "" };
 
 const temps: string[] = [];
@@ -36,10 +37,6 @@ function temp(prefix: string): string {
   return path;
 }
 
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-}
-
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -51,60 +48,7 @@ function processIsAlive(pid: number): boolean {
 
 function fixture() {
   mocked.agentDir = temp("pi-review-agent-");
-  const source = temp("pi-review-source-");
-  const origin = temp("pi-review-origin-");
-  git(source, "init", "-q", "-b", "trunk");
-  git(source, "config", "user.name", "Review Fixture");
-  git(source, "config", "user.email", "review@example.invalid");
-  writeFileSync(join(source, "shared.txt"), "shared\n");
-  git(source, "add", ".");
-  git(source, "commit", "-qm", "common");
-  const commonOid = git(source, "rev-parse", "HEAD");
-  writeFileSync(join(source, "base.txt"), "base\n");
-  git(source, "add", ".");
-  git(source, "commit", "-qm", "base");
-  const baseOid = git(source, "rev-parse", "HEAD");
-  git(source, "switch", "-qc", "feature", commonOid);
-  writeFileSync(join(source, "head.txt"), "head\n");
-  git(source, "add", ".");
-  git(source, "commit", "-qm", "head");
-  const headOid = git(source, "rev-parse", "HEAD");
-  git(origin, "init", "-q", "--bare");
-  git(source, "remote", "add", "fixture", `file://${origin}`);
-  git(source, "push", "-q", "fixture", `${baseOid}:refs/heads/trunk`);
-  git(source, "push", "-q", "fixture", `${headOid}:refs/pull/7/head`);
-
-  const metadata = {
-    owner: "acme",
-    repo: "widgets",
-    number: 7,
-    url: "https://github.com/acme/widgets/pull/7",
-    baseRef: "trunk",
-    baseOid,
-    headOid,
-    changedFiles: [],
-  };
-  const localExec: ExtensionAPI["exec"] = async (command, rawArgs, options = {}) => {
-    const args = [...rawArgs];
-    if (command === "git" && args[0] === "remote" && ["add", "set-url"].includes(args[1] ?? ""))
-      args[args.length - 1] = `file://${origin}`;
-    try {
-      const stdout = execFileSync(command, args, {
-        cwd: options.cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      return { code: 0, stdout, stderr: "", killed: false };
-    } catch (cause: any) {
-      return {
-        code: cause.status ?? 1,
-        stdout: String(cause.stdout ?? ""),
-        stderr: String(cause.stderr ?? cause.message ?? ""),
-        killed: false,
-      };
-    }
-  };
-  return { commonOid, metadata, localExec, origin };
+  return reviewRepo();
 }
 
 describe("review snapshot Git integration", () => {
@@ -308,7 +252,7 @@ describe("review snapshot Git integration", () => {
             },
             actual,
             reproduce:
-              "nub run test:vitest .pi/extensions/review/__tests__/snapshot-git-integration.test.ts",
+              "nub run test:vitest .pi/extensions/review/__tests__/snapshot-git.integration.test.ts",
           },
           null,
           2,
