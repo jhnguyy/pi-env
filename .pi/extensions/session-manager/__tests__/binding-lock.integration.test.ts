@@ -1,42 +1,36 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
-import { expect, it } from "vitest";
-import { acquireBindingLock } from "../binding-lock.js";
+import { expect, it, onTestFinished } from "vitest";
+import { startBindingLockOwner } from "./binding-lock-fixture.js";
 
 // Real Pi E2E cannot reliably kill a process during the short critical section.
 // This real child holds exactly that resource, then dies without finalization.
 it("releases the kernel lock when its owning process is killed", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-binding-lock-"));
+  const owners: ReturnType<typeof startBindingLockOwner>[] = [];
+  onTestFinished(async () => {
+    const results = await Promise.allSettled(owners.map((owner) => owner.stop()));
+    const failures: unknown[] = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    try {
+      await rm(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+    if (failures.length) throw new AggregateError(failures, "Binding lock fixture cleanup failed");
+  });
   const socket = join(root, "tmux.sock");
-  const module = new URL("../binding-lock.ts", import.meta.url).href;
-  const child = spawn(
-    process.execPath,
-    [
-      "--input-type=module",
-      "-e",
-      `
-    import { Effect } from "effect";
-    import { acquireBindingLock } from ${JSON.stringify(module)};
-    await Effect.runPromise(acquireBindingLock(${JSON.stringify(socket)}));
-    process.stdout.write("locked");
-  `,
-    ],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  try {
-    const [ready] = await once(child.stdout, "data");
-    expect(ready.toString()).toBe("locked");
-    const closed = once(child, "close");
-    child.kill("SIGKILL");
-    await closed;
-    const release = await Effect.runPromise(acquireBindingLock(socket));
-    await release();
-  } finally {
-    child.kill("SIGKILL");
-    await rm(root, { recursive: true, force: true });
-  }
+  // Share the five-second test budget across acquisitions and reserve time for cleanup.
+  const readinessDeadline = performance.now() + 4_000;
+  const owner = startBindingLockOwner(socket, readinessDeadline);
+  owners.push(owner);
+  await expect(owner.ready, "initial owner readiness").resolves.toBeUndefined();
+  expect(owner.child.kill("SIGKILL")).toBe(true);
+  expect(await owner.closed).toEqual({ code: null, signal: "SIGKILL" });
+
+  const replacement = startBindingLockOwner(socket, readinessDeadline);
+  owners.push(replacement);
+  await expect(replacement.ready, "post-SIGKILL reacquisition").resolves.toBeUndefined();
 });
