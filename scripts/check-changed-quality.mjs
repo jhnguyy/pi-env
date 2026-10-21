@@ -82,6 +82,7 @@ for (let offset = 0; offset < files.length; offset += 128) {
       "--allow",
       "no-await-in-loop",
       "--deny-warnings",
+      "--no-error-on-unmatched-pattern",
       "--",
       ...files.slice(offset, offset + 128),
     ],

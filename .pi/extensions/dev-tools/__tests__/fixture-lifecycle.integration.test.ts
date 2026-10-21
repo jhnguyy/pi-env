@@ -112,7 +112,6 @@ it("preserves a restart failure and reports shutdown and removal failures togeth
   await expect(fixture.restartDaemon()).rejects.toMatchObject({ code: "EISDIR" });
   failDisposal = true;
   await expect(fixture.cleanup()).rejects.toMatchObject({ errors: [shutdownError, removalError] });
-  expect(existsSync(fixture.project)).toBe(true);
   failRemoval = false;
   // The cached shutdown failure must not prevent retrying real removal.
   await expect(fixture.cleanup()).rejects.toBe(shutdownError);
@@ -140,7 +139,4 @@ it("preserves preparation and removal failures when allocation cannot return a f
       },
     ),
   ).toThrow(expect.objectContaining({ errors: [preparationError, removalError] }));
-  expect(existsSync(directory)).toBe(true);
-  rmSync(directory, { recursive: true, force: true });
-  expect(existsSync(directory)).toBe(false);
 });

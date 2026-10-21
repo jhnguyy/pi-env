@@ -80,10 +80,15 @@ describe("changed-code quality workflow", { timeout: 30_000 }, () => {
     expect(`${result.stdout}${result.stderr}`).toContain("new file.ts");
   });
 
-  it("does not scan unchanged complex files when the diff is empty", ({ qualityWorkspace }) => {
-    const result = run(qualityWorkspace);
+  it("does not scan unchanged complex files for empty and ignored-only diffs", async ({
+    qualityWorkspace,
+  }) => {
+    const empty = run(qualityWorkspace);
+    expect(empty.status, `${empty.stdout}\n${empty.stderr}`).toBe(0);
 
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    await writeFile(join(qualityWorkspace, "src/ignored.test.ts"), complexSource);
+    const ignored = run(qualityWorkspace);
+    expect(ignored.status, `${ignored.stdout}\n${ignored.stderr}`).toBe(0);
   });
 
   it("excludes deleted source files", async ({ qualityWorkspace }) => {
