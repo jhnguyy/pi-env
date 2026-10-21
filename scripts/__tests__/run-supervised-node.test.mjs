@@ -36,16 +36,16 @@ describe("supervised Node command runner", () => {
     );
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(7);
+  });
 
-    if (process.platform !== "win32") {
-      const signalled = spawnSync(
-        "scripts/node-run.sh",
-        ["scripts/run-supervised-node.mjs", "-e", "process.kill(process.pid, 'SIGTERM')"],
-        { cwd: process.cwd(), encoding: "utf8", timeout: 5_000 },
-      );
-      expect(signalled.error).toBeUndefined();
-      expect(signalled.status).toBe(143);
-    }
+  it.runIf(process.platform !== "win32")("maps child SIGTERM to its shell exit status", () => {
+    const signalled = spawnSync(
+      "scripts/node-run.sh",
+      ["scripts/run-supervised-node.mjs", "-e", "process.kill(process.pid, 'SIGTERM')"],
+      { cwd: process.cwd(), encoding: "utf8", timeout: 5_000 },
+    );
+    expect(signalled.error).toBeUndefined();
+    expect(signalled.status).toBe(143);
   });
 
   it.runIf(process.platform !== "win32")(
