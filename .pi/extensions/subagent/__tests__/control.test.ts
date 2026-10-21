@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { DEFAULT_SUBAGENT_CONFIG, type SubagentRuntimeConfig } from "../config";
 import * as Control from "../control";
@@ -145,17 +145,17 @@ describe("shared subagent run supervisor", () => {
   });
 
   it("aborts a run at its wall-time limit", async () => {
-    vi.useFakeTimers();
+    const supervisor = new Control.SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
+    const lease = await supervisor.acquire(request("/timed"));
     try {
-      const supervisor = new Control.SubagentRunSupervisor("session", config({ maxRunMs: 20 }));
-      const lease = await supervisor.acquire(request("/timed"));
       expect(lease.signal.aborted).toBe(false);
-      await vi.advanceTimersByTimeAsync(20);
+      await new Promise<void>((resolve) => {
+        lease.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
       expect(lease.signal.aborted).toBe(true);
+    } finally {
       lease.release();
       await supervisor.shutdown();
-    } finally {
-      vi.useRealTimers();
     }
   });
 });

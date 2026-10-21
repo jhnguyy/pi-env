@@ -22,6 +22,10 @@ Copyright (c) Nathan Rajlich
 stackback:
 Copyright (c) Roman Shtylman
 
+redis, @redis/client, @redis/bloom, @redis/json, @redis/search,
+and @redis/time-series:
+Copyright (c) 2022-2023, Redis, inc.
+
 MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
