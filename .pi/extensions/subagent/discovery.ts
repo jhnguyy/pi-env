@@ -1,4 +1,4 @@
-type AvailableModel = { provider: string; id: string; name: string };
+type AvailableModel = { provider: string; id: string };
 
 const DESCRIPTION_INTRO = [
   "Delegate to native Pi child sessions through one action-selected interface.",
@@ -30,16 +30,18 @@ export function buildDynamicDescription(
   availableModels: AvailableModel[],
   toolNames: string[] = [],
   modelAnnotations?: Record<string, string[]>,
+  scoped = false,
 ): string {
   const lines: string[] = [...DESCRIPTION_INTRO];
   if (toolNames.length) lines.push("", `Parent native tools (guidance, not the child's catalog): ${toolNames.join(", ")}.`);
   if (availableModels.length) {
-    lines.push("", "Parent available models (children resolve against their own native configuration):");
+    lines.push("", `Parent ${scoped ? "scoped" : "available"} models (children resolve against their own native configuration):`);
     for (const model of availableModels) {
       const key = `${model.provider}/${model.id}`;
       const tags = modelAnnotations?.[key] ?? [];
-      lines.push(`  ${key} — ${model.name}${tags.length ? ` [${tags.join(", ")}]` : ""}`);
+      lines.push(`  ${key}${tags.length ? ` [${tags.join(", ")}]` : ""}`);
     }
+    if (scoped) lines.push("Other available models also work. An unavailable selection fails and lists the available models.");
     const tags = new Set(availableModels.flatMap((model) => modelAnnotations?.[`${model.provider}/${model.id}`] ?? []));
     const guidance = Object.entries(MODEL_TAG_GUIDANCE).filter(([tag]) => tags.has(tag));
     if (guidance.length) lines.push("", "Model tag guidance:", ...guidance.map(([tag, intent]) => `  - [${tag}] ${intent}.`));

@@ -13,19 +13,19 @@ export const TOOLING_OTEL_ENV = {
   Endpoint: "PI_ENV_TOOLING_OTEL_ENDPOINT",
 } as const;
 
-export const TOOLING_OTEL_BOUNDS = DEFAULT_BOUNDED_OTEL_BOUNDS;
+const TOOLING_OTEL_BOUNDS = DEFAULT_BOUNDED_OTEL_BOUNDS;
 
-export interface ToolingOtelConfig extends BoundedOtelConfig {}
+interface ToolingOtelConfig extends BoundedOtelConfig {}
 
 export class ToolingOtelConfigError extends Data.TaggedError("ToolingOtelConfigError")<{
   readonly message: string;
 }> {}
 
 export type ToolingAttribute = string | number | boolean;
-export type ToolingAttributes = Readonly<Record<string, ToolingAttribute>>;
+type ToolingAttributes = Readonly<Record<string, ToolingAttribute>>;
 
 export const MAX_TOOLING_ATTRIBUTES = 24 as const;
-export const MAX_TOOLING_STRING_LENGTH = 128 as const;
+const MAX_TOOLING_STRING_LENGTH = 128 as const;
 
 const ALLOWED_TOOLING_ATTRIBUTE_KEYS = new Set([
   "operation",
@@ -69,7 +69,7 @@ const REJECTED_TOOLING_ATTRIBUTE_KEYS = new Set([
   "secrets",
 ]);
 
-export function sanitizeToolingAttributes(
+function sanitizeToolingAttributes(
   input: Readonly<Record<string, unknown>>,
 ): ToolingAttributes {
   const output: Record<string, ToolingAttribute> = {};
@@ -113,7 +113,7 @@ export function makeEffectToolingDiagnostics(options: {
   };
 }
 
-export function resolveToolingOtelConfig(
+function resolveToolingOtelConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): Effect.Effect<ToolingOtelConfig, ToolingOtelConfigError> {
   return resolveBoundedOtelConfig(env, TOOLING_OTEL_ENV).pipe(

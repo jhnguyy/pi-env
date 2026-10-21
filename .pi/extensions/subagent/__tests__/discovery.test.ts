@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { fauxProvider } from "@earendil-works/pi-ai";
-import { ModelRegistry, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime, resolveModelScopeWithDiagnostics, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import initSubagent from "../index";
 function createHarness() {
   const tools = new Map<string, any>();
@@ -18,7 +18,7 @@ function createHarness() {
 }
 
 
-it("registers the entire native available roster and descriptive tags despite restrictive cycling settings", async () => {
+it("advertises the native scoped roster with descriptive tags, or every available model without a scope", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-subagent-roster-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "project");
@@ -41,18 +41,27 @@ it("registers the entire native available roster and descriptive tags despite re
     runtime.registerNativeProvider(faux.provider);
     await runtime.getAvailable();
     ctx.modelRegistry = new ModelRegistry(runtime);
-    expect(SettingsManager.create(cwd, agentDir).getEnabledModels()).toEqual(["roster/quick"]);
+    const enabledModels = SettingsManager.create(cwd, agentDir).getEnabledModels()!;
+    // Native scope resolution stands in for the session's --models/enabledModels snapshot.
+    ctx.scopedModels = (await resolveModelScopeWithDiagnostics(enabledModels, runtime)).scopedModels;
     await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
-    const description = harness.tools.get("subagent").description;
-    // Real native availability and real settings cross the extension-start registration boundary.
-    for (const model of ctx.modelRegistry.getAvailable()) {
-      expect(description).toContain(`${model.provider}/${model.id} — ${model.name}`);
-    }
-    expect(description).toContain("roster/quick — Quick [preferred, experimental]");
-    expect(description).toContain("roster/deep — Deep [heavy, reviewer]");
-    expect(description).toContain("roster/plain — Plain");
-    expect(description).not.toContain("roster/unavailable");
-    expect(description).not.toContain("[local]");
+    const scoped = harness.tools.get("subagent").description;
+    expect(scoped).toContain("Parent scoped models");
+    expect(scoped).toContain("roster/quick [preferred, experimental]");
+    expect(scoped).toContain("Other available models also work.");
+    expect(scoped).not.toContain("roster/deep");
+    expect(scoped).not.toContain("roster/plain");
+    await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
+
+    ctx.scopedModels = [];
+    await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
+    const unscoped = harness.tools.get("subagent").description;
+    expect(unscoped).toContain("Parent available models");
+    expect(unscoped).toContain("roster/deep [heavy, reviewer]");
+    expect(unscoped).toContain("roster/plain");
+    expect(unscoped).not.toContain("Other available models");
+    expect(unscoped).not.toContain("roster/unavailable");
+    expect(unscoped).not.toContain("[local]");
   } finally {
     await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
     vi.unstubAllEnvs();

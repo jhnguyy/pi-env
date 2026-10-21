@@ -34,6 +34,7 @@ function sessionContext(cwd: string) {
     modelRegistry: {
       getAvailable: () => [],
     },
+    scopedModels: [],
   } as any;
 }
 
