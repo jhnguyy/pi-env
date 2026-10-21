@@ -11,8 +11,8 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type TypeScriptLspFixture, createTypeScriptLspFixture, sleep } from "./e2e-fixture";
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
+import { type TypeScriptLspFixture, createTypeScriptLspFixture } from "./e2e-fixture";
 
 const E2E = process.env["E2E"] === "1";
 const describeE2E = E2E ? describe : describe.skip;
@@ -46,14 +46,7 @@ describeE2E("LSP E2E", () => {
       "const y: number = 'hello';",
     ]);
 
-    // Retry diagnostics until errors appear (LSP may need time to process)
-    let result: any;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await sleep(300);
-      result = await fixture.callDaemon({ action: "diagnostics", path: badFile });
-      if (result.errorCount > 0) break;
-    }
-
+    const result = await fixture.callDaemon({ action: "diagnostics", path: badFile });
     expect(result.action).toBe("diagnostics");
     expect(result.errorCount).toBeGreaterThan(0);
     expect(result.items.length).toBeGreaterThan(0);
@@ -61,13 +54,7 @@ describeE2E("LSP E2E", () => {
   });
 
   it("reports Effect diagnostics with Effect identity", async () => {
-    let result: any;
-    for (let attempt = 0; attempt < 10; attempt++) {
-      await sleep(300);
-      result = await fixture.callDaemon({ action: "diagnostics", path: fixture.effectFile });
-      if (result.items.some((item: any) => item.code.startsWith("effect("))) break;
-    }
-
+    const result = await fixture.callDaemon({ action: "diagnostics", path: fixture.effectFile });
     expect(result.action).toBe("diagnostics");
     expect(result.items).toEqual(
       expect.arrayContaining([
@@ -142,9 +129,13 @@ describeE2E("LSP E2E", () => {
   // ─── Rename ────────────────────────────────────────────────────────────
 
   it("renames a TypeScript symbol across files", async () => {
-    const result = await fixture.callDaemon({
+    const renameFixture = createTypeScriptLspFixture();
+    onTestFinished(() => renameFixture.cleanup());
+    await renameFixture.start();
+
+    const result = await renameFixture.callDaemon({
       action: "rename",
-      path: fixture.typesFile,
+      path: renameFixture.typesFile,
       line: 7,
       character: 17,
       newName: "welcome",
@@ -153,8 +144,8 @@ describeE2E("LSP E2E", () => {
     expect(result.action).toBe("rename");
     expect(result.totalEdits).toBeGreaterThanOrEqual(3);
     expect(result.files).toHaveLength(2);
-    await expect(readFile(fixture.typesFile, "utf8")).resolves.toContain("export function welcome");
-    const mainContent = await readFile(fixture.mainFile, "utf8");
+    await expect(readFile(renameFixture.typesFile, "utf8")).resolves.toContain("export function welcome");
+    const mainContent = await readFile(renameFixture.mainFile, "utf8");
     expect(mainContent).toContain("import { welcome }");
     expect(mainContent).toContain("welcome(bob)");
   });
