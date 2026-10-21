@@ -29,7 +29,7 @@ Ordinary setup preserves personal settings and registers pi-env through Pi's pac
 
 Run `./setup.sh --reset` to back up user settings and restore this baseline with only pi-env registered. Auth, sessions, model endpoints, MCP configuration, keybindings, and project settings remain untouched. Reinstall local adapter packages afterward. See [setup and reset](docs/setup.md).
 
-Use `pi config` to select package resources. Use `/skill:pi-update` to review a proposed upstream release before changing the workbench.
+Use `pi config` to select package resources. Use `/skill:dependency-update` to assess a proposed dependency update.
 
 ## Documentation
 
