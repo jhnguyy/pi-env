@@ -7,7 +7,7 @@ description: Collects audited local Pi release evidence and guides a pi-env Pi d
 
 Use this skill for `/skill:pi-update`. Do not use the retired `pi-update` extension.
 
-1. Read the repository contribution policy. Delegate worktree creation, validation, review, commit, and publishing to `code-contribution`.
+1. Read the repository contribution policy. Use the `dependency-update` skill for version comparison, release and security review, workaround reassessment, and the final report. This skill owns Pi-specific evidence collection and compatibility checks.
 2. Locate the selected upstream Pi source resolved by the flake, or an explicitly acquired local source. Delegate source acquisition to the contribution workflow. Collection does not fetch or install anything.
 3. Run the collector from this skill directory:
 
