@@ -6,6 +6,18 @@ Use the [setup choices](../README.md#setup-choices) to select a provisioning mod
 
 The [toolchain](../nix/toolchain.nix) applies the [Nub GVS lock-access patch](../nix/patches/nub-gvs-lock-read-access.patch) and [store lock-access patch](../nix/patches/nub-store-lock-read-access.patch) through Nub's existing package recipe. Portable setup does not apply Nix source patches.
 
+## Pi release review
+
+Keep the Pi flake input and matching development packages on the same version. The [release collector](../scripts/collect-pi-release-evidence.mjs) collects version-checked documents from local upstream source without changing that source or live settings:
+
+```bash
+node scripts/collect-pi-release-evidence.mjs \
+  --source-dir /path/to/pi \
+  --old-version X.Y.Z \
+  --new-version X.Y.Z \
+  --output-dir /path/to/new-output
+```
+
 ## Home Manager
 
 Use the exported Home Manager module for declarative host integration. Read its [option declarations and configuration](../nix/home-manager.nix) when configuring a consumer. Do not copy defaults from this documentation.
