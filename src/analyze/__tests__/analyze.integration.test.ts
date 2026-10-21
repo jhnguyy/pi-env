@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { asyncRisksEffect, complexityEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
+import { asyncRisksEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { runBenchmarkEffect } from "../benchmark.js";
 import { analyze, analyzeEffect } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
@@ -57,7 +57,7 @@ function writeProject(files: Record<string, string>): string {
   return cwd;
 }
 
-const finding: Finding = { id: "", analyzer: AnalyzerName.Complexity, kind: FindingKind.Complexity, severity: Severity.Warning, message: "x", location: { path: "a.ts", line: 2, column: 1 }, related: [{ path: "b.ts", line: 3, column: 1 }] };
+const finding: Finding = { id: "", analyzer: AnalyzerName.Duplicates, kind: FindingKind.Duplicate, severity: Severity.Warning, message: "x", location: { path: "a.ts", line: 2, column: 1 }, related: [{ path: "b.ts", line: 3, column: 1 }] };
 const result: AnalysisResult = { version: 1, summary: { info: 0, warning: 1, error: 0, failures: 0 }, findings: [{ ...finding, id: "finding-id" }], analyzerFailures: [], benchmarks: [] };
 
 describe("analyze contracts", () => {
@@ -160,7 +160,7 @@ describe("analyze contracts", () => {
     expect(second.runs).toHaveLength(1);
   });
   it("formats related locations in each output mode", () => {
-    expect(formatResult(result, OutputMode.Compact)).toContain("warning\tcomplexity\ta.ts:2:1");
+    expect(formatResult(result, OutputMode.Compact)).toContain("warning\tduplicates\ta.ts:2:1");
     expect(formatResult(result, OutputMode.Pretty)).toContain("related: b.ts:3:1");
     expect(JSON.parse(formatResult(result, OutputMode.Json)).version).toBe(1);
   });
@@ -215,7 +215,7 @@ describe("analyze contracts", () => {
     const cwd = writeProject({ "src/a.ts": "export const a = 1;" });
     let launches = 0;
     const result = await Effect.runPromise(analyzeEffect({
-      cwd, scope: ScopeMode.All, maxMemoryMb: 512, checks: [AnalyzerName.Complexity, AnalyzerName.Types],
+      cwd, scope: ScopeMode.All, maxMemoryMb: 512, checks: [AnalyzerName.Duplicates, AnalyzerName.Types],
     }, {
       processRunner: () => { launches++; return Effect.succeed({ stdout: "", stderr: "" }); },
       runtime,
@@ -246,7 +246,7 @@ describe("analyze contracts", () => {
       cwd: fixtureRoot(),
       scope: ScopeMode.All,
       maxMemoryMb: 512,
-      checks: [AnalyzerName.Complexity],
+      checks: [AnalyzerName.Duplicates],
     }, {
       runtime: {
         now: () => 0,
@@ -255,7 +255,7 @@ describe("analyze contracts", () => {
     }));
 
     expect(result.analyzerFailures).toEqual([
-      expect.objectContaining({ analyzer: AnalyzerName.Complexity, message: expect.stringContaining("Memory budget exceeded") }),
+      expect.objectContaining({ analyzer: AnalyzerName.Duplicates, message: expect.stringContaining("Memory budget exceeded") }),
     ]);
   });
 
@@ -504,47 +504,9 @@ describe("ast analyzers", () => {
       export interface Second { id: string; name: string; active: boolean; }
     ` });
     const project = await Effect.runPromise(createProjectEffect(cwd));
-    await expect(Effect.runPromise(complexityEffect(project, cwd, allScope))).resolves.toEqual([]);
     await expect(Effect.runPromise(duplicatesEffect(project, cwd, allScope))).resolves.toEqual([]);
     await expect(Effect.runPromise(similarTypesEffect(project, cwd, allScope))).resolves.toHaveLength(1);
-    await expect(Effect.runPromise(asyncRisksEffect(project, cwd, allScope))).resolves.toHaveLength(2);
-  });
-
-  it("isolates nested function complexity and respects hunk body intersection", async () => {
-    const cwd = writeProject({ "src/complex.ts": `
-      export function outer(value: number) {
-        const inner = () => { if (value > 1) { if (value > 2) { if (value > 3) { return value; } } } return 0; };
-        if (value > 0) return inner();
-        return 0;
-      }
-      export function changed(value: number) {
-        if (value > 1) {
-          if (value > 2) {
-            if (value > 3) {
-              if (value > 4) {
-                if (value > 5) {
-                  if (value > 6) return value;
-                }
-              }
-            }
-          }
-        }
-        return 0;
-      }
-    ` });
-    const scope = pathScope(["src/complex.ts"], new Map([["src/complex.ts", [{ start: 8, end: 8 }]]]));
-    const findings = await Effect.runPromise(complexityEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, scope));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]?.location.line).toBe(7);
-  });
-
-  it("does not warn for a small flat boolean predicate", async () => {
-    const cwd = writeProject({ "src/flat.ts": `
-      export function matches(a: boolean, b: boolean, c: boolean, d: boolean) {
-        return a && b && c && d;
-      }
-    ` });
-    await expect(Effect.runPromise(complexityEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope))).resolves.toEqual([]);
+    await expect(Effect.runPromise(asyncRisksEffect(project, cwd, allScope))).resolves.toEqual([]);
   });
 
   it("detects renamed duplicate functions, same-file clones, and full canonical traversal", async () => {
@@ -652,16 +614,14 @@ describe("ast analyzers", () => {
 
   it("keeps reusable analyzer Effects independent", async () => {
     const cwd = writeProject({ "src/reusable.ts": `
-      export function complex(value: number) { if (value > 0) { if (value > 1) { if (value > 2) { if (value > 3) { if (value > 4) { if (value > 5) { if (value > 6) { if (value > 7) { if (value > 8) { if (value > 9) { if (value > 10) { if (value > 11) { if (value > 12) { if (value > 13) return value; } } } } } } } } } } } } } } return 0; }
       export function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
       export function beta(other: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > other) total += value * 2; else total += value; } return total; }
-      export async function risky(items: number[]) { for (const item of items) await Promise.resolve(item); }
+      export function risky(items: number[]) { for (const item of items) items.find(value => value === item); }
       export interface First { id: string; name: string; }
       export interface Second { id: string; name: string; }
     ` });
     const project = await Effect.runPromise(createProjectEffect(cwd));
     const effects = [
-      complexityEffect(project, cwd, allScope),
       asyncRisksEffect(project, cwd, allScope),
       duplicatesEffect(project, cwd, allScope),
       similarTypesEffect(project, cwd, allScope),
@@ -687,22 +647,10 @@ describe("ast analyzers", () => {
     ` });
     const messages = (await Effect.runPromise(asyncRisksEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope))).map((item) => item.message);
     expect(messages).not.toContain("filter call inside loop may repeat a scan");
-    expect(messages).toContain("Await inside loop may serialize work");
+    expect(messages).not.toContain("Await inside loop may serialize work");
     expect(messages).toContain("sort call inside loop may repeat a scan");
   });
 
-  it("suppresses only a loop immediately led by allow-sequential", async () => {
-    const cwd = writeProject({ "src/async.ts": `
-      export async function work(items: number[]) {
-        // analyze: allow-sequential
-        for (const item of items) await Promise.resolve(item);
-        for (const item of items) await Promise.resolve(item);
-      }
-    ` });
-    const findings = await Effect.runPromise(asyncRisksEffect(await Effect.runPromise(createProjectEffect(cwd)), cwd, allScope));
-    expect(findings).toHaveLength(1);
-    expect(findings[0]?.message).toBe("Await inside loop may serialize work");
-  });
 });
 
 describe("external analyzers and parsers", () => {

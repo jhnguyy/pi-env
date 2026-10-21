@@ -2,56 +2,36 @@ import {
   chmod,
   link,
   lstat,
-  mkdtemp,
   mkdir,
   readFile,
   rename,
-  rm,
   stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   MAX_NOTE_BYTES,
   NotesProviderError,
   type NotesListResponse,
   type NotesListResult,
 } from "../domain";
-import { createObsidianProvider, type ObsidianProviderOptions } from "../obsidian-provider";
-
-const roots: string[] = [];
+import { vaultFixture as fixture } from "./vault-fixture";
 
 function paginated(result: NotesListResponse): NotesListResult {
   if (Array.isArray(result)) throw new Error("Expected paginated provider output");
   return result as NotesListResult;
 }
 
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
-
-async function fixture(options: ObsidianProviderOptions = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "pi-notes-"));
-  roots.push(root);
-  const vault = path.join(root, "vault");
-  await mkdir(vault);
-  const provider = await createObsidianProvider(vault, options);
-  return { root, vault, provider };
-}
-
 describe("Obsidian notes provider", () => {
   it("provides bounded store orientation and provider-neutral inventory", async () => {
-    const { vault, provider } = await fixture();
-    await mkdir(path.join(vault, "projects"));
-    await mkdir(path.join(vault, "knowledge"));
-    await mkdir(path.join(vault, ".obsidian"));
-    await writeFile(path.join(vault, "projects", "topic.md"), "# Topic\nsearch target");
-    await writeFile(path.join(vault, "knowledge", "day.md"), "# Day\nsearch target");
-    await writeFile(path.join(vault, ".obsidian", "workspace.md"), "search target");
-    await writeFile(path.join(vault, "ignored.txt"), "search target");
+    const { provider } = await fixture({
+      "projects/topic.md": "# Topic\nsearch target",
+      "knowledge/day.md": "# Day\nsearch target",
+      ".obsidian/workspace.md": "search target",
+      "ignored.txt": "search target",
+    });
 
     const index = await provider.index();
     const projects = paginated(await provider.list({ prefix: "projects", limit: 1 }));
@@ -65,10 +45,7 @@ describe("Obsidian notes provider", () => {
   });
 
   it("continues bounded inventory without duplicate entries", async () => {
-    const { vault, provider } = await fixture();
-    await writeFile(path.join(vault, "a.md"), "a");
-    await writeFile(path.join(vault, "b.md"), "b");
-    await writeFile(path.join(vault, "c.md"), "c");
+    const { provider } = await fixture({ "a.md": "a", "b.md": "b", "c.md": "c" });
 
     const first = paginated(await provider.list({ limit: 2 }));
     expect(first.entries.map((note) => note.path)).toEqual(["a.md", "b.md"]);
@@ -87,11 +64,12 @@ describe("Obsidian notes provider", () => {
   });
 
   it("omits filesystem names that cannot round-trip through portable paths", async () => {
-    const { vault, provider } = await fixture();
-    await writeFile(path.join(vault, "wiki\\victim.md"), "unsafe name");
-    await writeFile(path.join(vault, "@note.md"), "unsafe name");
-    await writeFile(path.join(vault, "line\nbreak.md"), "unsafe name");
-    await writeFile(path.join(vault, "normal.md"), "normal");
+    const { provider } = await fixture({
+      "wiki\\victim.md": "unsafe name",
+      "@note.md": "unsafe name",
+      "line\nbreak.md": "unsafe name",
+      "normal.md": "normal",
+    });
 
     await expect(provider.list({})).resolves.toEqual({
       entries: [expect.objectContaining({ path: "normal.md" })],
@@ -110,9 +88,7 @@ describe("Obsidian notes provider", () => {
   });
 
   it("scopes revisions to note path and file identity", async () => {
-    const { vault, provider } = await fixture();
-    await writeFile(path.join(vault, "one.md"), "same content");
-    await writeFile(path.join(vault, "two.md"), "same content");
+    const { provider } = await fixture({ "one.md": "same content", "two.md": "same content" });
 
     const one = await provider.read("one.md");
     const two = await provider.read("two.md");
@@ -122,42 +98,30 @@ describe("Obsidian notes provider", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
-  it("creates a note only with an absent precondition and returns a readable revision", async () => {
-    const { vault, provider } = await fixture();
-    const created = await provider.write({
-      path: "wiki/topic.md",
-      content: "# Topic\nCurrent understanding.",
-      expectedRevision: null,
-    });
-    const note = await provider.read("wiki/topic.md");
-
-    expect(note.content).toBe("# Topic\nCurrent understanding.");
-    expect(note.revision).toBe(created.revision);
-    await expect(readFile(path.join(vault, "wiki", "topic.md"), "utf8")).resolves.toBe(
-      note.content,
-    );
-    await expect(
-      provider.write({ path: "wiki/topic.md", content: "overwrite", expectedRevision: null }),
-    ).rejects.toMatchObject({ code: "conflict" });
-  });
-
   it("rejects a read when the resolved file identity changes before open", async () => {
     let vault = "";
-    const fixtureState = await fixture({
-      afterReadTargetResolved: async (_notePath, target) => {
-        const replacement = path.join(vault, "replacement.md");
-        await writeFile(replacement, "replacement");
-        await rename(replacement, target);
+    const fixtureState = await fixture(
+      {},
+      {
+        afterReadTargetResolved: async (_notePath, target) => {
+          const replacement = path.join(vault, "replacement.md");
+          await writeFile(replacement, "replacement");
+          await rename(replacement, target);
+        },
       },
-    });
+    );
     vault = fixtureState.vault;
     await writeFile(path.join(vault, "note.md"), "original");
 
     await expect(fixtureState.provider.read("note.md")).rejects.toMatchObject({ code: "conflict" });
   });
 
-  it("treats missing guarded mutation targets as conflicts", async () => {
-    const { provider } = await fixture();
+  it("rejects guarded mutations of missing notes and directories", async () => {
+    const { vault, provider } = await fixture();
+    await mkdir(path.join(vault, "directory.md"));
+    await expect(
+      provider.delete({ path: "directory.md", expectedRevision: "revision" }),
+    ).rejects.toBeInstanceOf(NotesProviderError);
     await expect(
       provider.write({ path: "missing.md", content: "content", expectedRevision: "revision" }),
     ).rejects.toMatchObject({ code: "conflict" });
@@ -250,13 +214,16 @@ describe("Obsidian notes provider", () => {
   it("rechecks replace and delete revisions at the commit boundary", async () => {
     let operation: string | undefined;
     let target: string | undefined;
-    const fixtureState = await fixture({
-      beforeCommit: async (nextTarget, nextOperation) => {
-        operation = nextOperation;
-        target = nextTarget;
-        await writeFile(nextTarget, `external ${nextOperation}`);
+    const fixtureState = await fixture(
+      {},
+      {
+        beforeCommit: async (nextTarget, nextOperation) => {
+          operation = nextOperation;
+          target = nextTarget;
+          await writeFile(nextTarget, `external ${nextOperation}`);
+        },
       },
-    });
+    );
     const { vault, provider } = fixtureState;
     await writeFile(path.join(vault, "note.md"), "first");
     const first = await provider.read("note.md");
@@ -277,11 +244,14 @@ describe("Obsidian notes provider", () => {
   });
 
   it("uses an atomic absent check when creating a note", async () => {
-    const { vault, provider } = await fixture({
-      beforeCommit: async (target, operation) => {
-        if (operation === "create") await writeFile(target, "external creation");
+    const { vault, provider } = await fixture(
+      {},
+      {
+        beforeCommit: async (target, operation) => {
+          if (operation === "create") await writeFile(target, "external creation");
+        },
       },
-    });
+    );
 
     await expect(
       provider.write({ path: "note.md", content: "ours", expectedRevision: null }),
@@ -314,22 +284,6 @@ describe("Obsidian notes provider", () => {
     ).rejects.toMatchObject({ code: "resource-limit" });
     await writeFile(path.join(vault, "large.md"), oversized);
     await expect(provider.read("large.md")).rejects.toMatchObject({ code: "resource-limit" });
-  });
-
-  it("deletes only when the current revision matches", async () => {
-    const { vault, provider } = await fixture();
-    await writeFile(path.join(vault, "delete.md"), "remove me");
-    await mkdir(path.join(vault, "directory.md"));
-    const note = await provider.read("delete.md");
-
-    await expect(
-      provider.delete({ path: "delete.md", expectedRevision: "stale" }),
-    ).rejects.toMatchObject({ code: "conflict" });
-    await provider.delete({ path: "delete.md", expectedRevision: note.revision });
-    await expect(provider.read("delete.md")).rejects.toMatchObject({ code: "not-found" });
-    await expect(
-      provider.delete({ path: "directory.md", expectedRevision: "revision" }),
-    ).rejects.toBeInstanceOf(NotesProviderError);
   });
 
   it("rejects portable paths that can address Windows alternate streams", async () => {

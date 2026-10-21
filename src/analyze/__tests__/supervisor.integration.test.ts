@@ -22,7 +22,7 @@ function safeRequest(
     cwd,
     scope: ScopeMode.Paths,
     paths: ["src/example.ts"],
-    checks: [AnalyzerName.Complexity],
+    checks: [AnalyzerName.Duplicates],
     maxMemoryMb: ANALYZE_LIMITS.maxMemoryMb,
     maxSourceFiles: ANALYZE_LIMITS.sourceFiles,
     maxSourceFileBytes: ANALYZE_LIMITS.sourceFileBytes,
@@ -259,7 +259,6 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
       safeRequest(cwd, {
         paths: ["src/analyze"],
         checks: [
-          AnalyzerName.Complexity,
           AnalyzerName.AsyncRisk,
           AnalyzerName.Duplicates,
           AnalyzerName.TestDuplicates,
@@ -327,7 +326,7 @@ emit({ version: 1, type: "result", runId: request.runId, result: ${emptyResult} 
 emit({ version: 1, type: "complete", runId: request.runId });`,
     );
     const strict = await runPublicAnalyze(
-      { cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] },
+      { cwd, scope: ScopeMode.All, checks: [AnalyzerName.Duplicates] },
       { workerPath: worker, env: disabledEnv },
     );
     expect(strict.analyzerFailures[0]).toMatchObject({ analyzer: "containment" });
@@ -358,7 +357,7 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
         cwd,
         scope: ScopeMode.Paths,
         paths: ["src/a.ts"],
-        checks: [AnalyzerName.Complexity],
+        checks: [AnalyzerName.Duplicates],
       },
       {
         workerPath: worker,

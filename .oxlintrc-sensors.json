@@ -1,0 +1,21 @@
+{
+  "plugins": [],
+  "categories": {
+    "correctness": "off"
+  },
+  "ignorePatterns": [
+    ".agents/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/generated/**",
+    "tests/**",
+    "**/__tests__/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "tools/oxlint/anti-slop/**"
+  ],
+  "rules": {
+    "complexity": ["warn", { "max": 14 }],
+    "no-await-in-loop": "warn"
+  }
+}

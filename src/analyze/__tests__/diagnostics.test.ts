@@ -54,7 +54,7 @@ describe("analyze diagnostic contracts", () => {
   it("keeps telemetry attributes bounded and excludes sensitive or high-cardinality values", () => {
     const attributes = sanitizeDiagnosticAttributes({
       scope_mode: "diff",
-      analyzer: "complexity",
+      analyzer: "duplicates",
       stage: "x".repeat(500),
       path: "/secret/worktree/file.ts",
       token: "bearer-secret",
@@ -64,7 +64,7 @@ describe("analyze diagnostic contracts", () => {
     });
     expect(attributes).toEqual({
       scope_mode: "diff",
-      analyzer: "complexity",
+      analyzer: "duplicates",
       stage: "x".repeat(MAX_DIAGNOSTIC_STRING_LENGTH),
     });
     expect(JSON.stringify(attributes)).not.toContain("secret");
@@ -263,7 +263,7 @@ describe("analyze worker protocol", () => {
     runId: "protocol-run",
     cwd: "/worktree",
     scope: "diff",
-    checks: ["complexity"],
+    checks: ["duplicates"],
     maxMemoryMb: 512,
     maxSourceFiles: 1_024,
     maxSourceFileBytes: 256 * 1024,
@@ -397,8 +397,8 @@ describe("analyze worker protocol", () => {
     Effect.gen(function* () {
       const findings = Array.from({ length: 30 }, (_, index) => ({
         id: String(index),
-        analyzer: "complexity",
-        kind: "complexity",
+        analyzer: "duplicates",
+        kind: "duplicate",
         severity: "info",
         message: "x".repeat(1_800),
         location: { path: `src/file-${index}.ts`, line: 1, column: 1 },
@@ -445,8 +445,8 @@ describe("analyze worker protocol", () => {
           findings: [
             {
               id: "x",
-              analyzer: "complexity",
-              kind: "complexity",
+              analyzer: "duplicates",
+              kind: "duplicate",
               severity: "info",
               message: "x",
               location: { path, line: 1, column: 1 },
@@ -469,8 +469,8 @@ describe("analyze worker protocol", () => {
         findings: [
           {
             id: "x",
-            analyzer: "complexity",
-            kind: "complexity",
+            analyzer: "duplicates",
+            kind: "duplicate",
             severity: "info",
             message: "x",
             location: { path: "src/file.ts", line: 1, column: 1 },

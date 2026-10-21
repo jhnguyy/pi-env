@@ -19,7 +19,7 @@ describe("safe analyze policy", () => {
         cwd,
         scope: ScopeMode.Diff,
         ref: "main",
-        checks: [AnalyzerName.Complexity, AnalyzerName.AsyncRisk],
+        checks: [AnalyzerName.Duplicates, AnalyzerName.AsyncRisk],
         maxMemoryMb: 8_192,
       }),
     ).toMatchObject({
@@ -28,7 +28,7 @@ describe("safe analyze policy", () => {
         scope: ScopeMode.Diff,
         ref: "main",
         maxMemoryMb: 512,
-        checks: ["complexity", "async-risk"],
+        checks: ["duplicates", "async-risk"],
       },
     });
     expect(
@@ -80,19 +80,19 @@ describe("safe analyze policy", () => {
       ).toMatchObject({ _tag: "invalid" });
     }
     const invalidRequests: readonly PublicAnalyzeRequest[] = [
-      { cwd, scope: ScopeMode.Diff, paths: [], checks: [AnalyzerName.Complexity] },
+      { cwd, scope: ScopeMode.Diff, paths: [], checks: [AnalyzerName.Duplicates] },
       {
         cwd,
         scope: ScopeMode.Paths,
         paths: ["src/a.ts"],
         ref: "main",
-        checks: [AnalyzerName.Complexity],
+        checks: [AnalyzerName.Duplicates],
       },
       {
         cwd,
         scope: ScopeMode.Paths,
         paths: ["src/a.ts", "src/a.ts"],
-        checks: [AnalyzerName.Complexity],
+        checks: [AnalyzerName.Duplicates],
       },
       { cwd, scope: ScopeMode.All, paths: ["src/a.ts"], checks: [AnalyzerName.Types] },
       { cwd, scope: ScopeMode.All, ref: "main", checks: [AnalyzerName.Types] },
@@ -106,24 +106,26 @@ describe("safe analyze policy", () => {
     const cwd = fixtureRoot();
     expect(classifyAnalyzeRequest({ cwd })).toMatchObject({ _tag: "invalid" });
     expect(
-      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity, AnalyzerName.Complexity] }),
+      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Duplicates, AnalyzerName.Duplicates] }),
     ).toMatchObject({ _tag: "invalid" });
-    expect(classifyAnalyzeRequest({ cwd, checks: ["unknown"] })).toMatchObject({
-      _tag: "invalid",
-    });
+    for (const check of ["unknown", "complexity"]) {
+      expect(classifyAnalyzeRequest({ cwd, checks: [check] })).toMatchObject({
+        _tag: "invalid",
+      });
+    }
     expect(
-      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Complexity] }),
+      classifyAnalyzeRequest({ cwd, scope: ScopeMode.All, checks: [AnalyzerName.Duplicates] }),
     ).toMatchObject({ _tag: "strict" });
     expect(classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Types] })).toMatchObject({
       _tag: "strict",
     });
     expect(
-      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Complexity], profile: true }),
+      classifyAnalyzeRequest({ cwd, checks: [AnalyzerName.Duplicates], profile: true }),
     ).toMatchObject({ _tag: "strict" });
     expect(
       classifyAnalyzeRequest({
         cwd,
-        checks: [AnalyzerName.Complexity],
+        checks: [AnalyzerName.Duplicates],
         ref: "--upload-pack=malicious",
       }),
     ).toMatchObject({ _tag: "invalid" });

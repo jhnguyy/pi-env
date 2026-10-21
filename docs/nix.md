@@ -6,6 +6,12 @@ Use the [setup choices](../README.md#setup-choices) to select a provisioning mod
 
 The [toolchain](../nix/toolchain.nix) applies the [Nub GVS lock-access patch](../nix/patches/nub-gvs-lock-read-access.patch) and [store lock-access patch](../nix/patches/nub-store-lock-read-access.patch) through Nub's existing package recipe. Portable setup does not apply Nix source patches.
 
+## Packages and ownership
+
+`packages.<system>.tools` (`nix build .#tools`) supplies Node, Nub, and the baseline command-line tools without Pi. External consumers can pin this package separately from the application checkout. See [external runtime setup](setup.md#externally-managed-tools-with-checkout-owned-pi) for the environment and lifecycle contract.
+
+`packages.<system>.toolchain` and the default package still include upstream Nix-packaged Pi. Local setup apps, the development shell, and Home Manager retain their Nix Pi bindings.
+
 ## Pi release review
 
 Keep the Pi flake input and matching development packages on the same version. The [release collector](../scripts/collect-pi-release-evidence.mjs) collects version-checked documents from local upstream source without changing that source or live settings:
@@ -26,6 +32,6 @@ Host profile activation, builder access, and binary-cache trust belong in the co
 
 ## Validation
 
-Inspect outputs with `nix flake show`. Run `nix flake check` to build Pi and run its upstream install checks, plus the setup checks. Use `nix build .#pi --no-link` for a focused package check. Run the [repository verification portfolio](../scripts/verification-phases.mjs) for dependency-backed workflows.
+Inspect outputs with `nix flake show`. Run `nix flake check` to build Pi and run its upstream install checks, plus the setup checks. Use `nix build .#pi --no-link` for a focused Pi package check. Use `nix build .#tools --no-link` to check the tools-only package. Run the [repository verification portfolio](../scripts/verification-phases.mjs) for dependency-backed workflows.
 
 Use isolated homes and agent directories for setup validation. Do not activate a live host profile or reset live settings to validate a contribution.

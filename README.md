@@ -14,7 +14,7 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-Nix supplies the workbench and packages Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
+Nix supplies tools and can package Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
 
 | Environment | Command |
 | --- | --- |
@@ -23,7 +23,7 @@ Nix supplies the workbench and packages Pi through its upstream flake. Nub insta
 | Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
 | No Nix | `./setup.sh --portable` |
 
-`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools.
+`--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools. For externally managed tools with Nub-installed Pi, follow the [external runtime setup contract](docs/setup.md#externally-managed-tools-with-checkout-owned-pi).
 
 Ordinary setup preserves personal settings and registers pi-env through Pi's package manager. Fresh setup uses the [initial baseline](setup/managed-settings-core.mjs). Every run reapplies managed stall timeouts and retry settings so hung provider requests fail fast into Pi's retry. Pi owns transport, image handling, and theme selection.
 

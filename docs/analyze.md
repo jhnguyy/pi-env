@@ -1,17 +1,34 @@
 # Analyze
 
-> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `complexity,async-risk,duplicates,test-duplicates`. Only diff scope accepts a base ref. Only paths scope accepts paths. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
+> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `async-risk,duplicates,test-duplicates`. Only diff scope accepts a base ref. Only paths scope accepts paths. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
 >
 > All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits. They are not containment.
 
 Safe examples:
 
 ```sh
-nub run analyze -- --diff --checks complexity,async-risk
-nub run analyze -- --checks complexity src/analyze/policy.ts
+nub run analyze -- --diff --checks async-risk
+nub run analyze -- --checks async-risk src/analyze/policy.ts
 nub run analyze -- --checks duplicates .
 nub run analyze -- --checks test-duplicates .pi/extensions
 ```
+
+## Built-in lint sensors
+
+Oxlint owns cyclomatic complexity and awaits inside loops. Run `nub run lint:sensors .` for advisory warnings, or supply source paths instead of `.`. The [sensor config](../.oxlintrc-sensors.json) keeps these checks separate from strict type-aware lint. Tests, generated output, and the vendored lint plugin are excluded.
+
+`nub run sensors` runs Oxlint across production source, then runs Analyze's repeated-scan check on the diff. Analyze retains `async-risk` for repeated scans inside loops. It no longer reports awaits or accepts the `complexity` check. The custom cognitive-complexity score is retired.
+
+The complexity threshold remains 15. Oxlint's branch counting differs from the retired custom implementation. `quality:changed` gates complexity in complete changed and untracked source files, not only functions that intersect diff hunks. Unchanged files do not enter that gate. Await warnings remain advisory.
+
+For intentional sequential awaits, use a native suppression immediately before the await:
+
+```ts
+// oxlint-disable-next-line no-await-in-loop -- These writes must remain ordered.
+await writeNext();
+```
+
+The former `analyze: allow-sequential` marker no longer suppresses findings. Oxlint runs directly through repository scripts, not through Analyze's safe worker. Analyze's containment requirements do not change.
 
 ## Test portfolio audits
 
@@ -29,7 +46,7 @@ The `duplicates` check excludes test files. The `test-duplicates` check scans se
 
 Process groups guarantee descendant cleanup but are not aggregate memory/PID containment. Node old-space limits do not cover every native/external allocation. Safe syntax budgets are portable workload bounds for a stable local worktree, not a filesystem security sandbox against concurrent mutation. Strict requests therefore remain unavailable until a real cgroup/container/job adapter enforces aggregate limits.
 
-Async-risk findings about sequential awaits are review signals, not automatic defects. Benchmark runs, analyzer stages, and bundle entries may intentionally remain sequential when concurrency would distort measurements or increase peak memory.
+Await-in-loop warnings are review signals, not automatic defects. Benchmark runs and bundle entries may intentionally remain sequential when concurrency would distort measurements or increase peak memory.
 
 ## User-facing configuration
 

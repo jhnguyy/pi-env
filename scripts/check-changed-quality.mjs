@@ -63,8 +63,35 @@ if (mergeBase.status !== 0 || !output(mergeBase)) {
   process.exit(1);
 }
 
+const changed = git("diff", "--name-only", "--diff-filter=ACMR", "-z", output(mergeBase));
+const untracked = git("ls-files", "--others", "--exclude-standard", "-z");
+if (changed.status !== 0 || untracked.status !== 0) {
+  console.error("changed-code-quality: cannot discover changed source files");
+  process.exit(1);
+}
+const files = [...new Set(`${changed.stdout}\0${untracked.stdout}`.split("\0"))].filter(
+  (file) => /\.[cm]?[jt]sx?$/.test(file) && existsSync(file),
+);
+// Oxlint checks complete changed files, not only functions that intersect diff hunks.
+for (let offset = 0; offset < files.length; offset += 128) {
+  const result = run(
+    "nub",
+    [
+      "run",
+      "lint:sensors",
+      "--allow",
+      "no-await-in-loop",
+      "--deny-warnings",
+      "--",
+      ...files.slice(offset, offset + 128),
+    ],
+    { stdio: "inherit" },
+  );
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
 for (const [checks, failOn] of [
-  ["complexity,duplicates", "warning"],
+  ["duplicates", "warning"],
   ["async-risk", "error"],
 ]) {
   const result = run(
