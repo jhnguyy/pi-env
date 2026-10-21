@@ -9,7 +9,6 @@ This file owns repository documentation policy. Other files can point here. Do n
 - The [`code-contribution` skill](../../.agents/skills/code-contribution/SKILL.md) owns the portable contribution method.
 - `CONTRIBUTING.md` owns pi-env-specific contribution requirements.
 - `AGENTS.md` owns coding-agent navigation.
-- Code defines implemented behavior. Executable tests check behavioral expectations. Documentation augments these sources with non-obvious contracts, constraints, and operating guidance.
 - Keep roadmaps, proposed architecture, migration sequencing, research, and open decisions in project notes, not usage or convention docs.
 - When documenting a behavioral requirement, distinguish it from implemented support.
 
@@ -21,10 +20,7 @@ Do not add a sibling-file inventory to a README when the inventory repeats the v
 
 Create a separate index only when the index adds retrieval information that filenames and folders cannot show. Cross-link a specific dependency or source authority only when the relationship is not clear from the file structure.
 
-## Prose and comments
+## Content, prose, and comments
 
-1. Make names, types, decomposition, and tests explain behavior.
-2. Leave self-descriptive code uncommented.
-3. Use comments for constraints, alternatives, domain meaning, compatibility history, and safety rationale.
-4. Write documentation for an external, operator, or agent contract, a durable decision, or necessary navigation.
-5. Point to the source authority instead of repeating its content.
+- The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md) owns what to document and where each fact lives.
+- The [technical-writing reference](../../.agents/skills/communication-guidelines/references/technical-writing.md) owns prose and comment style.

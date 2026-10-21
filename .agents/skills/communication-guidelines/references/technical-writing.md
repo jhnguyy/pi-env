@@ -73,8 +73,7 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 - Make names, types, decomposition, and tests explain normal behavior.
 - Leave self-descriptive code uncommented.
 - Use comments for constraints, alternatives, domain meaning, compatibility history, and safety rationale.
-- Write documentation for external, operator, or agent contracts, durable decisions, and necessary navigation.
-- Link to the source authority instead of repeating content that can drift.
+- Apply the Documentation section of the global agent guidelines to decide what to document and where each fact lives.
 
 ## Comments and log messages
 
