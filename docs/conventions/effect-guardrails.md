@@ -57,7 +57,7 @@ For Effect-native tests:
 
 - Use `@effect/vitest`'s `it.effect`, which provides test services and a scope. Use `it.live` only when live runtime services are the behavior under test. Keep regular Vitest tests for plain TypeScript and compatibility adapters.
 - Provide dependencies through existing services/layers or explicit adapter seams, not mutable global overrides. Create mutable scenario state per test. Use `it.layer` for intentional suite-shared acquisition, with independent scenario state.
-- Use `TestClock` from `effect/testing` for Effect time. Coordinate fibers through explicit events using `Deferred`, `Queue`, or `Latch`, not arbitrary sleeps. Advancing `TestClock` does not advance native timers or external processes.
-- Test domain policy, not Effect internals. When relevant, assert typed failures, retry eligibility, bounds and exhaustion, cancellation outcomes, and conflicting versus independent work.
+- Use `TestClock` from `effect/testing` for Effect time. Fork the time-dependent operation before advancing `TestClock`. When readiness matters, wait for an explicit readiness signal before advancing time. Coordinate fibers through explicit events using `Deferred`, `Queue`, or `Latch`, not arbitrary sleeps. Advancing `TestClock` does not advance native timers or external processes.
+- Test domain policy, not Effect internals. When relevant, assert typed failures, retry eligibility, bounds and exhaustion, idempotency, cancellation outcomes, and conflicting versus independent work.
 - To prove cleanup, close the resource's owning scope or interrupt and await its owning fiber before asserting release. Use an inner `Effect.scoped` when assertions must follow scope closure. Automatic test teardown alone does not prove production cleanup.
 - Keep real-adapter evidence for subprocess termination, persisted state, and remote effects. Fiber interruption alone does not prove that external work stopped.
