@@ -465,8 +465,11 @@ export function registerSessionManager(pi: ExtensionAPI, options: SessionManager
 
   pi.on("session_info_changed", async (event, ctx) => {
     if (syncingName) return;
+    const targetGeneration = generation;
     const previousDisplayName = displayName;
     displayName = event.name;
+    if (workStartup) await workStartup;
+    if (targetGeneration !== generation) return;
     if (
       !managed ||
       !event.name ||

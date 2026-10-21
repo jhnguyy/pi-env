@@ -29,6 +29,7 @@
           inherit (toolchain)
             nodeFor
             piFor
+            toolsFor
             toolchainPackages
             toolchainFor
             ;

@@ -3,6 +3,7 @@
   pkgs,
   nodeFor,
   piFor,
+  toolsFor,
   toolchainPackages,
   toolchainFor,
 }:
@@ -53,6 +54,7 @@ in
 {
   packages = {
     default = toolchain;
+    tools = toolsFor pkgs;
     inherit toolchain pi;
   };
   apps = {

@@ -4,7 +4,7 @@
 2. **Finish with verifiable, repeatable evidence.** Each E2E run leaves an artifact with its inputs, expected result, actual result, and instructions to reproduce and check it. When CI runs the check, the CI log or uploaded artifact is the reference location. Preserve useful evidence on failure. Exclude secrets.
 3. **Write isolated tests before production code.** First explain the E2E gap. List the component's failure modes and expected outcomes, then write failing tests before implementing it. For existing code, reproduce the failure before changing it. Derive expectations from requirements, not from the implementation you just wrote.
 
-Follow the [`testing-practices` skill](../../.agents/skills/testing-practices/SKILL.md) for test doubles and for test retention and removal, including safety coverage and temporary catching tests.
+Follow the [`testing-practices` skill](../../.agents/skills/testing-practices/SKILL.md) for test doubles and for test retention and removal, including safety coverage and temporary catching tests. For TypeScript workflows that use Effect, follow [Effect guardrails](effect-guardrails.md#tests) for test execution, time, layers, and cleanup.
 
 ## Test structure and review
 

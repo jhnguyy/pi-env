@@ -128,64 +128,6 @@ function canonicalizeWithCap(node: ts.Node, caps: DuplicateCanonicalCaps = DUPLI
   return { canonical: parts.join("|"), truncated, nodeCount, tokenCount };
 }
 
-const logicalOperator = (node: ts.Node): ts.SyntaxKind | undefined =>
-  ts.isBinaryExpression(node)
-    && (node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-      || node.operatorToken.kind === ts.SyntaxKind.BarBarToken)
-    ? node.operatorToken.kind
-    : undefined;
-
-function isControlBranch(node: ts.Node): boolean {
-  return ts.isIfStatement(node)
-    || ts.isForStatement(node)
-    || ts.isForInStatement(node)
-    || ts.isForOfStatement(node)
-    || ts.isWhileStatement(node)
-    || ts.isDoStatement(node)
-    || ts.isCaseClause(node)
-    || ts.isConditionalExpression(node)
-    || ts.isCatchClause(node);
-}
-
-function functionComplexity(root: BodyFunction): { cyclomatic: number; cognitive: number } {
-  let cyclomatic = 1;
-  let cognitive = 0;
-  const visit = (node: ts.Node, controlDepth: number, parentLogical?: ts.SyntaxKind): void => {
-    if (node !== root && ts.isFunctionLike(node)) return;
-    const logical = logicalOperator(node);
-    if (logical !== undefined) {
-      cyclomatic++;
-      // A flat predicate is one cognitive sequence, even though each operator is
-      // still a defensible cyclomatic branch. Mixed operators start a new sequence.
-      if (logical !== parentLogical) cognitive++;
-      ts.forEachChild(node, (child) => visit(child, controlDepth, logical));
-      return;
-    }
-    const control = isControlBranch(node);
-    if (control) {
-      cyclomatic++;
-      cognitive += 1 + controlDepth;
-    }
-    ts.forEachChild(node, (child) => visit(child, control ? controlDepth + 1 : controlDepth));
-  };
-  visit(root, 0);
-  return { cyclomatic, cognitive };
-}
-
-const COMPLEXITY_ADVISORY = { cyclomatic: 15, cognitive: 20 } as const;
-
-function analyzeComplexityFile(file: ts.SourceFile, cwd: string, scope: Scope, output: Finding[]): void {
-  for (const fn of functions(file)) {
-    const loc = location(cwd, file, fn);
-    if (!changed(scope, loc)) continue;
-    const score = functionComplexity(fn);
-    if (score.cyclomatic >= COMPLEXITY_ADVISORY.cyclomatic || score.cognitive >= COMPLEXITY_ADVISORY.cognitive) {
-      output.push({ id: "", analyzer: AnalyzerName.Complexity, kind: FindingKind.Complexity, severity: Severity.Warning,
-        message: `Function complexity: cyclomatic ${score.cyclomatic}, cognitive ${score.cognitive}`, location: loc, data: score });
-    }
-  }
-}
-
 const analyzerFailure = (analyzer: AnalyzerName, cause: unknown): AnalyzerRunError => new AnalyzerRunError({
   analyzer,
   message: cause instanceof Error ? cause.message : String(cause),
@@ -204,10 +146,6 @@ function cooperativeFileAnalysis(
     }
     return output;
   });
-}
-
-export function complexityEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {
-  return cooperativeFileAnalysis(AnalyzerName.Complexity, project.files, (file, output) => analyzeComplexityFile(file, cwd, scope, output));
 }
 
 const ANALYZER_CAPS = {
@@ -645,65 +583,49 @@ function repeatedScanName(node: ts.Node): string | undefined {
   return ["sort", "find", "filter", "some", "every", "reduce"].includes(name) ? name : undefined;
 }
 
-function allowsSequential(file: ts.SourceFile, loop: ts.Node): boolean {
-  const text = file.getFullText();
-  const comments = ts.getLeadingCommentRanges(text, loop.getFullStart()) ?? [];
-  const last = comments.at(-1);
-  if (last === undefined || text.slice(last.end, loop.getStart(file)).trim() !== "") return false;
-  return /^\/\/\s*analyze:\s*allow-sequential\s*$/.test(text.slice(last.pos, last.end));
-}
-
 function visitForInOrOfLoop(
   node: ts.ForInOrOfStatement,
-  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  visit: (node: ts.Node, loopDepth: number) => void,
   loopDepth: number,
-  suppressed: boolean,
-  bodySuppressed: boolean,
 ): void {
   // For-of/in operands are evaluated once before iteration begins.
-  visit(node.initializer, loopDepth, suppressed);
-  visit(node.expression, loopDepth, suppressed);
-  visit(node.statement, loopDepth + 1, bodySuppressed);
+  visit(node.initializer, loopDepth);
+  visit(node.expression, loopDepth);
+  visit(node.statement, loopDepth + 1);
 }
 
 function visitForLoop(
   node: ts.ForStatement,
-  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  visit: (node: ts.Node, loopDepth: number) => void,
   loopDepth: number,
-  suppressed: boolean,
-  bodySuppressed: boolean,
 ): void {
-  if (node.initializer !== undefined) visit(node.initializer, loopDepth, suppressed);
-  if (node.condition !== undefined) visit(node.condition, loopDepth + 1, bodySuppressed);
-  if (node.incrementor !== undefined) visit(node.incrementor, loopDepth + 1, bodySuppressed);
-  visit(node.statement, loopDepth + 1, bodySuppressed);
+  if (node.initializer !== undefined) visit(node.initializer, loopDepth);
+  if (node.condition !== undefined) visit(node.condition, loopDepth + 1);
+  if (node.incrementor !== undefined) visit(node.incrementor, loopDepth + 1);
+  visit(node.statement, loopDepth + 1);
 }
 
 function visitWhileOrDoLoop(
   node: ts.WhileStatement | ts.DoStatement,
-  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  visit: (node: ts.Node, loopDepth: number) => void,
   loopDepth: number,
-  bodySuppressed: boolean,
 ): void {
-  visit(node.expression, loopDepth + 1, bodySuppressed);
-  visit(node.statement, loopDepth + 1, bodySuppressed);
+  visit(node.expression, loopDepth + 1);
+  visit(node.statement, loopDepth + 1);
 }
 
 function visitLoop(
   node: ts.Node,
-  file: ts.SourceFile,
-  visit: (node: ts.Node, loopDepth: number, suppressed: boolean) => void,
+  visit: (node: ts.Node, loopDepth: number) => void,
   loopDepth: number,
-  suppressed: boolean,
 ): boolean {
   if (!isLoop(node)) return false;
-  const bodySuppressed = suppressed || allowsSequential(file, node);
   if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
-    visitForInOrOfLoop(node, visit, loopDepth, suppressed, bodySuppressed);
+    visitForInOrOfLoop(node, visit, loopDepth);
   } else if (ts.isForStatement(node)) {
-    visitForLoop(node, visit, loopDepth, suppressed, bodySuppressed);
+    visitForLoop(node, visit, loopDepth);
   } else if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
-    visitWhileOrDoLoop(node, visit, loopDepth, bodySuppressed);
+    visitWhileOrDoLoop(node, visit, loopDepth);
   }
   return true;
 }
@@ -714,20 +636,10 @@ function visitAsyncRisks(
   scope: Scope,
   output: Finding[],
 ): void {
-  const visit = (node: ts.Node, loopDepth: number, suppressed: boolean): void => {
-    if (visitLoop(node, file, visit, loopDepth, suppressed)) return;
-    if (loopDepth > 0 && !suppressed) {
+  const visit = (node: ts.Node, loopDepth: number): void => {
+    if (visitLoop(node, visit, loopDepth)) return;
+    if (loopDepth > 0) {
       const loc = location(cwd, file, node);
-      if (changed(scope, loc) && ts.isAwaitExpression(node)) {
-        output.push({
-          id: "",
-          analyzer: AnalyzerName.AsyncRisk,
-          kind: FindingKind.AsyncRisk,
-          severity: Severity.Info,
-          message: "Await inside loop may serialize work",
-          location: loc,
-        });
-      }
       const scan = repeatedScanName(node);
       if (changed(scope, loc) && scan !== undefined) {
         output.push({
@@ -740,9 +652,9 @@ function visitAsyncRisks(
         });
       }
     }
-    ts.forEachChild(node, (child) => visit(child, loopDepth, suppressed));
+    ts.forEachChild(node, (child) => visit(child, loopDepth));
   };
-  visit(file, 0, false);
+  visit(file, 0);
 }
 
 export function asyncRisksEffect(project: SyntaxProject, cwd: string, scope: Scope): Effect.Effect<Finding[], AnalyzerRunError> {

@@ -39,10 +39,11 @@
     "typecheck": "scripts/node-run.sh node_modules/typescript/bin/tsc --noEmit",
     "lint:type": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
     "check:dependencies": "scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs . --output-type err --progress none --ignore-known .dependency-cruiser-known-violations.json",
-    "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 'scripts/*.{js,mjs}' '!scripts/node-policy.mjs' .dependency-cruiser.cjs .dependency-cruiser-known-violations.json .oxlintrc.json .oxfmtrc.json",
+    "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 'scripts/*.{js,mjs}' '!scripts/node-policy.mjs' .dependency-cruiser.cjs .dependency-cruiser-known-violations.json .oxlintrc.json .oxlintrc-sensors.json .oxfmtrc.json",
     "format:check": "nub run format --check",
     "analyze": "scripts/node-run.sh .pi/extensions/analyze/dist/cli.js",
-    "sensors": "nub run analyze -- --diff --checks complexity,async-risk",
+    "lint:sensors": "scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint -c .oxlintrc-sensors.json --threads=1",
+    "sensors": "nub run lint:sensors . && nub run analyze -- --diff --checks async-risk",
     "check:duplicates": "nub run analyze -- --checks duplicates . --fail-on error",
     "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
     "verify": "scripts/node-run.sh scripts/verify.mjs",
@@ -117,7 +118,8 @@
     "source-map-js": "1.2.2",
     "tinypool": "2.1.2",
     "toml": "4.2.0",
-    "undici": "8.10.2"
+    "undici": "8.10.2",
+    "vite": "8.3.3"
   },
   "engines": {
     "node": ">=24.19.0"

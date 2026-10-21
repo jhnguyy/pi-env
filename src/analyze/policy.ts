@@ -10,7 +10,6 @@ import {
 import { isDriveQualifiedPath } from "./workspace-path.js";
 
 export const SAFE_CHECKS = [
-  AnalyzerName.Complexity,
   AnalyzerName.AsyncRisk,
   AnalyzerName.Duplicates,
   AnalyzerName.TestDuplicates,
@@ -152,7 +151,7 @@ export const isSafeAnalyzerName = (value: unknown): value is SafeAnalyzerName =>
 function parseChecks(value: unknown): NonEmptyReadonlyArray<SafeAnalyzerName> | RejectedPolicy {
   if (!Array.isArray(value) || value.length === 0) {
     return invalid(
-      "checks must explicitly select complexity, async-risk, duplicates, and/or test-duplicates",
+      "checks must explicitly select async-risk, duplicates, and/or test-duplicates",
     );
   }
   if (value.length > analyzerNames.length) return invalid("too many analysis checks");
