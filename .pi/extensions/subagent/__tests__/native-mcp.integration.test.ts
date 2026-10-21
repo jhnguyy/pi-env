@@ -49,7 +49,9 @@ async function fixture(options: { broken?: boolean; timeout?: boolean; handled?:
     mcpServers: { fixture: {
       command: process.execPath,
       args: [serverPath, join(root, "protocol.jsonl"), join(root, "dispatch.jsonl")],
-      exposure: "direct", timeout: 1,
+      exposure: "direct",
+      // Only stalled-server scenarios need an injected request deadline.
+      ...(options.timeout ? { timeout: 1 } : {}),
     } },
   }));
   const provider = join(agentDir, "provider.mjs");
