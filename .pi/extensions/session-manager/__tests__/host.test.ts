@@ -1,7 +1,4 @@
-import { describe, expect, it, onTestFinished } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import {
   DuplicateWindowBinding,
@@ -10,46 +7,7 @@ import {
   type Exec,
 } from "../host.js";
 
-function testSocket(): string {
-  const root = mkdtempSync(join(tmpdir(), "pi-session-host-"));
-  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
-  return join(root, "tmux.sock");
-}
-
-function executor(
-  initialTags: Readonly<Record<string, string>>,
-  initialOwners: Readonly<Record<string, string>> = {},
-) {
-  const socketPath = testSocket();
-  const options: Record<string, Record<string, string>> = {
-    "@pi_session_id": { ...initialTags },
-    "@pi_session_pid": { ...initialOwners },
-  };
-  const tags = options["@pi_session_id"];
-  const owners = options["@pi_session_pid"];
-  const calls: string[][] = [];
-  const exec: Exec = async (command, args) => {
-    calls.push([command, ...args]);
-    const format = args.at(-1);
-    if (args.includes("list-windows")) return { code: 0, stdout: "@1\n@2\n", stderr: "" };
-    if (format === "#{socket_path}") return { code: 0, stdout: `${socketPath}\n`, stderr: "" };
-    if (format === "#{session_id}") return { code: 0, stdout: "$1\n", stderr: "" };
-    if (format === "#{window_id}") return { code: 0, stdout: "@1\n", stderr: "" };
-    const windowId = args[args.indexOf("-t") + 1];
-    const option = Object.keys(options).find((name) => args.includes(name));
-    if (args.includes("show-options") && option) {
-      return { code: 0, stdout: `${options[option][windowId] ?? ""}\n`, stderr: "" };
-    }
-    if (args.includes("set-option") && option) {
-      if (args.includes("-u")) delete options[option][windowId];
-      else if (args.includes("-o") && options[option][windowId])
-        return { code: 1, stdout: "", stderr: "already set" };
-      else options[option][windowId] = args.at(-1)!;
-    }
-    return { code: 0, stdout: "", stderr: "" };
-  };
-  return { calls, exec, tags, owners };
-}
+import { executor, testSocket } from "./tmux-executor.js";
 
 async function failureOf<A, E>(effect: Effect.Effect<A, E>): Promise<E> {
   return Effect.runPromise(effect.pipe(Effect.flip));
