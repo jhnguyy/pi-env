@@ -8,9 +8,11 @@ import { windowLabel } from "../host.js";
 import { workspaceId as workspaceIdFor } from "../runtime-path.js";
 import { createExtensionFixture } from "./extension-fixture.js";
 
+// These workflows use real file commits and kernel locks while scripting only the tmux boundary.
 describe("session-manager extension", () => {
   it("rejects a partial managed launch before catalog or host effects", async () => {
     const f = await createExtensionFixture();
+    const binding = f.pauseNextBind();
     let effectCalls = 0;
     const unexpected = () =>
       Effect.suspend(() => {
@@ -28,7 +30,8 @@ describe("session-manager extension", () => {
       environment: { TMUX_PANE: "%1", PI_ENV_SESSION_MANAGER_EXPECTED: "1" },
     });
 
-    await f.emit({ type: "session_start", reason: "startup" });
+    const starting = f.emit({ type: "session_start", reason: "startup" });
+    await expect(binding.waitUntilEntered(starting)).rejects.toThrow("before binding pause");
 
     expect(effectCalls).toBe(0);
     expect(f.native.shutdownCalls).toBe(1);
@@ -117,13 +120,15 @@ describe("session-manager extension", () => {
     rejectUpdate = true;
     composed.onCtrlD();
     composed.onCtrlD();
-    await expect.poll(() => f.native.notifications.length).toBe(1);
+    await f.notificationDelivered;
+    expect(f.native.notifications).toHaveLength(1);
     expect(f.native.ctrlDCalls).toBe(0);
     expect((await f.readManifest())?.sessions[0]).toMatchObject({ desiredState: "open" });
 
     rejectUpdate = false;
     composed.onCtrlD();
-    await expect.poll(() => f.native.ctrlDCalls).toBe(1);
+    await f.ctrlDCompleted;
+    expect(f.native.ctrlDCalls).toBe(1);
     expect(f.native.shutdownCalls).toBe(0);
     expect((await f.readManifest())?.sessions[0]).toMatchObject({
       desiredState: "closed",
@@ -158,7 +163,7 @@ describe("session-manager extension", () => {
 
     const binding = f.pauseNextBind();
     const starting = f.emit({ type: "session_start", reason: "new" }, { id: "session-b" });
-    await binding.entered;
+    await binding.waitUntilEntered(starting);
     const renaming = f.emit({ type: "session_info_changed", name: "investigate-resume" });
     binding.release();
     await Promise.all([starting, renaming]);
@@ -182,7 +187,7 @@ describe("session-manager extension", () => {
       f.register();
       const binding = f.pauseNextBind();
       const starting = f.emit({ type: "session_start", reason: "startup" });
-      await binding.entered;
+      await binding.waitUntilEntered(starting);
       const renaming = f.emit({ type: "session_info_changed", name: "obsolete-label" });
       const ending =
         transition === "shutdown"

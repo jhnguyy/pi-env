@@ -6,7 +6,9 @@ import { startBindingLockOwner } from "./binding-lock-fixture.js";
 
 // Real Pi E2E cannot reliably kill a process during the short critical section.
 // This real child holds exactly that resource, then dies without finalization.
-it("releases the kernel lock when its owning process is killed", async () => {
+it("releases the kernel lock when its owning process is killed", async ({ task }) => {
+  // Share the configured integration budget across acquisitions and reserve time for cleanup.
+  const readinessDeadline = performance.now() + Math.max(0, task.timeout - 5_000);
   const root = await mkdtemp(join(tmpdir(), "pi-binding-lock-"));
   const owners: ReturnType<typeof startBindingLockOwner>[] = [];
   onTestFinished(async () => {
@@ -22,8 +24,6 @@ it("releases the kernel lock when its owning process is killed", async () => {
     if (failures.length) throw new AggregateError(failures, "Binding lock fixture cleanup failed");
   });
   const socket = join(root, "tmux.sock");
-  // Share the five-second test budget across acquisitions and reserve time for cleanup.
-  const readinessDeadline = performance.now() + 4_000;
   const owner = startBindingLockOwner(socket, readinessDeadline);
   owners.push(owner);
   await expect(owner.ready, "initial owner readiness").resolves.toBeUndefined();

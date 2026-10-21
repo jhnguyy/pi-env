@@ -69,10 +69,19 @@ export async function createExtensionFixture() {
     shutdownCalls: 0,
     ctrlDCalls: 0,
   };
+  let completeCtrlD!: () => void;
+  let deliverNotification!: () => void;
+  const ctrlDCompleted = new Promise<void>((resolve) => {
+    completeCtrlD = resolve;
+  });
+  const notificationDelivered = new Promise<void>((resolve) => {
+    deliverNotification = resolve;
+  });
   const editor = {
     actionHandlers: new Map(),
     onCtrlD: () => {
       native.ctrlDCalls += 1;
+      completeCtrlD();
     },
   } as Editor;
   native.editorFactory = () => editor;
@@ -109,8 +118,11 @@ export async function createExtensionFixture() {
         setEditorComponent: (factory: EditorFactory | undefined) => {
           native.editorFactory = factory;
         },
-        notify: (message: string, level: "info" | "warning" | "error" = "info") =>
-          native.notifications.push({ message, level }),
+        notify: (message: string, level: "info" | "warning" | "error" = "info") => {
+          native.notifications.push({ message, level });
+          // Resume observers on the next UI turn, after the handler's promise chain settles.
+          setImmediate(deliverNotification);
+        },
       },
       shutdown: () => {
         native.shutdownCalls += 1;
@@ -149,6 +161,8 @@ export async function createExtensionFixture() {
     host,
     native,
     editor,
+    ctrlDCompleted,
+    notificationDelivered,
     tmux,
     emit,
     readManifest: () => Effect.runPromise(catalog.read(cwd)),
@@ -182,7 +196,18 @@ export async function createExtensionFixture() {
         await resumed;
         releases.delete(release);
       };
-      return { entered: observed, release };
+      return {
+        waitUntilEntered: (enrollment: Promise<void>) =>
+          Promise.race([
+            observed,
+            enrollment.then(() => {
+              throw new Error(
+                `Enrollment finished before binding pause: ${JSON.stringify(native.notifications)}`,
+              );
+            }),
+          ]),
+        release,
+      };
     },
   };
 }

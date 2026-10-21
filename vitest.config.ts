@@ -22,21 +22,50 @@ const integrationTestRoots = [
 export default defineConfig({
   test: {
     env: { TMPDIR: realpathSync(tmpdir()) },
-    testTimeout: e2e ? 30_000 : 5_000,
-    include: e2e
-      ? realWorkspaceCanary
-        ? [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"]
-        : [".pi/extensions/**/__tests__/e2e.test.ts"]
-      : portfolio === "integration"
-        ? integrationTestRoots
-        : testRoots,
-    exclude: [
-      "**/node_modules/**",
-      "**/dist/**",
-      ...(e2e ? [] : ["**/e2e.test.ts"]),
-      ...(portfolio === "unit"
-        ? ["**/*.integration.test.ts", "**/*.integration.test.mjs"]
-        : []),
-    ],
+    exclude: ["**/node_modules/**", "**/dist/**"],
+    projects: e2e
+      ? [
+          {
+            extends: true,
+            test: {
+              name: "e2e",
+              testTimeout: 30_000,
+              include: realWorkspaceCanary
+                ? [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"]
+                : [".pi/extensions/**/__tests__/e2e.test.ts"],
+            },
+          },
+        ]
+      : [
+          ...(portfolio === "integration"
+            ? []
+            : [
+                {
+                  extends: true,
+                  test: {
+                    name: "unit",
+                    testTimeout: 5_000,
+                    include: testRoots,
+                    exclude: [
+                      "**/e2e.test.ts",
+                      "**/*.integration.test.ts",
+                      "**/*.integration.test.mjs",
+                    ],
+                  },
+                },
+              ]),
+          ...(portfolio === "unit"
+            ? []
+            : [
+                {
+                  extends: true,
+                  test: {
+                    name: "integration",
+                    testTimeout: 30_000,
+                    include: integrationTestRoots,
+                  },
+                },
+              ]),
+        ],
   },
 });
