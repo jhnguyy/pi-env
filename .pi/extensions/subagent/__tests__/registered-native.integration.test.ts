@@ -280,6 +280,7 @@ export default function(pi) { pi.on('session_start',()=> { writeFileSync(${JSON.
       const result = await launch(overrides);
       expect((result.details as { isError: boolean }).isError, JSON.stringify(result)).toBe(true);
       expect(JSON.stringify(result.content)).toContain("unavailable");
+      if ("model" in overrides) expect(JSON.stringify(result.content)).toMatch(/Available: \S+\/\S+/);
       expect([...supervisor.children.values()].at(-1)!.inspect().state).toBe("closed");
       expect(existsSync(join(target, "started"))).toBe(startup);
       expect(existsSync(join(target, "model-turn"))).toBe(false);

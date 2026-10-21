@@ -141,12 +141,15 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     let model;
     if (this.run.modelOverride !== undefined) {
       const requested = this.run.modelOverride;
-      const matches = (await services.modelRuntime.getAvailable()).filter(
+      const available = await services.modelRuntime.getAvailable();
+      const matches = available.filter(
         (candidate) =>
           `${candidate.provider}/${candidate.id}` === requested || candidate.id === requested,
       );
       if (matches.length !== 1)
-        throw new Error(`Child model unavailable or ambiguous: "${requested}"`);
+        throw new Error(
+          `Child model unavailable or ambiguous: "${requested}". Available: ${available.map((candidate) => `${candidate.provider}/${candidate.id}`).join(", ")}`,
+        );
       model = matches[0];
     }
     const result = await createAgentSessionFromServices({

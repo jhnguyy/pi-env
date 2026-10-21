@@ -20,7 +20,7 @@ Supply `name` and `task` for `run` or `start`. Omit `model` and `tools` to use c
 
 Glob tool selectors fail before child resources load. Exact tool availability is checked at native model preflight, after Pi's bounded direct-MCP readiness wait. Unavailable names stop inference, but native startup and input hooks may already have caused effects. If an input hook handles the task without model preflight, only the already-registered catalog can be checked. A configured MCP tool that is not yet discovered can fail on that handled-input path.
 
-The model roster in the tool description describes the parent configuration for selection guidance. A child does not copy the parent's runtime-only providers, transient CLI configuration, or model catalog. Model annotations are descriptive, not delegation permissions.
+The model roster in the tool description describes the parent configuration for selection guidance. It lists the parent's scoped models (`--models` or `enabledModels`) when a scope exists, and every available model otherwise. The roster does not restrict selection: any available model works, and an unavailable selection reports the available models. A child does not copy the parent's runtime-only providers, transient CLI configuration, or model catalog. Model annotations are descriptive, not delegation permissions.
 
 `system_prompt` supplies additional delegated instructions, not a replacement for Pi's native system/context loading. The child appends those delegated instructions to its native prompt. Native context files, skills, input hooks, and configured extensions still apply.
 

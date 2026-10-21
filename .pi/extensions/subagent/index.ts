@@ -318,13 +318,14 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
     if (!(await runtime.startSession(ctx))) return;
     const settings = AgentSettings.readOptionalAgentSettings(undefined, ctx.cwd);
     const modelAnnotations = settings?.modelAnnotations ?? {};
-    const availableModels = ctx.modelRegistry.getAvailable() as Array<{
-      provider: string;
-      id: string;
-      name: string;
-    }>;
-
-    const description = Discovery.buildDynamicDescription(availableModels, pi.getAllTools().map((tool) => tool.name), modelAnnotations);
+    const scoped = ctx.scopedModels.length > 0;
+    const models = scoped ? ctx.scopedModels.map((entry) => entry.model) : ctx.modelRegistry.getAvailable();
+    const description = Discovery.buildDynamicDescription(
+      models,
+      pi.getAllTools().map((tool) => tool.name),
+      modelAnnotations,
+      scoped,
+    );
     registerSubagentTool(description);
   });
 }
