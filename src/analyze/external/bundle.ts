@@ -41,7 +41,6 @@ function extensionDirectoriesEffect(cwd: string): Effect.Effect<readonly string[
 
 function packageSideEffectsEffect(cwd: string, entryPoint: string): Effect.Effect<PackageSideEffectsResult> {
   return Effect.gen(function* () {
-    // analyze: allow-sequential
     for (const [path, source] of [[resolve(cwd, dirname(entryPoint), "package.json"), "package"], [resolve(cwd, "package.json"), "root"]] as const) {
       const value = yield* readJsonOrEffect<{ sideEffects?: boolean | readonly string[] }>(path, {});
       if (value.sideEffects !== undefined) return { sideEffects: value.sideEffects, source };
@@ -129,7 +128,6 @@ export function bundleAnalyzerEffect(cwd: string, scope: Scope, maxMemoryMb: num
     const entryPoints = scopedExtensionEntrypoints(cwd, scope, yield* discoverExtensionEntrypointsEffect(cwd));
     const { externals, configured } = yield* readConfiguredExternalsEffect(cwd);
     const findings: Finding[] = [];
-    // analyze: allow-sequential
     for (const entryPoint of entryPoints) {
       if (controls.beforeEntry?.(entryPoint) === false) break;
       const metafile = yield* workerMetafileEffect(

@@ -1,112 +1,53 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  KeybindingsManager,
-} from "@earendil-works/pi-coding-agent";
-import type { EditorComponent, EditorTheme, TUI } from "@earendil-works/pi-tui";
-import { afterEach, describe, expect, it } from "vitest";
+import type { EditorComponent } from "@earendil-works/pi-tui";
+import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { ManifestCommitFailure } from "../contracts.js";
 import { ensureCoordinator } from "../coordinator.js";
-import type { CurrentWindow, SessionHostShape } from "../host.js";
-import { registerSessionManager } from "../index.js";
+import { windowLabel } from "../host.js";
 import { workspaceId as workspaceIdFor } from "../runtime-path.js";
-import type { SessionFileProbe } from "../session-file.js";
-import { createFileSessionCatalog, type SessionCatalogShape } from "../storage.js";
-
-type EditorFactory = (
-  tui: TUI,
-  theme: EditorTheme,
-  keybindings: KeybindingsManager,
-) => EditorComponent;
-type CompatibleEditor = ReturnType<EditorFactory> & {
-  actionHandlers: Map<string, () => void>;
-  onCtrlD(): void;
-};
-const cast = <T>(value: unknown): T => value as T;
-
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
+import { createExtensionFixture } from "./extension-fixture.js";
 
 describe("session-manager extension", () => {
   it("rejects a partial managed launch before catalog or host effects", async () => {
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const noticeLevels: string[] = [];
-    let shutdownCalls = 0;
+    const f = await createExtensionFixture();
     let effectCalls = 0;
-    const unexpected = <A>() =>
-      Effect.sync(() => {
+    const unexpected = () =>
+      Effect.suspend(() => {
         effectCalls += 1;
-        return {} as A;
+        return Effect.die("Unexpected effect before launch validation");
       });
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: () => {},
-    });
-    registerSessionManager(pi, {
-      catalog: {
-        identity: () => unexpected(),
-        read: () => unexpected(),
-        update: () => unexpected(),
-      },
+    f.register({
+      catalog: { identity: unexpected, read: unexpected, update: unexpected },
       host: {
-        inspectCurrent: () => unexpected(),
-        bindCurrent: () => unexpected(),
-        renameCurrent: () => unexpected(),
-        releaseCurrent: () => unexpected(),
+        inspectCurrent: unexpected,
+        bindCurrent: unexpected,
+        renameCurrent: unexpected,
+        releaseCurrent: unexpected,
       },
-      environment: {
-        TMUX_PANE: "%1",
-        PI_ENV_SESSION_MANAGER_EXPECTED: "1",
-      },
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd: "/workspace",
-      sessionManager: {
-        getSessionId: () => "work-a",
-        getSessionFile: () => undefined,
-      },
-      ui: {
-        notify: (_message: string, level: string) => noticeLevels.push(level),
-      },
-      shutdown: () => {
-        shutdownCalls += 1;
-      },
+      environment: { TMUX_PANE: "%1", PI_ENV_SESSION_MANAGER_EXPECTED: "1" },
     });
 
-    await handlers.get("session_start")?.({} as never, ctx);
+    await f.emit({ type: "session_start", reason: "startup" });
 
     expect(effectCalls).toBe(0);
-    expect(shutdownCalls).toBe(1);
-    expect(noticeLevels).toEqual(["error"]);
+    expect(f.native.shutdownCalls).toBe(1);
+    expect(f.native.notifications.map((notice) => notice.level)).toEqual(["error"]);
   });
 
   it("rejects a restored-work coordinator mismatch before durable or tmux mutation", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-preflight-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const catalog = createFileSessionCatalog(join(root, "agent"));
-    await Effect.runPromise(ensureCoordinator({ catalog, cwd }));
+    const f = await createExtensionFixture();
+    f.native.session = { id: "work-a", name: "quiet-pine" };
+    await Effect.runPromise(ensureCoordinator({ catalog: f.catalog, cwd: f.cwd }));
     const timestamp = new Date().toISOString();
     await Effect.runPromise(
-      catalog.update(cwd, (manifest) => ({
+      f.catalog.update(f.cwd, (manifest) => ({
         ...manifest,
         sessions: [
           {
             version: 1,
             sessionId: "work-a",
-            cwd,
+            cwd: f.cwd,
             name: "quiet-pine",
             persistence: { state: "pending" },
             createdAt: timestamp,
@@ -117,29 +58,19 @@ describe("session-manager extension", () => {
         ],
       })),
     );
-    const before = await Effect.runPromise(catalog.read(cwd));
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
+    const before = await f.readManifest();
     let hostCalls = 0;
-    let shutdownCalls = 0;
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => "quiet-pine",
-      setSessionName: () => {},
-    });
-    const noHostEffect = <A>() =>
-      Effect.sync(() => {
+    const unexpected = () =>
+      Effect.suspend(() => {
         hostCalls += 1;
-        return {} as A;
+        return Effect.die("Unexpected host effect before launch validation");
       });
-    registerSessionManager(pi, {
-      catalog,
+    f.register({
       host: {
-        inspectCurrent: () => noHostEffect(),
-        bindCurrent: () => noHostEffect(),
-        renameCurrent: () => noHostEffect(),
-        releaseCurrent: () => noHostEffect(),
+        inspectCurrent: unexpected,
+        bindCurrent: unexpected,
+        renameCurrent: unexpected,
+        releaseCurrent: unexpected,
       },
       environment: {
         TMUX_PANE: "%1",
@@ -152,332 +83,128 @@ describe("session-manager extension", () => {
         PI_ENV_SESSION_MANAGER_EXTENSION: "/extension.js",
       },
     });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: { getSessionId: () => "work-a", getSessionFile: () => undefined },
-      ui: { notify: () => {} },
-      shutdown: () => {
-        shutdownCalls += 1;
-      },
-    });
 
-    await handlers.get("session_start")?.({} as never, ctx);
+    await f.emit({ type: "session_start", reason: "startup" });
 
     expect(hostCalls).toBe(0);
-    expect(shutdownCalls).toBe(1);
-    const after = await Effect.runPromise(catalog.read(cwd));
+    expect(f.native.shutdownCalls).toBe(1);
+    const after = await f.readManifest();
     expect(after?.revision).toBe(before?.revision);
     expect(after?.sessions[0]).toMatchObject({ sessionId: "work-a", desiredState: "open" });
   });
 
   it("composes the current editor and closes before its Ctrl+D callback", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const persistedCatalog = createFileSessionCatalog(join(root, "agent"));
+    const f = await createExtensionFixture();
+    f.native.session.file = join(f.root, "session-a.jsonl");
     let rejectUpdate = false;
-    const catalog: SessionCatalogShape = {
-      identity: (path) => persistedCatalog.identity(path),
-      read: (path) => persistedCatalog.read(path),
-      update: (path, transform) =>
-        rejectUpdate
-          ? Effect.fail(new ManifestCommitFailure({ path, cause: new Error("write failed") }))
-          : persistedCatalog.update(path, transform),
-    };
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    let editorFactory: EditorFactory | undefined;
-    let previousCtrlDCalls = 0;
-    const editor = cast<CompatibleEditor>({
-      actionHandlers: new Map<string, () => void>(),
-      onCtrlD: () => {
-        previousCtrlDCalls += 1;
+    f.register({
+      catalog: {
+        identity: (path) => f.catalog.identity(path),
+        read: (path) => f.catalog.read(path),
+        update: (path, transform) =>
+          rejectUpdate
+            ? Effect.fail(new ManifestCommitFailure({ path, cause: new Error("write failed") }))
+            : f.catalog.update(path, transform),
       },
     });
-    const previousFactory: EditorFactory = () => editor;
-    editorFactory = previousFactory;
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) => {
-        handlers.set(event, handler);
-      },
-      registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: () => {},
-      exec: async () => ({ code: 0, stdout: "", stderr: "" }),
-    });
-    const notifications: string[] = [];
-    let shutdownCalls = 0;
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: {
-        getSessionId: () => "session-a",
-        getSessionFile: () => join(root, "session-a.jsonl"),
-      },
-      ui: {
-        getEditorComponent: () => editorFactory,
-        setEditorComponent: (factory: EditorFactory | undefined) => {
-          editorFactory = factory;
-        },
-        setStatus: () => {},
-        notify: (message: string) => notifications.push(message),
-      },
-      shutdown: () => {
-        shutdownCalls += 1;
-      },
-    });
-    const currentWindow: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    const host: SessionHostShape = {
-      inspectCurrent: () => Effect.succeed(currentWindow),
-      bindCurrent: () => Effect.succeed(currentWindow),
-      renameCurrent: () => Effect.void,
-      releaseCurrent: () => Effect.void,
-    };
-    const sessionFiles: SessionFileProbe = {
-      exists: () => Effect.succeed(false),
-      verify: () => Effect.void,
-    };
-    registerSessionManager(pi, {
-      catalog,
-      host,
-      sessionFiles,
-      environment: { TMUX_PANE: "%1" },
-    });
+    const previousFactory = f.native.editorFactory;
 
-    await handlers.get("session_start")?.({} as never, ctx);
-    expect(editorFactory).not.toBe(previousFactory);
-    const composed = cast<CompatibleEditor>(
-      editorFactory?.(cast<never>({}), cast<never>({}), cast<never>({})),
-    );
-    expect(composed).toBe(editor);
+    await f.emit({ type: "session_start", reason: "startup" });
+    expect(f.native.editorFactory).not.toBe(previousFactory);
+    const composed = f.renderEditor();
+    expect(composed).toBe(f.editor);
 
     rejectUpdate = true;
     composed.onCtrlD();
     composed.onCtrlD();
-    await expect.poll(() => notifications.length).toBe(1);
-    expect(previousCtrlDCalls).toBe(0);
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
-      desiredState: "open",
-    });
+    await expect.poll(() => f.native.notifications.length).toBe(1);
+    expect(f.native.ctrlDCalls).toBe(0);
+    expect((await f.readManifest())?.sessions[0]).toMatchObject({ desiredState: "open" });
 
     rejectUpdate = false;
     composed.onCtrlD();
-    await expect.poll(() => previousCtrlDCalls).toBe(1);
-    expect(shutdownCalls).toBe(0);
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
+    await expect.poll(() => f.native.ctrlDCalls).toBe(1);
+    expect(f.native.shutdownCalls).toBe(0);
+    expect((await f.readManifest())?.sessions[0]).toMatchObject({
       desiredState: "closed",
       closedBy: "ctrl-d",
     });
   });
 
   it("keeps an incompatible editor and reports that Ctrl+D composition is unavailable", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    let factory: EditorFactory | undefined = () => cast<ReturnType<EditorFactory>>({});
-    const notices: string[] = [];
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => "amber-fox",
-      setSessionName: () => {},
-      exec: async () => ({ code: 0, stdout: "", stderr: "" }),
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: {
-        getSessionId: () => "session-a",
-        getSessionFile: () => join(root, "session-a.jsonl"),
-      },
-      ui: {
-        getEditorComponent: () => factory,
-        setEditorComponent: (value: EditorFactory | undefined) => {
-          factory = value;
-        },
-        setStatus: () => {},
-        notify: (message: string) => notices.push(message),
-      },
-      shutdown: () => {},
-    });
-    const catalog = createFileSessionCatalog(join(root, "agent"));
-    const window: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    registerSessionManager(pi, {
-      catalog,
-      host: {
-        inspectCurrent: () => Effect.succeed(window),
-        bindCurrent: () => Effect.succeed(window),
-        renameCurrent: () => Effect.void,
-        releaseCurrent: () => Effect.void,
-      },
-      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      environment: { TMUX_PANE: "%1" },
-    });
+    const f = await createExtensionFixture();
+    f.native.session.name = "amber-fox";
+    f.native.session.file = join(f.root, "session-a.jsonl");
+    f.native.editorFactory = () => ({}) as EditorComponent;
+    f.register();
 
-    await handlers.get("session_start")?.({} as never, ctx);
-    factory?.(cast<never>({}), cast<never>({}), cast<never>({}));
+    await f.emit({ type: "session_start", reason: "startup" });
+    f.renderEditor();
+    expect(f.native.notifications).toHaveLength(1);
+    expect(f.native.notifications[0]?.message).toContain("cannot compose Ctrl+D");
 
-    expect(notices).toHaveLength(1);
-
-    await handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]).toMatchObject({
-      desiredState: "open",
-    });
+    await f.emit({ type: "session_shutdown", reason: "quit" });
+    expect((await f.readManifest())?.sessions[0]).toMatchObject({ desiredState: "open" });
   });
 
-  it("leaves the Pi session unnamed while explicit renames sync to tmux", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-name-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    let displayName: string | undefined;
-    const renamedWindows: string[] = [];
-    let editorFactory: EditorFactory | undefined = () =>
-      cast<CompatibleEditor>({ actionHandlers: new Map(), onCtrlD: () => {} });
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => displayName,
-      setSessionName: (name: string) => {
-        displayName = name.trim() || undefined;
-      },
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: {
-        getSessionId: () => "session-a",
-        getSessionFile: () => undefined,
-      },
-      ui: {
-        getEditorComponent: () => editorFactory,
-        setEditorComponent: (factory: EditorFactory | undefined) => {
-          editorFactory = factory;
-        },
-        notify: () => {},
-      },
-      shutdown: () => {},
-    });
-    const currentWindow: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    const catalog = createFileSessionCatalog(join(root, "agent"));
-    registerSessionManager(pi, {
-      catalog,
-      host: {
-        inspectCurrent: () => Effect.succeed(currentWindow),
-        bindCurrent: () => Effect.succeed(currentWindow),
-        renameCurrent: (_paneId, _sessionId, name) =>
-          Effect.sync(() => {
-            renamedWindows.push(name);
-          }),
-        releaseCurrent: () => Effect.void,
-      },
-      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      environment: { TMUX_PANE: "%1" },
-    });
+  // E2E cannot hold enrollment open for an exact name-event interleaving.
+  it("keeps native sessions unnamed and applies renames delivered during enrollment", async () => {
+    const f = await createExtensionFixture();
+    f.register();
+    await f.emit({ type: "session_start", reason: "startup" });
+    expect(f.native.session.name).toBeUndefined();
+    expect((await f.readManifest())?.sessions[0]?.name).toBeUndefined();
+    await f.emit({ type: "session_shutdown", reason: "quit" });
 
-    await handlers.get("session_start")?.({} as never, ctx);
-    expect(displayName).toBeUndefined();
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBeUndefined();
+    const binding = f.pauseNextBind();
+    const starting = f.emit({ type: "session_start", reason: "new" }, { id: "session-b" });
+    await binding.entered;
+    const renaming = f.emit({ type: "session_info_changed", name: "investigate-resume" });
+    binding.release();
+    await Promise.all([starting, renaming]);
 
-    displayName = "investigate-resume";
-    await handlers.get("session_info_changed")?.(cast<never>({ name: "investigate-resume" }), ctx);
+    expect(f.native.session.name).toBe("investigate-resume");
+    expect(
+      (await f.readManifest())?.sessions.find((record) => record.sessionId === "session-b")?.name,
+    ).toBe("investigate-resume");
+    expect(f.tmux.labels["@1"]).toBe("investigate-resume");
 
-    expect((await Effect.runPromise(catalog.read(cwd)))?.sessions[0]?.name).toBe(
-      "investigate-resume",
-    );
-    expect(renamedWindows).toEqual(["investigate-resume"]);
-
-    displayName = undefined;
-    await handlers.get("session_info_changed")?.(cast<never>({ name: undefined }), ctx);
-
-    expect(displayName).toBeUndefined();
-    expect(renamedWindows).toEqual(["investigate-resume"]);
+    await f.emit({ type: "session_info_changed", name: undefined });
+    expect(f.native.session.name).toBeUndefined();
+    expect(f.tmux.labels["@1"]).toBe("investigate-resume");
   });
 
-  // E2E cannot pause enrollment while session_shutdown waits. A late successful
-  // enrollment must release its binding before shutdown completes.
-  it("releases a binding that completes after shutdown begins", async () => {
-    const root = await mkdtemp(join(tmpdir(), "session-extension-shutdown-"));
-    roots.push(root);
-    const cwd = join(root, "workspace");
-    await mkdir(cwd);
-    const handlers = new Map<string, (event: never, ctx: ExtensionContext) => unknown>();
-    const pi = cast<ExtensionAPI>({
-      on: (event: string, handler: (event: never, ctx: ExtensionContext) => unknown) =>
-        handlers.set(event, handler),
-      registerCommand: () => {},
-      getSessionName: () => undefined,
-      setSessionName: () => {},
-    });
-    const window: CurrentWindow = {
-      socketPath: "/tmp/tmux.sock",
-      tmuxSessionId: "$1",
-      windowId: "@1",
-      bindings: [],
-    };
-    let bind!: () => void;
-    let bindStarted!: () => void;
-    const binding = new Promise<void>((resolve) => {
-      bindStarted = resolve;
-    });
-    const released: string[] = [];
-    registerSessionManager(pi, {
-      catalog: createFileSessionCatalog(join(root, "agent")),
-      host: {
-        inspectCurrent: () => Effect.succeed(window),
-        bindCurrent: () =>
-          Effect.callback<CurrentWindow>((resume) => {
-            bind = () => resume(Effect.succeed(window));
-            bindStarted();
-          }),
-        renameCurrent: () => Effect.void,
-        releaseCurrent: (_paneId, sessionId) =>
-          Effect.sync(() => {
-            released.push(sessionId);
-          }),
-      },
-      sessionFiles: { exists: () => Effect.succeed(false), verify: () => Effect.void },
-      environment: { TMUX_PANE: "%1" },
-    });
-    const ctx = cast<ExtensionContext>({
-      mode: "tui",
-      cwd,
-      sessionManager: { getSessionId: () => "session-a", getSessionFile: () => undefined },
-      ui: {
-        getEditorComponent: () => undefined,
-        setEditorComponent: () => {},
-        notify: () => {},
-      },
-      shutdown: () => {},
-    });
+  // E2E cannot hold enrollment across shutdown or session replacement.
+  it.each(["shutdown", "session replacement"] as const)(
+    "discards pending renames and preserves binding ownership after %s",
+    async (transition) => {
+      const f = await createExtensionFixture();
+      f.register();
+      const binding = f.pauseNextBind();
+      const starting = f.emit({ type: "session_start", reason: "startup" });
+      await binding.entered;
+      const renaming = f.emit({ type: "session_info_changed", name: "obsolete-label" });
+      const ending =
+        transition === "shutdown"
+          ? f.emit({ type: "session_shutdown", reason: "quit" })
+          : f.emit({ type: "session_start", reason: "new" }, { id: "session-b" });
+      binding.release();
+      await Promise.all([starting, renaming, ending]);
 
-    void handlers.get("session_start")?.({} as never, ctx);
-    await binding;
-    const shutdown = handlers.get("session_shutdown")?.(cast<never>({ reason: "quit" }), ctx);
-    bind();
-    await shutdown;
-
-    expect(released).toEqual(["session-a"]);
-  });
+      expect(f.tmux.tags["@1"]).toBe(transition === "shutdown" ? undefined : "session-b");
+      const manifest = await f.readManifest();
+      expect(manifest?.sessions.map((record) => record.name)).toEqual(
+        transition === "shutdown" ? [undefined] : [undefined, undefined],
+      );
+      if (transition === "session replacement") {
+        expect(f.tmux.labels["@1"]).toBe(windowLabel("session-b"));
+        expect(manifest?.sessions.map((record) => record.sessionId)).toEqual([
+          "session-a",
+          "session-b",
+        ]);
+        await f.emit({ type: "session_shutdown", reason: "quit" });
+        expect(f.tmux.tags["@1"]).toBeUndefined();
+      }
+    },
+  );
 });

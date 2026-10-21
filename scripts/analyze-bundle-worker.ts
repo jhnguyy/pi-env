@@ -7,7 +7,6 @@ import type { BundleWorkerRequest } from "../src/analyze/external/bundle-protoco
 async function readStdin(maxBytes = 1024 * 1024): Promise<string> {
   const chunks: Buffer[] = [];
   let bytes = 0;
-  // analyze: allow-sequential
   for await (const chunk of process.stdin) {
     const buffer = Buffer.from(chunk);
     bytes += buffer.length;

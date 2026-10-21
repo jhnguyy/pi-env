@@ -1,3 +1,5 @@
+import { readFile, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import { applyExactEdits, createNotesContract, MAX_DETAIL_ITEMS, NOTES_ACTIONS } from "../contract";
@@ -8,12 +10,12 @@ import {
   MAX_NOTE_BYTES,
   MAX_NOTE_COUNT,
   MAX_REVISION_LENGTH,
-  NotesProviderError,
-  type NoteDocument,
   type NoteSearchResult,
   type NotesProvider,
 } from "../domain";
+import { vaultFixture } from "./vault-fixture";
 
+// External-provider boundary cases include responses the Obsidian provider cannot produce.
 function provider(): NotesProvider {
   return {
     id: "test",
@@ -31,64 +33,6 @@ function provider(): NotesProvider {
     })),
     write: vi.fn(async (request) => ({ path: request.path, revision: "rev-2" })),
     delete: vi.fn(async (request) => ({ path: request.path })),
-  };
-}
-
-function memoryProvider(initial: Record<string, string>): NotesProvider & {
-  readonly documents: Map<string, NoteDocument>;
-} {
-  const documents = new Map(
-    Object.entries(initial).map(([path, content], index) => [
-      path,
-      { path, content, revision: `rev-${index + 1}` },
-    ]),
-  );
-  let revision = documents.size;
-  return {
-    id: "memory",
-    documents,
-    index: vi.fn(async () => ({ text: "[Notes Index]|provider:memory" })),
-    list: vi.fn(async ({ prefix, limit, cursor }) => {
-      const entries = [...documents.values()]
-        .filter((note) => prefix === undefined || note.path.startsWith(prefix))
-        .sort((left, right) => left.path.localeCompare(right.path))
-        .filter((note) => cursor === undefined || note.path > cursor);
-      const page = entries.slice(0, limit);
-      return {
-        entries: page.map(({ path }) => ({ path })),
-        ...(page.length < entries.length && page.length > 0
-          ? { nextCursor: page[page.length - 1].path }
-          : {}),
-      };
-    }),
-    read: vi.fn(async (path) => {
-      const note = documents.get(path);
-      if (!note) throw new NotesProviderError({ code: "not-found", message: `Missing: ${path}` });
-      return note;
-    }),
-    search: vi.fn(async () => []),
-    write: vi.fn(async (request) => {
-      const current = documents.get(request.path);
-      const matches =
-        request.expectedRevision === null
-          ? current === undefined
-          : current?.revision === request.expectedRevision;
-      if (!matches) throw new NotesProviderError({ code: "conflict", message: "Conflict" });
-      const next = {
-        path: request.path,
-        content: request.content,
-        revision: `rev-${++revision}`,
-      };
-      documents.set(request.path, next);
-      return { path: next.path, revision: next.revision };
-    }),
-    delete: vi.fn(async ({ path, expectedRevision }) => {
-      if (documents.get(path)?.revision !== expectedRevision) {
-        throw new NotesProviderError({ code: "conflict", message: "Conflict" });
-      }
-      documents.delete(path);
-      return { path };
-    }),
   };
 }
 
@@ -200,7 +144,7 @@ describe("notes tool contract", () => {
   });
 
   it("reads Inbox items without mutation and preserves Follow-up state", async () => {
-    const fake = memoryProvider({
+    const { provider: store, vault } = await vaultFixture({
       "inbox/20260901.md":
         "## Follow-ups\n\n- [x] done\n- [ ] open\n\n## Notes\n\n```md\n- hidden example\n```\n-\n- first note\n  - detail\n",
       "inbox/20260902.md": "## Notes\n\n- later note\n",
@@ -208,7 +152,8 @@ describe("notes tool contract", () => {
       "inbox/2026/09/01.md": "## Notes\n\n- nested legacy\n",
       "inbox/2026/10/Untitled.md": "",
     });
-    const contract = createNotesContract(fake);
+    const contract = createNotesContract(store);
+    const original = await store.read("inbox/20260901.md");
 
     const earliest = await contract.execute(
       { collection: "inbox", action: "read" },
@@ -233,18 +178,23 @@ describe("notes tool contract", () => {
       expect.objectContaining({ kind: "followup", text: "open", checked: false }),
       expect.objectContaining({ kind: "note", text: "first note", nestedDetails: ["- detail"] }),
     ]);
-    expect(fake.write).not.toHaveBeenCalled();
-    expect(fake.delete).not.toHaveBeenCalled();
+    for (const text of ["first note", "- detail", '"checked": true', '"checked": false']) {
+      expect(dated.content).toEqual([{ type: "text", text: expect.stringContaining(text) }]);
+    }
+    expect(await store.read("inbox/20260901.md")).toEqual(original);
+    expect(await readFile(path.join(vault, "inbox/20260902.md"), "utf8")).toBe(
+      "## Notes\n\n- later note\n",
+    );
   });
 
   it("lists and reads only canonical Project documents with bounded cursors", async () => {
-    const fake = memoryProvider({
+    const { provider: store } = await vaultFixture({
       "projects/alpha.md": "# Alpha",
       "projects/platform/roadmap.md": "# Platform roadmap",
       "projects-old.md": "not a project",
       "wiki/project.md": "wiki",
     });
-    const contract = createNotesContract(fake);
+    const contract = createNotesContract(store);
 
     const first = await contract.execute(
       { collection: "projects", action: "list", limit: 1 },
@@ -254,6 +204,7 @@ describe("notes tool contract", () => {
       expect.objectContaining({ target: "alpha.md", path: "projects/alpha.md" }),
     ]);
     expect(first.details.nextCursor).toEqual(expect.any(String));
+    expect(first.content).toEqual([{ type: "text", text: expect.stringContaining("alpha.md") }]);
 
     const second = await contract.execute(
       {
@@ -275,6 +226,9 @@ describe("notes tool contract", () => {
       { collection: "projects", action: "read", target: "platform/roadmap.md" },
       { cwd: "/repo" },
     );
+    expect(read.content).toEqual([
+      { type: "text", text: expect.stringContaining("# Platform roadmap") },
+    ]);
     expect(read.details).toMatchObject({
       collection: "projects",
       path: "projects/platform/roadmap.md",
@@ -290,11 +244,12 @@ describe("notes tool contract", () => {
 
   it("returns schema-valid cursors for maximum UTF-8 Project targets", async () => {
     const target = `${("界".repeat(78) + "/").repeat(12)}${"界".repeat(64)}.md`;
-    const fake = memoryProvider({
-      "projects/a.md": "first",
-      [`projects/${target}`]: "second",
+    // This portable cursor limit exceeds some hosts' filesystem path limits.
+    const external = provider();
+    vi.mocked(external.list).mockResolvedValue({
+      entries: [{ path: "projects/a.md" }, { path: `projects/${target}` }],
     });
-    const contract = createNotesContract(fake);
+    const contract = createNotesContract(external);
 
     const first = await contract.execute(
       { collection: "projects", action: "list", limit: 1 },
@@ -327,11 +282,11 @@ describe("notes tool contract", () => {
   });
 
   it("keeps Project writes under projects/ and requires revision preconditions", async () => {
-    const fake = memoryProvider({ "projects/existing.md": "# Existing" });
-    const contract = createNotesContract(fake);
+    const { provider: store, vault } = await vaultFixture({ "projects/existing.md": "# Existing" });
+    const contract = createNotesContract(store);
     const content =
       "# Existing\n\nOwner: Team\n\nStatus: active\n\n## Next actions\n\n- Ship\n\nTicket: T-1\n";
-    const revision = fake.documents.get("projects/existing.md")?.revision;
+    const { revision } = await store.read("projects/existing.md");
 
     await contract.execute(
       {
@@ -354,8 +309,9 @@ describe("notes tool contract", () => {
       { cwd: "/repo" },
     );
 
-    expect(fake.documents.get("projects/existing.md")?.content).toBe(content);
-    expect(fake.documents.get("projects/nested/new.md")?.content).toBe("Free-form active plan");
+    expect(await readFile(path.join(vault, "projects/nested/new.md"), "utf8")).toBe(
+      "Free-form active plan",
+    );
     await expect(
       contract.execute(
         {
@@ -374,17 +330,17 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "path-escape" });
-    expect(fake.documents.get("projects/existing.md")?.content).toBe(content);
+    expect(await readFile(path.join(vault, "projects/existing.md"), "utf8")).toBe(content);
   });
 
   it("reads bounded Worklog selections in the requested date order", async () => {
-    const fake = memoryProvider({
+    const { provider: store } = await vaultFixture({
       "records/2026/09/01.md": "## Worklog\n\n- first\n- second\n",
       "records/2026/09/02.md": "## Notes\n\n- not work\n",
       "records/2026/09/03.md": "## Worklog\n\n- third\n",
       "records/health/subject.md": "## Worklog\n\n- legacy subject record\n",
     });
-    const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 3, 23, 30) });
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 3, 23, 30) });
 
     const firstPage = await contract.execute(
       { collection: "worklog", action: "read", selector: "all", limit: 2 },
@@ -409,6 +365,7 @@ describe("notes tool contract", () => {
     expect(secondPage.details.items).toEqual([
       expect.objectContaining({ date: "2026-09-01", text: "second" }),
     ]);
+    expect(secondPage.content).toEqual([{ type: "text", text: expect.stringContaining("second") }]);
 
     const chronological = await contract.execute(
       {
@@ -438,14 +395,14 @@ describe("notes tool contract", () => {
   });
 
   it("binds collection continuation cursors to the original read scope", async () => {
-    const fake = memoryProvider({
+    const { provider: store } = await vaultFixture({
       "inbox/20260901.md": "## Notes\n\n- one\n- two\n",
       "inbox/20260902.md": "## Notes\n\n- other date\n",
       "wiki/a.md": "a",
       "wiki/b.md": "b",
       "wiki/nested/c.md": "c",
     });
-    const contract = createNotesContract(fake);
+    const contract = createNotesContract(store);
 
     const inbox = await contract.execute(
       { collection: "inbox", action: "read", date: "2026-09-01", limit: 1 },
@@ -505,8 +462,8 @@ describe("notes tool contract", () => {
       }),
     );
     records["records/2026/02/02.md"] = "## Worklog\n\n- found\n";
-    const fake = memoryProvider(records);
-    const contract = createNotesContract(fake);
+    const { provider: store } = await vaultFixture(records);
+    const contract = createNotesContract(store);
 
     const first = await contract.execute(
       { collection: "worklog", action: "read", selector: "all", order: "chronological" },
@@ -514,7 +471,6 @@ describe("notes tool contract", () => {
     );
     expect(first.details.items).toEqual([]);
     expect(first.details.nextCursor).toEqual(expect.any(String));
-    expect(fake.read).toHaveBeenCalledTimes(32);
 
     const second = await contract.execute(
       {
@@ -532,15 +488,16 @@ describe("notes tool contract", () => {
   it("continues before structured collection details exceed their byte budget", async () => {
     const firstText = "a".repeat(20_000);
     const secondText = "b".repeat(20_000);
-    const fake = memoryProvider({
+    const { provider: store } = await vaultFixture({
       "records/2026/09/01.md": `## Worklog\n\n- ${firstText}\n- ${secondText}\n`,
     });
-    const contract = createNotesContract(fake);
+    const contract = createNotesContract(store);
 
     const first = await contract.execute(
       { collection: "worklog", action: "read", selector: "2026-09-01" },
       { cwd: "/repo" },
     );
+    expect(first.content).toEqual([{ type: "text", text: expect.stringContaining(firstText) }]);
     expect(first.details.items).toEqual([expect.objectContaining({ text: firstText })]);
     expect(first.details.nextCursor).toEqual(expect.any(String));
     const second = await contract.execute(
@@ -552,17 +509,19 @@ describe("notes tool contract", () => {
       },
       { cwd: "/repo" },
     );
+    expect(second.content).toEqual([{ type: "text", text: expect.stringContaining(secondText) }]);
     expect(second.details.items).toEqual([expect.objectContaining({ text: secondText })]);
   });
 
   it("navigates Wiki folders without recursively flooding their results", async () => {
-    const fake = memoryProvider({
+    const initial = {
       "wiki/root.md": "root",
       "wiki/ai/one.md": "one",
       "wiki/ai/nested/two.md": "two",
       "wiki/food/recipe.md": "recipe",
-    });
-    const contract = createNotesContract(fake);
+    };
+    const { provider: store, vault } = await vaultFixture(initial);
+    const contract = createNotesContract(store);
 
     const root = await contract.execute({ collection: "wiki", action: "read" }, { cwd: "/repo" });
     expect(root.details.items).toEqual([
@@ -585,17 +544,20 @@ describe("notes tool contract", () => {
       { cwd: "/repo" },
     );
     expect(file.details).toMatchObject({ path: "wiki/ai/one.md", revision: expect.any(String) });
-    expect(fake.write).not.toHaveBeenCalled();
+    expect(file.content).toEqual([{ type: "text", text: expect.stringContaining("\none") }]);
+    for (const [notePath, content] of Object.entries(initial)) {
+      expect(await readFile(path.join(vault, notePath), "utf8")).toBe(content);
+    }
   });
 
   it("uses the process-local date for collection writes and preserves other sections", async () => {
-    const fake = memoryProvider({
+    const { provider: store, vault } = await vaultFixture({
       "inbox/20260912.md":
         "# Context\r\n\r\n```md\r\n## Follow-ups\r\n- [ ]\r\n```\r\n\r\n## Follow-ups\r\n\r\n- [ ]\r\n\r\n## Notes\r\n\r\n- old\r\n\r\n## Other\r\n\r\nkeep\r\n",
       "inbox/2026/09/12.md": "## Notes\n\n- nested legacy\n",
       "records/2026/09/12.md": "---\ntype: record\n---\n# Record\n\n## Decisions\n\nkeep\n",
     });
-    const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 12, 23, 59) });
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12, 23, 59) });
 
     await contract.execute(
       { collection: "inbox", action: "write", kind: "followup", text: "new task" },
@@ -606,23 +568,26 @@ describe("notes tool contract", () => {
       { cwd: "/repo" },
     );
 
-    expect(fake.documents.get("inbox/20260912.md")?.content).toBe(
+    expect(await readFile(path.join(vault, "inbox/20260912.md"), "utf8")).toBe(
       "# Context\r\n\r\n```md\r\n## Follow-ups\r\n- [ ]\r\n```\r\n\r\n## Follow-ups\r\n\r\n- [ ] new task\r\n\r\n## Notes\r\n\r\n- old\r\n\r\n## Other\r\n\r\nkeep\r\n",
     );
-    expect(fake.documents.get("inbox/2026/09/12.md")?.content).toBe(
+    expect(await readFile(path.join(vault, "inbox/2026/09/12.md"), "utf8")).toBe(
       "## Notes\n\n- nested legacy\n",
     );
-    expect(fake.documents.get("records/2026/09/12.md")?.content).toContain(
+    expect(await readFile(path.join(vault, "records/2026/09/12.md"), "utf8")).toContain(
       "## Decisions\n\nkeep\n\n## Worklog\n\n- Shipped the contract\n",
     );
-    expect(fake.documents.has("inbox/20260913.md")).toBe(false);
+    await expect(stat(path.join(vault, "inbox/20260913.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("rejects a collection append that would exceed the note byte limit", async () => {
-    const path = "inbox/20260912.md";
+    const notePath = "inbox/20260912.md";
     const prefix = "## Notes\n\n- ";
-    const fake = memoryProvider({ [path]: prefix + "x".repeat(MAX_NOTE_BYTES - prefix.length) });
-    const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 12) });
+    const original = prefix + "x".repeat(MAX_NOTE_BYTES - prefix.length);
+    const { provider: store, vault } = await vaultFixture({ [notePath]: original });
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12) });
 
     await expect(
       contract.execute(
@@ -630,17 +595,20 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "resource-limit" });
-    expect(fake.write).not.toHaveBeenCalled();
+    expect(await readFile(path.join(vault, notePath), "utf8")).toBe(original);
   });
 
   it("rejects a concurrent Inbox append without replacing the newer content", async () => {
-    const path = "inbox/20260912.md";
-    const fake = memoryProvider({ [path]: "## Notes\n\n- current\n" });
-    vi.mocked(fake.write).mockImplementationOnce(async () => {
-      fake.documents.set(path, { path, content: "## Notes\n\n- concurrent\n", revision: "newer" });
-      throw new NotesProviderError({ code: "conflict", message: "Conflict" });
-    });
-    const contract = createNotesContract(fake, { now: () => new Date(2026, 8, 12) });
+    const notePath = "inbox/20260912.md";
+    const { provider: store, vault } = await vaultFixture(
+      { [notePath]: "## Notes\n\n- current\n" },
+      {
+        beforeCommit: async (target) => {
+          await writeFile(target, "## Notes\n\n- concurrent\n");
+        },
+      },
+    );
+    const contract = createNotesContract(store, { now: () => new Date(2026, 8, 12) });
 
     await expect(
       contract.execute(
@@ -648,12 +616,12 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    expect(fake.documents.get(path)?.content).toBe("## Notes\n\n- concurrent\n");
+    expect(await readFile(path.join(vault, notePath), "utf8")).toBe("## Notes\n\n- concurrent\n");
   });
 
   it("requires guarded Wiki creation and updates", async () => {
-    const fake = memoryProvider({ "wiki/existing.md": "old" });
-    const contract = createNotesContract(fake);
+    const { provider: store, vault } = await vaultFixture({ "wiki/existing.md": "old" });
+    const contract = createNotesContract(store);
 
     await contract.execute(
       {
@@ -677,9 +645,9 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    expect(fake.documents.get("wiki/existing.md")?.content).toBe("old");
+    expect(await readFile(path.join(vault, "wiki/existing.md"), "utf8")).toBe("old");
 
-    const revision = fake.documents.get("wiki/existing.md")?.revision;
+    const { revision } = await store.read("wiki/existing.md");
     await contract.execute(
       {
         collection: "wiki",
@@ -702,7 +670,7 @@ describe("notes tool contract", () => {
         { cwd: "/repo" },
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    expect(fake.documents.get("wiki/existing.md")?.content).toBe("updated");
+    expect(await readFile(path.join(vault, "wiki/existing.md"), "utf8")).toBe("updated");
     for (const target of ["/outside.md", "nested//note.md", "nested/note.md/"]) {
       await expect(
         contract.execute(
@@ -711,7 +679,9 @@ describe("notes tool contract", () => {
         ),
       ).rejects.toMatchObject({ code: expect.stringMatching(/invalid-path|path-escape/) });
     }
-    expect(fake.documents.has("wiki/nested/note.md")).toBe(false);
+    await expect(stat(path.join(vault, "wiki/nested/note.md"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   it("reports unsupported references without requiring every provider to implement resolve", async () => {
@@ -729,50 +699,88 @@ describe("notes tool contract", () => {
     expect(fake.list).toHaveBeenCalledWith({ prefix: "", limit: MAX_DETAIL_ITEMS }, undefined);
   });
 
-  it("applies exact edits in the shell and writes with the read revision", async () => {
-    const fake = provider();
-    vi.mocked(fake.read).mockResolvedValue({
-      path: "wiki/note.md",
-      content: "alpha beta",
-      revision: "rev-1",
-    });
-    const contract = createNotesContract(fake);
-    const output = await contract.execute(
+  it("creates, reads, edits, and deletes Store notes with persisted revision guards", async () => {
+    const { provider: store, vault } = await vaultFixture();
+    const contract = createNotesContract(store);
+    const target = path.join(vault, "other/note.md");
+    const created = await contract.execute(
+      { action: "write", path: "other/note.md", content: "alpha beta", revision: null },
+      { cwd: vault },
+    );
+    expect(await readFile(target, "utf8")).toBe("alpha beta");
+    const read = await contract.execute({ action: "read", path: "other/note.md" }, { cwd: vault });
+    expect(read.details.revision).toBe(created.details.revision);
+    expect(read.content).toEqual([{ type: "text", text: expect.stringContaining("alpha beta") }]);
+    expect(read.content).toEqual([
+      { type: "text", text: expect.stringContaining(`revision="${read.details.revision}"`) },
+    ]);
+    const edited = await contract.execute(
       {
         action: "edit",
-        path: "wiki/note.md",
-        revision: "rev-1",
+        path: "other/note.md",
+        revision: read.details.revision,
         edits: [{ oldText: "beta", newText: "gamma" }],
-        append: "\nmore",
+        append: "\nalpha",
       },
-      { cwd: "/repo" },
+      { cwd: vault },
     );
-    expect(fake.write).toHaveBeenCalledWith(
-      {
-        path: "wiki/note.md",
-        content: "alpha gamma\nmore",
-        expectedRevision: "rev-1",
-      },
-      undefined,
-    );
-    expect(output.details.revision).toBe("rev-2");
-  });
+    expect(edited.content).toEqual([{ type: "text", text: "Edited other/note.md" }]);
+    const persisted = await store.read("other/note.md");
+    expect(persisted.revision).toBe(edited.details.revision);
+    expect(persisted.revision).not.toBe(read.details.revision);
+    expect(await readFile(target, "utf8")).toBe("alpha gamma\nalpha");
 
-  it("rejects a stale edit before provider mutation", async () => {
-    const fake = provider();
-    const contract = createNotesContract(fake);
     await expect(
       contract.execute(
         {
           action: "edit",
-          path: "wiki/note.md",
-          revision: "stale",
-          edits: [{ oldText: "content", newText: "changed" }],
+          path: "other/note.md",
+          revision: read.details.revision,
+          append: "unsafe",
         },
-        { cwd: "/repo" },
+        { cwd: vault },
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    expect(fake.write).not.toHaveBeenCalled();
+    for (const [oldText, message] of [
+      ["absent", "not found"],
+      ["alpha", "more than once"],
+    ]) {
+      await expect(
+        contract.execute(
+          {
+            action: "edit",
+            path: "other/note.md",
+            revision: persisted.revision,
+            edits: [{ oldText, newText: "unsafe" }],
+            append: "also unsafe",
+          },
+          { cwd: vault },
+        ),
+      ).rejects.toThrow(message);
+      expect(await store.read("other/note.md")).toEqual(persisted);
+    }
+    await expect(
+      contract.execute(
+        {
+          action: "delete",
+          path: "other/note.md",
+          revision: read.details.revision,
+        },
+        { cwd: vault },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(target, "utf8")).toBe(persisted.content);
+    const deleted = await contract.execute(
+      {
+        action: "delete",
+        path: "other/note.md",
+        revision: persisted.revision,
+      },
+      { cwd: vault },
+    );
+    expect(deleted.content).toEqual([{ type: "text", text: "Deleted other/note.md" }]);
+    await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.read("other/note.md")).rejects.toMatchObject({ code: "not-found" });
   });
 
   it("rejects oversized provider orientation before exposing it", async () => {
@@ -886,7 +894,7 @@ describe("notes tool contract", () => {
     ).rejects.toMatchObject({ code: "invalid-provider" });
   });
 
-  it("requires explicit revision preconditions before mutation IO", async () => {
+  it("requires explicit matching revision preconditions before mutation IO", async () => {
     const fake = provider();
     const contract = createNotesContract(fake);
     await expect(
@@ -904,6 +912,13 @@ describe("notes tool contract", () => {
     await expect(
       contract.execute({ action: "delete", path: "note.md", revision: "" }, { cwd: "/repo" }),
     ).rejects.toMatchObject({ code: "invalid-revision" });
+    // Obsidian also rejects stale writes; this boundary check proves the shell prevents write IO.
+    await expect(
+      contract.execute(
+        { action: "edit", path: "note.md", revision: "stale", append: "unsafe" },
+        { cwd: "/repo" },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     expect(fake.write).not.toHaveBeenCalled();
     expect(fake.delete).not.toHaveBeenCalled();
   });

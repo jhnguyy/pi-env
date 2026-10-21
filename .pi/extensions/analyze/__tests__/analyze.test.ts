@@ -9,8 +9,8 @@ const result: AnalysisResult = {
   version: 1,
   summary: { info: 0, warning: 2, error: 0, failures: 0 },
   findings: [
-    { id: "1", analyzer: "complexity", kind: "complexity", severity: "warning", message: "first", location: { path: "a.ts", line: 1, column: 1 } },
-    { id: "2", analyzer: "complexity", kind: "complexity", severity: "warning", message: "second", location: { path: "b.ts", line: 2, column: 1 } },
+    { id: "1", analyzer: "duplicates", kind: "duplicate", severity: "warning", message: "first", location: { path: "a.ts", line: 1, column: 1 } },
+    { id: "2", analyzer: "duplicates", kind: "duplicate", severity: "warning", message: "second", location: { path: "b.ts", line: 2, column: 1 } },
   ],
   analyzerFailures: [],
   benchmarks: [],
