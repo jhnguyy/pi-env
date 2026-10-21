@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Fiber, Result } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, live } from "@effect/vitest";
 import { ProcessFailureKind, resolveNodeCommand, runProcess, streamProcess, type StreamProcessOptions } from "../platform";
 
 const node = resolveNodeCommand();
@@ -141,8 +141,9 @@ describe("process platform streamProcess", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
-  it.runIf(process.platform !== "win32")("terminates a started TERM-ignoring POSIX descendant after its parent closes", async () => {
+  live.runIf(process.platform !== "win32")("terminates a ready TERM-ignoring POSIX descendant after its parent closes", () => Effect.gen(function* () {
     const directory = temporaryDirectory("pi-process-tree-");
+    yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { recursive: true, force: true })));
     const marker = join(directory, "marker");
     const childPidFile = join(directory, "child-pid");
     const script = join(directory, "parent.mjs");
@@ -154,18 +155,18 @@ describe("process platform streamProcess", () => {
     ].join(";");
     writeFileSync(script, `import { spawn } from 'node:child_process';\nspawn(${JSON.stringify(node)}, ['-e', ${JSON.stringify(childCode)}], { stdio: 'ignore' });\nsetInterval(()=>{}, 1000);\n`);
 
-    const result = await Effect.runPromise(Effect.result(streamProcess(node, [script], { timeoutMs: 1_000, killGraceMs: 100 })));
-
-    expect(Result.isFailure(result)).toBe(true);
-    expect(existsSync(childPidFile)).toBe(true);
-    expect(existsSync(marker)).toBe(true);
+    const fiber = yield* streamProcess(node, [script], { timeoutMs: 10_000, killGraceMs: 100 }).pipe(Effect.forkScoped);
+    // Startup is not the termination contract. Wait for a real heartbeat before interrupting.
+    yield* Effect.promise(() => eventually(() => expect(readFileSync(marker, "utf8")).not.toBe(""), 200));
     const childPid = Number(readFileSync(childPidFile, "utf8"));
+
+    yield* Fiber.interrupt(fiber);
+
+    yield* Effect.promise(() => eventually(() => expect(isAlive(childPid)).toBe(false)));
     const before = readFileSync(marker, "utf8");
-    await eventually(() => expect(isAlive(childPid)).toBe(false));
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    yield* Effect.sleep("100 millis");
     expect(readFileSync(marker, "utf8")).toBe(before);
-    rmSync(directory, { recursive: true, force: true });
-  });
+  }), 10_000);
 });
 
 describe("resolveNodeCommand", () => {
