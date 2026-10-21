@@ -5,7 +5,7 @@
   "type": "module",
   "exports": "./dist/index.js",
   "dependencies": {
-    "effect": "4.0.0-beta.97"
+    "effect": "4.0.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",
