@@ -18,7 +18,7 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 import { resolveNotesProvider } from "../notes/provider-registry";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-const bundles = ["analyze", "web-context", "dev-tools", "notes", "skill-builder", "subagent"].map(
+const bundles = ["analyze", "web-context", "dev-tools", "notes", "subagent"].map(
   (name) => join(repo, `.pi/extensions/${name}/dist/index.js`),
 );
 
@@ -43,9 +43,9 @@ describe("native tool workflows", () => {
         bundles: bundles.map((path) => path.slice(repo.length + 1)),
       },
       expected: {
-        activeBefore: ["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"],
+        activeBefore: ["codemode", "tool_search", "closeout", "subagent", "notes"],
         callableBefore: ["analyze", "web_fetch", "notes", "subagent"],
-        notCallable: ["closeout", "skill_build"],
+        notCallable: ["closeout"],
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         composition: "nested read and Bash results combined with session context",
@@ -106,10 +106,10 @@ describe("native tool workflows", () => {
       const activeBefore = session.getActiveToolNames();
       const callableBefore = session.getCallableToolNames();
       evidence.actual = { activeBefore, callableBefore };
-      expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "skill_build", "subagent", "notes"]));
+      expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "subagent", "notes"]));
       expect(activeBefore).not.toContain("web_fetch");
       expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "notes", "subagent"]));
-      for (const name of ["tool_search", "closeout", "skill_build"]) expect(callableBefore).not.toContain(name);
+      for (const name of ["tool_search", "closeout"]) expect(callableBefore).not.toContain(name);
 
       const webUrl = "https://example.invalid/pi-env-fixture";
       globalThis.fetch = async (input) => {

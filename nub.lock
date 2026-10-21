@@ -164,8 +164,6 @@ importers:
         specifier: 4.1.2
         version: 4.1.2
 
-  .pi/extensions/skill-builder: {}
-
   .pi/extensions/subagent:
     dependencies:
       '@earendil-works/pi-agent-core':
