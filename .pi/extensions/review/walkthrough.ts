@@ -1,6 +1,7 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { bound, type Finding, type ReviewState } from "./core";
 import { decisionFor, isDegraded } from "./decision";
+import { reviewDiagnosticLines } from "./render";
 import {
   createWalkthroughContext,
   pinnedContext,
@@ -43,8 +44,7 @@ function coverageText(state: ReviewState): string {
   return [
     `Coverage: ${coverageStatus(state)}`,
     `Evidence omissions: ${omissions.join(", ") || "none"}`,
-    `Failed nodes: ${state.dag?.failedNodes?.join(", ") || "none"}`,
-    `Malformed nodes: ${state.dag?.malformedNodes?.join(", ") || "none"}`,
+    ...reviewDiagnosticLines(state),
     `Fallback: ${state.result?.provenance?.status === "fallback" ? (state.result.provenance.fallbackReason ?? "used") : "none"}`,
   ].join("\n");
 }

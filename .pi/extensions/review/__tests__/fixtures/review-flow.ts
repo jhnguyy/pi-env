@@ -10,6 +10,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
   DagExecutorFailed,
+  type DagSubagentRuntimeFailure,
   DagNodeStatus,
   materializeDagTextArtifact,
   publishDagSubagentTextResult,
@@ -129,7 +130,7 @@ function assignmentsFor(
   models: readonly Model<"openai-responses">[] = availableModels,
   pins: ReviewRolePins | Readonly<Record<string, string>> = {},
 ): ReviewRoleAssignments {
-  const resolved = resolvePrReviewModelPolicy(models, pins);
+  const resolved = resolvePrReviewModelPolicy(models, models, pins);
   return Object.fromEntries(
     Object.entries(resolved.assignments).map(([role, candidate]) => [
       role,
@@ -233,6 +234,7 @@ export async function runRealReviewFlow(
     };
     readonly models?: readonly Model<"openai-responses">[];
     readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
+    readonly readingPlanFailure?: DagSubagentRuntimeFailure;
     readonly reviewerOutput?: (role: string, text: string) => string;
     readonly synthesisOutput?: (dossier: ModelDossier) => string;
     readonly beforeCollection?: (artifactRoot: string, value: DagSessionReconstruction) => void;
@@ -428,21 +430,23 @@ export async function runRealReviewFlow(
     throw new Error(`Unexpected scripted node ${request.node.id}`);
   };
   const scriptedSubagent: DagEffectExecutor = (request) =>
-    Effect.tryPromise({
-      try: () => scriptedText(request),
-      catch: (error) => new DagExecutorFailed({ message: String(error), error }),
-    }).pipe(
-      Effect.flatMap((text) =>
-        publishDagSubagentTextResult(
-          artifactRoot,
-          request.runId,
-          request.node.id,
-          request.attemptId,
-          (request.node.executor.payload as any).output.name,
-          text,
-        ),
-      ),
-    );
+    request.node.id === "reading-plan" && options.readingPlanFailure
+      ? Effect.fail(options.readingPlanFailure)
+      : Effect.tryPromise({
+          try: () => scriptedText(request),
+          catch: (error) => new DagExecutorFailed({ message: String(error), error }),
+        }).pipe(
+          Effect.flatMap((text) =>
+            publishDagSubagentTextResult(
+              artifactRoot,
+              request.runId,
+              request.node.id,
+              request.attemptId,
+              (request.node.executor.payload as any).output.name,
+              text,
+            ),
+          ),
+        );
   const registry = {
     lookup: (kind: DagExecutorKind, key: string) =>
       Effect.succeed(

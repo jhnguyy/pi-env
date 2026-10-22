@@ -440,7 +440,9 @@ export interface ReviewState {
     };
     synthesisReference?: ReviewArtifactReference;
     failedNodes?: string[];
+    blockedNodes?: string[];
     malformedNodes?: string[];
+    failure?: { nodeId: string; message: string; sessionFile?: string };
     error?: string;
     recoveredFromProcessLoss?: boolean;
   };
@@ -451,6 +453,7 @@ export interface ReviewState {
     reviewersSucceeded: number;
     reviewersFailed: number;
     reviewersMalformed: number;
+    reviewersBlocked?: number;
     findings: number;
     anchoredFindings: number;
     evidence?: {

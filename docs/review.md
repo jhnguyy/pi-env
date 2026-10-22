@@ -15,11 +15,11 @@ Within one parent session, a create request for the same pull request and pinned
 
 ## Review and inspection
 
-GitHub access uses `gh`. The review uses models in Pi's available model registry; model annotations do not restrict review eligibility. One available model can fill every role. Optional `prReview.roleModels` entries can pin individual roles to available models. Unavailable pins fail validation.
+GitHub access uses `gh`. Review models must be in both the parent session's scoped models and Pi's authenticated available model registry. Configure `/scoped-models` and provider login before creating a review. An empty scope fails closed. Model annotations do not grant eligibility. Default role allocation follows scoped-model order, not alphabetical registry order. One eligible model can fill every role. Optional `prReview.roleModels` pins cannot bypass scope or authentication. Availability does not guarantee provider quota or successful inference.
 
 A review pins the pull request head, base, changed-file manifest, and diff before the agents read evidence. The extension prepares a managed worktree at the reviewed head. It limits and verifies evidence from that snapshot. Review children cannot use unrestricted filesystem, shell, or network tools. Focused reviewers receive admitted evidence, not filesystem tools.
 
-The review records its reading plan, coverage, reviewer results, findings, and provenance. Failed or malformed reviewers and missing evidence degrade coverage. Invalid synthesis falls back to admitted raw findings without silently dropping them. An invalid diff anchor remains an unanchored finding. These outcomes do not prove that a finding is correct.
+The review records its reading plan, coverage, reviewer results, findings, and provenance. Failed runs distinguish failed nodes from blocked dependencies and expose the initiating error and child transcript when available. An incomplete run is not a clean assessment. Failed or malformed reviewers and missing evidence degrade coverage. Invalid synthesis falls back to admitted raw findings without silently dropping them. An invalid diff anchor remains an unanchored finding. These outcomes do not prove that a finding is correct.
 
 Use these commands to inspect local reviews:
 

@@ -1,9 +1,5 @@
 import { getSupportedThinkingLevels, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
-import {
-  FocusedReviewRoles,
-  ReviewRoles,
-  type ReviewRole,
-} from "./review-topology";
+import { FocusedReviewRoles, ReviewRoles, type ReviewRole } from "./review-topology";
 
 export type ReviewRolePins = Partial<Record<ReviewRole, string>>;
 
@@ -47,9 +43,6 @@ function highestReasoning(model: ReviewModel): ThinkingLevel | undefined {
   }
   return undefined;
 }
-function compare(left: ReviewModelCandidate, right: ReviewModelCandidate): number {
-  return left.fqid < right.fqid ? -1 : left.fqid > right.fqid ? 1 : 0;
-}
 function assignment(
   role: ReviewRole,
   candidate: ReviewModelCandidate,
@@ -60,23 +53,33 @@ function assignment(
 
 export function resolvePrReviewModelPolicy(
   availableModels: readonly ReviewModel[],
+  scopedModels: readonly Pick<ReviewModel, "provider" | "id">[],
   pins: ReviewRolePins | Readonly<Record<string, string>> = {},
 ): ReviewModelPolicySuccess {
   for (const role of Object.keys(pins)) {
     if (!ReviewRoles.some((known) => known === role))
       throw new ReviewModelPolicyError("invalid_pin", `Unknown PR review role pin: ${role}.`);
   }
-  if (availableModels.length === 0)
-    throw new ReviewModelPolicyError("no_available_models", "No models are available for PR review.");
-  const availableRoster = availableModels
-    .map((model) => ({
-      provider: model.provider,
-      model: model.id,
-      fqid: fqid(model),
-      reasoning: highestReasoning(model),
-      contextWindow: model.contextWindow,
-    }))
-    .sort(compare);
+  const authenticatedById = new Map(availableModels.map((model) => [fqid(model), model]));
+  const availableRoster = [...new Set(scopedModels.map(fqid))].flatMap((id) => {
+    const model = authenticatedById.get(id);
+    return model
+      ? [
+          {
+            provider: model.provider,
+            model: model.id,
+            fqid: id,
+            reasoning: highestReasoning(model),
+            contextWindow: model.contextWindow,
+          },
+        ]
+      : [];
+  });
+  if (availableRoster.length === 0)
+    throw new ReviewModelPolicyError(
+      "no_available_models",
+      "No authenticated scoped models are available for PR review. Configure /scoped-models and provider login.",
+    );
   const availableByFqid = new Map(availableRoster.map((candidate) => [candidate.fqid, candidate]));
   for (const role of ReviewRoles) {
     const pin = pins[role];
@@ -84,7 +87,7 @@ export function resolvePrReviewModelPolicy(
     if (!availableByFqid.has(pin))
       throw new ReviewModelPolicyError(
         "invalid_pin",
-        `Pinned role ${role} references unavailable model ${pin}.`,
+        `Pinned role ${role} references model ${pin} outside the authenticated scoped models.`,
       );
   }
   const assignments = {} as Record<ReviewRole, ReviewModelAssignment>;
@@ -94,7 +97,10 @@ export function resolvePrReviewModelPolicy(
       ? availableByFqid.get(pin)
       : availableRoster[fallbackIndex % availableRoster.length];
     if (!candidate)
-      throw new ReviewModelPolicyError("no_available_models", "No model is available for PR review.");
+      throw new ReviewModelPolicyError(
+        "no_available_models",
+        "No model is available for PR review.",
+      );
     return assignment(role, candidate, pin !== undefined);
   };
   assignments["reading-plan"] = choose("reading-plan", 0);

@@ -358,6 +358,12 @@ describe("DAG-backed pull request review runner", () => {
     expect(saved.at(-1)?.dag).toMatchObject({ status: "failed" });
     expect(saved.at(-1)?.dag?.rawResultReferences).toHaveLength(6);
     expect(saved.at(-1)?.dag?.malformedNodes).toHaveLength(6);
+    expect(saved.at(-1)?.plan?.files.map((file) => file.path)).toEqual(["a.ts"]);
+    expect(saved.at(-1)?.metrics).toMatchObject({
+      reviewersFailed: 0,
+      reviewersMalformed: 6,
+      reviewersBlocked: 0,
+    });
     expect(modelDossier?.succeeded).toEqual([]);
     expect(modelDossier?.malformed).toHaveLength(6);
     expect(modelDossier?.verifiedReferences).toHaveLength(6);
