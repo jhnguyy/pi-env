@@ -28,8 +28,9 @@ type Case = {
 
 // Launch Pi with the real Node binary and a minimal environment. Toolchain shims on PATH
 // would otherwise run Pi as a child process, so the pane process would not be Pi.
-const piEnv: Record<string, string> = { TERM: "xterm-256color" };
-for (const key of ["HOME", "PATH", "USER", "LANG", "TMPDIR"]) {
+// The C locale also exercises tmux's non-UTF-8 output on UTF-8 development hosts.
+const piEnv: Record<string, string> = { TERM: "xterm-256color", LANG: "C" };
+for (const key of ["HOME", "PATH", "USER", "TMPDIR"]) {
   const value = process.env[key];
   if (value !== undefined) piEnv[key] = value;
 }
@@ -78,13 +79,14 @@ describeE2E("session-manager in real tmux", () => {
     const format = (value: string) => tmux("display-message", "-p", "-t", target, value);
     const screen = () => tmux("capture-pane", "-p", "-t", target);
     const window = () => {
-      const [panePid, dead, sessionId, ownerPid, name] = format(
-        "#{pane_pid}\t#{pane_dead}\t#{@pi_session_id}\t#{@pi_session_pid}\t#{window_name}",
-      ).split("\t");
+      // Non-UTF-8 tmux clients replace tabs with underscores. Only the name can contain pipes.
+      const [panePid, dead, sessionId, ownerPid, ...name] = format(
+        "#{pane_pid}|#{pane_dead}|#{@pi_session_id}|#{@pi_session_pid}|#{window_name}",
+      ).split("|");
       return {
         sessionId,
         ownerPid,
-        name,
+        name: name.join("|"),
         panePid,
         dead,
         automaticRename: option("automatic-rename") || "inherited",
@@ -605,13 +607,13 @@ describeE2E("session-manager in real tmux", () => {
       await check(
         "explicit name",
         {
-          boundName: "quiet pine; $(touch nope)",
-          releasedName: "quiet pine; $(touch nope)",
+          boundName: "quiet | pine; $(touch nope)",
+          releasedName: "quiet | pine; $(touch nope)",
           sessionId: "",
           noShellExecution: true,
         },
         async () => {
-          const name = "quiet pine; $(touch nope)";
+          const name = "quiet | pine; $(touch nope)";
           respawn("--name", name);
           const state = await bound("", name);
           signalPi("SIGTERM");
