@@ -52,6 +52,7 @@ import {
   type DeckReference,
 } from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
+import type { ReviewRoleAssignments } from "./review-graph";
 import { createDiffIndex } from "./diff-index";
 import { applyDecision, selectedFindings, isDegraded } from "./decision";
 import { guidedWalkthrough, walkthroughSummary } from "./walkthrough";
@@ -639,7 +640,7 @@ async function createReviewAttempt(
   let stage: PreparationStage = "dag-service";
   let registration: DagRuntimeServiceRegistration;
   let deck: ReturnType<typeof buildReviewDeck>;
-  let assignments: Record<string, { model: string; reasoning?: string }>;
+  let assignments: ReviewRoleAssignments & NonNullable<ReviewState["roleAssignments"]>;
   try {
     const currentRegistration = coordinator.dagRegistration;
     if (
@@ -675,32 +676,24 @@ async function createReviewAttempt(
       testRangeRefs: ranges.testRangeRefs,
       omissions: ranges.omissions,
     });
-    state = {
-      ...state,
-      deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
-      roleAssignments: Object.fromEntries(
-        Object.entries(policy.assignments).map(([role, assignment]) => [
-          role,
-          {
-            model: assignment.fqid,
-            provider: assignment.provider,
-            ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
-            pinned: assignment.pinned,
-            contextWindow: assignment.contextWindow,
-          },
-        ]),
-      ),
-    };
+    // Policy supplies every role; fromEntries cannot retain its closed key set.
     assignments = Object.fromEntries(
       Object.entries(policy.assignments).map(([role, assignment]) => [
         role,
         {
           model: assignment.fqid,
+          provider: assignment.provider,
           ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
+          pinned: assignment.pinned,
           contextWindow: assignment.contextWindow,
         },
       ]),
-    );
+    ) as typeof assignments;
+    state = {
+      ...state,
+      deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
+      roleAssignments: assignments,
+    };
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
     await assertActivePreparationScope(pi, state, coordinatorScope);
@@ -719,7 +712,7 @@ async function createReviewAttempt(
       ctx,
       signal,
       service: registration.service,
-      assignments: assignments as any,
+      assignments,
       deckPath: deck.path,
       state,
       save: (next) => {

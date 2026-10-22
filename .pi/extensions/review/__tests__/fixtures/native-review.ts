@@ -32,7 +32,15 @@ interface NativeReviewOptions {
 }
 
 /** Own native sessions and their synthetic evidence, not scenario assertions or DAG execution. */
-export function createNativeReviewFixture(context: TestContext, options: NativeReviewOptions) {
+export function createNativeReviewFixture(
+  context: TestContext,
+  options: NativeReviewOptions,
+  dependencies: {
+    readonly removeDirectory?: typeof rm;
+    readonly writeEvidence?: typeof writeFile;
+  } = {},
+) {
+  const { removeDirectory = rm, writeEvidence = writeFile } = dependencies;
   // reviewRepo's teardown is registered first, so sessions settle before its Git directory is removed.
   const repo = reviewRepo("a.ts", "export const value = 1;\n");
   const root = mkdtempSync(join(tmpdir(), "public-native-review-"));
@@ -73,9 +81,14 @@ export function createNativeReviewFixture(context: TestContext, options: NativeR
     await settle(() => session?.dispose());
     context.signal.removeEventListener("abort", requestAbort);
     vi.unstubAllEnvs();
-    const failed = context.task.result?.state === "fail" || failures.length > 0;
-    if (failed) await settle(() => cp(repo.root, join(root, "git-fixture"), { recursive: true }));
-    const evidence = {
+    const testFailed = context.task.result?.state === "fail";
+    if (!testFailed && failures.length === 0)
+      await settle(() => removeDirectory(root, { recursive: true, force: true }));
+    if (testFailed || failures.length > 0) {
+      await settle(() => mkdir(root, { recursive: true }));
+      await settle(() => cp(repo.root, join(root, "git-fixture"), { recursive: true }));
+    }
+    const evidence = () => ({
       scenario: context.task.name,
       input: {
         scope: options.scopedProviders,
@@ -84,27 +97,33 @@ export function createNativeReviewFixture(context: TestContext, options: NativeR
       },
       expected: options.expected,
       actual: { state: latestState(), children },
-      verdict: failed ? "failed" : "passed",
+      verdict: testFailed || failures.length > 0 ? "failed" : "passed",
       aborted: context.signal.aborted,
       errors: context.task.result?.errors?.map((error) => error.message),
       cleanupErrors: failures.map((error) => (error instanceof Error ? error.message : error)),
-      retainedEvidence: failed ? root : undefined,
+      retainedEvidence: testFailed || failures.length > 0 ? root : undefined,
       reproduce:
         "nub run test:vitest .pi/extensions/review/__tests__/public-native.integration.test.ts",
-    };
-    await settle(() => writeFile(join(root, "evidence.json"), JSON.stringify(evidence, null, 2)));
+    });
+    if (testFailed || failures.length > 0)
+      await settle(() =>
+        writeEvidence(join(root, "evidence.json"), JSON.stringify(evidence(), null, 2)),
+      );
+    const finalEvidence = evidence();
     console.info(
       JSON.stringify({
-        ...evidence,
+        ...finalEvidence,
         actual: {
-          status: evidence.actual.state?.dag?.status ?? evidence.actual.state?.preparation?.stage,
-          error: evidence.actual.state?.dag?.error ?? evidence.actual.state?.preparation?.message,
-          children: evidence.actual.children,
+          status:
+            finalEvidence.actual.state?.dag?.status ??
+            finalEvidence.actual.state?.preparation?.stage,
+          error:
+            finalEvidence.actual.state?.dag?.error ??
+            finalEvidence.actual.state?.preparation?.message,
+          children: finalEvidence.actual.children,
         },
       }),
     );
-    if (!failed && failures.length === 0)
-      await settle(() => rm(root, { recursive: true, force: true }));
     if (failures.length)
       throw new AggregateError(failures, `Native review fixture cleanup failed. Evidence: ${root}`);
   });
