@@ -15,6 +15,7 @@
     ".pi/extensions/notes",
     ".pi/extensions/review",
     ".pi/extensions/session-manager",
+    ".pi/extensions/share",
     ".pi/extensions/subagent"
   ],
   "type": "module",
@@ -76,7 +77,8 @@
     "@opentelemetry/sdk-logs": "0.220.0",
     "@opentelemetry/sdk-metrics": "2.9.0",
     "@opentelemetry/sdk-trace-node": "2.9.0",
-    "effect": "4.0.5"
+    "effect": "4.0.5",
+    "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",
@@ -137,6 +139,7 @@
       ".pi/extensions/notes",
       ".pi/extensions/review",
       ".pi/extensions/session-manager",
+      ".pi/extensions/share",
       ".pi/extensions/subagent"
     ],
     "skills": [

@@ -2,8 +2,10 @@
  * @module _shared/settings
  * @purpose Shared Effect seam for pi settings.json files.
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
+import lockfile from "proper-lockfile";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
 
@@ -122,6 +124,32 @@ export function readSettingsBlock(key: string, cwd = process.cwd(), env: Setting
 
 export function decodeSettingsBlockSync<S extends Schema.Constraint & { readonly DecodingServices: never }>(key: string, schema: S, cwd = process.cwd(), env: SettingsEnv = defaultSettingsEnv): S["Type"] {
   return Effect.runSync(decodeSettingsBlockEffect(key, schema, cwd, env));
+}
+
+export function updateGlobalSettingsBlockEffect(key: string, patch: SettingsBlock, env: SettingsEnv = defaultSettingsEnv): Effect.Effect<void, SettingsError> {
+  const path = env.globalSettingsPath();
+  const failure = (cause: unknown) => new SettingsReadError({ source: SettingsSource.Global, path, cause });
+  return Effect.scoped(Effect.gen(function* () {
+    yield* Effect.acquireRelease(
+      Effect.try({ try: () => {
+        mkdirSync(dirname(path), { recursive: true });
+        return lockfile.lockSync(path, { realpath: false });
+      }, catch: failure }),
+      (release) => Effect.try({ try: release, catch: failure }).pipe(Effect.orDie),
+    );
+    const layer = yield* readSettingsDocumentEffect(path, SettingsSource.Global, env);
+    if (key in layer.document && !isObject(layer.document[key])) {
+      return yield* new SettingsDecodeError({ source: SettingsSource.Global, path, key, cause: layer.document[key] });
+    }
+    yield* Effect.try({ try: () => {
+      const temporary = `${path}.${randomUUID()}.tmp`;
+      const document = { ...layer.document, [key]: { ...objectAt(layer.document, key), ...patch } };
+      try {
+        writeFileSync(temporary, `${JSON.stringify(document, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+        renameSync(temporary, path);
+      } finally { rmSync(temporary, { force: true }); }
+    }, catch: failure });
+  }));
 }
 
 function objectAt(root: SettingsBlock, key: string): SettingsBlock {
