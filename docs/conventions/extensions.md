@@ -49,7 +49,7 @@ Overlay order is global then project with shallow replacement only. `readSetting
 
 Schema decoding should happen once at the consumer boundary with `decodeSettingsBlockEffect`/`decodeSettingsBlockSync` or a snapshot decode helper. Block schema failures are overlay errors that include the block `key` and both participating paths. JSON or root failures remain exact-source local errors. Compatibility sync wrappers may throw these typed errors. Let them reach existing rendering boundaries.
 
-Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Pi owns model availability and native model-selection settings. Subagents advertise the complete available registry roster. Model annotations are descriptive selection guidance, not approval tags or delegation permissions. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
+Agent settings use Effect Schema for `modelAnnotations`, `workTracker` (`repos` and `protectedBranches`), and `extensions`. Pi owns model availability and native model-selection settings. [Subagents](../subagents.md) own their advertised model roster. Model annotations are descriptive selection guidance, not approval tags or delegation permissions. The subagent extension decodes its `subagent` settings block at the consumer boundary. Required reads return typed settings errors. Optional reads return `null` only when both files are missing. They continue to recover to `null` on malformed or invalid settings for subagent and work-tracker behavior while using a single snapshot load.
 
 ## Native tool registration
 
@@ -66,6 +66,8 @@ registerContractTool(pi, {
   },
 });
 ```
+
+Declare `parameters` as one top-level object. Some provider adapters, including Pi's Anthropic adapter, send only top-level `properties` and `required`, so a top-level union reaches the model as an empty object. Check per-action combinations at execution, as the [notes contract](../../.pi/extensions/notes/contract.ts) does.
 
 The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
