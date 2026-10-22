@@ -80,15 +80,20 @@ describe("changed-code quality workflow", { timeout: 30_000 }, () => {
     expect(`${result.stdout}${result.stderr}`).toContain("new file.ts");
   });
 
-  it("does not scan unchanged complex files for empty and ignored-only diffs", async ({
+  it("does not scan unchanged complex files for an empty diff", ({ qualityWorkspace }) => {
+    const result = run(qualityWorkspace);
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  });
+
+  it("does not scan unchanged complex files for an ignored-only diff", async ({
     qualityWorkspace,
   }) => {
-    const empty = run(qualityWorkspace);
-    expect(empty.status, `${empty.stdout}\n${empty.stderr}`).toBe(0);
-
     await writeFile(join(qualityWorkspace, "src/ignored.test.ts"), complexSource);
-    const ignored = run(qualityWorkspace);
-    expect(ignored.status, `${ignored.stdout}\n${ignored.stderr}`).toBe(0);
+
+    const result = run(qualityWorkspace);
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
   });
 
   it("accepts changes selected only by sensor exclusions", async ({ qualityWorkspace }) => {
