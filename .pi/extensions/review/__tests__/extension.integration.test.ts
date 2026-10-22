@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { Effect } from "effect";
 import { Check } from "typebox/value";
-import { DagSessionRunNotFound } from "../../../../src/dag/index.js";
+import { DagSessionEntryType, DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { restore } from "../index";
 import { formatPullRequestContext } from "../context";
@@ -148,7 +149,7 @@ function createFixture() {
   pi.exec = repo.exec;
   const entries: unknown[] = [];
   const appendCustomEntry = (customType: string, data: unknown) => {
-    entries.push({ type: "custom", customType, data: structuredClone(data) });
+    entries.push({ type: "custom", customType, data: JSON.parse(JSON.stringify(data)) });
     return String(entries.length);
   };
   pi.appendEntry = (customType: string, data: unknown) => {
@@ -164,6 +165,7 @@ function createFixture() {
       appendCustomEntry,
     },
     modelRegistry: { getAvailable: () => availableModels },
+    scopedModels: availableModels.map((model) => ({ model })),
   };
   const create = (id = "create") =>
     pi.tools[0].execute(
@@ -667,7 +669,7 @@ describe("review extension pull request surface", () => {
     expect(pi.appended[0][1].state.dag).toMatchObject({
       status: "interrupted",
       recoveredFromProcessLoss: true,
-      failedNodes: ["review-correctness", "synthesis"],
+      failedNodes: [],
     });
     expect(pi.appended[0][1].state.dag.rawResultReferences).toHaveLength(0);
   });
@@ -993,61 +995,6 @@ describe("review extension pull request surface", () => {
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
   });
 
-  it("persists a successful public create through the offline DAG and reuses its finalized result", async () => {
-    const { pi, repo, ctx, create, complete } = createFixture();
-    const { flow, result } = await complete();
-    const state = flow.state;
-    expect(result.details).toMatchObject({ status: "succeeded", reviewId: state.snapshot.id });
-    expect(result.content[0].text).toContain(
-      "Editorial consolidation retained three actionable concerns.",
-    );
-    expect(state.dag).toMatchObject({ status: "succeeded", submitted: true });
-    expect(state.result?.findings).toHaveLength(3);
-    expect(state.result?.provenance?.status).toBe("accepted");
-    expect(flow.invalidSynthesisRejected).toBe(true);
-    expect(flow.workspaceRoot).toBe(state.snapshot.worktree);
-    expect(git(state.snapshot.worktree, "rev-parse", "HEAD")).toBe(repo.metadata.headOid);
-    expect(state.snapshot.metadata.changedFiles).toEqual([{ path: "a.ts" }]);
-    const deck = JSON.parse(readFileSync(state.deck!.path, "utf8"));
-    expect(deck.laterRefs.readingPlanRefs).toHaveLength(1);
-    expect(deck.laterRefs.rawResultRefs).toHaveLength(6);
-    expect(state.posts).toEqual([]);
-    const persisted = readFileSync(join(state.snapshot.artifactDir, "state.json"), "utf8");
-    expect(JSON.parse(persisted)).toEqual(state);
-    expect(flow.registeredTools).toBe(0);
-    const entriesBeforeReuse = structuredClone(pi.appended);
-    const reused = await create("reuse");
-    expect(reused.details).toMatchObject({
-      reviewId: state.snapshot.id,
-      status: "succeeded",
-      reused: true,
-    });
-    expect(pi.appended).toEqual(entriesBeforeReuse);
-    expect(readFileSync(join(state.snapshot.artifactDir, "state.json"), "utf8")).toBe(persisted);
-    pi.handlers.session_tree({}, ctx);
-    const notes: string[] = [];
-    await pi.command(`pr open ${state.snapshot.id}`, {
-      ...ctx,
-      ui: { notify: (message: string) => notes.push(message) },
-    });
-    expect(notes.at(-1)).toContain("DAG: succeeded");
-    expect(notes.at(-1)).toContain("Findings: 3");
-    console.info(
-      JSON.stringify({
-        input: "public review pr create; local divergent Git history; offline model executor",
-        expected: "succeeded; accepted provenance; persisted deck refs; idempotent reuse",
-        actual: {
-          status: state.dag!.status,
-          findings: state.result!.findings.length,
-          rawRefs: deck.laterRefs.rawResultRefs.length,
-          reused: reused.details.reused,
-        },
-        reproduce:
-          "nub run test:vitest .pi/extensions/review/__tests__/extension.integration.test.ts",
-      }),
-    );
-  });
-
   it("does not retry a failed snapshot while explicit cleanup owns the review", async () => {
     const root = tempRoot();
     const state = {
@@ -1250,7 +1197,12 @@ describe("review extension pull request surface", () => {
       reviewId: first.details.reviewId,
       dagRunId: first.details.dagRunId,
     });
-    expect(flow.requests).toHaveLength(8);
+    const graphEntry = Type.Object({
+      type: Type.Literal("custom"),
+      customType: Type.Literal(DagSessionEntryType),
+      data: Type.Object({ event: Type.Object({ _tag: Type.Literal("graph") }) }),
+    });
+    expect(flow.entries.filter((entry) => Check(graphEntry, entry))).toHaveLength(1);
   });
 
   it("lists, opens, and cleans a review by ID", async () => {

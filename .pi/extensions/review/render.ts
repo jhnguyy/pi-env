@@ -17,7 +17,28 @@ import {
   ReviewerNodes,
   SynthesisNode,
 } from "./review-topology";
-import type { PrReviewParams } from "./schema";
+import type { PrReviewParams, ReviewState } from "./schema";
+
+export function reviewDiagnosticLines(state: ReviewState): string[] {
+  if (!state.dag) return [];
+  const dag = state.dag;
+  const groups = [
+    ["Failed", dag.failedNodes ?? []],
+    ["Blocked", dag.blockedNodes ?? []],
+    ["Malformed", dag.malformedNodes ?? []],
+  ] as const;
+  return [
+    ...groups.map(([label, nodes]) => `${label} nodes: ${nodes.join(", ") || "none"}`),
+    ...(dag.error ? [`Error: ${dag.error}`] : []),
+    ...(dag.failure?.sessionFile ? [`Child session: ${dag.failure.sessionFile}`] : []),
+  ];
+}
+
+export function reviewMetricsLine(metrics: ReviewState["metrics"]): string {
+  if (!metrics) return "Metrics: unavailable.";
+  const usage = metrics.usage;
+  return `Metrics: ${Math.round(metrics.durationMs)}ms; deck ${metrics.deckBytes}B; results ${metrics.reviewerOutputBytes}B; reviewers ${metrics.reviewersSucceeded} succeeded/${metrics.reviewersFailed} failed/${metrics.reviewersMalformed} malformed/${metrics.reviewersBlocked ?? 0} blocked; anchors ${metrics.anchoredFindings}/${metrics.findings}; usage ${usage?.turns ?? 0} turns, ${usage?.input ?? 0} input, ${usage?.output ?? 0} output, ${usage?.cacheRead ?? 0} cache read, cost ${usage?.cost ?? 0}.`;
+}
 
 interface ReviewUsageDetails {
   readonly cost: number;
@@ -235,30 +256,21 @@ function renderReviewTerminal(
     ...(details.reviewId ? [`  ${theme.fg("dim", details.reviewId)}`] : []),
   ];
 
-  if (options.expanded) {
-    const fullVerdict =
-      verdict ?? (terminalCannotProduceVerdict(details.status) ? "unavailable" : undefined);
-    const detailed = toolResultText(result);
-    return new Text(
-      [
-        header,
-        ...(fullVerdict ? [`  verdict: ${fullVerdict}`] : []),
-        ...metadata,
-        ...(detailed ? [theme.fg("muted", "─── details ───"), detailed] : []),
-      ].join("\n"),
-      0,
-      0,
-    );
-  }
-
-  const compactVerdict = verdict
-    ? shortDescription(verdict, { oneLine: true })
-    : terminalCannotProduceVerdict(details.status)
-      ? "unavailable"
-      : undefined;
-  return new WidthBoundedText(
-    [header, ...(compactVerdict ? [`  verdict: ${compactVerdict}`] : []), ...metadata].join("\n"),
-  );
+  const unavailable = terminalCannotProduceVerdict(details.status) ? "unavailable" : undefined;
+  const displayedVerdict = options.expanded
+    ? (verdict ?? unavailable)
+    : verdict
+      ? shortDescription(verdict, { oneLine: true })
+      : unavailable;
+  const lines = [
+    header,
+    ...(displayedVerdict ? [`  verdict: ${displayedVerdict}`] : []),
+    ...metadata,
+  ];
+  if (!options.expanded) return new WidthBoundedText(lines.join("\n"));
+  const detailed = toolResultText(result);
+  if (detailed) lines.push(theme.fg("muted", "─── details ───"), detailed);
+  return new Text(lines.join("\n"), 0, 0);
 }
 
 export function renderReviewCall(args: PrReviewParams, theme: ToolRenderTheme): Component {

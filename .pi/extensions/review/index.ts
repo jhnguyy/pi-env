@@ -17,7 +17,10 @@ import {
   type DagRuntimeServiceRegistration,
 } from "../_shared/dag-runtime-service";
 import { txt } from "../_shared/result";
-import { loadSettingsSnapshotEffect, decodeSettingsBlockFromSnapshotEffect } from "../_shared/settings";
+import {
+  loadSettingsSnapshotEffect,
+  decodeSettingsBlockFromSnapshotEffect,
+} from "../_shared/settings";
 import { registerPublicTool } from "../_shared/tool-render";
 import {
   Disclosure,
@@ -49,6 +52,7 @@ import {
   type DeckReference,
 } from "./deck";
 import { resolvePrReviewModelPolicy } from "./model-policy";
+import type { ReviewRoleAssignments } from "./review-graph";
 import { createDiffIndex } from "./diff-index";
 import { applyDecision, selectedFindings, isDegraded } from "./decision";
 import { guidedWalkthrough, walkthroughSummary } from "./walkthrough";
@@ -63,7 +67,12 @@ import {
   type ReviewDagProgress,
 } from "./review-dag-runner";
 import { readVerifiedRawFinding } from "./reviewer-dossier";
-import { renderReviewCall, renderReviewResult } from "./render";
+import {
+  renderReviewCall,
+  renderReviewResult,
+  reviewDiagnosticLines,
+  reviewMetricsLine,
+} from "./render";
 import { ReviewCommand, PrReviewParamsSchema, type PrReviewParams } from "./schema";
 import {
   currentRemoteHead,
@@ -264,18 +273,15 @@ function summarizeResult(s: ReviewState): string {
         (f) =>
           `${f.id}: ${f.severity}/${f.impact} ${f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "unanchored"} - ${f.problem}`,
       )
-      .join("\n") || "No findings.";
+      .join("\n") || (s.result ? "No findings." : "Review incomplete; no assessment produced.");
   return bound(
     [
       `PR review ${s.snapshot.id}`,
       `DAG status: ${s.dag?.status ?? "failed"}`,
       `Verdict: ${s.result?.verdict ?? "failed"}`,
-      `Failed nodes: ${s.dag?.failedNodes?.join(", ") || "none"}`,
-      `Malformed nodes: ${s.dag?.malformedNodes?.join(", ") || "none"}`,
+      ...reviewDiagnosticLines(s),
       `Findings: ${findings.length}`,
-      s.metrics
-        ? `Metrics: ${Math.round(s.metrics.durationMs)}ms; deck ${s.metrics.deckBytes}B; results ${s.metrics.reviewerOutputBytes}B; reviewers ${s.metrics.reviewersSucceeded} succeeded/${s.metrics.reviewersFailed} failed/${s.metrics.reviewersMalformed} malformed; anchors ${s.metrics.anchoredFindings}/${s.metrics.findings}; usage ${s.metrics.usage?.turns ?? 0} turns, ${s.metrics.usage?.input ?? 0} input, ${s.metrics.usage?.output ?? 0} output, ${s.metrics.usage?.cacheRead ?? 0} cache read, cost ${s.metrics.usage?.cost ?? 0}.`
-        : "Metrics: unavailable.",
+      reviewMetricsLine(s.metrics),
       index,
     ].join("\n"),
   );
@@ -332,42 +338,80 @@ function selectedRangeRefs(snapshot: ReviewState["snapshot"]): {
 }
 type PreparationStage = NonNullable<ReviewState["preparation"]>["stage"];
 
+function preparationActionResult(
+  state: ReviewState,
+  failure: NonNullable<ReviewState["preparation"]>,
+  reused: boolean,
+): ReviewActionResult {
+  const measured =
+    failure.actual !== undefined && failure.limit !== undefined
+      ? ` Actual: ${failure.actual}. Limit: ${failure.limit}.`
+      : "";
+  return {
+    content: [
+      txt(
+        `Review ${state.snapshot.id} failed during ${failure.stage}: ${failure.code}. ${failure.message}${measured} Worktree cleaned: ${failure.worktreeCleaned ? "yes" : "no"}. Next: /review pr open ${state.snapshot.id}`,
+      ),
+    ],
+    isError: true,
+    details: {
+      status: "failed",
+      reviewId: state.snapshot.id,
+      headOid: state.snapshot.metadata.headOid,
+      stage: failure.stage,
+      failureCode: failure.code,
+      error: failure.message,
+      actual: failure.actual,
+      limit: failure.limit,
+      command: failure.command,
+      stdout: failure.stdout,
+      stderr: failure.stderr,
+      worktreeCleaned: failure.worktreeCleaned,
+      nextAction: `/review pr walkthrough ${state.snapshot.id}`,
+      reused,
+    },
+  };
+}
+
+function reviewResultDetails(state: ReviewState, reused: boolean): ReviewActionResult["details"] {
+  const {
+    status,
+    runId,
+    error,
+    failedNodes,
+    blockedNodes,
+    malformedNodes,
+    failure,
+    rawResultReferences,
+  } = state.dag ?? {};
+  const { coverage, verdict, findings } = state.result ?? {};
+  return {
+    status: status ?? "prepared",
+    reviewId: state.snapshot.id,
+    dagRunId: runId,
+    dagStatus: status,
+    error,
+    failedNodes: failedNodes ?? [],
+    blockedNodes: blockedNodes ?? [],
+    malformedNodes: malformedNodes ?? [],
+    failure,
+    metrics: state.metrics,
+    coverage,
+    selectedFindingIds: state.selectedFindingIds,
+    decisions: state.decisions,
+    verdict,
+    findings: findings ?? [],
+    rawResultReferences: rawResultReferences ?? [],
+    nextAction: `/review pr walkthrough ${state.snapshot.id}`,
+    reused,
+  };
+}
+
 export function reviewActionResult(state: ReviewState, reused = false): ReviewActionResult {
-  if (state.preparation?.status === "failed") {
-    const failure = state.preparation;
-    const measured =
-      failure.actual !== undefined && failure.limit !== undefined
-        ? ` Actual: ${failure.actual}. Limit: ${failure.limit}.`
-        : "";
-    return {
-      content: [
-        txt(
-          `Review ${state.snapshot.id} failed during ${failure.stage}: ${failure.code}. ${failure.message}${measured} Worktree cleaned: ${failure.worktreeCleaned ? "yes" : "no"}. Next: /review pr open ${state.snapshot.id}`,
-        ),
-      ],
-      isError: true,
-      details: {
-        status: "failed",
-        reviewId: state.snapshot.id,
-        headOid: state.snapshot.metadata.headOid,
-        stage: failure.stage,
-        failureCode: failure.code,
-        error: failure.message,
-        actual: failure.actual,
-        limit: failure.limit,
-        command: failure.command,
-        stdout: failure.stdout,
-        stderr: failure.stderr,
-        worktreeCleaned: failure.worktreeCleaned,
-        nextAction: `/review pr walkthrough ${state.snapshot.id}`,
-        reused,
-      },
-    };
-  }
-  const dagFailed =
-    state.dag?.status === "failed" ||
-    state.dag?.status === "cancelled" ||
-    state.dag?.status === "interrupted";
+  if (state.preparation?.status === "failed")
+    return preparationActionResult(state, state.preparation, reused);
+  const dagFailed = ["failed", "cancelled", "interrupted"].includes(state.dag?.status ?? "");
+  const usage = reused ? undefined : nestedReviewUsage(state);
   return {
     content: [
       txt(
@@ -375,25 +419,8 @@ export function reviewActionResult(state: ReviewState, reused = false): ReviewAc
       ),
     ],
     ...(dagFailed ? { isError: true } : {}),
-    ...(!reused && nestedReviewUsage(state) ? { usage: nestedReviewUsage(state) } : {}),
-    details: {
-      status: state.dag?.status ?? "prepared",
-      reviewId: state.snapshot.id,
-      dagRunId: state.dag?.runId,
-      dagStatus: state.dag?.status,
-      error: state.dag?.error,
-      failedNodes: state.dag?.failedNodes ?? [],
-      malformedNodes: state.dag?.malformedNodes ?? [],
-      metrics: state.metrics,
-      coverage: state.result?.coverage,
-      selectedFindingIds: state.selectedFindingIds,
-      decisions: state.decisions,
-      verdict: state.result?.verdict,
-      findings: state.result?.findings ?? [],
-      rawResultReferences: state.dag?.rawResultReferences ?? [],
-      nextAction: `/review pr walkthrough ${state.snapshot.id}`,
-      reused,
-    },
+    ...(usage ? { usage } : {}),
+    details: reviewResultDetails(state, reused),
   };
 }
 
@@ -510,6 +537,50 @@ function preparationFailure(
   };
 }
 
+function attachReviewResultReferences(
+  state: ReviewState,
+  snapshot: ReviewState["snapshot"],
+  terminalDag: NonNullable<ReviewState["dag"]>,
+): ReviewState {
+  try {
+    const updated = updateReviewDeckLaterRefs({
+      snapshot,
+      readingPlanRefs: terminalDag.readingPlanReference
+        ? [
+            {
+              kind: "reading-plan",
+              id: "reading-plan",
+              uri: terminalDag.readingPlanReference.path,
+              digest: terminalDag.readingPlanReference.digest,
+              bytes: terminalDag.readingPlanReference.bytes,
+              producerNodeId: terminalDag.readingPlanReference.producerNodeId,
+              outputName: terminalDag.readingPlanReference.outputName,
+            },
+          ]
+        : [],
+      rawResultRefs: terminalDag.rawResultReferences.map((reference, index) => ({
+        kind: "raw-result",
+        id: `raw-result-${index + 1}`,
+        uri: reference.path,
+        digest: reference.digest,
+        bytes: reference.bytes,
+        producerNodeId: reference.producerNodeId,
+        outputName: reference.outputName,
+      })),
+    });
+    return { ...state, deck: { path: updated.path, digest: updated.digest, bytes: updated.bytes } };
+  } catch (cause) {
+    return {
+      ...state,
+      dag: {
+        ...terminalDag,
+        status: terminalDag.status === "succeeded" ? "degraded" : terminalDag.status,
+        error: `Review result references were not added to the deck: ${cause instanceof Error ? cause.message : String(cause)}`,
+      },
+    };
+  }
+}
+
 async function createReviewAttempt(
   pi: ExtensionAPI,
   metadata: ReviewMetadata,
@@ -569,7 +640,7 @@ async function createReviewAttempt(
   let stage: PreparationStage = "dag-service";
   let registration: DagRuntimeServiceRegistration;
   let deck: ReturnType<typeof buildReviewDeck>;
-  let assignments: Record<string, { model: string; reasoning?: string }>;
+  let assignments: ReviewRoleAssignments & NonNullable<ReviewState["roleAssignments"]>;
   try {
     const currentRegistration = coordinator.dagRegistration;
     if (
@@ -587,6 +658,7 @@ async function createReviewAttempt(
     stage = "model-policy";
     const policy = resolvePrReviewModelPolicy(
       ctx.modelRegistry.getAvailable(),
+      ctx.scopedModels.map(({ model }) => model),
       reviewSettings.roleModels ?? {},
     );
     stage = "range-selection";
@@ -604,32 +676,24 @@ async function createReviewAttempt(
       testRangeRefs: ranges.testRangeRefs,
       omissions: ranges.omissions,
     });
-    state = {
-      ...state,
-      deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
-      roleAssignments: Object.fromEntries(
-        Object.entries(policy.assignments).map(([role, assignment]) => [
-          role,
-          {
-            model: assignment.fqid,
-            provider: assignment.provider,
-            ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
-            pinned: assignment.pinned,
-            contextWindow: assignment.contextWindow,
-          },
-        ]),
-      ),
-    };
+    // Policy supplies every role; fromEntries cannot retain its closed key set.
     assignments = Object.fromEntries(
       Object.entries(policy.assignments).map(([role, assignment]) => [
         role,
         {
           model: assignment.fqid,
+          provider: assignment.provider,
           ...(assignment.reasoning ? { reasoning: assignment.reasoning } : {}),
+          pinned: assignment.pinned,
           contextWindow: assignment.contextWindow,
         },
       ]),
-    );
+    ) as typeof assignments;
+    state = {
+      ...state,
+      deck: { path: deck.path, digest: deck.digest, bytes: deck.bytes },
+      roleAssignments: assignments,
+    };
     saveState(pi, state, coordinatorScope);
   } catch (cause) {
     await assertActivePreparationScope(pi, state, coordinatorScope);
@@ -648,7 +712,7 @@ async function createReviewAttempt(
       ctx,
       signal,
       service: registration.service,
-      assignments: assignments as any,
+      assignments,
       deckPath: deck.path,
       state,
       save: (next) => {
@@ -673,46 +737,7 @@ async function createReviewAttempt(
   const terminalDag = state.dag;
   if (terminalDag) {
     await assertActivePreparationScope(pi, state, coordinatorScope);
-    try {
-      const updated = updateReviewDeckLaterRefs({
-        snapshot,
-        readingPlanRefs: terminalDag.readingPlanReference
-          ? [
-              {
-                kind: "reading-plan",
-                id: "reading-plan",
-                uri: terminalDag.readingPlanReference.path,
-                digest: terminalDag.readingPlanReference.digest,
-                bytes: terminalDag.readingPlanReference.bytes,
-                producerNodeId: terminalDag.readingPlanReference.producerNodeId,
-                outputName: terminalDag.readingPlanReference.outputName,
-              },
-            ]
-          : [],
-        rawResultRefs: terminalDag.rawResultReferences.map((reference, index) => ({
-          kind: "raw-result",
-          id: `raw-result-${index + 1}`,
-          uri: reference.path,
-          digest: reference.digest,
-          bytes: reference.bytes,
-          producerNodeId: reference.producerNodeId,
-          outputName: reference.outputName,
-        })),
-      });
-      state = {
-        ...state,
-        deck: { path: updated.path, digest: updated.digest, bytes: updated.bytes },
-      };
-    } catch (cause) {
-      state = {
-        ...state,
-        dag: {
-          ...terminalDag,
-          status: terminalDag.status === "succeeded" ? "degraded" : terminalDag.status,
-          error: `Review result references were not added to the deck: ${cause instanceof Error ? cause.message : String(cause)}`,
-        },
-      };
-    }
+    state = attachReviewResultReferences(state, snapshot, terminalDag);
     saveState(pi, state, coordinatorScope);
   }
   return reviewActionResult(state);
@@ -922,8 +947,7 @@ function renderStatus(): string {
       : "",
     s.preparation ? `Worktree cleaned: ${s.preparation.worktreeCleaned ? "yes" : "no"}` : "",
     `Plan: ${s.plan ? "submitted" : "pending"}`,
-    s.dag?.failedNodes?.length ? `Failed nodes: ${s.dag.failedNodes.join(", ")}` : "",
-    s.dag?.malformedNodes?.length ? `Malformed nodes: ${s.dag.malformedNodes.join(", ")}` : "",
+    ...reviewDiagnosticLines(s),
     `Findings: ${s.result?.findings.length ?? 0}`,
     s.metrics
       ? `Evidence: ${Math.round(s.metrics.durationMs)}ms, deck ${s.metrics.deckBytes}B, results ${s.metrics.reviewerOutputBytes}B, ${s.metrics.reviewersSucceeded} reviewers succeeded`
@@ -935,7 +959,8 @@ function renderStatus(): string {
 }
 function renderFindings(): string {
   const s = coordinator.latestState();
-  if (!s?.result) return "No findings.";
+  if (!s) return "No active PR review.";
+  if (!s.result) return "Review incomplete; no assessment produced.";
   const selected = new Set(selectedFindings(s).map((finding) => finding.id));
   return (
     s.result.findings
@@ -1178,11 +1203,15 @@ function contentHashFor(s: ReviewState, event: ReviewEventValue): string {
   );
 }
 
+function degradedCoverageWarning(state: ReviewState): string {
+  const { coverage, provenance } = state.result ?? {};
+  const omissions = state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? [];
+  return `WARNING: degraded coverage. Failed: ${coverage?.failed.join(", ") || "none"}; malformed: ${coverage?.malformed.join(", ") || "none"}; omissions: ${omissions.join(", ") || "none"}; fallback: ${provenance?.status === "fallback" ? "yes" : "no"}.`;
+}
+
 function postingConfirmation(state: ReviewState, event: ReviewEventValue): string {
   const selected = selectedFindings(state);
-  const coverage = isDegraded(state)
-    ? `WARNING: degraded coverage. Failed: ${state.result?.coverage?.failed.join(", ") || "none"}; malformed: ${state.result?.coverage?.malformed.join(", ") || "none"}; omissions: ${(state.dag?.evidenceCoverage?.omissions ?? state.plan?.evidenceOmissions ?? []).join(", ") || "none"}; fallback: ${state.result?.provenance?.status === "fallback" ? "yes" : "no"}.`
-    : "Coverage: complete.";
+  const coverage = isDegraded(state) ? degradedCoverageWarning(state) : "Coverage: complete.";
   const preface = bound((state.preface ?? "").trim(), 500) || "(none)";
   return bound(
     `${coverage}
@@ -1293,16 +1322,19 @@ export async function postReview(
       : "The review was accepted remotely, but the review changed before completion was recorded.";
   }
 
-  async function execute(): Promise<string> {
-    let state = await preflight("posting queue");
-    if (typeof state === "string") return state;
+  function previousPostingAttempt(state: ReviewState): PostAttempt | string | undefined {
     const posted = state.posts.find(
       (post) => post.contentHash === contentHash && post.status === "posted",
     );
     if (posted) return `Review already posted (${posted.reviewId ?? posted.id}).`;
-    let attempt = state.posts.find(
-      (post) => post.contentHash === contentHash && post.status !== "posted",
-    );
+    return state.posts.find((post) => post.contentHash === contentHash && post.status !== "posted");
+  }
+
+  async function execute(): Promise<string> {
+    let state = await preflight("posting queue");
+    if (typeof state === "string") return state;
+    let attempt = previousPostingAttempt(state);
+    if (typeof attempt === "string") return attempt;
     if (attempt) {
       const prior = await reconcile(state, attempt);
       if (prior) return `Existing review found for marker; not posting duplicate (${prior}).`;

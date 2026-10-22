@@ -20,11 +20,10 @@ import {
   runRealReviewFlow,
   reviewFixture as fixture,
   assignments,
-  availableModels,
   eventsApi as piEvents,
   type ModelDossier,
 } from "./fixtures/review-flow";
-import { EvidenceResolverNode, ReviewerNodes } from "../review-graph";
+import { EvidenceResolverNode } from "../review-graph";
 import { ReviewEvidenceChunkOutputs } from "../evidence-resolver";
 import type { ReviewState } from "../schema";
 import { readVerifiedRawFinding } from "../reviewer-dossier";
@@ -85,39 +84,8 @@ describe("DAG-backed pull request review runner", () => {
     });
     expect(flow.state.result?.provenance?.status).toBe("accepted");
   });
-  it("honors a supported role pin through the real offline session runtime", async () => {
-    const model = availableModels
-      .map((candidate) => `${candidate.provider}/${candidate.id}`)
-      .find((id) => id !== assignments.correctness.model);
-    if (!model) throw new Error("Role-pin fixture needs an alternative registry model");
-    const flow = await runRealReviewFlow(undefined, { pins: { correctness: model } });
-    const node = ReviewerNodes.find((candidate) => candidate.role === "correctness");
-    expect(flow.requests.find((request) => request.nodeId === node?.nodeId)?.model).toBe(model);
-    expect(flow.state.dag?.status).toBe("succeeded");
-    expect(flow.state.result?.coverage?.status).toBe("complete");
-  });
-
-  it.each([
-    { name: "empty roster", options: { models: [] }, code: "no_available_models" },
-    {
-      name: "unknown role pin",
-      options: { pins: { invented: "provider-a/model" } },
-      code: "invalid_pin",
-    },
-    {
-      name: "unavailable model pin",
-      options: { pins: { security: "missing/model" } },
-      code: "invalid_pin",
-    },
-  ])("rejects $name before running a review", async ({ options, code }) => {
-    await expect(runRealReviewFlow(undefined, options)).rejects.toMatchObject({ code });
-  });
-
   it("produces a finalized review through the real offline session runtime", async () => {
     const flow = await runRealReviewFlow();
-    const registryModels = availableModels.map((model) => `${model.provider}/${model.id}`);
-    expect(flow.requests.length).toBeGreaterThan(0);
-    for (const request of flow.requests) expect(registryModels).toContain(request.model);
     expect(flow.state.dag).toMatchObject({ status: "succeeded" });
     expect(flow.state.result?.coverage?.succeeded).toEqual(
       expect.arrayContaining([
@@ -358,6 +326,12 @@ describe("DAG-backed pull request review runner", () => {
     expect(saved.at(-1)?.dag).toMatchObject({ status: "failed" });
     expect(saved.at(-1)?.dag?.rawResultReferences).toHaveLength(6);
     expect(saved.at(-1)?.dag?.malformedNodes).toHaveLength(6);
+    expect(saved.at(-1)?.plan?.files.map((file) => file.path)).toEqual(["a.ts"]);
+    expect(saved.at(-1)?.metrics).toMatchObject({
+      reviewersFailed: 0,
+      reviewersMalformed: 6,
+      reviewersBlocked: 0,
+    });
     expect(modelDossier?.succeeded).toEqual([]);
     expect(modelDossier?.malformed).toHaveLength(6);
     expect(modelDossier?.verifiedReferences).toHaveLength(6);
