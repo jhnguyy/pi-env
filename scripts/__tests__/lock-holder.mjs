@@ -1,6 +1,6 @@
-import { acquireHeavyweightLock } from "../heavyweight-lock.mjs";
+import * as HeavyweightLock from "../heavyweight-lock.mjs";
 
-const lease = await acquireHeavyweightLock({ commonDir: process.argv[2] });
+const lease = await HeavyweightLock.acquireHeavyweightLock({ commonDir: process.argv[2] });
 console.log("locked");
 if (process.argv[3] === "--hold") process.stdin.resume();
 else

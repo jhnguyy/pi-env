@@ -1,16 +1,6 @@
 import { Effect, Result } from "effect";
-import {
-  DEFAULT_KILL_GRACE_MS,
-  ProcessFailureKind,
-  resolveNodeCommand,
-  runInheritedProcess,
-} from "../src/process/platform.ts";
-
-import {
-  acquireHeavyweightLock,
-  gitCommonDir,
-  heavyweightLockTimeoutMs,
-} from "./heavyweight-lock.mjs";
+import * as Process from "../src/process/platform.ts";
+import * as HeavyweightLock from "./heavyweight-lock.mjs";
 
 const SIGNAL_EXIT_CODE = { SIGINT: 130, SIGTERM: 143 };
 
@@ -63,7 +53,7 @@ if (!script) {
   );
   const killGraceMs = positiveInteger(
     process.env.PI_ENV_TEST_KILL_GRACE_MS,
-    DEFAULT_KILL_GRACE_MS,
+    Process.DEFAULT_KILL_GRACE_MS,
     "PI_ENV_TEST_KILL_GRACE_MS",
   );
 
@@ -82,12 +72,12 @@ if (!script) {
     let lease;
     try {
       const commonDir = heavyweight
-        ? gitCommonDir(process.cwd(), { allowMissing: true })
+        ? HeavyweightLock.gitCommonDir(process.cwd(), { allowMissing: true })
         : undefined;
       if (commonDir) {
-        lease = await acquireHeavyweightLock({
+        lease = await HeavyweightLock.acquireHeavyweightLock({
           commonDir,
-          timeoutMs: heavyweightLockTimeoutMs(),
+          timeoutMs: HeavyweightLock.heavyweightLockTimeoutMs(),
           signal: controller.signal,
           onWait: (owner) =>
             console.error(
@@ -97,8 +87,8 @@ if (!script) {
       }
       const result = await Effect.runPromise(
         Effect.result(
-          runInheritedProcess(
-            externalCommand ? script : resolveNodeCommand(),
+          Process.runInheritedProcess(
+            externalCommand ? script : Process.resolveNodeCommand(),
             externalCommand ? args : [script, ...normalizeVitestWorkerArgs(script, args)],
             {
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
@@ -115,7 +105,7 @@ if (!script) {
         process.exitCode = result.success;
       } else {
         console.error(result.failure.message);
-        process.exitCode = result.failure.kind === ProcessFailureKind.Timeout ? 124 : 1;
+        process.exitCode = result.failure.kind === Process.ProcessFailureKind.Timeout ? 124 : 1;
       }
     } catch (error) {
       if (receivedSignal) {

@@ -5,12 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { expect, test } from "vitest";
-import { acquireHeavyweightLock, gitCommonDir } from "../heavyweight-lock.mjs";
+import * as HeavyweightLock from "../heavyweight-lock.mjs";
+import * as SupervisorFixture from "./fixtures/supervisor-fixture.ts";
 
 const execute = promisify(execFile);
 const repo = process.cwd();
-const runner = join(repo, "scripts/run-supervised-node.mjs");
-const workload = join(import.meta.dirname, "fixtures/heavyweight-workload.ts");
 const node = process.env.PI_ENV_NODE_BIN ?? process.execPath;
 const manifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
 const env = {
@@ -48,67 +47,29 @@ const it = test.extend({
       git(root, "commit", "-m", "baseline");
       const sibling = join(root, "sibling worktree");
       git(root, "worktree", "add", "-b", "sibling", sibling);
-      await use({ root, sibling, commonDir: gitCommonDir(root) });
+      await use({ root, sibling, commonDir: HeavyweightLock.gitCommonDir(root) });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   },
 });
 
-async function start(cwd, extraEnv = {}, args = [workload]) {
-  const child = spawn(node, [runner, "--heavyweight", ...args], {
-    cwd,
-    env: { ...env, ...extraEnv },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  let stdout = "";
-  let stderr = "";
-  let ready;
-  const started = new Promise((resolve) => {
-    ready = resolve;
-  });
-  let notifyWaiting;
-  const waiting = new Promise((resolve) => {
-    notifyWaiting = resolve;
-  });
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-    if (stdout.includes("ready\n")) ready();
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-    if (stderr.includes("Waiting for heavyweight-operation lock")) notifyWaiting();
-  });
-  const closed = new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
-  });
-  const watchdog = setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
-  closed.then(
-    () => clearTimeout(watchdog),
-    () => clearTimeout(watchdog),
+async function start(cwd, extraEnv = {}) {
+  await using startup = new AsyncDisposableStack();
+  const tree = startup.use(SupervisorFixture.processTreeFixture("heavyweight-workload.ts"));
+  const command = startup.use(
+    SupervisorFixture.startSupervisor(["--heavyweight", ...tree.args], {
+      cwd,
+      env: { ...env, ...extraEnv },
+      tree,
+    }),
   );
+  const cleanup = startup.move();
   return {
-    child,
-    closed,
-    ready: () =>
-      Promise.race([
-        started,
-        closed.then((result) => {
-          throw new Error(`Exited before readiness: ${JSON.stringify(result)}`);
-        }),
-      ]),
-    waiting: () =>
-      Promise.race([
-        waiting,
-        closed.then((result) => {
-          throw new Error(`Exited before waiting: ${JSON.stringify(result)}`);
-        }),
-      ]),
-    async [Symbol.asyncDispose]() {
-      child.kill("SIGTERM");
-      await closed;
-    },
+    ...command,
+    ready: () => command.waitForOutput("stdout", "ready\n"),
+    waiting: () => command.waitForOutput("stderr", "Waiting for heavyweight-operation lock"),
+    [Symbol.asyncDispose]: () => cleanup.disposeAsync(),
   };
 }
 
@@ -116,7 +77,7 @@ for (const name of ["typecheck", "lint:type", "test:vitest"]) {
   it(`${name} waits for a sibling worktree's lease before launching its real tool`, async ({
     workspace,
   }) => {
-    const lease = await acquireHeavyweightLock({ cwd: workspace.root, env });
+    const lease = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
     try {
       await expect(
         execute("nub", ["run", name, "--help"], { cwd: workspace.sibling, env, timeout: 12_000 }),
@@ -141,23 +102,27 @@ it("holds its lease until exit and preserves the command status", async ({ works
   await using command = await start(workspace.root);
   await command.ready();
   await expect(
-    acquireHeavyweightLock({ cwd: workspace.sibling, env, timeoutMs: 0 }),
+    HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.sibling, env, timeoutMs: 0 }),
   ).rejects.toThrow("Timed out waiting");
   command.child.stdin.end("finish\n");
-  expect(await command.closed).toMatchObject({ code: 7, signal: null });
-  const next = await acquireHeavyweightLock({ cwd: workspace.sibling, env, timeoutMs: 0 });
+  expect(await command.closed).toMatchObject({ code: 7, signal: null, watchdogFired: false });
+  const next = await HeavyweightLock.acquireHeavyweightLock({
+    cwd: workspace.sibling,
+    env,
+    timeoutMs: 0,
+  });
   await next.release();
 });
 
 it("reenters an inherited lease without releasing its owner", async ({ workspace }) => {
-  const outer = await acquireHeavyweightLock({ cwd: workspace.root, env });
+  const outer = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
   try {
     await using command = await start(workspace.sibling, {
       PI_ENV_HEAVYWEIGHT_LOCK_TOKEN: outer.token,
     });
     await command.ready();
     command.child.stdin.end("finish\n");
-    expect(await command.closed).toMatchObject({ code: 7 });
+    expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
     expect(JSON.parse(await readFile(join(outer.lockPath, "owner.json"), "utf8")).token).toBe(
       outer.token,
     );
@@ -172,14 +137,18 @@ it.runIf(process.platform !== "win32")(
     await using command = await start(workspace.root);
     await command.ready();
     command.child.kill("SIGTERM");
-    expect(await command.closed).toMatchObject({ code: 143, signal: null });
-    const next = await acquireHeavyweightLock({ cwd: workspace.sibling, env, timeoutMs: 0 });
+    expect(await command.closed).toMatchObject({ code: 143, signal: null, watchdogFired: false });
+    const next = await HeavyweightLock.acquireHeavyweightLock({
+      cwd: workspace.sibling,
+      env,
+      timeoutMs: 0,
+    });
     await next.release();
   },
 );
 
 it("starts a queued command only after its sibling releases the lease", async ({ workspace }) => {
-  const outer = await acquireHeavyweightLock({ cwd: workspace.root, env });
+  const outer = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
   try {
     await using command = await start(workspace.sibling, {
       PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS: "10000",
@@ -191,7 +160,7 @@ it("starts a queued command only after its sibling releases the lease", async ({
     await outer.release();
     await command.ready();
     command.child.stdin.end("finish\n");
-    expect(await command.closed).toMatchObject({ code: 7 });
+    expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
   } finally {
     await outer.release();
   }
@@ -200,14 +169,19 @@ it("starts a queued command only after its sibling releases the lease", async ({
 it.runIf(process.platform !== "win32")(
   "cancels a waiter without starting work or releasing the owner's lease",
   async ({ workspace }) => {
-    const outer = await acquireHeavyweightLock({ cwd: workspace.root, env });
+    const outer = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
     try {
       await using command = await start(workspace.sibling, {
         PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS: "10000",
       });
       await command.waiting();
       command.child.kill("SIGTERM");
-      expect(await command.closed).toMatchObject({ code: 143, stdout: "", signal: null });
+      expect(await command.closed).toMatchObject({
+        code: 143,
+        stdout: "",
+        signal: null,
+        watchdogFired: false,
+      });
       expect(JSON.parse(await readFile(join(outer.lockPath, "owner.json"), "utf8")).token).toBe(
         outer.token,
       );
@@ -244,7 +218,7 @@ it.runIf(process.platform !== "win32")(
       await using command = await start(workspace.sibling);
       await command.ready();
       command.child.stdin.end("finish\n");
-      expect(await command.closed).toMatchObject({ code: 7 });
+      expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
     } finally {
       holder.kill("SIGKILL");
       await closed;
@@ -259,7 +233,7 @@ it("runs a source snapshot without Git metadata", async () => {
     await using command = await start(outside);
     await command.ready();
     command.child.stdin.end("finish\n");
-    expect(await command.closed).toMatchObject({ code: 7 });
+    expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
   } finally {
     await rm(outside, { recursive: true, force: true });
   }
