@@ -1,9 +1,8 @@
 import { Result } from "effect";
-import { expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { describe, expect, it } from "vitest";
 import { buildClientRequest, buildClientRequestResult, DevToolsAction } from "../request";
 
-describeIfEnabled("dev-tools", "request builder", () => {
+describe("request builder", () => {
   const positionActions = [
     DevToolsAction.Hover,
     DevToolsAction.Definition,

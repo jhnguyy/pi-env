@@ -33,11 +33,6 @@ export function configurePiEffect(ctx) {
       mkdirSync(ctx.testUtilsDir, { recursive: true }),
     );
     yield* linkPathEffect(
-      join(ctx.repo, ".pi/extensions/__tests__/test-utils.ts"),
-      join(ctx.testUtilsDir, "test-utils.ts"),
-      "~/.pi/agent/extensions/__tests__/test-utils.ts",
-    );
-    yield* linkPathEffect(
       join(ctx.repo, ".pi/extensions/__tests__/loader.test.ts"),
       join(ctx.testUtilsDir, "loader.test.ts"),
       "~/.pi/agent/extensions/__tests__/loader.test.ts",

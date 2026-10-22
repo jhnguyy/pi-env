@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 
 // ─── Shared mock builder ──────────────────────────────────────────────────────
 
@@ -34,7 +33,7 @@ function makeCommandCaptureMock(targetCommand?: string, captureMessages?: string
 
 // ─── /review-retros ───────────────────────────────────────────────────────────
 
-describeIfEnabled("work-tracker", "/review-retros command", () => {
+describe("/review-retros command", () => {
   it("handler sends a user message mentioning default count (5)", async () => {
     const mod = await import("../index");
     const messages: string[] = [];
@@ -68,7 +67,7 @@ describeIfEnabled("work-tracker", "/review-retros command", () => {
 
 // ─── /handoff ─────────────────────────────────────────────────────────────────
 
-describeIfEnabled("work-tracker", "/handoff command", () => {
+describe("/handoff command", () => {
   it("handler queues two sendUserMessage calls (handoff + retro)", async () => {
     const mod = await import("../index");
 

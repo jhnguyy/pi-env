@@ -1,5 +1,4 @@
-import { expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { describe, expect, it } from "vitest";
 import { PiEvent } from "../../_shared/agent-tools";
 import { registerDevToolsLifecycle } from "../lifecycle";
 
@@ -25,7 +24,7 @@ function createPi() {
   };
 }
 
-describeIfEnabled("dev-tools", "dev-tools lifecycle", () => {
+describe("dev-tools lifecycle", () => {
   it("removes stale post-edit feedback from context without sending new agent-end feedback", async () => {
     const pi = createPi();
     const state = registerDevToolsLifecycle(pi as any);

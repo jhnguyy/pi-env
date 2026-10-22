@@ -8,7 +8,6 @@ import { it as effectIt } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   ClientTransportError,
   LspClient,
@@ -113,7 +112,7 @@ function waitUntil(predicate: () => boolean): Effect.Effect<void> {
   });
 }
 
-describeIfEnabled("dev-tools", "LspClient", () => {
+describe("LspClient", () => {
   let tmpDir: string;
   let socketPath: string;
   let server: Server | null;

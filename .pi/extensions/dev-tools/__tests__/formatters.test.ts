@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import "../register-actions"; // populate action registry for formatResult
 import {
   formatResult,
@@ -19,7 +18,7 @@ import type {
   SymbolsResult,
 } from "../protocol";
 
-describeIfEnabled("dev-tools", "Formatters", () => {
+describe("Formatters", () => {
   // ─── formatDiagnostics ─────────────────────────────────────────────────────
 
   describe("formatDiagnostics", () => {

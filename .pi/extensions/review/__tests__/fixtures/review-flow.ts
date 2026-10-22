@@ -24,10 +24,12 @@ import {
 } from "../../../_shared/dag-executor-registration";
 import {
   listenForDagRuntimeService,
+  registerDagRuntimeService,
+  unregisterDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../../../_shared/dag-runtime-service";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
-import { buildReviewDeck } from "../../deck";
+import { buildReviewDeck, type ReviewDeck } from "../../deck";
 import {
   reviewEvidenceResolverExecutor,
   ReviewEvidenceCoverageOutput,
@@ -223,6 +225,12 @@ export async function runRealReviewFlow(
     inspect: (signal?: AbortSignal) => Promise<any>;
   }) => Promise<void>,
   options: {
+    readonly publicCreate?: {
+      readonly root: string;
+      readonly pi: any;
+      readonly ctx: any;
+      readonly execute: () => Promise<ReviewState>;
+    };
     readonly models?: readonly Model<"openai-responses">[];
     readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
     readonly reviewerOutput?: (role: string, text: string) => string;
@@ -234,34 +242,40 @@ export async function runRealReviewFlow(
   await using cleanup = new AsyncDisposableStack();
   const requests: { nodeId: string; model: string }[] = [];
   const resolvedAssignments = assignmentsFor(options.models, options.pins);
-  const { root, artifactRoot, ctx, state: initial } = reviewFixture();
-  const { worktree, diffPath } = initial.snapshot;
+  const fixture = options.publicCreate ?? reviewFixture();
+  const { root, ctx } = fixture;
+  const initial = "state" in fixture ? fixture.state : undefined;
   const sessionDir = ctx.sessionManager.getSessionDir();
   const sessionId = ctx.sessionManager.getSessionId();
+  const artifactRoot = path.join(sessionDir, "dag-artifacts", sessionId);
   const entries: unknown[] = ctx.sessionManager.getBranch();
-  initial.decisions = {};
-  const later = `// later pinned evidence ${"x".repeat(5_200)} end-of-later-evidence`;
-  writeFileSync(
-    path.join(worktree, "a.ts"),
-    `export const value = 1;\n${"\n".repeat(18)}${later}\n`,
-  );
-  execFileSync("git", ["init", "-q"], { cwd: worktree });
-  execFileSync("git", ["config", "user.email", "review@example.test"], { cwd: worktree });
-  execFileSync("git", ["config", "user.name", "Review Test"], { cwd: worktree });
-  execFileSync("git", ["add", "a.ts"], { cwd: worktree });
-  execFileSync("git", ["commit", "-qm", "snapshot"], { cwd: worktree });
-  const headOid = execFileSync("git", ["rev-parse", "HEAD"], {
-    cwd: worktree,
-    encoding: "utf8",
-  }).trim();
-  const diff =
-    "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-export const value = 0;\n+export const value = 1;\n" +
-    `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -20 +20 @@\n-// old note\n+${later}\n`;
-  writeFileSync(diffPath, diff);
-  initial.snapshot.metadata.headOid = headOid;
-  initial.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
-  const deck = buildReviewDeck({ snapshot: initial.snapshot });
-  const pi = eventsApi();
+  let deckPath: string | undefined;
+  if (initial) {
+    const { worktree, diffPath } = initial.snapshot;
+    initial.decisions = {};
+    const later = `// later pinned evidence ${"x".repeat(5_200)} end-of-later-evidence`;
+    writeFileSync(
+      path.join(worktree, "a.ts"),
+      `export const value = 1;\n${"\n".repeat(18)}${later}\n`,
+    );
+    execFileSync("git", ["init", "-q"], { cwd: worktree });
+    execFileSync("git", ["config", "user.email", "review@example.test"], { cwd: worktree });
+    execFileSync("git", ["config", "user.name", "Review Test"], { cwd: worktree });
+    execFileSync("git", ["add", "a.ts"], { cwd: worktree });
+    execFileSync("git", ["commit", "-qm", "snapshot"], { cwd: worktree });
+    const headOid = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: worktree,
+      encoding: "utf8",
+    }).trim();
+    const diff =
+      "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-export const value = 0;\n+export const value = 1;\n" +
+      `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -20 +20 @@\n-// old note\n+${later}\n`;
+    writeFileSync(diffPath, diff);
+    initial.snapshot.metadata.headOid = headOid;
+    initial.snapshot.diffHash = createHash("sha256").update(diff).digest("hex");
+    deckPath = buildReviewDeck({ snapshot: initial.snapshot }).path;
+  }
+  const pi = options.publicCreate?.pi ?? eventsApi();
   const services: DagRuntimeServiceRegistration[] = [];
   let serviceDisposals = 0;
   let registeredTools = 0;
@@ -275,14 +289,16 @@ export async function runRealReviewFlow(
   pi.events.on("agent-tools:register", () => registeredTools++);
   pi.events.on("agent-tools:unregister", () => unregisteredTools++);
   const generation = "review-scenario";
-  const evidenceRegistration = registerDagExecutor({
-    parentSessionId: sessionId,
-    sessionGeneration: generation,
-    kind: ReviewEvidenceExecutorKind,
-    key: ReviewEvidenceResolverKey,
-    executor: reviewEvidenceResolverExecutor({ artifactRoot }),
-  });
-  cleanup.defer(() => unregisterDagExecutor(evidenceRegistration));
+  if (!options.publicCreate) {
+    const evidenceRegistration = registerDagExecutor({
+      parentSessionId: sessionId,
+      sessionGeneration: generation,
+      kind: ReviewEvidenceExecutorKind,
+      key: ReviewEvidenceResolverKey,
+      executor: reviewEvidenceResolverExecutor({ artifactRoot }),
+    });
+    cleanup.defer(() => unregisterDagExecutor(evidenceRegistration));
+  }
   let customTools: readonly ToolDefinition[] = [];
   const findTool = (prefix: string) => {
     const tool = customTools.find((candidate) => candidate.name.startsWith(prefix));
@@ -299,6 +315,22 @@ export async function runRealReviewFlow(
     const payload = request.node.executor.payload as { model: string };
     requests.push({ nodeId: request.node.id, model: payload.model });
     if (request.node.id === "reading-plan") {
+      const deckReply = await findTool("review_deck_").execute("deck", {});
+      const deck: ReviewDeck = JSON.parse(
+        deckReply.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n"),
+      );
+      const publicEvidence = deck.files.flatMap((file) =>
+        (file.diffHunks ?? []).map(([startLine, endLine]) => ({
+          kind: "diff" as const,
+          path: file.path,
+          startLine,
+          endLine,
+          purpose: "patch",
+        })),
+      );
       const submitted = await findTool("submit_review_plan_").execute("plan", {
         goal: "Change the exported value.",
         goalAssessment: "The diff changes the value.",
@@ -306,7 +338,9 @@ export async function runRealReviewFlow(
         riskReasons: [],
         cohorts: [{ label: "code", purpose: "implementation", paths: ["a.ts"] }],
         files: [{ path: "a.ts", attention: "high", role: "implementation" }],
-        evidence: [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 12, purpose: "patch" }],
+        evidence: initial
+          ? [{ kind: "diff", path: "a.ts", startLine: 1, endLine: 12, purpose: "patch" }]
+          : publicEvidence,
       });
       if (submitted.isError) throw new Error("Reading plan was rejected");
       return submitted.content
@@ -432,42 +466,54 @@ export async function runRealReviewFlow(
   let submissionState: ReviewState | undefined;
   let workspaceRoot: string | undefined;
   let reconstruction: DagSessionReconstruction;
-  const state = await runReviewDag({
-    pi,
-    ctx,
-    service: {
-      ...services[0].service,
-      submit: (graph, authority) => {
-        customTools = authority?.customTools ?? [];
-        workspaceRoot = authority?.workspaceRoot;
-        submissionState = saved.at(-1);
-        return services[0].service.submit(graph, authority);
-      },
-      reconstruct: (runId) =>
-        services[0].service.reconstruct(runId).pipe(
-          Effect.tap((value: DagSessionReconstruction) =>
-            Effect.sync(() => {
-              options.beforeCollection?.(artifactRoot, value);
-            }),
-          ),
+  const service: DagRuntimeServiceRegistration["service"] = {
+    ...services[0].service,
+    submit: (graph, authority) => {
+      customTools = authority?.customTools ?? [];
+      workspaceRoot = authority?.workspaceRoot;
+      submissionState = saved.at(-1);
+      return services[0].service.submit(graph, authority);
+    },
+    reconstruct: (runId) =>
+      services[0].service.reconstruct(runId).pipe(
+        Effect.tap((value: DagSessionReconstruction) =>
+          Effect.sync(() => {
+            options.beforeCollection?.(artifactRoot, value);
+          }),
         ),
-    },
-    assignments: resolvedAssignments,
-    deckPath: deck.path,
-    state: initial,
-    onProgress: (update) => progress.push(update),
-    save: (next) => {
-      const persisted = structuredClone(next);
-      options.onSave?.(persisted);
-      saved.push(persisted);
-      entries.push({
-        type: "custom",
-        customType: REVIEW_ENTRY_TYPE,
-        data: { reviewId: persisted.snapshot.id, state: persisted },
-      });
-    },
-  });
-  reconstruction = await Effect.runPromise(services[0].service.reconstruct(state.dag!.runId));
+      ),
+  };
+  let state: ReviewState;
+  if (options.publicCreate) {
+    const registration = registerDagRuntimeService(pi, {
+      parentSessionId: sessionId,
+      sessionGeneration: generation,
+      service,
+    });
+    cleanup.defer(() => unregisterDagRuntimeService(pi, registration));
+    state = await options.publicCreate.execute();
+  } else {
+    state = await runReviewDag({
+      pi,
+      ctx,
+      service,
+      assignments: resolvedAssignments,
+      deckPath: deckPath!,
+      state: initial!,
+      onProgress: (update) => progress.push(update),
+      save: (next) => {
+        const persisted = structuredClone(next);
+        options.onSave?.(persisted);
+        saved.push(persisted);
+        entries.push({
+          type: "custom",
+          customType: REVIEW_ENTRY_TYPE,
+          data: { reviewId: persisted.snapshot.id, state: persisted },
+        });
+      },
+    });
+  }
+  reconstruction = await Effect.runPromise(service.reconstruct(state.dag!.runId));
   await cleanup.disposeAsync();
   return {
     root,
@@ -479,7 +525,7 @@ export async function runRealReviewFlow(
     submissionState,
     workspaceRoot,
     progress,
-    rebuild: (persisted = { ...initial, dag: state.dag }) =>
+    rebuild: (persisted = { ...(initial ?? state), dag: state.dag }) =>
       reconstructReviewDagState({
         ctx,
         service: services[0].service,
