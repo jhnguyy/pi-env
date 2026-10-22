@@ -38,7 +38,7 @@ async function readOwner(lockPath) {
   }
 }
 
-function pidIsAlive(pid) {
+async function pidIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -102,15 +102,30 @@ async function tryCreateLease(lockPath, { token, pid, now, writeOwnerFile }) {
   }
 }
 
-async function recoverStaleLease(lockPath, token) {
-  const stalePath = `${lockPath}.stale-${token}`;
+async function recoverStaleLease(lockPath, token, isPidAlive) {
+  const recoveryPath = `${lockPath}.recovery`;
   try {
-    await rename(lockPath, stalePath);
-    await rm(stalePath, { recursive: true, force: true });
-    return true;
+    await mkdir(recoveryPath, { mode: 0o700 });
   } catch (error) {
-    if (error?.code !== "ENOENT" && error?.code !== "EEXIST") throw error;
+    if (error?.code !== "EEXIST") throw error;
     return false;
+  }
+  try {
+    // Another recoverer may already have replaced the observed owner with a live lease.
+    const owner = await readOwner(lockPath);
+    if (!owner || (await isPidAlive(owner.pid))) return false;
+    const stalePath = `${lockPath}.stale-${token}`;
+    try {
+      await rename(lockPath, stalePath);
+      await rm(stalePath, { recursive: true, force: true });
+      return true;
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "EEXIST") throw error;
+      return false;
+    }
+  } finally {
+    // An interrupted recoverer leaves its guard for conservative manual recovery.
+    await rm(recoveryPath, { recursive: true, force: true });
   }
 }
 
@@ -137,7 +152,12 @@ export async function acquireHeavyweightLock(options) {
     // have made the directory but not yet atomically published owner.json, so a
     // genuinely ownerless directory is left in place for manual/conservative
     // recovery instead of being stolen by time.
-    if (owner && !isPidAlive(owner.pid) && (await recoverStaleLease(lockPath, token))) continue;
+    if (
+      owner &&
+      !(await isPidAlive(owner.pid)) &&
+      (await recoverStaleLease(lockPath, token, isPidAlive))
+    )
+      continue;
 
     if (nowMs() >= deadline) {
       const holder = owner ? ` (held by pid ${owner.pid})` : "";
