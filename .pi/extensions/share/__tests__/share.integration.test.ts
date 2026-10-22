@@ -1,78 +1,6 @@
-import { execFile } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import * as nodeFiles from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
-import { SessionManager, type ExtensionAPI, type ExtensionCommandContext, type RegisteredCommand } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
-import share, { type ShareFiles } from "../index";
-
-const run = promisify(execFile);
-const piCli = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-// GitHub is the only external service replaced here. Pi performs the real HTML export.
-const privateRepository = { id: 123, private: true, permissions: { push: true } };
-
-function fixture(...repositories: unknown[]) {
-  if (repositories.length === 0) repositories.push(privateRepository);
-  let checks = 0;
-  const root = mkdtempSync(join(tmpdir(), "pi-share-test-"));
-  roots.push(root);
-  const settings = join(root, "settings.json");
-  const projectSettings = join(root, "project-settings.json");
-  writeFileSync(settings, JSON.stringify({ theme: "dark" }));
-  const session = SessionManager.create(root, join(root, "sessions"));
-  session.appendMessage({ role: "user", content: "synthetic private conversation", timestamp: Date.now() });
-  let command: RegisteredCommand | undefined;
-  const uploads: unknown[] = [];
-  const requests: string[][] = [];
-  const events: string[] = [];
-  const notices: string[] = [];
-  let prompts = 0;
-  let answer: string | undefined = "owner/private-exports";
-  let approved = true;
-  const files: ShareFiles = { ...nodeFiles };
-  const api: Partial<ExtensionAPI> = {
-    registerCommand(_name: string, value: RegisteredCommand) { command = value; },
-    async exec(binary, args, options) {
-      if (binary === "gh") {
-        requests.push(args);
-        expect(args).toContain("--hostname");
-        if (args.includes("PUT")) {
-          events.push("upload");
-          const body = JSON.parse(readFileSync(args[args.indexOf("--input") + 1], "utf8"));
-          uploads.push(body);
-          return { code: 0, stdout: JSON.stringify({ content: { html_url: "https://github.com/owner/private-exports/blob/main/sessions/export.html" } }), stderr: "", killed: false };
-        }
-        events.push("repository");
-        return { code: 0, stdout: JSON.stringify(repositories[Math.min(checks++, repositories.length - 1)]), stderr: "", killed: false };
-      }
-      events.push("export");
-      const result = await run(process.execPath, [piCli, ...args], { signal: options?.signal });
-      return { code: 0, stdout: result.stdout, stderr: result.stderr, killed: false };
-    },
-  };
-  share(api as ExtensionAPI, { globalSettingsPath: () => settings, projectSettingsPath: () => projectSettings, readFile: readFileSync }, files);
-  const ui: Partial<ExtensionCommandContext["ui"]> = {
-    input: async () => { prompts++; return answer; },
-    confirm: async () => { events.push("confirm"); return approved; },
-    notify: (text: string) => { notices.push(text); },
-  };
-  const context: Partial<ExtensionCommandContext> = {
-    cwd: root, hasUI: true, sessionManager: session,
-    waitForIdle: async () => {},
-    ui: ui as ExtensionCommandContext["ui"],
-  };
-  return { settings, projectSettings, files, uploads, requests, events, notices, get prompts() { return prompts; }, cancel() { answer = undefined; }, decline() { approved = false; }, invoke: (signal?: AbortSignal) => {
-    context.signal = signal;
-    return command!.handler("", context as ExtensionCommandContext);
-  } };
-}
+import { lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { fixture, privateRepository, roots } from "./fixture";
 
 describe("private repository share", () => {
   it("exports through Pi, saves the first repository, and reuses it", async () => {
@@ -86,6 +14,7 @@ describe("private repository share", () => {
     expect(Buffer.from(data!, "base64").toString()).toContain("synthetic private conversation");
     expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark", share: { repo: "owner/private-exports" } });
     expect(f.notices.join("\n")).toContain("https://github.com/owner/private-exports/blob/");
+    expect(f.requests.find((args) => args.includes("PUT"))?.join(" ")).toMatch(/\d{4}-\d{2}-\d{2}-synthetic-private-conversation-[a-f0-9]+\.html/);
     await f.invoke();
     expect(f.prompts).toBe(1);
     expect(f.uploads).toHaveLength(2);
@@ -110,7 +39,8 @@ describe("private repository share", () => {
   ])("does not upload when the confirmed repository changes: %j", async (changedRepository) => {
     const f = fixture(privateRepository, changedRepository);
     await f.invoke();
-    expect(f.events).toEqual(["repository", "confirm", "export", "repository"]);
+    expect(f.events.indexOf("confirm")).toBeLessThan(f.events.lastIndexOf("repository"));
+    expect(f.events.indexOf("export")).toBeLessThan(f.events.lastIndexOf("repository"));
     expect(f.uploads).toEqual([]);
     expect(f.notices.join("\n")).toContain("Share failed");
   });
@@ -157,6 +87,19 @@ describe("private repository share", () => {
     expect(f.notices.join("\n")).toContain(`Could not read project settings at ${f.projectSettings}`);
   });
 
+  it.each(["malformed", "lost"] as const)("reports committed uploads with an unusable %s response without inviting a blind retry", async (response) => {
+    const f = fixture();
+    f.github.uploadResponse = response;
+    await f.invoke();
+    expect(f.uploads).toHaveLength(1);
+    const notices = f.notices.join("\n");
+    expect(notices).toContain("owner/private-exports@main:sessions/");
+    expect(notices).toContain("/share-private list");
+    expect(notices).not.toContain("Share failed:");
+    expect(notices).not.toContain("Shared privately:");
+    expect(notices).toMatch(response === "malformed" ? /uploaded/i : /may|uncertain/i);
+  });
+
   it("warns about retained sensitive exports without reporting a successful upload as failed", async () => {
     const f = fixture();
     f.files.rm = async (path) => {
@@ -168,6 +111,18 @@ describe("private repository share", () => {
     expect(f.notices.join("\n")).toContain("Shared privately:");
     expect(f.notices.join("\n")).toContain("sensitive session data");
     expect(f.notices.join("\n")).not.toContain("Share failed:");
+  });
+
+  it.each(["upload", "delete"] as const)("warns when %s commits before cancellation interrupts the response", async (action) => {
+    const f = fixture();
+    const controller = new AbortController();
+    f.github.abortOnCommit = controller;
+    await expect(f.invoke(controller.signal, action)).rejects.toBeDefined();
+    expect(action === "upload" ? f.uploads : f.deletions).toHaveLength(1);
+    const notices = f.notices.join("\n");
+    expect(notices).toContain("owner/private-exports@main:sessions/");
+    expect(notices).toContain("/share-private list");
+    expect(notices).toMatch(/may|uncertain/i);
   });
 
   it("does not start publication when its operation is already aborted", async () => {

@@ -1,21 +1,34 @@
 # Private session sharing
 
-Use `/share-private` for private-repository uploads. Native `/share` remains unchanged: it can publish to Radius or an unlisted gist. Pi's extension API cannot reliably intercept that command.
+Use `/share-private` to upload a session, `/share-private list` to find previous uploads, and `/share-private delete` to select one for removal. Native `/share` remains unchanged: it can publish to Radius or an unlisted gist. Pi's current extension API cannot reliably intercept it.
 
-Authenticate `gh` with an account that can push to the destination GitHub.com repository. Set the default in Pi's `settings.json`, or enter `owner/repo` when `/share-private` prompts:
+Authenticate `gh` with an account that can push to the destination GitHub.com repository. Set the destination in Pi's `settings.json`, or enter `owner/repo` at the first prompt:
 
 ```json
 {
   "share": {
-    "repo": "owner/private-repository"
+    "repo": "owner/private-repository",
+    "branch": "session-shares"
   }
 }
 ```
 
-The prompt saves a global default. Project settings can override it. For a symlinked settings file, set `share.repo` in its managed source instead.
+Create the branch before using it. Omit `branch` to use the repository's default branch. The repository prompt saves a global default. Project settings can override it. For a symlinked settings file, edit its managed source instead.
 
-Before you confirm an upload, check the session and repository membership. Exports are not redacted and include tool output and all session branches. Repository visibility can change between the privacy check and upload, or after publication. If the repository becomes public, anyone can access the shared file.
+## Viewing and privacy
 
-Download the HTML from the returned GitHub file link and open it locally. Deleting a shared file does not erase its repository history.
+Before confirming an upload, check the session, branch, and repository membership. Exports are not redacted and include tool output and all session branches. Filenames use the session name or first prompt, so they can also reveal session details.
 
-See the [share command](../.pi/extensions/share/index.ts) for publication checks and limits, and the [settings boundary](../.pi/extensions/_shared/settings.ts) for configuration precedence.
+Uploads require a private repository. If Pages is enabled, its visibility must also be verifiably private. The extension does not change hosting settings. A matching branch-based private Pages source provides a browser link. Deployment may take a minute or more. Otherwise, download the HTML from the GitHub file link and open it locally.
+
+Repository and Pages settings can change between the check and upload, or after publication. Other workflows can also publish repository files. If content becomes public, anyone can access it.
+
+## Removing a share
+
+Delete removes the selected file from the configured branch. If Pages serves that branch, removal from the site requires a successful redeployment. Git history, forks, clones, caches, and downloaded copies can retain the content. A full takedown can require history rewriting or GitHub support.
+
+List and delete remain available if Pages becomes public, so you can remove exposed files. They still require a private repository and push access.
+
+After an interrupted or uncertain upload/delete, verify the named file with list or GitHub before retrying. A lost response does not mean the write failed.
+
+See the [GitHub adapter](../.pi/extensions/share/github.ts) for destination validation and listing limits, the [commands](../.pi/extensions/share/index.ts) for confirmation and export behavior, and the [settings boundary](../.pi/extensions/_shared/settings.ts) for configuration precedence.
