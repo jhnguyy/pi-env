@@ -1,10 +1,8 @@
 # Private session sharing
 
-The pi-env share extension routes terminal `/share` to `/share-private`. Use `/share-private` directly in RPC clients or when another extension replaces the editor after startup.
+Use `/share-private` for private-repository uploads. Native `/share` remains unchanged: it can publish to Radius or an unlisted gist. Pi's extension API cannot reliably intercept that command.
 
-Authenticate the GitHub CLI with an account that can push to the destination repository. The extension supports GitHub.com repositories only. It does not create repositories.
-
-Set the destination in your Pi `settings.json`:
+Authenticate `gh` with an account that can push to the destination GitHub.com repository. Set the default in Pi's `settings.json`, or enter `owner/repo` when `/share-private` prompts:
 
 ```json
 {
@@ -14,10 +12,10 @@ Set the destination in your Pi `settings.json`:
 }
 ```
 
-If no destination is configured, `/share` asks for one. It validates the repository before saving it as the global default. Project settings can override that default. Edit `share.repo` to change the destination.
+The prompt saves a global default. Project settings can override it. For a symlinked settings file, set `share.repo` in its managed source instead.
 
-Before each upload, Pi asks for confirmation. The export is not redacted. It includes session branches and tool output, which can contain sensitive information. Check the session and repository membership before you confirm.
+Before you confirm an upload, check the session and repository membership. Exports are not redacted and include tool output and all session branches. Repository visibility can change between the privacy check and upload, or after publication. If the repository becomes public, anyone can access the shared file.
 
-The result is an authenticated GitHub file link. Download the HTML file and open it locally to view the session. The extension does not use a public viewer or a gist. Each upload creates a new file, so repeated shares remain in repository history. Deleting a file does not erase its history.
+Download the HTML from the returned GitHub file link and open it locally. Deleting a shared file does not erase its repository history.
 
-See the [share command](../.pi/extensions/share/index.ts) for publication limits and the [settings boundary](../.pi/extensions/_shared/settings.ts) for configuration precedence.
+See the [share command](../.pi/extensions/share/index.ts) for publication checks and limits, and the [settings boundary](../.pi/extensions/_shared/settings.ts) for configuration precedence.

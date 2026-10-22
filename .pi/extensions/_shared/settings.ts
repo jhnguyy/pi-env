@@ -2,7 +2,7 @@
  * @module _shared/settings
  * @purpose Shared Effect seam for pi settings.json files.
  */
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -47,6 +47,12 @@ export class SettingsDecodeError extends Data.TaggedError("SettingsDecodeError")
 }> {}
 
 export type SettingsError = SettingsReadError | SettingsDecodeError;
+
+export class SettingsWriteError extends Data.TaggedError("SettingsWriteError")<{
+  readonly path: string;
+  readonly message: string;
+  readonly cause: unknown;
+}> {}
 
 const SettingsObjectSchema = Schema.Record(Schema.String, Schema.Unknown);
 
@@ -126,9 +132,9 @@ export function decodeSettingsBlockSync<S extends Schema.Constraint & { readonly
   return Effect.runSync(decodeSettingsBlockEffect(key, schema, cwd, env));
 }
 
-export function updateGlobalSettingsBlockEffect(key: string, patch: SettingsBlock, env: SettingsEnv = defaultSettingsEnv): Effect.Effect<void, SettingsError> {
+export function updateGlobalSettingsBlockEffect(key: string, patch: SettingsBlock, env: SettingsEnv = defaultSettingsEnv): Effect.Effect<void, SettingsError | SettingsWriteError> {
   const path = env.globalSettingsPath();
-  const failure = (cause: unknown) => new SettingsReadError({ source: SettingsSource.Global, path, cause });
+  const failure = (cause: unknown) => new SettingsWriteError({ path, message: `Could not update ${path}: ${cause instanceof Error ? cause.message : "settings write failed"}`, cause });
   return Effect.scoped(Effect.gen(function* () {
     yield* Effect.acquireRelease(
       Effect.try({ try: () => {
@@ -137,6 +143,11 @@ export function updateGlobalSettingsBlockEffect(key: string, patch: SettingsBloc
       }, catch: failure }),
       (release) => Effect.try({ try: release, catch: failure }).pipe(Effect.orDie),
     );
+    yield* Effect.try({ try: () => {
+      if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        throw new Error("The settings file is a symlink. Edit its managed source instead.");
+      }
+    }, catch: failure });
     const layer = yield* readSettingsDocumentEffect(path, SettingsSource.Global, env);
     if (key in layer.document && !isObject(layer.document[key])) {
       return yield* new SettingsDecodeError({ source: SettingsSource.Global, path, key, cause: layer.document[key] });

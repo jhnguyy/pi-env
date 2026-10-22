@@ -4,12 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
-import { installShareRouting } from "./editor";
-import { decodeSettingsBlockEffect, defaultSettingsEnv, type SettingsEnv, updateGlobalSettingsBlockEffect } from "../_shared/settings";
+import { decodeSettingsBlockEffect, defaultSettingsEnv, SettingsDecodeError, type SettingsEnv, SettingsReadError, SettingsWriteError, updateGlobalSettingsBlockEffect } from "../_shared/settings";
 
 const Repo = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/));
 const ShareSettings = Schema.Struct({ repo: Schema.optionalKey(Repo) });
-const Repository = Schema.Struct({ private: Schema.Boolean, permissions: Schema.Struct({ push: Schema.Boolean }) });
+const Repository = Schema.Struct({ id: Schema.Number, private: Schema.Boolean, permissions: Schema.Struct({ push: Schema.Boolean }) });
 const Upload = Schema.Struct({ content: Schema.Struct({ html_url: Schema.String }) });
 const MaxExportBytes = 10 * 1024 * 1024;
 
@@ -20,7 +19,7 @@ function io<A>(message: string, action: () => Promise<A>) {
 }
 
 function execute(pi: ExtensionAPI, ctx: ExtensionCommandContext, binary: string, args: string[]) {
-  return Effect.flatMap(io(`Could not run ${binary}. Check that it is installed and authenticated.`, () => pi.exec(binary, args, { cwd: ctx.cwd, timeout: 120_000 })), (result) =>
+  return Effect.flatMap(io(`Could not run ${binary}. Check that it is installed.`, () => pi.exec(binary, args, { cwd: ctx.cwd, timeout: 120_000 })), (result) =>
     result.code === 0 && !result.killed
       ? Effect.succeed(result.stdout)
       : Effect.fail(new ShareError({ message: `${binary} failed: ${result.stderr.trim() || `exit ${result.code}`}` })));
@@ -30,9 +29,20 @@ function json(text: string) {
   return Effect.try({ try: () => JSON.parse(text) as unknown, catch: (cause) => new ShareError({ message: "GitHub returned invalid JSON.", cause }) });
 }
 
+function inspectRepository(pi: ExtensionAPI, ctx: ExtensionCommandContext, repo: string) {
+  return Effect.gen(function* () {
+    const response = yield* execute(pi, ctx, "gh", ["api", "--hostname", "github.com", `repos/${repo}`]);
+    const repository = yield* Schema.decodeUnknownEffect(Repository)(yield* json(response));
+    if (!repository.private || !repository.permissions.push) {
+      return yield* new ShareError({ message: "The repository must be private and your GitHub account must have push access." });
+    }
+    return repository;
+  });
+}
+
 function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEnv) {
   return Effect.gen(function* () {
-    if (!ctx.hasUI) return yield* new ShareError({ message: "Run /share interactively to choose and confirm its private destination." });
+    if (!ctx.hasUI) return yield* new ShareError({ message: "Run /share-private interactively to choose and confirm its private destination." });
     yield* io("Could not wait for the session to become idle.", () => ctx.waitForIdle());
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return yield* new ShareError({ message: "This session has no saved session file to export." });
@@ -40,9 +50,7 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEn
     const input = settings.repo ?? (yield* io("Could not prompt for a repository.", () => ctx.ui.input("Private GitHub repository (saved as your default)", "owner/repo")));
     if (input === undefined) return;
     const repo = yield* Schema.decodeUnknownEffect(Repo)(input.trim());
-    const metadataText = yield* execute(pi, ctx, "gh", ["api", "--hostname", "github.com", `repos/${repo}`]);
-    const metadata = yield* Schema.decodeUnknownEffect(Repository)(yield* json(metadataText));
-    if (!metadata.private || !metadata.permissions.push) return yield* new ShareError({ message: "The repository must be private and your GitHub account must have push access." });
+    const repository = yield* inspectRepository(pi, ctx, repo);
     if (!settings.repo) {
       yield* updateGlobalSettingsBlockEffect("share", { repo }, env);
       ctx.ui.notify(`Default share repository saved: ${repo}`, "info");
@@ -62,6 +70,8 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEn
       const payload = join(directory, "upload.json");
       yield* io("Could not prepare the upload.", () => writeFile(payload, JSON.stringify({ message: "Share Pi session", content: content.toString("base64") }), { mode: 0o600 }));
       const path = `sessions/${randomUUID()}.html`;
+      const current = yield* inspectRepository(pi, ctx, repo);
+      if (current.id !== repository.id) return yield* new ShareError({ message: "The repository changed after confirmation. Run /share-private again to confirm its destination." });
       const response = yield* execute(pi, ctx, "gh", ["api", "--hostname", "github.com", "--method", "PUT", `repos/${repo}/contents/${path}`, "--input", payload]);
       const upload = yield* Schema.decodeUnknownEffect(Upload)(yield* json(response));
       ctx.ui.notify(`Shared privately: ${upload.content.html_url}\nDownload the HTML file to view the session.`, "info");
@@ -69,16 +79,20 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEn
   });
 }
 
+function failureMessage(error: unknown): string {
+  if (error instanceof SettingsReadError) return `Could not read ${error.source} settings at ${error.path}.`;
+  if (error instanceof SettingsDecodeError) return `Invalid ${error.source} settings at ${error.path}${error.key ? ` (${error.key})` : ""}.`;
+  if (error instanceof ShareError || error instanceof SettingsWriteError) return error.message;
+  return "Invalid repository name or GitHub response. Use owner/repo and check repository privacy and push access.";
+}
+
 export default function share(pi: ExtensionAPI, env: SettingsEnv = defaultSettingsEnv): void {
-  installShareRouting(pi);
-  const command = {
+  pi.registerCommand("share-private", {
     description: "Publish the session HTML to your private GitHub repository",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       await Effect.runPromise(publish(pi, ctx, env).pipe(Effect.catch((error) => Effect.sync(() => {
-        const message = error instanceof ShareError ? error.message : "Invalid share settings or GitHub response. Check share.repo (owner/repo), repository privacy, and push access.";
-        ctx.ui.notify(`Share failed: ${message}`, "error");
+        ctx.ui.notify(`Share failed: ${failureMessage(error)}`, "error");
       }))));
     },
-  };
-  pi.registerCommand("share-private", command);
+  });
 }
