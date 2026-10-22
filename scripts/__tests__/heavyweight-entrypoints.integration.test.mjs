@@ -1,14 +1,12 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import * as HeavyweightLock from "../heavyweight-lock.mjs";
+import * as ChildFixture from "./fixtures/child-process-fixture.ts";
 import * as SupervisorFixture from "./fixtures/supervisor-fixture.ts";
 
-const execute = promisify(execFile);
 const repo = process.cwd();
 const node = process.env.PI_ENV_NODE_BIN ?? process.execPath;
 const manifest = JSON.parse(await readFile(join(repo, "package.json"), "utf8"));
@@ -74,26 +72,31 @@ async function start(cwd, extraEnv = {}) {
 }
 
 for (const name of ["typecheck", "lint:type", "test:vitest"]) {
-  it(`${name} waits for a sibling worktree's lease before launching its real tool`, async ({
+  it(`${name} rejects contention and launches its real tool after release`, async ({
     workspace,
   }) => {
     const lease = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
     try {
-      await expect(
-        execute("nub", ["run", name, "--help"], { cwd: workspace.sibling, env, timeout: 12_000 }),
-      ).rejects.toMatchObject({
+      await using blocked = ChildFixture.startChild("nub", ["run", name, "--help"], {
+        cwd: workspace.sibling,
+        env,
+      });
+      expect(await blocked.closed).toMatchObject({
         code: 1,
         stdout: "",
+        error: undefined,
+        watchdogFired: false,
         stderr: expect.stringContaining("Timed out waiting for heavyweight-operation lock"),
       });
     } finally {
       await lease.release();
     }
-    const result = await execute("nub", ["run", name, "--help"], {
+    await using launched = ChildFixture.startChild("nub", ["run", name, "--help"], {
       cwd: workspace.sibling,
       env,
-      timeout: 12_000,
     });
+    const result = await launched.closed;
+    expect(result).toMatchObject({ code: 0, error: undefined, watchdogFired: false });
     expect(result.stdout.trim()).not.toBe("");
   });
 }
@@ -194,35 +197,20 @@ it.runIf(process.platform !== "win32")(
 it.runIf(process.platform !== "win32")(
   "recovers after a separate lease owner is killed",
   async ({ workspace }) => {
-    const holder = spawn(
+    await using holder = ChildFixture.startChild(
       node,
       [join(repo, "scripts/__tests__/lock-holder.mjs"), workspace.commonDir, "--hold"],
-      {
-        cwd: workspace.root,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      },
+      { cwd: workspace.root, env },
     );
-    const closed = once(holder, "close");
-    try {
-      await Promise.race([
-        once(holder.stdout, "data"),
-        closed.then(() => {
-          throw new Error("Owner exited before locking");
-        }),
-      ]);
-      holder.kill("SIGKILL");
-      await closed;
-      const ownerPath = join(workspace.commonDir, "pi-env-heavyweight-operation.lock/owner.json");
-      expect(JSON.parse(await readFile(ownerPath, "utf8")).pid).toBe(holder.pid);
-      await using command = await start(workspace.sibling);
-      await command.ready();
-      command.child.stdin.end("finish\n");
-      expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
-    } finally {
-      holder.kill("SIGKILL");
-      await closed;
-    }
+    await holder.waitForOutput("stdout", "locked\n");
+    holder.child.kill("SIGKILL");
+    expect(await holder.closed).toMatchObject({ signal: "SIGKILL", watchdogFired: false });
+    const ownerPath = join(workspace.commonDir, "pi-env-heavyweight-operation.lock/owner.json");
+    expect(JSON.parse(await readFile(ownerPath, "utf8")).pid).toBe(holder.child.pid);
+    await using command = await start(workspace.sibling);
+    await command.ready();
+    command.child.stdin.end("finish\n");
+    expect(await command.closed).toMatchObject({ code: 7, watchdogFired: false });
   },
 );
 
