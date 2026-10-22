@@ -2,7 +2,14 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Check } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
-import { applyExactEdits, createNotesContract, MAX_DETAIL_ITEMS, NOTES_ACTIONS } from "../contract";
+import {
+  applyExactEdits,
+  createNotesContract,
+  MAX_DETAIL_ITEMS,
+  NOTES_ACTIONS,
+  NOTES_PARAMETERS,
+  NOTES_VARIANTS,
+} from "../contract";
 import {
   MAX_EDIT_ITEMS,
   MAX_INDEX_BYTES,
@@ -36,31 +43,62 @@ function provider(): NotesProvider {
   };
 }
 
+// Pi validates the flat declaration; execution then requires the matching variant.
+const accepts = (value: unknown) => Check(NOTES_PARAMETERS, value) && Check(NOTES_VARIANTS, value);
+
 describe("notes tool contract", () => {
+  it("declares variant fields at the top level and enforces the variant at execution", async () => {
+    const flat: {
+      type: string;
+      anyOf?: unknown;
+      properties: Record<string, { description?: string }>;
+    } = JSON.parse(JSON.stringify(NOTES_PARAMETERS));
+    expect(flat.type).toBe("object");
+    expect(flat.anyOf).toBeUndefined();
+    const variantFields = new Set(NOTES_VARIANTS.anyOf.flatMap((variant) => Object.keys(variant.properties)));
+    expect(new Set(Object.keys(flat.properties))).toEqual(variantFields);
+    for (const field of Object.values(flat.properties)) expect(field.description).toBeTruthy();
+    expect(flat.properties.target?.description).toContain("projects read (required), projects write (required):");
+    expect(flat.properties.action?.description).toContain("worklog record:");
+
+    const fake = provider();
+    const contract = createNotesContract(fake);
+    const missingFields = { collection: "projects", action: "write", content: "# Plan", path: "projects/plan.md" };
+    expect(Check(contract.parameters, missingFields)).toBe(true);
+    await expect(contract.execute(missingFields as never, { cwd: "/repo" })).rejects.toThrow(
+      "Invalid notes projects write arguments: missing target, revision; unsupported path",
+    );
+    await expect(
+      contract.execute({ collection: "projects", action: "search" } as never, { cwd: "/repo" }),
+    ).rejects.toThrow("notes projects does not support action search; use one of: list, read, write");
+    expect(fake.write).not.toHaveBeenCalled();
+    expect(fake.search).not.toHaveBeenCalled();
+  });
+
   it("exposes one stable provider-neutral schema", () => {
     const contract = createNotesContract(provider());
     expect(contract.name).toBe("notes");
-    const variants = contract.parameters.anyOf as Array<{
-      properties: Record<string, { description?: string }>;
-    }>;
+    const variants: Array<{ properties: Record<string, { description?: string }> }> = JSON.parse(
+      JSON.stringify(NOTES_VARIANTS.anyOf),
+    );
     for (const variant of variants) {
       expect(variant.properties.collection?.description).toBeTruthy();
       expect(variant.properties.action.description).toBeTruthy();
     }
     for (const action of NOTES_ACTIONS.filter((candidate) => candidate !== "record")) {
-      expect(Check(contract.parameters, { action })).toBe(true);
+      expect(accepts({ action })).toBe(true);
     }
-    expect(Check(contract.parameters, { action: "record" })).toBe(false);
-    expect(Check(contract.parameters, {})).toBe(false);
-    expect(Check(contract.parameters, { action: "list", prefix: "any/provider/path" })).toBe(true);
-    expect(Check(contract.parameters, { action: "list", area: "wiki" })).toBe(false);
-    expect(Check(contract.parameters, { action: "search", areas: ["worklog"] })).toBe(false);
+    expect(accepts({ action: "record" })).toBe(false);
+    expect(accepts({})).toBe(false);
+    expect(accepts({ action: "list", prefix: "any/provider/path" })).toBe(true);
+    expect(accepts({ action: "list", area: "wiki" })).toBe(false);
+    expect(accepts({ action: "search", areas: ["worklog"] })).toBe(false);
     expect(
-      Check(contract.parameters, { collection: "inbox", action: "read", date: "2026-09-12" }),
+      accepts({ collection: "inbox", action: "read", date: "2026-09-12" }),
     ).toBe(true);
-    expect(Check(contract.parameters, { collection: "projects", action: "list" })).toBe(true);
+    expect(accepts({ collection: "projects", action: "list" })).toBe(true);
     expect(
-      Check(contract.parameters, {
+      accepts({
         collection: "projects",
         action: "write",
         target: "platform/roadmap.md",
@@ -68,15 +106,15 @@ describe("notes tool contract", () => {
         revision: null,
       }),
     ).toBe(true);
-    expect(Check(contract.parameters, { collection: "projects", action: "search" })).toBe(false);
+    expect(accepts({ collection: "projects", action: "search" })).toBe(false);
     expect(
-      Check(contract.parameters, { collection: "worklog", action: "record", text: "Shipped" }),
+      accepts({ collection: "worklog", action: "record", text: "Shipped" }),
     ).toBe(true);
-    expect(Check(contract.parameters, { collection: "wiki", action: "read", target: "ai" })).toBe(
+    expect(accepts({ collection: "wiki", action: "read", target: "ai" })).toBe(
       true,
     );
     expect(
-      Check(contract.parameters, {
+      accepts({
         collection: "inbox",
         action: "write",
         kind: "note",
@@ -85,22 +123,22 @@ describe("notes tool contract", () => {
       }),
     ).toBe(false);
     expect(
-      Check(contract.parameters, {
+      accepts({
         collection: "worklog",
         action: "record",
         text: "done",
         selector: "2000-01-01",
       }),
     ).toBe(false);
-    expect(Check(contract.parameters, { action: "list", limit: MAX_NOTE_COUNT + 1 })).toBe(false);
+    expect(accepts({ action: "list", limit: MAX_NOTE_COUNT + 1 })).toBe(false);
     expect(
-      Check(contract.parameters, {
+      accepts({
         action: "edit",
         edits: Array.from({ length: MAX_EDIT_ITEMS + 1 }, () => ({ oldText: "a", newText: "b" })),
       }),
     ).toBe(false);
     expect(
-      Check(contract.parameters, {
+      accepts({
         action: "delete",
         revision: "r".repeat(MAX_REVISION_LENGTH + 1),
       }),
@@ -260,7 +298,7 @@ describe("notes tool contract", () => {
     if (cursor === undefined) throw new Error("Expected a Project continuation cursor");
     expect(cursor.length).toBeGreaterThan(4_096);
     expect(
-      Check(contract.parameters, {
+      accepts({
         collection: "projects",
         action: "list",
         cursor,
@@ -273,7 +311,7 @@ describe("notes tool contract", () => {
     );
     expect(second.details.items).toEqual([expect.objectContaining({ target })]);
     expect(
-      Check(contract.parameters, {
+      accepts({
         collection: "projects",
         action: "list",
         cursor: "x".repeat(MAX_LIST_CURSOR_LENGTH + 1),
