@@ -65,6 +65,8 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
   registerPublicTool(pi, {
     name: "dev-tools",
     label: "Dev Tools",
+    exposure: "deferred",
+    namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description: description,
     promptSnippet:
       "Language-server-backed code intelligence — diagnostics, hover, definitions, " +

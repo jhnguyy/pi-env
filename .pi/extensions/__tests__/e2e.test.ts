@@ -44,7 +44,7 @@ describe("native tool workflows", () => {
       },
       expected: {
         activeBefore: ["codemode", "tool_search", "closeout", "subagent", "notes"],
-        callableBefore: ["analyze", "web_fetch", "notes", "subagent"],
+        callableBefore: ["analyze", "web_fetch", "dev-tools", "notes", "subagent"],
         notCallable: ["closeout"],
         loaded: "web_fetch through model-issued search",
         webFetches: "synthetic result from deferred codemode and activated direct calls",
@@ -107,8 +107,8 @@ describe("native tool workflows", () => {
       const callableBefore = session.getCallableToolNames();
       evidence.actual = { activeBefore, callableBefore };
       expect(activeBefore).toEqual(expect.arrayContaining(["codemode", "tool_search", "closeout", "subagent", "notes"]));
-      expect(activeBefore).not.toContain("web_fetch");
-      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "notes", "subagent"]));
+      for (const name of ["web_fetch", "dev-tools"]) expect(activeBefore).not.toContain(name);
+      expect(callableBefore).toEqual(expect.arrayContaining(["analyze", "web_fetch", "dev-tools", "notes", "subagent"]));
       for (const name of ["tool_search", "closeout"]) expect(callableBefore).not.toContain(name);
 
       const webUrl = "https://example.invalid/pi-env-fixture";
