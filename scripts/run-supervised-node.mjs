@@ -6,6 +6,12 @@ import {
   runInheritedProcess,
 } from "../src/process/platform.ts";
 
+import {
+  acquireHeavyweightLock,
+  gitCommonDir,
+  heavyweightLockTimeoutMs,
+} from "./heavyweight-lock.mjs";
+
 const SIGNAL_EXIT_CODE = { SIGINT: 130, SIGTERM: 143 };
 
 function positiveInteger(value, fallback, name) {
@@ -17,7 +23,12 @@ function positiveInteger(value, fallback, name) {
   return null;
 }
 
-const [script, ...args] = process.argv.slice(2);
+const commandArgs = process.argv.slice(2);
+const heavyweight = commandArgs[0] === "--heavyweight";
+if (heavyweight) commandArgs.shift();
+const externalCommand = commandArgs[0] === "--command";
+if (externalCommand) commandArgs.shift();
+const [script, ...args] = commandArgs;
 
 function normalizeVitestWorkerArgs(scriptPath, commandArgs) {
   if (!scriptPath.endsWith("/vitest.mjs")) return commandArgs;
@@ -40,7 +51,9 @@ function normalizeVitestWorkerArgs(scriptPath, commandArgs) {
 }
 
 if (!script) {
-  console.error("usage: scripts/run-supervised-node.mjs <script> [args...]");
+  console.error(
+    "usage: scripts/run-supervised-node.mjs [--heavyweight] [--command] <script-or-command> [args...]",
+  );
   process.exitCode = 2;
 } else {
   const timeoutMs = positiveInteger(
@@ -66,14 +79,32 @@ if (!script) {
     process.on("SIGINT", onSigint);
     process.on("SIGTERM", onSigterm);
 
+    let lease;
     try {
+      const commonDir = heavyweight
+        ? gitCommonDir(process.cwd(), { allowMissing: true })
+        : undefined;
+      if (commonDir) {
+        lease = await acquireHeavyweightLock({
+          commonDir,
+          timeoutMs: heavyweightLockTimeoutMs(),
+          signal: controller.signal,
+          onWait: (owner) =>
+            console.error(
+              `Waiting for heavyweight-operation lock${owner ? ` (held by pid ${owner.pid})` : ""}.`,
+            ),
+        });
+      }
       const result = await Effect.runPromise(
         Effect.result(
           runInheritedProcess(
-            resolveNodeCommand(),
-            [script, ...normalizeVitestWorkerArgs(script, args)],
+            externalCommand ? script : resolveNodeCommand(),
+            externalCommand ? args : [script, ...normalizeVitestWorkerArgs(script, args)],
             {
               ...(timeoutMs === undefined ? {} : { timeoutMs }),
+              ...(lease
+                ? { env: { ...process.env, PI_ENV_HEAVYWEIGHT_LOCK_TOKEN: lease.token } }
+                : {}),
               killGraceMs,
             },
           ),
@@ -93,8 +124,12 @@ if (!script) {
         throw error;
       }
     } finally {
-      process.off("SIGINT", onSigint);
-      process.off("SIGTERM", onSigterm);
+      try {
+        await lease?.release();
+      } finally {
+        process.off("SIGINT", onSigint);
+        process.off("SIGTERM", onSigterm);
+      }
     }
   }
 }

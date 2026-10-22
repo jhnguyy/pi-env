@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { withHeavyweightLock } from "./heavyweight-lock.mjs";
+import { heavyweightLockTimeoutMs, withHeavyweightLock } from "./heavyweight-lock.mjs";
 import { SAFE_VERIFICATION_PHASES } from "./verification-phases.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
@@ -8,7 +8,6 @@ if (process.argv.includes("--list")) {
   process.exit(0);
 }
 
-const timeoutMs = Number(process.env.PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS ?? 10 * 60_000);
 const exitCode = await withHeavyweightLock(
   (lease) => {
     const inheritedToken = process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
@@ -20,6 +19,6 @@ const exitCode = await withHeavyweightLock(
       else process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = inheritedToken;
     }
   },
-  { timeoutMs: Number.isFinite(timeoutMs) && timeoutMs >= 0 ? timeoutMs : 10 * 60_000 },
+  { timeoutMs: heavyweightLockTimeoutMs() },
 );
 process.exit(exitCode);

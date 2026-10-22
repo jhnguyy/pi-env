@@ -28,4 +28,6 @@ Share fixture lifecycle and evidence handling when multiple workflows need the s
 
 Use `*.integration.test.ts` or `*.integration.test.mjs` for workflows that require real process or storage lifecycles. [`vitest.config.ts`](../../vitest.config.ts) separates these from the unit portfolio. Unit tests have a five-second budget. Integration and E2E workflows have a thirty-second budget, including when the default test command runs both portfolios. Keep readiness and completion event-driven. Use explicit tighter watchdogs when the scenario needs them, and distinguish watchdog activation from the expected outcome.
 
+Standalone Vitest runs, typechecks, and type-aware lint share the `verify:safe` heavyweight lock across sibling Git worktrees. Nested commands inherit the owning lease. A waiting command reports the owner and waits up to ten minutes. Set `PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS=0` to fail immediately on contention. Non-Git source snapshots run without worktree coordination. This lock does not coordinate unrelated repositories or bound memory within one command. Use `test:safe` for a one-worker test portfolio on constrained hosts.
+
 E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
