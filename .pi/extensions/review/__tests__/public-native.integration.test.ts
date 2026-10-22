@@ -1,125 +1,38 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import {
-  createAgentSessionFromServices,
-  createAgentSessionServices,
-  SessionManager,
-  SettingsManager,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
-import { expect, it, vi } from "vitest";
-import { fileURLToPath } from "node:url";
-import { REVIEW_ENTRY_TYPE, type ReviewState } from "../core";
-import initReview from "../index";
-import { setManagedGitExecForTests } from "../snapshot";
-import initSubagent from "../../subagent/index";
-import { getSubagentRunSupervisor } from "../../subagent/control";
-import {
-  listenForDagRuntimeService,
-  type ActiveDagRuntimeService,
-} from "../../_shared/dag-runtime-service";
-import { git, reviewRepo } from "./fixtures/review-repo";
+import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { expect, it } from "vitest";
+import { git } from "./fixtures/review-repo";
+import { createNativeReviewFixture } from "./fixtures/native-review";
 import {
   ParentProvider,
   ReviewProvider,
+  SecondReviewProvider,
   SignedOutProvider,
 } from "./fixtures/native-review-provider";
 
-it("completes and reuses a scoped public review through real native children", async () => {
-  const root = await mkdtemp(join(tmpdir(), "public-native-review-"));
-  await using cleanup = new AsyncDisposableStack();
-  cleanup.defer(() => {
-    vi.unstubAllEnvs();
+const preferred = `${ReviewProvider}/faux-1`;
+const secondary = `${SecondReviewProvider}/faux-1`;
+
+it("honors authenticated scope order through native review, persistence, reuse, and reload", async (context) => {
+  const review = createNativeReviewFixture(context, {
+    scopedProviders: [SignedOutProvider, ReviewProvider, SecondReviewProvider, ReviewProvider],
+    expected:
+      "Two authenticated scoped models in scope order; complete coverage; accepted provenance; persistent reuse after reload",
   });
-  cleanup.defer(() => setManagedGitExecForTests());
-  cleanup.defer(() => rm(root, { recursive: true, force: true }));
-  const repo = reviewRepo("a.ts", "export const value = 1;\n");
-  const agentDir = join(root, "agent");
-  const cwd = join(root, "parent");
-  await mkdir(agentDir);
-  await mkdir(cwd);
-  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-  await writeFile(
-    join(agentDir, "models.json"),
-    JSON.stringify({
-      providers: {
-        [ParentProvider]: { apiKey: "synthetic-not-a-secret" },
-        [ReviewProvider]: { apiKey: "synthetic-not-a-secret" },
-      },
-    }),
+  await review.start();
+  expect(review.availableModels()).toContain(`${ParentProvider}/faux-1`);
+  expect(review.availableModels()).not.toContain(`${SignedOutProvider}/faux-1`);
+  const result = await review.create();
+  expect(result.isError).not.toBe(true);
+  expect(JSON.stringify(result.content)).toContain(
+    "Native review retained one actionable finding.",
   );
-  await writeFile(
-    join(agentDir, "settings.json"),
-    JSON.stringify({
-      extensions: [fileURLToPath(new URL("./fixtures/native-review-provider.ts", import.meta.url))],
-      defaultProvider: ParentProvider,
-      defaultModel: "faux-1",
-      defaultTools: ["read"],
-      retry: { enabled: false },
-    }),
+  expect(JSON.stringify(result.content)).toContain(
+    "The exported value violates the requested contract.",
   );
-  let runtime: ActiveDagRuntimeService | undefined;
-  const observeRuntime = (pi: ExtensionAPI) => {
-    cleanup.defer(
-      listenForDagRuntimeService(pi, (registration) => {
-        runtime = registration.service;
-      }),
-    );
-  };
-  const reviewWithLocalRemote = (pi: ExtensionAPI) => initReview({ ...pi, exec: repo.exec });
-  setManagedGitExecForTests(repo.localExec);
-  const services = await createAgentSessionServices({
-    cwd,
-    agentDir,
-    settingsManager: SettingsManager.create(cwd, agentDir, { projectTrusted: true }),
-    resourceLoaderReloadOptions: { resolveProjectTrust: async () => true },
-    resourceLoaderOptions: {
-      extensionFactories: [observeRuntime, initSubagent, reviewWithLocalRemote],
-    },
-  });
-  const parentModel = services.modelRuntime.getModel(ParentProvider, "faux-1")!;
-  const reviewModel = services.modelRuntime.getModel(ReviewProvider, "faux-1")!;
-  const signedOutModel = services.modelRuntime.getModel(SignedOutProvider, "faux-1")!;
-  const availableProviders = (await services.modelRuntime.getAvailable()).map(
-    (model) => model.provider,
-  );
-  expect(availableProviders).toEqual(expect.arrayContaining([ParentProvider, ReviewProvider]));
-  expect(availableProviders).not.toContain(SignedOutProvider);
-  const { session } = await createAgentSessionFromServices({
-    services,
-    sessionManager: SessionManager.create(cwd, join(root, "sessions")),
-    model: parentModel,
-    scopedModels: [{ model: reviewModel }, { model: signedOutModel }],
-    tools: ["review"],
-  });
-  cleanup.defer(() => session.dispose());
-  cleanup.defer(async () => {
-    await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-  });
-  cleanup.defer(() => session.abort());
-  await session.bindExtensions({ mode: "print" });
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-    void session.abort();
-  }, 20_000);
-  cleanup.defer(() => clearTimeout(timeout));
-  const latestState = () => {
-    const entries = session.sessionManager.getBranch();
-    const entry = [...entries]
-      .reverse()
-      .find((item) => item.type === "custom" && item.customType === REVIEW_ENTRY_TYPE);
-    if (entry?.type !== "custom") throw new Error("Public review did not persist state");
-    return (entry.data as { state: ReviewState }).state;
-  };
-  await session.prompt("Create the fixture pull request review. Parent-only marker.");
-  controller.signal.throwIfAborted();
-  const state = latestState();
-  expect(state.dag?.status, JSON.stringify(state)).toBe("succeeded");
-  cleanup.defer(async () => {
-    await runtime?.closeChildren?.(state.dag!.runId);
-  });
+  expect(JSON.stringify(result.content)).toContain("a.ts:1");
+  const state = review.state();
+  expect(state.dag?.status).toBe("succeeded");
   expect(state.result?.provenance?.status).toBe("accepted");
   expect(state.result?.coverage?.status).toBe("complete");
   expect(state.result?.findings).toHaveLength(1);
@@ -127,58 +40,182 @@ it("completes and reuses a scoped public review through real native children", a
     anchorValid: true,
     sourceReviewers: ["correctness"],
   });
-  expect(Object.values(state.roleAssignments!).map((role) => role.model)).toEqual(
-    Array.from({ length: 8 }, () => `${ReviewProvider}/faux-1`),
-  );
-  expect(git(state.snapshot.worktree, "rev-parse", "HEAD")).toBe(repo.metadata.headOid);
+  expect(state.roleAssignments).toMatchObject({
+    "reading-plan": { model: preferred },
+    correctness: { model: preferred },
+    intent: { model: secondary },
+    "whole-change": { model: secondary },
+    synthesis: { model: secondary },
+  });
+  expect(git(state.snapshot.worktree, "rev-parse", "HEAD")).toBe(review.headOid);
   expect(state.snapshot.metadata.changedFiles).toEqual([{ path: "a.ts" }]);
-  const persisted = await readFile(join(state.snapshot.artifactDir, "state.json"), "utf8");
+  const persisted = await review.readPersistedState();
   expect(JSON.parse(persisted)).toEqual(state);
-  const children = getSubagentRunSupervisor(session.sessionId)!.children;
-  expect(children.size).toBe(8);
-  for (const child of children.values()) {
-    const inspected = child.inspect();
-    expect(inspected.model).toBe(`${ReviewProvider}/faux-1`);
-    expect(JSON.stringify(inspected.messages)).not.toContain("Parent-only marker.");
-    expect(await readFile(child.summary().sessionFile!, "utf8")).toContain(
-      "review-fixture-request",
-    );
-    if (
-      inspected.name.startsWith("review-pr-") &&
-      !/reading-plan|synthesis/u.test(inspected.name)
-    ) {
-      expect(inspected.activeTools).toEqual([]);
-      expect(inspected.callableTools).toEqual([]);
+  const deck = JSON.parse(await readFile(state.deck!.path, "utf8"));
+  expect(deck.laterRefs.readingPlanRefs).toHaveLength(1);
+  expect(deck.laterRefs.rawResultRefs).toHaveLength(6);
+  const children = review.children();
+  expect(children).toHaveLength(8);
+  expect(new Set(children.map((child) => child.model))).toEqual(new Set([preferred, secondary]));
+  for (const child of children) {
+    expect(JSON.stringify(child.messages)).not.toContain("Parent-only marker.");
+    const output = JSON.parse(child.initialResult!.finalOutput);
+    if (output.goal) expect(child.model).toBe(preferred);
+    if (output.role === "whole-change") expect(child.model).toBe(secondary);
+    if (output.role) {
+      expect(child.activeTools).toEqual([]);
+      expect(child.callableTools).toEqual([]);
     }
   }
-  expect(session.getActiveToolNames()).toEqual(["review"]);
-  expect(session.model?.provider).toBe(ParentProvider);
+  expect(review.parentConfiguration()).toEqual({
+    model: `${ParentProvider}/faux-1`,
+    tools: ["review"],
+  });
   expect(state.posts).toEqual([]);
-  await session.prompt("Create the same fixture review again.");
-  controller.signal.throwIfAborted();
-  expect(latestState()).toEqual(state);
-  expect(children.size).toBe(8);
-  expect(await readFile(join(state.snapshot.artifactDir, "state.json"), "utf8")).toBe(persisted);
-  const results = session.messages.flatMap((message) =>
-    message.role === "toolResult" && message.toolName === "review" ? [message] : [],
+  const reused = await review.create("Create the same fixture review again.");
+  expect(reused).toMatchObject({ isError: false, details: { reused: true, status: "succeeded" } });
+  expect(review.children()).toHaveLength(8);
+  expect(await review.readPersistedState()).toBe(persisted);
+  await review.reload();
+  const restored = await review.create("Open the existing fixture review after reload.");
+  expect(restored).toMatchObject({
+    isError: false,
+    details: { reused: true, status: "succeeded" },
+  });
+  expect(JSON.stringify(restored.content)).toContain(
+    "Native review retained one actionable finding.",
   );
-  expect(results).toHaveLength(2);
-  expect(results.every((result) => !result.isError)).toBe(true);
-  expect(JSON.stringify(results)).toContain("Native review retained one actionable finding.");
-  expect(JSON.stringify(results.at(-1))).toContain('"reused":true');
-  console.info(
-    JSON.stringify({
-      input:
-        "Public create; local Git; real native children; disk-loaded scripted provider; one scoped model",
-      expected:
-        "complete coverage; accepted provenance; eight scoped children; persisted idempotent reuse",
-      actual: {
-        status: state.dag!.status,
-        findings: state.result!.findings.length,
-        children: children.size,
-      },
-      reproduce:
-        "nub run test:vitest .pi/extensions/review/__tests__/public-native.integration.test.ts",
-    }),
+  expect(JSON.stringify(restored.content)).toContain(
+    "The exported value violates the requested contract.",
   );
+  expect(review.state()).toEqual(state);
+  expect(review.children()).toHaveLength(0);
+  expect(await review.readPersistedState()).toBe(persisted);
+});
+
+it("honors an eligible role pin in the native child model", async (context) => {
+  const review = createNativeReviewFixture(context, {
+    scopedProviders: [ReviewProvider, SecondReviewProvider],
+    roleModels: { correctness: secondary },
+    expected:
+      "Correctness runs on the explicitly pinned secondary model; planner retains the first scoped model",
+  });
+  await review.start();
+  const result = await review.create();
+  expect(result.isError).not.toBe(true);
+  expect(review.state().roleAssignments).toMatchObject({
+    "reading-plan": { model: preferred, pinned: false },
+    correctness: { model: secondary, pinned: true },
+  });
+  const child = review
+    .children()
+    .find((candidate) => JSON.parse(candidate.initialResult!.finalOutput).role === "correctness");
+  expect(child?.model).toBe(secondary);
+  expect(review.state().result?.coverage?.status).toBe("complete");
+});
+
+const rejections: {
+  name: string;
+  scopedProviders: readonly string[];
+  roleModels: Record<string, string>;
+  message: string;
+}[] = [
+  {
+    name: "empty scope",
+    scopedProviders: [],
+    roleModels: {},
+    message: "No authenticated scoped models",
+  },
+  {
+    name: "signed-out-only scope",
+    scopedProviders: [SignedOutProvider],
+    roleModels: {},
+    message: "No authenticated scoped models",
+  },
+  {
+    name: "authenticated out-of-scope pin",
+    scopedProviders: [ReviewProvider],
+    roleModels: { correctness: `${ParentProvider}/faux-1` },
+    message: "outside the authenticated scoped models",
+  },
+  {
+    name: "signed-out pin",
+    scopedProviders: [ReviewProvider, SignedOutProvider],
+    roleModels: { correctness: `${SignedOutProvider}/faux-1` },
+    message: "outside the authenticated scoped models",
+  },
+  {
+    name: "unavailable pin",
+    scopedProviders: [ReviewProvider],
+    roleModels: { security: "missing/model" },
+    message: "missing/model",
+  },
+  {
+    name: "unknown role pin",
+    scopedProviders: [ReviewProvider],
+    roleModels: { invented: preferred },
+    message: "Unknown PR review role pin",
+  },
+];
+it.for(rejections)("rejects $name before review children start", async (input, context) => {
+  const review = createNativeReviewFixture(context, {
+    scopedProviders: input.scopedProviders,
+    roleModels: input.roleModels,
+    expected: `${input.message}; model-policy failure; no review children; worktree removed`,
+  });
+  await review.start();
+  const result = await review.create();
+  expect(result.isError).toBe(true);
+  expect(result.details).toMatchObject({ stage: "model-policy", status: "failed" });
+  expect(JSON.stringify(result.content)).toContain(input.message);
+  const state = review.state();
+  expect(state.dag).toBeUndefined();
+  expect(state.roleAssignments).toBeUndefined();
+  expect(state.preparation?.worktreeCleaned).toBe(true);
+  expect(existsSync(state.snapshot.worktree)).toBe(false);
+  expect(review.children()).toHaveLength(0);
+});
+
+it("preserves a real planner provider error and failed-result reuse after reload", async (context) => {
+  const review = createNativeReviewFixture(context, {
+    scopedProviders: [ReviewProvider],
+    provider: { plannerError: "Provider quota exhausted" },
+    expected:
+      "Planner provider error and real child transcript are preserved; eight nodes blocked; zero failed reviewers; reload does not rerun",
+  });
+  await review.start();
+  const result = await review.create();
+  expect(result.isError).toBe(true);
+  const content = JSON.stringify(result.content);
+  expect(content).toContain("reading-plan: Provider quota exhausted");
+  expect(content).toContain("Review incomplete; no assessment produced.");
+  expect(content).not.toContain("No findings.");
+  expect(result.details).toMatchObject({
+    failedNodes: ["reading-plan"],
+    metrics: {
+      reviewersSucceeded: 0,
+      reviewersFailed: 0,
+      reviewersMalformed: 0,
+      reviewersBlocked: 6,
+    },
+  });
+  const state = review.state();
+  expect(state.dag?.blockedNodes).toHaveLength(8);
+  expect(state.dag?.failure).toMatchObject({
+    nodeId: "reading-plan",
+    message: "Provider quota exhausted",
+  });
+  const sessionFile = state.dag?.failure?.sessionFile;
+  if (!sessionFile) throw new Error("Missing planner transcript reference");
+  expect(content).toContain(sessionFile);
+  expect(await readFile(sessionFile, "utf8")).toContain("Provider quota exhausted");
+  expect(review.children()).toHaveLength(1);
+  const persisted = await review.readPersistedState();
+  await review.reload();
+  const reused = await review.create("Open the failed fixture review after reload.");
+  expect(reused).toMatchObject({ isError: true, details: { reused: true } });
+  expect(JSON.stringify(reused.content)).toContain("Provider quota exhausted");
+  expect(review.state()).toEqual(state);
+  expect(await review.readPersistedState()).toBe(persisted);
+  expect(review.children()).toHaveLength(0);
 });

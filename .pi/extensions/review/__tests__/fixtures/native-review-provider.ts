@@ -14,6 +14,11 @@ import type { reviewerDossierContext } from "../../reviewer-dossier";
 export const ParentProvider = "a-parent-fixture";
 export const SignedOutProvider = "b-signed-out-fixture";
 export const ReviewProvider = "z-review-fixture";
+export const SecondReviewProvider = "y-review-fixture";
+
+export interface NativeReviewProviderOptions {
+  readonly plannerError?: string;
+}
 
 function text(message: TranscriptContext["messages"][number]): string {
   return typeof message.content === "string"
@@ -25,9 +30,13 @@ function text(message: TranscriptContext["messages"][number]): string {
 }
 
 /** Script inference from real tool results. Never read or manufacture review artifacts. */
-export default function nativeReviewProvider(pi: ExtensionAPI) {
+export default function nativeReviewProvider(
+  pi: ExtensionAPI,
+  options: NativeReviewProviderOptions = {},
+) {
   const parent = fauxProvider({ provider: ParentProvider });
   const reviewer = fauxProvider({ provider: ReviewProvider });
+  const secondReviewer = fauxProvider({ provider: SecondReviewProvider });
   const signedOut = fauxProvider({ provider: SignedOutProvider });
   const respond: FauxResponseFactory = (context, _options, _state, model) => {
     pi.appendEntry("review-fixture-request", { provider: model.provider });
@@ -40,17 +49,19 @@ export default function nativeReviewProvider(pi: ExtensionAPI) {
     const call = (prefix: string, args: ToolCall["arguments"] = {}) =>
       fauxAssistantMessage(fauxToolCall(tool(prefix), args), { stopReason: "toolUse" });
     const last = context.messages.at(-1);
-    if (last?.role === "toolResult" && last.isError)
-      throw new Error(`Native review tool failed: ${text(last)}`);
     if (model.provider === ParentProvider) {
       if (last?.role === "toolResult" && last.toolName === "review")
-        return fauxAssistantMessage("Public review completed.");
+        return fauxAssistantMessage(
+          last.isError ? "Public review failure reported." : "Public review completed.",
+        );
       return call("review", {
         command: "pr",
         action: "create",
         url: "https://github.com/acme/widgets/pull/7",
       });
     }
+    if (last?.role === "toolResult" && last.isError)
+      throw new Error(`Native review tool failed: ${text(last)}`);
     if (last?.role === "toolResult") {
       if (last.toolName.startsWith("submit_review_")) return fauxAssistantMessage(text(last));
       if (last.toolName.startsWith("review_deck_")) {
@@ -103,7 +114,9 @@ export default function nativeReviewProvider(pi: ExtensionAPI) {
       throw new Error(`Unexpected native review tool result: ${last.toolName}`);
     }
     if (tools.some((candidate) => candidate.name.startsWith("submit_review_plan_")))
-      return call("review_deck_");
+      return options.plannerError
+        ? fauxAssistantMessage("", { stopReason: "error", errorMessage: options.plannerError })
+        : call("review_deck_");
     if (tools.some((candidate) => candidate.name.startsWith("submit_review_synthesis_")))
       return call("review_result_refs_");
     const user = [...context.messages].reverse().find((message) => message.role === "user");
@@ -142,7 +155,7 @@ export default function nativeReviewProvider(pi: ExtensionAPI) {
       }),
     );
   };
-  for (const provider of [parent, reviewer]) {
+  for (const provider of [parent, reviewer, secondReviewer]) {
     provider.setResponses(Array.from({ length: 16 }, () => respond));
     pi.registerProvider(provider.provider);
   }

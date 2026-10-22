@@ -10,7 +10,6 @@ import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
   DagExecutorFailed,
-  type DagSubagentRuntimeFailure,
   DagNodeStatus,
   materializeDagTextArtifact,
   publishDagSubagentTextResult,
@@ -38,7 +37,7 @@ import {
   ReviewEvidenceResolverKey,
 } from "../../evidence-resolver";
 import { EvidenceResolverNode, type ReviewRoleAssignments } from "../../review-graph";
-import { resolvePrReviewModelPolicy, type ReviewRolePins } from "../../model-policy";
+import { resolvePrReviewModelPolicy } from "../../model-policy";
 import { reconstructReviewDagState, runReviewDag } from "../../review-dag-runner";
 import type { reviewerDossierContext } from "../../reviewer-dossier";
 
@@ -126,11 +125,8 @@ export const availableModels = ["provider-a", "provider-b"].map(
   }),
 );
 
-function assignmentsFor(
-  models: readonly Model<"openai-responses">[] = availableModels,
-  pins: ReviewRolePins | Readonly<Record<string, string>> = {},
-): ReviewRoleAssignments {
-  const resolved = resolvePrReviewModelPolicy(models, models, pins);
+function assignmentsFor(): ReviewRoleAssignments {
+  const resolved = resolvePrReviewModelPolicy(availableModels, availableModels);
   return Object.fromEntries(
     Object.entries(resolved.assignments).map(([role, candidate]) => [
       role,
@@ -207,17 +203,12 @@ export interface RealReviewFlow {
   readonly registeredTools: number;
   readonly unregisteredTools: number;
   readonly serviceDisposals: number;
-  readonly requests: readonly {
-    readonly nodeId: string;
-    readonly model: string;
-  }[];
 }
 
 /**
- * Isolation gap: no credentialed native model session in this portfolio. Keep the real
- * DAG, artifact IO, evidence resolver and native tool definitions; script only the
- * model executor boundary. Submission authority supplies the private tools directly,
- * independent of the runtime's pending native-session integration.
+ * Artifact corruption and terminal replay need controlled publication/collection boundaries.
+ * Keep admission, artifact IO, and reconstruction real. The native public workflow owns
+ * model selection and provider failures; this fixture retains fault-oriented execution control.
  */
 export async function runRealReviewFlow(
   beforeSynthesis?: (boundary: {
@@ -232,9 +223,6 @@ export async function runRealReviewFlow(
       readonly ctx: any;
       readonly execute: () => Promise<ReviewState>;
     };
-    readonly models?: readonly Model<"openai-responses">[];
-    readonly pins?: ReviewRolePins | Readonly<Record<string, string>>;
-    readonly readingPlanFailure?: DagSubagentRuntimeFailure;
     readonly reviewerOutput?: (role: string, text: string) => string;
     readonly synthesisOutput?: (dossier: ModelDossier) => string;
     readonly beforeCollection?: (artifactRoot: string, value: DagSessionReconstruction) => void;
@@ -242,8 +230,7 @@ export async function runRealReviewFlow(
   } = {},
 ): Promise<RealReviewFlow> {
   await using cleanup = new AsyncDisposableStack();
-  const requests: { nodeId: string; model: string }[] = [];
-  const resolvedAssignments = assignmentsFor(options.models, options.pins);
+  const resolvedAssignments = assignmentsFor();
   const fixture = options.publicCreate ?? reviewFixture();
   const { root, ctx } = fixture;
   const initial = "state" in fixture ? fixture.state : undefined;
@@ -314,8 +301,6 @@ export async function runRealReviewFlow(
   let dossierRawIds: string[] = [];
   let dossier: ModelDossier | undefined;
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
-    const payload = request.node.executor.payload as { model: string };
-    requests.push({ nodeId: request.node.id, model: payload.model });
     if (request.node.id === "reading-plan") {
       const deckReply = await findTool("review_deck_").execute("deck", {});
       const deck: ReviewDeck = JSON.parse(
@@ -430,23 +415,21 @@ export async function runRealReviewFlow(
     throw new Error(`Unexpected scripted node ${request.node.id}`);
   };
   const scriptedSubagent: DagEffectExecutor = (request) =>
-    request.node.id === "reading-plan" && options.readingPlanFailure
-      ? Effect.fail(options.readingPlanFailure)
-      : Effect.tryPromise({
-          try: () => scriptedText(request),
-          catch: (error) => new DagExecutorFailed({ message: String(error), error }),
-        }).pipe(
-          Effect.flatMap((text) =>
-            publishDagSubagentTextResult(
-              artifactRoot,
-              request.runId,
-              request.node.id,
-              request.attemptId,
-              (request.node.executor.payload as any).output.name,
-              text,
-            ),
-          ),
-        );
+    Effect.tryPromise({
+      try: () => scriptedText(request),
+      catch: (error) => new DagExecutorFailed({ message: String(error), error }),
+    }).pipe(
+      Effect.flatMap((text) =>
+        publishDagSubagentTextResult(
+          artifactRoot,
+          request.runId,
+          request.node.id,
+          request.attemptId,
+          (request.node.executor.payload as any).output.name,
+          text,
+        ),
+      ),
+    );
   const registry = {
     lookup: (kind: DagExecutorKind, key: string) =>
       Effect.succeed(
@@ -544,6 +527,5 @@ export async function runRealReviewFlow(
     registeredTools,
     unregisteredTools,
     serviceDisposals,
-    requests,
   };
 }

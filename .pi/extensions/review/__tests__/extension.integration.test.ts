@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { Effect } from "effect";
 import { Check } from "typebox/value";
-import { DagSessionRunNotFound, DagSubagentRuntimeFailure } from "../../../../src/dag/index.js";
+import { DagSessionEntryType, DagSessionRunNotFound } from "../../../../src/dag/index.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import reviewExtension, { restore } from "../index";
 import { formatPullRequestContext } from "../context";
@@ -994,165 +995,6 @@ describe("review extension pull request surface", () => {
     expect(calls.filter((call) => call[1] === "worktree" && call[2] === "add")).toHaveLength(1);
   });
 
-  it("persists a successful public create through the offline DAG and reuses its finalized result", async () => {
-    const { pi, repo, ctx, create, complete } = createFixture();
-    const preferred = availableModels[1];
-    const unavailable = { ...preferred, provider: "signed-out" };
-    const unscoped = { ...preferred, provider: "a-unscoped" };
-    ctx.modelRegistry.getAvailable = () => [unscoped, ...availableModels];
-    ctx.scopedModels = [unavailable, preferred, availableModels[0], preferred].map((model) => ({
-      model,
-    }));
-    const { flow, result } = await complete();
-    const state = flow.state;
-    expect(flow.requests.length).toBeGreaterThan(0);
-    expect(new Set(flow.requests.map((request) => request.model))).toEqual(
-      new Set(availableModels.map((model) => `${model.provider}/${model.id}`)),
-    );
-    expect(state.roleAssignments?.["reading-plan"].model).toBe(
-      `${preferred.provider}/${preferred.id}`,
-    );
-    expect(state.roleAssignments?.correctness.model).toBe(`${preferred.provider}/${preferred.id}`);
-    expect(state.roleAssignments?.intent.model).toBe(
-      `${availableModels[0].provider}/${availableModels[0].id}`,
-    );
-    expect(result.details).toMatchObject({ status: "succeeded", reviewId: state.snapshot.id });
-    expect(result.content[0].text).toContain(
-      "Editorial consolidation retained three actionable concerns.",
-    );
-    expect(state.dag).toMatchObject({ status: "succeeded", submitted: true });
-    expect(state.result?.findings).toHaveLength(3);
-    expect(state.result?.provenance?.status).toBe("accepted");
-    expect(flow.invalidSynthesisRejected).toBe(true);
-    expect(flow.workspaceRoot).toBe(state.snapshot.worktree);
-    expect(git(state.snapshot.worktree, "rev-parse", "HEAD")).toBe(repo.metadata.headOid);
-    expect(state.snapshot.metadata.changedFiles).toEqual([{ path: "a.ts" }]);
-    const deck = JSON.parse(readFileSync(state.deck!.path, "utf8"));
-    expect(deck.laterRefs.readingPlanRefs).toHaveLength(1);
-    expect(deck.laterRefs.rawResultRefs).toHaveLength(6);
-    expect(state.posts).toEqual([]);
-    const persisted = readFileSync(join(state.snapshot.artifactDir, "state.json"), "utf8");
-    expect(JSON.parse(persisted)).toEqual(state);
-    expect(flow.registeredTools).toBe(0);
-    const entriesBeforeReuse = structuredClone(pi.appended);
-    const reused = await create("reuse");
-    expect(reused.details).toMatchObject({
-      reviewId: state.snapshot.id,
-      status: "succeeded",
-      reused: true,
-    });
-    expect(pi.appended).toEqual(entriesBeforeReuse);
-    expect(readFileSync(join(state.snapshot.artifactDir, "state.json"), "utf8")).toBe(persisted);
-    pi.handlers.session_tree({}, ctx);
-    const notes: string[] = [];
-    await pi.command(`pr open ${state.snapshot.id}`, {
-      ...ctx,
-      ui: { notify: (message: string) => notes.push(message) },
-    });
-    expect(notes.at(-1)).toContain("DAG: succeeded");
-    expect(notes.at(-1)).toContain("Findings: 3");
-    console.info(
-      JSON.stringify({
-        input: "public review pr create; local divergent Git history; offline model executor",
-        expected: "succeeded; accepted provenance; persisted deck refs; idempotent reuse",
-        actual: {
-          status: state.dag!.status,
-          findings: state.result!.findings.length,
-          rawRefs: deck.laterRefs.rawResultRefs.length,
-          reused: reused.details.reused,
-        },
-        reproduce:
-          "nub run test:vitest .pi/extensions/review/__tests__/extension.integration.test.ts",
-      }),
-    );
-  });
-
-  it("reports a planner provider failure without counting blocked nodes as failed reviewers", async () => {
-    const { root, pi, ctx, create } = createFixture();
-    const sessionFile = join(root, "planner-session.jsonl");
-    const readingPlanFailure = new DagSubagentRuntimeFailure({
-      phase: "execution",
-      message: "DAG subagent returned an error result.",
-      cause: { errorMessage: "Provider quota exhausted", sessionFile },
-    });
-    let result: any;
-    const flow = await runRealReviewFlow(undefined, {
-      readingPlanFailure,
-      publicCreate: {
-        root,
-        pi,
-        ctx,
-        execute: async () => {
-          result = await create();
-          return pi.appended.at(-1)[1].state;
-        },
-      },
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("reading-plan: Provider quota exhausted");
-    expect(result.content[0].text).toContain(sessionFile);
-    expect(result.content[0].text).toContain("Review incomplete; no assessment produced.");
-    expect(result.content[0].text).not.toContain("No findings.");
-    expect(result.details.failedNodes).toEqual(["reading-plan"]);
-    expect(result.details.blockedNodes).toHaveLength(8);
-    expect(result.details.metrics).toMatchObject({
-      reviewersSucceeded: 0,
-      reviewersFailed: 0,
-      reviewersMalformed: 0,
-      reviewersBlocked: 6,
-    });
-    expect(flow.state.dag?.failure).toEqual({
-      nodeId: "reading-plan",
-      message: "Provider quota exhausted",
-      sessionFile,
-    });
-    expect((await flow.rebuild(flow.state)).dag?.failure).toEqual(flow.state.dag?.failure);
-    expect(flow.requests).toEqual([]);
-    const reused = await create("reuse-failed");
-    expect(reused.details.reused).toBe(true);
-    expect(reused.content[0].text).toContain("Provider quota exhausted");
-  });
-
-  it.each(["empty scope", "signed-out scope", "out-of-scope pin", "signed-out pin"])(
-    "rejects %s without running review models",
-    async (scenario) => {
-      const { root, pi, ctx, create } = createFixture();
-      const allowed = availableModels[0];
-      const unavailable = { ...allowed, provider: "signed-out" };
-      ctx.scopedModels =
-        scenario === "empty scope"
-          ? []
-          : scenario === "signed-out scope"
-            ? [{ model: unavailable }]
-            : [{ model: allowed }, { model: unavailable }];
-      if (scenario.endsWith("pin")) {
-        const pinned = scenario === "out-of-scope pin" ? availableModels[1] : unavailable;
-        mkdirSync(join(root, ".pi"));
-        writeFileSync(
-          join(root, ".pi", "settings.json"),
-          JSON.stringify({
-            prReview: { roleModels: { correctness: `${pinned.provider}/${pinned.id}` } },
-          }),
-        );
-      }
-      registerDagRuntimeService(pi, {
-        parentSessionId: "parent",
-        sessionGeneration: "scoped-model-policy",
-        service: {
-          submit: () => Effect.die("Invalid model policy must not submit a DAG"),
-        } as any,
-      });
-      const result = await create();
-      expect(result.isError).toBe(true);
-      expect(result.details).toMatchObject({ stage: "model-policy", status: "failed" });
-      expect(result.content[0].text).toMatch(/scoped/);
-      const state = pi.appended.at(-1)[1].state;
-      expect(state.dag).toBeUndefined();
-      expect(state.roleAssignments).toBeUndefined();
-      expect(existsSync(state.snapshot.worktree)).toBe(false);
-    },
-  );
-
   it("does not retry a failed snapshot while explicit cleanup owns the review", async () => {
     const root = tempRoot();
     const state = {
@@ -1355,7 +1197,12 @@ describe("review extension pull request surface", () => {
       reviewId: first.details.reviewId,
       dagRunId: first.details.dagRunId,
     });
-    expect(flow.requests).toHaveLength(8);
+    const graphEntry = Type.Object({
+      type: Type.Literal("custom"),
+      customType: Type.Literal(DagSessionEntryType),
+      data: Type.Object({ event: Type.Object({ _tag: Type.Literal("graph") }) }),
+    });
+    expect(flow.entries.filter((entry) => Check(graphEntry, entry))).toHaveLength(1);
   });
 
   it("lists, opens, and cleans a review by ID", async () => {
