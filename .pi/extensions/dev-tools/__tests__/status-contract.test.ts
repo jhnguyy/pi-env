@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import { formatStatus } from "../formatters";
 import type { StatusResult } from "../protocol";
 
@@ -41,7 +40,7 @@ function formatExpectedStatus(result: ExpectedStatusContract): string {
   return formatStatus(result);
 }
 
-describeIfEnabled("dev-tools", "status contract", () => {
+describe("status contract", () => {
   it("defines ready as semantic readiness and preserves a valid empty semantic result", () => {
     const result: ExpectedStatusContract = {
       action: "status",

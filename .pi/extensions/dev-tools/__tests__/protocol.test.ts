@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   serializeRequest,
   serializeResponse,
@@ -10,7 +9,7 @@ import {
   type DiagnosticsResult,
 } from "../protocol";
 
-describeIfEnabled("dev-tools", "Protocol", () => {
+describe("Protocol", () => {
   // ─── serializeRequest ───────────────────────────────────────────────────
 
   describe("serializeRequest", () => {

@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
 import {
   applyCleanupPlan,
   buildCleanupPlan,
@@ -56,7 +55,7 @@ function createCleanupFixture() {
   return { root, repo, dirtyWorktree };
 }
 
-describeIfEnabled("dev-tools", "/cleanup command", () => {
+describe("/cleanup command", () => {
   it("parses dry-run, apply, force, no-fetch, and base args", () => {
     expect(parseCleanupArgs(undefined)).toEqual({ apply: false, force: false, fetch: true, baseRef: undefined, repoPath: undefined });
     expect(parseCleanupArgs("apply --force --no-fetch --base origin/develop --repo /repo")).toEqual({

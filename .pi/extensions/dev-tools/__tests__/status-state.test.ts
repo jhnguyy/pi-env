@@ -1,8 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { afterEach, describe, expect, it } from "vitest";
 import { LspBackend } from "../backend";
 import type { LspBackendConfig } from "../backend-configs";
 import { handleStatus } from "../handlers";
@@ -42,7 +41,7 @@ function status(snapshot: any, projectRoots: string[] = []) {
   return handleStatus({ id: 1, action: "status" }, deps(snapshot, projectRoots)).result;
 }
 
-describeIfEnabled("dev-tools", "status state model", () => {
+describe("status state model", () => {
   let tmpDir: string | undefined;
 
   afterEach(() => {

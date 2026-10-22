@@ -1,8 +1,7 @@
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { describeIfEnabled } from "../../__tests__/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleRename, type RenameBackend, type RenameHandlerDeps } from "../handlers";
 import { pathToUri } from "../utils";
 import { applyWorkspaceEdit } from "../workspace-edit";
@@ -14,7 +13,7 @@ function range(startLine: number, startCharacter: number, endLine: number, endCh
   };
 }
 
-describeIfEnabled("dev-tools", "rename action", () => {
+describe("rename action", () => {
   let root: string;
   let declarationPath: string;
   let usagePath: string;
