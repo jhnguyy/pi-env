@@ -70,6 +70,7 @@ in
         home.packages = toolchainPackages pkgs;
         home.sessionVariables = {
           PI_ENV_NODE_BIN = "${nodeFor pkgs}/bin/node";
+          NODE_EXECUTABLE = "${nodeFor pkgs}/bin/node";
           PI_PACKAGE_DIR = "${piFor pkgs}/lib/pi/node_modules/@earendil-works/pi-coding-agent";
           PI_ENV_PI_EXECUTABLE = lib.getExe (piFor pkgs);
         };
