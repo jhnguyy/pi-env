@@ -5,7 +5,8 @@ import {
   formatSize,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
+import { Errors } from "typebox/value";
 import type { DomainToolContext, ToolContract } from "../_shared/tool-contract";
 import {
   DEFAULT_COLLECTION_LIMIT,
@@ -109,7 +110,8 @@ const revisionPrecondition = () =>
       "Use null only to create a new document. For an update, use the revision from a prior read; stale revisions fail.",
   });
 
-export const NOTES_PARAMETERS = Type.Union([
+/** Strict argument contract: one object per supported collection and action. */
+export const NOTES_VARIANTS = Type.Union([
   Type.Object(
     {
       collection: Type.Optional(collectionParameter("store")),
@@ -358,6 +360,106 @@ export const NOTES_PARAMETERS = Type.Union([
   ),
 ]);
 
+type SchemaNode = Record<string, unknown> & { description?: string };
+type VariantSchema = (typeof NOTES_VARIANTS.anyOf)[number];
+type Variant = { readonly label: string; readonly collection: string; readonly actions: readonly string[]; readonly schema: VariantSchema };
+
+function variantProperties(schema: VariantSchema): Record<string, SchemaNode> {
+  return Object.fromEntries(Object.entries(schema.properties).map(([name, field]: [string, TSchema]) => [name, { ...field }]));
+}
+
+const NOTES_VARIANT_LIST: readonly Variant[] = NOTES_VARIANTS.anyOf.map((schema) => {
+  const properties = variantProperties(schema);
+  const collection = String(properties.collection?.const ?? "store");
+  const action = properties.action;
+  const actions = action?.const === undefined ? (action?.enum as string[]) : [String(action.const)];
+  return { label: actions.length === 1 ? `${collection} ${actions[0]}` : collection, collection, actions, schema };
+});
+
+const LOOSEST_BOUND: Readonly<Record<string, (a: number, b: number) => number>> = {
+  maxLength: Math.max,
+  maximum: Math.max,
+  maxItems: Math.max,
+  minimum: Math.min,
+};
+
+function withoutAnnotations({ description: _description, "~optional": _optional, ...rest }: SchemaNode): SchemaNode {
+  return rest;
+}
+
+function mergedField(uses: ReadonlyArray<{ readonly label: string; readonly schema: SchemaNode }>): SchemaNode {
+  const merged = { ...withoutAnnotations(uses[0].schema) };
+  for (const { schema } of uses.slice(1)) {
+    for (const [keyword, loosest] of Object.entries(LOOSEST_BOUND)) {
+      const value = schema[keyword];
+      if (typeof value === "number" && typeof merged[keyword] === "number") merged[keyword] = loosest(merged[keyword], value);
+    }
+  }
+  const labelsByDescription = new Map<string, string[]>();
+  for (const { label, schema } of uses) {
+    const description = schema.description ?? "";
+    labelsByDescription.set(description, [...(labelsByDescription.get(description) ?? []), label]);
+  }
+  return { ...merged, description: [...labelsByDescription].map(([description, labels]) => `${labels.join(", ")}: ${description}`).join("\n") };
+}
+
+function requiredLabel(variant: Variant, name: string): string {
+  return (variant.schema.required as readonly string[] | undefined)?.includes(name) ? `${variant.label} (required)` : variant.label;
+}
+
+
+// Some providers, including Pi's Anthropic adapter, declare only top-level properties, so a
+// union arrives as an empty object. Declare the variants' fields flat and check the variant at execution.
+function flattenNotesVariants() {
+  const fields = new Map<string, Array<{ label: string; schema: SchemaNode }>>();
+  for (const variant of NOTES_VARIANT_LIST) {
+    for (const [name, schema] of Object.entries(variantProperties(variant.schema))) {
+      if (name === "collection" || name === "action") continue;
+      fields.set(name, [...(fields.get(name) ?? []), { label: requiredLabel(variant, name), schema }]);
+    }
+  }
+  const actionUses = NOTES_VARIANT_LIST.map((variant) => ({
+    label: variant.label,
+    schema: variantProperties(variant.schema).action,
+  }));
+  return Type.Object(
+    {
+      collection: Type.Optional(
+        StringEnum(NOTES_COLLECTIONS, {
+          description: NOTES_COLLECTIONS.map((name) => `${name}: ${NOTES_COLLECTION_DESCRIPTIONS[name]}`).join("\n"),
+        }),
+      ),
+      action: StringEnum(NOTES_ACTIONS, { description: mergedField(actionUses).description }),
+      ...Object.fromEntries([...fields].map(([name, uses]) => [name, Type.Optional(mergedField(uses))])),
+    },
+    { additionalProperties: false },
+  );
+}
+
+/** Provider-visible argument schema. Execution checks the matching variant of `NOTES_VARIANTS`. */
+export const NOTES_PARAMETERS = flattenNotesVariants();
+
+function formatVariantError(error: ReturnType<typeof Errors>[number]): string | undefined {
+  if (error.keyword === "boolean") return undefined;
+  if (error.keyword === "required") return `missing ${error.params.requiredProperties.join(", ")}`;
+  if (error.keyword === "additionalProperties") return `unsupported ${error.params.additionalProperties.join(", ")}`;
+  return `${error.instancePath.slice(1) || "arguments"} ${error.message}`;
+}
+
+/** Reject arguments that the flat schema admits but the selected collection and action do not. */
+export function parseNotesParams(params: NotesParams): NotesParams {
+  const collection = params.collection ?? "store";
+  const variants = NOTES_VARIANT_LIST.filter((variant) => variant.collection === collection);
+  const variant = variants.find((candidate) => candidate.actions.includes(params.action));
+  if (variant === undefined) {
+    const supported = variants.flatMap((candidate) => candidate.actions).join(", ");
+    throw new Error(`notes ${collection} does not support action ${params.action}; use one of: ${supported}`);
+  }
+  const problems = Errors(variant.schema, params).map(formatVariantError).filter((problem) => problem !== undefined);
+  if (problems.length > 0) throw new Error(`Invalid notes ${variant.label} arguments: ${problems.join("; ")}`);
+  return params;
+}
+
 export interface NotesParams {
   readonly collection?: (typeof NOTES_COLLECTIONS)[number];
   readonly action: (typeof NOTES_ACTIONS)[number];
@@ -423,10 +525,11 @@ export function createNotesContract(
 
 async function executeNotesAction(
   provider: NotesProvider,
-  params: NotesParams,
+  input: NotesParams,
   context: DomainToolContext,
   now: () => Date,
 ) {
+  const params = parseNotesParams(input);
   const collection = params.collection ?? "store";
   if (collection !== "store") {
     return executeCollectionAction(provider, collection, params, context.signal, now);
@@ -1511,21 +1614,18 @@ function result(text: string, details: NotesToolDetails) {
   };
 }
 
+const DETAIL_LISTS = ["notes", "results", "items"] as const;
+
 function boundDetails(details: NotesToolDetails): NotesToolDetails {
-  const notes = details.notes?.slice(0, MAX_DETAIL_ITEMS);
-  const results = details.results?.slice(0, MAX_DETAIL_ITEMS);
-  const items = details.items?.slice(0, MAX_DETAIL_ITEMS);
-  const truncated =
-    (details.notes?.length ?? 0) > MAX_DETAIL_ITEMS ||
-    (details.results?.length ?? 0) > MAX_DETAIL_ITEMS ||
-    (details.items?.length ?? 0) > MAX_DETAIL_ITEMS;
-  return {
-    ...details,
-    ...(notes === undefined ? {} : { notes }),
-    ...(results === undefined ? {} : { results }),
-    ...(items === undefined ? {} : { items }),
-    ...(truncated ? { truncated: true } : {}),
-  };
+  const bounded: { [Key in (typeof DETAIL_LISTS)[number]]?: readonly unknown[] } = {};
+  let truncated = false;
+  for (const key of DETAIL_LISTS) {
+    const list = details[key];
+    if (list === undefined) continue;
+    bounded[key] = list.slice(0, MAX_DETAIL_ITEMS);
+    truncated ||= list.length > MAX_DETAIL_ITEMS;
+  }
+  return { ...details, ...bounded, ...(truncated ? { truncated: true } : {}) };
 }
 
 function formatDocument(path: string, revision: string, content: string): string {

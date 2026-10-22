@@ -60,14 +60,8 @@ export async function activateNotesExtension(
     piOptions: {
       promptSnippet: "Maintain Inbox, Projects, Wiki, Worklog, and other Markdown notes",
       promptGuidelines: [
-        "Use the Inbox, Projects, Wiki, and Worklog collection actions for their defined behaviors. Pi-env owns their canonical paths and lifecycle semantics.",
-        "Use Store index before the first general store interaction in a task. Use Store list for authoritative inventory outside the core collections and Store search for global retrieval.",
-        "Use Inbox for unclassified captures. Inbox reads are non-destructive. Inbox writes do not classify, route, promote, rewrite, or delete captures.",
-        "Use Projects for active plans, owners, status, next actions, and linked tickets.",
-        "Use Wiki for maintained current knowledge. Integrate coherent updates instead of appending session logs.",
-        "Record only brief completed-work outcomes in Worklog. Do not use Worklog for plans, current project state, or session narrative.",
-        "Use revisions returned by Projects, Wiki, or Store reads for updates so concurrent changes fail safely. Use a null revision only for explicit creation.",
-        "Use transitional Store mutation only for bounded maintenance and migration work.",
+        "Use Store index before the first general Store interaction in a task.",
+        "Use collection actions for Inbox, Projects, Wiki, and Worklog content. Use Store mutation only for bounded maintenance and migration work.",
         "Never store secrets, credentials, private keys, tokens, or raw sensitive dumps in notes.",
       ],
       renderCall(args, theme) {
