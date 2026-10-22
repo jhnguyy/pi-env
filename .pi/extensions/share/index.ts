@@ -1,38 +1,34 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import * as nodeFiles from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Data, Effect, Schema } from "effect";
+import { execEffect } from "../_shared/exec";
 import { decodeSettingsBlockEffect, defaultSettingsEnv, SettingsDecodeError, type SettingsEnv, SettingsReadError, SettingsWriteError, updateGlobalSettingsBlockEffect } from "../_shared/settings";
 
 const Repo = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/));
 const ShareSettings = Schema.Struct({ repo: Schema.optionalKey(Repo) });
-const Repository = Schema.Struct({ id: Schema.Number, private: Schema.Boolean, permissions: Schema.Struct({ push: Schema.Boolean }) });
-const Upload = Schema.Struct({ content: Schema.Struct({ html_url: Schema.String }) });
+const RepositoryResponse = Schema.fromJsonString(Schema.Struct({ id: Schema.Number, private: Schema.Boolean, permissions: Schema.Struct({ push: Schema.Boolean }) }));
+const UploadResponse = Schema.fromJsonString(Schema.Struct({ content: Schema.Struct({ html_url: Schema.String }) }));
 const MaxExportBytes = 10 * 1024 * 1024;
+
+export type ShareFiles = Pick<typeof nodeFiles, "mkdtemp" | "readFile" | "rm" | "stat" | "writeFile">;
 
 class ShareError extends Data.TaggedError("ShareError")<{ readonly message: string; readonly cause?: unknown }> {}
 
+function shareFailure(message: string, cause?: unknown): ShareError {
+  return new ShareError({ message, cause });
+}
+
 function io<A>(message: string, action: () => Promise<A>) {
-  return Effect.tryPromise({ try: action, catch: (cause) => new ShareError({ message, cause }) });
+  return Effect.tryPromise({ try: action, catch: (cause) => shareFailure(message, cause) });
 }
 
-function execute(pi: ExtensionAPI, ctx: ExtensionCommandContext, binary: string, args: string[]) {
-  return Effect.flatMap(io(`Could not run ${binary}. Check that it is installed.`, () => pi.exec(binary, args, { cwd: ctx.cwd, timeout: 120_000 })), (result) =>
-    result.code === 0 && !result.killed
-      ? Effect.succeed(result.stdout)
-      : Effect.fail(new ShareError({ message: `${binary} failed: ${result.stderr.trim() || `exit ${result.code}`}` })));
-}
-
-function json(text: string) {
-  return Effect.try({ try: () => JSON.parse(text) as unknown, catch: (cause) => new ShareError({ message: "GitHub returned invalid JSON.", cause }) });
-}
-
-function inspectRepository(pi: ExtensionAPI, ctx: ExtensionCommandContext, repo: string) {
+function inspectRepository(exec: ExtensionAPI["exec"], cwd: string, repo: string) {
   return Effect.gen(function* () {
-    const response = yield* execute(pi, ctx, "gh", ["api", "--hostname", "github.com", `repos/${repo}`]);
-    const repository = yield* Schema.decodeUnknownEffect(Repository)(yield* json(response));
+    const response = yield* execEffect(exec, "gh", ["api", "--hostname", "github.com", `repos/${repo}`], shareFailure, { cwd });
+    const repository = yield* Schema.decodeUnknownEffect(RepositoryResponse)(response.stdout);
     if (!repository.private || !repository.permissions.push) {
       return yield* new ShareError({ message: "The repository must be private and your GitHub account must have push access." });
     }
@@ -40,7 +36,7 @@ function inspectRepository(pi: ExtensionAPI, ctx: ExtensionCommandContext, repo:
   });
 }
 
-function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEnv) {
+function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEnv, files: ShareFiles) {
   return Effect.gen(function* () {
     if (!ctx.hasUI) return yield* new ShareError({ message: "Run /share-private interactively to choose and confirm its private destination." });
     yield* io("Could not wait for the session to become idle.", () => ctx.waitForIdle());
@@ -50,7 +46,7 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEn
     const input = settings.repo ?? (yield* io("Could not prompt for a repository.", () => ctx.ui.input("Private GitHub repository (saved as your default)", "owner/repo")));
     if (input === undefined) return;
     const repo = yield* Schema.decodeUnknownEffect(Repo)(input.trim());
-    const repository = yield* inspectRepository(pi, ctx, repo);
+    const repository = yield* inspectRepository(pi.exec, ctx.cwd, repo);
     if (!settings.repo) {
       yield* updateGlobalSettingsBlockEffect("share", { repo }, env);
       ctx.ui.notify(`Default share repository saved: ${repo}`, "info");
@@ -59,21 +55,23 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, env: SettingsEn
     if (!approved) return;
     yield* Effect.scoped(Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
-        io("Could not create the export directory.", () => mkdtemp(join(tmpdir(), "pi-share-"))),
-        (path) => io("Could not remove the temporary export.", () => rm(path, { recursive: true, force: true })).pipe(Effect.orDie),
+        io("Could not create the export directory.", () => files.mkdtemp(join(tmpdir(), "pi-share-"))),
+        (path) => io(`Could not remove ${path}.`, () => files.rm(path, { recursive: true, force: true })).pipe(
+          Effect.catch((error) => Effect.sync(() => ctx.ui.notify(`${error.message} It may contain sensitive session data. Remove the directory manually.`, "warning"))),
+        ),
       );
       const html = join(directory, "session.html");
-      yield* execute(pi, ctx, "pi", ["--export", sessionFile, html]);
-      const size = yield* io("Could not inspect the exported session.", () => stat(html));
+      yield* execEffect(pi.exec, "pi", ["--export", sessionFile, html], shareFailure, { cwd: ctx.cwd });
+      const size = yield* io("Could not inspect the exported session.", () => files.stat(html));
       if (size.size > MaxExportBytes) return yield* new ShareError({ message: "The session export exceeds the 10 MiB share limit. Use /export to save it locally." });
-      const content = yield* io("Could not read the exported session.", () => readFile(html));
+      const content = yield* io("Could not read the exported session.", () => files.readFile(html));
       const payload = join(directory, "upload.json");
-      yield* io("Could not prepare the upload.", () => writeFile(payload, JSON.stringify({ message: "Share Pi session", content: content.toString("base64") }), { mode: 0o600 }));
+      yield* io("Could not prepare the upload.", () => files.writeFile(payload, JSON.stringify({ message: "Share Pi session", content: content.toString("base64") }), { mode: 0o600 }));
       const path = `sessions/${randomUUID()}.html`;
-      const current = yield* inspectRepository(pi, ctx, repo);
+      const current = yield* inspectRepository(pi.exec, ctx.cwd, repo);
       if (current.id !== repository.id) return yield* new ShareError({ message: "The repository changed after confirmation. Run /share-private again to confirm its destination." });
-      const response = yield* execute(pi, ctx, "gh", ["api", "--hostname", "github.com", "--method", "PUT", `repos/${repo}/contents/${path}`, "--input", payload]);
-      const upload = yield* Schema.decodeUnknownEffect(Upload)(yield* json(response));
+      const response = yield* execEffect(pi.exec, "gh", ["api", "--hostname", "github.com", "--method", "PUT", `repos/${repo}/contents/${path}`, "--input", payload], shareFailure, { cwd: ctx.cwd });
+      const upload = yield* Schema.decodeUnknownEffect(UploadResponse)(response.stdout);
       ctx.ui.notify(`Shared privately: ${upload.content.html_url}\nDownload the HTML file to view the session.`, "info");
     }));
   });
@@ -86,13 +84,13 @@ function failureMessage(error: unknown): string {
   return "Invalid repository name or GitHub response. Use owner/repo and check repository privacy and push access.";
 }
 
-export default function share(pi: ExtensionAPI, env: SettingsEnv = defaultSettingsEnv): void {
+export default function share(pi: ExtensionAPI, env: SettingsEnv = defaultSettingsEnv, files: ShareFiles = nodeFiles): void {
   pi.registerCommand("share-private", {
     description: "Publish the session HTML to your private GitHub repository",
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      await Effect.runPromise(publish(pi, ctx, env).pipe(Effect.catch((error) => Effect.sync(() => {
+      await Effect.runPromise(publish(pi, ctx, env, files).pipe(Effect.catch((error) => Effect.sync(() => {
         ctx.ui.notify(`Share failed: ${failureMessage(error)}`, "error");
-      }))));
+      }))), { signal: ctx.signal });
     },
   });
 }

@@ -30,6 +30,7 @@ export function execEffect<E>(
     catch: (cause) => makeError(options.failureDetail ?? `${rendered} failed.`, cause),
   }).pipe(
     Effect.flatMap((result) => {
+      if (result.killed) return Effect.fail(makeError(`${rendered} was terminated: ${result.stderr || result.stdout}`));
       if (options.failOnNonZero === false || result.code === 0) return Effect.succeed(result);
       return Effect.fail(
         makeError(`${rendered} exited ${result.code}: ${result.stderr || result.stdout}`),

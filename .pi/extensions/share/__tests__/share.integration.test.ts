@@ -1,16 +1,19 @@
 import { execFile } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import * as nodeFiles from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { SessionManager, type ExtensionAPI, type ExtensionCommandContext, type RegisteredCommand } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import share from "../index";
+import share, { type ShareFiles } from "../index";
 
 const run = promisify(execFile);
 const piCli = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 // GitHub is the only external service replaced here. Pi performs the real HTML export.
 const privateRepository = { id: 123, private: true, permissions: { push: true } };
@@ -33,9 +36,10 @@ function fixture(...repositories: unknown[]) {
   let prompts = 0;
   let answer: string | undefined = "owner/private-exports";
   let approved = true;
+  const files: ShareFiles = { ...nodeFiles };
   const api: Partial<ExtensionAPI> = {
     registerCommand(_name: string, value: RegisteredCommand) { command = value; },
-    async exec(binary: string, args: string[]) {
+    async exec(binary, args, options) {
       if (binary === "gh") {
         requests.push(args);
         expect(args).toContain("--hostname");
@@ -49,11 +53,11 @@ function fixture(...repositories: unknown[]) {
         return { code: 0, stdout: JSON.stringify(repositories[Math.min(checks++, repositories.length - 1)]), stderr: "", killed: false };
       }
       events.push("export");
-      const result = await run(process.execPath, [piCli, ...args]);
+      const result = await run(process.execPath, [piCli, ...args], { signal: options?.signal });
       return { code: 0, stdout: result.stdout, stderr: result.stderr, killed: false };
     },
   };
-  share(api as ExtensionAPI, { globalSettingsPath: () => settings, projectSettingsPath: () => projectSettings, readFile: readFileSync });
+  share(api as ExtensionAPI, { globalSettingsPath: () => settings, projectSettingsPath: () => projectSettings, readFile: readFileSync }, files);
   const ui: Partial<ExtensionCommandContext["ui"]> = {
     input: async () => { prompts++; return answer; },
     confirm: async () => { events.push("confirm"); return approved; },
@@ -64,7 +68,10 @@ function fixture(...repositories: unknown[]) {
     waitForIdle: async () => {},
     ui: ui as ExtensionCommandContext["ui"],
   };
-  return { settings, projectSettings, uploads, requests, events, notices, get prompts() { return prompts; }, cancel() { answer = undefined; }, decline() { approved = false; }, invoke: () => command!.handler("", context as ExtensionCommandContext) };
+  return { settings, projectSettings, files, uploads, requests, events, notices, get prompts() { return prompts; }, cancel() { answer = undefined; }, decline() { approved = false; }, invoke: (signal?: AbortSignal) => {
+    context.signal = signal;
+    return command!.handler("", context as ExtensionCommandContext);
+  } };
 }
 
 describe("private repository share", () => {
@@ -148,6 +155,26 @@ describe("private repository share", () => {
     await f.invoke();
     expect(f.requests).toEqual([]);
     expect(f.notices.join("\n")).toContain(`Could not read project settings at ${f.projectSettings}`);
+  });
+
+  it("warns about retained sensitive exports without reporting a successful upload as failed", async () => {
+    const f = fixture();
+    f.files.rm = async (path) => {
+      if (typeof path === "string") roots.push(path);
+      throw new Error("synthetic cleanup failure");
+    };
+    await expect(f.invoke()).resolves.toBeUndefined();
+    expect(f.uploads).toHaveLength(1);
+    expect(f.notices.join("\n")).toContain("Shared privately:");
+    expect(f.notices.join("\n")).toContain("sensitive session data");
+    expect(f.notices.join("\n")).not.toContain("Share failed:");
+  });
+
+  it("does not start publication when its operation is already aborted", async () => {
+    const f = fixture();
+    await expect(f.invoke(AbortSignal.abort())).rejects.toBeDefined();
+    expect(f.requests).toEqual([]);
+    expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark" });
   });
 
   it("cancels a missing-repository prompt without effects", async () => {

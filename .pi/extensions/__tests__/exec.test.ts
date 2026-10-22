@@ -47,6 +47,14 @@ describe("shared execEffect", () => {
     ).resolves.toMatchObject({ code: 7 });
   });
 
+  it.each([true, false])("rejects terminated processes even with exit code zero (failOnNonZero=%s)", async (failOnNonZero) => {
+    const exec: Exec = async () => ({ ...ok(), killed: true });
+
+    await expect(
+      Effect.runPromise(execEffect(exec, "cmd", [], makeError, { failOnNonZero })),
+    ).rejects.toThrow("cmd was terminated");
+  });
+
   it("forwards Effect interruption as the exec AbortSignal", async () => {
     let signal: AbortSignal | undefined;
     let start!: () => void;
