@@ -44,7 +44,6 @@ it.each(["on", "only"] as const)("delegates through native codemode (%s) without
     const provider = join(agentDir, "provider.mjs");
     writeFileSync(provider, `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
 import { writeFileSync } from 'node:fs';
-import { afterCodemode } from ${JSON.stringify(new URL("./fixtures/faux-codemode.ts", import.meta.url).href)};
 export default function(pi) {
  const p = fauxProvider({provider:'native-delegation'});
  pi.registerProvider(p.provider);
@@ -59,10 +58,10 @@ export default function(pi) {
    pi.appendEntry('delegation-loadout',{active:pi.getActiveTools(),registered:pi.getAllTools().map(t=>t.name)});
    if (event.text === 'launch') p.setResponses([
      fauxAssistantMessage(fauxToolCall('codemode',{code:${JSON.stringify(parentCode)}}),{stopReason:'toolUse'}),
-     afterCodemode(p, ${JSON.stringify(parentCode)}, [fauxAssistantMessage('parent complete')])]);
+     fauxAssistantMessage('parent complete')]);
    if (event.text === 'cancel') p.setResponses([
      fauxAssistantMessage(fauxToolCall('codemode',{code:${JSON.stringify(cancelCode)}}),{stopReason:'toolUse'}),
-     afterCodemode(p, ${JSON.stringify(cancelCode)}, [fauxAssistantMessage('parent cancelled')])]);
+     fauxAssistantMessage('parent cancelled')]);
    if (event.text === 'blocked task') p.setResponses([
      fauxAssistantMessage(fauxToolCall('fixture_gate',{}),{stopReason:'toolUse'}),
      fauxAssistantMessage('gate complete')]);
@@ -70,9 +69,8 @@ export default function(pi) {
      const done = fauxAssistantMessage('child complete');
      p.setResponses([
        fauxAssistantMessage(fauxToolCall('codemode',{code:${JSON.stringify(childCode)}}),{stopReason:'toolUse'}),
-       afterCodemode(p, ${JSON.stringify(childCode)}, [
-         fauxAssistantMessage(fauxToolCall('subagent',{action:'run',name:'recursive',task:'must not run'}),{stopReason:'toolUse'}),
-         done])]);
+       fauxAssistantMessage(fauxToolCall('subagent',{action:'run',name:'recursive',task:'must not run'}),{stopReason:'toolUse'}),
+       done]);
    }
  });
 }`);
@@ -95,15 +93,9 @@ export default function(pi) {
     const parentCodeResults = parent.messages.filter(
       (message) => message.role === "toolResult" && message.toolName === "codemode",
     );
-    evidence.parentCapacityFailures = parentCodeResults.filter(
-      (message) => message.role === "toolResult" && message.isError,
-    );
-    for (const message of parentCodeResults) {
-      if (message.role !== "toolResult" || !message.isError) continue;
-      expect(JSON.stringify(message.content)).toContain("Codemode worker limit reached");
-      expect(JSON.stringify(message.content)).toContain("No tool calls were made.");
-      expect(message.details).toMatchObject({ calls: [] });
-    }
+    evidence.parentCodeResults = parentCodeResults;
+    expect(parentCodeResults).toHaveLength(1);
+    expect(parentCodeResults.every((message) => message.role === "toolResult" && !message.isError)).toBe(true);
     const result = parentCodeResults.find((message) => message.role === "toolResult" && !message.isError);
     expect(result?.role).toBe("toolResult");
     if (result?.role !== "toolResult") throw new Error("Missing parent codemode result");
@@ -129,12 +121,8 @@ export default function(pi) {
       const codeResults = messages.filter(
         (message) => message.role === "toolResult" && message.toolName === "codemode",
       );
-      for (const message of codeResults) {
-        if (message.role !== "toolResult" || !message.isError) continue;
-        expect(JSON.stringify(message.content)).toContain("Codemode worker limit reached");
-        expect(JSON.stringify(message.content)).toContain("No tool calls were made.");
-        expect(message.details).toMatchObject({ calls: [] });
-      }
+      expect(codeResults).toHaveLength(1);
+      expect(codeResults.every((message) => message.role === "toolResult" && !message.isError)).toBe(true);
       const codeResult = codeResults.find((message) => message.role === "toolResult" && !message.isError);
       expect(codeResult?.role === "toolResult" && codeResult.isError).toBe(false);
       expect(JSON.stringify(codeResult)).toContain("child-native identity");
