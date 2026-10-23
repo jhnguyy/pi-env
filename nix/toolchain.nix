@@ -35,41 +35,13 @@ let
     (builtins.fromJSON (builtins.readFile "${pi}/packages/coding-agent/package.json")).version;
   piFor =
     pkgs:
-    let
-      patched = builtins.hasAttr "@earendil-works/pi-coding-agent@${piVersion}" (
-        manifest.patchedDependencies or { }
-      );
-      # Patch the inner workspace build, not the install-only outer derivation.
-      # Keep metadata on the original source to avoid import-from-derivation.
-      buildStdenv = pkgs.stdenv // {
-        mkDerivation =
-          args:
-          pkgs.stdenv.mkDerivation (
-            args
-            // pkgs.lib.optionalAttrs (patched && (args.pname or "") == "pi-workspace-packages") {
-              patches = (args.patches or [ ]) ++ [
-                (../patches + "/pi-command-overrides-${piVersion}.patch")
-              ];
-            }
-          );
-      };
-      package = pi.packages.${pkgs.stdenv.hostPlatform.system}.default.override {
-        nodejs_22 = nodeFor pkgs;
-        stdenv = buildStdenv;
-      };
-    in
     assert pkgs.lib.assertMsg (builtins.all (name: manifest.devDependencies.${name} == piVersion) [
       "@earendil-works/pi-coding-agent"
       "@earendil-works/pi-agent-core"
       "@earendil-works/pi-ai"
       "@earendil-works/pi-tui"
     ]) "Pi development dependencies must match the upstream Pi flake";
-    package.overrideAttrs (old: {
-      installCheckPhase = (old.installCheckPhase or "") + ''
-        ${nodeFor pkgs}/bin/node ${../scripts}/verify-pi-runtime.mjs \
-          "$out/lib/pi/node_modules/@earendil-works/pi-coding-agent" ${../package.json}
-      '';
-    });
+    pi.packages.${pkgs.stdenv.hostPlatform.system}.default.override { nodejs_22 = nodeFor pkgs; };
   nubFor =
     pkgs:
     let

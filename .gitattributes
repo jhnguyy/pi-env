@@ -1,3 +1,0 @@
-# Unified patches preserve upstream tabs and blank context lines.
-patches/*.patch text eol=lf -whitespace
-patches/pi-coding-agent-*.patch linguist-generated=true

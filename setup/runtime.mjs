@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   RuntimeCommand,
   commandSucceeds,
@@ -15,7 +14,6 @@ import {
 } from "./runtime-support.mjs";
 import { deriveSetupPolicy } from "./policy.mjs";
 import { reconcileManagedBlock } from "./managed-block.mjs";
-import { validatePiRuntimeInstall } from "../scripts/package-contract.mjs";
 
 const PiPackage = Object.freeze({
   Name: "@earendil-works/pi-coding-agent",
@@ -63,12 +61,9 @@ function installDependencies() {
   ok("node_modules up to date");
 }
 
-function readPiRequirements() {
-  const manifest = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
-  return {
-    manifest,
-    version: manifest.devDependencies?.[PiPackage.Name] ?? manifest.dependencies?.[PiPackage.Name],
-  };
+function readPiVersion() {
+  const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
+  return pkg.devDependencies?.[PiPackage.Name] ?? pkg.dependencies?.[PiPackage.Name];
 }
 
 function shSingleQuote(value) {
@@ -111,7 +106,6 @@ function writePiWrapper(piPackageDir, piPackageEntry, piExecutable) {
     "index.js",
   );
   const installedWrapper = join(piBinDir, "pi");
-  const runtimeVerifier = fileURLToPath(new URL("../scripts/verify-pi-runtime.mjs", import.meta.url));
   const wrapper = `#!/usr/bin/env sh
 set -eu
 DEFAULT_PI_PACKAGE_DIR='${shSingleQuote(piPackageDir)}'
@@ -120,8 +114,6 @@ PI_EXECUTABLE='${shSingleQuote(piExecutable)}'
 SESSION_MANAGER_START='${shSingleQuote(sessionManagerStart)}'
 SESSION_MANAGER_EXTENSION='${shSingleQuote(sessionManagerExtension)}'
 INSTALLED_PI_WRAPPER='${shSingleQuote(installedWrapper)}'
-PI_RUNTIME_VERIFY='${shSingleQuote(runtimeVerifier)}'
-WORKBENCH_MANIFEST='${shSingleQuote(join(repo, "package.json"))}'
 REQUESTED_PI_PACKAGE_DIR="\${PI_PACKAGE_DIR:-}"
 PI_PACKAGE_DIR="$DEFAULT_PI_PACKAGE_DIR"
 if [ -z "$PI_EXECUTABLE" ] && [ -n "$REQUESTED_PI_PACKAGE_DIR" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/package.json" ] && [ -f "$REQUESTED_PI_PACKAGE_DIR/$PI_PACKAGE_ENTRY" ]; then
@@ -149,7 +141,6 @@ if [ ! -f "$PI_PACKAGE_DIR/package.json" ] || [ ! -f "$PI_ENTRY" ]; then
   echo "pi-env: rerun setup.sh, or set PI_PACKAGE_DIR to a valid pi package directory." >&2
   exit 127
 fi
-"$NODE_BIN" "$PI_RUNTIME_VERIFY" "$PI_PACKAGE_DIR" "$WORKBENCH_MANIFEST"
 if [ "$#" -eq 1 ] && [ "$1" = "--start" ] && [ "\${PI_ENV_SESSION_MANAGER_BYPASS:-}" != "1" ]; then
   if [ ! -f "$SESSION_MANAGER_START" ] || [ ! -f "$SESSION_MANAGER_EXTENSION" ]; then
     echo "pi-env: session manager build is missing. Rerun setup." >&2
@@ -237,23 +228,20 @@ function ensureLocalNixPathInShellProfiles() {
   }
 }
 
-function assertPiRuntime(piPackageDir, version, manifest) {
+function assertPiVersion(piPackageDir, version) {
   const installedVersion = JSON.parse(
     readFileSync(join(piPackageDir, "package.json"), "utf8"),
   ).version;
-  if (installedVersion !== version) {
-    const source = process.env.PI_PACKAGE_DIR
-      ? " PI_PACKAGE_DIR supplies it; update its provisioner (Home Manager: ./setup.sh --sync-home-manager)."
-      : "";
-    fail(`Pi package version ${installedVersion} does not match the workbench (${version}).${source}`);
-  }
-  const errors = validatePiRuntimeInstall(piPackageDir, manifest);
-  if (errors.length > 0) fail(errors.join("\n"));
+  if (installedVersion === version) return;
+  const source = process.env.PI_PACKAGE_DIR
+    ? " PI_PACKAGE_DIR supplies it; update its provisioner (Home Manager: ./setup.sh --sync-home-manager)."
+    : "";
+  fail(`Pi package version ${installedVersion} does not match the workbench (${version}).${source}`);
 }
 
 function installPiCli(policy) {
   section("Pi CLI");
-  const { manifest, version } = readPiRequirements();
+  const version = readPiVersion();
   const piPackageDir = process.env.PI_PACKAGE_DIR
     ? resolve(process.env.PI_PACKAGE_DIR)
     : join(repo, "node_modules", ...PiPackage.Name.split("/"));
@@ -261,7 +249,7 @@ function installPiCli(policy) {
     fail(`  ✗  missing pi package after install: ${piPackageDir}`);
   }
   const piPackageEntry = readPiPackageEntry(piPackageDir);
-  assertPiRuntime(piPackageDir, version, manifest);
+  assertPiVersion(piPackageDir, version);
   const piEntry = join(piPackageDir, piPackageEntry);
   if (!existsSync(piEntry) || !statSync(piEntry).isFile()) {
     fail(`  ✗  missing pi entrypoint after install: ${piEntry}`);

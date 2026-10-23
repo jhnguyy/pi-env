@@ -125,9 +125,6 @@
     "node": ">=24.19.0"
   },
   "packageManager": "nub@0.9.6",
-  "patchedDependencies": {
-    "@earendil-works/pi-coding-agent@1.4.0": "patches/pi-coding-agent-1.4.0.patch"
-  },
   "allowScripts": {
     "@google/genai": true,
     "esbuild": true

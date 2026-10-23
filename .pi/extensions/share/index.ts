@@ -123,7 +123,7 @@ function failureMessage(error: unknown): string {
 }
 
 export default function share(pi: ExtensionAPI, env: SettingsEnv = defaultSettingsEnv, files: ShareFiles = nodeFiles): void {
-  const command: Parameters<ExtensionAPI["registerCommand"]>[1] = {
+  pi.registerCommand("share-private", {
     description: "Publish, list, or delete session exports in a private GitHub repository",
     getArgumentCompletions: (prefix) => Actions.flatMap((action) => action.startsWith(prefix) ? [{ value: action, label: action }] : []),
     handler: async (args, ctx) => {
@@ -132,13 +132,5 @@ export default function share(pi: ExtensionAPI, env: SettingsEnv = defaultSettin
         else ctx.ui.notify(`Share failed: ${failureMessage(error)}`, "error");
       }))), { signal: ctx.signal });
     },
-  };
-  pi.registerCommand("share-private", command);
-  if (pi.supportsBuiltinCommandOverrides === true) {
-    pi.registerCommand("share", { ...command, overrideBuiltin: true });
-  } else {
-    pi.on("session_start", (_event, ctx) => {
-      ctx.ui.notify("This Pi runtime cannot override native /share. Use /share-private and update the pi-env runtime.", "warning");
-    });
-  }
+  });
 }
