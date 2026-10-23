@@ -16,6 +16,7 @@
     "scripts/verify-pre-commit.mjs",
     "scripts/verify-safe.mjs",
     "scripts/__tests__/lock-holder.mjs",
+    "src/workflow/__tests__/worker.ts",
     "scripts/__tests__/fixtures/supervised-process-tree.ts",
     "scripts/__tests__/fixtures/supervised-descendant.ts",
     "setup/apply-managed-settings.mjs",
