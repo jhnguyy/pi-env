@@ -42,7 +42,7 @@ export function registerDevTools(pi: DevToolsRegistrationApi, client = new LspCl
     "go-to-implementation, find-references, symbol rename, incoming/outgoing call hierarchy, " +
     "document/workspace symbols. Rename applies language-server workspace edits to disk. " +
     "Communicates with a shared daemon that " +
-    "manages typescript-language-server (for .ts/.tsx/.js), bash-language-server " +
+    "manages the native TypeScript language server (for .ts/.tsx/.js), bash-language-server " +
     "(for .sh/.bash/.zsh/.ksh), and nil (for .nix files), spawning each on first use. " +
     "Diagnostics supports bulk checks: pass multiple paths to check all files in one call.";
 

@@ -6,6 +6,7 @@
     "@earendil-works/pi-tui",
     "@earendil-works/pi-agent-core",
     "typebox",
+    "@parcel/watcher",
     "@sinclair/typebox",
     "@effect/opentelemetry",
     "@opentelemetry/api",

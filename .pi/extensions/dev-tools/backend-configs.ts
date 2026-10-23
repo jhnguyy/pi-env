@@ -78,12 +78,6 @@ function packageBinEntry(packageName: string, binName: string): string {
   return join(dirname(packageJsonPath), bin);
 }
 
-function packagePluginProbeLocation(packageName: string): string {
-  let location = dirname(require.resolve(`${packageName}/package.json`));
-  for (const _segment of packageName.split("/")) location = dirname(location);
-  return dirname(location);
-}
-
 function nodeExecPathShim(): string {
   return `data:text/javascript,${encodeURIComponent(`const configured = process.env.${ProcessEnvironmentName.NodeBinary}?.trim(); if (configured) Object.defineProperty(process, 'execPath', { value: configured, configurable: true, writable: true });`)}`;
 }
@@ -97,13 +91,12 @@ function nativeLaunch(binaryName: string, args: string[]): { launchCommand: stri
   return { launchCommand: binaryName, launchArgs: args };
 }
 
-/** Use Nub's workspace TypeScript, which prepare patches with Effect diagnostics. */
-function resolveTypeScriptServerPath(): string {
-  return require.resolve("typescript/lib/tsserver.js");
-}
-
 const TS_CAPABILITIES = {
   ...STANDARD_CAPABILITIES,
+  workspace: {
+    ...STANDARD_CAPABILITIES.workspace,
+    didChangeWatchedFiles: { dynamicRegistration: true, relativePatternSupport: true },
+  },
   textDocument: {
     ...STANDARD_CAPABILITIES.textDocument,
     implementation: {},
@@ -148,9 +141,9 @@ export const BACKEND_CONFIGS: LspBackendConfig[] = [
   // ── LSP backends ────────────────────────────────────────────────────────────
   {
     name: BackendName.TypeScript,
-    binaryName: "typescript-language-server",
-    binaryArgs: ["--stdio"],
-    ...nodeModuleLaunch("typescript-language-server", "typescript-language-server", ["--stdio"]),
+    binaryName: "tsc",
+    binaryArgs: ["--lsp", "--stdio"],
+    ...nodeModuleLaunch("@typescript/native", "tsc", ["--lsp", "--stdio"]),
     extensions: new Map([
       [".ts", "typescript"], [".tsx", "typescriptreact"],
       [".js", "javascript"], [".jsx", "javascriptreact"],
@@ -159,19 +152,12 @@ export const BACKEND_CONFIGS: LspBackendConfig[] = [
     ]),
     capabilities: TS_CAPABILITIES,
     initializationOptions: {
-      disableAutomaticTypingAcquisition: true,
-      // These tools do not offer auto-import completions. Avoid their dependency-wide index.
-      preferences: { includePackageJsonAutoImports: "off" },
-      maxTsServerMemory: 768,
-      plugins: [
-        {
-          name: "@effect/language-service",
-          location: packagePluginProbeLocation("@effect/language-service"),
-        },
-      ],
-      tsserver: {
-        path: resolveTypeScriptServerPath(),
-        useSyntaxServer: "never",
+      // Content mappers execute workspace code and require a separate trust decision.
+      runExternalCode: false,
+      enableTelemetry: false,
+      userPreferences: {
+        tsserver: { automaticTypeAcquisition: { enabled: false } },
+        suggest: { autoImports: false },
       },
     },
     codePrefix: "TS",
