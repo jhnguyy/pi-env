@@ -34,10 +34,10 @@ export type SharePath = typeof SharePath.Type;
 const ShareIdentity = Schema.Struct({ name: Schema.String, path: SharePath, sha: Schema.NonEmptyString }).check(
   Schema.makeFilter((file) => file.path === `sessions/${file.name}`),
 ).pipe(Schema.brand("ShareIdentity"));
-export type ShareFile = typeof ShareIdentity.Type & { readonly htmlUrl: string };
+export type ShareVersion = typeof ShareIdentity.Type;
+export type ShareFile = ShareVersion & { readonly htmlUrl: string };
 
 type GitHubExec = ExtensionAPI["exec"];
-const MaxResponseCharacters = 8 * 1024 * 1024;
 const Repository = Schema.Struct({
   id: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
   private: Schema.Boolean,
@@ -77,9 +77,6 @@ const request = Effect.fnUntraced(function* (
   const result = yield* Exec.execEffect(exec, "gh", [
     "api", "--hostname", "github.com", "--include", "--method", method, endpoint, ...fields,
   ], shareFailure, { cwd, failOnNonZero: false, failureDetail: "Could not run the GitHub request." });
-  if (result.stdout.length > MaxResponseCharacters) {
-    return yield* shareFailure("The GitHub response exceeds the share response limit; results may be incomplete.");
-  }
   const envelope = /^HTTP\/\d+(?:\.\d+)? ([1-5]\d{2})[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n/.exec(result.stdout);
   if (!envelope) return yield* shareFailure("GitHub did not return a valid HTTP response. Check gh authentication and connectivity.");
   const status = Number(envelope[1]);
@@ -105,6 +102,17 @@ function httpsUrl(value: string): string | undefined {
   return url.href;
 }
 
+const readPages = Effect.fnUntraced(function* (exec: GitHubExec, cwd: string, repo: RepositoryName) {
+  return yield* decode(Pages, yield* requiredRequest(exec, cwd, `repos/${repo}/pages`), "Pages response (private visibility is required)");
+});
+
+function privateSite(pages: typeof Pages.Type) {
+  const base = httpsUrl(pages.html_url);
+  if (pages.public !== false || !base) return undefined;
+  const branch = pages.build_type === "legacy" && pages.source?.path === "/" ? pages.source.branch : undefined;
+  return { base, branch };
+}
+
 export const inspectTarget = Effect.fnUntraced(function* (
   exec: GitHubExec, cwd: string, repo: RepositoryName, branch?: string,
 ) {
@@ -112,11 +120,12 @@ export const inspectTarget = Effect.fnUntraced(function* (
   if (!Number.isSafeInteger(repository.id) || !repository.private || !repository.permissions.push) {
     return yield* shareFailure("The repository must have a valid identity, be private, and grant your GitHub account push access.");
   }
-  const selected = branch ?? repository.default_branch;
-  if (!selected || selected.length > 1024 || /[\u0000-\u0020\u007f]/.test(selected) || /[\uD800-\uDFFF]/u.test(selected)) {
-    return yield* shareFailure("The share branch is invalid.");
-  }
-  const current = yield* decode(Branch, yield* requiredRequest(exec, cwd, `repos/${repo}/branches/${encodeURIComponent(selected)}`), "branch response");
+  const site = branch === undefined && repository.has_pages
+    ? yield* readPages(exec, cwd, repo).pipe(Effect.map(privateSite), Effect.catch(() => Effect.void))
+    : undefined;
+  const selected = branch ?? site?.branch ?? repository.default_branch;
+  const ref = yield* Effect.try({ try: () => encodeURIComponent(selected), catch: (cause) => shareFailure("The share branch contains invalid Unicode.", cause) });
+  const current = yield* decode(Branch, yield* requiredRequest(exec, cwd, `repos/${repo}/branches/${ref}`), "branch response");
   if (current.name !== selected) return yield* shareFailure("GitHub returned a different branch than the selected share branch.");
   return { repo, branch: selected, repositoryId: repository.id, hasPages: repository.has_pages };
 });
@@ -131,14 +140,11 @@ export const revalidateTarget = Effect.fnUntraced(function* (exec: GitHubExec, c
 
 export const privatePagesBase = Effect.fnUntraced(function* (exec: GitHubExec, cwd: string, target: ShareTarget) {
   if (!target.hasPages) return undefined;
-  const pages = yield* decode(Pages, yield* requiredRequest(exec, cwd, `repos/${target.repo}/pages`), "Pages response (private visibility is required)");
-  const base = httpsUrl(pages.html_url);
-  if (pages.public !== false || !base) {
-    return yield* shareFailure("GitHub Pages must be explicitly private and have a valid HTTPS URL before sharing.");
-  }
+  const site = privateSite(yield* readPages(exec, cwd, target.repo));
+  if (!site) return yield* shareFailure("GitHub Pages must be explicitly private and have a valid HTTPS URL before sharing.");
   // Workflow builds do not bind published paths to the configured branch source.
-  if (pages.build_type !== "legacy" || pages.source?.branch !== target.branch || pages.source.path !== "/") return undefined;
-  return base.endsWith("/") ? base : `${base}/`;
+  if (site.branch !== target.branch) return undefined;
+  return site.base.endsWith("/") ? site.base : `${site.base}/`;
 });
 
 export const listShares = Effect.fnUntraced(function* (exec: GitHubExec, cwd: string, target: ShareTarget) {
@@ -164,9 +170,22 @@ export const listShares = Effect.fnUntraced(function* (exec: GitHubExec, cwd: st
   return files;
 });
 
+export const findShare = Effect.fnUntraced(function* (exec: GitHubExec, cwd: string, target: ShareTarget, path: SharePath) {
+  // Object media keeps metadata available when the HTML is too large for inline content.
+  const body = yield* request(exec, cwd, `repos/${target.repo}/contents/${path}?ref=${encodeURIComponent(target.branch)}`, "GET", ["-H", "Accept: application/vnd.github.object+json"], true);
+  if (body === undefined) return undefined;
+  const current = yield* decode(Content, body, "current share response");
+  if (current.type !== "file" || current.path !== path || !Schema.is(ShareIdentity)(current)) {
+    return yield* shareFailure("GitHub returned an inconsistent share identity.");
+  }
+  return current;
+});
+
 export const uploadShare = Effect.fnUntraced(function* (
-  exec: GitHubExec, cwd: string, target: ShareTarget, path: SharePath, payloadFile: string,
+  exec: GitHubExec, cwd: string, target: ShareTarget, path: SharePath, payloadFile: string, previous: ShareVersion | undefined,
 ) {
+  const current = yield* findShare(exec, cwd, target, path);
+  if (current?.sha !== previous?.sha) return yield* shareFailure("The share changed after confirmation. Run /share-private list and confirm again.");
   const response = yield* requiredRequest(exec, cwd, `repos/${target.repo}/contents/${path}`, "PUT", ["--input", payloadFile]).pipe(
     Effect.mapError((cause) => mutationFailure("upload", target, path, "uncertain", cause)),
   );
@@ -182,8 +201,8 @@ export const deleteShare = Effect.fnUntraced(function* (
   exec: GitHubExec, cwd: string, target: ShareTarget, file: ShareFile,
 ) {
   const endpoint = `repos/${target.repo}/contents/${file.path}`;
-  const current = yield* decode(Content, yield* requiredRequest(exec, cwd, `${endpoint}?ref=${encodeURIComponent(target.branch)}`), "current share response");
-  if (current.type !== "file" || current.path !== file.path || current.name !== file.name || current.sha !== file.sha) {
+  const current = yield* findShare(exec, cwd, target, file.path);
+  if (!current || current.sha !== file.sha) {
     return yield* shareFailure("The selected share changed after listing. List shares again before deleting it.");
   }
   yield* requiredRequest(exec, cwd, endpoint, "DELETE", [

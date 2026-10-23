@@ -19,12 +19,13 @@ it.skipIf(!enabled)("corroborates the GitHub fixture with real read-only respons
   let verdict = "fail";
   let cliVersion = "unavailable";
   try {
-    cliVersion = (await run("gh", ["--version"], { timeout: 6000 })).stdout.split("\n")[0];
+    cliVersion = (await run("gh", ["--version"], { timeout: 4000 })).stdout.split("\n")[0];
     const repository = "repos/jhnguyy/pi-env";
-    for (const endpoint of [repository, `${repository}/branches/main`, `${repository}/contents?ref=main`, `${repository}/pages`]) {
+    for (const endpoint of [repository, `${repository}/branches/main`, `${repository}/contents?ref=main`, `${repository}/contents/LICENSE?ref=main`, `${repository}/pages`]) {
       const args = ["api", "--hostname", "github.com", "--include", "--method", "GET", endpoint];
+      if (endpoint.includes("/contents/")) args.push("-H", "Accept: application/vnd.github.object+json");
       // gh exits nonzero for a genuine 404, but still returns its HTTP envelope.
-      const response = await run("gh", args, { timeout: 6000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_DEBUG: "" } }).then(({ stdout }) => ({ stdout, exitCode: 0 })).catch((error: unknown) => {
+      const response = await run("gh", args, { timeout: 4000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_DEBUG: "" } }).then(({ stdout }) => ({ stdout, exitCode: 0 })).catch((error: unknown) => {
         if (typeof error === "object" && error !== null && "stdout" in error && typeof error.stdout === "string" && "code" in error && typeof error.code === "number") return { stdout: error.stdout, exitCode: error.code };
         throw error;
       });
@@ -47,10 +48,10 @@ it.skipIf(!enabled)("corroborates the GitHub fixture with real read-only respons
         expect(status).toBe(200);
         fields["name"] = typeof body.name;
         expect(body.name).toBe("main");
-      } else if (endpoint.includes("/contents?")) {
+      } else if (endpoint.includes("/contents")) {
         expect(status).toBe(200);
-        expect(Array.isArray(body)).toBe(true);
-        const file = body.find((entry: Record<string, unknown>) => entry["type"] === "file");
+        expect(Array.isArray(body)).toBe(!endpoint.includes("/contents/"));
+        const file = Array.isArray(body) ? body.find((entry: Record<string, unknown>) => entry["type"] === "file") : body;
         expect(file).toBeDefined();
         for (const [key, value] of Object.entries(exampleShare)) {
           fields[key] = typeof file[key];
@@ -68,7 +69,7 @@ it.skipIf(!enabled)("corroborates the GitHub fixture with real read-only respons
     verdict = "pass";
   } finally {
     writeFileSync(artifact, JSON.stringify({
-      inputs: { cliVersion, requests: "GET-only repository, branch, directory metadata, and Pages" },
+      inputs: { cliVersion, requests: "GET-only repository, branch, directory and license-file metadata, and Pages" },
       expected: "HTTP envelopes and DTO field types agree with the workflow fixture",
       actual: observations, verdict,
       limits: "No mutation or private Pages deployment is exercised. Only status and field types are retained; response bodies and headers are not recorded.",

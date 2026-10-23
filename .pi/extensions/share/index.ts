@@ -2,12 +2,10 @@ import * as nodeFiles from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Clock, Effect, Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { execEffect } from "../_shared/exec";
-import { generateId } from "../_shared/id";
-import { slugify } from "../_shared/slug";
 import { decodeSettingsBlockEffect, defaultSettingsEnv, SettingsDecodeError, type SettingsEnv, SettingsReadError, SettingsWriteError, updateGlobalSettingsBlockEffect } from "../_shared/settings";
-import { deleteShare, inspectTarget, listShares, mutationFailure, privatePagesBase, RepositoryName, SharePath, revalidateTarget, ShareError, shareFailure, type ShareFile, type ShareTarget, uploadShare } from "./github";
+import { deleteShare, findShare, inspectTarget, listShares, mutationFailure, privatePagesBase, RepositoryName, SharePath, revalidateTarget, ShareError, shareFailure, type ShareFile, type ShareTarget, uploadShare } from "./github";
 
 const ShareSettings = Schema.Struct({ repo: Schema.optionalKey(RepositoryName), branch: Schema.optionalKey(Schema.NonEmptyString) });
 const Actions = ["upload", "list", "delete"];
@@ -19,24 +17,18 @@ function io<A>(message: string, action: () => Promise<A>) {
   return Effect.tryPromise({ try: action, catch: (cause) => shareFailure(message, cause) });
 }
 
-function sessionTitle(manager: ExtensionCommandContext["sessionManager"]): string {
-  const name = manager.getSessionName();
-  if (name) return name;
-  const entry = manager.getBranch().find((entry) => entry.type === "message" && entry.message.role === "user");
-  if (entry?.type !== "message" || entry.message.role !== "user") return "session";
-  const content = entry.message.content;
-  return typeof content === "string" ? content : content.filter((block) => block.type === "text").map((block) => block.text).join(" ");
-}
-
 function viewUrl(base: string | undefined, file: ShareFile): string {
   return base ? new URL(file.path, `${base.replace(/\/+$/, "")}/`).href : file.htmlUrl;
 }
 
 function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, target: ShareTarget, sessionFile: string, files: ShareFiles) {
   return Effect.gen(function* () {
-    const date = new Date(yield* Clock.currentTimeMillis).toISOString().slice(0, 10);
-    const path = yield* Schema.decodeUnknownEffect(SharePath)(`sessions/${date}-${slugify(sessionTitle(ctx.sessionManager), { fallback: "session" })}-${generateId(6)}.html`);
-    const approved = yield* io("Could not confirm publication.", () => ctx.ui.confirm("Publish session", `Upload the full, unredacted session export, including tool output and all branches, to ${target.repo}@${target.branch}:${path}? Repository readers can access it.`));
+    const created = new Date(ctx.sessionManager.getHeader()?.timestamp ?? "");
+    const suffix = ctx.sessionManager.getSessionId().slice(-12);
+    if (!Number.isFinite(created.getTime()) || !/^[a-f0-9]{12}$/i.test(suffix)) return yield* shareFailure("The session has no usable creation date or session ID.");
+    const path = yield* Schema.decodeUnknownEffect(SharePath)(`sessions/${created.toISOString().slice(0, 10)}-${suffix}.html`);
+    const previous = yield* findShare(pi.exec, ctx.cwd, target, path);
+    const approved = yield* io("Could not confirm publication.", () => ctx.ui.confirm("Publish session", `${previous ? "Replace the existing share with" : "Upload"} the full, unredacted session export, including tool output and all branches, to ${target.repo}@${target.branch}:${path}? Repository readers can access it.`));
     if (!approved) return;
     yield* Effect.scoped(Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
@@ -51,10 +43,10 @@ function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, target: ShareTa
       if (size.size > MaxExportBytes) return yield* shareFailure("The session export exceeds the 10 MiB share limit. Use /export to save it locally.");
       const content = yield* io("Could not read the exported session.", () => files.readFile(html));
       const payload = join(directory, "upload.json");
-      yield* io("Could not prepare the upload.", () => files.writeFile(payload, JSON.stringify({ message: "Share Pi session", branch: target.branch, content: content.toString("base64") }), { mode: 0o600 }));
+      yield* io("Could not prepare the upload.", () => files.writeFile(payload, JSON.stringify({ message: "Share Pi session", branch: target.branch, sha: previous?.sha, content: content.toString("base64") }), { mode: 0o600 }));
       const current = yield* revalidateTarget(pi.exec, ctx.cwd, target);
       const pages = yield* privatePagesBase(pi.exec, ctx.cwd, current);
-      const blob = yield* uploadShare(pi.exec, ctx.cwd, current, path, payload).pipe(
+      const blob = yield* uploadShare(pi.exec, ctx.cwd, current, path, payload, previous).pipe(
         Effect.onInterrupt(() => Effect.sync(() => ctx.ui.notify(mutationFailure("upload", current, path, "uncertain", undefined).message, "warning"))),
       );
       const url = pages ? new URL(path, `${pages.replace(/\/+$/, "")}/`).href : blob;
@@ -108,8 +100,8 @@ function runShare(args: string, pi: ExtensionAPI, ctx: ExtensionCommandContext, 
     const target = yield* inspectTarget(pi.exec, ctx.cwd, repo, settings.branch);
     if (action === "upload") yield* privatePagesBase(pi.exec, ctx.cwd, target);
     if (!settings.repo) {
-      yield* updateGlobalSettingsBlockEffect("share", { repo }, env);
-      ctx.ui.notify(`Default share repository saved: ${repo}`, "info");
+      yield* updateGlobalSettingsBlockEffect("share", { repo, branch: target.branch }, env);
+      ctx.ui.notify(`Default share destination saved: ${repo}@${target.branch}`, "info");
     }
     if (action === "upload" && sessionFile) yield* publish(pi, ctx, target, sessionFile, files);
     else if (action === "list" || action === "delete") yield* manage(pi, ctx, target, action);

@@ -13,11 +13,13 @@ Authenticate `gh` with an account that can push to the destination GitHub.com re
 }
 ```
 
-Create the branch before using it. Omit `branch` to use the repository's default branch. The repository prompt saves a global default. Project settings can override it. For a symlinked settings file, edit its managed source instead.
+Create the branch before using it. An explicit `branch` takes precedence. Otherwise, a verified private, branch-based Pages site with a root source supplies the destination branch; the repository default is the fallback. The repository prompt saves both the repository and chosen branch as global defaults. Project settings can override them. For a symlinked settings file, edit its managed source instead.
 
 ## Viewing and privacy
 
-Before confirming an upload, check the session, branch, and repository membership. Exports are not redacted and include tool output and all session branches. Filenames use the session name or first prompt, so they can also reveal session details.
+Before confirming an upload, check the session, branch, and repository membership. Exports are not redacted and include tool output and all session branches. Filenames contain only the session's UTC creation date and a session-ID suffix, never its name or prompt text.
+
+Sharing the same session again at the same destination uses the same path and link. The confirmation explicitly identifies replacement of an existing share. If the file changes after confirmation, the command stops instead of overwriting it. Earlier versions remain in Git history. Existing shares with older filenames are not renamed automatically.
 
 Uploads require a private repository. If Pages is enabled, its visibility must also be verifiably private. The extension does not change hosting settings. A matching branch-based private Pages source provides a browser link. Deployment may take a minute or more. Otherwise, download the HTML from the GitHub file link and open it locally.
 

@@ -51,6 +51,7 @@ export function fixture(...repositories: unknown[]) {
     branches: new Set(["main", "shares", "feature/test"]),
     shares: [exampleShare] as unknown[],
     currentShare: exampleShare as unknown,
+    contents: new Map<string, { type: string; name: string; path: string; sha: string; html_url: string }>(),
     rootContents: [] as unknown[],
     uploadResponse: undefined as "malformed" | "lost" | undefined,
     deleteResponse: undefined as "lost" | undefined,
@@ -91,9 +92,19 @@ export function fixture(...repositories: unknown[]) {
         }
         if (method === "PUT") {
           events.push("upload");
-          uploads.push(body);
-          status = 201;
-          data = { content: { html_url: `https://github.com/owner/private-exports/blob/${String(body["branch"] ?? "main")}/${route.split("/contents/")[1]}` } };
+          const path = route.split("/contents/")[1];
+          const key = `${String(body["branch"])}:${path}`;
+          const existing = github.contents.get(key);
+          if (body["sha"] !== existing?.sha) {
+            status = 409;
+            data = { message: "synthetic SHA conflict" };
+          } else {
+            uploads.push(body);
+            status = existing ? 200 : 201;
+            const content = { type: "file", name: path.slice("sessions/".length), path, sha: String(uploads.length).padStart(40, "0"), html_url: `https://github.com/owner/private-exports/blob/${String(body["branch"])}/${path}` };
+            github.contents.set(key, content);
+            data = { content };
+          }
         } else {
           events.push("delete");
           deletions.push({ path: route.split("/contents/")[1], body });
@@ -116,7 +127,10 @@ export function fixture(...repositories: unknown[]) {
         data = github.rootContents;
       } else if (route.includes("/contents/")) {
         events.push("file");
-        data = github.currentShare;
+        const path = route.split("/contents/")[1];
+        const branch = new URLSearchParams(endpoint.split("?")[1]).get("ref");
+        data = path === exampleShare.path ? github.currentShare : github.contents.get(`${branch}:${path}`);
+        if (data === undefined) { status = 404; data = { message: "Not Found" }; }
       } else {
         events.push("repository");
         const repository = repositories[Math.min(checks++, repositories.length - 1)];

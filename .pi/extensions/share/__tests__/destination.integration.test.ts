@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import * as nodeFiles from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { fixture, privateRepository } from "./fixture";
@@ -30,12 +30,36 @@ describe("share destination", () => {
     expect(f.notices.join("\n")).toContain("Share failed");
   });
 
-  it("names the export from the date, sanitized session name, and a collision-resistant ID", async () => {
+  it("uses only the creation date and session ID suffix, never session text", async () => {
     const f = fixture();
-    f.session.appendSessionInfo("Readable ../ Demo ✨");
+    f.session.getHeader()!.timestamp = "2001-01-02T03:04:05.000Z";
+    f.session.appendSessionInfo("sensitive customer incident");
     await f.invoke();
     const endpoint = f.requests.find((args) => args.includes("PUT"))?.find((arg) => arg.startsWith("repos/"));
-    expect(endpoint).toMatch(/\/contents\/sessions\/\d{4}-\d{2}-\d{2}-readable-demo-[a-f0-9]{12,32}\.html$/);
+    expect(endpoint).toBe(`repos/owner/private-exports/contents/sessions/2001-01-02-${f.session.getSessionId().slice(-12)}.html`);
+    expect(endpoint).not.toMatch(/sensitive|customer|synthetic|conversation/);
+  });
+
+  it("chooses and saves the private root Pages source branch on first use", async () => {
+    const f = fixture();
+    f.github.pages = privatePages;
+    await f.invoke();
+    expect(f.uploads[0]?.["branch"]).toBe("shares");
+    expect(f.confirmations[0]).toContain("@shares:");
+    expect(JSON.parse(readFileSync(f.settings, "utf8")).share).toEqual({ repo: "owner/private-exports", branch: "shares" });
+    f.github.pages = { ...privatePages, source: { branch: "main", path: "/" } };
+    await f.invoke();
+    expect(f.uploads[1]?.["branch"]).toBe("shares");
+  });
+
+  it.each([
+    { ...privatePages, build_type: "workflow" },
+    { ...privatePages, source: { branch: "shares", path: "/docs" } },
+  ])("falls back to the default branch without a private root branch source: %j", async (pages) => {
+    const f = fixture();
+    f.github.pages = pages;
+    await f.invoke();
+    expect(f.uploads[0]?.["branch"]).toBe("main");
   });
 
   it("returns an authenticated private Pages link for the matching branch and root source", async () => {

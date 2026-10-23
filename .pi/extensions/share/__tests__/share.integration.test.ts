@@ -12,9 +12,9 @@ describe("private repository share", () => {
     const data = html.match(/<script id="session-data" type="application\/json">([^<]+)<\/script>/)?.[1];
     expect(data).toBeDefined();
     expect(Buffer.from(data!, "base64").toString()).toContain("synthetic private conversation");
-    expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark", share: { repo: "owner/private-exports" } });
+    expect(JSON.parse(readFileSync(f.settings, "utf8"))).toEqual({ theme: "dark", share: { repo: "owner/private-exports", branch: "main" } });
     expect(f.notices.join("\n")).toContain("https://github.com/owner/private-exports/blob/");
-    expect(f.requests.find((args) => args.includes("PUT"))?.join(" ")).toMatch(/\d{4}-\d{2}-\d{2}-synthetic-private-conversation-[a-f0-9]+\.html/);
+    expect(f.requests.find((args) => args.includes("PUT"))?.join(" ")).toMatch(/\d{4}-\d{2}-\d{2}-[a-f0-9]{12}\.html/);
     await f.invoke();
     expect(f.prompts).toBe(1);
     expect(f.uploads).toHaveLength(2);
