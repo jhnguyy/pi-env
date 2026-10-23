@@ -1,0 +1,9 @@
+{
+  "name": "@pi-env/share",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  }
+}
