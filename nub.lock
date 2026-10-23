@@ -18,6 +18,11 @@ overrides:
   undici: 8.12.3
   vite: 8.3.3
 
+patchedDependencies:
+  '@earendil-works/pi-coding-agent@1.4.0':
+    hash: fecd672e4aae154a1af09449b163964050aa575e7e01f64012c56782916d869e
+    path: patches/pi-coding-agent-1.4.0.patch
+
 importers:
 
   .:
@@ -64,7 +69,7 @@ importers:
         version: 1.4.0
       '@earendil-works/pi-coding-agent':
         specifier: 1.4.0
-        version: 1.4.0
+        version: 1.4.0(patch_hash=fecd672e4aae154a1af09449b163964050aa575e7e01f64012c56782916d869e)
       '@earendil-works/pi-tui':
         specifier: 1.4.0
         version: 1.4.0
@@ -139,7 +144,7 @@ importers:
         version: 1.4.0
       '@earendil-works/pi-coding-agent':
         specifier: '*'
-        version: 1.4.0
+        version: 1.4.0(patch_hash=fecd672e4aae154a1af09449b163964050aa575e7e01f64012c56782916d869e)
       '@earendil-works/pi-tui':
         specifier: '*'
         version: 1.4.0
@@ -156,7 +161,7 @@ importers:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: '*'
-        version: 1.4.0
+        version: 1.4.0(patch_hash=fecd672e4aae154a1af09449b163964050aa575e7e01f64012c56782916d869e)
       '@earendil-works/pi-tui':
         specifier: '*'
         version: 1.4.0
@@ -2599,7 +2604,7 @@ snapshots:
     dependencies:
       quickjs-wasi: 3.6.2
 
-  '@earendil-works/pi-coding-agent@1.4.0':
+  '@earendil-works/pi-coding-agent@1.4.0(patch_hash=fecd672e4aae154a1af09449b163964050aa575e7e01f64012c56782916d869e)':
     dependencies:
       '@earendil-works/pi-agent-core': 1.4.0
       '@earendil-works/pi-ai': 1.4.0

@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { fixture, privateRepository, roots } from "./fixture";
 
 describe("private repository share", () => {
+  it("explicitly claims native share using the same handler as the private alias", () => {
+    const f = fixture();
+    expect(f.commands.get("share")?.overrideBuiltin).toBe(true);
+    expect(f.commands.get("share")?.handler).toBe(f.commands.get("share-private")?.handler);
+  });
+
   it("exports through Pi, saves the first repository, and reuses it", async () => {
     const f = fixture();
     await f.invoke();

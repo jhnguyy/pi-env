@@ -154,6 +154,36 @@ test_pi_cli_wrapper_intercepts_only_exact_start() {
   rm -rf "$tmp"
 }
 
+test_pi_cli_wrapper_rechecks_selected_runtime() {
+  local tmp package alternate output file
+  tmp="$(with_temp_dir)"
+  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  PI_ENV_NODE_BIN=$(node_bin)
+  create_stub_repo "$tmp"
+  run_pi_cli_setup
+  package="$REPO/node_modules/@earendil-works/pi-coding-agent"
+  alternate="$tmp/alternate"
+  cp -R "$package" "$alternate"
+  # External-runtime fixture metadata is separate from its stub executable.
+  for file in core/extensions/loader.js core/extensions/runner.js core/agent-session.js \
+    modes/interactive/interactive-mode.js core/extensions/types.d.ts bundle/chunks/runtime.js; do
+    mkdir -p "$package/dist/$(dirname "$file")"
+    printf '%s\n' 'supportsBuiltinCommandOverrides getBuiltinCommandOverride overrideBuiltin .tryExecuteBuiltinCommandOverride(' > "$package/dist/$file"
+  done
+  cat > "$REPO/package.json" <<'JSON'
+{"devDependencies":{"@earendil-works/pi-coding-agent":"1.2.3"},"pi":{"extensions":[".pi/extensions/share"]}}
+JSON
+  output=$(PI_PACKAGE_DIR= "$PI_BIN_DIR/pi")
+  [ "$output" = 'stub pi []' ] || fail "compatible runtime should launch without extra stdout"
+  if PI_PACKAGE_DIR="$alternate" "$PI_BIN_DIR/pi" > "$tmp/rejected.log" 2>&1; then
+    fail "wrapper must reject an unpatched runtime selected after setup"
+  fi
+  grep -q 'lacks explicit built-in command override support' "$tmp/rejected.log" || fail "wrapper should explain incompatible runtime"
+  ! grep -q 'stub pi' "$tmp/rejected.log" || fail "wrapper must reject before launching Pi"
+  unset PI_ENV_CONFIG_MANAGED_BY_NIX PI_ENV_NODE_BIN
+  rm -rf "$tmp"
+}
+
 test_pi_cli_wrapper_skips_write_when_managed_by_nix() {
   local tmp
   tmp="$(with_temp_dir)"
@@ -204,6 +234,29 @@ exit 0'
   if [ "$mode" != local-nix ]; then rm -rf "$tmp"; fi
 )
 
+test_pi_cli_wrapper_rejects_unpatched_share_runtime() (
+  local tmp
+  tmp="$(with_temp_dir)"
+  trap 'rm -rf "$tmp"' EXIT
+  PI_ENV_CONFIG_MANAGED_BY_NIX=1
+  PI_ENV_NODE_BIN=$(node_bin)
+  create_stub_repo "$tmp"
+  "$PI_ENV_NODE_BIN" - "$REPO/package.json" <<'JS'
+const fs = require('node:fs');
+const path = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+pkg.pi = { extensions: ['.pi/extensions/share'] };
+fs.writeFileSync(path, JSON.stringify(pkg));
+JS
+  if run_pi_cli_setup >"$tmp/setup.log" 2>&1; then
+    fail "setup should reject a Pi runtime without explicit built-in command ownership"
+  fi
+  grep -q 'built-in command override support' "$tmp/setup.log" || fail "setup should identify missing runtime support"
+  [ ! -e "$PI_BIN_DIR/pi" ] || fail "setup should not install an unsafe runtime wrapper"
+)
+
+test_pi_cli_wrapper_rejects_unpatched_share_runtime
+test_pi_cli_wrapper_rechecks_selected_runtime
 test_pi_cli_wrapper_uses_repo_locked_package
 test_pi_cli_wrapper_uses_declared_package_entry
 test_pi_cli_wrapper_pins_configured_node

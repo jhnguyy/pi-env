@@ -30,6 +30,7 @@ export function fixture(...repositories: unknown[]) {
   const session = SessionManager.create(root, join(root, "sessions"));
   session.appendMessage({ role: "user", content: "synthetic private conversation", timestamp: Date.now() });
   let command: RegisteredCommand | undefined;
+  const commands = new Map<string, RegisteredCommand>();
   const uploads: Array<Record<string, unknown>> = [];
   const deletions: Array<{ path: string; body: Record<string, unknown> }> = [];
   const requests: string[][] = [];
@@ -53,7 +54,12 @@ export function fixture(...repositories: unknown[]) {
   let selected: string | undefined;
   const files: ShareFiles = { ...nodeFiles };
   const api: Partial<ExtensionAPI> = {
-    registerCommand(name: string, value: RegisteredCommand) { expect(name).toBe("share-private"); command = value; },
+    supportsBuiltinCommandOverrides: true,
+    on() { return () => {}; },
+    registerCommand(name: string, value: RegisteredCommand) {
+      commands.set(name, value);
+      if (name === "share-private") command = value;
+    },
     async exec(binary, args, options) {
       if (binary !== "gh") {
         events.push("export");
@@ -134,7 +140,7 @@ export function fixture(...repositories: unknown[]) {
     cwd: root, hasUI: true, sessionManager: session, waitForIdle: async () => {}, ui: ui as ExtensionCommandContext["ui"],
   };
   return {
-    settings, projectSettings, files, session, github, uploads, deletions, requests, events, notices, confirmations,
+    settings, projectSettings, files, session, commands, github, uploads, deletions, requests, events, notices, confirmations,
     get prompts() { return prompts; },
     cancel() { answer = undefined; },
     decline() { approved = false; },

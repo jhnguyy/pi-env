@@ -1,60 +1,69 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { expect, it, onTestFinished } from "vitest";
+import { expect, it } from "vitest";
+import { piTui } from "./fixtures/pi-tui";
 
-const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 const test = process.env["E2E"] === "1" ? it : it.skip;
+const extension = join(process.cwd(), ".pi/extensions/share/dist/index.js");
+const override = join(process.cwd(), ".pi/extensions/share/__tests__/fixtures/command-override.ts");
+const second = join(process.cwd(), ".pi/extensions/share/__tests__/fixtures/second-command-override.ts");
+const ordinary = join(process.cwd(), ".pi/extensions/share/__tests__/fixtures/ordinary-command.ts");
+const replacementEditor = join(process.cwd(), ".pi/extensions/share/__tests__/fixtures/replacement-editor.ts");
 
-test("/share-private in real Pi opens the repository prompt", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-private-share-e2e-"));
-  const socket = join(root, "tmux.sock");
-  const tmux = (...args: string[]) => execFileSync("tmux", ["-S", socket, "-f", "/dev/null", ...args], { encoding: "utf8" });
-  let screen = "";
-  let verdict = "fail";
-  onTestFinished(() => {
-    const errors: unknown[] = [];
-    const attempt = (cleanup: () => void) => {
-      try { cleanup(); } catch (error) { errors.push(error); }
-    };
-    attempt(() => {
-      const evidence = process.env["PI_ENV_E2E_ARTIFACT_DIR"] ?? join(tmpdir(), "pi-share-evidence");
-      mkdirSync(evidence, { recursive: true });
-      const path = join(evidence, `share-${Date.now()}.json`);
-      writeFileSync(path, JSON.stringify({ input: "/share-private in an isolated Pi TUI", expected: "Private repository prompt, no gist publication", actual: screen, verdict, repeat: "E2E=1 nub run test:vitest .pi/extensions/share/__tests__/e2e.test.ts" }, null, 2));
-      console.log(`Share TUI evidence: ${path}`);
-    });
-    attempt(() => { if (existsSync(socket)) tmux("kill-server"); });
-    attempt(() => rmSync(root, { recursive: true, force: true }));
-    if (errors.length > 0) throw new AggregateError(errors, "Share E2E teardown failed");
-  });
+test.each([
+  { command: "/share", replacement: false },
+  { command: "/share-private", replacement: false },
+  { command: "/share", replacement: true },
+])("$command opens the private prompt (replacement editor=$replacement)", async ({ command, replacement }) => {
+  const f = piTui(replacement ? [extension, replacementEditor] : [extension]);
+  await f.waitFor("No models available");
+  f.send(command);
+  expect(await f.waitFor("Private GitHub repository")).toContain("saved as your default");
+  f.escape();
+  expect(JSON.parse(readFileSync(f.settings, "utf8"))).not.toHaveProperty("share");
+  expect(f.ghCalls()).toBe("");
+  f.passed();
+});
 
-  const agent = join(root, "agent");
-  mkdirSync(agent);
-  writeFileSync(join(agent, "settings.json"), JSON.stringify({ quietStartup: true, tuiMode: "regular" }));
-  const session = SessionManager.create(root, join(root, "sessions"));
-  session.appendMessage({ role: "user", content: "synthetic share routing check", timestamp: Date.now() });
-  const cli = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
-  const extension = join(process.cwd(), ".pi/extensions/share/dist/index.js");
-  tmux("new-session", "-d", "-s", "share", "-x", "120", "-y", "40", `env PI_CODING_AGENT_DIR=${quote(agent)} PI_OFFLINE=1 ${quote(process.execPath)} ${quote(cli)} --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files -e ${quote(extension)} --session ${quote(session.getSessionFile()!)} --offline`);
-  const deadline = Date.now() + 15_000;
-  const waitFor = async (text: string) => {
-    while (Date.now() < deadline) {
-      screen = tmux("capture-pane", "-p", "-t", "share");
-      if (screen.includes(text)) return;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    throw new Error(`Did not see ${text}: ${screen}`);
-  };
-  await waitFor("No models available");
-  tmux("send-keys", "-t", "share", "-l", "/share-private");
-  tmux("send-keys", "-t", "share", "Enter");
-  await waitFor("Private GitHub repository");
-  expect(screen).toContain("saved as your default");
-  expect(screen).not.toContain("gist.github.com");
-  tmux("send-keys", "-t", "share", "Escape");
-  expect(JSON.parse(readFileSync(join(agent, "settings.json"), "utf8"))).not.toHaveProperty("share");
-  verdict = "pass";
+test("a claimed handler failure cannot fall through to native sharing", async () => {
+  const f = piTui([override], ["--override-test-mode", "error"]);
+  await f.waitFor("No models available");
+  f.send("/share");
+  await f.waitFor("Synthetic override failure");
+  expect(f.ghCalls()).toBe("");
+  f.passed();
+});
+
+test("canceling a claimed confirmation consumes the command and its arguments", async () => {
+  const f = piTui([override], ["--override-test-mode", "confirm"]);
+  await f.waitFor("No models available");
+  f.send("/share from-terminal");
+  await f.waitFor("Synthetic override confirmation");
+  f.escape();
+  const screen = await f.waitFor("Override handled without upload");
+  expect(screen).toContain("Override handled without upload: from-terminal");
+  expect(f.ghCalls()).toBe("");
+  f.passed();
+});
+
+test("multiple explicit claimants block the bare command rather than restore native sharing", async () => {
+  const f = piTui([override, second]);
+  await f.waitFor("No models available");
+  f.send("/share");
+  const screen = await f.waitFor('Extension "command:share" error:');
+  expect(screen).toContain("override conflict");
+  expect(screen).not.toContain("Override handled without upload");
+  expect(f.ghCalls()).toBe("");
+  f.passed();
+});
+
+test.each([{ extensions: [] }, { extensions: [ordinary] }])("native sharing remains unchanged without an explicit claim ($extensions)", async ({ extensions }) => {
+  const f = piTui(extensions);
+  await f.waitFor("No models available");
+  f.send("/share");
+  const screen = await f.waitFor("GitHub CLI is not logged in");
+  expect(screen).not.toContain("An ordinary handler must not run");
+  expect(f.ghCalls()).toContain("auth status");
+  expect(f.ghCalls()).not.toContain("gist create");
+  f.passed();
 });

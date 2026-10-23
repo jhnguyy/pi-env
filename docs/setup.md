@@ -22,6 +22,8 @@ See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../
 
 [Nix bindings](../nix/outputs.nix) provide the local Nix runtime. The [runtime adapter](../setup/runtime.mjs) owns CLI installation and session launching. [Hydration](../scripts/hydrate.mjs) owns dependency-install preparation.
 
+When private sharing is registered, setup and the generated launcher require explicit built-in command override support in both the SDK and CLI. They reject an incompatible Pi package even when its version matches or it is selected through a later `PI_PACKAGE_DIR` override. The external provisioner owns runtime replacement; setup does not patch that package. See [local command-override patch ownership](nix.md#local-command-override-patch).
+
 ### Externally managed tools with checkout-owned Pi
 
 An external provisioner can supply Node, Nub, and command-line tools through [`packages.<system>.tools`](nix.md#packages-and-ownership). Pi then comes from the checkout's Nub-installed dependencies, not the Nix Pi package.

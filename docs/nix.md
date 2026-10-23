@@ -24,6 +24,22 @@ node scripts/collect-pi-release-evidence.mjs \
   --output-dir /path/to/new-output
 ```
 
+## Local command-override patch
+
+Pi-env carries a core dispatcher hook for explicit built-in command ownership. Nix applies the source patch before Pi's normal build. Nub applies a versioned package patch during dependency installation, including SDK JavaScript, declarations, and the bundled CLI. Neither path changes an installed editor or rewrites runtime methods after startup.
+
+Review the source patch for behavior. Treat the package patch as a generated artifact. The [generator](../scripts/generate-pi-command-override-patches.mjs) checks the pinned source revision and published package version, and rejects unrelated bundle changes. It uses Pi's official build output rather than a separate bundler configuration.
+
+To regenerate, apply the source patch to the locked Pi checkout and follow that checkout's build instructions. Mark the new suite test as intent-to-add so its diff is included. Then provide the built checkout and an unpacked pristine published package:
+
+```bash
+node scripts/generate-pi-command-override-patches.mjs /path/to/built-pi /path/to/pristine-package
+nub install --ignore-scripts --lockfile-only
+nub install --frozen-lockfile
+```
+
+Keep both artifacts and the lockfile update together. Remove the local patches when the dependency supplies the required hook itself. An externally managed Pi must be rebuilt by its provisioner; setup verifies its capability instead of modifying it. Restart Pi after changing the core runtime.
+
 ## Home Manager
 
 Use the exported Home Manager module for declarative host integration. Read its [option declarations and configuration](../nix/home-manager.nix) when configuring a consumer. Do not copy defaults from this documentation.

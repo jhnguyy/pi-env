@@ -1,6 +1,10 @@
 # Private session sharing
 
-Use `/share-private` to upload a session, `/share-private list` to find previous uploads, and `/share-private delete` to select one for removal. Native `/share` remains unchanged: it can publish to Radius or an unlisted gist. Pi's current extension API cannot reliably intercept it.
+Use `/share` to upload a session, `/share list` to find previous uploads, and `/share delete` to select one for removal. `/share-private` remains an alias.
+
+The pi-env runtime gives the extension explicit ownership of native `/share`. A canceled or failed claimed command cannot fall through to native sharing. Restart Pi after installing runtime changes. `/reload` cannot replace the core dispatcher.
+
+Setup and the generated launcher reject runtimes without the required hook. If you load the extension through an unmanaged older Pi, it warns and exposes only `/share-private`. Native `/share` in that older runtime can still publish through Radius or a gist. See [runtime patch ownership](nix.md#local-command-override-patch).
 
 Authenticate `gh` with an account that can push to the destination GitHub.com repository. Set the destination in Pi's `settings.json`, or enter `owner/repo` at the first prompt:
 
