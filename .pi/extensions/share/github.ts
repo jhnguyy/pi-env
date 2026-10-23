@@ -13,7 +13,7 @@ export function shareFailure(message: string, cause?: unknown): ShareError {
 }
 
 export interface ShareTarget {
-  readonly repo: string;
+  readonly repo: RepositoryName;
   readonly branch: string;
   readonly repositoryId: number;
   readonly hasPages: boolean;
@@ -27,14 +27,14 @@ export function mutationFailure(operation: "upload" | "delete", target: ShareTar
   return new ShareError({ message: `${message} Run /share-private list or inspect GitHub before retrying.`, mutationOutcome: outcome, cause });
 }
 
-export interface ShareFile {
-  readonly name: string;
-  readonly path: string;
-  readonly sha: string;
-  readonly htmlUrl: string;
-}
-
-export const RepositoryName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/));
+export const RepositoryName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_][A-Za-z0-9_.-]*$/)).pipe(Schema.brand("ShareRepositoryName"));
+export type RepositoryName = typeof RepositoryName.Type;
+export const SharePath = Schema.String.check(Schema.isPattern(/^sessions\/[A-Za-z0-9_][A-Za-z0-9_.-]*\.html$/)).pipe(Schema.brand("SharePath"));
+export type SharePath = typeof SharePath.Type;
+const ShareIdentity = Schema.Struct({ name: Schema.String, path: SharePath, sha: Schema.NonEmptyString }).check(
+  Schema.makeFilter((file) => file.path === `sessions/${file.name}`),
+).pipe(Schema.brand("ShareIdentity"));
+export type ShareFile = typeof ShareIdentity.Type & { readonly htmlUrl: string };
 
 type GitHubExec = ExtensionAPI["exec"];
 const MaxResponseCharacters = 8 * 1024 * 1024;
@@ -99,10 +99,6 @@ const requiredRequest = Effect.fnUntraced(function* (
   return body;
 });
 
-function safePath(path: string): boolean {
-  return /^sessions\/[A-Za-z0-9_][A-Za-z0-9_.-]*\.html$/.test(path);
-}
-
 function httpsUrl(value: string): string | undefined {
   const url = URL.parse(value);
   if (!url || url.protocol !== "https:" || !url.hostname || url.username || url.password || url.search || url.hash) return undefined;
@@ -110,11 +106,8 @@ function httpsUrl(value: string): string | undefined {
 }
 
 export const inspectTarget = Effect.fnUntraced(function* (
-  exec: GitHubExec, cwd: string, repo: string, branch?: string,
+  exec: GitHubExec, cwd: string, repo: RepositoryName, branch?: string,
 ) {
-  if (!Schema.is(RepositoryName)(repo)) {
-    return yield* shareFailure("Use a GitHub repository name in owner/repo form.");
-  }
   const repository = yield* decode(Repository, yield* requiredRequest(exec, cwd, `repos/${repo}`), "repository response");
   if (!Number.isSafeInteger(repository.id) || !repository.private || !repository.permissions.push) {
     return yield* shareFailure("The repository must have a valid identity, be private, and grant your GitHub account push access.");
@@ -163,18 +156,17 @@ export const listShares = Effect.fnUntraced(function* (exec: GitHubExec, cwd: st
   }
   const files: ShareFile[] = [];
   for (const entry of entries) {
-    if (entry.type !== "file" || !safePath(entry.path) || entry.path !== `sessions/${entry.name}`) continue;
+    if (entry.type !== "file" || !Schema.is(ShareIdentity)(entry)) continue;
     const htmlUrl = entry.html_url === null ? undefined : httpsUrl(entry.html_url);
     if (!htmlUrl) return yield* shareFailure("GitHub returned an invalid share view URL.");
-    files.push({ name: entry.name, path: entry.path, sha: entry.sha, htmlUrl });
+    files.push({ ...entry, htmlUrl });
   }
   return files;
 });
 
 export const uploadShare = Effect.fnUntraced(function* (
-  exec: GitHubExec, cwd: string, target: ShareTarget, path: string, payloadFile: string,
+  exec: GitHubExec, cwd: string, target: ShareTarget, path: SharePath, payloadFile: string,
 ) {
-  if (!safePath(path)) return yield* shareFailure("Shares must be direct HTML files under sessions/.");
   const response = yield* requiredRequest(exec, cwd, `repos/${target.repo}/contents/${path}`, "PUT", ["--input", payloadFile]).pipe(
     Effect.mapError((cause) => mutationFailure("upload", target, path, "uncertain", cause)),
   );
@@ -189,9 +181,6 @@ export const uploadShare = Effect.fnUntraced(function* (
 export const deleteShare = Effect.fnUntraced(function* (
   exec: GitHubExec, cwd: string, target: ShareTarget, file: ShareFile,
 ) {
-  if (!safePath(file.path) || file.path !== `sessions/${file.name}` || !file.sha) {
-    return yield* shareFailure("Only direct HTML files under sessions/ can be deleted.");
-  }
   const endpoint = `repos/${target.repo}/contents/${file.path}`;
   const current = yield* decode(Content, yield* requiredRequest(exec, cwd, `${endpoint}?ref=${encodeURIComponent(target.branch)}`), "current share response");
   if (current.type !== "file" || current.path !== file.path || current.name !== file.name || current.sha !== file.sha) {

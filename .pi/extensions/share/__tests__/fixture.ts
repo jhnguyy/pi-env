@@ -12,13 +12,23 @@ const run = promisify(execFile);
 const piCli = join(process.cwd(), "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 export const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  const errors: unknown[] = [];
+  for (const root of roots.splice(0)) {
+    try { rmSync(root, { recursive: true, force: true }); }
+    catch (error) { errors.push(error); }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "Share fixture teardown failed");
 });
 
 export const privateRepository = { id: 123, private: true, permissions: { push: true }, default_branch: "main", has_pages: false };
 export const exampleShare = { type: "file", name: "2026-10-22-example-0123456789ab.html", path: "sessions/2026-10-22-example-0123456789ab.html", sha: "a".repeat(40), html_url: "https://github.com/owner/private-exports/blob/main/sessions/2026-10-22-example-0123456789ab.html" };
 
 // GitHub is replaced at its process adapter. Pi exports and local files remain real.
+// github-contract.integration.test.ts corroborates GET DTOs and real gh envelopes (opt-in).
+// Synthetic mutation bodies follow https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents
+// and https://docs.github.com/en/rest/repos/contents#delete-a-file.
+// Private Pages cases follow https://docs.github.com/en/rest/pages/pages#get-a-github-pages-site;
+// private deployment and mutation outcomes are not exercised by the read-only check.
 export function fixture(...repositories: unknown[]) {
   if (repositories.length === 0) repositories.push(privateRepository);
   let checks = 0;

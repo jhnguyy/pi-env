@@ -34,7 +34,7 @@ describe("manage private shares", () => {
     expect(f.deletions).toEqual([]);
   });
 
-  it.each(["README.md", "sessions/../README.html", "sessions/nested/file.html"])("rejects an unsafe listed path: %s", async (path) => {
+  it.each(["README.md", "sessions/../README.html", "sessions/nested/file.html", "sessions/different-name.html"])("rejects an unsafe listed path: %s", async (path) => {
     const f = fixture();
     f.github.shares = [{ ...exampleShare, path }];
     await f.invoke(undefined, "delete");

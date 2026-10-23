@@ -7,7 +7,7 @@ import { execEffect } from "../_shared/exec";
 import { generateId } from "../_shared/id";
 import { slugify } from "../_shared/slug";
 import { decodeSettingsBlockEffect, defaultSettingsEnv, SettingsDecodeError, type SettingsEnv, SettingsReadError, SettingsWriteError, updateGlobalSettingsBlockEffect } from "../_shared/settings";
-import { deleteShare, inspectTarget, listShares, mutationFailure, privatePagesBase, RepositoryName, revalidateTarget, ShareError, shareFailure, type ShareFile, type ShareTarget, uploadShare } from "./github";
+import { deleteShare, inspectTarget, listShares, mutationFailure, privatePagesBase, RepositoryName, SharePath, revalidateTarget, ShareError, shareFailure, type ShareFile, type ShareTarget, uploadShare } from "./github";
 
 const ShareSettings = Schema.Struct({ repo: Schema.optionalKey(RepositoryName), branch: Schema.optionalKey(Schema.NonEmptyString) });
 const Actions = ["upload", "list", "delete"];
@@ -35,7 +35,7 @@ function viewUrl(base: string | undefined, file: ShareFile): string {
 function publish(pi: ExtensionAPI, ctx: ExtensionCommandContext, target: ShareTarget, sessionFile: string, files: ShareFiles) {
   return Effect.gen(function* () {
     const date = new Date(yield* Clock.currentTimeMillis).toISOString().slice(0, 10);
-    const path = `sessions/${date}-${slugify(sessionTitle(ctx.sessionManager), { fallback: "session" })}-${generateId(6)}.html`;
+    const path = yield* Schema.decodeUnknownEffect(SharePath)(`sessions/${date}-${slugify(sessionTitle(ctx.sessionManager), { fallback: "session" })}-${generateId(6)}.html`);
     const approved = yield* io("Could not confirm publication.", () => ctx.ui.confirm("Publish session", `Upload the full, unredacted session export, including tool output and all branches, to ${target.repo}@${target.branch}:${path}? Repository readers can access it.`));
     if (!approved) return;
     yield* Effect.scoped(Effect.gen(function* () {
@@ -101,9 +101,10 @@ function runShare(args: string, pi: ExtensionAPI, ctx: ExtensionCommandContext, 
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (action === "upload" && !sessionFile) return yield* shareFailure("This session has no saved session file to export.");
     const settings = yield* decodeSettingsBlockEffect("share", ShareSettings, ctx.cwd, env);
-    const input = settings.repo ?? (yield* io("Could not prompt for a repository.", () => ctx.ui.input("Private GitHub repository (saved as your default)", "owner/repo")));
-    if (input === undefined) return;
-    const repo = yield* Schema.decodeUnknownEffect(RepositoryName)(input.trim());
+    const repo = settings.repo ?? (yield* io("Could not prompt for a repository.", () => ctx.ui.input("Private GitHub repository (saved as your default)", "owner/repo")).pipe(
+      Effect.flatMap((input) => input === undefined ? Effect.void : Schema.decodeUnknownEffect(RepositoryName)(input.trim())),
+    ));
+    if (repo === undefined) return;
     const target = yield* inspectTarget(pi.exec, ctx.cwd, repo, settings.branch);
     if (action === "upload") yield* privatePagesBase(pi.exec, ctx.cwd, target);
     if (!settings.repo) {
