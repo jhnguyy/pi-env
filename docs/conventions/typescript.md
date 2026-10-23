@@ -1,5 +1,13 @@
 # TypeScript conventions
 
+## Compiler and API compatibility
+
+The native compiler and the JavaScript compiler API have separate roles. Keep their aliases in [`package.json`](../../package.json) separate. Analysis and setup still need the JavaScript API, which the native compiler does not replace.
+
+Keep the root and [dev-tools](../../.pi/extensions/dev-tools/package.json) native compiler aliases aligned. Hydration must patch the compiler that the daemon launches.
+
+[`Hydration`](../../scripts/hydrate.mjs) applies Effect support to the native compiler. Keep the Effect patch package compatible with the pinned native compiler. The plugin configuration name remains `@effect/language-service`, even without the legacy plugin package.
+
 ## Domain-first types
 
 Follow [`domain-modeling.md`](domain-modeling.md) for boundary parsing and invariant-preserving types. Prefer functions that consume discriminated, canonical, or opaque domain values over functions that repeatedly validate broad primitives.
