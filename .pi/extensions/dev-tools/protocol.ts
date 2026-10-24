@@ -2,7 +2,7 @@
  * LSP Daemon Protocol — shared types between client and daemon.
  *
  * All positions are 1-indexed in the protocol (converted to 0-indexed
- * internally when communicating with language servers).
+ * internally when communicating with the typescript-language-server).
  */
 
 import type { DevToolsAction } from "./action-contract";

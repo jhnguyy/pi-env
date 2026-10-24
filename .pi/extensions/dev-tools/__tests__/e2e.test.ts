@@ -1,18 +1,16 @@
 /*
- * E2E tests — full round-trip with the native TypeScript language server.
+ * E2E tests — full round-trip with real typescript-language-server.
  *
  * Gated behind E2E=1 environment variable.
  *
  * Run with: nub run test:e2e .pi/extensions/dev-tools/__tests__/e2e.test.ts
  * Or from repo root: E2E=1 nub run test:e2e
  *
- * These tests spawn a real LspDaemon with the native TypeScript language server
+ * These tests spawn a real LspDaemon with a real typescript-language-server
  * and verify the full pipeline from request to response.
  */
 
-import { mkdirSync, renameSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { type TypeScriptLspFixture, createTypeScriptLspFixture } from "./e2e-fixture";
 
@@ -42,7 +40,7 @@ describeE2E("LSP E2E", () => {
 
   // ─── Diagnostics ──────────────────────────────────────────────────────
 
-  it("reports TypeScript errors and clears them after a file edit", async () => {
+  it("reports errors for invalid TypeScript", async () => {
     const badFile = fixture.writeFile("broken.ts", [
       "const x: string = 42;",
       "const y: number = 'hello';",
@@ -53,64 +51,6 @@ describeE2E("LSP E2E", () => {
     expect(result.errorCount).toBeGreaterThan(0);
     expect(result.items.length).toBeGreaterThan(0);
     expect(result.items[0].code).toMatch(/^TS\d+/);
-
-    fixture.writeFile("broken.ts", "const x: string = 'valid';");
-    const updated = await fixture.callDaemon({ action: "diagnostics", path: badFile });
-    expect(updated.errorCount).toBe(0);
-    expect(updated.items).toEqual([]);
-  });
-
-  it("refreshes diagnostics when unopened and open dependencies change on disk", async () => {
-    const dependencyFixture = createTypeScriptLspFixture();
-    onTestFinished(() => dependencyFixture.cleanup());
-    await dependencyFixture.start();
-
-    const initial = await dependencyFixture.callDaemon({ action: "diagnostics", path: dependencyFixture.mainFile });
-    expect(initial.errorCount).toBe(0);
-    dependencyFixture.writeFile("types.ts", (await readFile(dependencyFixture.typesFile, "utf8"))
-      .replace("name: string;", "name: number;"));
-    await expect.poll(async () => (await dependencyFixture.callDaemon({
-      action: "diagnostics", path: dependencyFixture.mainFile,
-    })).errorCount).toBeGreaterThan(0);
-
-    await dependencyFixture.callDaemon({ action: "hover", path: dependencyFixture.typesFile, line: 2, character: 3 });
-    dependencyFixture.writeFile("types.ts", (await readFile(dependencyFixture.typesFile, "utf8"))
-      .replace("name: number;", "name: string;"));
-    await expect.poll(async () => (await dependencyFixture.callDaemon({
-      action: "diagnostics", path: dependencyFixture.mainFile,
-    })).errorCount).toBe(0);
-  });
-
-  it("drops stale open overlays when a dependency directory moves", async () => {
-    const moved = createTypeScriptLspFixture();
-    onTestFinished(() => moved.cleanup());
-    const root = dirname(moved.mainFile);
-    const before = join(root, "before");
-    const after = join(root, "after");
-    mkdirSync(before);
-    renameSync(moved.typesFile, join(before, "types.ts"));
-    const main = (await readFile(moved.mainFile, "utf8")).replaceAll('"./types"', '"./before/types"');
-    moved.writeFile("main.ts", main);
-    await moved.start();
-    expect((await moved.callDaemon({ action: "diagnostics", path: moved.mainFile })).errorCount).toBe(0);
-    await moved.callDaemon({ action: "hover", path: join(before, "types.ts"), line: 2, character: 3 });
-
-    renameSync(before, after);
-    await expect.poll(async () => (await moved.callDaemon({
-      action: "diagnostics", path: moved.mainFile,
-    })).errorCount).toBeGreaterThan(0);
-    moved.writeFile("main.ts", main.replaceAll("./before/types", "./after/types"));
-    await expect.poll(async () => (await moved.callDaemon({
-      action: "diagnostics", path: moved.mainFile,
-    })).errorCount).toBe(0);
-
-    moved.writeFile("after/types.ts", (await readFile(join(after, "types.ts"), "utf8"))
-      .replace("name: string;", "name: number;"));
-    renameSync(after, before);
-    moved.writeFile("main.ts", main);
-    await expect.poll(async () => (await moved.callDaemon({
-      action: "diagnostics", path: moved.mainFile,
-    })).errorCount).toBeGreaterThan(0);
   });
 
   it("reports Effect diagnostics with Effect identity", async () => {

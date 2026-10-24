@@ -38,7 +38,7 @@ describe("findBinary", () => {
     const oldPath = process.env["PATH"];
     process.env["PATH"] = "/nonexistent";
     try {
-      const bin = await findBinary("bash-language-server");
+      const bin = await findBinary("typescript-language-server");
       expect(bin).toBeTruthy();
       expect(bin).toContain("node_modules/.bin");
     } finally {

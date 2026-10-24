@@ -1,12 +1,10 @@
 # TypeScript conventions
 
-## Compiler and API compatibility
+## Validation compiler
 
-The native compiler and the JavaScript compiler API have separate roles. Keep their aliases in [`package.json`](../../package.json) separate. Analysis and setup still need the JavaScript API, which the native compiler does not replace.
+Keep command-line compiler upgrades separate from dev-tools and JavaScript compiler-API migrations. They have different compatibility and lifecycle constraints.
 
-Keep the root and [dev-tools](../../.pi/extensions/dev-tools/package.json) native compiler aliases aligned. Hydration must patch the compiler that the daemon launches.
-
-[`Hydration`](../../scripts/hydrate.mjs) applies Effect support to the native compiler. Keep the Effect patch package compatible with the pinned native compiler. The plugin configuration name remains `@effect/language-service`, even without the legacy plugin package.
+The [typecheck launcher](../../scripts/effect-tsc.sh) selects the Effect-enabled native compiler without replacing the stock native executable. Keep native-only diagnostic policy in [the typecheck configuration](../../tsconfig.typecheck.json), not the configuration shared with the existing language server.
 
 ## Domain-first types
 

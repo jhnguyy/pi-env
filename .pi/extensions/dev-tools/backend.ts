@@ -4,9 +4,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import {
-  dirname, extname, isAbsolute, join, relative as relativePath, sep, resolve as resolvePath,
-} from "node:path";
+import { dirname, extname, join, resolve as resolvePath } from "node:path";
 
 import { Data, Deferred, Effect, Exit, Scope } from "effect";
 
@@ -14,7 +12,6 @@ import { scopedChildProcess } from "../../../src/process/platform.js";
 import { serializeMessage, LspParser, type LspMessage } from "./lsp-transport";
 import { DocumentManager, MAX_OPEN_DOCUMENTS } from "./document-manager";
 import { DiagnosticsCache } from "./diagnostics-cache";
-import { FileWatchers } from "./file-watchers";
 import { pathToUri, toOneBased, severityLabel, truncateMessage } from "./utils";
 import type { DiagnosticItem, InitializationState, ProjectMode } from "./protocol";
 import type { LspBackendConfig } from "./backend-configs";
@@ -37,7 +34,6 @@ import {
 
 
 const COLD_SEMANTIC_METHODS = new Set([
-  "textDocument/diagnostic",
   "textDocument/documentSymbol",
   "workspace/symbol",
   "textDocument/hover",
@@ -72,7 +68,6 @@ type ListenerSet = {
 
 type BackendResource = {
   scope?: Scope.Closeable;
-  watchers?: FileWatchers;
   process?: ChildProcess;
   listeners?: ListenerSet;
   stderrTail: string;
@@ -168,21 +163,10 @@ function backendErrorFromCause(
   return backendError(kind, `${prefix}: ${detail}`.slice(0, 4_000));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function formatDiagnosticCode(
-  diagnostic: { code?: unknown; source?: unknown; message?: unknown },
-  prefix: string,
-): string {
+function formatDiagnosticCode(diagnostic: { code?: unknown; source?: unknown }, prefix: string): string {
   const rawCode = diagnostic.code != null ? String(diagnostic.code) : "";
   if (!rawCode) return "";
   if (diagnostic.source === "effect") return `effect(${rawCode})`;
-  const effectRule = typeof diagnostic.message === "string"
-    ? / effect\(([A-Za-z][A-Za-z0-9]*)\)$/.exec(diagnostic.message)?.[1]
-    : undefined;
-  if (effectRule) return `effect(${effectRule})`;
   return prefix && !rawCode.startsWith(prefix) ? `${prefix}${rawCode}` : rawCode;
 }
 
@@ -196,7 +180,6 @@ export class LspBackend {
   private readonly pendingLsp = new Map<number, Pending>();
   private initialWorkspaceRoot: string | null = null;
   private semanticAvailable = false;
-  private pullDiagnostics = false;
   private lastSemanticRequest: SemanticRequestSummary | undefined;
   private startupFailureDetail: string | undefined;
   private semanticFailure: SemanticFailureSummary | undefined;
@@ -427,8 +410,7 @@ export class LspBackend {
       yield* this.assertStartingEffect(generation);
       const scope = yield* Scope.make();
       owned.scope = scope;
-      owned.watchers = new FileWatchers();
-      yield* this.installResourceEffect(generation, { scope, watchers: owned.watchers });
+      yield* this.installResourceEffect(generation, { scope });
 
       const env = this.nodeExecPathShim
         ? {
@@ -685,10 +667,8 @@ export class LspBackend {
             cause,
           ),
       });
-      const response = yield* Deferred.await(deferred);
+      yield* Deferred.await(deferred);
       yield* this.assertStartingEffect(generation);
-      const capabilities = isRecord(response.result) ? response.result.capabilities : undefined;
-      this.pullDiagnostics = isRecord(capabilities) && Boolean(capabilities.diagnosticProvider);
       this.sendLsp({ jsonrpc: "2.0", method: "initialized", params: {} }, generation);
     });
   }
@@ -769,14 +749,8 @@ export class LspBackend {
     });
   }
 
-  async waitForDiagnostics(uri: string): Promise<void> {
-    if (!this.pullDiagnostics) return this.diagnostics.waitForSettled(uri);
-    const response = await this.lspRequest("textDocument/diagnostic", { textDocument: { uri } });
-    const report = response?.result;
-    if (!isRecord(report) || report.kind !== "full" || !Array.isArray(report.items)) {
-      throw new Error(`${this.name} LSP returned an invalid full diagnostic report`);
-    }
-    this.onDiagnostics({ uri, diagnostics: report.items });
+  waitForDiagnostics(uri: string): Promise<void> {
+    return this.diagnostics.waitForSettled(uri);
   }
 
   getDiagnostics(uri: string): DiagnosticItem[] {
@@ -791,7 +765,6 @@ export class LspBackend {
         );
       }
       const generation = this.lifecycle.generation;
-      const watchers = this.lifecycle.resource.watchers;
       const id = this.nextLspId++;
       const deferred = Deferred.makeUnsafe<LspMessage, LspBackendError>();
       this.addPending(
@@ -815,23 +788,7 @@ export class LspBackend {
       }).pipe(
         Effect.tapError((error) => this.failRequestEffect(id, error, generation)),
       );
-      const request = send.pipe(
-        Effect.andThen(Deferred.await(deferred)),
-        Effect.tap(() => Effect.promise(() => watchers?.ready() ?? Promise.resolve())),
-        Effect.tap(() =>
-          Effect.suspend(() =>
-            this.lifecycle._tag === "running" && this.lifecycle.generation === generation
-              ? Effect.void
-              : Effect.fail(backendError(LspBackendErrorKind.Cancelled, `${this.name} LSP request cancelled`)),
-          ),
-        ),
-        Effect.timeoutOrElse({
-          duration: lspRequestTimeoutMs(method),
-          orElse: () => Effect.fail(backendError(
-            LspBackendErrorKind.Request, `${this.name} LSP request timed out: ${method}`,
-          )),
-        }),
-      );
+      const request = send.pipe(Effect.andThen(Deferred.await(deferred)));
       return withSafeDevToolsSpan(
         this.telemetry.diagnostics,
         DevToolsSpanName.BackendRequest,
@@ -864,43 +821,6 @@ export class LspBackend {
         );
       }
       if (message.id == null) return Effect.void;
-      if (message.method) {
-        return Effect.tryPromise({
-          try: async () => {
-            const state = this.lifecycle;
-            if (state._tag !== "starting" && state._tag !== "running") return;
-            const params = isRecord(message.params) ? message.params : {};
-            switch (message.method) {
-              case "client/registerCapability":
-                await state.resource.watchers?.register(
-                  params.registrations,
-                  this.initialWorkspaceRoot ?? process.cwd(),
-                  (path, type) => this.onWatchedFile(path, type, generation),
-                  (cause) => {
-                    Effect.runFork(this.failAndResetEffect(
-                      generation,
-                      backendErrorFromCause(LspBackendErrorKind.Document, `${this.name} file watcher failed`, cause),
-                    ));
-                  },
-                );
-                break;
-              case "client/unregisterCapability":
-                await state.resource.watchers?.unregister(params.unregisterations);
-                break;
-              default:
-                this.sendLsp({
-                  jsonrpc: "2.0", id: message.id,
-                  error: { code: -32601, message: `Unsupported client method: ${message.method}` },
-                }, generation);
-                return;
-            }
-            this.sendLsp({ jsonrpc: "2.0", id: message.id, result: null }, generation);
-          },
-          catch: (cause) => backendErrorFromCause(
-            LspBackendErrorKind.Document, `${this.name} capability registration failed`, cause,
-          ),
-        }).pipe(Effect.catch((error) => this.failAndResetEffect(generation, error)));
-      }
       if (message.error) {
         return this.failRequestEffect(
           message.id as number,
@@ -913,30 +833,6 @@ export class LspBackend {
       }
       return this.succeedRequestEffect(message.id as number, message, generation);
     });
-  }
-
-  private onWatchedFile(path: string, type: 1 | 2 | 3, generation: number): void {
-    const state = this.lifecycle;
-    if ((state._tag !== "starting" && state._tag !== "running") || state.generation !== generation) return;
-    const uri = pathToUri(path);
-    if (type === 3) {
-      for (const openUri of this.docManager.openUris) {
-        const document = this.docManager.getDoc(openUri)!;
-        const suffix = relativePath(path, document.absolutePath);
-        if (!isAbsolute(suffix) && suffix !== ".." && !suffix.startsWith(`..${sep}`)) {
-          this.closeFile(document.absolutePath);
-        }
-      }
-    } else if (this.docManager.getDoc(uri)) {
-      const { notification } = this.docManager.ensure(path);
-      if (notification) this.sendLsp({
-        jsonrpc: "2.0", method: `textDocument/${notification.type}`, params: notification.params,
-      }, generation);
-      this.diagnostics.delete(uri);
-    }
-    this.sendLsp({
-      jsonrpc: "2.0", method: "workspace/didChangeWatchedFiles", params: { changes: [{ uri, type }] },
-    }, generation);
   }
 
   private onDiagnostics(params: { uri: string; diagnostics: any[] }): void {
@@ -1049,9 +945,9 @@ export class LspBackend {
 
   private cleanupResourceEffect(resource: BackendResource): Effect.Effect<void> {
     const detach = Effect.sync(() => this.detach(resource));
-    const stopWatchers = Effect.promise(() => resource.watchers?.close() ?? Promise.resolve());
-    const closeProcess = resource.scope ? Scope.close(resource.scope, Exit.void) : Effect.void;
-    return closeProcess.pipe(Effect.ensuring(stopWatchers), Effect.ensuring(detach));
+    return resource.scope
+      ? Scope.close(resource.scope, Exit.void).pipe(Effect.ensuring(detach))
+      : detach;
   }
 
   private resetCaches(): void {
@@ -1070,16 +966,16 @@ export class LspBackend {
     error: LspBackendError,
   ): Effect.Effect<void> {
     return Effect.suspend(() => {
+      this.semanticAvailable = false;
+      if (this.lifecycle._tag === "starting") {
+        this.startupFailureDetail = compactStatusDetail(error.message);
+      }
       const state = this.lifecycle;
       if (
         (state._tag !== "starting" && state._tag !== "running") ||
         state.generation !== generation
       ) {
         return Effect.void;
-      }
-      this.semanticAvailable = false;
-      if (state._tag === "starting") {
-        this.startupFailureDetail = compactStatusDetail(error.message);
       }
       const done = Deferred.makeUnsafe<void>();
       const stoppingGeneration = generation + 1;
@@ -1095,13 +991,13 @@ export class LspBackend {
         if (state._tag === "starting") {
           yield* Deferred.fail(state.ready, error).pipe(Effect.ignore);
         }
-        yield* this.cleanupResourceEffect(state.resource).pipe(Effect.ensuring(
-          Effect.sync(() => {
-            if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
-              this.lifecycle = BackendLifecycle.idle({ generation: stoppingGeneration });
-            }
-          }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
-        ));
+        yield* this.cleanupResourceEffect(state.resource);
+        yield* Effect.sync(() => {
+          if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
+            this.lifecycle = BackendLifecycle.idle({ generation: stoppingGeneration });
+          }
+        });
+        yield* Deferred.succeed(done, undefined).pipe(Effect.ignore);
       });
     });
   }
@@ -1152,15 +1048,15 @@ export class LspBackend {
         yield* this.failAllPendingEffect(
           backendError(LspBackendErrorKind.Shutdown, `${this.name} LSP shutdown`),
         );
-        yield* this.cleanupResourceEffect(stopping.resource).pipe(Effect.ensuring(
-          Effect.sync(() => {
-            this.resetCaches();
-            this.resetSemanticState();
-            if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
-              this.lifecycle = BackendLifecycle.idle({ generation: stopping.generation });
-            }
-          }).pipe(Effect.andThen(Deferred.succeed(done, undefined))),
-        ));
+        yield* this.cleanupResourceEffect(stopping.resource);
+        yield* Effect.sync(() => {
+          this.resetCaches();
+          this.resetSemanticState();
+          if (this.lifecycle._tag === "stopping" && this.lifecycle.done === done) {
+            this.lifecycle = BackendLifecycle.idle({ generation: stopping.generation });
+          }
+        });
+        yield* Deferred.succeed(done, undefined).pipe(Effect.ignore);
       });
       return withSafeDevToolsSpan(
         this.telemetry.diagnostics,

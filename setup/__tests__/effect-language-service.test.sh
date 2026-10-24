@@ -4,37 +4,38 @@ set -euo pipefail
 # shellcheck source=setup/__tests__/helpers.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
-tmp="$(with_temp_dir)"
-trap 'rm -rf "$tmp"' EXIT
-node="$(node_bin)"
-repo="$tmp/repo"
-mkdir -p "$repo/node_modules/@typescript" "$repo/node_modules/@effect" "$repo/scripts"
-cp -RL "$ROOT/node_modules/@typescript/native" "$repo/node_modules/@typescript/native"
-platform_package="$("$node" -p '"@typescript/typescript-" + process.platform + "-" + process.arch')"
-platform_root="$("$node" -e 'const { createRequire } = require("node:module"); const { dirname } = require("node:path"); const r = createRequire(require.resolve("@typescript/native/package.json")); console.log(dirname(r.resolve(process.argv[1] + "/package.json")))' "$platform_package")"
-cp -RL "$platform_root" "$repo/node_modules/$platform_package"
-ln -s "$ROOT/node_modules/@effect/tsgo" "$repo/node_modules/@effect/tsgo"
-cli="$ROOT/node_modules/@effect/tsgo/dist/effect-tsgo.cjs"
-for script in extension-manifest extension-contract package-contract install-contract verify-install; do
-  cp "$ROOT/scripts/$script.mjs" "$repo/scripts/"
-done
-printf '%s\n' '{"workspaces":[],"pi":{"extensions":[]},"devDependencies":{"@effect/tsgo":"0.56.0"}}' > "$repo/package.json"
-printf '%s\n' '{"extensionsDir":".pi/extensions"}' > "$repo/pi-build.config.json"
-mkdir -p "$repo/.pi/extensions"
+test_patch_helper_patches_and_reruns() {
+  local cli first_log node patch_marker second_log target tmp version
+  tmp="$(with_temp_dir)"
+  cli="$ROOT/node_modules/@effect/language-service/cli.js"
+  node="$(node_bin)"
+  target="$tmp/repo/node_modules/typescript"
+  first_log="$tmp/first-patch.log"
+  second_log="$tmp/second-patch.log"
+  mkdir -p "$tmp/repo/node_modules/@effect"
+  cp "$ROOT/package.json" "$tmp/repo/package.json"
+  cp -RL "$ROOT/node_modules/typescript" "$target"
+  ln -s "$ROOT/node_modules/@effect/language-service" "$tmp/repo/node_modules/@effect/language-service"
 
-(cd "$repo" && "$node" "$cli" unpatch --typescript --typescript-package @typescript/native) > "$tmp/unpatch.log" 2>&1
-if (cd "$repo" && "$node" scripts/verify-install.mjs) > "$tmp/unpatched.log" 2>&1; then
-  fail "Unpatched native TypeScript installation was accepted"
-fi
-assert_file_contains "$tmp/unpatched.log" "Effect TypeScript patch check failed"
-
-for attempt in first second; do
-  if ! (cd "$repo" && PI_ENV_NODE_BIN="$tmp/not-node" NODE_EXECUTABLE="$tmp/not-node" \
-    "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") > "$tmp/$attempt.log" 2>&1; then
-    fail "Native Effect TypeScript patch failed: $(cat "$tmp/$attempt.log")"
+  "$node" "$cli" unpatch --dir "$target" --log-level none
+  "$node" "$cli" patch --dir "$target" --module typescript --log-level none
+  version="$("$node" -p "require('$ROOT/node_modules/@effect/language-service/package.json').version")"
+  patch_marker="\"use effect-lsp-patch-version $version\";"
+  if ! (cd "$tmp/repo" && PI_ENV_NODE_BIN="$tmp/not-node" NODE_EXECUTABLE="$tmp/not-node" \
+    "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$first_log" 2>&1; then
+    fail "Effect TypeScript patch failed: $(cat "$first_log")"
   fi
-  (cd "$repo" && "$node" scripts/verify-install.mjs) > "$tmp/verified.log" 2>&1
-  assert_file_contains "$tmp/verified.log" "Install readiness check passed"
-done
+  assert_file_contains "$target/lib/typescript.js" "$patch_marker"
+  assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
 
-echo "Native Effect TypeScript setup tests passed"
+  if ! (cd "$tmp/repo" && "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$second_log" 2>&1; then
+    fail "Effect TypeScript patch rerun failed: $(cat "$second_log")"
+  fi
+  assert_file_contains "$target/lib/typescript.js" "$patch_marker"
+  assert_file_contains "$target/lib/_tsc.js" "$patch_marker"
+  rm -rf "$tmp"
+}
+
+test_patch_helper_patches_and_reruns
+
+echo "Effect language service setup tests passed"

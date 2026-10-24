@@ -8,21 +8,16 @@ import { validateInstall } from "./install-contract.mjs";
 
 function effectPatchIssues(repoRoot) {
   const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-  if (!packageJson.devDependencies?.["@effect/tsgo"]) return [];
+  if (!packageJson.devDependencies?.["@effect/language-service"]) return [];
 
-  const modules = join(repoRoot, "node_modules");
-  const native = JSON.parse(readFileSync(join(modules, "@typescript/native/package.json"), "utf8"));
-  const effect = JSON.parse(readFileSync(join(modules, "@effect/tsgo/package.json"), "utf8"));
-  const expected = `Version ${native.version}+effect-tsgo.${effect.version}`;
-  const cli = join(modules, "@typescript/native/bin/tsc");
+  const cli = join(repoRoot, "node_modules", "@effect", "language-service", "cli.js");
   const nodeBin = process.env.PI_ENV_NODE_BIN || process.env.NODE_EXECUTABLE || process.execPath;
-  const result = spawnSync(nodeBin, [cli, "--version"], {
+  const result = spawnSync(nodeBin, [cli, "check"], {
     cwd: repoRoot,
     encoding: "utf8",
   });
-  if (result.status === 0 && result.stdout.trim() === expected) return [];
-  const detail =
-    `${result.stdout ?? ""}\n${result.stderr ?? ""}\n${result.error?.message ?? ""}`.trim();
+  if (result.status === 0) return [];
+  const detail = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
   return [`Effect TypeScript patch check failed${detail ? `: ${detail}` : ""}`];
 }
 
