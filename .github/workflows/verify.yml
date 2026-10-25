@@ -54,7 +54,18 @@ jobs:
 
       - name: Verify canonical portfolio
         shell: bash
+        env:
+          PI_ENV_WORKFLOW_EVIDENCE: .e2e-evidence/workflow/result.json
         run: scripts/node-run.sh scripts/verify.mjs
+
+      - name: Show durable workflow proof evidence
+        if: always()
+        shell: bash
+        run: |
+          node --input-type=module -e '
+            import { readFile } from "node:fs/promises";
+            process.stdout.write(await readFile(".e2e-evidence/workflow/result.json", "utf8"));
+          '
 
       - name: Verify safe Analyze canary
         shell: bash
