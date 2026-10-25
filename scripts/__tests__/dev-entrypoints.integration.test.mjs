@@ -64,11 +64,43 @@ for (const [command, filters, expected, env = {}] of [
 
 test("rejects an unknown test mode before launching Vitest", async () => {
   await expect(
-    execute("scripts/node-run.sh", ["scripts/test.mjs", "unknown"], {
+    execute("scripts/node-run.sh", ["scripts/dev.mjs", "test", "unknown"], {
       timeout: 5_000,
     }),
   ).rejects.toMatchObject({
     code: 2,
     stderr: expect.stringContaining("Unknown test mode: unknown"),
+  });
+});
+
+for (const [command, required, excluded] of [
+  ["verify", "runtime-tests: runtime tests", "runtime-tests-safe:"],
+  ["verify:safe", "runtime-tests-safe: runtime tests (one worker)", "runtime-tests: runtime tests"],
+  ["verify:pre-commit", "changed-code-quality:", "setup-tests:"],
+  ["verify:phase", "real-workspace-semantic-canary:", "runtime-tests-safe:"],
+]) {
+  test(`${command} lists its portfolio without acquiring the caller's lock`, async () => {
+    const { stdout } = await execute("nub", ["run", command, "--list"], {
+      env: {
+        ...process.env,
+        PI_ENV_HEAVYWEIGHT_LOCK_TOKEN: "",
+        PI_ENV_HEAVYWEIGHT_LOCK_TIMEOUT_MS: "0",
+      },
+      timeout: 15_000,
+    });
+    expect(stdout).toContain(required);
+    expect(stdout).not.toContain(excluded);
+  });
+}
+
+test("rejects an unknown verification phase before running a portfolio", async () => {
+  await expect(
+    execute("nub", ["run", "verify:phase", "unknown-phase"], {
+      timeout: 5_000,
+    }),
+  ).rejects.toMatchObject({
+    code: 2,
+    stdout: "",
+    stderr: expect.stringContaining('verify:phase: unknown phase "unknown-phase"'),
   });
 });

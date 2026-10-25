@@ -47,15 +47,11 @@ describe("test portfolio discovery", () => {
       join(repo, "scripts/__tests__/run-supervised-node.integration.test.mjs"),
     );
 
-    const { stdout } = await execute(
-      "scripts/node-run.sh",
-      ["scripts/run-safe-tests.mjs", "--list"],
-      {
-        cwd: repo,
-        env: { ...process.env, E2E: "0", REAL_WORKSPACE_CANARY: "0" },
-        timeout: 20_000,
-      },
-    );
+    const { stdout } = await execute("nub", ["run", "test:safe", "--list"], {
+      cwd: repo,
+      env: { ...process.env, E2E: "0", REAL_WORKSPACE_CANARY: "0" },
+      timeout: 20_000,
+    });
     expect(stdout).toContain("unit 1/");
     expect(stdout).toContain("integration 1/");
     expect(stdout).toContain("scripts/__tests__/run-supervised-node.integration.test.mjs");

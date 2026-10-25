@@ -43,6 +43,8 @@ Source-owned contracts:
 - lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
 - scripts: [`package.json#scripts`](package.json)
 
+Put modes of the shared developer CLI in [`scripts/dev.mjs`](scripts/dev.mjs) instead of creating one entry-point file per mode. Keep substantial implementation modules and platform adapters separate.
+
 Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. Use `nub run test --changed` for changed tests. Use file filters with `nub run test:e2e` for a specific E2E suite. TypeScript checking remains repository-wide for soundness.
 
 ## Testing and review
