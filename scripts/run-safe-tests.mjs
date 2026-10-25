@@ -33,13 +33,9 @@ process.on("SIGTERM", onSigterm);
 
 async function testFiles(portfolio) {
   const result = await Effect.runPromise(
-    runProcess(
-      "scripts/node-run.sh",
-      ["node_modules/vitest/vitest.mjs", "list", "--filesOnly", "--json"],
-      {
-        env: { ...process.env, PI_ENV_TEST_PORTFOLIO: portfolio },
-      },
-    ),
+    runProcess("nub", ["run", "test", "list", "--filesOnly", "--json"], {
+      env: { ...process.env, PI_ENV_TEST_PORTFOLIO: portfolio },
+    }),
     { signal: controller.signal },
   );
   if (result.exitCode !== 0) {
@@ -87,7 +83,7 @@ try {
       console.log(`\n==> ${batch.portfolio} test batch ${batch.index}/${batch.total}`);
       const result = await Effect.runPromise(
         Effect.result(
-          runInheritedProcess("nub", ["run", "test:vitest", "--maxWorkers=1", ...batch.files], {
+          runInheritedProcess("nub", ["run", "test", "--maxWorkers=1", ...batch.files], {
             env: { ...process.env, PI_ENV_TEST_PORTFOLIO: batch.portfolio },
           }),
         ),

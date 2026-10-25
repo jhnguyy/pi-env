@@ -27,6 +27,10 @@ Follow `docs/conventions/documentation.md` for documentation placement, README s
 
 Nix owns provisioning and uses Pi's upstream package. Nub owns repository dependency install and script orchestration, and supplies the single portable fallback. `package.json#engines.node` declares compatibility, not an exact patch pin. Flake evaluation checks Node, Nub, and Pi development-package consistency.
 
+Run package scripts through Nub. Nub selects Node and supplies it on the script's `PATH`. Use plain `node` for application scripts in `package.json`. For an explicit Nub runtime, set `NODE_EXECUTABLE`. Use `nub node which` to inspect selection.
+
+Keep `scripts/node-run.sh` for callers outside Nub, including setup and analyzer subprocesses. Native-tool launchers use `scripts/tool-node-run.sh` because their child processes need a directly executable host Node. Keep the compatibility check: Nub can select an explicit pin that does not satisfy `engines.node`.
+
 Before assuming a toolchain problem is a code problem, verify whether the host can execute Nub, whether Node satisfies `package.json#engines.node`, and whether Nix is local (`nix run` can realize store paths) or externally managed (`--nix-managed`, no local store writes). If a fix depends on one of those assumptions, update README/setup docs with the expectation.
 
 ## Extension development
@@ -39,7 +43,7 @@ Source-owned contracts:
 - lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
 - scripts: [`package.json#scripts`](package.json)
 
-Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. TypeScript checking remains repository-wide for soundness.
+Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. Use `nub run test --changed` for changed tests. Use file filters with `nub run test:e2e` for a specific E2E suite. TypeScript checking remains repository-wide for soundness.
 
 ## Testing and review
 
@@ -50,7 +54,7 @@ Canonical standard and safe verification phases live in [`scripts/verification-p
 Run the dev-tools real-workspace canary with retained evidence:
 
 ```bash
-PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run test:e2e:real-workspace-canary
+PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" REAL_WORKSPACE_CANARY=1 nub run test:e2e
 ```
 
 Each run writes a `pi-dev-tools-canary-*/result.json` with the revision, public request, expected destination, actual result, and verdict. Keep this directory for review. Without the environment variable, evidence goes to temporary storage.
@@ -61,7 +65,7 @@ Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux
 nub run test:e2e:session-manager:docker
 ```
 
-The script runs two [`docker-bake.hcl`](docker-bake.hcl) targets. `session-manager-e2e-evidence` runs the test and exports `result.json`, `exit-code`, and `vitest.log` to `.e2e-evidence/session-manager` even when the test fails. A `PI_ENV_E2E_ARTIFACT_DIR` outside the repository also needs `docker buildx bake --allow fs.write=<dir>`. `session-manager-e2e` reuses the cached run and fails when the test failed. The E2E builds from the shared `toolchain` stage, so it works from a worktree. BuildKit reuses a passing result until the build inputs change; add `--no-cache-filter session-manager-e2e-run` to force a rerun. `nub run test:e2e:session-manager` runs the same test on the host when tmux is installed.
+The script runs two [`docker-bake.hcl`](docker-bake.hcl) targets. `session-manager-e2e-evidence` runs the test and exports `result.json`, `exit-code`, and `vitest.log` to `.e2e-evidence/session-manager` even when the test fails. A `PI_ENV_E2E_ARTIFACT_DIR` outside the repository also needs `docker buildx bake --allow fs.write=<dir>`. `session-manager-e2e` reuses the cached run and fails when the test failed. The E2E builds from the shared `toolchain` stage, so it works from a worktree. BuildKit reuses a passing result until the build inputs change; add `--no-cache-filter session-manager-e2e-run` to force a rerun. `nub run test:e2e .pi/extensions/session-manager/__tests__/e2e.test.ts` runs the same test on the host when tmux is installed.
 
 ## Worktree requirements
 

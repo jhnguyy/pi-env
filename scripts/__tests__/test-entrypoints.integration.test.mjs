@@ -7,9 +7,8 @@ const unitFile = "src/dag/__tests__/validation.test.ts";
 const integrationFile = "scripts/__tests__/test-portfolios.integration.test.mjs";
 
 // Use real Vitest discovery without importing E2E suites or invoking a provider.
-for (const [command, filters, expected] of [
+for (const [command, filters, expected, env = {}] of [
   ["test", [unitFile, integrationFile], [unitFile, integrationFile]],
-  ["test:vitest", [unitFile, integrationFile], [unitFile, integrationFile]],
   ["test:unit", [unitFile, integrationFile], [unitFile]],
   ["test:integration", [unitFile, integrationFile], [integrationFile]],
   [
@@ -24,23 +23,34 @@ for (const [command, filters, expected] of [
     ],
   ],
   [
-    "test:e2e:native-tools",
-    [],
+    "test:e2e",
+    [".pi/extensions/__tests__/e2e.test.ts", ".pi/extensions/subagent/__tests__/e2e.test.ts"],
     [".pi/extensions/__tests__/e2e.test.ts", ".pi/extensions/subagent/__tests__/e2e.test.ts"],
   ],
-  ["test:e2e:session-manager", [], [".pi/extensions/session-manager/__tests__/e2e.test.ts"]],
   [
-    "test:e2e:real-workspace-canary",
+    "test:e2e",
+    [".pi/extensions/session-manager/__tests__/e2e.test.ts"],
+    [".pi/extensions/session-manager/__tests__/e2e.test.ts"],
+  ],
+  [
+    "test:e2e",
     [],
     [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"],
+    { REAL_WORKSPACE_CANARY: "1" },
   ],
 ]) {
-  test(`${command} preserves suite selection and forwards Vitest arguments`, async () => {
+  test(`${command} ${filters.join(" ")} ${JSON.stringify(env)} selects the requested suites`, async () => {
     const { stdout } = await execute(
       "nub",
       ["run", command, "list", ...filters, "--filesOnly", "--json"],
       {
-        env: { ...process.env, E2E: "0", REAL_WORKSPACE_CANARY: "0", PI_ENV_TEST_PORTFOLIO: "" },
+        env: {
+          ...process.env,
+          E2E: "0",
+          REAL_WORKSPACE_CANARY: "0",
+          PI_ENV_TEST_PORTFOLIO: "",
+          ...env,
+        },
         timeout: 25_000,
         maxBuffer: 4 * 1024 * 1024,
       },

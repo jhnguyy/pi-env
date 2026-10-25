@@ -74,7 +74,7 @@ describeE2E("real workspace semantic canary", () => {
   let artifactPath: string;
   const evidence: Record<string, unknown> = {
     scenario: "registered dev-tools definition lookup and real-workspace restart",
-    repeat: "nub run test:e2e:real-workspace-canary",
+    repeat: "REAL_WORKSPACE_CANARY=1 nub run test:e2e",
     expected: {
       symbol: "registerPublicTool",
       destination: relative(repoRoot, sharedApiFile),

@@ -28,7 +28,7 @@ const it = test.extend({
     try {
       // Use the shipped commands and installed tools with synthetic Git history.
       const scripts = Object.fromEntries(
-        ["typecheck", "lint:type", "test:vitest"].map((name) => [
+        ["typecheck", "lint:type", "test"].map((name) => [
           name,
           manifest.scripts[name].replace(
             /\b(?:scripts|node_modules)\/[^\s]+/g,
@@ -71,7 +71,7 @@ async function start(cwd, extraEnv = {}) {
   };
 }
 
-for (const name of ["typecheck", "lint:type", "test:vitest"]) {
+for (const name of ["typecheck", "lint:type", "test"]) {
   it(`${name} rejects contention and launches its real tool after release`, async ({
     workspace,
   }) => {
