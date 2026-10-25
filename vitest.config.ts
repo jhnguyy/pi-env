@@ -21,6 +21,8 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
+    pool: "threads",
+    maxWorkers: e2e ? 1 : 4,
     env: { TMPDIR: realpathSync(tmpdir()) },
     exclude: ["**/node_modules/**", "**/dist/**"],
     projects: e2e
