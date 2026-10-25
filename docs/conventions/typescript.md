@@ -1,11 +1,5 @@
 # TypeScript conventions
 
-## Validation compiler
-
-Keep command-line compiler upgrades separate from dev-tools and JavaScript compiler-API migrations. They have different compatibility and lifecycle constraints.
-
-The [typecheck launcher](../../scripts/effect-tsc.sh) selects the Effect-enabled native compiler without replacing the stock native executable. Keep native-only diagnostic policy in [the typecheck configuration](../../tsconfig.typecheck.json), not the configuration shared with the existing language server.
-
 ## Domain-first types
 
 Follow [`domain-modeling.md`](domain-modeling.md) for boundary parsing and invariant-preserving types. Prefer functions that consume discriminated, canonical, or opaque domain values over functions that repeatedly validate broad primitives.
