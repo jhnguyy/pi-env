@@ -1,12 +1,8 @@
 ## Vocabulary and terminology
 
 - Prefer common, familiar words. Use each word with one meaning and one part of speech in a given context.
-- Ground terminology in the domain’s authoritative sources, such as requirements, code, APIs, standards, and operator procedures. Check what each term names before using it.
-- Preserve established domain terms when they carry precise meaning. Explain unfamiliar terms for the intended reader. When no established term fits, describe the specific behavior or responsibility in plain language.
+- Ground terminology in the surrounding work.
 - Use technical nouns only to name defined items or concepts. Use technical verbs only to name defined actions or processes.
-- Use one technical term for each item or concept. Do not introduce synonyms for variation.
-- When you introduce a long official term, write it in full. Define a clear short form before you use the short form.
-- Keep an ordinary multi-word noun to three words when practical. Rewrite a longer noun phrase to show how its parts relate.
 - Avoid contractions when they can reduce clarity.
 - Use American English spelling unless another authority requires a different spelling.
 
@@ -78,10 +74,5 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 ## Comments and log messages
 
 - Write a comment as concise descriptive text.
-- Write an authored log message as a short statement of the event, state, action, or result.
-- Name the affected component when context does not make it clear.
+- Write a log message as a short statement of the event or change and its effects.
 - Use the same terms in logs, code, documentation, and operator procedures.
-
-## Review checklist
-
-Follow the [Communication Guidelines protocol](../SKILL.md#protocol). Apply this reference’s topic-specific rules during that review. Replace vague nouns with concrete actors, actions, items, or results. Split dense paragraphs.
