@@ -1,0 +1,19 @@
+diff --git a/out/config.js b/out/config.js
+--- a/out/config.js
++++ b/out/config.js
+@@ -87,11 +87,12 @@
+         .default([]),
+     // Controls the executable used for ShellCheck linting information. An empty string will disable linting.
+     shellcheckPath: zod_1.z.string().trim().default('shellcheck'),
+-    shfmt: exports.ShfmtConfigSchema.default({}),
++    shfmt: exports.ShfmtConfigSchema.prefault({}),
+ });
+ // Initialization options override only supplied settings, preserving environment defaults.
+-exports.InitializationOptionsSchema = exports.ConfigSchema.partial().extend({
+-    shfmt: exports.ShfmtConfigSchema.partial().optional(),
++const optionalWithoutDefaults = (schema) => zod_1.z.object(Object.fromEntries(Object.entries(schema.shape).map(([key, value]) => [key, value.unwrap().optional()])));
++exports.InitializationOptionsSchema = optionalWithoutDefaults(exports.ConfigSchema).extend({
++    shfmt: optionalWithoutDefaults(exports.ShfmtConfigSchema).optional(),
+ });
+ function getConfigFromEnvironmentVariables() {
+     const rawConfig = {

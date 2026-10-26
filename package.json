@@ -36,7 +36,7 @@
     "test:e2e:session-manager": "E2E=1 nub run test:vitest .pi/extensions/session-manager/__tests__/e2e.test.ts --maxWorkers=1",
     "test:e2e:session-manager:docker": "export PI_ENV_REVISION=$(git describe --always --dirty --abbrev=40) && docker buildx bake session-manager-e2e-evidence && docker buildx bake session-manager-e2e",
     "test:e2e:real-workspace-canary": "E2E=1 REAL_WORKSPACE_CANARY=1 nub run test:vitest --maxWorkers=1",
-    "typecheck": "bash scripts/effect-tsc.sh --noEmit --project tsconfig.typecheck.json",
+    "typecheck": "scripts/node-run.sh scripts/run-supervised-node.mjs --heavyweight node_modules/typescript/bin/tsc --noEmit",
     "lint:type": "scripts/node-run.sh scripts/run-supervised-node.mjs --heavyweight --command scripts/tool-node-run.sh node_modules/oxlint/bin/oxlint . --type-aware --threads=1 --deny-warnings --ignore-pattern 'tests/**' --ignore-pattern '**/dist/**'",
     "check:dependencies": "scripts/node-run.sh node_modules/dependency-cruiser/bin/dependency-cruise.mjs . --output-type err --progress none --ignore-known .dependency-cruiser-known-violations.json",
     "format": "scripts/tool-node-run.sh node_modules/oxfmt/bin/oxfmt --threads=1 'scripts/*.{js,mjs}' '!scripts/node-policy.mjs' .dependency-cruiser.cjs .dependency-cruiser-known-violations.json .oxlintrc.json .oxlintrc-sensors.json .oxfmtrc.json",
@@ -86,12 +86,10 @@
     "@earendil-works/pi-coding-agent": "1.4.0",
     "@earendil-works/pi-tui": "1.4.0",
     "@effect/language-service": "^0.87.4",
-    "@effect/tsgo": "0.56.0",
     "@effect/vitest": "4.0.5",
     "@oxlint/plugins": "1.88.0",
     "@types/node": "^24.0.0",
     "@types/proper-lockfile": "^4.1.4",
-    "@typescript/native": "npm:typescript@7.0.2",
     "dependency-cruiser": "^18.0.0",
     "esbuild": "^0.28.1",
     "knip": "^6.24.0",
@@ -121,7 +119,8 @@
     "tinypool": "2.1.2",
     "toml": "4.2.0",
     "undici": "8.12.3",
-    "vite": "8.3.3"
+    "vite": "8.3.3",
+    "zod": "4.6.7"
   },
   "engines": {
     "node": ">=24.19.0"
@@ -150,5 +149,8 @@
     "themes": [
       "themes"
     ]
+  },
+  "patchedDependencies": {
+    "bash-language-server@5.8.1": "patches/bash-language-server@5.8.1.patch"
   }
 }
