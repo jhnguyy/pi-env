@@ -14,8 +14,6 @@ import type {
   SymbolsResult,
 } from "../protocol";
 
-const E2E = process.env["E2E"] === "1";
-const describeE2E = E2E ? describe : describe.skip;
 const repoRoot = process.cwd();
 const analyzeFile = `${repoRoot}/.pi/extensions/analyze/index.ts`;
 const sharedApiFile = `${repoRoot}/.pi/extensions/_shared/tool-render.ts`;
@@ -69,12 +67,12 @@ function expectSymbol(result: LspResult, name: string): void {
   expect((result as SymbolsResult).items.map((item) => item.name)).toContain(name);
 }
 
-describeE2E("real workspace semantic canary", () => {
+describe("real workspace semantic canary", () => {
   let fixture: LspDaemonFixture;
   let artifactPath: string;
   const evidence: Record<string, unknown> = {
     scenario: "registered dev-tools definition lookup and real-workspace restart",
-    repeat: "nub run test:e2e:real-workspace-canary",
+    repeat: "nub run verify:phase real-workspace-semantic-canary",
     expected: {
       symbol: "registerPublicTool",
       destination: relative(repoRoot, sharedApiFile),

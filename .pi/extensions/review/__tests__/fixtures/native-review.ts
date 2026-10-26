@@ -103,7 +103,7 @@ export function createNativeReviewFixture(
       cleanupErrors: failures.map((error) => (error instanceof Error ? error.message : error)),
       retainedEvidence: testFailed || failures.length > 0 ? root : undefined,
       reproduce:
-        "nub run test:vitest .pi/extensions/review/__tests__/public-native.integration.test.ts",
+        "nub run test:integration .pi/extensions/review/__tests__/public-native.integration.test.ts",
     });
     if (testFailed || failures.length > 0)
       await settle(() =>

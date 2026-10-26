@@ -252,7 +252,7 @@ describe("review snapshot Git integration", () => {
             },
             actual,
             reproduce:
-              "nub run test:vitest .pi/extensions/review/__tests__/snapshot-git.integration.test.ts",
+              "nub run test:integration .pi/extensions/review/__tests__/snapshot-git.integration.test.ts",
           },
           null,
           2,

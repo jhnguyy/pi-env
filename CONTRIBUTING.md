@@ -45,23 +45,23 @@ Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vites
 
 Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for E2E-first testing and evidence requirements. Catching tests are ephemeral and may not be committed.
 
-Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Run the safe verification portfolio before integration when the full workspace contract is required.
+Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Test projects live in [`vitest.config.ts`](vitest.config.ts). Run the safe verification portfolio before integration when the full workspace contract is required.
 
 Run the dev-tools real-workspace canary with retained evidence:
 
 ```bash
-PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run test:e2e:real-workspace-canary
+PI_ENV_CANARY_ARTIFACT_DIR="$HOME/canary-evidence" nub run verify:phase real-workspace-semantic-canary
 ```
 
-Each run writes a `pi-dev-tools-canary-*/result.json` with the revision, public request, expected destination, actual result, and verdict. Keep this directory for review. Without the environment variable, evidence goes to temporary storage.
+Retain that directory for review. The [canary](.pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts) owns the artifact format and default storage location.
 
-Run the session-manager E2E in Docker. It drives real Pi inside an isolated tmux server and covers window binding, stale-binding reclaim after `kill -9`, release, labels, and duplicate-name restoration. See [session identity and display names](docs/session-manager.md) for the behavioral contract:
+Run the session-manager E2E in Docker to isolate tmux from the host. See [session identity and display names](docs/session-manager.md) for the behavioral contract:
 
 ```bash
 nub run test:e2e:session-manager:docker
 ```
 
-The script runs two [`docker-bake.hcl`](docker-bake.hcl) targets. `session-manager-e2e-evidence` runs the test and exports `result.json`, `exit-code`, and `vitest.log` to `.e2e-evidence/session-manager` even when the test fails. A `PI_ENV_E2E_ARTIFACT_DIR` outside the repository also needs `docker buildx bake --allow fs.write=<dir>`. `session-manager-e2e` reuses the cached run and fails when the test failed. The E2E builds from the shared `toolchain` stage, so it works from a worktree. BuildKit reuses a passing result until the build inputs change; add `--no-cache-filter session-manager-e2e-run` to force a rerun. `nub run test:e2e:session-manager` runs the same test on the host when tmux is installed.
+The [bake targets](docker-bake.hcl) own build options, caching, and evidence export.
 
 ## Worktree requirements
 

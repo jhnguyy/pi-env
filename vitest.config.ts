@@ -2,10 +2,6 @@ import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { defineConfig } from "vitest/config";
 
-const e2e = process.env.E2E === "1";
-const portfolio = process.env.PI_ENV_TEST_PORTFOLIO;
-const realWorkspaceCanary = process.env.REAL_WORKSPACE_CANARY === "1";
-
 const testRoots = [
   ".pi/extensions/**/__tests__/**/*.test.ts",
   "src/**/__tests__/**/*.test.ts",
@@ -21,51 +17,50 @@ const integrationTestRoots = [
 
 export default defineConfig({
   test: {
+    project: ["unit", "integration"],
+    pool: "threads",
+    maxWorkers: 4,
+    testTimeout: 30_000,
     env: { TMPDIR: realpathSync(tmpdir()) },
     exclude: ["**/node_modules/**", "**/dist/**"],
-    projects: e2e
-      ? [
-          {
-            extends: true,
-            test: {
-              name: "e2e",
-              testTimeout: 30_000,
-              include: realWorkspaceCanary
-                ? [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"]
-                : [".pi/extensions/**/__tests__/e2e.test.ts"],
-            },
-          },
-        ]
-      : [
-          ...(portfolio === "integration"
-            ? []
-            : [
-                {
-                  extends: true,
-                  test: {
-                    name: "unit",
-                    testTimeout: 5_000,
-                    include: testRoots,
-                    exclude: [
-                      "**/e2e.test.ts",
-                      "**/*.integration.test.ts",
-                      "**/*.integration.test.mjs",
-                    ],
-                  },
-                },
-              ]),
-          ...(portfolio === "unit"
-            ? []
-            : [
-                {
-                  extends: true,
-                  test: {
-                    name: "integration",
-                    testTimeout: 30_000,
-                    include: integrationTestRoots,
-                  },
-                },
-              ]),
-        ],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          testTimeout: 5_000,
+          include: testRoots,
+          exclude: [
+            "**/e2e.test.ts",
+            "**/*.e2e.test.ts",
+            "**/*.integration.test.ts",
+            "**/*.integration.test.mjs",
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "integration",
+          include: integrationTestRoots,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "e2e",
+          maxWorkers: 1,
+          include: [".pi/extensions/**/__tests__/e2e.test.ts"],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "real-workspace-canary",
+          maxWorkers: 1,
+          include: [".pi/extensions/dev-tools/__tests__/real-workspace-canary.e2e.test.ts"],
+        },
+      },
+    ],
   },
 });

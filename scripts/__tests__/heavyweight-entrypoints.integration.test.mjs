@@ -27,15 +27,12 @@ const it = test.extend({
     const root = await mkdtemp(join(tmpdir(), "heavyweight-entrypoints-"));
     try {
       // Use the shipped commands and installed tools with synthetic Git history.
-      const scripts = Object.fromEntries(
-        ["typecheck", "lint:type", "test:vitest"].map((name) => [
-          name,
-          manifest.scripts[name].replace(
-            /\b(?:scripts|node_modules)\/[^\s]+/g,
-            (path) => `'${join(repo, path).replaceAll("'", "'\\''")}'`,
-          ),
-        ]),
-      );
+      const scripts = {
+        test: manifest.scripts.test.replace(
+          /\b(?:scripts|node_modules)\/[^\s]+/g,
+          (path) => `'${join(repo, path).replaceAll("'", "'\\''")}'`,
+        ),
+      };
       await writeFile(
         join(root, "package.json"),
         JSON.stringify({ type: "module", engines: manifest.engines, scripts }),
@@ -71,35 +68,33 @@ async function start(cwd, extraEnv = {}) {
   };
 }
 
-for (const name of ["typecheck", "lint:type", "test:vitest"]) {
-  it(`${name} rejects contention and launches its real tool after release`, async ({
-    workspace,
-  }) => {
-    const lease = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
-    try {
-      await using blocked = ChildFixture.startChild("nub", ["run", name, "--help"], {
-        cwd: workspace.sibling,
-        env,
-      });
-      expect(await blocked.closed).toMatchObject({
-        code: 1,
-        stdout: "",
-        error: undefined,
-        watchdogFired: false,
-        stderr: expect.stringContaining("Timed out waiting for heavyweight-operation lock"),
-      });
-    } finally {
-      await lease.release();
-    }
-    await using launched = ChildFixture.startChild("nub", ["run", name, "--help"], {
+it("shared developer execution rejects contention and launches after release", async ({
+  workspace,
+}) => {
+  const lease = await HeavyweightLock.acquireHeavyweightLock({ cwd: workspace.root, env });
+  try {
+    await using blocked = ChildFixture.startChild("nub", ["run", "test", "--help"], {
       cwd: workspace.sibling,
       env,
     });
-    const result = await launched.closed;
-    expect(result).toMatchObject({ code: 0, error: undefined, watchdogFired: false });
-    expect(result.stdout.trim()).not.toBe("");
+    expect(await blocked.closed).toMatchObject({
+      code: 1,
+      stdout: "",
+      error: undefined,
+      watchdogFired: false,
+      stderr: expect.stringContaining("Timed out waiting for heavyweight-operation lock"),
+    });
+  } finally {
+    await lease.release();
+  }
+  await using launched = ChildFixture.startChild("nub", ["run", "test", "--help"], {
+    cwd: workspace.sibling,
+    env,
   });
-}
+  const result = await launched.closed;
+  expect(result).toMatchObject({ code: 0, error: undefined, watchdogFired: false });
+  expect(result.stdout.trim()).not.toBe("");
+});
 
 it("holds its lease until exit and preserves the command status", async ({ workspace }) => {
   await using command = await start(workspace.root);
