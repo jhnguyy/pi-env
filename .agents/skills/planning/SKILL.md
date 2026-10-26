@@ -1,39 +1,41 @@
 ---
 name: planning
-disable-model-invocation: true
-description: Transform a request into a scoped, testable delivery path that continues through production landing and explicit closure. Use when the user asks to apply ownership to feature, roadmap, migration, or operational planning.
+description: Turn an intended change into clear decisions and a verifiable path to the outcome. Use when defining a change, reviewing a design or architecture proposal, or planning delivery.
 ---
 
 # Planning
 
-Use this as a planning transformation, not as a generic checklist:
+Use this workflow to turn a request into a plan and verify the outcome:
 
 ```text
-request → scoped problem → success contract → delivery path → landed outcome → closure
+request → problem and scope → success criteria → implementation and rollout plan → verified outcome → remaining work
 ```
 
 ## Operating Rules
 
-- Derive decisions before tasks. Resolve the problem and success boundaries before adding implementation detail.
-- Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
-- Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
-- Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
-- Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
+- Evaluate the premise before implementation. Identify the assumption that makes the proposed approach necessary and check it against available evidence. When uncertainty can change the approach, choose an observation that could contradict the assumption.
+- Consider how the system would look if the requirement had been present from the start. Use that design to compare approaches.
+- Match planning detail to the change’s risk, uncertainty, and reversibility. Keep low-risk, reversible work brief.
+- Identify who is responsible for implementation, verification, rollout, and follow-up. Record delegated work and the limits of each responsibility.
 
-## Transformation
+## Design documents
 
-### 1. Derive the scoped problem
+Use the design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
 
-Treat the request as input to refine. Derive only the scopes that can affect the plan:
+## Workflow
 
-- **Local:** What behavior is broken, missing, or desired?
-- **User:** Who is affected, and what outcome is blocked?
-- **System:** What workflow, dependency, data flow, or assumption produces the condition?
-- **Strategic:** Why does this matter to the product or roadmap?
+### 1. Define the problem and scope
 
-State the selected problem boundary and why broader or narrower scopes are excluded.
+Use the request to identify the problem and the work needed to solve it:
 
-### 2. Establish the success contract
+- What local behavior is broken, missing, or desired?
+- Who is affected, and what outcome is blocked?
+- What system workflow, dependency, data flow, or assumption produces the condition?
+- Why does this matter to the product or roadmap?
+
+State what the plan includes and excludes, and explain why.
+
+### 2. Define the success criteria
 
 Before decomposing work, state:
 
@@ -43,32 +45,26 @@ Before decomposing work, state:
 - constraints and non-goals
 - accepted risks and unresolved assumptions
 
-Use this contract to judge approaches and completion.
+### 3. Plan implementation, verification, and rollout
 
-### 3. Derive the delivery path
+Evaluate the proposed approach against the success criteria. Compare alternatives when their tradeoffs can change the decision. Derive implementation, verification, and rollout work from the selected approach.
 
-Evaluate the proposed approach against the success contract. Surface alternatives only when they expose a material tradeoff. Derive implementation, verification, and rollout work from the selected approach.
+Include operating concerns only when they can change scope, approach, sequence, verification, rollout, or ownership.
 
-Select operating concerns by relevance rather than enumeration. Examples include failure and recovery, data migration, compatibility, security, dependencies, observability, and maintenance.
+For each unknown that can change the plan, record the question, affected decision, and how to resolve it. State who will resolve it or when it must be resolved.
 
-For each consequential unknown, record:
+### 4. Verify the outcome in production
 
-```text
-question → affected decision → resolution method → resolution point or owner
-```
+Plan how to deploy the change and verify that it works:
 
-### 4. Plan production landing
+1. Establish compatibility, migration, configuration, observability, rollout, and rollback needs.
+2. Confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
+3. Exercise the changed behavior under real conditions and compare the results with the success criteria.
+4. Observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
 
-Model landing as more than deployment:
+Deployment confirms that the change reached the environment. Verification establishes whether the changed behavior meets the success criteria.
 
-1. **Prepare:** establish compatibility, migration, configuration, observability, rollout, and rollback needs.
-2. **Release:** confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
-3. **Exercise:** invoke the changed behavior under real conditions and compare evidence with the success contract.
-4. **Stabilize:** observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
-
-“Deployed” means the change moved. “Landed” means the intended outcome works in its real environment.
-
-### 5. Close residual responsibility
+### 5. Resolve remaining work
 
 For every material remaining item, choose an explicit state:
 
@@ -78,19 +74,4 @@ For every material remaining item, choose an explicit state:
 - blocked with an escalation path
 - excluded with rationale
 
-Identify necessary communication and later observation by affected party and purpose, not by generating a generic audience list. The work is closed when completion evidence satisfies the success contract and no material responsibility remains implicit.
-
-## Output Shape
-
-Adapt this shape to local planning conventions. Omit sections that cannot affect action or judgment.
-
-```md
-## Problem boundary
-## Success contract
-## Decisions and material tradeoffs
-## Delivery path
-## Production landing
-## Open questions and resolution paths
-## Residual responsibilities
-## Completion evidence
-```
+State who needs an update, what they need to know, and who will check for delayed effects. Close the work when the evidence meets the success criteria and each remaining item has an explicit status. Assign responsibility for any further action.
