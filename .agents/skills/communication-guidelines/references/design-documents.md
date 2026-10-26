@@ -2,8 +2,6 @@
 
 Use this reference when drafting or reviewing a design document or architecture proposal. Its purpose is to help reviewers understand and assess consequential decisions before implementation makes them expensive to change.
 
-The [planning skill](../../planning/SKILL.md) owns problem boundaries, success criteria, tradeoffs, and resolution paths. Use it to derive or assess the reasoning. This reference owns presentation. Follow local document conventions and authoritative specifications rather than creating competing sources.
-
 ## Select the depth
 
 A design document is not necessary for every change. Use one when written review can resolve uncertainty, coordinate participants, or prevent an expensive misunderstanding. Keep low-risk, reversible work brief.

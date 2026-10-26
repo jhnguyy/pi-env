@@ -27,19 +27,13 @@ Keep exact quotations, identifiers, commands, paths, and machine syntax unchange
 10. Check pronouns, connectors, and prepositional phrases for more than one possible meaning.
 11. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
 
-## Technical writing
+## References
 
-Load [references/technical-writing.md](references/technical-writing.md) when you write or review:
+Load each reference that applies to the task.
 
-- Technical documentation
-- Procedures or operational instructions
-- Safety information
-- Code comments or authored log messages
-- Other text that explains a system, component, state, or action
-
-## Pattern guide
-
-Load [references/patterns.md](references/patterns.md) when examples of avoidable communication patterns help.
+- For technical explanations, procedures, safety information, comments, or logs, load [technical-writing.md](references/technical-writing.md). It covers terminology, sentence construction, step order, runnable checkpoints, and expected results.
+- For design documents or architecture proposals, load [design-documents.md](references/design-documents.md). It covers proposal context, scenarios, interfaces, constraints, operational risks, and decision state.
+- When drafting or reviewing prose, load [patterns.md](references/patterns.md). It gives examples and corrections for empty announcements, inflated importance, manufactured contrasts, performative certainty, false intimacy, repetitive rhythm, and false agency.
 
 ## Output
 
