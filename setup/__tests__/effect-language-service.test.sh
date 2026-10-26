@@ -17,10 +17,14 @@ test_patch_helper_patches_and_reruns() {
   cp -RL "$ROOT/node_modules/typescript" "$target"
   ln -s "$ROOT/node_modules/@effect/language-service" "$tmp/repo/node_modules/@effect/language-service"
 
-  "$node" "$cli" unpatch --dir "$target" --log-level none
+  "$node" "$cli" unpatch --dir "$target" --module tsc --log-level none
   "$node" "$cli" patch --dir "$target" --module typescript --log-level none
   version="$("$node" -p "require('$ROOT/node_modules/@effect/language-service/package.json').version")"
   patch_marker="\"use effect-lsp-patch-version $version\";"
+  assert_file_contains "$target/lib/typescript.js" "$patch_marker"
+  if grep -qF "$patch_marker" "$target/lib/_tsc.js"; then
+    fail 'fixture compiler must be unpatched before running the patch helper'
+  fi
   if ! (cd "$tmp/repo" && PI_ENV_NODE_BIN="$tmp/not-node" NODE_EXECUTABLE="$tmp/not-node" \
     "$node" "$ROOT/scripts/patch-effect-language-service.mjs" "$node") >"$first_log" 2>&1; then
     fail "Effect TypeScript patch failed: $(cat "$first_log")"
