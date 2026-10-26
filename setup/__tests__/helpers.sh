@@ -59,10 +59,13 @@ make_executable() {
   chmod +x "$path"
 }
 
-# Run a setup/configure.mjs command against an isolated home. Prefix scenario variables.
+# Run a setup/configure.mjs command with every configure path pinned inside the fixture home,
+# so inherited personal overrides cannot redirect writes or cleanup.
 run_configure() {
   local command="$1" repo="$2" home="$3" node
   node=$(node_bin)
   HOME="$home" REPO="$repo" PI_AGENT_DIR="$home/.pi/agent" PI_CODING_AGENT_DIR="$home/.pi/agent" \
+    AGENTS_DIR="$home/.agents" XDG_CONFIG_HOME="$home/.config" \
+    GHOSTTY_CONFIG_DIR="$home/.config/ghostty" \
     "$node" "$ROOT/setup/configure.mjs" "$command" "$node"
 }

@@ -22,7 +22,7 @@ export REPO="$ROOT"
 export HOME="$tmp/home"
 mkdir -p "$HOME"
 export PI_AGENT_DIR="$tmp/pi-agent" PI_CODING_AGENT_DIR="$tmp/pi-agent"
-export XDG_CONFIG_HOME="$tmp/xdg"
+export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$tmp/xdg" GHOSTTY_CONFIG_DIR="$tmp/xdg/ghostty"
 
 set +e
 "$NODE_BIN" setup/configure.mjs not-a-command >"$tmp/unknown.out" 2>"$tmp/unknown.err"

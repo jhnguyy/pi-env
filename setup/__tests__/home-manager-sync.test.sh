@@ -147,6 +147,8 @@ test_update_mismatch_fails_before_switch() {
 # Nub install is stubbed; Home Manager supplies Pi through PI_PACKAGE_DIR.
 run_setup_runtime() {
   env PATH="$STUB_DIR:$PATH" ROOT="$ROOT" REPO="$REPO_DIR" TMP="$TMP" \
+    AGENTS_DIR="$TMP/home/.agents" XDG_CONFIG_HOME="$TMP/home/.config" \
+    GHOSTTY_CONFIG_DIR="$TMP/home/.config/ghostty" \
     bash -euo pipefail -c '
       source "$ROOT/setup/lib.sh"
       source "$ROOT/setup/install.sh"

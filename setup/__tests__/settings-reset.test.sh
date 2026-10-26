@@ -28,6 +28,7 @@ JS
 }
 trap finish EXIT
 export HOME="$EVIDENCE/home"
+export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$HOME/.config" GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty"
 unset PI_AGENT_DIR
 export PI_CODING_AGENT_DIR="$EVIDENCE/selected-agent"
 mkdir -p "$HOME/.pi/agent"

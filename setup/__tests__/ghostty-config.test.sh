@@ -62,7 +62,7 @@ for layout in macos xdg; do
   export HOME="$EVIDENCE/$layout/home"
   mkdir -p "$HOME"
   export XDG_CONFIG_HOME="$EVIDENCE/$layout/xdg"
-  export PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$HOME/.pi/agent"
+  export PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$HOME/.pi/agent" AGENTS_DIR="$HOME/.agents"
   if [ "$layout" = macos ]; then
     export GHOSTTY_CONFIG_DIR="$HOME/Library/Application Support/com.mitchellh.ghostty"
   else

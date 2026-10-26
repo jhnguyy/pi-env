@@ -127,6 +127,8 @@ test_unrelated_roles_link_is_preserved() {
 test_obsolete_test_links_are_removed() {
   local tmp home links user_links
   tmp="$(with_temp_dir)"
+  # shellcheck disable=SC2064 # Expand now; the local is gone when the trap runs.
+  trap "rm -rf '$tmp'" EXIT
   home="$tmp/home"
   links="$home/.pi/agent/extensions/__tests__"
   mkdir -p "$links"
@@ -154,6 +156,7 @@ test_obsolete_test_links_are_removed() {
   [ ! -e "$links" ] && [ ! -L "$links" ] || fail "Pi setup must remove obsolete links written through a symlinked checkout"
 
   rm -rf "$tmp"
+  trap - EXIT
 }
 
 test_agent_guidelines_are_created_from_the_managed_source

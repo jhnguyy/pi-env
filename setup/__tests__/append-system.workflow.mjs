@@ -49,6 +49,9 @@ function configurePi(fixture) {
       REPO: root,
       PI_AGENT_DIR: agentDir,
       PI_CODING_AGENT_DIR: agentDir,
+      AGENTS_DIR: join(home, ".agents"),
+      XDG_CONFIG_HOME: join(home, ".config"),
+      GHOSTTY_CONFIG_DIR: join(home, ".config/ghostty"),
     },
   });
   appendFileSync(join(evidence, "setup.log"), `${result.stdout ?? ""}${result.stderr ?? ""}`);
