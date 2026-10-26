@@ -11,16 +11,16 @@ Use the core principles of ASD-STE100 Simplified Technical English, Issue 9, as 
 
 Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
 
-Keep exact quotations, identifiers, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
+Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
 
 ## Protocol
 
 1. Identify the purpose, reader, assumed knowledge, required facts, and exact text that must not change.
 2. Check the document before editing sentences. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
 3. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Link to authoritative sources for depth rather than duplicating their specifications.
-4. Give each sentence one main idea. Split long or nested sentences.
-5. Prefer active voice, concrete verbs, and explicit actors when the actor is useful.
-6. Use one term for each item or concept. Preserve project and subject-field terminology.
+4. Give each sentence one main idea. Split long or nested sentences and dense paragraphs.
+5. Prefer active voice, concrete verbs, and clear subjects. Replace vague nouns with specific actors, actions, items, or results.
+6. Preserve project terminology.
 7. Put conditions before dependent actions or results.
 8. Use lists for steps, alternatives, or complex information.
 9. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.

@@ -11,47 +11,48 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 - Identify the target repository from the request or ask if it is ambiguous. Find its root and the task worktree before repository commands, even when Pi starts elsewhere. Read the target repository's `README.md` and `CONTRIBUTING.md` when they exist. Follow applicable area-specific instructions.
 - State the intended outcome, material assumptions, success criteria, and required validation. Record an assumption when it can change the solution, risk, or result.
-- Deliver one coherent outcome completely. Include all code, tests, migrations, and cleanup required for that outcome. Update documentation only for facts that code, tests, or tooling cannot carry. Preserve unrelated behavior. Every changed part must support the pull request intention.
-- Separate work that has an independent purpose into another contribution or explicit follow-up.
+- Deliver one coherent outcome in verifiable phases, including the required code, tests, migrations, and cleanup. Preserve unrelated behavior. Separate work with an independent purpose into another contribution or explicit follow-up.
+- Update documentation only for facts that code, tests, or tooling cannot carry.
 
 ## Inspect Before Implementing
 
-- Inspect existing owners, callers, nearby tests, and conventions before selecting an implementation.
-- Before adding a responsibility or changing a boundary, find candidate owners in the affected area, shared modules, and relevant installed dependencies.
-- Compare candidate inputs, outputs, authority, lifecycle, and failure behavior. Similar names or shapes do not establish equivalent contracts.
+- Identify the module, service, or dependency responsible for the intended result. Inspect its callers, nearby tests, and conventions before selecting an implementation.
+- Before adding a responsibility or changing a boundary, explore prior art around the affected area, in shared modules, and in relevant installed dependencies.
+- Compare candidate inputs, outputs, authority, lifecycle, and failure behavior. Establish equivalent contracts from behavior rather than similar names or shapes.
 - Choose direct reuse, extension of an existing owner, or a separate owner. Record the considered owners and contract difference when the decision affects review.
 
 ## Design the Change
 
-- Prefer a small conceptual surface over a small line count. Give each concept one owner and one stable term.
+- Make the smallest change that solves the problem. Prefer fewer concepts over fewer lines. Give each concept one owner and one stable term.
+- Choose data structures before writing logic. Trace the main access patterns and state transitions. Define types and ownership so callers can use the capability without special-case coordination.
+- Before sharing mutable state, examine how concurrent changes affect each actor. Isolate state when sharing is unnecessary.
+- Remove obsolete paths, redundant checks, and duplicated decisions within the contribution’s scope before adding new mechanisms. Preserve checks that enforce current boundary contracts.
 - Use narrow interfaces that hide internal sequencing and data. Keep authority and data flow explicit.
-- Keep deterministic transforms plain, and put IO, cancellation, resources, and operational failure behind clear boundaries.
-- Parse weak or untrusted inputs into invariant-preserving domain values before the workflow causes effects. Do not discard established information and repeat validation downstream.
+- Keep deterministic data transformations simple. Put IO, cancellation, resource management, and operational failures behind explicit boundaries.
+- Parse weakly constrained or untrusted inputs into domain values that preserve required invariants before using them to change state or cause external effects. Preserve established invariants and information through later operations.
 - Bound work before allocation. Prefer simple representations, one-pass data flow, and reuse of values derived from immutable inputs.
-- Add an interface, service, layer, or helper only for a current ownership, lifecycle, protocol, substitution, repeated-change, or test-leverage need.
-- Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.
-- Do not reorganize code only to reduce file size, line count, or a static metric. Use measured end-to-end behavior as the authority for performance changes.
+- Keep each workflow’s related operations together. Prefer designs that make invalid states harder to express. Keep changes easy to roll back or remove.
+- Use measured end-to-end behavior as the authority for performance changes.
 
 ## Isolate the Work
 
-Perform agentic repository changes in a dedicated worktree. Keep the base worktree on the base branch and do not modify it for contribution work.
+Perform agentic repository changes in a dedicated worktree. Keep the base worktree unchanged on the base branch.
 
 Follow repository policy for branch names, base synchronization, worktree placement, initialization, and resuming existing work. Before using a branch or worktree, inspect current Git state and avoid any location another session can own. Preserve local work and stop when safe synchronization requires a decision that local policy does not resolve.
 
 ## Implement and Validate
 
-- Run focused checks while implementing. Use failures to revise the implementation or its assumptions.
-- Add tests when the outcome, a known regression, or a material risk requires new evidence. Do not add tests only to restate established behavior.
-- Follow specialized testing practice and repository validation policy. Run the required integration portfolio before review or integration.
-- Broaden or repeat checks only when new changes, failures, unresolved concerns, or repository policy justify more evidence.
+Work in phases:
+
+1. Define expected outcomes and failure cases from requirements before writing implementation code.
+2. Explore the affected workflow and its current behavior. Identify how to verify the intended result. Reuse existing E2E coverage where possible. Follow the [testing-practices skill](../testing-practices/SKILL.md) when new tests are needed.
+3. Implement the change against those expected outcomes.
+4. Verify the complete workflow and run the required repository checks before review or merge.
 
 ## Commit and Publish
 
 - Inspect `git status` and the diff before committing. Commit only the intended changes.
-- Resolve the push remote from repository instructions or Git configuration. Ask if it is ambiguous. Set the upstream on the first push. Do not force-push or change remote configuration unless the user explicitly requests it.
-- Before preparing a pull request, inspect repository contribution guidance and applicable pull request templates.
-- Explain the behavioral outcome and rationale. Record important decisions, validation, risks, and follow-up work. Do not narrate the diff or list every changed file.
-- If the repository uses pull-request-only merges, do not merge locally unless the user explicitly requests it.
+- Before preparing a pull request, inspect repository contribution guidance and applicable templates. Explain the behavioral outcome, rationale, important decisions, validation, risks, and follow-up work.
 
 ## Clean Up
 
