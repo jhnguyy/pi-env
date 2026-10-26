@@ -15,15 +15,17 @@ Keep exact quotations, identifiers, commands, paths, and machine syntax unchange
 
 ## Protocol
 
-1. Identify the purpose, reader, required facts, and exact text that must not change.
-2. Give each sentence one main idea. Split long or nested sentences.
-3. Prefer active voice, concrete verbs, and explicit actors when the actor is useful.
-4. Use one term for each item or concept. Preserve project and subject-field terminology.
-5. Put conditions before dependent actions or results.
-6. Use lists for steps, alternatives, or complex information.
-7. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.
-8. Check pronouns, connectors, and prepositional phrases for more than one possible meaning.
-9. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
+1. Identify the purpose, reader, assumed knowledge, required facts, and exact text that must not change.
+2. Check the document before editing sentences. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
+3. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Link to authoritative sources for depth rather than duplicating their specifications.
+4. Give each sentence one main idea. Split long or nested sentences.
+5. Prefer active voice, concrete verbs, and explicit actors when the actor is useful.
+6. Use one term for each item or concept. Preserve project and subject-field terminology.
+7. Put conditions before dependent actions or results.
+8. Use lists for steps, alternatives, or complex information.
+9. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.
+10. Check pronouns, connectors, and prepositional phrases for more than one possible meaning.
+11. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
 
 ## Technical writing
 
@@ -35,7 +37,11 @@ Load [references/technical-writing.md](references/technical-writing.md) when you
 - Code comments or authored log messages
 - Other text that explains a system, component, state, or action
 
-The reference is a house-style summary of ASD-STE100 Issue 9. Do not claim formal compliance.
+The reference combines a house-style summary of ASD-STE100 Issue 9 with practical documentation guidance. Do not claim formal compliance.
+
+## Design documents
+
+Load [references/design-documents.md](references/design-documents.md) when drafting or reviewing a design document or architecture proposal. Use the [planning skill](../planning/SKILL.md) to derive or assess the decisions before polishing their presentation.
 
 ## Pattern guide
 

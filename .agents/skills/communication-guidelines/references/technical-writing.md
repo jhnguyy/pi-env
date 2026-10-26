@@ -1,6 +1,6 @@
 # Technical Writing Reference
 
-This reference distills the core ideas of ASD-STE100 Simplified Technical English, Issue 9. It supports the pi-env house style. It does not replace the standard or provide its controlled dictionary.
+This reference combines core ideas from ASD-STE100 Simplified Technical English, Issue 9, with practical documentation guidance. It supports the pi-env house style. It does not replace the standard or provide its controlled dictionary.
 
 ## Vocabulary and terminology
 
@@ -42,6 +42,10 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 - Put a condition first when the reader must know the condition before the action.
 - Use a note for information only. Do not hide an instruction in a note.
 - Show the order of steps with numbers or letters when order is important.
+- State prerequisites and the tested environment when they affect reproducibility. Do not imply support for untested environments.
+- Make commands copyable. Distinguish commands from output and identify values the reader must replace. Preserve necessary safety confirmations.
+- Name each file and show where an edit belongs. Keep examples runnable at meaningful checkpoints.
+- Give checks and expected results at checkpoints and completion so readers can distinguish success from failure. Link to a complete runnable example when useful.
 
 ## Descriptions
 

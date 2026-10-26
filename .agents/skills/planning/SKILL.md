@@ -1,7 +1,6 @@
 ---
 name: planning
-disable-model-invocation: true
-description: Transform a request into a scoped, testable delivery path that continues through production landing and explicit closure. Use when the user asks to apply ownership to feature, roadmap, migration, or operational planning.
+description: Derive scoped problems, success criteria, decisions, and delivery paths. Use when drafting or reviewing design documents, architecture proposals, feature plans, roadmaps, migrations, or operational plans, and for changes with consequential uncertainty, coordination, or costly-to-reverse decisions. Routine fixes and straightforward edits do not need this skill.
 ---
 
 # Planning
@@ -19,6 +18,14 @@ request → scoped problem → success contract → delivery path → landed out
 - Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
 - Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
+
+## Scope and document writing
+
+Apply the transformation to the requested work, not every possible phase. For design documents and proposals, derive the problem, success contract, decisions, and consequential unknowns before drafting. Include delivery, production landing, and closure only when they affect the proposal or belong to the requested plan.
+
+A planning or design request does not authorize implementation, release, or remote writes. Distinguish proposed verification from evidence already obtained.
+
+This skill owns decision reasoning. The [design-document writing reference](../communication-guidelines/references/design-documents.md) owns how to present that reasoning for review. Load it when drafting or reviewing a design document or architecture proposal.
 
 ## Transformation
 
@@ -82,7 +89,7 @@ Identify necessary communication and later observation by affected party and pur
 
 ## Output Shape
 
-Adapt this shape to local planning conventions. Omit sections that cannot affect action or judgment.
+Adapt this shape to local planning conventions and the requested scope. It is not a required document template. Omit sections that cannot affect action or judgment.
 
 ```md
 ## Problem boundary
