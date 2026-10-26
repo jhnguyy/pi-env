@@ -1,7 +1,3 @@
-# Technical Writing Reference
-
-This reference combines core ideas from ASD-STE100 Simplified Technical English, Issue 9, with practical documentation guidance. It supports the pi-env house style. It does not replace the standard or provide its controlled dictionary.
-
 ## Vocabulary and terminology
 
 - Prefer common, familiar words. Use each word with one meaning and one part of speech in a given context.

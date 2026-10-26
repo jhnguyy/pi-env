@@ -1,6 +1,6 @@
 ---
 name: planning
-description: Derive scoped problems, success criteria, decisions, and delivery paths. Use when drafting or reviewing design documents, architecture proposals, feature plans, roadmaps, migrations, or operational plans, and for changes with consequential uncertainty, coordination, or costly-to-reverse decisions. Routine fixes and straightforward edits do not need this skill.
+description: Turn an intended change into clear decisions and a verifiable path to the outcome. Use when defining a change, reviewing a design or architecture proposal, or planning delivery.
 ---
 
 # Planning
