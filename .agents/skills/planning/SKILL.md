@@ -21,7 +21,7 @@ request → scoped problem → success contract → delivery path → landed out
 
 ## Scope and document writing
 
-Use the phases that fit the request. Before drafting a design document or proposal, define the problem, success contract, key decisions, and consequential unknowns. Cover delivery, production landing, and closure when they affect the design or the requested plan.
+Use the design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
 
 ## Transformation
 
@@ -82,18 +82,3 @@ For every material remaining item, choose an explicit state:
 - excluded with rationale
 
 Identify necessary communication and later observation by affected party and purpose, not by generating a generic audience list. The work is closed when completion evidence satisfies the success contract and no material responsibility remains implicit.
-
-## Output Shape
-
-Adapt this shape to local planning conventions and the requested scope. It is not a required document template. Omit sections that cannot affect action or judgment.
-
-```md
-## Problem boundary
-## Success contract
-## Decisions and material tradeoffs
-## Delivery path
-## Production landing
-## Open questions and resolution paths
-## Residual responsibilities
-## Completion evidence
-```
