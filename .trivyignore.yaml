@@ -39,3 +39,86 @@ vulnerabilities:
       - "**/node_modules/@oxlint-tsgolint/linux-x64/tsgolint"
     expired_at: 2026-10-15
     statement: "The latest available oxlint-tsgolint release still bundles a tsgolint executable built with the affected Go runtime. Remove this temporary exception when a fixed release is available."
+
+  # Retain native CLI checking while fixed compiler packages are unavailable.
+  # Exceptions cover only the pinned Linux x64 executables, not other Go tools.
+  - id: CVE-2026-56851
+    paths:
+      - "**/@effect+tsgo-linux-x64@0.56.0/node_modules/@effect/tsgo-linux-x64/lib/tsc"
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "Accept the crafted-input panic risk temporarily for local CLI checking. The affected nickname profile appears unused. Remove when compiler packages bundle fixed x/text."
+  - id: CVE-2026-56852
+    paths:
+      - "**/@effect+tsgo-linux-x64@0.56.0/node_modules/@effect/tsgo-linux-x64/lib/tsc"
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "Accept the malformed-UTF-8 normalization hang risk temporarily for local CLI checking. Do not expose this compiler as an untrusted-input service. Remove when compiler packages bundle fixed x/text."
+
+  # The stock compiler supplies version discovery. typecheck executes the Effect
+  # compiler instead, whose Go 1.27.3 runtime fixes these standard-library CVEs.
+  - id: CVE-2026-111943
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-33818
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-39821
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-39822
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-46600
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-56853
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-56858
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-56859
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-56860
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-56862
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-78667
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-78669
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
+  - id: CVE-2026-97031
+    paths:
+      - "**/@typescript+typescript-linux-x64@7.0.2/node_modules/@typescript/typescript-linux-x64/lib/tsc"
+    expired_at: 2026-11-25
+    statement: "The repository does not execute this stock compiler. Remove when its bundled Go runtime is fixed."
