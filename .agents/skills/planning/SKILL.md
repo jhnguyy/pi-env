@@ -33,10 +33,10 @@ This skill owns decision reasoning. The [design-document writing reference](../c
 
 Treat the request as input to refine. Derive only the scopes that can affect the plan:
 
-- **Local:** What behavior is broken, missing, or desired?
-- **User:** Who is affected, and what outcome is blocked?
-- **System:** What workflow, dependency, data flow, or assumption produces the condition?
-- **Strategic:** Why does this matter to the product or roadmap?
+- What local behavior is broken, missing, or desired?
+- Who is affected, and what outcome is blocked?
+- What system workflow, dependency, data flow, or assumption produces the condition?
+- Why does this matter to the product or roadmap?
 
 State the selected problem boundary and why broader or narrower scopes are excluded.
 
@@ -68,10 +68,10 @@ question → affected decision → resolution method → resolution point or own
 
 Model landing as more than deployment:
 
-1. **Prepare:** establish compatibility, migration, configuration, observability, rollout, and rollback needs.
-2. **Release:** confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
-3. **Exercise:** invoke the changed behavior under real conditions and compare evidence with the success contract.
-4. **Stabilize:** observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
+1. Establish compatibility, migration, configuration, observability, rollout, and rollback needs.
+2. Confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
+3. Invoke the changed behavior under real conditions and compare evidence with the success contract.
+4. Observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
 
 “Deployed” means the change moved. “Landed” means the intended outcome works in its real environment.
 

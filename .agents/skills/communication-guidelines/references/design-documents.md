@@ -28,13 +28,13 @@ Explain the consequential commitments and why they satisfy the success criteria.
 
 Select the following details only when they affect review:
 
-- **Flow and boundaries:** Trace a representative interaction across components, dependencies, and trust boundaries. Use a diagram when it explains relationships more clearly than prose. Retain editable diagram source.
-- **Interfaces:** Show the interactions people and systems rely on, such as UI sketches, API or CLI semantics, and file formats. Include relevant failure semantics and compatibility constraints.
-- **Constraints and dependencies:** Explain limits imposed by budget, clients, infrastructure, or existing systems. Identify consequential language, runtime, storage, and service choices and their maintenance costs.
-- **Operations:** State measurable expectations for availability, latency, or capacity when relevant. Explain how they will be measured, which failures need alerts, and how recovery works. Identify diagnostic events, log access and retention, and sensitive data that must not enter logs.
-- **Security and privacy:** Explain threats, attack surface, trust boundaries, and controls. Identify sensitive data, who can access it, how it is protected, and how long it is retained. If a plausible risk is dismissed, explain why so reviewers can challenge the assumption.
-- **Legal obligations:** Identify applicable contractual, licensing, or regulatory constraints and unresolved review needs. Distinguish confirmed obligations from questions requiring qualified review.
-- **Delivery:** Explain migration, rollout, and rollback when those constraints can change the proposed design. When milestones matter, tie them to useful artifacts or feedback that can expose mistaken assumptions early. Do not invent dates or a release plan for a request limited to design.
+- Trace a representative interaction across components, dependencies, and trust boundaries. Use a diagram when it explains relationships more clearly than prose. Retain editable diagram source.
+- Show the interactions people and systems rely on, such as UI sketches, API or CLI semantics, and file formats. Include relevant failure semantics and compatibility constraints.
+- Explain limits imposed by budget, clients, infrastructure, or existing systems. Identify consequential language, runtime, storage, and service choices and their maintenance costs.
+- State measurable expectations for availability, latency, or capacity when relevant. Explain how they will be measured, which failures need alerts, and how recovery works. Identify diagnostic events, log access and retention, and sensitive data that must not enter logs.
+- Explain threats, attack surface, trust boundaries, and controls. Identify sensitive data, who can access it, how it is protected, and how long it is retained. If a plausible risk is dismissed, explain why so reviewers can challenge the assumption.
+- Identify applicable contractual, licensing, or regulatory constraints and unresolved review needs. Distinguish confirmed obligations from questions requiring qualified review.
+- Explain migration, rollout, and rollback when those constraints can change the proposed design. When milestones matter, tie them to useful artifacts or feedback that can expose mistaken assumptions early. Do not invent dates or a release plan for a request limited to design.
 
 Leave inexpensive, reversible implementation choices to implementation unless reviewers need them to assess feasibility.
 
