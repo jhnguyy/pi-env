@@ -132,8 +132,8 @@ export const VerificationPhase = Object.freeze({
   RealWorkspaceSemanticCanary: phase(
     "real-workspace-semantic-canary",
     "real workspace semantic canary",
-    "env",
-    ["REAL_WORKSPACE_CANARY=1", "nub", "run", "test:e2e"],
+    "nub",
+    ["run", "test", "--project", "real-workspace-canary"],
     VerificationClass.SafetyIntegration,
     VerificationCapability.WorkspaceSemantics,
   ),

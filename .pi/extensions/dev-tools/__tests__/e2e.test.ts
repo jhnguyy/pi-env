@@ -1,23 +1,8 @@
-/*
- * E2E tests — full round-trip with real typescript-language-server.
- *
- * Gated behind E2E=1 environment variable.
- *
- * Run with: nub run test:e2e .pi/extensions/dev-tools/__tests__/e2e.test.ts
- * Or from repo root: E2E=1 nub run test:e2e
- *
- * These tests spawn a real LspDaemon with a real typescript-language-server
- * and verify the full pipeline from request to response.
- */
-
 import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from "vitest";
 import { type TypeScriptLspFixture, createTypeScriptLspFixture } from "./e2e-fixture";
 
-const E2E = process.env["E2E"] === "1";
-const describeE2E = E2E ? describe : describe.skip;
-
-describeE2E("LSP E2E", () => {
+describe("LSP E2E", () => {
   let fixture: TypeScriptLspFixture;
 
   beforeAll(async () => {

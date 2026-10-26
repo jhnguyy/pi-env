@@ -12,7 +12,6 @@ export function listPlan(phases) {
 }
 
 export function runPlan(phases, options = {}) {
-  const run = options.run ?? spawnSync;
   const name = options.name ?? "verify";
   const log = options.log ?? console.log;
   const logError = options.logError ?? console.error;
@@ -23,7 +22,7 @@ export function runPlan(phases, options = {}) {
     }
     log(`\n==> ${phase.label}`);
     const startedAt = performance.now();
-    const result = run(phase.command, phase.args, { stdio: "inherit" });
+    const result = spawnSync(phase.command, phase.args, { stdio: "inherit" });
     const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
     if (result.error) {
       logError(

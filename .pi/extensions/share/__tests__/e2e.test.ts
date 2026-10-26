@@ -6,9 +6,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, onTestFinished } from "vitest";
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
-const test = process.env["E2E"] === "1" ? it : it.skip;
 
-test("/share-private in real Pi opens the repository prompt", async () => {
+it("/share-private in real Pi opens the repository prompt", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-private-share-e2e-"));
   const socket = join(root, "tmux.sock");
   const tmux = (...args: string[]) => execFileSync("tmux", ["-S", socket, "-f", "/dev/null", ...args], { encoding: "utf8" });

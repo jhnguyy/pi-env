@@ -26,6 +26,6 @@ Give each behavior one owning workflow. Extend that workflow instead of repeatin
 
 Share fixture lifecycle and evidence handling when multiple workflows need the same contract. Name each fixture for the resources or responsibility it owns. Keep scenario actions and expected outcomes explicit.
 
-Use `*.integration.test.ts` or `*.integration.test.mjs` for workflows that require real process or storage lifecycles. [`vitest.config.ts`](../../vitest.config.ts) separates these from the unit portfolio. Unit tests have a five-second budget. Integration and E2E workflows have a thirty-second budget, including when the default test command runs both portfolios. Keep readiness and completion event-driven. Use explicit tighter watchdogs when the scenario needs them, and distinguish watchdog activation from the expected outcome.
+Use `*.integration.test.ts` or `*.integration.test.mjs` for workflows that require real process or storage lifecycles. [`vitest.config.ts`](../../vitest.config.ts) owns project selection and timeout defaults. Keep readiness and completion event-driven. Use explicit tighter watchdogs when the scenario needs them, and distinguish watchdog activation from the expected outcome.
 
 E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).

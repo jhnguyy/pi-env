@@ -13,26 +13,6 @@ function positiveInteger(value, fallback, name) {
   return null;
 }
 
-function normalizeVitestWorkerArgs(scriptPath, commandArgs) {
-  if (!scriptPath.endsWith("/vitest.mjs")) return commandArgs;
-
-  const normalized = [];
-  let maxWorkers;
-  for (let index = 0; index < commandArgs.length; index++) {
-    const argument = commandArgs[index];
-    if (argument.startsWith("--maxWorkers=")) {
-      maxWorkers = argument;
-      continue;
-    }
-    if (argument === "--maxWorkers" && index + 1 < commandArgs.length) {
-      maxWorkers = `--maxWorkers=${commandArgs[++index]}`;
-      continue;
-    }
-    normalized.push(argument);
-  }
-  return maxWorkers === undefined ? normalized : [...normalized, maxWorkers];
-}
-
 async function runSupervisedCommand(command, args, heavyweight, timeoutMs, killGraceMs) {
   const controller = new AbortController();
   let receivedSignal;
@@ -121,7 +101,7 @@ export async function runSupervisedNode(commandArgs) {
 
   await runSupervisedCommand(
     externalCommand ? script : Process.resolveNodeCommand(),
-    externalCommand ? args : [script, ...normalizeVitestWorkerArgs(script, args)],
+    externalCommand ? args : [script, ...args],
     heavyweight,
     timeoutMs,
     killGraceMs,

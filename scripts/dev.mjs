@@ -26,55 +26,14 @@ function capture(command, args, cwd = process.cwd()) {
   }).trim();
 }
 
-async function runTests(mode, args) {
-  switch (mode) {
-    case "all":
-      break;
-    case "unit":
-    case "integration":
-      process.env.PI_ENV_TEST_PORTFOLIO = mode;
-      break;
-    case "e2e":
-      process.env.E2E = "1";
-      break;
-    case "safe":
-      await runSafeTests(args);
-      return;
-    case "docker":
-      await runDockerTests(args);
-      return;
-    default:
-      console.error(`Unknown test mode: ${mode ?? "(missing)"}`);
-      process.exitCode = 2;
-      return;
-  }
-  const command = args[0] === "list" ? args.shift() : "run";
-  await runSupervisedNode([
-    "--heavyweight",
-    join(repo, "node_modules/vitest/vitest.mjs"),
-    command,
-    ...args,
-  ]);
-}
-
 function positiveInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function batches(values, size) {
-  const result = [];
-  for (let index = 0; index < values.length; index += size) {
-    result.push(values.slice(index, index + size));
-  }
-  return result;
-}
-
-async function testFiles(portfolio, signal) {
+async function safeTestPlan(signal) {
   const result = await Effect.runPromise(
-    runProcess("nub", ["run", "test", "list", "--filesOnly", "--json"], {
-      env: { ...process.env, PI_ENV_TEST_PORTFOLIO: portfolio },
-    }),
+    runProcess("nub", ["run", "test", "list", "--filesOnly", "--json"]),
     { signal },
   );
   if (result.exitCode !== 0) {
@@ -84,31 +43,39 @@ async function testFiles(portfolio, signal) {
   if (
     !Array.isArray(entries) ||
     entries.some(
-      (entry) => !entry || typeof entry.file !== "string" || entry.projectName !== portfolio,
+      (entry) =>
+        !entry ||
+        typeof entry.file !== "string" ||
+        typeof entry.projectName !== "string" ||
+        entry.projectName.length === 0,
     )
   ) {
-    throw new Error(`Invalid Vitest discovery for ${portfolio}`);
+    throw new Error("Invalid Vitest discovery");
   }
-  return entries.map((entry) => relative(process.cwd(), entry.file)).sort();
-}
+  if (entries.length === 0) throw new Error("Vitest did not discover any tests");
 
-async function safeTestPlan(signal) {
-  const batchSizes = {
-    unit: positiveInteger(process.env.PI_ENV_SAFE_TEST_BATCH_SIZE, 16),
-    integration: positiveInteger(process.env.PI_ENV_SAFE_INTEGRATION_BATCH_SIZE, 4),
-  };
-  const groups = [];
-  for (const portfolio of ["unit", "integration"]) {
-    groups.push({ portfolio, files: await testFiles(portfolio, signal) });
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!groups.has(entry.projectName)) groups.set(entry.projectName, []);
+    groups.get(entry.projectName).push(relative(process.cwd(), entry.file));
   }
-  return groups.flatMap(({ portfolio, files }) =>
-    batches(files, batchSizes[portfolio]).map((batch, index) => ({
-      portfolio,
-      index: index + 1,
-      total: Math.ceil(files.length / batchSizes[portfolio]),
-      files: batch,
-    })),
-  );
+  const plan = [];
+  for (const [portfolio, files] of groups) {
+    files.sort();
+    const size =
+      portfolio === "unit"
+        ? positiveInteger(process.env.PI_ENV_SAFE_TEST_BATCH_SIZE, 16)
+        : positiveInteger(process.env.PI_ENV_SAFE_INTEGRATION_BATCH_SIZE, 4);
+    for (let offset = 0; offset < files.length; offset += size) {
+      plan.push({
+        portfolio,
+        index: offset / size + 1,
+        total: Math.ceil(files.length / size),
+        files: files.slice(offset, offset + size),
+      });
+    }
+  }
+  return plan;
 }
 
 async function runTestBatches(plan, signal) {
@@ -116,9 +83,13 @@ async function runTestBatches(plan, signal) {
     console.log(`\n==> ${batch.portfolio} test batch ${batch.index}/${batch.total}`);
     const result = await Effect.runPromise(
       Effect.result(
-        runInheritedProcess("nub", ["run", "test", "--maxWorkers=1", ...batch.files], {
-          env: { ...process.env, PI_ENV_TEST_PORTFOLIO: batch.portfolio },
-        }),
+        runInheritedProcess("nub", [
+          "run",
+          "test",
+          `--project=${batch.portfolio}`,
+          "--maxWorkers=1",
+          ...batch.files,
+        ]),
       ),
       { signal },
     );
@@ -180,9 +151,8 @@ async function runDockerTests(args) {
   ]);
 }
 
-async function runLint(args) {
-  await runSupervisedNode([
-    "--heavyweight",
+function lintArguments(args) {
+  return [
     "--command",
     join(repo, "scripts/tool-node-run.sh"),
     join(repo, "node_modules/oxlint/bin/oxlint"),
@@ -195,16 +165,16 @@ async function runLint(args) {
     "--ignore-pattern",
     "**/dist/**",
     ...args,
-  ]);
+  ];
 }
 
-async function runTypecheck(args) {
+function typecheckArguments(args) {
   const compiler = capture(
     process.execPath,
     [join(repo, "node_modules/@effect/tsgo/dist/effect-tsgo.cjs"), "get-exe-path"],
     repo,
   );
-  await runSupervisedNode(["--heavyweight", "--command", compiler, ...args]);
+  return ["--command", compiler, ...args];
 }
 
 function verificationPhases(mode) {
@@ -275,22 +245,36 @@ function runVerificationPhase(args) {
 
 async function main([command, ...args]) {
   switch (command) {
-    case "test":
-      await runTests(args[0], args.slice(1));
+    case "test:safe":
+      await runSafeTests(args);
+      return;
+    case "test:docker":
+      await runDockerTests(args);
       return;
     case "verify":
       await runVerification(args[0], args.slice(1));
       return;
-    case "lint":
-      await runLint(args);
-      return;
-    case "typecheck":
-      await runTypecheck(args);
-      return;
-    default:
-      console.error("usage: node scripts/dev.mjs <test|verify|lint|typecheck> [mode] [args...]");
-      process.exitCode = 2;
   }
+
+  let commandArgs;
+  switch (command) {
+    case "test":
+      commandArgs = [join(repo, "node_modules/vitest/vitest.mjs"), "--run", ...args];
+      break;
+    case "lint":
+      commandArgs = lintArguments(args);
+      break;
+    case "typecheck":
+      commandArgs = typecheckArguments(args);
+      break;
+    default:
+      console.error(
+        "usage: node scripts/dev.mjs <test|test:safe|test:docker|verify|lint|typecheck> [args...]",
+      );
+      process.exitCode = 2;
+      return;
+  }
+  await runSupervisedNode(["--heavyweight", ...commandArgs]);
 }
 
 try {
