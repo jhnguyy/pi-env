@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Type } from "typebox";
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -22,6 +22,7 @@ let child: string;
 let usageFile: string;
 let usageId: string;
 let usageChildId: string;
+let largeErrorId: string;
 let usageTimestamp: string;
 let assistantEntryId: string;
 let middleEntryId: string;
@@ -78,6 +79,17 @@ function createSyntheticTranscripts(): void {
   ], "untimed-id");
   writeTranscript(join(root, "ambiguous-a.jsonl"), "/ambiguous", [], "ambiguous-id");
   writeTranscript(join(root, "ambiguous-b.jsonl"), "/ambiguous", [], "ambiguous-id");
+  writeTranscript(join(root, "long-header.jsonl"), `/${"λ".repeat(8000)}`, [], "long-header-id");
+  writeFileSync(join(root, "short-header.jsonl"), JSON.stringify({ type: "session", id: "short-header-id", cwd: "/short" }));
+  for (const [id, size] of [["boundary-header-id", 65536], ["oversized-header-id", 65537]] as const) {
+    const header = { type: "session", id, cwd: "/boundary", padding: "" };
+    header.padding = "x".repeat(size - Buffer.byteLength(JSON.stringify(header)));
+    const text = JSON.stringify(header);
+    assert.equal(Buffer.byteLength(text), size);
+    writeFileSync(join(root, `${id}.jsonl`), `${text}\n`);
+  }
+  writeFileSync(join(root, "empty.jsonl"), "");
+  writeFileSync(join(root, "broken-header.jsonl"), '{"type":');
   writeFileSync(join(home, "outside.jsonl"), "outside content must not leak");
   symlinkSync(join(home, "outside.jsonl"), join(root, "escape.jsonl"));
 }
@@ -105,6 +117,7 @@ async function createNativeTranscripts(): Promise<void> {
           name: "bash", label: "Controlled Bash", description: "Synthetic command service.",
           parameters: Type.Object({ command: Type.String() }),
           async execute(_id, args) {
+            if (args.command === "large failure") throw new Error(`private-large-output ${"synthetic error ".repeat(10000)}`);
             if (args.command.includes("fail")) throw new Error("private-output: synthetic external failure");
             return { content: [{ type: "text", text: `${term} tool output private-output` }], details: undefined };
           },
@@ -201,6 +214,13 @@ async function createNativeTranscripts(): Promise<void> {
   usageChildId = usageChild.getSessionId();
   await generate(usageChild, async (generated) => {
     assert.equal((await call(generated, "bash", { command: "git status" })).isError, false);
+  });
+  utimesSync(usageFile, 1000, 1000);
+  utimesSync(usageChild.getSessionFile()!, 2000, 2000);
+  const largeErrorManager = SessionManager.create(join(home, "large-errors"), root);
+  largeErrorId = largeErrorManager.getSessionId();
+  await generate(largeErrorManager, async (generated) => {
+    assert.equal((await call(generated, "bash", { command: "large failure" })).isError, true);
   });
   for (const [name, count] of [["limit", 21], ["exact", 20]] as const) {
     const manager = SessionManager.create(join(home, name), root);
@@ -317,6 +337,8 @@ void describe("session introspection public workflow", { concurrency: false }, (
     const list = await invoke("list_sessions", { cwd: usageCwd });
     assert.equal(list.isError, false);
     assert(list.text.includes(`id: ${usageId}`));
+    assert(list.text.includes(`id: ${usageChildId}`));
+    assert(list.text.indexOf(`id: ${usageChildId}`) < list.text.indexOf(`id: ${usageId}`));
     const result = await read({ sessionId: usageId });
     assert.equal(result.sessionId, usageId);
     assert.equal(result.file, usageFile);
@@ -330,6 +352,26 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.deepStrictEqual(await read({ path: usageFile }), result);
     const nested = await read({ sessionId: usageChildId });
     assert.deepStrictEqual(nested.toolCounts, { bash: 1 });
+  });
+
+  void it("finds IDs across different header sizes, missing newlines, and corrupt unrelated headers", async () => {
+    for (const sessionId of ["long-header-id", "short-header-id", "boundary-header-id"]) {
+      const result = await read({ sessionId, fields: ["tools"] });
+      assert.equal(result.sessionId, sessionId);
+      assert.deepStrictEqual(result.toolCounts, {});
+    }
+    const oversized = await invoke("read_session", { sessionId: "oversized-header-id" });
+    assert.equal(oversized.isError, true);
+    assert.match(oversized.text, /not found/);
+  });
+
+  void it("returns only error locations for large failed tool outputs", async () => {
+    const result = await read({ sessionId: largeErrorId, fields: ["errors"] });
+    assert.equal(result.toolErrors.length, 1);
+    assert.equal(result.toolErrors[0].toolName, "bash");
+    assert(result.toolErrors[0].line > 0);
+    assert(!("text" in result.toolErrors[0]));
+    assert.doesNotMatch(JSON.stringify(result), /private-large-output|synthetic error/);
   });
 
   void it("adds sparse navigation and only recorded timing in detailed mode", async () => {

@@ -244,7 +244,7 @@ function applyMessageToView(
   message: SessionEntry["message"],
   line: number,
   view: Pick<SessionView, "userPrompts" | "toolErrorSummaries">,
-  navigation: { prompts: boolean; errors: boolean },
+  navigation: { prompts: boolean; errors: boolean; includeErrorText?: boolean },
 ): void {
   if (!message) return;
   if (navigation.prompts && message.role === MessageRole.User) {
@@ -252,7 +252,7 @@ function applyMessageToView(
     if (text) view.userPrompts.push({ line, text });
   }
   if (navigation.errors && message.role === MessageRole.ToolResult && message.isError) {
-    const text = oneLine(textFromContent(message.content), 260);
+    const text = navigation.includeErrorText === false ? "" : oneLine(textFromContent(message.content), 260);
     view.toolErrorSummaries.push({ line, toolName: message.toolName ?? "unknown", text });
   }
 }
@@ -267,6 +267,7 @@ type NavigationOptions = {
   branches: boolean;
   compactions: boolean;
   summarizePrompts?: boolean;
+  includeErrorText?: boolean;
 };
 
 export function inspectEntries(
@@ -324,7 +325,7 @@ export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION
   return file;
 }
 
-export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+export function discoverSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
   const root = resolve(sessionDir);
   if (!existsSync(root)) return [];
   const out: string[] = [];
@@ -337,7 +338,14 @@ export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
       else if (entry.isFile() && entry.name.endsWith(".jsonl")) out.push(path);
     }
   }
-  return out.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return out;
+}
+
+export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+  return discoverSessionFiles(sessionDir)
+    .map((file) => ({ file, mtime: statSync(file).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)
+    .map(({ file }) => file);
 }
 
 export function listSessionDigests(options: {

@@ -2,7 +2,7 @@ import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { DEFAULT_SESSION_DIR, assertUnderSessionDir, inspectEntries, listSessionFiles, parseSessionLines, readSessionFile, type ParsedSessionEntries } from "./sessions";
+import { DEFAULT_SESSION_DIR, assertUnderSessionDir, inspectEntries, discoverSessionFiles, parseSessionLines, readSessionFile, type ParsedSessionEntries } from "./sessions";
 import { inspectSessionUsage, USAGE_REFERENCE_SCHEMA } from "./usage";
 
 const FIELD_SCHEMA = Type.Union([
@@ -59,13 +59,14 @@ function guardedPath(path: string): string {
   return assertUnderSessionDir(realpathSync(file), realpathSync(DEFAULT_SESSION_DIR));
 }
 
-function headerId(file: string): string | undefined {
+function headerId(file: string, buffer: Buffer): string | undefined {
   const descriptor = openSync(file, "r");
   try {
     // Discovery parses only a bounded header, not transcript bodies.
-    const buffer = Buffer.alloc(64 * 1024);
     const size = readSync(descriptor, buffer, 0, buffer.length, 0);
-    const line = buffer.subarray(0, size).toString("utf8").split("\n", 1)[0];
+    const contents = buffer.subarray(0, size);
+    const newline = contents.indexOf(0x0a);
+    const line = contents.toString("utf8", 0, newline === -1 ? size : newline);
     const header: unknown = JSON.parse(line);
     if (header && typeof header === "object" && "type" in header && header.type === "session" && "id" in header && typeof header.id === "string") return header.id;
   } catch (error) {
@@ -79,9 +80,10 @@ async function resolveFile(params: ReadParams, signal?: AbortSignal): Promise<st
   if ((params.path === undefined) === (params.sessionId === undefined)) throw new Error("Supply exactly one of sessionId or path.");
   if (params.path !== undefined) return guardedPath(params.path);
   let match: string | undefined;
-  for (const file of listSessionFiles()) {
+  const buffer = Buffer.alloc(64 * 1024);
+  for (const file of discoverSessionFiles()) {
     await setImmediate(undefined, { signal });
-    if (headerId(file) !== params.sessionId) continue;
+    if (headerId(file, buffer) !== params.sessionId) continue;
     if (match) throw new Error("Session ID is ambiguous. Select an exact path with list_sessions.");
     match = file;
   }
@@ -154,7 +156,7 @@ export async function executeReadSession(params: ReadParams, signal?: AbortSigna
   if ([...fields].some((field) => field !== "tools" && field !== "skills")) {
     const view = inspectEntries(entries, file, bytes, {
       prompts: fields.has("prompts"), errors: fields.has("errors"),
-      branches: fields.has("branches"), compactions: fields.has("compactions"), summarizePrompts: false,
+      branches: fields.has("branches"), compactions: fields.has("compactions"), summarizePrompts: false, includeErrorText: false,
     });
     projectNavigation(result, view, fields);
   }
