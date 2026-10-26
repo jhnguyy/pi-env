@@ -67,7 +67,7 @@ interface TextBlock {
   thinking?: string;
 }
 
-interface SessionEntry {
+interface SessionEntry extends Record<string, unknown> {
   type: string;
   timestamp?: string;
   id?: string;
@@ -111,11 +111,18 @@ function oneLine(text: string, max = 220): string {
 
 function parseLine(line: string): SessionEntry | undefined {
   try {
-    return JSON.parse(line) as SessionEntry;
+    const value: unknown = JSON.parse(line);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as SessionEntry : undefined;
   } catch {
     return undefined;
   }
 }
+
+export function parseSessionLines(lines: string[]): Array<SessionEntry | undefined> {
+  return lines.map(parseLine);
+}
+
+export type ParsedSessionEntries = ReturnType<typeof parseSessionLines>;
 
 interface DigestState {
   timestamp?: string;
@@ -133,10 +140,11 @@ interface DigestState {
   labels: Array<{ targetId: string; label: string }>;
 }
 
-function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState): void {
+function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState, summarizePrompts: boolean): void {
   switch (message.role) {
     case MessageRole.User: {
       state.userTurns += 1;
+      if (!summarizePrompts) break;
       const text = oneLine(textFromContent(message.content));
       if (text) {
         state.firstUserPrompt ??= text;
@@ -157,7 +165,7 @@ function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, sta
   }
 }
 
-function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
+function applyEntryToDigest(entry: SessionEntry, state: DigestState, summarizePrompts: boolean): void {
   switch (entry.type) {
     case SessionEntryType.Session:
       state.sessionId = entry.id;
@@ -176,12 +184,16 @@ function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
       state.compacted = true;
       break;
     case SessionEntryType.Message:
-      if (entry.message) applyMessageToDigest(entry.message, state);
+      if (entry.message) applyMessageToDigest(entry.message, state, summarizePrompts);
       break;
   }
 }
 
 function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
+  return digestEntries(parseSessionLines(lines), file, bytes);
+}
+
+function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, summarizePrompts = true): SessionDigest {
   const filename = basename(file);
   const timestamp = parseTimestamp(filename);
   const state: DigestState = {
@@ -195,13 +207,12 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
   };
   const childCounts = new Map<string | null, number>();
 
-  for (const line of lines) {
-    const entry = parseLine(line);
+  for (const entry of entries) {
     if (!entry) continue;
     if (entry.id && entry.parentId !== undefined) {
       childCounts.set(entry.parentId ?? null, (childCounts.get(entry.parentId ?? null) ?? 0) + 1);
     }
-    applyEntryToDigest(entry, state);
+    applyEntryToDigest(entry, state, summarizePrompts);
   }
 
   let branches = 0;
@@ -229,49 +240,66 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
   };
 }
 
+function applyMessageToView(
+  message: SessionEntry["message"],
+  line: number,
+  view: Pick<SessionView, "userPrompts" | "toolErrorSummaries">,
+  navigation: { prompts: boolean; errors: boolean },
+): void {
+  if (!message) return;
+  if (navigation.prompts && message.role === MessageRole.User) {
+    const text = oneLine(textFromContent(message.content), 500);
+    if (text) view.userPrompts.push({ line, text });
+  }
+  if (navigation.errors && message.role === MessageRole.ToolResult && message.isError) {
+    const text = oneLine(textFromContent(message.content), 260);
+    view.toolErrorSummaries.push({ line, toolName: message.toolName ?? "unknown", text });
+  }
+}
+
 export function inspectLines(lines: string[], file: string, bytes = 0): SessionView {
-  const digest = digestLines(lines, file, bytes);
+  return inspectEntries(parseSessionLines(lines), file, bytes);
+}
+
+type NavigationOptions = {
+  prompts: boolean;
+  errors: boolean;
+  branches: boolean;
+  compactions: boolean;
+  summarizePrompts?: boolean;
+};
+
+export function inspectEntries(
+  entries: ParsedSessionEntries,
+  file: string,
+  bytes = 0,
+  navigation: NavigationOptions = { prompts: true, errors: true, branches: true, compactions: true },
+): SessionView {
+  const digest = digestEntries(entries, file, bytes, navigation.summarizePrompts !== false);
   const userPrompts: SessionView["userPrompts"] = [];
   const toolErrorSummaries: SessionView["toolErrorSummaries"] = [];
   const branchSummaries: SessionView["branchSummaries"] = [];
   const compactions: SessionView["compactions"] = [];
+  const messageView = { userPrompts, toolErrorSummaries };
 
-  lines.forEach((line, index) => {
+  if (![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(Boolean)) return { ...digest, userPrompts, toolErrorSummaries, branchSummaries, compactions };
+
+  entries.forEach((entry, index) => {
     const lineNo = index + 1;
-    const entry = parseLine(line);
     if (!entry) return;
 
     switch (entry.type) {
       case SessionEntryType.BranchSummary:
-        if (entry.summary) branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
+        if (navigation.branches && entry.summary) branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
         return;
 
       case SessionEntryType.Compaction:
-        compactions.push({ line: lineNo, tokensBefore: entry.tokensBefore, text: oneLine(entry.summary ?? "", 300) });
+        if (navigation.compactions) compactions.push({ line: lineNo, tokensBefore: entry.tokensBefore, text: oneLine(entry.summary ?? "", 300) });
         return;
 
-      case SessionEntryType.Message: {
-        const message = entry.message;
-        if (!message) return;
-
-        switch (message.role) {
-          case MessageRole.User: {
-            const text = oneLine(textFromContent(message.content), 500);
-            if (text) userPrompts.push({ line: lineNo, text });
-            return;
-          }
-
-          case MessageRole.ToolResult: {
-            if (!message.isError) return;
-            const text = oneLine(textFromContent(message.content), 260);
-            toolErrorSummaries.push({ line: lineNo, toolName: message.toolName ?? "unknown", text });
-            return;
-          }
-
-          case MessageRole.Assistant:
-            return;
-        }
-      }
+      case SessionEntryType.Message:
+        applyMessageToView(entry.message, lineNo, messageView, navigation);
+        return;
     }
   });
 

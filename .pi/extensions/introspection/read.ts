@@ -2,8 +2,8 @@ import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import { DEFAULT_SESSION_DIR, assertUnderSessionDir, inspectLines, listSessionFiles, readSessionFile } from "./sessions";
-import { inspectSessionUsage } from "./usage";
+import { DEFAULT_SESSION_DIR, assertUnderSessionDir, inspectEntries, listSessionFiles, parseSessionLines, readSessionFile, type ParsedSessionEntries } from "./sessions";
+import { inspectSessionUsage, USAGE_REFERENCE_SCHEMA } from "./usage";
 
 const FIELD_SCHEMA = Type.Union([
   Type.Literal("metadata"), Type.Literal("tools"), Type.Literal("skills"), Type.Literal("prompts"),
@@ -37,13 +37,7 @@ export const READ_OUTPUT_SCHEMA = Type.Object({
   skillReadCounts: Type.Optional(COUNT_SCHEMA), skillEnvelopeCounts: Type.Optional(COUNT_SCHEMA),
   matchedRecords: Type.Optional(Type.Number()), incompleteNestedRecords: Type.Optional(Type.Boolean()),
   referencesTruncated: Type.Optional(Type.Boolean()),
-  references: Type.Optional(Type.Array(Type.Object({
-    file: Type.String(), entryId: Type.Optional(Type.String()), line: Type.Number(),
-    kind: Type.Union([Type.Literal("tool_call"), Type.Literal("skill_read"), Type.Literal("skill_envelope")]),
-    tool: Type.Optional(Type.String()), skill: Type.Optional(Type.String()), callId: Type.Optional(Type.String()),
-    status: Type.Optional(Type.Union([Type.Literal("ok"), Type.Literal("error"), Type.Literal("unfinished"), Type.Literal("unknown")])),
-    nested: Type.Optional(Type.Boolean()), timestamp: Type.Optional(Type.String()), durationMs: Type.Optional(Type.Number()),
-  }))),
+  references: Type.Optional(Type.Array(USAGE_REFERENCE_SCHEMA)),
   userPrompts: Type.Optional(Type.Array(LINE_TEXT_SCHEMA)),
   toolErrors: Type.Optional(Type.Array(Type.Object({ line: Type.Number(), toolName: Type.String() }))),
   labels: Type.Optional(Type.Array(Type.Object({ targetId: Type.String(), label: Type.String() }))),
@@ -102,7 +96,7 @@ function selectedFields(params: ReadParams): Set<Field> {
   return fields;
 }
 
-function projectNavigation(result: ReadResult, view: ReturnType<typeof inspectLines>, fields: Set<Field>): void {
+function projectNavigation(result: ReadResult, view: ReturnType<typeof inspectEntries>, fields: Set<Field>): void {
   if (fields.has("metadata")) result.metadata = {
     name: view.name, cwd: view.cwd, timestamp: view.timestamp,
     userTurns: view.userTurns, assistantTurns: view.assistantTurns, toolResults: view.toolResults, toolErrors: view.toolErrors,
@@ -115,10 +109,10 @@ function projectNavigation(result: ReadResult, view: ReturnType<typeof inspectLi
   if (fields.has("compactions")) result.compactions = view.compactions;
 }
 
-function projectUsage(result: ReadResult, lines: string[], fields: Set<Field>, params: ReadParams): void {
+function projectUsage(result: ReadResult, entries: ParsedSessionEntries, fields: Set<Field>, params: ReadParams): void {
   if (!fields.has("tools") && !fields.has("skills")) return;
   const scope = fields.has("tools") ? fields.has("skills") ? "all" : "tools" : "skills";
-  const usage = inspectSessionUsage(lines, result.file, { ...params, scope });
+  const usage = inspectSessionUsage(entries, result.file, { ...params, scope, includeReferences: result.mode !== "basic" });
   result.matchedRecords = usage.matchedRecords;
   result.incompleteNestedRecords = usage.incompleteNestedRecords;
   if (fields.has("tools")) {
@@ -154,10 +148,17 @@ export async function executeReadSession(params: ReadParams, signal?: AbortSigna
   const file = await resolveFile(params, signal);
   signal?.throwIfAborted();
   const { lines, bytes } = readSessionFile(file);
-  const view = inspectLines(lines, file, bytes);
-  const result: ReadResult = { file, sessionId: view.sessionId, mode: params.mode ?? "basic" };
-  projectNavigation(result, view, fields);
-  projectUsage(result, lines, fields, params);
+  const entries = parseSessionLines(lines);
+  const header = entries.find((entry) => entry?.type === "session");
+  const result: ReadResult = { file, sessionId: header?.id, mode: params.mode ?? "basic" };
+  if ([...fields].some((field) => field !== "tools" && field !== "skills")) {
+    const view = inspectEntries(entries, file, bytes, {
+      prompts: fields.has("prompts"), errors: fields.has("errors"),
+      branches: fields.has("branches"), compactions: fields.has("compactions"), summarizePrompts: false,
+    });
+    projectNavigation(result, view, fields);
+  }
+  projectUsage(result, entries, fields, params);
   const text = boundedOutput(result);
   return { content: [{ type: "text" as const, text }], details: result, structuredContent: result };
 }

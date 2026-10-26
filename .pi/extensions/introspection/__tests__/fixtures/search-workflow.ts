@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Type } from "typebox";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,11 +17,20 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type JsonObject } fro
 
 const home = homedir();
 const root = join(home, ".pi/agent/sessions/project");
-const parent = join(root, "parent.jsonl");
-const child = join(root, "_children/parent/child.jsonl");
-const usageFile = join(root, "usage.jsonl");
-const usageId = "usage-session-id";
-const outputFile = join(root, ...Array<string>(8).fill("long-path".repeat(10)), "output.jsonl");
+let parent: string;
+let child: string;
+let usageFile: string;
+let usageId: string;
+let usageChildId: string;
+let usageTimestamp: string;
+let assistantEntryId: string;
+let middleEntryId: string;
+let envelopeEntryId: string;
+const fixtureCwd = join(home, "fixture");
+const usageCwd = join(home, "usage");
+const skillPath = (name: string) => join(home, "skills", name, "SKILL.md");
+let outputFile: string;
+let outputEntryId: string;
 const term = "postgres [db]";
 const outputTerm = "\u0000".repeat(200);
 const outputSnippet = `${"\u0001".repeat(80)}${outputTerm}${"\u0001".repeat(80)}`;
@@ -39,45 +49,21 @@ function writeTranscript(file: string, cwd: string, entries: object[], id = file
   ].map((entry) => JSON.stringify(entry)).join("\n\n") + "\nnot json\n");
 }
 
-function createTranscripts(): void {
-  writeTranscript(parent, "/fixture", [
-    message("u1", "user", "First unrelated prompt", null),
-    message("a1", "assistant", [{ type: "text", text: `${"İ".repeat(200)}${"before ".repeat(30)}POSTGRES [db] decision${" after".repeat(30)}` }]),
-    message("u2", "user", "Middle postgres [db] question"),
-    message("a2", "assistant", [{ type: "thinking", thinking: `${term} private` }, { type: "toolCall", name: "bash", arguments: { command: `${term} command` } }]),
-    message("t1", "toolResult", `${term} tool output`),
-    { type: "compaction", summary: `${term} generated summary` },
-    message("u3", "user", "Last unrelated prompt"),
-  ]);
-  writeTranscript(child, "/fixture", [message("child-u", "user", `${term} child`, null)]);
-  for (const [name, count] of [["limit", 21], ["exact", 20]] as const) {
-    writeTranscript(join(root, `${name}.jsonl`), `/${name}`, Array.from({ length: count }, (_, i) => message(`${name}-${i}`, "user", term)));
-  }
-  writeTranscript(outputFile, "/output", Array.from({ length: 20 }, (_, i) => message(`output-${i}`, "user", outputSnippet)));
-  writeTranscript(usageFile, "/usage", [
-    message("mentions", "user", "bash read /skill:testing-practices /skills/mentioned/SKILL.md"),
-    message("command", "user", '<skill name="testing-practices" location="/skills/testing-practices/SKILL.md">\nInstructions\n</skill>'),
+function createSyntheticTranscripts(): void {
+  // Keep malformed, missing-result, exact-clock, and oversized inputs separate from native workflows.
+  writeTranscript(join(root, "legacy-usage.jsonl"), "/legacy-usage", [
+    message("legacy-prompt", "user", "Legacy postgres [db] note", null),
     message("calls", "assistant", [
       { type: "toolCall", id: "b1", name: "bash", arguments: { command: "git status" } },
-      { type: "toolCall", id: "r1", name: "read", arguments: { path: "/skills/testing-practices/SKILL.md" } },
-      { type: "toolCall", id: "r2", name: "read", arguments: { path: "/skills/failed/SKILL.md" } },
       { type: "toolCall", id: "lost", name: "bash", arguments: { command: "not completed" } },
       { type: "toolCall", id: "wrapper", name: "codemode", arguments: { code: "private-source" } },
     ]),
-    ...[["b1", "bash", true], ["r1", "read", false], ["r2", "read", true]].map(([toolCallId, toolName, isError]) => ({ type: "message", id: `result-${toolCallId}`, message: { role: "toolResult", toolCallId, toolName, isError, durationMs: 25, content: [{ type: "text", text: "private-output" }] } })),
+    { type: "message", id: "result-b1", message: { role: "toolResult", toolCallId: "b1", toolName: "bash", isError: true, durationMs: 25, content: [{ type: "text", text: "private-output" }] } },
     { type: "message", id: "nested", timestamp: "2026-10-25T00:00:01.000Z", message: { role: "toolResult", toolCallId: "wrapper", toolName: "codemode", isError: false, nestedCalls: { complete: false, calls: [
       { id: "wrapper/1", name: "bash", arguments: { command: "git status --short" }, status: "ok", durationMs: 12 },
-      { id: "wrapper/2", name: "read", arguments: { path: "/skills/nested-skill/SKILL.md" }, status: "ok" },
-      { id: "wrapper/3", name: "read", argumentsBytes: 10000, status: "ok" },
+      { id: "wrapper/2", name: "read", argumentsBytes: 10000, status: "ok" },
     ] } } },
-    { type: "branch_summary", summary: "Ignore bash /skill:summary" },
-    { type: "label", targetId: "calls", label: "todo: inspect usage" },
-    { type: "compaction", tokensBefore: 100, summary: "Compact usage history" },
-  ], usageId);
-  writeTranscript(join(root, "_children/usage/child.jsonl"), "/usage", [
-    message("child-call", "assistant", [{ type: "toolCall", id: "child-b", name: "bash", arguments: { command: "git status" } }], null),
-    { type: "message", message: { role: "toolResult", toolCallId: "child-b", toolName: "bash", isError: false } },
-  ], "usage-child-id");
+  ], "legacy-usage-id");
   writeTranscript(join(root, "usage-output.jsonl"), "/usage-output", Array.from({ length: 100 }, (_, i) => message(`call-${i}-${"x".repeat(1000)}`, "assistant", [
     { type: "toolCall", id: `call-${i}`, name: "__proto__", arguments: {} },
   ])));
@@ -94,7 +80,142 @@ function createTranscripts(): void {
   writeTranscript(join(root, "ambiguous-b.jsonl"), "/ambiguous", [], "ambiguous-id");
   writeFileSync(join(home, "outside.jsonl"), "outside content must not leak");
   symlinkSync(join(home, "outside.jsonl"), join(root, "escape.jsonl"));
-  writeTranscript(join(root, "other.jsonl"), "/usage", [message("excluded", "assistant", [{ type: "toolCall", id: "x", name: "bash", arguments: { command: "git status" } }])]);
+}
+
+async function createNativeTranscripts(): Promise<void> {
+  for (const cwd of [fixtureCwd, usageCwd]) mkdirSync(cwd, { recursive: true });
+  for (const name of ["testing-practices", "nested-skill"]) {
+    mkdirSync(dirname(skillPath(name)), { recursive: true });
+    writeFileSync(skillPath(name), `---\nname: ${name}\ndescription: Synthetic instructions for the session workflow.\n---\nprivate-skill-instructions\n`);
+  }
+  const provider = fauxProvider();
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
+  const modelRuntime = await ModelRuntime.create({ authPath: join(home, "generation-auth.json"), modelsPath: null, refreshOnCreate: false });
+  modelRuntime.registerNativeProvider(provider.provider);
+
+  async function generate(manager: SessionManager, run: (generated: typeof session) => Promise<void>) {
+    const cwd = manager.getHeader()!.cwd;
+    const loader = new DefaultResourceLoader({
+      cwd, agentDir: join(home, "generation-agent"), settingsManager,
+      noPromptTemplates: true, noThemes: true, noContextFiles: true,
+      additionalSkillPaths: [join(home, "skills")],
+      extensionFactories: [(pi) => {
+        // Control the external command boundary. Pi owns execution and recording.
+        pi.registerTool({
+          name: "bash", label: "Controlled Bash", description: "Synthetic command service.",
+          parameters: Type.Object({ command: Type.String() }),
+          async execute(_id, args) {
+            if (args.command.includes("fail")) throw new Error("private-output: synthetic external failure");
+            return { content: [{ type: "text", text: `${term} tool output private-output` }], details: undefined };
+          },
+        });
+        pi.registerTool({
+          name: "codemode", label: "Controlled composition", description: "Run the fixture's nested tools.",
+          parameters: Type.Object({ code: Type.String() }),
+          async execute(_id, _args, _signal, _update, ctx) {
+            assert.equal((await ctx.executeTool("bash", { command: "git status --short" })).isError, false);
+            assert.equal((await ctx.executeTool("read", { path: skillPath("nested-skill") })).isError, false);
+            return { content: [{ type: "text", text: "private-output" }], details: undefined };
+          },
+        });
+      }],
+    });
+    await loader.reload();
+    assert.deepStrictEqual(loader.getExtensions().errors, []);
+    assert.deepStrictEqual(loader.getSkills().skills.map((skill) => skill.name).sort(), ["nested-skill", "testing-practices"]);
+    const { session: generated } = await createAgentSession({
+      cwd, agentDir: join(home, "generation-agent"), modelRuntime, model: provider.getModel(),
+      resourceLoader: loader, settingsManager, sessionManager: manager, tools: ["read", "bash", "codemode"],
+    });
+    try {
+      await generated.bindExtensions({});
+      generated.setActiveToolsByName(["read", "bash", "codemode"]);
+      await run(generated);
+    } finally {
+      generated.dispose();
+    }
+  }
+  async function say(generated: typeof session, prompt: string, response = "done") {
+    provider.setResponses([fauxAssistantMessage(response)]);
+    await generated.prompt(prompt);
+  }
+  async function call(generated: typeof session, name: string, args: JsonObject, prompt = "Execute the controlled workflow.") {
+    const start = generated.messages.length;
+    provider.setResponses([
+      fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    await generated.prompt(prompt);
+    const result = generated.messages.slice(start).find((entry) => entry.role === "toolResult" && entry.toolName === name);
+    assert(result?.role === "toolResult");
+    return result;
+  }
+  const parentManager = SessionManager.create(fixtureCwd, root);
+  parent = parentManager.getSessionFile()!;
+  await generate(parentManager, async (generated) => {
+    await say(generated, "First unrelated prompt", `${"İ".repeat(200)}${"before ".repeat(30)}POSTGRES [db] decision${" after".repeat(30)}`);
+    assistantEntryId = parentManager.getLeafId()!;
+    provider.setResponses([
+      fauxAssistantMessage([
+        { type: "thinking", thinking: `${term} private` },
+        fauxToolCall("bash", { command: `${term} command` }),
+      ], { stopReason: "toolUse" }),
+      fauxAssistantMessage("done"),
+    ]);
+    await generated.prompt("Middle postgres [db] question");
+    assert(generated.messages.some((entry) => entry.role === "toolResult" && !entry.isError));
+    const middle = parentManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("Middle postgres [db] question"));
+    assert(middle);
+    middleEntryId = middle.id;
+    parentManager.branchWithSummary(assistantEntryId, `${term} generated summary`);
+    await say(generated, "Last unrelated prompt");
+    parentManager.appendCompaction(`${term} generated summary`, null, 100);
+  });
+  const childManager = SessionManager.create(fixtureCwd, join(root, "_children", parentManager.getSessionId()), { parentSession: parent });
+  child = childManager.getSessionFile()!;
+  await generate(childManager, (generated) => say(generated, `${term} child`));
+
+  const usageManager = SessionManager.create(usageCwd, root);
+  usageFile = usageManager.getSessionFile()!;
+  usageId = usageManager.getSessionId();
+  usageTimestamp = usageManager.getHeader()!.timestamp;
+  await generate(usageManager, async (generated) => {
+    await say(generated, "bash read /skill:testing-practices /skills/mentioned/SKILL.md");
+    await say(generated, "/skill:testing-practices");
+    const envelope = usageManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("<skill name="));
+    assert(envelope, "native /skill command must persist its expanded envelope");
+    envelopeEntryId = envelope.id;
+    const failedCommand = await call(generated, "bash", { command: "git status fail" });
+    assert.equal(failedCommand.isError, true);
+    assert.match(JSON.stringify(failedCommand.content), /synthetic external failure/);
+    assert.equal((await call(generated, "read", { path: skillPath("testing-practices") })).isError, false);
+    assert.equal((await call(generated, "read", { path: skillPath("failed") })).isError, true);
+    assert.equal((await call(generated, "codemode", { code: "private-source" })).isError, false);
+    const leaf = usageManager.getLeafId()!;
+    usageManager.appendLabelChange(leaf, "todo: inspect usage");
+    usageManager.branchWithSummary(leaf, "Ignore bash /skill:summary");
+    usageManager.appendCompaction("Compact usage history", null, 100);
+    usageManager.appendSessionInfo("Native usage workflow");
+  });
+  const usageChild = SessionManager.create(usageCwd, join(root, "_children", usageId), { parentSession: usageFile });
+  usageChildId = usageChild.getSessionId();
+  await generate(usageChild, async (generated) => {
+    assert.equal((await call(generated, "bash", { command: "git status" })).isError, false);
+  });
+  for (const [name, count] of [["limit", 21], ["exact", 20]] as const) {
+    const manager = SessionManager.create(join(home, name), root);
+    await generate(manager, async (generated) => {
+      for (let i = 0; i < count; i++) await say(generated, term);
+    });
+  }
+  const outputManager = SessionManager.create(join(home, "output"), join(root, ...Array<string>(8).fill("long-path".repeat(10))));
+  outputFile = outputManager.getSessionFile()!;
+  await generate(outputManager, async (generated) => {
+    for (let i = 0; i < 20; i++) await say(generated, outputSnippet);
+    const firstPrompt = outputManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user");
+    assert(firstPrompt);
+    outputEntryId = firstPrompt.id;
+  });
 }
 
 async function invoke(tool: string, params: JsonObject) {
@@ -130,7 +251,8 @@ function matchRecords(text: string): string[] {
 // node:test owns completion and reports failed callbacks through the process exit status.
 void describe("session introspection public workflow", { concurrency: false }, () => {
   before(async () => {
-    createTranscripts();
+    await createNativeTranscripts();
+    createSyntheticTranscripts();
     const settingsManager = SettingsManager.inMemory({ defaultTools: ["+tool_search"] });
     const modelRuntime = await ModelRuntime.create({ authPath: join(home, "auth.json"), modelsPath: null, refreshOnCreate: false });
     modelRuntime.registerNativeProvider(faux.provider);
@@ -177,36 +299,36 @@ void describe("session introspection public workflow", { concurrency: false }, (
   });
 
   void it("finds literal text in middle prompts, alternate branches, and nested sessions without non-text content", async () => {
-    const result = await search({ term: ` ${term} `, cwd: "/fixture" });
+    const result = await search({ term: ` ${term} `, cwd: fixtureCwd });
     const records = matchRecords(result.text);
     assert.equal(result.isError, false);
     assert.partialDeepStrictEqual(result.details, { truncated: false });
     assert.equal(records.length, 3);
-    const assistant = records.find((record) => record.includes('"entryId":"a1"'));
+    const assistant = records.find((record) => JSON.parse(record).entryId === assistantEntryId);
     assert(assistant);
-    assert.partialDeepStrictEqual(JSON.parse(assistant), { file: parent, entryId: "a1", role: "assistant" });
+    assert.partialDeepStrictEqual(JSON.parse(assistant), { file: parent, entryId: assistantEntryId, role: "assistant" });
     assert.match(assistant, /"snippet":"….*POSTGRES \[db\] decision.*…"/);
-    assert(records.some((record) => record.includes('"entryId":"u2"')));
+    assert(records.some((record) => JSON.parse(record).entryId === middleEntryId));
     assert(records.some((record) => record.includes(JSON.stringify(child))));
     assert.doesNotMatch(result.text, /private|tool output|command|generated summary/);
   });
 
   void it("lists IDs and reads a basic view by exact ID without prompts or per-call evidence", async () => {
-    const list = await invoke("list_sessions", { cwd: "/usage" });
+    const list = await invoke("list_sessions", { cwd: usageCwd });
     assert.equal(list.isError, false);
-    assert.match(list.text, /id: usage-session-id/);
+    assert(list.text.includes(`id: ${usageId}`));
     const result = await read({ sessionId: usageId });
     assert.equal(result.sessionId, usageId);
     assert.equal(result.file, usageFile);
     assert.equal(result.mode, "basic");
-    assert.equal(result.metadata.timestamp, "2026-10-25T00:00:00.000Z");
-    assert.deepStrictEqual(result.toolCounts, { bash: 3, read: 4, codemode: 1 });
+    assert.equal(result.metadata.timestamp, usageTimestamp);
+    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, codemode: 1 });
     assert.deepStrictEqual(result.skillReadCounts, { "testing-practices": 1, "nested-skill": 1 });
     assert(!("references" in result));
     assert(!("userPrompts" in result));
     assert(!("branchSummaries" in result));
     assert.deepStrictEqual(await read({ path: usageFile }), result);
-    const nested = await read({ sessionId: "usage-child-id" });
+    const nested = await read({ sessionId: usageChildId });
     assert.deepStrictEqual(nested.toolCounts, { bash: 1 });
   });
 
@@ -217,6 +339,20 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.equal(result.labels[0].label, "todo: inspect usage");
     assert.equal(result.branchSummaries[0].text, "Ignore bash /skill:summary");
     assert.equal(result.compactions[0].tokensBefore, 100);
+    const nested = result.references.find((ref: { nested?: boolean; tool?: string }) => ref.nested && ref.tool === "bash");
+    assert(nested);
+    assert(Number.isFinite(Date.parse(nested.timestamp)));
+    assert(nested.durationMs >= 0);
+    assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|git status/);
+    const untimed = await read({ sessionId: "untimed-id", mode: "detailed", fields: ["tools"] });
+    assert(!("timestamp" in untimed.references[0]));
+    assert(!("durationMs" in untimed.references[0]));
+  });
+
+  void it("retains legacy missing-result, bounded nested-record, and exact timing compatibility", async () => {
+    const result = await read({ sessionId: "legacy-usage-id", mode: "usage" });
+    assert.deepStrictEqual(result.toolCounts, { bash: 3, read: 1, codemode: 1 });
+    assert.equal(result.incompleteNestedRecords, true);
     const top = result.references.find((ref: { callId?: string }) => ref.callId === "b1");
     assert.equal(top.timestamp, "2026-10-25T00:00:00.000Z");
     assert.equal(top.durationMs, 25);
@@ -224,12 +360,18 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.equal(nested.timestamp, "2026-10-25T00:00:01.000Z");
     assert.equal(nested.durationMs, 12);
     const unknown = result.references.find((ref: { callId?: string }) => ref.callId === "lost");
-    assert(!("durationMs" in unknown));
     assert.equal(unknown.status, "unknown");
+    assert(!("durationMs" in unknown));
     assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|git status/);
-    const untimed = await read({ sessionId: "untimed-id", mode: "detailed", fields: ["tools"] });
-    assert(!("timestamp" in untimed.references[0]));
-    assert(!("durationMs" in untimed.references[0]));
+    for (const ref of result.references as Array<{ line: number; file: string; entryId: string }>) {
+      const entry = JSON.parse(readFileSync(ref.file, "utf8").split("\n")[ref.line - 1]);
+      assert.equal(entry.id, ref.entryId);
+    }
+    const searchResult = await search({ term, cwd: "/legacy-usage" });
+    assert.equal(searchResult.isError, false);
+    const records = matchRecords(searchResult.text).map((record) => JSON.parse(record));
+    assert.equal(records.length, 1);
+    assert.equal(records[0].entryId, "legacy-prompt");
   });
 
   void it("projects requested fields and limits evidence to the selected tools or skills scope", async () => {
@@ -251,10 +393,10 @@ void describe("session introspection public workflow", { concurrency: false }, (
 
   for (const [params, error] of [
     [{}, /exactly one/],
-    [{ sessionId: usageId, path: usageFile }, /exactly one/],
+    [{ sessionId: "any-id", path: join(root, "any.jsonl") }, /exactly one/],
     [{ sessionId: "missing-id" }, /not found/],
     [{ sessionId: "ambiguous-id" }, /ambiguous/],
-    [{ sessionId: usageId, fields: ["prompts"], tool: "bash" }, /require the tools or skills field/],
+    [{ sessionId: "legacy-usage-id", fields: ["prompts"], tool: "bash" }, /require the tools or skills field/],
     [{ path: join(home, "outside.jsonl") }, /restricted/],
     [{ path: join(root, "escape.jsonl") }, /restricted/],
   ] as Array<[JsonObject, RegExp]>) {
@@ -268,17 +410,16 @@ void describe("session introspection public workflow", { concurrency: false }, (
 
   void it("counts recorded calls, outcomes, successful skill reads, and user-supplied skill envelopes", async () => {
     const result = await usage();
-    assert.deepStrictEqual(result.toolCounts, { bash: 3, read: 4, codemode: 1 });
+    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, codemode: 1 });
     assert.deepStrictEqual(result.toolErrorCounts, { bash: 1, read: 1 });
     assert.deepStrictEqual(result.skillReadCounts, { "testing-practices": 1, "nested-skill": 1 });
     assert.deepStrictEqual(result.skillEnvelopeCounts, { "testing-practices": 1 });
-    assert(result.references.some((ref: { kind: string; entryId?: string }) => ref.kind === "skill_envelope" && ref.entryId === "command"));
-    assert.equal(result.incompleteNestedRecords, true);
+    assert(result.references.some((ref: { kind: string; entryId?: string }) => ref.kind === "skill_envelope" && ref.entryId === envelopeEntryId));
+    assert.equal(result.incompleteNestedRecords, false);
     assert.equal(result.referencesTruncated, false);
-    assert.equal(result.matchedRecords, 9);
-    assert(result.references.some((ref: { callId?: string; status?: string }) => ref.callId === "lost" && ref.status === "unknown"));
-    assert(result.references.some((ref: { callId?: string; nested?: boolean; entryId?: string }) => ref.callId === "wrapper/1" && ref.nested && ref.entryId === "nested"));
-    assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|git status|mentioned|failed/);
+    assert.equal(result.matchedRecords, 7);
+    assert(result.references.some((ref: { nested?: boolean }) => ref.nested));
+    assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|private-skill-instructions|git status|mentioned|failed/);
     for (const ref of result.references as Array<{ line: number; file: string; entryId: string }>) {
       const entry = JSON.parse(readFileSync(ref.file, "utf8").split("\n")[ref.line - 1]);
       assert.equal(entry.id, ref.entryId);
@@ -336,7 +477,7 @@ void describe("session introspection public workflow", { concurrency: false }, (
 
   for (const [cwd, moreMatches] of [["/limit", true], ["/exact", false]] as const) {
     void it(`reports ${moreMatches ? "omitted matches beyond" : "completion at"} the match limit`, async () => {
-      const result = await search({ term, cwd });
+      const result = await search({ term, cwd: join(home, cwd.slice(1)) });
       assert.equal(matchRecords(result.text).length, 20);
       assert.partialDeepStrictEqual(result.details, { truncated: moreMatches });
       assert.deepStrictEqual(JSON.parse(result.text.split("\n")[0]), { matchCount: 20, moreMatches });
@@ -344,13 +485,13 @@ void describe("session introspection public workflow", { concurrency: false }, (
   }
 
   void it("preserves complete source records and snippets when output is truncated", async () => {
-    const result = await search({ term: outputTerm, cwd: "/output" });
+    const result = await search({ term: outputTerm, cwd: join(home, "output") });
     assert.partialDeepStrictEqual(result.details, { truncated: true });
     assert.match(result.text, /Output truncated/);
     assert(Buffer.byteLength(result.text) < 51 * 1024);
     const records = matchRecords(result.text);
     assert(records.length > 0 && records.length < 20);
     for (const record of records) assert.doesNotThrow(() => JSON.parse(record));
-    assert.partialDeepStrictEqual(JSON.parse(records[0]), { file: outputFile, entryId: "output-0", snippet: outputSnippet });
+    assert.partialDeepStrictEqual(JSON.parse(records[0]), { file: outputFile, entryId: outputEntryId, snippet: outputSnippet });
   });
 });

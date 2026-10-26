@@ -1,13 +1,11 @@
 import { basename, dirname, resolve } from "node:path";
+import { Type, type Static } from "typebox";
+import type { ParsedSessionEntries } from "./sessions";
 
 type RecordValue = Record<string, unknown>;
 
 function record(value: unknown): RecordValue | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : undefined;
-}
-
-function parseEntry(line: string): RecordValue | undefined {
-  try { return record(JSON.parse(line)); } catch { return undefined; }
 }
 
 function textContent(content: unknown): string {
@@ -19,19 +17,29 @@ function textContent(content: unknown): string {
   }).join("\n");
 }
 
-export type UsageReference = {
-  file: string;
-  entryId?: string;
-  line: number;
-  kind: "tool_call" | "skill_read" | "skill_envelope";
-  tool?: string;
-  skill?: string;
-  callId?: string;
-  status?: "ok" | "error" | "unfinished" | "unknown";
-  nested?: boolean;
-  timestamp?: string;
-  durationMs?: number;
-};
+export const UsageKind = {
+  ToolCall: "tool_call",
+  SkillRead: "skill_read",
+  SkillEnvelope: "skill_envelope",
+} as const;
+
+export const UsageStatus = {
+  Ok: "ok",
+  Error: "error",
+  Unfinished: "unfinished",
+  Unknown: "unknown",
+} as const;
+
+const USAGE_STATUSES = Object.values(UsageStatus);
+
+export const USAGE_REFERENCE_SCHEMA = Type.Object({
+  file: Type.String(), entryId: Type.Optional(Type.String()), line: Type.Number(),
+  kind: Type.Enum(UsageKind),
+  tool: Type.Optional(Type.String()), skill: Type.Optional(Type.String()), callId: Type.Optional(Type.String()),
+  status: Type.Optional(Type.Enum(UsageStatus)),
+  nested: Type.Optional(Type.Boolean()), timestamp: Type.Optional(Type.String()), durationMs: Type.Optional(Type.Number()),
+});
+export type UsageReference = Static<typeof USAGE_REFERENCE_SCHEMA>;
 
 export type SessionUsage = {
   toolCounts: Record<string, number>;
@@ -50,6 +58,7 @@ export interface UsageQuery {
   argument?: string;
   limit?: number;
   scope?: "tools" | "skills" | "all";
+  includeReferences?: boolean;
 }
 
 type Source = Pick<UsageReference, "file" | "entryId" | "line" | "timestamp">;
@@ -85,7 +94,7 @@ function increment(counts: Record<string, number>, name: string): void {
 }
 
 function skillRead(call: Call, cwd?: string): string | undefined {
-  if (call.name !== "read" || call.status !== "ok") return;
+  if (call.name !== "read" || call.status !== UsageStatus.Ok) return;
   const path = record(call.arguments)?.path;
   if (typeof path !== "string" || basename(path) !== "SKILL.md") return;
   return basename(dirname(cwd ? resolve(cwd, path) : path));
@@ -102,34 +111,34 @@ function messageOf(entry: RecordValue | undefined): RecordValue | undefined {
   return entry?.type === "message" ? record(entry.message) : undefined;
 }
 
-function callOutcomes(entries: Array<RecordValue | undefined>): Map<string, Outcome> {
+function callOutcomes(entries: Array<RecordValue | undefined>, includeTiming: boolean): Map<string, Outcome> {
   const outcomes = new Map<string, Outcome>();
   for (const entry of entries) {
     const message = messageOf(entry);
     if (message?.role === "toolResult" && typeof message.toolCallId === "string") {
-      outcomes.set(message.toolCallId, { status: message.isError === true ? "error" : "ok", durationMs: duration(message.durationMs) });
+      outcomes.set(message.toolCallId, { status: message.isError === true ? UsageStatus.Error : UsageStatus.Ok, durationMs: includeTiming ? duration(message.durationMs) : undefined });
     }
   }
   return outcomes;
 }
 
-function parseCall(value: unknown, nested: boolean, outcomes: Map<string, Outcome>): Call | undefined {
+function parseCall(value: unknown, nested: boolean, outcomes: Map<string, Outcome>, includeTiming: boolean): Call | undefined {
   const part = record(value);
   if (!part || typeof part.name !== "string" || (!nested && part.type !== "toolCall")) return;
   const id = typeof part.id === "string" ? part.id : undefined;
-  const nestedStatus = (["ok", "error", "unfinished"] as const).find((status) => status === part.status) ?? "unknown";
+  const nestedStatus = USAGE_STATUSES.find((status) => status === part.status) ?? UsageStatus.Unknown;
   const outcome = id ? outcomes.get(id) : undefined;
   return { name: part.name, id, arguments: part.arguments, nested,
-    status: nested ? nestedStatus : outcome?.status ?? "unknown",
-    durationMs: nested ? duration(part.durationMs) : outcome?.durationMs };
+    status: nested ? nestedStatus : outcome?.status ?? UsageStatus.Unknown,
+    durationMs: includeTiming ? nested ? duration(part.durationMs) : outcome?.durationMs : undefined };
 }
 
-function messageCalls(message: RecordValue, outcomes: Map<string, Outcome>): Call[] {
+function messageCalls(message: RecordValue, outcomes: Map<string, Outcome>, includeTiming: boolean): Call[] {
   const nested = message.role === "toolResult";
   const values = nested ? record(message.nestedCalls)?.calls : message.content;
   if ((!nested && message.role !== "assistant") || !Array.isArray(values)) return [];
   return values.flatMap((value: unknown) => {
-    const call = parseCall(value, nested, outcomes);
+    const call = parseCall(value, nested, outcomes, includeTiming);
     return call ? [call] : [];
   });
 }
@@ -138,48 +147,54 @@ function matchesCall(call: Call, skill: string | undefined, query: UsageQuery): 
   if (query.scope === "skills" && skill === undefined) return false;
   if (query.tool !== undefined && call.name !== query.tool) return false;
   if (query.skill !== undefined && skill !== query.skill) return false;
-  return query.argument === undefined || (JSON.stringify(call.arguments) ?? "").toLowerCase().includes(query.argument.toLowerCase());
+  return query.argument === undefined || (JSON.stringify(call.arguments) ?? "").toLowerCase().includes(query.argument);
 }
 
-function addReference(result: SessionUsage, reference: UsageReference, limit: number): void {
+function addReference(result: SessionUsage, source: Source | undefined, call: Call | undefined, skill: string | undefined, limit: number): void {
   result.matchedRecords++;
-  if (result.references.length < limit) result.references.push(reference);
-  else result.referencesTruncated = true;
+  if (!source || result.references.length >= limit) return;
+  const reference: UsageReference = {
+    ...source, skill, kind: call ? skill ? UsageKind.SkillRead : UsageKind.ToolCall : UsageKind.SkillEnvelope,
+  };
+  if (call) Object.assign(reference, { tool: call.name, callId: call.id, status: call.status, nested: call.nested, durationMs: call.durationMs });
+  result.references.push(reference);
 }
 
-function collectMessage(result: SessionUsage, message: RecordValue, source: Source, outcomes: Map<string, Outcome>, query: UsageQuery, limit: number, cwd?: string): void {
+function collectMessage(result: SessionUsage, message: RecordValue, source: Source | undefined, outcomes: Map<string, Outcome>, query: UsageQuery, limit: number, cwd?: string): void {
   if (message.role === "toolResult" && record(message.nestedCalls)?.complete === false) result.incompleteNestedRecords = true;
-  for (const call of messageCalls(message, outcomes)) {
+  for (const call of messageCalls(message, outcomes, source !== undefined)) {
     const skill = skillRead(call, cwd);
     if (!matchesCall(call, skill, query)) continue;
     increment(result.toolCounts, call.name);
-    if (call.status === "error") increment(result.toolErrorCounts, call.name);
+    if (call.status === UsageStatus.Error) increment(result.toolErrorCounts, call.name);
     if (skill) increment(result.skillReadCounts, skill);
-    addReference(result, { ...source, tool: call.name, callId: call.id, status: call.status,
-      nested: call.nested, kind: skill ? "skill_read" : "tool_call", skill, durationMs: call.durationMs }, limit);
+    addReference(result, source, call, skill, limit);
   }
   const skill = skillEnvelope(message, query);
   if (skill) {
     increment(result.skillEnvelopeCounts, skill);
-    addReference(result, { ...source, kind: "skill_envelope", skill }, limit);
+    addReference(result, source, undefined, skill, limit);
   }
 }
 
-export function inspectSessionUsage(lines: string[], file: string, options: UsageQuery = {}): SessionUsage {
+export function inspectSessionUsage(entries: ParsedSessionEntries, file: string, options: UsageQuery = {}): SessionUsage {
   const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
   const result: SessionUsage = {
     toolCounts: {}, toolErrorCounts: {}, skillReadCounts: {}, skillEnvelopeCounts: {},
     matchedRecords: 0, references: [], referencesTruncated: false, incompleteNestedRecords: false,
   };
-  const entries = lines.map(parseEntry);
+  const query = { ...options, argument: options.argument?.toLowerCase() };
   const header = entries.find((entry) => entry?.type === "session");
   const cwd = typeof header?.cwd === "string" ? header.cwd : undefined;
-  const outcomes = callOutcomes(entries);
+  const outcomes = callOutcomes(entries, options.includeReferences !== false);
   entries.forEach((entry, index) => {
     const message = messageOf(entry);
     if (!message) return;
-    const source = { file, entryId: typeof entry?.id === "string" ? entry.id : undefined, line: index + 1, timestamp: timestamp(entry, message) };
-    collectMessage(result, message, source, outcomes, options, limit, cwd);
+    const source = options.includeReferences !== false && result.references.length < limit
+      ? { file, entryId: typeof entry?.id === "string" ? entry.id : undefined, line: index + 1, timestamp: timestamp(entry, message) }
+      : undefined;
+    collectMessage(result, message, source, outcomes, query, limit, cwd);
   });
+  result.referencesTruncated = options.includeReferences !== false && result.matchedRecords > result.references.length;
   return result;
 }
