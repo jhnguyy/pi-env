@@ -97,7 +97,7 @@ RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=100
 ARG PI_ENV_REVISION=unknown
 RUN mkdir -p /tmp/e2e-evidence \
   && { PI_ENV_REVISION="$PI_ENV_REVISION" PI_ENV_E2E_ARTIFACT_DIR=/tmp/e2e-evidence \
-      tini -s -- nub run test:e2e:session-manager; echo "$?" > /tmp/e2e-evidence/exit-code; } 2>&1 \
+      tini -s -- nub run test:e2e .pi/extensions/session-manager/__tests__/e2e.test.ts; echo "$?" > /tmp/e2e-evidence/exit-code; } 2>&1 \
     | tee /tmp/e2e-evidence/vitest.log \
   && { cp /tmp/e2e-evidence/*/result.json /tmp/e2e-evidence/result.json 2>/dev/null \
     || echo '{"status":"missing"}' > /tmp/e2e-evidence/result.json; }

@@ -54,7 +54,7 @@ jobs:
 
       - name: Verify canonical portfolio
         shell: bash
-        run: scripts/node-run.sh scripts/verify.mjs
+        run: nub run verify
 
       - name: Verify safe Analyze canary
         shell: bash

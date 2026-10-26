@@ -6,9 +6,8 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, onTestFinished } from "vitest";
 
 const quote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
-const test = process.env["E2E"] === "1" ? it : it.skip;
 
-test("/share-private in real Pi opens the repository prompt", async () => {
+it("/share-private in real Pi opens the repository prompt", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-private-share-e2e-"));
   const socket = join(root, "tmux.sock");
   const tmux = (...args: string[]) => execFileSync("tmux", ["-S", socket, "-f", "/dev/null", ...args], { encoding: "utf8" });
@@ -23,7 +22,7 @@ test("/share-private in real Pi opens the repository prompt", async () => {
       const evidence = process.env["PI_ENV_E2E_ARTIFACT_DIR"] ?? join(tmpdir(), "pi-share-evidence");
       mkdirSync(evidence, { recursive: true });
       const path = join(evidence, `share-${Date.now()}.json`);
-      writeFileSync(path, JSON.stringify({ input: "/share-private in an isolated Pi TUI", expected: "Private repository prompt, no gist publication", actual: screen, verdict, repeat: "E2E=1 nub run test:vitest .pi/extensions/share/__tests__/e2e.test.ts" }, null, 2));
+      writeFileSync(path, JSON.stringify({ input: "/share-private in an isolated Pi TUI", expected: "Private repository prompt, no gist publication", actual: screen, verdict, repeat: "nub run test:e2e .pi/extensions/share/__tests__/e2e.test.ts" }, null, 2));
       console.log(`Share TUI evidence: ${path}`);
     });
     attempt(() => { if (existsSync(socket)) tmux("kill-server"); });

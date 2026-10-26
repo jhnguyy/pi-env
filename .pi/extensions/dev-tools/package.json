@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "test": "vitest run",
-    "test:e2e": "E2E=1 vitest run"
+    "test:e2e": "nub run --workspace-root test:e2e .pi/extensions/dev-tools/__tests__/e2e.test.ts"
   },
   "dependencies": {
     "bash-language-server": "^5.6.0",

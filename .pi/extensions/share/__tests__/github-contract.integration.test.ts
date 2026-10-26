@@ -73,7 +73,7 @@ it.skipIf(!enabled)("corroborates the GitHub fixture with real read-only respons
       expected: "HTTP envelopes and DTO field types agree with the workflow fixture",
       actual: observations, verdict,
       limits: "No mutation or private Pages deployment is exercised. Only status and field types are retained; response bodies and headers are not recorded.",
-      reproduce: "PI_ENV_SHARE_GITHUB_CONTRACT=1 nub run test:vitest .pi/extensions/share/__tests__/github-contract.integration.test.ts",
+      reproduce: "PI_ENV_SHARE_GITHUB_CONTRACT=1 nub run test:integration .pi/extensions/share/__tests__/github-contract.integration.test.ts",
     }, null, 2));
     console.info(`Share GitHub contract evidence: ${artifact}`);
   }

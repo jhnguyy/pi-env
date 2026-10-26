@@ -12,7 +12,6 @@ import { createFileSessionCatalog } from "../storage.js";
 
 // Drives real Pi with only session-manager loaded inside an isolated tmux server.
 // Run in the container with `nub run test:e2e:session-manager:docker`.
-const describeE2E = process.env["E2E"] === "1" ? describe : describe.skip;
 const repoRoot = process.cwd();
 const piCli = join(repoRoot, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 const extension = join(repoRoot, ".pi/extensions/session-manager/dist/index.js");
@@ -53,7 +52,7 @@ async function until<T>(read: () => T, done: (value: T) => boolean, what: string
   return value;
 }
 
-describeE2E("session-manager in real tmux", () => {
+describe("session-manager in real tmux", () => {
   let root = "";
   let socket = "";
   let fixture: ReturnType<typeof windowFixture>;

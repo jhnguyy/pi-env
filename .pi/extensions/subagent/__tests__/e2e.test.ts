@@ -27,7 +27,7 @@ it.each(["on", "only"] as const)("delegates through native codemode (%s) without
   const evidence: Record<string, unknown> = {
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
     dirty: execFileSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).trim().length > 0,
-    repeat: "nub run build && nub run test:e2e:native-tools",
+    repeat: "nub run build && nub run verify:phase native-tool-discovery",
     input: { mode, actions: ["run", "start", "wait", "result"], childTools: "target-native defaults", cancellation: "parent abort during a nested child tool" },
     expected: "Children use their own codemode without recursive delegation. Nested usage is reported once. Parent abort reaches the child tool, which settles cooperatively.",
     verdict: "failed",
