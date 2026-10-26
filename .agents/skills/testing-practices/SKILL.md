@@ -11,7 +11,7 @@ Read the repository testing policy and requirements.
 
 Derive expected outcomes from requirements, not implementation details. Exercise the workflow people use and check its final result. Prefer E2E as the only behavioral test layer.
 
-Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant. Show that each new check fails for the defect it targets.
+Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant. Show that each new check fails when its target contract is violated.
 
 Add isolated tests only for failures that E2E cannot exercise reliably. Identify that gap, list the failure modes and expected outcomes, and write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it.
 
