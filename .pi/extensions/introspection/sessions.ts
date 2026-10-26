@@ -47,7 +47,6 @@ export interface SessionDigest {
   assistantTurns: number;
   toolResults: number;
   toolErrors: number;
-  toolCounts: Record<string, number>;
   labels: Array<{ targetId: string; label: string }>;
   compacted: boolean;
   branches: number;
@@ -56,7 +55,7 @@ export interface SessionDigest {
 
 export interface SessionView extends SessionDigest {
   userPrompts: Array<{ line: number; text: string }>;
-  toolErrorSummaries: Array<{ line: number; toolName: string; text: string }>;
+  toolErrorLocations: Array<{ line: number; toolName: string }>;
   branchSummaries: Array<{ line: number; text: string }>;
   compactions: Array<{ line: number; tokensBefore?: number; text: string }>;
 }
@@ -136,7 +135,6 @@ interface DigestState {
   toolResults: number;
   toolErrors: number;
   compacted: boolean;
-  toolCounts: Record<string, number>;
   labels: Array<{ targetId: string; label: string }>;
 }
 
@@ -157,8 +155,6 @@ function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, sta
       break;
     case MessageRole.ToolResult: {
       state.toolResults += 1;
-      const tool = message.toolName ?? "unknown";
-      state.toolCounts[tool] = (state.toolCounts[tool] ?? 0) + 1;
       if (message.isError) state.toolErrors += 1;
       break;
     }
@@ -202,7 +198,6 @@ function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, s
     toolResults: 0,
     toolErrors: 0,
     compacted: false,
-    toolCounts: {},
     labels: [],
   };
   const childCounts = new Map<string | null, number>();
@@ -232,7 +227,6 @@ function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, s
     assistantTurns: state.assistantTurns,
     toolResults: state.toolResults,
     toolErrors: state.toolErrors,
-    toolCounts: state.toolCounts,
     labels: state.labels,
     compacted: state.compacted,
     branches,
@@ -243,8 +237,8 @@ function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, s
 function applyMessageToView(
   message: SessionEntry["message"],
   line: number,
-  view: Pick<SessionView, "userPrompts" | "toolErrorSummaries">,
-  navigation: { prompts: boolean; errors: boolean; includeErrorText?: boolean },
+  view: Pick<SessionView, "userPrompts" | "toolErrorLocations">,
+  navigation: { prompts: boolean; errors: boolean },
 ): void {
   if (!message) return;
   if (navigation.prompts && message.role === MessageRole.User) {
@@ -252,13 +246,8 @@ function applyMessageToView(
     if (text) view.userPrompts.push({ line, text });
   }
   if (navigation.errors && message.role === MessageRole.ToolResult && message.isError) {
-    const text = navigation.includeErrorText === false ? "" : oneLine(textFromContent(message.content), 260);
-    view.toolErrorSummaries.push({ line, toolName: message.toolName ?? "unknown", text });
+    view.toolErrorLocations.push({ line, toolName: message.toolName ?? "unknown" });
   }
-}
-
-export function inspectLines(lines: string[], file: string, bytes = 0): SessionView {
-  return inspectEntries(parseSessionLines(lines), file, bytes);
 }
 
 type NavigationOptions = {
@@ -266,24 +255,22 @@ type NavigationOptions = {
   errors: boolean;
   branches: boolean;
   compactions: boolean;
-  summarizePrompts?: boolean;
-  includeErrorText?: boolean;
 };
 
 export function inspectEntries(
   entries: ParsedSessionEntries,
   file: string,
-  bytes = 0,
-  navigation: NavigationOptions = { prompts: true, errors: true, branches: true, compactions: true },
+  bytes: number,
+  navigation: NavigationOptions,
 ): SessionView {
-  const digest = digestEntries(entries, file, bytes, navigation.summarizePrompts !== false);
+  const digest = digestEntries(entries, file, bytes, false);
   const userPrompts: SessionView["userPrompts"] = [];
-  const toolErrorSummaries: SessionView["toolErrorSummaries"] = [];
+  const toolErrorLocations: SessionView["toolErrorLocations"] = [];
   const branchSummaries: SessionView["branchSummaries"] = [];
   const compactions: SessionView["compactions"] = [];
-  const messageView = { userPrompts, toolErrorSummaries };
+  const messageView = { userPrompts, toolErrorLocations };
 
-  if (![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(Boolean)) return { ...digest, userPrompts, toolErrorSummaries, branchSummaries, compactions };
+  if (![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(Boolean)) return { ...digest, ...messageView, branchSummaries, compactions };
 
   entries.forEach((entry, index) => {
     const lineNo = index + 1;
@@ -304,7 +291,7 @@ export function inspectEntries(
     }
   });
 
-  return { ...digest, userPrompts, toolErrorSummaries, branchSummaries, compactions };
+  return { ...digest, ...messageView, branchSummaries, compactions };
 }
 
 export function readSessionFile(path: string): { lines: string[]; bytes: number } {
@@ -429,38 +416,6 @@ export async function searchSessionMessages(options: {
   return { matches, truncated: false };
 }
 
-class MarkdownBuilder {
-  private readonly lines: string[] = [];
-
-  line(text = ""): this {
-    this.lines.push(text);
-    return this;
-  }
-
-  linesOf(lines: string[]): this {
-    this.lines.push(...lines);
-    return this;
-  }
-
-  section(title: string, lines: string[]): this {
-    if (lines.length === 0) return this;
-    if (this.lines.length > 0) this.line();
-    return this.line(`### ${title}`).linesOf(lines);
-  }
-
-  toString(): string {
-    return this.lines.join("\n");
-  }
-}
-
-function formatToolCounts(toolCounts: Record<string, number>): string | undefined {
-  const text = Object.entries(toolCounts)
-    .sort(([, a], [, b]) => b - a)
-    .map(([name, count]) => `${name}(${count})`)
-    .join(", ");
-  return text || undefined;
-}
-
 function splitLabels(labels: SessionDigest["labels"]): {
   milestones: Array<{ targetId: string; text: string }>;
   labels: SessionDigest["labels"];
@@ -490,40 +445,17 @@ function formatDigest(s: SessionDigest, index: number): string {
     .filter(Boolean)
     .join(", ");
 
-  return new MarkdownBuilder()
-    .line(`${index + 1}. ${title}`)
-    .line(`   id: ${s.sessionId ?? "unknown"}`)
-    .line(`   ${s.cwd ? `cwd: ${s.cwd}` : "cwd: unknown"}`)
-    .line(`   ${counts}${markers ? `; ${markers}` : ""}`)
-    .line(`   ${s.firstUserPrompt ? `first: ${s.firstUserPrompt}` : "first: (none)"}`)
-    .line(`   file: ${s.file}`)
-    .toString();
+  return [
+    `${index + 1}. ${title}`,
+    `   id: ${s.sessionId ?? "unknown"}`,
+    `   ${s.cwd ? `cwd: ${s.cwd}` : "cwd: unknown"}`,
+    `   ${counts}${markers ? `; ${markers}` : ""}`,
+    `   ${s.firstUserPrompt ? `first: ${s.firstUserPrompt}` : "first: (none)"}`,
+    `   file: ${s.file}`,
+  ].join("\n");
 }
 
 export function formatDigestList(sessions: SessionDigest[]): string {
   if (sessions.length === 0) return "No matching pi sessions found.";
   return sessions.map(formatDigest).join("\n\n");
-}
-
-export function formatSessionView(view: SessionView): string {
-  const { milestones, labels } = splitLabels(view.labels);
-  const builder = new MarkdownBuilder()
-    .line(`## Session ${view.name ? `${view.name} — ` : ""}${view.timestamp}`)
-    .linesOf([
-      view.cwd ? `cwd: ${view.cwd}` : undefined,
-      `file: ${view.file}`,
-      `turns: ${view.userTurns} user, ${view.assistantTurns} assistant, ${view.toolResults} tool results, ${view.toolErrors} tool errors`,
-      formatToolCounts(view.toolCounts) ? `tools: ${formatToolCounts(view.toolCounts)}` : undefined,
-      view.branches ? `branches: ${view.branches}` : undefined,
-      view.compacted ? "compacted: yes" : undefined,
-    ].filter((line): line is string => Boolean(line)));
-
-  return builder
-    .section("Milestones", milestones.map((milestone) => `- ${milestone.text} → ${milestone.targetId}`))
-    .section("Labels", labels.map((label) => `- ${label.label} → ${label.targetId}`))
-    .section("User prompts", view.userPrompts.map((prompt, i) => `${i + 1}. L${prompt.line}: ${prompt.text}`))
-    .section("Tool errors", view.toolErrorSummaries.map((error) => `- L${error.line} ${error.toolName}: ${error.text}`))
-    .section("Branch summaries", view.branchSummaries.map((branch) => `- L${branch.line}: ${branch.text}`))
-    .section("Compactions", view.compactions.map((compaction) => `- L${compaction.line}${compaction.tokensBefore ? ` (${compaction.tokensBefore} tokens)` : ""}: ${compaction.text}`))
-    .toString();
 }

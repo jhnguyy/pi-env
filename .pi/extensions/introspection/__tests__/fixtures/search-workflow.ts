@@ -17,27 +17,27 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall, type JsonObject } fro
 
 const home = homedir();
 const root = join(home, ".pi/agent/sessions/project");
-let parent: string;
 let child: string;
 let usageFile: string;
 let usageId: string;
 let usageChildId: string;
-let largeErrorId: string;
 let usageTimestamp: string;
 let assistantEntryId: string;
 let middleEntryId: string;
 let envelopeEntryId: string;
 const fixtureCwd = join(home, "fixture");
-const usageCwd = join(home, "usage");
 const skillPath = (name: string) => join(home, "skills", name, "SKILL.md");
 let outputFile: string;
 let outputEntryId: string;
 const term = "postgres [db]";
+const successCommand = `printf '${term} tool output private-output'; : 'git status'`;
+const failureCommand = `printf 'private-output private-large-output synthetic external failure synthetic error'; printf '%40000s' ''; : 'git status ${term}'; exit 1`;
 const outputTerm = "\u0000".repeat(200);
 const outputSnippet = `${"\u0001".repeat(80)}${outputTerm}${"\u0001".repeat(80)}`;
 const faux = fauxProvider();
 let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
 let wasDeferred = false;
+type ToolErrorLocation = { line: number; toolName: string };
 
 function message(id: string, role: string, content: unknown, parentId: string | null = "u1") {
   return { type: "message", id, parentId, timestamp: "2026-10-25T00:00:00.000Z", message: { role, content } };
@@ -95,7 +95,7 @@ function createSyntheticTranscripts(): void {
 }
 
 async function createNativeTranscripts(): Promise<void> {
-  for (const cwd of [fixtureCwd, usageCwd]) mkdirSync(cwd, { recursive: true });
+  mkdirSync(fixtureCwd, { recursive: true });
   for (const name of ["testing-practices", "nested-skill"]) {
     mkdirSync(dirname(skillPath(name)), { recursive: true });
     writeFileSync(skillPath(name), `---\nname: ${name}\ndescription: Synthetic instructions for the session workflow.\n---\nprivate-skill-instructions\n`);
@@ -112,23 +112,13 @@ async function createNativeTranscripts(): Promise<void> {
       noPromptTemplates: true, noThemes: true, noContextFiles: true,
       additionalSkillPaths: [join(home, "skills")],
       extensionFactories: [(pi) => {
-        // Control the external command boundary. Pi owns execution and recording.
         pi.registerTool({
-          name: "bash", label: "Controlled Bash", description: "Synthetic command service.",
-          parameters: Type.Object({ command: Type.String() }),
-          async execute(_id, args) {
-            if (args.command === "large failure") throw new Error(`private-large-output ${"synthetic error ".repeat(10000)}`);
-            if (args.command.includes("fail")) throw new Error("private-output: synthetic external failure");
-            return { content: [{ type: "text", text: `${term} tool output private-output` }], details: undefined };
-          },
-        });
-        pi.registerTool({
-          name: "codemode", label: "Controlled composition", description: "Run the fixture's nested tools.",
-          parameters: Type.Object({ code: Type.String() }),
-          async execute(_id, _args, _signal, _update, ctx) {
-            assert.equal((await ctx.executeTool("bash", { command: "git status --short" })).isError, false);
+          name: "compose", label: "Compose tools", description: "Record native nested tool calls.",
+          parameters: Type.Object({ note: Type.String() }),
+          async execute(_id, args, _signal, _update, ctx) {
+            assert.equal((await ctx.executeTool("bash", { command: successCommand })).isError, false);
             assert.equal((await ctx.executeTool("read", { path: skillPath("nested-skill") })).isError, false);
-            return { content: [{ type: "text", text: "private-output" }], details: undefined };
+            return { content: [{ type: "text", text: `private-output ${args.note}` }], details: undefined };
           },
         });
       }],
@@ -138,104 +128,80 @@ async function createNativeTranscripts(): Promise<void> {
     assert.deepStrictEqual(loader.getSkills().skills.map((skill) => skill.name).sort(), ["nested-skill", "testing-practices"]);
     const { session: generated } = await createAgentSession({
       cwd, agentDir: join(home, "generation-agent"), modelRuntime, model: provider.getModel(),
-      resourceLoader: loader, settingsManager, sessionManager: manager, tools: ["read", "bash", "codemode"],
+      resourceLoader: loader, settingsManager, sessionManager: manager, tools: ["read", "bash", "compose"],
     });
     try {
       await generated.bindExtensions({});
-      generated.setActiveToolsByName(["read", "bash", "codemode"]);
+      generated.setActiveToolsByName(["read", "bash", "compose"]);
       await run(generated);
     } finally {
       generated.dispose();
     }
   }
-  async function say(generated: typeof session, prompt: string, response = "done") {
+  async function say(generated: typeof session, prompt: string, response = "private-assistant-narrative") {
     provider.setResponses([fauxAssistantMessage(response)]);
     await generated.prompt(prompt);
   }
   async function call(generated: typeof session, name: string, args: JsonObject, prompt = "Execute the controlled workflow.") {
     const start = generated.messages.length;
     provider.setResponses([
-      fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" }),
-      fauxAssistantMessage("done"),
+      fauxAssistantMessage([{ type: "thinking", thinking: `${term} private-thinking` }, fauxToolCall(name, args)], { stopReason: "toolUse" }),
+      fauxAssistantMessage("private-assistant-narrative"),
     ]);
     await generated.prompt(prompt);
     const result = generated.messages.slice(start).find((entry) => entry.role === "toolResult" && entry.toolName === name);
     assert(result?.role === "toolResult");
     return result;
   }
-  const parentManager = SessionManager.create(fixtureCwd, root);
-  parent = parentManager.getSessionFile()!;
-  await generate(parentManager, async (generated) => {
-    await say(generated, "First unrelated prompt", `${"İ".repeat(200)}${"before ".repeat(30)}POSTGRES [db] decision${" after".repeat(30)}`);
-    assistantEntryId = parentManager.getLeafId()!;
-    provider.setResponses([
-      fauxAssistantMessage([
-        { type: "thinking", thinking: `${term} private` },
-        fauxToolCall("bash", { command: `${term} command` }),
-      ], { stopReason: "toolUse" }),
-      fauxAssistantMessage("done"),
-    ]);
-    await generated.prompt("Middle postgres [db] question");
-    assert(generated.messages.some((entry) => entry.role === "toolResult" && !entry.isError));
-    const middle = parentManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("Middle postgres [db] question"));
-    assert(middle);
-    middleEntryId = middle.id;
-    parentManager.branchWithSummary(assistantEntryId, `${term} generated summary`);
-    await say(generated, "Last unrelated prompt");
-    parentManager.appendCompaction(`${term} generated summary`, null, 100);
-  });
-  const childManager = SessionManager.create(fixtureCwd, join(root, "_children", parentManager.getSessionId()), { parentSession: parent });
-  child = childManager.getSessionFile()!;
-  await generate(childManager, (generated) => say(generated, `${term} child`));
-
-  const usageManager = SessionManager.create(usageCwd, root);
+  const usageManager = SessionManager.create(fixtureCwd, root);
   usageFile = usageManager.getSessionFile()!;
   usageId = usageManager.getSessionId();
   usageTimestamp = usageManager.getHeader()!.timestamp;
   await generate(usageManager, async (generated) => {
-    await say(generated, "bash read /skill:testing-practices /skills/mentioned/SKILL.md");
+    await say(generated, "Troubleshoot session usage. bash read /skill:testing-practices /skills/mentioned/SKILL.md",
+      `${"İ".repeat(200)}${"before ".repeat(30)}POSTGRES [db] decision${" after".repeat(30)}`);
+    assistantEntryId = usageManager.getLeafId()!;
     await say(generated, "/skill:testing-practices");
     const envelope = usageManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("<skill name="));
     assert(envelope, "native /skill command must persist its expanded envelope");
     envelopeEntryId = envelope.id;
-    const failedCommand = await call(generated, "bash", { command: "git status fail" });
+    const failedCommand = await call(generated, "bash", { command: failureCommand }, "Middle postgres [db] question");
+    const middle = usageManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("Middle postgres [db] question"));
+    assert(middle);
+    middleEntryId = middle.id;
     assert.equal(failedCommand.isError, true);
     assert.match(JSON.stringify(failedCommand.content), /synthetic external failure/);
     assert.equal((await call(generated, "read", { path: skillPath("testing-practices") })).isError, false);
     assert.equal((await call(generated, "read", { path: skillPath("failed") })).isError, true);
-    assert.equal((await call(generated, "codemode", { code: "private-source" })).isError, false);
+    assert.equal((await call(generated, "compose", { note: "private-source" })).isError, false);
     const leaf = usageManager.getLeafId()!;
     usageManager.appendLabelChange(leaf, "todo: inspect usage");
-    usageManager.branchWithSummary(leaf, "Ignore bash /skill:summary");
-    usageManager.appendCompaction("Compact usage history", null, 100);
+    usageManager.appendLabelChange(envelopeEntryId, "manual-checkpoint");
+    usageManager.branchWithSummary(assistantEntryId, `Ignore bash /skill:summary ${term} generated summary`);
+    await say(generated, "Last unrelated prompt");
+    usageManager.appendCompaction(`${term} generated summary`, null, 100);
     usageManager.appendSessionInfo("Native usage workflow");
   });
-  const usageChild = SessionManager.create(usageCwd, join(root, "_children", usageId), { parentSession: usageFile });
+  const usageChild = SessionManager.create(fixtureCwd, join(root, "_children", usageId), { parentSession: usageFile });
   usageChildId = usageChild.getSessionId();
+  child = usageChild.getSessionFile()!;
   await generate(usageChild, async (generated) => {
-    assert.equal((await call(generated, "bash", { command: "git status" })).isError, false);
+    assert.equal((await call(generated, "bash", { command: successCommand }, `${term} child`)).isError, false);
   });
   utimesSync(usageFile, 1000, 1000);
   utimesSync(usageChild.getSessionFile()!, 2000, 2000);
-  const largeErrorManager = SessionManager.create(join(home, "large-errors"), root);
-  largeErrorId = largeErrorManager.getSessionId();
-  await generate(largeErrorManager, async (generated) => {
-    assert.equal((await call(generated, "bash", { command: "large failure" })).isError, true);
-  });
   for (const [name, count] of [["limit", 21], ["exact", 20]] as const) {
     const manager = SessionManager.create(join(home, name), root);
-    await generate(manager, async (generated) => {
-      for (let i = 0; i < count; i++) await say(generated, term);
-    });
+    for (let i = 0; i < count; i++) {
+      manager.appendMessage({ role: "user", content: term, timestamp: Date.now() });
+    }
   }
   const outputManager = SessionManager.create(join(home, "output"), join(root, ...Array<string>(8).fill("long-path".repeat(10))));
   outputFile = outputManager.getSessionFile()!;
-  await generate(outputManager, async (generated) => {
-    for (let i = 0; i < 20; i++) await say(generated, outputSnippet);
-    const firstPrompt = outputManager.getEntries().find((entry) => entry.type === "message" && entry.message.role === "user");
-    assert(firstPrompt);
-    outputEntryId = firstPrompt.id;
-  });
+  for (let i = 0; i < 20; i++) {
+    const id = outputManager.appendMessage({ role: "user", content: outputSnippet, timestamp: Date.now() });
+    if (i === 0) outputEntryId = id;
+  }
 }
 
 async function invoke(tool: string, params: JsonObject) {
@@ -289,21 +255,9 @@ void describe("session introspection public workflow", { concurrency: false }, (
     }));
     await session.bindExtensions({});
     wasDeferred = !session.getActiveToolNames().includes("search_sessions");
-    faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("tool_search", { query: "search_sessions", limit: 1 }), { stopReason: "toolUse" }),
-      fauxAssistantMessage("done"),
-    ]);
-    await session.prompt("Discover the session search tool.");
-    faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("tool_search", { query: "read_session", limit: 1 }), { stopReason: "toolUse" }),
-      fauxAssistantMessage("done"),
-    ]);
-    await session.prompt("Discover the session reader.");
-    faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("tool_search", { query: "list_sessions", limit: 1 }), { stopReason: "toolUse" }),
-      fauxAssistantMessage("done"),
-    ]);
-    await session.prompt("Discover session navigation.");
+    for (const query of ["search_sessions", "read_session", "list_sessions"]) {
+      assert.equal((await invoke("tool_search", { query, limit: 1 })).isError, false);
+    }
   });
 
   after(async () => {
@@ -326,7 +280,7 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.equal(records.length, 3);
     const assistant = records.find((record) => JSON.parse(record).entryId === assistantEntryId);
     assert(assistant);
-    assert.partialDeepStrictEqual(JSON.parse(assistant), { file: parent, entryId: assistantEntryId, role: "assistant" });
+    assert.partialDeepStrictEqual(JSON.parse(assistant), { file: usageFile, entryId: assistantEntryId, role: "assistant" });
     assert.match(assistant, /"snippet":"….*POSTGRES \[db\] decision.*…"/);
     assert(records.some((record) => JSON.parse(record).entryId === middleEntryId));
     assert(records.some((record) => record.includes(JSON.stringify(child))));
@@ -334,17 +288,19 @@ void describe("session introspection public workflow", { concurrency: false }, (
   });
 
   void it("lists IDs and reads a basic view by exact ID without prompts or per-call evidence", async () => {
-    const list = await invoke("list_sessions", { cwd: usageCwd });
+    const list = await invoke("list_sessions", { cwd: fixtureCwd });
     assert.equal(list.isError, false);
     assert(list.text.includes(`id: ${usageId}`));
     assert(list.text.includes(`id: ${usageChildId}`));
     assert(list.text.indexOf(`id: ${usageChildId}`) < list.text.indexOf(`id: ${usageId}`));
+    assert.match(list.text, /1 milestone\(s\)/);
+    assert.match(list.text, /1 label\(s\)/);
     const result = await read({ sessionId: usageId });
     assert.equal(result.sessionId, usageId);
     assert.equal(result.file, usageFile);
     assert.equal(result.mode, "basic");
     assert.equal(result.metadata.timestamp, usageTimestamp);
-    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, codemode: 1 });
+    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, compose: 1 });
     assert.deepStrictEqual(result.skillReadCounts, { "testing-practices": 1, "nested-skill": 1 });
     assert(!("references" in result));
     assert(!("userPrompts" in result));
@@ -366,8 +322,8 @@ void describe("session introspection public workflow", { concurrency: false }, (
   });
 
   void it("returns only error locations for large failed tool outputs", async () => {
-    const result = await read({ sessionId: largeErrorId, fields: ["errors"] });
-    assert.equal(result.toolErrors.length, 1);
+    const result = await read({ sessionId: usageId, fields: ["errors"] });
+    assert.equal(result.toolErrors.length, 2);
     assert.equal(result.toolErrors[0].toolName, "bash");
     assert(result.toolErrors[0].line > 0);
     assert(!("text" in result.toolErrors[0]));
@@ -376,16 +332,17 @@ void describe("session introspection public workflow", { concurrency: false }, (
 
   void it("adds sparse navigation and only recorded timing in detailed mode", async () => {
     const result = await read({ sessionId: usageId, mode: "detailed" });
-    assert(result.userPrompts.length > 0);
+    assert(result.userPrompts.some((prompt: { text: string }) => prompt.text.startsWith("Troubleshoot session usage.")));
     assert.equal(result.toolErrors.length, 2);
+    assert(result.toolErrors.every((error: ToolErrorLocation) => !("text" in error)));
     assert.equal(result.labels[0].label, "todo: inspect usage");
-    assert.equal(result.branchSummaries[0].text, "Ignore bash /skill:summary");
+    assert.equal(result.branchSummaries[0].text, `Ignore bash /skill:summary ${term} generated summary`);
     assert.equal(result.compactions[0].tokensBefore, 100);
     const nested = result.references.find((ref: { nested?: boolean; tool?: string }) => ref.nested && ref.tool === "bash");
     assert(nested);
     assert(Number.isFinite(Date.parse(nested.timestamp)));
     assert(nested.durationMs >= 0);
-    assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|git status/);
+    assert.doesNotMatch(JSON.stringify(result), /private-source|private-output|private-assistant-narrative|private-thinking|git status/);
     const untimed = await read({ sessionId: "untimed-id", mode: "detailed", fields: ["tools"] });
     assert(!("timestamp" in untimed.references[0]));
     assert(!("durationMs" in untimed.references[0]));
@@ -452,7 +409,7 @@ void describe("session introspection public workflow", { concurrency: false }, (
 
   void it("counts recorded calls, outcomes, successful skill reads, and user-supplied skill envelopes", async () => {
     const result = await usage();
-    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, codemode: 1 });
+    assert.deepStrictEqual(result.toolCounts, { bash: 2, read: 3, compose: 1 });
     assert.deepStrictEqual(result.toolErrorCounts, { bash: 1, read: 1 });
     assert.deepStrictEqual(result.skillReadCounts, { "testing-practices": 1, "nested-skill": 1 });
     assert.deepStrictEqual(result.skillEnvelopeCounts, { "testing-practices": 1 });

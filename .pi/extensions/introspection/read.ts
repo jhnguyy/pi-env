@@ -105,7 +105,7 @@ function projectNavigation(result: ReadResult, view: ReturnType<typeof inspectEn
     branches: view.branches, compacted: view.compacted, bytes: view.bytes,
   };
   if (fields.has("prompts")) result.userPrompts = view.userPrompts;
-  if (fields.has("errors")) result.toolErrors = view.toolErrorSummaries.map(({ line, toolName }) => ({ line, toolName }));
+  if (fields.has("errors")) result.toolErrors = view.toolErrorLocations;
   if (fields.has("labels")) result.labels = view.labels;
   if (fields.has("branches")) result.branchSummaries = view.branchSummaries;
   if (fields.has("compactions")) result.compactions = view.compactions;
@@ -156,7 +156,7 @@ export async function executeReadSession(params: ReadParams, signal?: AbortSigna
   if ([...fields].some((field) => field !== "tools" && field !== "skills")) {
     const view = inspectEntries(entries, file, bytes, {
       prompts: fields.has("prompts"), errors: fields.has("errors"),
-      branches: fields.has("branches"), compactions: fields.has("compactions"), summarizePrompts: false, includeErrorText: false,
+      branches: fields.has("branches"), compactions: fields.has("compactions"),
     });
     projectNavigation(result, view, fields);
   }
