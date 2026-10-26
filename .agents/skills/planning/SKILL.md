@@ -14,6 +14,8 @@ request → scoped problem → success contract → delivery path → landed out
 ## Operating Rules
 
 - Derive decisions before tasks. Define the problem and success contract before adding implementation detail.
+- Evaluate the premise before implementation. Identify the assumption that makes the proposed approach necessary and check it against available evidence. When uncertainty can change the approach, choose an observation that could contradict the assumption.
+- Consider how the system would look if the requirement had been present from the start. Use that design to compare approaches.
 - Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
 - Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
