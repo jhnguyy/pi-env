@@ -35,5 +35,16 @@ SETUP_TESTS=(
 )
 
 for test_script in "${SETUP_TESTS[@]}"; do
-  env -u PI_AGENT_DIR -u PI_CODING_AGENT_DIR -u SETTINGS_FILE bash "$test_script"
+  printf '\nsetup-test: start %s\n' "$test_script"
+  started_at=$SECONDS
+  if env -u PI_AGENT_DIR -u PI_CODING_AGENT_DIR -u SETTINGS_FILE bash "$test_script"; then
+    status=0
+  else
+    status=$?
+  fi
+  printf 'setup-test: end %s status=%d elapsed=%ds\n' \
+    "$test_script" "$status" "$((SECONDS - started_at))"
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
 done
