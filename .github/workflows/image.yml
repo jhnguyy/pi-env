@@ -19,32 +19,12 @@ env:
   CANDIDATE_TAG: pi-env:ci
 
 jobs:
-  verify:
+  qualify:
     name: Build, verify, and scan image candidate
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-        with:
-          persist-credentials: false
-
-      - name: Qualify image candidate
-        uses: ./.github/actions/qualify-image
-        with:
-          image-tag: ${{ env.CANDIDATE_TAG }}
-
-  publish:
-    name: Build, verify, scan, and publish image candidate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -57,6 +37,36 @@ jobs:
         with:
           image-tag: ${{ env.CANDIDATE_TAG }}
 
+      - name: Retain qualified image for publisher
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualified-image
+          path: ${{ steps.qualified-image.outputs.archive-path }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  publish:
+    name: Publish qualified image
+    needs: qualify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download qualified image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: qualified-image
+          path: ${{ runner.temp }}/qualified-image
+
+      - name: Load qualified image
+        shell: bash
+        run: docker load --input "$RUNNER_TEMP/qualified-image/pi-env-image.tar"
+
       - name: Authenticate publisher with GHCR
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
         with:
@@ -66,26 +76,11 @@ jobs:
 
       - name: Publish verified image to GHCR
         shell: bash
-        env:
-          EXPECTED_IMAGE_ID: ${{ steps.qualified-image.outputs.image-id }}
         run: |
           set -euo pipefail
-          actual_image_id="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_TAG")"
-          if [[ "$actual_image_id" != "$EXPECTED_IMAGE_ID" ]]; then
-            echo "::error title=Container candidate identity changed::The image selected for publication is not the qualified image candidate."
-            exit 1
-          fi
-
           immutable_tag="$IMAGE_NAME:$GITHUB_SHA"
           main_tag="$IMAGE_NAME:main"
           docker tag "$CANDIDATE_TAG" "$immutable_tag"
           docker tag "$CANDIDATE_TAG" "$main_tag"
-
-          if ! docker push "$immutable_tag"; then
-            echo "::error title=Container image publication failed::GHCR rejected the immutable commit tag."
-            exit 1
-          fi
-          if ! docker push "$main_tag"; then
-            echo "::error title=Container image publication failed::GHCR rejected the main tag."
-            exit 1
-          fi
+          docker push "$immutable_tag"
+          docker push "$main_tag"
