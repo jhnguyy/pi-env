@@ -41,36 +41,36 @@ const SUBAGENT_PARAMETERS = Type.Object(
   {
     action: StringEnum(Object.values(SubagentAction) as [SubagentAction, ...SubagentAction[]], {
       description:
-        "Operation to perform. Use run for a blocking child, start for a background child, or a job-management action.",
+        "run waits for the initial answer. start returns a background job ID. list shows retained jobs. usage totals child usage.",
     }),
     name: Type.Optional(
       Type.String({
         description:
-          "Human-readable child-session name. Required for run/start. Stored as a `sub-` prefixed session name.",
+          "Child-session label. Required for run/start.",
       }),
     ),
     task: Type.Optional(Type.String({ description: "Task to delegate. Required for run/start." })),
     tools: Type.Optional(
       Type.Array(Type.String(), {
-        description: "Explicit child tool selection. Omit for native defaults; [] selects no tools.",
+        description: "Child tool names. Omit for child defaults. [] selects none.",
       }),
     ),
     model: Type.Optional(
       Type.String({
         description:
-          "Model as 'provider/model-id' for run/start. Omit for the child-native default.",
+          "provider/model-id for run/start. Omit for the child default.",
       }),
     ),
     system_prompt: Type.Optional(
       Type.String({
         description:
-          "Additional delegated system instructions. Native context and resources still load normally.",
+          "Additional child instructions. Native context still loads.",
       }),
     ),
     cwd: Type.Optional(
       Type.String({
         description:
-          "Absolute working directory for run/start. Resolved with realpath and must be an existing directory.",
+          "Existing absolute working directory for run/start. Defaults to the parent cwd.",
       }),
     ),
     job_id: Type.Optional(
@@ -322,9 +322,7 @@ export default function (pi: ExtensionAPI, dependencies: SessionRuntime.Subagent
     const models = scoped ? ctx.scopedModels.map((entry) => entry.model) : ctx.modelRegistry.getAvailable();
     const description = Discovery.buildDynamicDescription(
       models,
-      pi.getAllTools().map((tool) => tool.name),
       modelAnnotations,
-      scoped,
     );
     registerSubagentTool(description);
   });

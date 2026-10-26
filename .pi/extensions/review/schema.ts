@@ -27,9 +27,7 @@ const PR_REVIEW_FEEDBACK_VALUES = [
 export const MAX_CONTEXT_PAGE_SIZE = 5;
 export const PrReviewParamsSchema = Type.Object(
   {
-    command: Type.Literal("pr", {
-      description: "Review subject. Use `pr` for pull request operations.",
-    }),
+    command: Type.Literal("pr"),
     action: StringEnum(REVIEW_COMMAND_VALUES),
     url: Type.Optional(
       Type.String({

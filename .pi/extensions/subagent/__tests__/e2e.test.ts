@@ -89,6 +89,11 @@ export default function(pi) {
     });
     parent = (await createAgentSessionFromServices({ services, sessionManager: SessionManager.create(root, join(root, "sessions")) })).session;
     await parent.bindExtensions({ mode: "print" });
+    const declaration = parent.getToolDefinition("subagent");
+    expect(declaration).toBeDefined();
+    evidence.delegationDeclaration = { description: declaration!.description, parameters: declaration!.parameters };
+    expect(declaration!.description).toContain("native-delegation/faux-1");
+    expect(declaration!.description).not.toContain("parent_only");
     await parent.prompt("launch");
     const parentCodeResults = parent.messages.filter(
       (message) => message.role === "toolResult" && message.toolName === "codemode",

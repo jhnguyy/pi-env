@@ -47,7 +47,7 @@ export default function (pi: ExtensionAPI) {
       name: "search_sessions",
       label: "Search Sessions",
       description:
-        `Search local pi session user and assistant text, including nested sessions and alternate branches. Read-only. Returns at most ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool-call names and arguments, tool output, thinking, and summaries. Finds mentions, not invocations. Use read_session with mode usage for recorded calls and skill-loading evidence. Use list_sessions for metadata navigation.`,
+        `Read-only search of user/assistant text mentions, not invocations. Includes nested sessions and stored branches. Returns up to ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool calls, tool output, thinking, and summaries. Use read_session mode usage for recorded calls and skill evidence.`,
       parameters: SEARCH_SCHEMA,
       async execute(params, { signal }) {
         const result = await searchSessionMessages({ term: params.term, cwd: params.cwd, signal });
@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI) {
     exposure: "deferred",
     namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
-      "List pi sessions as compact navigation digests before selecting one for read_session. Returns session IDs, cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
+      "Read-only session navigation. Returns compact metadata and IDs/paths for read_session, without raw transcripts or tool output.",
     parameters: LIST_SCHEMA,
     async execute(_id, params, signal) { return executeListSessions(params, signal); },
     renderCall: (params, theme) => renderCompactToolCall("list_sessions", params.query ?? params.cwd, theme),
@@ -85,7 +85,7 @@ export default function (pi: ExtensionAPI) {
     exposure: "deferred",
     namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
-      'Read one local Pi session by exact sessionId or path from list_sessions. Read-only. Default basic returns metadata and tool/skill count dictionaries. mode detailed adds sparse navigation and call evidence with recorded timestamps, durations, outcomes, and nested-call markers. mode usage returns only usage dictionaries and evidence. Use fields for specific checks, such as {"sessionId":"...","fields":["tools"]}. Tool, skill, and argument filters combine with AND and affect only usage evidence. Counts cover all matching records in that file, including stored alternate branches, not child session files. References are bounded by limit and output budget. Raw arguments, tool output, thinking, and full assistant prose are excluded. Error navigation returns tool names and line references, not error output. Missing timing is omitted, not estimated. Timestamps identify the containing message entry, not exact execution start times. Skill reads mean successful read calls to SKILL.md, keyed by parent directory. Skill envelopes are user text shaped like Pi\'s /skill: expansion, not proof of command invocation. Neither proves skill compliance. incompleteNestedRecords flags known gaps in retained nested calls. Use search_sessions for text mentions.',
+      'Read-only inspection of one local Pi session by exact ID or path. Filters combine with AND and affect usage only. Includes stored branches, not child files. Returns counts and bounded evidence, not raw arguments, tool output, thinking, or full assistant prose. Recorded timestamps identify messages, not execution starts. Missing timing is omitted. Known nested-call gaps are flagged. Skill envelopes do not prove command invocation. Reads and envelopes do not prove skill compliance. Use search_sessions for text mentions.',
     parameters: READ_SCHEMA,
     outputSchema: READ_OUTPUT_SCHEMA,
     async execute(_id, params, signal) { return executeReadSession(params, signal); },
