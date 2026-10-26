@@ -12,7 +12,11 @@ Select content by what reviewers must decide or challenge. The sections below ar
 
 ## Establish the proposal
 
-Open with the problem, intended outcome, and recommended approach. Make the opening understandable to the expected stakeholders without an oral briefing. Introduce specialist detail after readers understand why it matters.
+Use a recognizable title. Make the document's owner, authoritative location, and review or approval state clear through the host system or document metadata. Do not imply agreement that reviewers have not given.
+
+Open with the problem, intended outcome, and recommended approach. Make the opening understandable to the expected stakeholders without an oral briefing. Explain the motivation and relevant prior attempts. State goals as benefits or observable outcomes, not merely technology choices.
+
+Order later detail for the readers who need it. Explain unfamiliar terms where they first matter rather than relying on a glossary. Link to related designs, specifications, and test plans when they supply necessary context.
 
 State the scope boundary. Include non-goals when readers could reasonably expect them to be in scope. Make the requested decision or feedback explicit.
 
@@ -25,10 +29,12 @@ Explain the consequential commitments and why they satisfy the success criteria.
 Select the following details only when they affect review:
 
 - **Flow and boundaries:** Trace a representative interaction across components, dependencies, and trust boundaries. Use a diagram when it explains relationships more clearly than prose. Retain editable diagram source.
-- **Interfaces:** State the behavior that other components or users must rely on, including relevant failure semantics and compatibility constraints.
-- **Operations:** Explain how material failures become visible and how recovery works. Include measurable service expectations when they drive the design.
-- **Security and privacy:** Explain relevant threats, authority, sensitive-data access, and retention. Do not substitute a claim that the design is secure for an account of the risk.
-- **Delivery:** Explain migration, rollout, and rollback when those constraints can change the proposed design. Do not invent a release plan for a request limited to design.
+- **Interfaces:** Show the interactions people and systems rely on, such as UI sketches, API or CLI semantics, and file formats. Include relevant failure semantics and compatibility constraints.
+- **Constraints and dependencies:** Explain limits imposed by budget, clients, infrastructure, or existing systems. Identify consequential language, runtime, storage, and service choices and their maintenance costs.
+- **Operations:** State measurable expectations for availability, latency, or capacity when relevant. Explain how they will be measured, which failures need alerts, and how recovery works. Identify diagnostic events, log access and retention, and sensitive data that must not enter logs.
+- **Security and privacy:** Explain threats, attack surface, trust boundaries, and controls. Identify sensitive data, who can access it, how it is protected, and how long it is retained. If a plausible risk is dismissed, explain why so reviewers can challenge the assumption.
+- **Legal obligations:** Identify applicable contractual, licensing, or regulatory constraints and unresolved review needs. Distinguish confirmed obligations from questions requiring qualified review.
+- **Delivery:** Explain migration, rollout, and rollback when those constraints can change the proposed design. When milestones matter, tie them to useful artifacts or feedback that can expose mistaken assumptions early. Do not invent dates or a release plan for a request limited to design.
 
 Leave inexpensive, reversible implementation choices to implementation unless reviewers need them to assess feasibility.
 

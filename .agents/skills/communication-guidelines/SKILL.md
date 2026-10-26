@@ -37,12 +37,6 @@ Load [references/technical-writing.md](references/technical-writing.md) when you
 - Code comments or authored log messages
 - Other text that explains a system, component, state, or action
 
-The reference combines a house-style summary of ASD-STE100 Issue 9 with practical documentation guidance. Do not claim formal compliance.
-
-## Design documents
-
-Load [references/design-documents.md](references/design-documents.md) when drafting or reviewing a design document or architecture proposal. Use the [planning skill](../planning/SKILL.md) to derive or assess the decisions before polishing their presentation.
-
 ## Pattern guide
 
 Load [references/patterns.md](references/patterns.md) when examples of avoidable communication patterns help.

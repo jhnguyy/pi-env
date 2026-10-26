@@ -23,8 +23,6 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 ## Design the Change
 
-For consequential design decisions, use the [planning skill](../planning/SKILL.md). When drafting or reviewing a design document, also use the [communication guidelines](../communication-guidelines/SKILL.md) and their design-document reference. Routine fixes do not require a design document.
-
 - Prefer a small conceptual surface over a small line count. Give each concept one owner and one stable term.
 - Use narrow interfaces that hide internal sequencing and data. Keep authority and data flow explicit.
 - Keep deterministic transforms plain, and put IO, cancellation, resources, and operational failure behind clear boundaries.
