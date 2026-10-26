@@ -11,8 +11,8 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 - Identify the target repository from the request or ask if it is ambiguous. Find its root and the task worktree before repository commands, even when Pi starts elsewhere. Read the target repository's `README.md` and `CONTRIBUTING.md` when they exist. Follow applicable area-specific instructions.
 - State the intended outcome, material assumptions, success criteria, and required validation. Record an assumption when it can change the solution, risk, or result.
-- Deliver one coherent outcome completely. Include all code, tests, migrations, and cleanup required for that outcome. Update documentation only for facts that code, tests, or tooling cannot carry. Preserve unrelated behavior. Every changed part must support the pull request intention.
-- Separate work that has an independent purpose into another contribution or explicit follow-up.
+- Deliver one coherent outcome with all required code, tests, migrations, and cleanup. Preserve unrelated behavior. Separate work with an independent purpose into another contribution or explicit follow-up.
+- Update documentation only for facts that code, tests, or tooling cannot carry.
 
 ## Inspect Before Implementing
 
@@ -31,9 +31,9 @@ Use for repository changes from initial scope through post-merge cleanup.
 - Keep deterministic transforms plain, and put IO, cancellation, resources, and operational failure behind clear boundaries.
 - Parse weak or untrusted inputs into invariant-preserving domain values before the workflow causes effects. Preserve established information through downstream operations.
 - Bound work before allocation. Prefer simple representations, one-pass data flow, and reuse of values derived from immutable inputs.
-- Add an interface, service, layer, or helper only for a current ownership, lifecycle, protocol, substitution, repeated-change, or test-leverage need.
+- Base structural changes, including new interfaces, services, layers, or helpers, on current ownership, lifecycle, protocol, substitution, workflow, maintenance, or test-leverage needs.
 - Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.
-- Base structural changes on current ownership, workflow, or maintenance needs rather than file size, line count, or a static metric. Use measured end-to-end behavior as the authority for performance changes.
+- Use measured end-to-end behavior as the authority for performance changes.
 
 ## Isolate the Work
 

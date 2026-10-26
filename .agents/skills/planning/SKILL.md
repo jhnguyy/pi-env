@@ -16,8 +16,6 @@ request → scoped problem → success contract → delivery path → landed out
 - Derive decisions before tasks. Define the problem and success contract before adding implementation detail.
 - Evaluate the premise before implementation. Identify the assumption that makes the proposed approach necessary and check it against available evidence. When uncertainty can change the approach, choose an observation that could contradict the assumption.
 - Consider how the system would look if the requirement had been present from the start. Use that design to compare approaches.
-- Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
-- Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
 - Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
 
@@ -54,13 +52,9 @@ Use this contract to judge approaches and completion.
 
 Evaluate the proposed approach against the success contract. Surface alternatives only when they expose a material tradeoff. Derive implementation, verification, and rollout work from the selected approach.
 
-Select operating concerns by relevance rather than enumeration. Examples include failure and recovery, data migration, compatibility, security, dependencies, observability, and maintenance.
+Include operating concerns only when they can change scope, approach, sequence, verification, rollout, or ownership.
 
-For each consequential unknown, record:
-
-```text
-question → affected decision → resolution method → resolution point or owner
-```
+For each consequential unknown, record the question, affected decision, resolution method, and resolution point or owner.
 
 ### 4. Plan production landing
 
