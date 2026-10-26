@@ -6,8 +6,6 @@ import { tmpdir } from "node:os";
 import {
   assertUnderSessionDir,
   formatDigestList,
-  formatSessionView,
-  inspectLines,
   listSessionDigests,
 } from "../sessions";
 
@@ -52,25 +50,9 @@ describe("session digests", () => {
 
     expect(result.cwd).toBe("/repo");
     expect(result.firstUserPrompt).toBe("Please fix setup");
-    expect(result.toolCounts).toEqual({ bash: 1 });
     expect(result.toolErrors).toBe(1);
     expect(result.labels).toEqual([{ targetId: "u1", label: "checkpoint" }]);
     expect(formatDigestList([result])).not.toContain("very noisy failure output");
-  });
-
-  it("surfaces todo labels as milestones in compact lists", () => {
-    const result = digestLines(
-      lines(
-        { type: "session", id: "s1", cwd: "/repo" },
-        { type: "message", id: "u1", parentId: null, message: { role: "user", content: [{ type: "text", text: "Do work" }] } },
-        { type: "label", targetId: "u1", label: "todo: implement navigation" },
-      ),
-      "2026-03-06T23-15-17-780Z_abc123.jsonl",
-    );
-
-    const text = formatDigestList([result]);
-    expect(text).toContain("1 milestone(s)");
-    expect(text).not.toContain("1 label(s)");
   });
 
   it("skips malformed JSON lines while digesting valid entries", () => {
@@ -85,47 +67,6 @@ describe("session digests", () => {
 
     expect(result.cwd).toBe("/repo");
     expect(result.firstUserPrompt).toBe("Valid prompt");
-  });
-});
-
-describe("session views", () => {
-  it("includes user prompts and tool error summaries while omitting assistant prose", () => {
-    const view = inspectLines(
-      lines(
-        { type: "session", id: "s1", cwd: "/repo" },
-        { type: "message", message: { role: "user", content: [{ type: "text", text: "Troubleshoot nub" }] } },
-        { type: "message", message: { role: "assistant", content: [{ type: "text", text: "Implemented the fix" }] } },
-        { type: "message", message: { role: "toolResult", toolName: "bash", isError: true, content: [{ type: "text", text: "nub failed" }] } },
-      ),
-      "x.jsonl",
-      0,
-    );
-
-    const text = formatSessionView(view);
-    expect(text).toContain("Troubleshoot nub");
-    expect(text).toContain("bash: nub failed");
-    expect(text).not.toContain("Implemented the fix");
-  });
-
-  it("renders todo labels as milestones, separate from labels", () => {
-    const view = inspectLines(
-      lines(
-        { type: "session", id: "s1", cwd: "/repo" },
-        { type: "message", id: "u1", parentId: null, message: { role: "user", content: [{ type: "text", text: "Do work" }] } },
-        { type: "label", targetId: "u1", label: "todo: implement navigation" },
-        { type: "label", targetId: "u1", label: "manual-checkpoint" },
-      ),
-      "x.jsonl",
-      0,
-    );
-
-    const text = formatSessionView(view);
-    const milestones = text.match(/### Milestones\n([\s\S]*?)(?=\n### |$)/)?.[1];
-    const labels = text.match(/### Labels\n([\s\S]*?)(?=\n### |$)/)?.[1];
-    expect(milestones).toContain("implement navigation → u1");
-    expect(milestones).not.toContain("manual-checkpoint");
-    expect(labels).toContain("manual-checkpoint → u1");
-    expect(labels).not.toContain("implement navigation");
   });
 });
 

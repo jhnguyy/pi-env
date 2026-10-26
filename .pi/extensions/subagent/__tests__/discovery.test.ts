@@ -46,9 +46,10 @@ it("advertises the native scoped roster with descriptive tags, or every availabl
     ctx.scopedModels = (await resolveModelScopeWithDiagnostics(enabledModels, runtime)).scopedModels;
     await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
     const scoped = harness.tools.get("subagent").description;
-    expect(scoped).toContain("Parent scoped models");
+    expect(scoped).toContain("Model hints");
     expect(scoped).toContain("roster/quick [preferred, experimental]");
-    expect(scoped).toContain("Other available models also work.");
+    expect(scoped).toContain("not an allowlist");
+    expect(scoped).toContain("child availability may differ");
     expect(scoped).not.toContain("roster/deep");
     expect(scoped).not.toContain("roster/plain");
     await harness.handlers.get("session_shutdown")!({ type: "session_shutdown" }, ctx);
@@ -56,10 +57,9 @@ it("advertises the native scoped roster with descriptive tags, or every availabl
     ctx.scopedModels = [];
     await harness.handlers.get("session_start")!({ type: "session_start" }, ctx);
     const unscoped = harness.tools.get("subagent").description;
-    expect(unscoped).toContain("Parent available models");
+    expect(unscoped).toContain("Model hints");
     expect(unscoped).toContain("roster/deep [heavy, reviewer]");
     expect(unscoped).toContain("roster/plain");
-    expect(unscoped).not.toContain("Other available models");
     expect(unscoped).not.toContain("roster/unavailable");
     expect(unscoped).not.toContain("[local]");
   } finally {

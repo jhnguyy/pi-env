@@ -47,7 +47,6 @@ export interface SessionDigest {
   assistantTurns: number;
   toolResults: number;
   toolErrors: number;
-  toolCounts: Record<string, number>;
   labels: Array<{ targetId: string; label: string }>;
   compacted: boolean;
   branches: number;
@@ -56,7 +55,7 @@ export interface SessionDigest {
 
 export interface SessionView extends SessionDigest {
   userPrompts: Array<{ line: number; text: string }>;
-  toolErrorSummaries: Array<{ line: number; toolName: string; text: string }>;
+  toolErrorLocations: Array<{ line: number; toolName: string }>;
   branchSummaries: Array<{ line: number; text: string }>;
   compactions: Array<{ line: number; tokensBefore?: number; text: string }>;
 }
@@ -67,8 +66,9 @@ interface TextBlock {
   thinking?: string;
 }
 
-interface SessionEntry {
+interface SessionEntry extends Record<string, unknown> {
   type: string;
+  timestamp?: string;
   id?: string;
   parentId?: string | null;
   targetId?: string;
@@ -110,13 +110,21 @@ function oneLine(text: string, max = 220): string {
 
 function parseLine(line: string): SessionEntry | undefined {
   try {
-    return JSON.parse(line) as SessionEntry;
+    const value: unknown = JSON.parse(line);
+    return value !== null && typeof value === "object" && !Array.isArray(value) ? value as SessionEntry : undefined;
   } catch {
     return undefined;
   }
 }
 
+export function parseSessionLines(lines: string[]): Array<SessionEntry | undefined> {
+  return lines.map(parseLine);
+}
+
+export type ParsedSessionEntries = ReturnType<typeof parseSessionLines>;
+
 interface DigestState {
+  timestamp?: string;
   sessionId?: string;
   cwd?: string;
   name?: string;
@@ -127,14 +135,14 @@ interface DigestState {
   toolResults: number;
   toolErrors: number;
   compacted: boolean;
-  toolCounts: Record<string, number>;
   labels: Array<{ targetId: string; label: string }>;
 }
 
-function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState): void {
+function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, state: DigestState, summarizePrompts: boolean): void {
   switch (message.role) {
     case MessageRole.User: {
       state.userTurns += 1;
+      if (!summarizePrompts) break;
       const text = oneLine(textFromContent(message.content));
       if (text) {
         state.firstUserPrompt ??= text;
@@ -147,18 +155,17 @@ function applyMessageToDigest(message: NonNullable<SessionEntry["message"]>, sta
       break;
     case MessageRole.ToolResult: {
       state.toolResults += 1;
-      const tool = message.toolName ?? "unknown";
-      state.toolCounts[tool] = (state.toolCounts[tool] ?? 0) + 1;
       if (message.isError) state.toolErrors += 1;
       break;
     }
   }
 }
 
-function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
+function applyEntryToDigest(entry: SessionEntry, state: DigestState, summarizePrompts: boolean): void {
   switch (entry.type) {
     case SessionEntryType.Session:
       state.sessionId = entry.id;
+      state.timestamp = entry.timestamp;
       state.cwd = entry.cwd;
       break;
     case SessionEntryType.SessionInfo:
@@ -173,12 +180,16 @@ function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
       state.compacted = true;
       break;
     case SessionEntryType.Message:
-      if (entry.message) applyMessageToDigest(entry.message, state);
+      if (entry.message) applyMessageToDigest(entry.message, state, summarizePrompts);
       break;
   }
 }
 
 function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
+  return digestEntries(parseSessionLines(lines), file, bytes);
+}
+
+function digestEntries(entries: ParsedSessionEntries, file: string, bytes = 0, summarizePrompts = true): SessionDigest {
   const filename = basename(file);
   const timestamp = parseTimestamp(filename);
   const state: DigestState = {
@@ -187,18 +198,16 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
     toolResults: 0,
     toolErrors: 0,
     compacted: false,
-    toolCounts: {},
     labels: [],
   };
   const childCounts = new Map<string | null, number>();
 
-  for (const line of lines) {
-    const entry = parseLine(line);
+  for (const entry of entries) {
     if (!entry) continue;
     if (entry.id && entry.parentId !== undefined) {
       childCounts.set(entry.parentId ?? null, (childCounts.get(entry.parentId ?? null) ?? 0) + 1);
     }
-    applyEntryToDigest(entry, state);
+    applyEntryToDigest(entry, state, summarizePrompts);
   }
 
   let branches = 0;
@@ -210,7 +219,7 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
     file,
     sessionId: state.sessionId,
     cwd: state.cwd,
-    timestamp,
+    timestamp: state.timestamp ?? timestamp,
     name: state.name,
     firstUserPrompt: state.firstUserPrompt,
     lastUserPrompt: state.lastUserPrompt,
@@ -218,7 +227,6 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
     assistantTurns: state.assistantTurns,
     toolResults: state.toolResults,
     toolErrors: state.toolErrors,
-    toolCounts: state.toolCounts,
     labels: state.labels,
     compacted: state.compacted,
     branches,
@@ -226,53 +234,64 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
   };
 }
 
-export function inspectLines(lines: string[], file: string, bytes = 0): SessionView {
-  const digest = digestLines(lines, file, bytes);
+function applyMessageToView(
+  message: SessionEntry["message"],
+  line: number,
+  view: Pick<SessionView, "userPrompts" | "toolErrorLocations">,
+  navigation: { prompts: boolean; errors: boolean },
+): void {
+  if (!message) return;
+  if (navigation.prompts && message.role === MessageRole.User) {
+    const text = oneLine(textFromContent(message.content), 500);
+    if (text) view.userPrompts.push({ line, text });
+  }
+  if (navigation.errors && message.role === MessageRole.ToolResult && message.isError) {
+    view.toolErrorLocations.push({ line, toolName: message.toolName ?? "unknown" });
+  }
+}
+
+type NavigationOptions = {
+  prompts: boolean;
+  errors: boolean;
+  branches: boolean;
+  compactions: boolean;
+};
+
+export function inspectEntries(
+  entries: ParsedSessionEntries,
+  file: string,
+  bytes: number,
+  navigation: NavigationOptions,
+): SessionView {
+  const digest = digestEntries(entries, file, bytes, false);
   const userPrompts: SessionView["userPrompts"] = [];
-  const toolErrorSummaries: SessionView["toolErrorSummaries"] = [];
+  const toolErrorLocations: SessionView["toolErrorLocations"] = [];
   const branchSummaries: SessionView["branchSummaries"] = [];
   const compactions: SessionView["compactions"] = [];
+  const messageView = { userPrompts, toolErrorLocations };
 
-  lines.forEach((line, index) => {
+  if (![navigation.prompts, navigation.errors, navigation.branches, navigation.compactions].some(Boolean)) return { ...digest, ...messageView, branchSummaries, compactions };
+
+  entries.forEach((entry, index) => {
     const lineNo = index + 1;
-    const entry = parseLine(line);
     if (!entry) return;
 
     switch (entry.type) {
       case SessionEntryType.BranchSummary:
-        if (entry.summary) branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
+        if (navigation.branches && entry.summary) branchSummaries.push({ line: lineNo, text: oneLine(entry.summary, 300) });
         return;
 
       case SessionEntryType.Compaction:
-        compactions.push({ line: lineNo, tokensBefore: entry.tokensBefore, text: oneLine(entry.summary ?? "", 300) });
+        if (navigation.compactions) compactions.push({ line: lineNo, tokensBefore: entry.tokensBefore, text: oneLine(entry.summary ?? "", 300) });
         return;
 
-      case SessionEntryType.Message: {
-        const message = entry.message;
-        if (!message) return;
-
-        switch (message.role) {
-          case MessageRole.User: {
-            const text = oneLine(textFromContent(message.content), 500);
-            if (text) userPrompts.push({ line: lineNo, text });
-            return;
-          }
-
-          case MessageRole.ToolResult: {
-            if (!message.isError) return;
-            const text = oneLine(textFromContent(message.content), 260);
-            toolErrorSummaries.push({ line: lineNo, toolName: message.toolName ?? "unknown", text });
-            return;
-          }
-
-          case MessageRole.Assistant:
-            return;
-        }
-      }
+      case SessionEntryType.Message:
+        applyMessageToView(entry.message, lineNo, messageView, navigation);
+        return;
     }
   });
 
-  return { ...digest, userPrompts, toolErrorSummaries, branchSummaries, compactions };
+  return { ...digest, ...messageView, branchSummaries, compactions };
 }
 
 export function readSessionFile(path: string): { lines: string[]; bytes: number } {
@@ -280,7 +299,7 @@ export function readSessionFile(path: string): { lines: string[]; bytes: number 
   if (!file.endsWith(".jsonl")) throw new Error(`Expected a .jsonl file, got: ${file}`);
   if (!existsSync(file)) throw new Error(`Session file not found: ${file}`);
   const raw = readFileSync(file, "utf8");
-  return { lines: raw.trim().split("\n").filter(Boolean), bytes: Buffer.byteLength(raw) };
+  return { lines: raw.split("\n"), bytes: Buffer.byteLength(raw) };
 }
 
 export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION_DIR): string {
@@ -293,7 +312,7 @@ export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION
   return file;
 }
 
-function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+export function discoverSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
   const root = resolve(sessionDir);
   if (!existsSync(root)) return [];
   const out: string[] = [];
@@ -306,7 +325,14 @@ function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
       else if (entry.isFile() && entry.name.endsWith(".jsonl")) out.push(path);
     }
   }
-  return out.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return out;
+}
+
+export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+  return discoverSessionFiles(sessionDir)
+    .map((file) => ({ file, mtime: statSync(file).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime)
+    .map(({ file }) => file);
 }
 
 export function listSessionDigests(options: {
@@ -390,38 +416,6 @@ export async function searchSessionMessages(options: {
   return { matches, truncated: false };
 }
 
-class MarkdownBuilder {
-  private readonly lines: string[] = [];
-
-  line(text = ""): this {
-    this.lines.push(text);
-    return this;
-  }
-
-  linesOf(lines: string[]): this {
-    this.lines.push(...lines);
-    return this;
-  }
-
-  section(title: string, lines: string[]): this {
-    if (lines.length === 0) return this;
-    if (this.lines.length > 0) this.line();
-    return this.line(`### ${title}`).linesOf(lines);
-  }
-
-  toString(): string {
-    return this.lines.join("\n");
-  }
-}
-
-function formatToolCounts(toolCounts: Record<string, number>): string | undefined {
-  const text = Object.entries(toolCounts)
-    .sort(([, a], [, b]) => b - a)
-    .map(([name, count]) => `${name}(${count})`)
-    .join(", ");
-  return text || undefined;
-}
-
 function splitLabels(labels: SessionDigest["labels"]): {
   milestones: Array<{ targetId: string; text: string }>;
   labels: SessionDigest["labels"];
@@ -451,39 +445,17 @@ function formatDigest(s: SessionDigest, index: number): string {
     .filter(Boolean)
     .join(", ");
 
-  return new MarkdownBuilder()
-    .line(`${index + 1}. ${title}`)
-    .line(`   ${s.cwd ? `cwd: ${s.cwd}` : "cwd: unknown"}`)
-    .line(`   ${counts}${markers ? `; ${markers}` : ""}`)
-    .line(`   ${s.firstUserPrompt ? `first: ${s.firstUserPrompt}` : "first: (none)"}`)
-    .line(`   file: ${s.file}`)
-    .toString();
+  return [
+    `${index + 1}. ${title}`,
+    `   id: ${s.sessionId ?? "unknown"}`,
+    `   ${s.cwd ? `cwd: ${s.cwd}` : "cwd: unknown"}`,
+    `   ${counts}${markers ? `; ${markers}` : ""}`,
+    `   ${s.firstUserPrompt ? `first: ${s.firstUserPrompt}` : "first: (none)"}`,
+    `   file: ${s.file}`,
+  ].join("\n");
 }
 
 export function formatDigestList(sessions: SessionDigest[]): string {
   if (sessions.length === 0) return "No matching pi sessions found.";
   return sessions.map(formatDigest).join("\n\n");
-}
-
-export function formatSessionView(view: SessionView): string {
-  const { milestones, labels } = splitLabels(view.labels);
-  const builder = new MarkdownBuilder()
-    .line(`## Session ${view.name ? `${view.name} — ` : ""}${view.timestamp}`)
-    .linesOf([
-      view.cwd ? `cwd: ${view.cwd}` : undefined,
-      `file: ${view.file}`,
-      `turns: ${view.userTurns} user, ${view.assistantTurns} assistant, ${view.toolResults} tool results, ${view.toolErrors} tool errors`,
-      formatToolCounts(view.toolCounts) ? `tools: ${formatToolCounts(view.toolCounts)}` : undefined,
-      view.branches ? `branches: ${view.branches}` : undefined,
-      view.compacted ? "compacted: yes" : undefined,
-    ].filter((line): line is string => Boolean(line)));
-
-  return builder
-    .section("Milestones", milestones.map((milestone) => `- ${milestone.text} → ${milestone.targetId}`))
-    .section("Labels", labels.map((label) => `- ${label.label} → ${label.targetId}`))
-    .section("User prompts", view.userPrompts.map((prompt, i) => `${i + 1}. L${prompt.line}: ${prompt.text}`))
-    .section("Tool errors", view.toolErrorSummaries.map((error) => `- L${error.line} ${error.toolName}: ${error.text}`))
-    .section("Branch summaries", view.branchSummaries.map((branch) => `- L${branch.line}: ${branch.text}`))
-    .section("Compactions", view.compactions.map((compaction) => `- L${compaction.line}${compaction.tokensBefore ? ` (${compaction.tokensBefore} tokens)` : ""}: ${compaction.text}`))
-    .toString();
 }

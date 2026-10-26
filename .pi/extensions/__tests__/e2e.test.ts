@@ -1,7 +1,7 @@
 import { describe, expect, it, onTestFinished } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,7 +252,7 @@ describe("native tool workflows", () => {
   });
 });
 
-it("runs the named session search scenarios in an isolated HOME", () => {
+it("runs the named session introspection scenarios in an isolated HOME", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-session-search-"));
   onTestFinished(() => rmSync(home, { recursive: true, force: true }));
   const evidenceRoot = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
@@ -262,10 +262,13 @@ it("runs the named session search scenarios in an isolated HOME", () => {
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
     bundleHash: createHash("sha256").update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js"))).digest("hex"),
     repeat: "nub run build && nub run verify:phase native-tool-discovery",
-    input: "synthetic transcripts and a scripted provider in fixtures/search-workflow.ts",
-    expected: "all named public-workflow scenarios pass, including model-visible truncation",
+    input: "native persistent Pi parent/child sessions, built-in skill reads and /skill expansion, controlled command failures and ctx.executeTool composition; synthetic legacy, missing-record, and adversarial histories in fixtures/search-workflow.ts",
+    retainedInputs: { sessions: "sessions/", skills: "skills/", originalHome: home },
+    retentionErrors: [] as string[],
+    expected: "all named public-workflow scenarios pass, including session IDs, read modes, field filters, timing, privacy boundaries, and bounded JSON",
     actual: "", verdict: "failed",
   };
+  const failures: unknown[] = [];
   try {
     // Native homedir() needs process-level isolation. The child owns typed setup and assertions.
     evidence.actual = execFileSync(process.execPath, [
@@ -275,9 +278,24 @@ it("runs the named session search scenarios in an isolated HOME", () => {
     evidence.verdict = "passed";
   } catch (error) {
     if (error instanceof Error && "stdout" in error) evidence.actual = String(error.stdout);
-    throw error;
+    failures.push(error);
   } finally {
-    writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
-    console.info(`Session search evidence: ${artifact}\n${evidence.actual}`);
+    for (const [source, target] of [[join(home, ".pi/agent/sessions"), "sessions"], [join(home, "skills"), "skills"]]) {
+      try {
+        if (existsSync(source)) cpSync(source, join(dirname(artifact), target), { recursive: true });
+      } catch (error) {
+        failures.push(error);
+        evidence.retentionErrors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (failures.length) evidence.verdict = "failed";
+    try {
+      writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
+      console.info(`Session search evidence: ${artifact}\n${evidence.actual}`);
+    } catch (error) {
+      failures.push(error);
+    }
   }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Session introspection workflow or evidence retention failed.", { cause: failures[0] });
 });
