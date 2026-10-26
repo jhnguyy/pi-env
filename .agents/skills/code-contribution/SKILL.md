@@ -52,10 +52,8 @@ Follow repository policy for branch names, base synchronization, worktree placem
 ## Commit and Publish
 
 - Inspect `git status` and the diff before committing. Commit only the intended changes.
-- Resolve the push remote from repository instructions or Git configuration. Ask if it is ambiguous. Set the upstream on the first push. Obtain an explicit user request before force-pushing or changing remote configuration.
-- Before preparing a pull request, inspect repository contribution guidance and applicable pull request templates.
-- Explain the behavioral outcome and rationale. Record important decisions, validation, risks, and follow-up work.
-- If the repository uses pull-request-only merges, obtain an explicit user request before merging locally.
+- Resolve the push remote from repository instructions or Git configuration. If the remote is ambiguous, ask which remote to use. Set the upstream on the first push.
+- Before preparing a pull request, inspect repository contribution guidance and applicable templates. Explain the behavioral outcome, rationale, important decisions, validation, risks, and follow-up work.
 
 ## Clean Up
 
