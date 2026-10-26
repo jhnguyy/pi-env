@@ -6,8 +6,6 @@
 - Avoid contractions when they can reduce clarity.
 - Use American English spelling unless another authority requires a different spelling.
 
-A summary cannot validate words against the ASD-STE100 dictionary. Do not claim formal vocabulary compliance from this reference.
-
 ## Verbs and voice
 
 - Prefer the infinitive, imperative, simple present, simple past, or simple future form.
