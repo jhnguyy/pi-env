@@ -13,13 +13,13 @@ request → scoped problem → success contract → delivery path → landed out
 
 ## Operating Rules
 
-- Derive decisions before tasks. Resolve the problem and success boundaries before adding implementation detail.
+- Derive decisions before tasks. Define the problem and success contract before adding implementation detail.
 - Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
 - Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
 - Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
 
-## Scope and document writing
+## Design documents
 
 Use the design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
 
