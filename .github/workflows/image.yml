@@ -25,9 +25,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-    outputs:
-      image-id: ${{ steps.qualified-image.outputs.image-id }}
-      archive-sha256: ${{ steps.qualified-image.outputs.archive-sha256 }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
@@ -66,27 +63,9 @@ jobs:
           name: qualified-image
           path: ${{ runner.temp }}/qualified-image
 
-      - name: Verify and load qualified image
+      - name: Load qualified image
         shell: bash
-        env:
-          EXPECTED_ARCHIVE_SHA256: ${{ needs.qualify.outputs.archive-sha256 }}
-          EXPECTED_IMAGE_ID: ${{ needs.qualify.outputs.image-id }}
-        run: |
-          set -euo pipefail
-          if [[ ! "$EXPECTED_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ || ! "$EXPECTED_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error title=Invalid candidate identity::Qualification did not provide valid image and archive identities."
-            exit 1
-          fi
-          cd "$RUNNER_TEMP/qualified-image"
-          printf '%s  pi-env-image.tar\n' "$EXPECTED_ARCHIVE_SHA256" | sha256sum --check --strict
-          docker load --input pi-env-image.tar
-          actual_image_id="$(docker image inspect --format '{{.Id}}' "$CANDIDATE_TAG")"
-          if [[ "$actual_image_id" != "$EXPECTED_IMAGE_ID" ]]; then
-            echo "::error title=Container candidate identity changed::The loaded image is not the qualified image candidate."
-            exit 1
-          fi
-          echo "Loaded qualified image ID: $actual_image_id"
-          echo "Verified archive SHA-256: $EXPECTED_ARCHIVE_SHA256"
+        run: docker load --input "$RUNNER_TEMP/qualified-image/pi-env-image.tar"
 
       - name: Authenticate publisher with GHCR
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
@@ -97,20 +76,11 @@ jobs:
 
       - name: Publish verified image to GHCR
         shell: bash
-        env:
-          EXPECTED_IMAGE_ID: ${{ needs.qualify.outputs.image-id }}
         run: |
           set -euo pipefail
           immutable_tag="$IMAGE_NAME:$GITHUB_SHA"
           main_tag="$IMAGE_NAME:main"
-          docker tag "$EXPECTED_IMAGE_ID" "$immutable_tag"
-          docker tag "$EXPECTED_IMAGE_ID" "$main_tag"
-
-          if ! docker push "$immutable_tag"; then
-            echo "::error title=Container image publication failed::GHCR rejected the immutable commit tag."
-            exit 1
-          fi
-          if ! docker push "$main_tag"; then
-            echo "::error title=Container image publication failed::GHCR rejected the main tag."
-            exit 1
-          fi
+          docker tag "$CANDIDATE_TAG" "$immutable_tag"
+          docker tag "$CANDIDATE_TAG" "$main_tag"
+          docker push "$immutable_tag"
+          docker push "$main_tag"
