@@ -11,15 +11,17 @@ Read the repository testing policy and requirements.
 
 Derive expected outcomes from requirements, not implementation details. Exercise the workflow people use and check its final result. Prefer E2E as the only behavioral test layer.
 
-Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant.
+Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant. Show that each new check fails for the defect it targets.
 
 Add isolated tests only for failures that E2E cannot exercise reliably. Identify that gap, list the failure modes and expected outcomes, and write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it.
 
-## Use real components
+## Replace only what the test cannot run
 
 Run local, deterministic components with synthetic data, including binaries, files, parsers, and in-process services.
 
-Use test doubles only for external services, credentials, time, randomness, or failures that cannot otherwise be induced. Replace dependencies at the outermost boundary, not at internal methods. Assert observable results and data crossing that boundary, not calls recorded by a double.
+Use test doubles only for external services, credentials, time, randomness, platform APIs the runtime lacks, or failures that cannot otherwise be induced. Replace dependencies at the outermost boundary, not at internal methods. Prefer injected seams and fakes over patching modules. Inject real implementations for internal collaborators.
+
+Assert observable results. Recording what crosses the boundary is fine, but a recorded call proves arrival, not that the result was used.
 
 Identify a contract test, sandbox run, or recorded response that checks each double's assumptions about the real dependency. Label tests that capture current third-party behavior as change detectors, not requirements.
 
