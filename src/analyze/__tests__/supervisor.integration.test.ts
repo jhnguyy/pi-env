@@ -123,13 +123,12 @@ describe("analyze supervisor", () => {
 
   it("accepts valid bounded worker protocol and ignores NODE_EXECUTABLE", async () => {
     const cwd = fixtureRoot();
-    expect(process.env.PI_ENV_NODE_BIN).toBeTruthy();
     await expect(
       superviseAnalyze(safeRequest(cwd), {
         workerPath: validWorker(cwd),
         env: {
           ...disabledEnv,
-          PI_ENV_NODE_BIN: process.env.PI_ENV_NODE_BIN,
+          PI_ENV_NODE_BIN: process.execPath,
           NODE_EXECUTABLE: "/not/a/reusable/node",
         },
       }),

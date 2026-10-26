@@ -1,7 +1,6 @@
 ---
 name: planning
-disable-model-invocation: true
-description: Transform a request into a scoped, testable delivery path that continues through production landing and explicit closure. Use when the user asks to apply ownership to feature, roadmap, migration, or operational planning.
+description: Turn an intended change into clear decisions and a verifiable path to the outcome. Use when defining a change, reviewing a design or architecture proposal, or planning delivery.
 ---
 
 # Planning
@@ -14,11 +13,15 @@ request → scoped problem → success contract → delivery path → landed out
 
 ## Operating Rules
 
-- Derive decisions before tasks. Resolve the problem and success boundaries before adding implementation detail.
+- Derive decisions before tasks. Define the problem and success contract before adding implementation detail.
 - Include a concern only when it can change scope, approach, sequence, verification, rollout, or ownership.
 - Represent uncertainty as an open question, the decision it affects, and a concrete way to resolve it.
 - Scale depth with consequence, uncertainty, and irreversibility. Keep low-risk, reversible work terse.
 - Treat ownership as a complete account of responsibility. Delegation and explicit boundaries are valid outcomes.
+
+## Design documents
+
+Use the design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
 
 ## Transformation
 
@@ -26,10 +29,10 @@ request → scoped problem → success contract → delivery path → landed out
 
 Treat the request as input to refine. Derive only the scopes that can affect the plan:
 
-- **Local:** What behavior is broken, missing, or desired?
-- **User:** Who is affected, and what outcome is blocked?
-- **System:** What workflow, dependency, data flow, or assumption produces the condition?
-- **Strategic:** Why does this matter to the product or roadmap?
+- What local behavior is broken, missing, or desired?
+- Who is affected, and what outcome is blocked?
+- What system workflow, dependency, data flow, or assumption produces the condition?
+- Why does this matter to the product or roadmap?
 
 State the selected problem boundary and why broader or narrower scopes are excluded.
 
@@ -61,10 +64,10 @@ question → affected decision → resolution method → resolution point or own
 
 Model landing as more than deployment:
 
-1. **Prepare:** establish compatibility, migration, configuration, observability, rollout, and rollback needs.
-2. **Release:** confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
-3. **Exercise:** invoke the changed behavior under real conditions and compare evidence with the success contract.
-4. **Stabilize:** observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
+1. Establish compatibility, migration, configuration, observability, rollout, and rollback needs.
+2. Confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
+3. Invoke the changed behavior under real conditions and compare evidence with the success contract.
+4. Observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
 
 “Deployed” means the change moved. “Landed” means the intended outcome works in its real environment.
 
@@ -79,18 +82,3 @@ For every material remaining item, choose an explicit state:
 - excluded with rationale
 
 Identify necessary communication and later observation by affected party and purpose, not by generating a generic audience list. The work is closed when completion evidence satisfies the success contract and no material responsibility remains implicit.
-
-## Output Shape
-
-Adapt this shape to local planning conventions. Omit sections that cannot affect action or judgment.
-
-```md
-## Problem boundary
-## Success contract
-## Decisions and material tradeoffs
-## Delivery path
-## Production landing
-## Open questions and resolution paths
-## Residual responsibilities
-## Completion evidence
-```
