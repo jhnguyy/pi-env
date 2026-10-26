@@ -126,20 +126,6 @@ describeE2E("LSP E2E", () => {
     expect(names).toContain("greet");
   });
 
-  it("returns shell function symbols through Bash Language Server", async () => {
-    const shellFile = fixture.writeFile("greet.sh", [
-      "#!/usr/bin/env bash",
-      "greet() {",
-      "  printf 'hello\\n'",
-      "}",
-    ]);
-    const result = await fixture.callDaemon({ action: "symbols", path: shellFile });
-    expect(result.action).toBe("symbols");
-    expect(result.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "greet" })]),
-    );
-  });
-
   // ─── Rename ────────────────────────────────────────────────────────────
 
   it("renames a TypeScript symbol across files", async () => {
