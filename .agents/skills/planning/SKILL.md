@@ -21,11 +21,7 @@ request → scoped problem → success contract → delivery path → landed out
 
 ## Scope and document writing
 
-Apply the transformation to the requested work, not every possible phase. For design documents and proposals, derive the problem, success contract, decisions, and consequential unknowns before drafting. Include delivery, production landing, and closure only when they affect the proposal or belong to the requested plan.
-
-A planning or design request does not authorize implementation, release, or remote writes. Distinguish proposed verification from evidence already obtained.
-
-This skill owns decision reasoning. The [design-document writing reference](../communication-guidelines/references/design-documents.md) owns how to present that reasoning for review. Load it when drafting or reviewing a design document or architecture proposal.
+Use the phases that fit the request. Before drafting a design document or proposal, define the problem, success contract, key decisions, and consequential unknowns. Cover delivery, production landing, and closure when they affect the design or the requested plan.
 
 ## Transformation
 
