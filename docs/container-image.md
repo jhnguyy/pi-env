@@ -18,7 +18,9 @@ Verify the complete image artifact contract with one in-image command:
 docker run --rm IMAGE nub run verify:image-artifact
 ```
 
-The workflow builds one local candidate for each run. It verifies and scans that candidate before publication. A `main` push publishes the same local image under the immutable `GITHUB_SHA` tag for the `main` commit and the `main` tag. The publication path does not rebuild the image.
+Qualification and publication use separate runners so candidate execution and scanning do not share publication permissions. The qualified image crosses that boundary as a Docker archive. The publisher checks the archive SHA-256 and loaded image ID against qualification outputs before registry authentication. It does not rebuild or execute the image.
+
+The [image workflow](../.github/workflows/image.yml) owns event restrictions, artifact retention, and registry tags. See the [scanner trust boundary](../SECURITY.md) for remaining risks.
 
 GitHub run names distinguish pull-request verification from `main` publication. Step names and failure annotations identify the build, artifact contract, security scanner, security policy, candidate identity, authentication, or registry publication boundary.
 

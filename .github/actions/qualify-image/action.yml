@@ -11,6 +11,12 @@ outputs:
   image-id:
     description: Docker image ID of the qualified candidate.
     value: ${{ steps.record-image.outputs.image-id }}
+  archive-path:
+    description: Docker archive of the qualified candidate.
+    value: ${{ steps.record-image.outputs.archive-path }}
+  archive-sha256:
+    description: SHA-256 of the qualified candidate archive.
+    value: ${{ steps.record-image.outputs.archive-sha256 }}
 
 runs:
   using: composite
@@ -74,6 +80,7 @@ runs:
         fi
 
     - name: Scan container image security policy
+      id: scan-image
       shell: bash
       working-directory: ${{ github.workspace }}
       env:
@@ -85,6 +92,8 @@ runs:
         results="$results_dir/trivy-image-results.json"
         cache_dir="$RUNNER_TEMP/trivy-cache"
         ignore_file="$GITHUB_WORKSPACE/.trivyignore.yaml"
+        image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")"
+        echo "image-id=$image_id" >> "$GITHUB_OUTPUT"
         docker save "$IMAGE_TAG" --output "$image_tar"
         chmod 0644 "$image_tar"
         mkdir -p "$cache_dir" "$results_dir"
@@ -132,8 +141,20 @@ runs:
       shell: bash
       env:
         IMAGE_TAG: ${{ inputs.image-tag }}
+        SCANNED_IMAGE_ID: ${{ steps.scan-image.outputs.image-id }}
       run: |
         set -euo pipefail
         image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")"
-        echo "image-id=$image_id" >> "$GITHUB_OUTPUT"
+        if [[ "$image_id" != "$SCANNED_IMAGE_ID" ]]; then
+          echo "::error title=Container candidate identity changed::The candidate tag changed after the scan archive was created."
+          exit 1
+        fi
+        archive_path="$RUNNER_TEMP/pi-env-image.tar"
+        archive_sha256="$(sha256sum "$archive_path" | cut -d ' ' -f 1)"
+        {
+          echo "image-id=$image_id"
+          echo "archive-path=$archive_path"
+          echo "archive-sha256=$archive_sha256"
+        } >> "$GITHUB_OUTPUT"
         echo "Qualified image ID: $image_id"
+        echo "Qualified archive SHA-256: $archive_sha256"
