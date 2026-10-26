@@ -11,7 +11,7 @@ Use the core principles of ASD-STE100 Simplified Technical English, Issue 9, as 
 
 Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
 
-Keep exact quotations, identifiers, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
+Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
 
 ## Protocol
 

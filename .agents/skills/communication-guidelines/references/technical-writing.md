@@ -3,8 +3,7 @@
 - Prefer common, familiar words. Use each word with one meaning and one part of speech in a given context.
 - Ground terminology in the domain’s authoritative sources, such as requirements, code, APIs, standards, and operator procedures. Check what each term names before using it.
 - Preserve established domain terms when they carry precise meaning. Explain unfamiliar terms for the intended reader. When no established term fits, describe the specific behavior or responsibility in plain language.
-- Treat a technical noun as the name of a defined item or concept. Treat a technical verb as the name of a defined action or process.
-- Do not use a technical noun as a verb or a technical verb as a noun.
+- Use technical nouns only to name defined items or concepts. Use technical verbs only to name defined actions or processes.
 - Use one technical term for each item or concept. Do not introduce synonyms for variation.
 - When you introduce a long official term, write it in full. Define a clear short form before you use the short form.
 - Keep an ordinary multi-word noun to three words when practical. Rewrite a longer noun phrase to show how its parts relate.
@@ -78,19 +77,11 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 
 ## Comments and log messages
 
-- Write a comment as concise descriptive text. Keep one topic in each sentence.
+- Write a comment as concise descriptive text.
 - Write an authored log message as a short statement of the event, state, action, or result.
 - Name the affected component when context does not make it clear.
 - Use the same terms in logs, code, documentation, and operator procedures.
-- Preserve exact identifiers and values. Apply the house style to the human-readable text around them.
 
 ## Review checklist
 
-1. Confirm that each sentence has one clear purpose.
-2. Confirm that instructions state one action and put required conditions first.
-3. Replace vague nouns with concrete actors, actions, items, or results.
-4. Remove unnecessary synonyms, jargon, filler, and figurative language.
-5. Resolve ambiguous pronouns and prepositional phrases.
-6. Split long sentences and dense paragraphs.
-7. Check domain terms against their authoritative sources. Confirm that revisions preserve facts, scope, uncertainty, and technical meaning.
-8. Confirm that exact machine text remains exact.
+Follow the [Communication Guidelines protocol](../SKILL.md#protocol). Apply this reference’s topic-specific rules during that review. Replace vague nouns with concrete actors, actions, items, or results. Split dense paragraphs.

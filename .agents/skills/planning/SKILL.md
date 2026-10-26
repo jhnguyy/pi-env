@@ -13,7 +13,6 @@ request → problem and scope → success criteria → implementation and rollou
 
 ## Operating Rules
 
-- Make decisions before defining tasks. Define the problem and success criteria before adding implementation detail.
 - Evaluate the premise before implementation. Identify the assumption that makes the proposed approach necessary and check it against available evidence. When uncertainty can change the approach, choose an observation that could contradict the assumption.
 - Consider how the system would look if the requirement had been present from the start. Use that design to compare approaches.
 - Match planning detail to the change’s risk, uncertainty, and reversibility. Keep low-risk, reversible work brief.
@@ -45,8 +44,6 @@ Before decomposing work, state:
 - what observable evidence establishes success
 - constraints and non-goals
 - accepted risks and unresolved assumptions
-
-Use these criteria to evaluate approaches and determine when the work is complete.
 
 ### 3. Plan implementation, verification, and rollout
 
