@@ -1,18 +1,36 @@
 ---
 name: testing-practices
-description: Designs E2E-first tests and repeatable evidence. Use when adding or reviewing tests, fixing a regression, deciding whether isolated tests are necessary, choosing what a test double may replace, or retiring tests when a feature changes.
+description: Selects tests and reproducible evidence without duplicate coverage. Use when adding or reviewing tests, fixing regressions, choosing test doubles, or removing tests.
 ---
 
 # Testing Practices
 
 Read the repository testing policy and requirements.
 
-1. **Start with E2E.** Exercise the workflow people use and check its final result. Prefer this as the only behavioral test layer. Reuse existing coverage when it already proves the outcome.
-2. **Leave evidence where reviewers look.** Each run produces an inspectable record with inputs, expected and actual results, and instructions to reproduce and check it. When CI can run the check, the CI run is that record: make each result visible in the job log or an uploaded artifact. Keep local artifacts for checks that CI cannot run. Preserve failure evidence and follow local privacy and storage policy.
-3. **Use isolation only for a named gap.** Explain what E2E cannot exercise reliably. List failure modes and expected outcomes, then write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it. Derive expectations from requirements, not implementation details.
-4. **Replace only what the test cannot run.** Run local, deterministic components for real with synthetic data. These include binaries, files, parsers, and in-process services. Use a test double only for:
-   - an external service, a credential, real time, or randomness;
-   - a failure that you cannot induce otherwise, such as a timeout or a 5xx response.
+## Select checks
 
-   Replace at the outermost boundary, such as the HTTP session, a local server, or an adapter port, not at the code's own internal methods. Assert on results and on what crossed the boundary, not on the calls a double received. Every double encodes an assumption about the real dependency. Name the check that confirms that assumption: a contract test, a sandbox run, or a recorded response. Label characterization tests of third-party code as change detectors. Their expectations come from the current implementation.
-5. **Retain current contracts.** When removing or simplifying a feature, delete assertions and fixtures that serve only retired requirements. Keep coverage for current outcomes and integrity requirements, including compatibility and expected failures. Preserve safety coverage until replacement evidence detects failures of those current contracts. Leave temporary catching tests uncommitted. Keep regression tests for current contracts.
+Derive expected outcomes from requirements, not implementation details. Exercise the workflow people use and check its final result. Prefer E2E as the only behavioral test layer.
+
+Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant.
+
+Add isolated tests only for failures that E2E cannot exercise reliably. Identify that gap, list the failure modes and expected outcomes, and write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it.
+
+## Use real components
+
+Run local, deterministic components with synthetic data, including binaries, files, parsers, and in-process services.
+
+Use test doubles only for external services, credentials, time, randomness, or failures that cannot otherwise be induced. Replace dependencies at the outermost boundary, not at internal methods. Assert observable results and data crossing that boundary, not calls recorded by a double.
+
+Identify a contract test, sandbox run, or recorded response that checks each double's assumptions about the real dependency. Label tests that capture current third-party behavior as change detectors, not requirements.
+
+## Retain useful coverage
+
+Delete assertions and fixtures that serve only retired requirements. Keep coverage for current outcomes, compatibility, integrity, and expected failures.
+
+Before removing safety coverage, verify that replacement evidence detects violations of the same contracts. Keep regression tests for current contracts. Leave temporary catching tests uncommitted.
+
+## Leave reproducible evidence
+
+Record inputs, expected and actual results, and instructions to reproduce and check each run. Use CI logs or uploaded artifacts when CI can run the check. Keep local artifacts for checks CI cannot run.
+
+Preserve failure evidence. Follow repository privacy and storage policy.
