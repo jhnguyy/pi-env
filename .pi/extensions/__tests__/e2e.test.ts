@@ -252,7 +252,7 @@ describe("native tool workflows", () => {
   });
 });
 
-it("runs the named session search scenarios in an isolated HOME", () => {
+it("runs the named session introspection scenarios in an isolated HOME", () => {
   const home = mkdtempSync(join(tmpdir(), "pi-session-search-"));
   onTestFinished(() => rmSync(home, { recursive: true, force: true }));
   const evidenceRoot = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
@@ -263,7 +263,7 @@ it("runs the named session search scenarios in an isolated HOME", () => {
     bundleHash: createHash("sha256").update(readFileSync(join(repo, ".pi/extensions/introspection/dist/index.js"))).digest("hex"),
     repeat: "nub run build && nub run verify:phase native-tool-discovery",
     input: "synthetic transcripts and a scripted provider in fixtures/search-workflow.ts",
-    expected: "all named public-workflow scenarios pass, including model-visible truncation",
+    expected: "all named public-workflow scenarios pass, including session IDs, read modes, field filters, timing, privacy boundaries, and bounded JSON",
     actual: "", verdict: "failed",
   };
   try {

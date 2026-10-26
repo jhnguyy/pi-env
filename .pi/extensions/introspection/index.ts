@@ -3,20 +3,12 @@ import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead } from "
 import { Type } from "typebox";
 
 import * as ContractTools from "../_shared/register-contract-tool";
+import { registerPublicTool, renderCompactToolCall, renderTextToolResult } from "../_shared/tool-render";
+import { executeReadSession, READ_OUTPUT_SCHEMA, READ_SCHEMA } from "./read";
 import {
-  registerPublicTool,
-  renderCompactToolCall,
-  renderTextToolResult,
-} from "../_shared/tool-render";
-import {
-  DEFAULT_SESSION_DIR,
   SESSION_SEARCH_LIMIT,
-  assertUnderSessionDir,
   formatDigestList,
-  formatSessionView,
-  inspectLines,
   listSessionDigests,
-  readSessionFile,
   searchSessionMessages,
 } from "./sessions";
 
@@ -26,85 +18,27 @@ const LIST_SCHEMA = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Maximum sessions to return, 1-100. Defaults to 20." })),
 });
 
-const READ_SCHEMA = Type.Object({
-  path: Type.String({ description: `Absolute path to a session .jsonl file under ${DEFAULT_SESSION_DIR}/.` }),
-});
-
 const SEARCH_SCHEMA = Type.Object({
   term: Type.String({ minLength: 1, maxLength: 200, description: "Literal word or phrase to find. Case-insensitive, not a regex." }),
   cwd: LIST_SCHEMA.properties.cwd,
 });
 
 type ListSessionsParams = { cwd?: string; query?: string; limit?: number };
-type ReadSessionParams = { path: string };
-
-type ToolTextResult<TDetails extends Record<string, unknown>> = {
-  content: Array<{ type: "text"; text: string }>;
-  details: TDetails;
-};
 
 function truncatedText(raw: string): { text: string; truncated: boolean } {
   const trunc = truncateHead(raw, { maxBytes: DEFAULT_MAX_BYTES, maxLines: DEFAULT_MAX_LINES });
   let text = trunc.content;
-  if (trunc.truncated) {
-    text += `\n\n[Output truncated: ${formatSize(trunc.outputBytes)} of ${formatSize(trunc.totalBytes)}.]`;
-  }
+  if (trunc.truncated) text += `\n\n[Output truncated: ${formatSize(trunc.outputBytes)} of ${formatSize(trunc.totalBytes)}.]`;
   return { text, truncated: trunc.truncated };
 }
 
-function readSessionView(path: string) {
-  const file = assertUnderSessionDir(path);
-  const { lines, bytes } = readSessionFile(file);
-  return inspectLines(lines, file, bytes);
-}
-
-function executeListSessions(
-  params: ListSessionsParams,
-  signal?: AbortSignal,
-): ToolTextResult<{ count: number; truncated: boolean; cancelled: boolean }> {
+function executeListSessions(params: ListSessionsParams, signal?: AbortSignal) {
   if (signal?.aborted) {
-    return { content: [{ type: "text", text: "Cancelled." }], details: { count: 0, truncated: false, cancelled: true } };
+    return { content: [{ type: "text" as const, text: "Cancelled." }], details: { count: 0, truncated: false, cancelled: true } };
   }
   const sessions = listSessionDigests({ cwd: params.cwd, query: params.query, limit: params.limit });
   const { text, truncated } = truncatedText(formatDigestList(sessions));
-  return {
-    content: [{ type: "text", text }],
-    details: { count: sessions.length, truncated, cancelled: false },
-  };
-}
-
-function executeReadSession(
-  params: ReadSessionParams,
-  signal?: AbortSignal,
-): ToolTextResult<{
-  file: string;
-  cwd: string;
-  timestamp: string;
-  userTurns: number;
-  toolErrors: number;
-  truncated: boolean;
-  cancelled: boolean;
-}> {
-  if (signal?.aborted) {
-    return {
-      content: [{ type: "text", text: "Cancelled." }],
-      details: { file: "", cwd: "", timestamp: "", userTurns: 0, toolErrors: 0, truncated: false, cancelled: true },
-    };
-  }
-  const view = readSessionView(params.path);
-  const { text, truncated } = truncatedText(formatSessionView(view));
-  return {
-    content: [{ type: "text", text }],
-    details: {
-      file: view.file,
-      cwd: view.cwd ?? "",
-      timestamp: view.timestamp,
-      userTurns: view.userTurns,
-      toolErrors: view.toolErrors,
-      truncated,
-      cancelled: false,
-    },
-  };
+  return { content: [{ type: "text" as const, text }], details: { count: sessions.length, truncated, cancelled: false } };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -113,7 +47,7 @@ export default function (pi: ExtensionAPI) {
       name: "search_sessions",
       label: "Search Sessions",
       description:
-        `Search local pi session user and assistant text, including nested sessions and alternate branches. Read-only. Returns at most ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool output, thinking, and summaries. Use list_sessions for metadata navigation and read_session for a sparse session view.`,
+        `Search local pi session user and assistant text, including nested sessions and alternate branches. Read-only. Returns at most ${SESSION_SEARCH_LIMIT} snippets with file paths and entry IDs, newest files first. Excludes tool-call names and arguments, tool output, thinking, and summaries. Finds mentions, not invocations. Use read_session with mode usage for recorded calls and skill-loading evidence. Use list_sessions for metadata navigation.`,
       parameters: SEARCH_SCHEMA,
       async execute(params, { signal }) {
         const result = await searchSessionMessages({ term: params.term, cwd: params.cwd, signal });
@@ -128,8 +62,7 @@ export default function (pi: ExtensionAPI) {
       exposure: "deferred",
       namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
       renderCall: (params, theme) => renderCompactToolCall("search_sessions", params.term, theme),
-      renderResult: (result, options, theme, context) =>
-        renderTextToolResult("search_sessions", result, options, theme, context),
+      renderResult: (result, options, theme, context) => renderTextToolResult("search_sessions", result, options, theme, context),
     },
   });
 
@@ -139,15 +72,11 @@ export default function (pi: ExtensionAPI) {
     exposure: "deferred",
     namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
-      "List pi sessions as compact navigation digests before selecting one for read_session. Returns cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
+      "List pi sessions as compact navigation digests before selecting one for read_session. Returns session IDs, cwd, timestamp, first prompt, counts, error counts, labels, branch/compaction markers, and file paths without raw JSONL or tool output.",
     parameters: LIST_SCHEMA,
-    async execute(_id, params, signal) {
-      return executeListSessions(params, signal);
-    },
-    renderCall: (params, theme) =>
-      renderCompactToolCall("list_sessions", params.query ?? params.cwd, theme),
-    renderResult: (result, options, theme, context) =>
-      renderTextToolResult("list_sessions", result, options, theme, context),
+    async execute(_id, params, signal) { return executeListSessions(params, signal); },
+    renderCall: (params, theme) => renderCompactToolCall("list_sessions", params.query ?? params.cwd, theme),
+    renderResult: (result, options, theme, context) => renderTextToolResult("list_sessions", result, options, theme, context),
   });
 
   registerPublicTool(pi, {
@@ -156,21 +85,18 @@ export default function (pi: ExtensionAPI) {
     exposure: "deferred",
     namespace: { name: "pi-env", description: "Local analysis, session, web, and issue tools" },
     description:
-      "Read a session path selected with list_sessions as a sparse navigation view. Default output includes metadata, user prompts, tool error summaries, labels, branch summaries, and compactions; it excludes raw tool outputs and full assistant narrative.",
+      'Read one local Pi session by exact sessionId or path from list_sessions. Read-only. Default basic returns metadata and tool/skill count dictionaries. mode detailed adds sparse navigation and call evidence with recorded timestamps, durations, outcomes, and nested-call markers. mode usage returns only usage dictionaries and evidence. Use fields for specific checks, such as {"sessionId":"...","fields":["tools"]}. Tool, skill, and argument filters combine with AND and affect only usage evidence. Counts cover all matching records in that file, including stored alternate branches, not child session files. References are bounded by limit and output budget. Raw arguments, tool output, thinking, and full assistant prose are excluded. Error navigation returns tool names and line references, not error output. Missing timing is omitted, not estimated. Timestamps identify the containing message entry, not exact execution start times. Skill reads mean successful read calls to SKILL.md, keyed by parent directory. Skill envelopes are user text shaped like Pi\'s /skill: expansion, not proof of command invocation. Neither proves skill compliance. incompleteNestedRecords flags known gaps in retained nested calls. Use search_sessions for text mentions.',
     parameters: READ_SCHEMA,
-    async execute(_id, params, signal) {
-      return executeReadSession(params, signal);
-    },
-    renderCall: (params, theme) => renderCompactToolCall("read_session", params.path, theme),
-    renderResult: (result, options, theme, context) =>
-      renderTextToolResult("read_session", result, options, theme, context),
+    outputSchema: READ_OUTPUT_SCHEMA,
+    async execute(_id, params, signal) { return executeReadSession(params, signal); },
+    renderCall: (params, theme) => renderCompactToolCall("read_session", `${params.sessionId ?? params.path ?? ""} ${params.mode ?? "basic"}`, theme),
+    renderResult: (result, options, theme, context) => renderTextToolResult("read_session", result, options, theme, context),
   });
 
   pi.registerCommand("sessions", {
     description: "List recent pi sessions as compact navigation digests",
     handler: async (args, ctx) => {
-      const query = args.trim() || undefined;
-      const { content } = executeListSessions({ query, limit: 20 });
+      const { content } = executeListSessions({ query: args.trim() || undefined, limit: 20 });
       ctx.ui.notify(content[0]?.text ?? "No matching pi sessions found.", "info");
     },
   });

@@ -69,6 +69,7 @@ interface TextBlock {
 
 interface SessionEntry {
   type: string;
+  timestamp?: string;
   id?: string;
   parentId?: string | null;
   targetId?: string;
@@ -117,6 +118,7 @@ function parseLine(line: string): SessionEntry | undefined {
 }
 
 interface DigestState {
+  timestamp?: string;
   sessionId?: string;
   cwd?: string;
   name?: string;
@@ -159,6 +161,7 @@ function applyEntryToDigest(entry: SessionEntry, state: DigestState): void {
   switch (entry.type) {
     case SessionEntryType.Session:
       state.sessionId = entry.id;
+      state.timestamp = entry.timestamp;
       state.cwd = entry.cwd;
       break;
     case SessionEntryType.SessionInfo:
@@ -210,7 +213,7 @@ function digestLines(lines: string[], file: string, bytes = 0): SessionDigest {
     file,
     sessionId: state.sessionId,
     cwd: state.cwd,
-    timestamp,
+    timestamp: state.timestamp ?? timestamp,
     name: state.name,
     firstUserPrompt: state.firstUserPrompt,
     lastUserPrompt: state.lastUserPrompt,
@@ -280,7 +283,7 @@ export function readSessionFile(path: string): { lines: string[]; bytes: number 
   if (!file.endsWith(".jsonl")) throw new Error(`Expected a .jsonl file, got: ${file}`);
   if (!existsSync(file)) throw new Error(`Session file not found: ${file}`);
   const raw = readFileSync(file, "utf8");
-  return { lines: raw.trim().split("\n").filter(Boolean), bytes: Buffer.byteLength(raw) };
+  return { lines: raw.split("\n"), bytes: Buffer.byteLength(raw) };
 }
 
 export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION_DIR): string {
@@ -293,7 +296,7 @@ export function assertUnderSessionDir(path: string, sessionDir = DEFAULT_SESSION
   return file;
 }
 
-function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
+export function listSessionFiles(sessionDir = DEFAULT_SESSION_DIR): string[] {
   const root = resolve(sessionDir);
   if (!existsSync(root)) return [];
   const out: string[] = [];
@@ -453,6 +456,7 @@ function formatDigest(s: SessionDigest, index: number): string {
 
   return new MarkdownBuilder()
     .line(`${index + 1}. ${title}`)
+    .line(`   id: ${s.sessionId ?? "unknown"}`)
     .line(`   ${s.cwd ? `cwd: ${s.cwd}` : "cwd: unknown"}`)
     .line(`   ${counts}${markers ? `; ${markers}` : ""}`)
     .line(`   ${s.firstUserPrompt ? `first: ${s.firstUserPrompt}` : "first: (none)"}`)
