@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(git rev-parse --show-toplevel)"
 RUNTIME="${TRIVY_RUNTIME:-auto}"
 IMAGE="${TRIVY_IMAGE:-aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f}"
 CACHE_DIR="${TRIVY_CACHE_DIR:-${TMPDIR:-/tmp}/pi-env-trivy-cache}"
@@ -41,8 +41,8 @@ fi
 SCAN_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/pi-env-trivy.XXXXXXXX")"
 trap 'rm -rf -- "$SCAN_TEMP"' EXIT
 SCAN_ROOT="$SCAN_TEMP/source"
-bash "$SCRIPT_DIR/trivy-snapshot.sh" "$SCAN_ROOT"
-mkdir -p "$CACHE_DIR"
+mkdir -p "$SCAN_ROOT" "$CACHE_DIR"
+git -C "$ROOT" archive --format=tar HEAD | tar -xf - -C "$SCAN_ROOT"
 
 trivy_args=(
   fs
