@@ -20,7 +20,7 @@ Keep exact quotations, identifiers, commands, paths, and machine syntax unchange
 3. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Link to authoritative sources for depth rather than duplicating their specifications.
 4. Give each sentence one main idea. Split long or nested sentences.
 5. Prefer active voice, concrete verbs, and explicit actors when the actor is useful.
-6. Use one term for each item or concept. Preserve project and subject-field terminology.
+6. Use one term for each item or concept. Check domain terms against the sources described in the technical-writing reference.
 7. Put conditions before dependent actions or results.
 8. Use lists for steps, alternatives, or complex information.
 9. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.

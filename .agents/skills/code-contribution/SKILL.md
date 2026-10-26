@@ -16,23 +16,23 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 ## Inspect Before Implementing
 
-- Inspect existing owners, callers, nearby tests, and conventions before selecting an implementation.
+- Identify the module, service, or dependency responsible for the affected behavior. Inspect its callers, nearby tests, and conventions before selecting an implementation.
 - Before adding a responsibility or changing a boundary, explore prior art in the affected area, shared modules, and relevant installed dependencies. Find candidate owners and established approaches.
 - Compare candidate inputs, outputs, authority, lifecycle, and failure behavior. Establish equivalent contracts from behavior rather than similar names or shapes.
 - Choose direct reuse, extension of an existing owner, or a separate owner. Record the considered owners and contract difference when the decision affects review.
 
 ## Design the Change
 
-- Make the smallest change that solves the problem. Prefer a small conceptual surface over a small line count. Give each concept one owner and one stable term.
+- Make the smallest change that solves the problem. Prefer fewer concepts over fewer lines. Give each concept one owner and one stable term.
 - Choose data structures before writing logic. Trace the main access patterns and state transitions. Define types and ownership so callers can use the capability without special-case coordination.
 - Before sharing mutable state, examine how concurrent changes affect each actor. Isolate state when sharing is unnecessary.
 - Remove obsolete paths, redundant checks, and duplicated decisions within the contribution’s scope before adding new mechanisms. Preserve checks that enforce current boundary contracts.
 - Use narrow interfaces that hide internal sequencing and data. Keep authority and data flow explicit.
-- Keep deterministic transforms plain, and put IO, cancellation, resources, and operational failure behind clear boundaries.
-- Parse weak or untrusted inputs into invariant-preserving domain values before the workflow causes effects. Preserve established information through downstream operations.
+- Keep deterministic data transformations simple. Put IO, cancellation, resource management, and operational failures behind explicit boundaries.
+- Parse weakly constrained or untrusted inputs into domain values that preserve required invariants before using them to change state or cause external effects. Preserve established invariants and information through later operations.
 - Bound work before allocation. Prefer simple representations, one-pass data flow, and reuse of values derived from immutable inputs.
-- Base structural changes, including new interfaces, services, layers, or helpers, on current ownership, lifecycle, protocol, substitution, workflow, maintenance, or test-leverage needs.
-- Keep cohesive workflows together. Prefer designs that make invalid states harder to express and preserve a direct rollback or deletion path.
+- Add or change interfaces, services, layers, or helpers to meet a current need. Identify the responsibility, resource lifecycle, protocol, replaceable dependency, workflow, maintenance task, or test that requires the change.
+- Keep each workflow’s related operations together. Prefer designs that make invalid states harder to express. Keep changes easy to roll back or remove.
 - Use measured end-to-end behavior as the authority for performance changes.
 
 ## Isolate the Work
@@ -46,7 +46,7 @@ Follow repository policy for branch names, base synchronization, worktree placem
 - Run focused checks while implementing. Use failures to revise the implementation or its assumptions.
 - When repeated fixes fail the same check, evaluate their shared premise before another implementation. Choose a check that could contradict the premise. Use the result to revise the approach.
 - Add tests when the outcome, a known regression, or a material risk requires new evidence. Reuse existing coverage when it already proves the required behavior.
-- Follow specialized testing practice and repository validation policy. Run the required integration portfolio before review or integration.
+- Follow specialized testing practice and repository validation policy. Run the required repository checks before review or merge.
 - Broaden or repeat checks only when new changes, failures, unresolved concerns, or repository policy justify more evidence.
 
 ## Commit and Publish

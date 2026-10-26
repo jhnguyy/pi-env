@@ -1,7 +1,8 @@
 ## Vocabulary and terminology
 
 - Prefer common, familiar words. Use each word with one meaning and one part of speech in a given context.
-- Use the approved terminology for the project, company, industry, or subject field.
+- Ground terminology in the domain’s authoritative sources, such as requirements, code, APIs, standards, and operator procedures. Check what each term names before using it.
+- Preserve established domain terms when they carry precise meaning. Explain unfamiliar terms for the intended reader. When no established term fits, describe the specific behavior or responsibility in plain language.
 - Treat a technical noun as the name of a defined item or concept. Treat a technical verb as the name of a defined action or process.
 - Do not use a technical noun as a verb or a technical verb as a noun.
 - Use one technical term for each item or concept. Do not introduce synonyms for variation.
@@ -91,5 +92,5 @@ A summary cannot validate words against the ASD-STE100 dictionary. Do not claim 
 4. Remove unnecessary synonyms, jargon, filler, and figurative language.
 5. Resolve ambiguous pronouns and prepositional phrases.
 6. Split long sentences and dense paragraphs.
-7. Confirm that terminology, facts, scope, and uncertainty did not change.
+7. Check domain terms against their authoritative sources. Confirm that revisions preserve facts, scope, uncertainty, and technical meaning.
 8. Confirm that exact machine text remains exact.
