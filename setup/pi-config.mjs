@@ -1,95 +1,89 @@
-import { lstatSync, mkdirSync, readlinkSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { ok, section, skip } from "./runtime-support.mjs";
 import {
-  fileEffect,
-  linkPathEffect,
-  linked,
-  managedBlockEffect,
-  pathExistsOrIsSymlink,
+  managedFileEffect,
+  removeEmptyDirectoryEffect,
+  removeOwnedLinkEffect,
 } from "./file-ops.mjs";
+import { changed, displayPath, ok, section } from "./report.mjs";
 
-function removeLegacyRolesLinkEffect(ctx) {
-  const source = join(ctx.repo, ".agents/roles");
-  const target = join(ctx.agentsDir, "roles");
-  return fileEffect("remove obsolete roles link", target, () => {
-    if (!pathExistsOrIsSymlink(target)) return;
-    if (!lstatSync(target).isSymbolicLink() || readlinkSync(target) !== source) {
-      skip("~/.agents/roles");
-      return;
-    }
-    unlinkSync(target);
-    linked("~/.agents/roles (obsolete link removed)");
-  });
+const ManagedFiles = Object.freeze([
+  {
+    path: "APPEND_SYSTEM.md",
+    blocks: [
+      { name: "append-system", source: ".pi/agent/APPEND_SYSTEM.md" },
+      { name: "correspondence", source: "setup/templates/correspondence.md" },
+    ],
+  },
+  {
+    path: "AGENTS.md",
+    blocks: [{ name: "agent-guidelines", source: "setup/templates/AGENTS.md" }],
+  },
+]);
+
+// Earlier setup versions created these paths. Entries without a source are directories.
+function obsoletePaths(ctx) {
+  const testLinks = join(ctx.agentDir, "extensions/__tests__");
+  return [
+    { target: join(ctx.agentsDir, "roles"), source: ".agents/roles" },
+    { target: join(testLinks, "loader.test.ts"), source: ".pi/extensions/__tests__/loader.test.ts" },
+    { target: join(testLinks, "test-utils.ts"), source: ".pi/extensions/__tests__/test-utils.ts" },
+    { target: testLinks },
+  ];
+}
+
+function checkoutPaths(ctx, relativePath) {
+  return [join(ctx.repo, relativePath), join(ctx.sourceRoot, relativePath)];
 }
 
 export function configurePiEffect(ctx) {
   return Effect.gen(function* () {
     section("Pi");
     yield* registerSettingsEffect(ctx);
-    yield* removeLegacyRolesLinkEffect(ctx);
-    yield* fileEffect("create directory", ctx.testUtilsDir, () =>
-      mkdirSync(ctx.testUtilsDir, { recursive: true }),
-    );
-    yield* linkPathEffect(
-      join(ctx.repo, ".pi/extensions/__tests__/loader.test.ts"),
-      join(ctx.testUtilsDir, "loader.test.ts"),
-      "~/.pi/agent/extensions/__tests__/loader.test.ts",
-    );
-    yield* managedBlockEffect(
-      ctx.appendSrc,
-      ctx.appendDst,
-      "<!-- pi-env:append-system:start -->",
-      "<!-- pi-env:append-system:end -->",
-      "~/.pi/agent/APPEND_SYSTEM.md",
-    );
-    yield* managedBlockEffect(
-      join(ctx.setupDir, "templates/correspondence.md"),
-      ctx.appendDst,
-      "<!-- pi-env:correspondence:start -->",
-      "<!-- pi-env:correspondence:end -->",
-      "~/.pi/agent/APPEND_SYSTEM.md",
-    );
-    yield* managedBlockEffect(
-      join(ctx.setupDir, "templates/AGENTS.md"),
-      join(ctx.piAgentDir, "AGENTS.md"),
-      "<!-- pi-env:agent-guidelines:start -->",
-      "<!-- pi-env:agent-guidelines:end -->",
-      "~/.pi/agent/AGENTS.md",
-    );
+    for (const { path, blocks } of ManagedFiles) {
+      const target = join(ctx.agentDir, path);
+      yield* managedFileEffect(
+        target,
+        blocks.map(({ name, source }) => ({ name, source: join(ctx.sourceRoot, source) })),
+        displayPath(target, ctx.home),
+      );
+    }
+    for (const { target, source } of obsoletePaths(ctx)) {
+      const label = displayPath(target, ctx.home);
+      yield* source
+        ? removeOwnedLinkEffect(checkoutPaths(ctx, source), target, label)
+        : removeEmptyDirectoryEffect(target, label);
+    }
   });
 }
 
 function registerSettingsEffect(ctx) {
-  return Effect.try({
-    try: () => {
-      const commandResult = ctx.run(
-        ctx.setupNodeBin,
-        [
-          "setup/apply-managed-settings.mjs",
-          ctx.settingsFile,
-          ctx.repo,
-          ...(ctx.env.PI_ENV_RESET_SETTINGS === "1" ? ["--reset"] : []),
-        ],
-        { cwd: ctx.repo },
-      );
-      if (commandResult.stderr.trim()) console.error(commandResult.stderr.trim());
-      const result = commandResult.stdout.trim();
-      switch (result) {
-        case "unchanged":
-          ok("settings and package registration");
-          break;
-        case "created":
-          linked("settings.json created with baseline and package registration");
-          break;
-        case "updated":
-          linked("settings package registration updated");
-          break;
-        default:
-          if (result) console.log(result);
-      }
-    },
-    catch: (error) => error,
+  return Effect.gen(function* () {
+    const settingsFile = join(ctx.agentDir, "settings.json");
+    const commandResult = yield* ctx.command(
+      ctx.setupNodeBin,
+      [
+        "setup/apply-managed-settings.mjs",
+        settingsFile,
+        ctx.repo,
+        ...(ctx.env.PI_ENV_RESET_SETTINGS === "1" ? ["--reset"] : []),
+      ],
+      { cwd: ctx.sourceRoot },
+    );
+    if (commandResult.stderr.trim()) console.error(commandResult.stderr.trim());
+    const result = commandResult.stdout.trim();
+    switch (result) {
+      case "unchanged":
+        ok("settings and package registration");
+        break;
+      case "created":
+        changed("settings.json created with baseline and package registration");
+        break;
+      case "updated":
+        changed("settings package registration updated");
+        break;
+      default:
+        if (result) console.log(result);
+    }
   });
 }

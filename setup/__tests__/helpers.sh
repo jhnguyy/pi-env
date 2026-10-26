@@ -58,3 +58,11 @@ make_executable() {
   printf '%s\n' "$body" > "$path"
   chmod +x "$path"
 }
+
+# Run a setup/configure.mjs command against an isolated home. Prefix scenario variables.
+run_configure() {
+  local command="$1" repo="$2" home="$3" node
+  node=$(node_bin)
+  HOME="$home" REPO="$repo" PI_AGENT_DIR="$home/.pi/agent" PI_CODING_AGENT_DIR="$home/.pi/agent" \
+    "$node" "$ROOT/setup/configure.mjs" "$command" "$node"
+}

@@ -5,21 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 configure_repo_tools_env() {
-  local repo="$1" home="$2"
-  REPO="$repo" \
-  SETUP_DIR="$ROOT/setup" \
-  SETTINGS_FILE="$home/settings.json" \
-  AGENTS_DIR="$home/.agents" \
-  TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
-  APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_DST="$home/.pi/agent/APPEND_SYSTEM.md" \
-  PI_AGENT_DIR="$home/.pi/agent" \
-  TMUX_CONF="$home/.tmux.conf" \
-  TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \
-  GHOSTTY_CONFIG_DIR="$home/.config/ghostty" \
-  POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
-  PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
-  run_node "$ROOT/setup/configure.mjs" repo-tools "$(node_bin)"
+  run_configure repo-tools "$1" "$2"
 }
 
 new_repo() {

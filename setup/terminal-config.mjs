@@ -1,15 +1,16 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
-import { ok, section, skip } from "./runtime-support.mjs";
-import { fileEffect, linkPathEffect, linked } from "./file-ops.mjs";
+import { fileEffect, linkPathEffect } from "./file-ops.mjs";
+import { changed, displayPath, note, ok, section } from "./report.mjs";
+
+const GhosttyThemes = Object.freeze(["pi-env-gruvbox-dark", "pi-env-gruvbox-light"]);
 
 export function configureTerminalToolsEffect(ctx, policy) {
   return Effect.gen(function* () {
     section("Terminal tools");
     if (!policy.terminal.enabled) {
-      skip("terminal tools (disabled by setup option)");
+      note("terminal tools (disabled by setup option)");
       return;
     }
     yield* configureTmuxEffect(ctx, policy);
@@ -18,42 +19,44 @@ export function configureTerminalToolsEffect(ctx, policy) {
 }
 
 function configureTmuxEffect(ctx, policy) {
-  return fileEffect("configure tmux", ctx.tmuxConf, () => {
+  const tmuxConf = join(ctx.home, ".tmux.conf");
+  const sourceLine = `source-file ${join(ctx.sourceRoot, "setup/templates/tmux.conf")}`;
+  return fileEffect("configure tmux", tmuxConf, () => {
     if (!policy.terminal.tmux.configure) {
-      skip("tmux config (managed externally)");
+      note("tmux config (managed externally)");
       return;
     }
-    if (
-      existsSync(ctx.tmuxConf) &&
-      readFileSync(ctx.tmuxConf, "utf8").includes(ctx.tmuxSourceLine)
-    ) {
+    if (existsSync(tmuxConf) && readFileSync(tmuxConf, "utf8").includes(sourceLine)) {
       ok("tmux-gruvbox.conf sourced from ~/.tmux.conf");
-    } else if (existsSync(ctx.tmuxConf)) {
-      appendFileSync(ctx.tmuxConf, `\n${ctx.tmuxSourceLine}\n`);
-      linked("tmux-gruvbox.conf appended to ~/.tmux.conf");
+    } else if (existsSync(tmuxConf)) {
+      appendFileSync(tmuxConf, `\n${sourceLine}\n`);
+      changed("tmux-gruvbox.conf appended to ~/.tmux.conf");
     } else {
-      writeFileSync(ctx.tmuxConf, `${ctx.tmuxSourceLine}\n`);
-      linked("tmux-gruvbox.conf → new ~/.tmux.conf");
+      writeFileSync(tmuxConf, `${sourceLine}\n`);
+      changed("tmux-gruvbox.conf → new ~/.tmux.conf");
     }
   });
 }
 
 function configureGhosttyEffect(ctx, policy) {
+  const { ghostty } = policy.terminal;
+  const configDir = ctx.ghosttyConfigDir;
+  const configLabel = displayPath(configDir, ctx.home);
+  const themesDir = join(ctx.xdgConfigHome, "ghostty/themes");
   return Effect.gen(function* () {
-    if (!policy.terminal.ghostty.configure) {
-      skip(`${ctx.ghosttyConfigDir} (managed externally)`);
+    if (!ghostty.configure) {
+      note(`${configLabel} (managed externally)`);
       return;
     }
-    if (ctx.env.SHOULD_LINK_GHOSTTY !== "1") {
-      skip(
-        `${ctx.ghosttyConfigDir} (not needed for ${ctx.env.CONTEXT_LABEL ?? "this context"}; set PI_ENV_LINK_GHOSTTY=1 to force)`,
+    if (!ghostty.needed) {
+      note(
+        `${configLabel} (not needed for ${ghostty.context}; set PI_ENV_LINK_GHOSTTY=1 to force)`,
       );
       return;
     }
-    const themesDir = join(ctx.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "ghostty", "themes");
     const canCreate = yield* Effect.sync(() => {
       try {
-        mkdirSync(ctx.ghosttyConfigDir, { recursive: true });
+        mkdirSync(configDir, { recursive: true });
         mkdirSync(themesDir, { recursive: true });
         return true;
       } catch {
@@ -61,23 +64,18 @@ function configureGhosttyEffect(ctx, policy) {
       }
     });
     if (!canCreate) {
-      skip(`${ctx.ghosttyConfigDir} (cannot create)`);
+      note(`${configLabel} (cannot create)`);
       return;
     }
-    yield* linkPathEffect(
-      join(ctx.repo, "ghostty/config"),
-      join(ctx.ghosttyConfigDir, "config"),
-      join(ctx.ghosttyConfigDir, "config"),
-    );
-    yield* linkPathEffect(
-      join(ctx.repo, "ghostty/themes/pi-env-gruvbox-dark"),
-      join(themesDir, "pi-env-gruvbox-dark"),
-      join(themesDir, "pi-env-gruvbox-dark"),
-    );
-    yield* linkPathEffect(
-      join(ctx.repo, "ghostty/themes/pi-env-gruvbox-light"),
-      join(themesDir, "pi-env-gruvbox-light"),
-      join(themesDir, "pi-env-gruvbox-light"),
-    );
+    const links = [
+      { source: join(ctx.sourceRoot, "ghostty/config"), target: join(configDir, "config") },
+      ...GhosttyThemes.map((theme) => ({
+        source: join(ctx.sourceRoot, "ghostty/themes", theme),
+        target: join(themesDir, theme),
+      })),
+    ];
+    for (const { source, target } of links) {
+      yield* linkPathEffect(source, target, displayPath(target, ctx.home));
+    }
   });
 }

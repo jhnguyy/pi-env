@@ -3,19 +3,7 @@ setup_run_configure() {
   local setup_node_bin
   setup_node_bin=$(resolve_setup_node_bin)
   REPO="$REPO" \
-  SETUP_DIR="$SETUP_DIR" \
-  PI_AGENT_DIR="$PI_AGENT_DIR" \
-  AGENTS_DIR="$AGENTS_DIR" \
-  SETTINGS_FILE="$SETTINGS_FILE" \
-  PI_BIN_DIR="$PI_BIN_DIR" \
-  TMUX_CONF="$TMUX_CONF" \
-  TMUX_SOURCE_LINE="$TMUX_SOURCE_LINE" \
-  GHOSTTY_CONFIG_DIR="$GHOSTTY_CONFIG_DIR" \
-  APPEND_SRC="$APPEND_SRC" \
-  APPEND_DST="$APPEND_DST" \
-  TEST_UTILS_DIR="$TEST_UTILS_DIR" \
-  POST_MERGE_HOOK_SRC="$POST_MERGE_HOOK_SRC" \
-  PRE_COMMIT_HOOK_SRC="$PRE_COMMIT_HOOK_SRC" \
+  PI_CODING_AGENT_DIR="$PI_AGENT_DIR" \
   SHOULD_LINK_GHOSTTY="${should_link_ghostty:-0}" \
   CONTEXT_LABEL="${context_label:-}" \
   PI_ENV_HOME_MANAGER_OUTCOME_FILE="${home_manager_outcome_file:-}" \

@@ -35,8 +35,8 @@ printf '%s\n' '{"defaultThinkingLevel":"high"}' > "$HOME/.pi/agent/settings.json
 cp "$HOME/.pi/agent/settings.json" "$EVIDENCE/unselected-settings.json"
 phase='native agent-directory selection'
 setup_init_context "$ROOT/setup"
-assert_eq "$SETTINGS_FILE" "$PI_CODING_AGENT_DIR/settings.json" 'base settings use native agent directory'
-export REPO SETUP_DIR SETTINGS_FILE AGENTS_DIR TEST_UTILS_DIR APPEND_SRC APPEND_DST PI_AGENT_DIR TMUX_CONF TMUX_SOURCE_LINE GHOSTTY_CONFIG_DIR POST_MERGE_HOOK_SRC PRE_COMMIT_HOOK_SRC
+assert_eq "$PI_AGENT_DIR" "$PI_CODING_AGENT_DIR" 'setup uses the native agent directory'
+export REPO SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
 export PI_ENV_SETUP_MODE=portable PI_ENV_SKIP_TERMINAL=1 PI_ENV_SKIP_REPO_HOOKS=1 PI_ENV_SKIP_HOME_MANAGER=1
 configure() {
   setup_parse_args "$@" --no-terminal --no-repo-hooks --no-home-manager

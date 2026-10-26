@@ -11,19 +11,6 @@ export function mustEnv(name) {
   return value;
 }
 
-export function section(title) {
-  console.log(`\n${title}`);
-  console.log('-'.repeat(title.length));
-}
-
-export function ok(message) {
-  console.log(`  ✓  ${message}`);
-}
-
-export function skip(message) {
-  console.log(`  —  ${message} already exists locally. Skip.`);
-}
-
 export function fail(message, exitCode = 1) {
   console.error(message);
   process.exit(exitCode);

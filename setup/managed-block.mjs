@@ -21,3 +21,19 @@ export function reconcileManagedBlock(current, managed, startMarker, endMarker) 
 
   return `${current.slice(0, start)}${block}${current.slice(end + endMarker.length)}`;
 }
+
+export function reconcileNamedBlocks(current, blocks) {
+  const changed = [];
+  let next = current;
+  for (const { name, body } of blocks) {
+    const reconciled = reconcileManagedBlock(
+      next,
+      body,
+      `<!-- pi-env:${name}:start -->`,
+      `<!-- pi-env:${name}:end -->`,
+    );
+    if (reconciled !== next) changed.push(name);
+    next = reconciled;
+  }
+  return { next, changed };
+}
