@@ -1,31 +1,30 @@
 ---
 name: communication-guidelines
-description: Drafts, rewrites, and reviews substantial human-facing prose under the pi-env ASD-STE100-based house style. Use for correspondence, documentation, code comments, authored log messages, review feedback, commit messages, pull-request text, or difficult style decisions. Routine short replies use the compressed global baseline.
+description: Drafts, rewrites, and reviews substantial human-facing prose for usefulness, accuracy, clarity, and reader effort. Use for correspondence, documentation, code comments, authored log messages, review feedback, commit messages, pull-request text, or difficult style decisions. Routine short replies use the compressed global baseline.
 ---
 
 # Communication Guidelines
 
-## Rule
+## Core values
 
-Use the core principles of ASD-STE100 Simplified Technical English, Issue 9, as the default. This is a house style, not a claim of formal compliance. Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning.
+- Help the reader understand, decide, or act. Choose content, depth, structure, and medium for that outcome.
+- Preserve facts, scope, uncertainty, and technical meaning. Distinguish evidence, inference, proposals, and unresolved questions.
+- Respect the reader's attention, knowledge, and dignity. Minimize total reader effort, not word count. Supply necessary context without condescension or unnecessary blame.
+- Make consequential reasoning and evidence available for assessment. Explain tradeoffs and risks. Make instructions verifiable.
+- Apply style rules and tool suggestions with judgment. Preserve effective wording and natural voice. Change text only when the change serves the reader.
 
-Be direct, specific, and useful. Preserve claims, scope, uncertainty, and technical precision. Remove wording that adds drama, intimacy, authority, or certainty without adding information.
-
-Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text. Apply the house style to the human-readable text around those elements.
+Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning. Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text.
 
 ## Protocol
 
 1. Identify the purpose, reader, assumed knowledge, required facts, and exact text that must not change.
-2. Check the document before editing sentences. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
-3. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Link to authoritative sources for depth rather than duplicating their specifications.
-4. Give each sentence one main idea. Split long or nested sentences and dense paragraphs.
-5. Prefer active voice, concrete verbs, and clear subjects. Replace vague nouns with specific actors, actions, items, or results.
-6. Preserve project terminology.
-7. Put conditions before dependent actions or results.
-8. Use lists for steps, alternatives, or complex information.
-9. Remove filler, vague emphasis, unclear jargon, unnecessary synonyms, and figurative language.
-10. Check pronouns, connectors, and prepositional phrases for more than one possible meaning.
-11. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
+2. Review reasoning and completeness before editing sentences. Resolve contradictions and expose consequential gaps rather than polishing over them. Do not invent facts to make an explanation complete.
+3. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
+4. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Summarize relevant linked context rather than requiring a detour to understand the point.
+5. Give each sentence one main idea. Prefer active voice, concrete verbs, and clear subjects. Name actors when responsibility matters. Preserve project terminology and make references unambiguous.
+6. Put conditions before dependent actions or results. Use lists for steps, alternatives, or complex information.
+7. Remove filler, vague emphasis, unclear jargon, and unnecessary synonyms. Retain examples, repetition, or figurative language when they improve understanding without distorting meaning.
+8. Read for natural phrasing and unnecessary repetition. Read aloud when useful. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
 
 ## References
 
