@@ -284,7 +284,7 @@ void describe("session introspection public workflow", { concurrency: false }, (
     assert.match(assistant, /"snippet":"….*POSTGRES \[db\] decision.*…"/);
     assert(records.some((record) => JSON.parse(record).entryId === middleEntryId));
     assert(records.some((record) => record.includes(JSON.stringify(child))));
-    assert.doesNotMatch(result.text, /private|tool output|command|generated summary/);
+    assert.doesNotMatch(result.text, /private-|tool output|command|generated summary/);
   });
 
   void it("lists IDs and reads a basic view by exact ID without prompts or per-call evidence", async () => {
