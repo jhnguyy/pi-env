@@ -5,22 +5,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 configure_home_manager() {
-  local repo="$1" home="$2"
-  REPO="$repo" \
-  SETUP_DIR="$ROOT/setup" \
-  SETTINGS_FILE="$home/settings.json" \
-  AGENTS_DIR="$home/.agents" \
-  TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
-  APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_DST="$home/.pi/agent/APPEND_SYSTEM.md" \
-  PI_AGENT_DIR="$home/.pi/agent" \
-  TMUX_CONF="$home/.tmux.conf" \
-  TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \
-  GHOSTTY_CONFIG_DIR="$home/.config/ghostty" \
-  POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
-  PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
-  PATH="$STUB_DIR:$PATH" \
-  run_node "$ROOT/setup/configure.mjs" home-manager "$(node_bin)"
+  PATH="$STUB_DIR:$PATH" run_configure home-manager "$1" "$2"
 }
 
 write_lock() {
@@ -162,16 +147,14 @@ test_update_mismatch_fails_before_switch() {
 # Nub install is stubbed; Home Manager supplies Pi through PI_PACKAGE_DIR.
 run_setup_runtime() {
   env PATH="$STUB_DIR:$PATH" ROOT="$ROOT" REPO="$REPO_DIR" TMP="$TMP" \
+    AGENTS_DIR="$TMP/home/.agents" XDG_CONFIG_HOME="$TMP/home/.config" \
+    GHOSTTY_CONFIG_DIR="$TMP/home/.config/ghostty" \
     bash -euo pipefail -c '
       source "$ROOT/setup/lib.sh"
       source "$ROOT/setup/install.sh"
       source "$ROOT/setup/configure.sh"
       SETUP_DIR="$ROOT/setup" PI_BIN_DIR="$TMP/home/.local/bin"
-      PI_AGENT_DIR="$TMP/home/.pi/agent" AGENTS_DIR="$TMP/home/.agents"
-      SETTINGS_FILE="$PI_AGENT_DIR/settings.json" TMUX_CONF="$TMP/home/.tmux.conf"
-      TMUX_SOURCE_LINE=unused GHOSTTY_CONFIG_DIR="$TMP/home/ghostty" APPEND_SRC=unused
-      APPEND_DST=unused APPEND_MARKER=unused TEST_UTILS_DIR=unused
-      POST_MERGE_HOOK_SRC=unused PRE_COMMIT_HOOK_SRC=unused
+      PI_AGENT_DIR="$TMP/home/.pi/agent"
       setup_install_runtime'
 }
 

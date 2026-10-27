@@ -8,21 +8,7 @@ START_MARKER='<!-- pi-env:agent-guidelines:start -->'
 END_MARKER='<!-- pi-env:agent-guidelines:end -->'
 
 configure_pi() {
-  local home="$1"
-  REPO="$ROOT" \
-  SETUP_DIR="$ROOT/setup" \
-  SETTINGS_FILE="$home/.pi/agent/settings.json" \
-  AGENTS_DIR="$home/.agents" \
-  TEST_UTILS_DIR="$home/.pi/agent/extensions/__tests__" \
-  APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_DST="$home/.pi/agent/APPEND_SYSTEM.md" \
-  PI_AGENT_DIR="$home/.pi/agent" \
-  TMUX_CONF="$home/.tmux.conf" \
-  TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \
-  GHOSTTY_CONFIG_DIR="$home/.config/ghostty" \
-  POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
-  PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
-  run_node "$ROOT/setup/configure.mjs" pi "$(node_bin)" >/dev/null
+  run_configure pi "$ROOT" "$1" >/dev/null
 }
 
 assert_managed_content() {
@@ -138,8 +124,44 @@ test_unrelated_roles_link_is_preserved() {
   rm -rf "$tmp"
 }
 
+test_obsolete_test_links_are_removed() {
+  local tmp home links user_links
+  tmp="$(with_temp_dir)"
+  # shellcheck disable=SC2064 # Expand now; the local is gone when the trap runs.
+  trap "rm -rf '$tmp'" EXIT
+  home="$tmp/home"
+  links="$home/.pi/agent/extensions/__tests__"
+  mkdir -p "$links"
+  ln -s "$ROOT/.pi/extensions/__tests__/loader.test.ts" "$links/loader.test.ts"
+  ln -s "$ROOT/.pi/extensions/__tests__/test-utils.ts" "$links/test-utils.ts"
+
+  configure_pi "$home"
+  [ ! -e "$links" ] && [ ! -L "$links" ] || fail "Pi setup must remove its obsolete test links and their empty directory"
+  [ -d "$home/.pi/agent/extensions" ] || fail "Pi setup must keep the extensions directory"
+
+  user_links="$tmp/user-home/.pi/agent/extensions/__tests__"
+  mkdir -p "$user_links"
+  ln -s "$ROOT/.pi/extensions/__tests__/loader.test.ts" "$user_links/loader.test.ts"
+  printf '%s\n' 'user-owned' >"$user_links/test-utils.ts"
+  configure_pi "$tmp/user-home"
+  [ ! -L "$user_links/loader.test.ts" ] || fail "Pi setup must remove its obsolete loader link"
+  assert_file_contains "$user_links/test-utils.ts" 'user-owned'
+
+  # Earlier setup wrote the shell's logical path, so a symlinked checkout must still match.
+  ln -s "$ROOT" "$tmp/checkout-alias"
+  links="$tmp/alias-home/.pi/agent/extensions/__tests__"
+  mkdir -p "$links"
+  ln -s "$tmp/checkout-alias/.pi/extensions/__tests__/loader.test.ts" "$links/loader.test.ts"
+  run_configure pi "$tmp/checkout-alias" "$tmp/alias-home" >/dev/null
+  [ ! -e "$links" ] && [ ! -L "$links" ] || fail "Pi setup must remove obsolete links written through a symlinked checkout"
+
+  rm -rf "$tmp"
+  trap - EXIT
+}
+
 test_agent_guidelines_are_created_from_the_managed_source
 test_agent_guidelines_are_reconciled_idempotently
+test_obsolete_test_links_are_removed
 test_managed_obsolete_roles_link_is_removed
 test_user_owned_roles_file_is_preserved
 test_unrelated_roles_link_is_preserved

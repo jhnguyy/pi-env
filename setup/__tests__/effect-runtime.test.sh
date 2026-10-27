@@ -19,19 +19,10 @@ if [ "$status" -ne 1 ] || [ "$(grep -c '^REPO is required$' "$tmp/missing.err")"
 fi
 
 export REPO="$ROOT"
-export SETUP_DIR="$ROOT/setup"
-export SETTINGS_FILE="$tmp/settings.json"
-export AGENTS_DIR="$tmp/agents"
-export TEST_UTILS_DIR="$tmp/test-utils"
-export APPEND_SRC="$ROOT/AGENTS.md"
-export APPEND_DST="$tmp/APPEND_SYSTEM.md"
-export PI_AGENT_DIR="$tmp/pi-agent"
-export TMUX_CONF="$tmp/tmux.conf"
-export TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf"
-export GHOSTTY_CONFIG_DIR="$tmp/ghostty"
-export XDG_CONFIG_HOME="$tmp/xdg"
-export POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge"
-export PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit"
+export HOME="$tmp/home"
+mkdir -p "$HOME"
+export PI_AGENT_DIR="$tmp/pi-agent" PI_CODING_AGENT_DIR="$tmp/pi-agent"
+export AGENTS_DIR="$HOME/.agents" XDG_CONFIG_HOME="$tmp/xdg" GHOSTTY_CONFIG_DIR="$tmp/xdg/ghostty"
 
 set +e
 "$NODE_BIN" setup/configure.mjs not-a-command >"$tmp/unknown.out" 2>"$tmp/unknown.err"
@@ -69,12 +60,12 @@ if [ "$status" -ne 7 ] || [ "$(grep -c 'node-fails setup/apply-managed-settings.
   exit 1
 fi
 
-printf 'not a directory' >"$tmp/blocked-tmux"
+printf 'not a directory' >"$tmp/blocked-home"
 set +e
-PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0 PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=1 TMUX_CONF="$tmp/blocked-tmux/config" "$NODE_BIN" setup/configure.mjs terminal >"$tmp/fs.out" 2>"$tmp/fs.err"
+HOME="$tmp/blocked-home" PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0 PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=1 "$NODE_BIN" setup/configure.mjs terminal >"$tmp/fs.out" 2>"$tmp/fs.err"
 status=$?
 set -e
-if [ "$status" -ne 1 ] || [ "$(grep -c "configure tmux failed for $tmp/blocked-tmux/config:" "$tmp/fs.err")" -ne 1 ]; then
+if [ "$status" -ne 1 ] || [ "$(grep -c "configure tmux failed for $tmp/blocked-home/.tmux.conf:" "$tmp/fs.err")" -ne 1 ]; then
   echo "FAIL: filesystem errors should render exactly once" >&2
   cat "$tmp/fs.err" >&2
   exit 1

@@ -1,31 +1,10 @@
 #!/usr/bin/env bash
+# Setup's Node steps derive their own paths from REPO, HOME, and the agent directory.
 setup_init_context() {
   SETUP_DIR="$(cd "$1" && pwd)"
   REPO="$(cd "$SETUP_DIR/.." && pwd)"
 
   source "$SETUP_DIR/agent-dir.sh"
   pi_env_resolve_agent_dir || return $?
-  AGENTS_DIR="${AGENTS_DIR:-$HOME/.agents}"
-  SETTINGS_FILE="$PI_AGENT_DIR/settings.json"
-
-  PI_CLI_ROOT="${PI_CLI_ROOT:-$HOME/.local/share/pi-env/pi-cli}"
   PI_BIN_DIR="${PI_BIN_DIR:-$HOME/.local/bin}"
-
-  TMUX_THEME_SRC="$SETUP_DIR/templates/tmux.conf"
-  TMUX_CONF="$HOME/.tmux.conf"
-  TMUX_SOURCE_LINE="source-file $TMUX_THEME_SRC"
-
-  if [ -z "${GHOSTTY_CONFIG_DIR:-}" ]; then
-    case "$(uname -s)" in
-      Darwin) GHOSTTY_CONFIG_DIR="$HOME/Library/Application Support/com.mitchellh.ghostty" ;;
-      *) GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty" ;;
-    esac
-  fi
-
-  APPEND_SRC="$REPO/.pi/agent/APPEND_SYSTEM.md"
-  APPEND_DST="$PI_AGENT_DIR/APPEND_SYSTEM.md"
-
-  TEST_UTILS_DIR="$PI_AGENT_DIR/extensions/__tests__"
-  POST_MERGE_HOOK_SRC="$SETUP_DIR/hooks/post-merge"
-  PRE_COMMIT_HOOK_SRC="$SETUP_DIR/hooks/pre-commit"
 }

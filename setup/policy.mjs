@@ -4,11 +4,6 @@ export const SetupMode = Object.freeze({
   NixManaged: 'nix-managed',
 });
 
-export const Ownership = Object.freeze({
-  Setup: 'setup',
-  External: 'external',
-});
-
 function flag(env, name) {
   return env[name] === '1';
 }
@@ -19,48 +14,33 @@ export function deriveSetupPolicy(env = process.env) {
   const nixManaged = mode === SetupMode.NixManaged || flag(env, 'PI_ENV_CONFIG_MANAGED_BY_NIX');
   const terminalDisabled = flag(env, 'PI_ENV_SKIP_TERMINAL');
   const terminalManagedExternally = nixManaged || terminalDisabled;
-  const cliManagedExternally = flag(env, 'PI_ENV_CLI_MANAGED_BY_NIX');
-  const pathManagedExternally = nixManaged || flag(env, 'PI_ENV_SKIP_PATH_PROFILE');
-  const repoHooksDisabled = flag(env, 'PI_ENV_SKIP_REPO_HOOKS');
-  const homeManagerSyncDisabled = flag(env, 'PI_ENV_SKIP_HOME_MANAGER');
-  const homeManagerUpdateRequested = flag(env, 'PI_ENV_HOME_MANAGER_SYNC');
-  const tmuxManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_TMUX');
-  const ghosttyManagedExternally = terminalManagedExternally || flag(env, 'PI_ENV_SKIP_GHOSTTY');
 
   return Object.freeze({
     mode,
-    nixManaged,
-    pi: Object.freeze({
-      settings: Ownership.Setup,
-      agentFiles: Ownership.Setup,
-    }),
     cli: Object.freeze({
-      owner: cliManagedExternally ? Ownership.External : Ownership.Setup,
-      writeWrapper: !cliManagedExternally,
+      writeWrapper: !flag(env, 'PI_ENV_CLI_MANAGED_BY_NIX'),
     }),
     path: Object.freeze({
-      owner: pathManagedExternally ? Ownership.External : Ownership.Setup,
-      updateShellProfiles: !pathManagedExternally,
+      updateShellProfiles: !nixManaged && !flag(env, 'PI_ENV_SKIP_PATH_PROFILE'),
     }),
     terminal: Object.freeze({
-      owner: terminalManagedExternally ? Ownership.External : Ownership.Setup,
       enabled: !terminalDisabled,
       tmux: Object.freeze({
-        owner: tmuxManagedExternally ? Ownership.External : Ownership.Setup,
-        configure: !tmuxManagedExternally,
+        configure: !terminalManagedExternally && !flag(env, 'PI_ENV_SKIP_TMUX'),
       }),
       ghostty: Object.freeze({
-        owner: ghosttyManagedExternally ? Ownership.External : Ownership.Setup,
-        configure: !ghosttyManagedExternally,
+        configure: !terminalManagedExternally && !flag(env, 'PI_ENV_SKIP_GHOSTTY'),
+        // setup/environment.sh detects whether this host needs Ghostty.
+        needed: flag(env, 'SHOULD_LINK_GHOSTTY'),
+        context: env.CONTEXT_LABEL || 'this context',
       }),
     }),
     repoTools: Object.freeze({
-      owner: repoHooksDisabled ? Ownership.External : Ownership.Setup,
-      installHooks: !repoHooksDisabled,
+      installHooks: !flag(env, 'PI_ENV_SKIP_REPO_HOOKS'),
     }),
     homeManager: Object.freeze({
-      sync: !homeManagerSyncDisabled,
-      update: homeManagerUpdateRequested,
+      sync: !flag(env, 'PI_ENV_SKIP_HOME_MANAGER'),
+      update: flag(env, 'PI_ENV_HOME_MANAGER_SYNC'),
     }),
   });
 }

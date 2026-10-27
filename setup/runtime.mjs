@@ -6,12 +6,10 @@ import {
   commandSucceeds,
   fail,
   mustEnv,
-  ok,
   run,
   runChecked,
-  section,
-  skip,
 } from "./runtime-support.mjs";
+import { note, ok, section } from "./report.mjs";
 import { deriveSetupPolicy } from "./policy.mjs";
 import { reconcileManagedBlock } from "./managed-block.mjs";
 
@@ -51,7 +49,7 @@ function nubInstall(args) {
 
 function installDependencies() {
   section("Dependencies");
-  console.log("  —  Setup will install repository dependencies with Nub.");
+  note("Setup will install repository dependencies with Nub.");
   const strategy = selectInstallStrategy();
   const installArgs = strategy === InstallStrategy.PlainNodeBootstrap ? ["--ignore-scripts"] : [];
   if (!nubInstall(installArgs)) fail("  ✗  Nub install failed.");
@@ -265,11 +263,11 @@ function installPiCli(policy) {
   writePiWrapper(piPackageDir, piPackageEntry, piExecutable);
   ok(`pi ${version} → ${join(piBinDir, "pi")}`);
   if (!policy.path.updateShellProfiles) {
-    skip("shell profile PATH edits (managed externally)");
+    note("shell profile PATH edits (managed externally)");
   } else if (policy.mode === "local-nix") {
     ensureLocalNixPathInShellProfiles();
   } else if (!process.env.PATH.split(":").includes(piBinDir)) {
-    console.log(`  —  ${piBinDir} is not in PATH yet. Updating shell profiles.`);
+    note(`${piBinDir} is not in PATH yet. Updating shell profiles.`);
     ensurePathInShellProfiles(piBinDir);
   }
 }

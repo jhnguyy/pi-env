@@ -5,28 +5,12 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/helpers.sh"
 
 run_terminal_config() {
-  local node
-  node=$(node_bin)
-  REPO="$ROOT" \
-  SETUP_DIR="$ROOT/setup" \
-  PI_AGENT_DIR="$HOME/.pi/agent" \
-  AGENTS_DIR="$HOME/.agents" \
-  SETTINGS_FILE="$HOME/.pi/agent/settings.json" \
-  PI_BIN_DIR="$HOME/.local/bin" \
-  TMUX_CONF="$HOME/.tmux.conf" \
-  TMUX_SOURCE_LINE="source-file $ROOT/setup/templates/tmux.conf" \
-  GHOSTTY_CONFIG_DIR="$HOME/.config/ghostty" \
-  APPEND_SRC="$ROOT/.pi/agent/APPEND_SYSTEM.md" \
-  APPEND_DST="$HOME/.pi/agent/APPEND_SYSTEM.md" \
-  TEST_UTILS_DIR="$HOME/.pi/agent/extensions/__tests__" \
-  POST_MERGE_HOOK_SRC="$ROOT/setup/hooks/post-merge" \
-  PRE_COMMIT_HOOK_SRC="$ROOT/setup/hooks/pre-commit" \
   SHOULD_LINK_GHOSTTY="${SHOULD_LINK_GHOSTTY:-1}" \
   CONTEXT_LABEL="${CONTEXT_LABEL:-host}" \
   PI_ENV_CONFIG_MANAGED_BY_NIX="${PI_ENV_CONFIG_MANAGED_BY_NIX:-}" \
   PI_ENV_SKIP_TMUX="${PI_ENV_SKIP_TMUX:-}" \
   PI_ENV_SKIP_GHOSTTY="${PI_ENV_SKIP_GHOSTTY:-}" \
-  "$node" "$ROOT/setup/configure.mjs" terminal "$node" >/dev/null
+  run_configure terminal "$ROOT" "$HOME" >/dev/null
 }
 
 test_nix_managed_config_skips_terminal_writes() {

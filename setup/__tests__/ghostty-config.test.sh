@@ -56,21 +56,26 @@ validate() {
 export PI_ENV_SETUP_MODE=portable PI_ENV_CONFIG_MANAGED_BY_NIX=0
 export PI_ENV_SKIP_TERMINAL=0 PI_ENV_SKIP_GHOSTTY=0 SHOULD_LINK_GHOSTTY=1
 unset PI_AGENT_DIR PI_CODING_AGENT_DIR
+native_layout=$([ "$(uname -s)" = Darwin ] && echo macos || echo xdg)
+export REPO="$ROOT"
 for layout in macos xdg; do
   export HOME="$EVIDENCE/$layout/home"
   mkdir -p "$HOME"
   export XDG_CONFIG_HOME="$EVIDENCE/$layout/xdg"
+  export PI_AGENT_DIR="$HOME/.pi/agent" PI_CODING_AGENT_DIR="$HOME/.pi/agent" AGENTS_DIR="$HOME/.agents"
   if [ "$layout" = macos ]; then
     export GHOSTTY_CONFIG_DIR="$HOME/Library/Application Support/com.mitchellh.ghostty"
   else
     export GHOSTTY_CONFIG_DIR="$XDG_CONFIG_HOME/ghostty"
   fi
-  source "$ROOT/setup/context.sh"
-  setup_init_context "$ROOT/setup"
-  export REPO SETUP_DIR SETTINGS_FILE AGENTS_DIR TEST_UTILS_DIR APPEND_SRC APPEND_DST PI_AGENT_DIR TMUX_CONF TMUX_SOURCE_LINE GHOSTTY_CONFIG_DIR POST_MERGE_HOOK_SRC PRE_COMMIT_HOOK_SRC
   for run in first rerun; do
     printf 'Setup run: %s/%s\n' "$layout" "$run"
-    "$NODE" "$ROOT/setup/configure.mjs" terminal
+    # The native layout exercises setup's default directory; the other needs the override.
+    if [ "$layout" = "$native_layout" ]; then
+      env -u GHOSTTY_CONFIG_DIR "$NODE" "$ROOT/setup/configure.mjs" terminal
+    else
+      "$NODE" "$ROOT/setup/configure.mjs" terminal
+    fi
     [ "$(readlink "$GHOSTTY_CONFIG_DIR/config")" = "$ROOT/ghostty/config" ]
     for mode in dark light; do
       [ "$(readlink "$XDG_CONFIG_HOME/ghostty/themes/pi-env-gruvbox-$mode")" = "$ROOT/ghostty/themes/pi-env-gruvbox-$mode" ]

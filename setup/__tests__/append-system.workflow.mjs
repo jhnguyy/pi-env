@@ -47,25 +47,19 @@ function configurePi(fixture) {
       ...process.env,
       HOME: home,
       REPO: root,
-      SETUP_DIR: join(root, "setup"),
-      SETTINGS_FILE: join(agentDir, "settings.json"),
-      AGENTS_DIR: join(home, ".agents"),
-      TEST_UTILS_DIR: join(agentDir, "extensions/__tests__"),
-      APPEND_SRC: join(root, ".pi/agent/APPEND_SYSTEM.md"),
-      APPEND_DST: appendFile,
       PI_AGENT_DIR: agentDir,
       PI_CODING_AGENT_DIR: agentDir,
-      TMUX_CONF: join(home, ".tmux.conf"),
-      TMUX_SOURCE_LINE: `source-file ${join(root, "setup/templates/tmux.conf")}`,
+      AGENTS_DIR: join(home, ".agents"),
+      XDG_CONFIG_HOME: join(home, ".config"),
       GHOSTTY_CONFIG_DIR: join(home, ".config/ghostty"),
-      POST_MERGE_HOOK_SRC: join(root, "setup/hooks/post-merge"),
-      PRE_COMMIT_HOOK_SRC: join(root, "setup/hooks/pre-commit"),
     },
   });
   appendFileSync(join(evidence, "setup.log"), `${result.stdout ?? ""}${result.stderr ?? ""}`);
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `Pi configuration failed: ${result.stderr}`);
-  return readFileSync(appendFile, "utf8");
+  const report = result.stdout.split("\n").filter((line) => line.includes("APPEND_SYSTEM.md"));
+  assert.equal(report.length, 1, `one status line must cover all APPEND_SYSTEM.md blocks: ${report}`);
+  return { text: readFileSync(appendFile, "utf8"), report: report[0] };
 }
 
 function verifyLegacyUpgrade(fixture) {
@@ -74,7 +68,7 @@ function verifyLegacyUpgrade(fixture) {
     "Keep this personal rule.\n\n  Keep this spacing.  \n";
   writeFileSync(fixture.appendFile, legacy);
   writeFileSync(join(fixture.evidence, "legacy.md"), legacy);
-  const actual = configurePi(fixture);
+  const { text: actual } = configurePi(fixture);
   writeFileSync(join(fixture.evidence, "upgraded.md"), actual);
   assert.equal(actual.slice(0, legacy.length), legacy, "legacy text must remain unchanged");
   assert.ok(actual.includes(fixture.expectedBlock), "legacy setup must install the source block");
@@ -87,9 +81,13 @@ function verifyStaleBlockRepair(fixture, installed) {
   writeFileSync(join(fixture.evidence, "expected-reconciled.md"), expected);
   writeFileSync(join(fixture.evidence, "stale.md"), stale);
   writeFileSync(fixture.appendFile, stale);
-  const actual = configurePi(fixture);
+  const { text: actual, report } = configurePi(fixture);
   writeFileSync(join(fixture.evidence, "reconciled.md"), actual);
   assert.equal(actual, expected, "repair must change only the managed block");
+  assert.match(report, /\(updated: append-system\)$/, "the report must name only the repaired block");
+  const rerun = configurePi(fixture);
+  assert.equal(rerun.text, expected, "a rerun must not change APPEND_SYSTEM.md");
+  assert.match(rerun.report, /\(managed blocks current\)$/);
 }
 
 const fixture = createFixture();
@@ -101,7 +99,7 @@ try {
     JSON.stringify(
       {
         verdict: "pass",
-        checks: ["legacy-upgrade", "stale-repair", "exact-preservation"],
+        checks: ["legacy-upgrade", "stale-repair", "exact-preservation", "single-report", "rerun"],
       },
       null,
       2,
