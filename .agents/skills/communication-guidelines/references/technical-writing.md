@@ -10,7 +10,7 @@
 
 - Prefer the infinitive, imperative, simple present, simple past, or simple future form.
 - Avoid progressive, perfect, and other complex verb constructions when a simple form has the same meaning.
-- Prefer active voice. Use passive voice when the actor is unknown or irrelevant, or when it keeps attention on the problem rather than personal blame. Keep consequential responsibilities explicit.
+- Prefer active voice and concrete verbs. Make consequential responsibilities explicit.
 - Use a verb to state an action. Avoid nominalizations that hide the action or the actor.
 - Limit an `-ing` form to a defined technical term when practical. Rewrite the sentence when the form creates ambiguity.
 
