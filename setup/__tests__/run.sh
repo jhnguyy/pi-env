@@ -34,10 +34,20 @@ SETUP_TESTS=(
   setup/__tests__/effect-language-service.test.sh
 )
 
+# Tests set their own agent directory, Pi package, and Home Manager inputs. A Home Manager
+# session exports personal values for these, so remove them before each test.
+CALLER_STATE=(
+  PI_AGENT_DIR PI_CODING_AGENT_DIR SETTINGS_FILE
+  PI_PACKAGE_DIR PI_ENV_PI_EXECUTABLE PI_ENV_CLI_MANAGED_BY_NIX
+  PI_ENV_HOME_MANAGER_FLAKE PI_ENV_HOME_MANAGER_INPUT
+)
+UNSET_CALLER_STATE=()
+for name in "${CALLER_STATE[@]}"; do UNSET_CALLER_STATE+=(-u "$name"); done
+
 for test_script in "${SETUP_TESTS[@]}"; do
   printf '\nsetup-test: start %s\n' "$test_script"
   started_at=$SECONDS
-  if env -u PI_AGENT_DIR -u PI_CODING_AGENT_DIR -u SETTINGS_FILE bash "$test_script"; then
+  if env "${UNSET_CALLER_STATE[@]}" bash "$test_script"; then
     status=0
   else
     status=$?
