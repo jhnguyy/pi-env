@@ -1,7 +1,8 @@
 import { existsSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Data, Effect, Schema } from "effect";
+import { Data, Effect, Schedule, Schema, type Scope } from "effect";
+import lockfile from "proper-lockfile";
 import { Type, type Static } from "typebox";
 import { execEffect } from "../_shared/exec";
 import { parseGitHubPullRequestUrl } from "../_shared/github";
@@ -59,7 +60,7 @@ export const CLOSEOUT_TOOL_PARAMETERS = Type.Object({
 export type CloseoutToolInput = Static<typeof CLOSEOUT_TOOL_PARAMETERS>;
 
 const CLOSEOUT_DESCRIPTION =
-  "Verify and close out one merged GitHub pull request. Synchronizes its base branch, removes only its head worktree, and deletes its matching local branch. Invoke only after explicit user authorization for cleanup.";
+  "Verify and close out one merged GitHub pull request. Synchronizes its base branch, removes only its head worktree, and deletes its matching local branch. Waits up to two minutes for another closeout or a busy Git index lock. Invoke only after explicit user authorization for cleanup.";
 const CLOSEOUT_PROMPT_SNIPPET =
   "Close out a verified merged GitHub pull request and clean up its local worktree and branch";
 const CLOSEOUT_PROMPT_GUIDELINES = [
@@ -111,6 +112,33 @@ function run(
   options: { cwd?: string; timeout?: number; failOnNonZero?: boolean } = {},
 ) {
   return execEffect(exec, command, args, closeoutFailure, options);
+}
+
+const LOCK_RETRY = { times: 480, schedule: Schedule.spaced("250 millis") };
+
+function isCloseoutLockBusy(error: CloseoutError): boolean {
+  return typeof error.cause === "object" && error.cause !== null &&
+    "code" in error.cause && error.cause.code === "ELOCKED";
+}
+
+function acquireCloseoutLock(commonDir: string) {
+  return Effect.acquireRelease(
+    Effect.try({
+      try: () => lockfile.lockSync(commonDir, { lockfilePath: join(commonDir, "pi-closeout.lock") }),
+      catch: (cause) => closeoutFailure(`Could not acquire closeout lock for ${commonDir}.`, cause),
+    }).pipe(
+      Effect.retry({ ...LOCK_RETRY, while: isCloseoutLockBusy }),
+      Effect.mapError((error) => isCloseoutLockBusy(error)
+        ? closeoutFailure(`Timed out waiting for another closeout in ${commonDir} after 120 seconds.`, error)
+        : error),
+    ),
+    (release) => Effect.sync(release),
+    { interruptible: true },
+  );
+}
+
+function isIndexLockBusy(error: CloseoutError): boolean {
+  return /Unable to create '[^\n]*[/\\]index\.lock': File exists\./i.test(error.message);
 }
 
 function decodePullRequest(raw: string): Effect.Effect<PullRequest, CloseoutError> {
@@ -292,7 +320,7 @@ function closeoutWorkflow(
   exec: Exec,
   cwd: string,
   request: CloseoutRequest,
-): Effect.Effect<CloseoutResult, CloseoutError> {
+): Effect.Effect<CloseoutResult, CloseoutError, Scope.Scope> {
   return Effect.gen(function* () {
     const lookupCwd = request.repoPath ? resolve(cwd, request.repoPath) : cwd;
     const pr = yield* loadPullRequest(exec, lookupCwd, request.pr);
@@ -320,6 +348,9 @@ function closeoutWorkflow(
       localRepository === expectedRepository,
       `Pull request ${pr.url} does not belong to the local origin repository.`,
     );
+
+    const commonDir = yield* gitText(exec, repoRoot, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    yield* acquireCloseoutLock(commonDir);
 
     const worktrees = parseWorktreePorcelain(
       yield* gitText(exec, repoRoot, ["worktree", "list", "--porcelain"]),
@@ -403,14 +434,21 @@ function closeoutWorkflow(
     );
 
     if (headWorktree) yield* verifyWorktree(exec, headWorktree, pr.headRefName, "PR head");
-    yield* verifyWorktree(exec, baseWorktree!, pr.baseRefName, "Base branch");
     if (localHeadExists) {
       yield* verifyLocalHead(exec, baseWorktree!.path, pr.headRefName, pr.headRefOid);
     }
-    yield* run(exec, "git", ["merge", "--ff-only", remoteBaseRef], {
-      cwd: baseWorktree!.path,
-      timeout: 120_000,
-    });
+    yield* Effect.gen(function* () {
+      yield* verifyWorktree(exec, baseWorktree!, pr.baseRefName, "Base branch");
+      yield* run(exec, "git", ["merge", "--ff-only", remoteBaseRef], {
+        cwd: baseWorktree!.path,
+        timeout: 120_000,
+      });
+    }).pipe(
+      Effect.retry({ ...LOCK_RETRY, while: isIndexLockBusy }),
+      Effect.mapError((error) => isIndexLockBusy(error)
+        ? closeoutFailure(`Timed out waiting for the Git index lock after 120 seconds. ${error.message}`, error)
+        : error),
+    );
     const baseOid = yield* gitText(exec, baseWorktree!.path, ["rev-parse", "HEAD"]);
 
     if (headWorktree) {
@@ -447,7 +485,7 @@ export function closeoutPullRequest(
   request: CloseoutRequest,
   signal?: AbortSignal,
 ): Promise<CloseoutResult> {
-  const workflow = closeoutWorkflow(exec, cwd, request);
+  const workflow = Effect.scoped(closeoutWorkflow(exec, cwd, request));
   return signal ? Effect.runPromise(workflow, { signal }) : Effect.runPromise(workflow);
 }
 

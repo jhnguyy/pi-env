@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -93,16 +93,11 @@ function createExec(
     }
 
     const actualArgs = args[0] === "fetch" ? ["fetch", "--prune", "origin"] : args;
-    const result = spawnSync("git", actualArgs, {
-      cwd: options?.cwd,
-      encoding: "utf8",
+    return new Promise<ExecResult>((resolve) => {
+      execFile("git", actualArgs, { cwd: options?.cwd, signal: options?.signal }, (error, stdout, stderr) => {
+        resolve({ stdout, stderr, code: error ? Number(error.code) || 1 : 0, killed: error?.killed ?? false });
+      });
     });
-    return {
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
-      code: result.status ?? 1,
-      killed: false,
-    };
   };
 
   return { exec, calls };
@@ -275,6 +270,131 @@ describe("/closeout command", () => {
       args: ["-G", "--", "github-agent"],
       cwd: fixture.repo,
     });
+  });
+
+  it("waits for an existing Git index lock before completing cleanup", async () => {
+    const fixture = createCloseoutFixture();
+    const indexLock = join(fixture.repo, ".git", "index.lock");
+    let attempts = 0;
+    let releaseLock: ReturnType<typeof setTimeout> | undefined;
+    const { exec } = createExec(fixture, {}, ({ command, args }) => {
+      if (command === "git" && args[0] === "merge") {
+        attempts += 1;
+        if (attempts === 1) {
+          writeFileSync(indexLock, "another Git process owns this lock\n");
+          releaseLock = setTimeout(() => rmSync(indexLock), 50);
+        }
+      }
+      return undefined;
+    });
+
+    try {
+      const result = await closeoutPullRequest(exec, "/home/agent", request(fixture.repo));
+      expect(attempts).toBeGreaterThan(1);
+      expect(result.deletedBranch).toBe(true);
+      expect(git(fixture.repo, "rev-parse", "HEAD")).toBe(fixture.mergeOid);
+      expect(existsSync(fixture.featureWorktree)).toBe(false);
+    } finally {
+      clearTimeout(releaseLock);
+      rmSync(indexLock, { force: true });
+    }
+  });
+
+  it("cancels an index-lock wait without removing Git's lock and releases the closeout lock", async () => {
+    const fixture = createCloseoutFixture();
+    const indexLock = join(fixture.repo, ".git", "index.lock");
+    writeFileSync(indexLock, "another Git process owns this lock\n");
+    const real = createExec(fixture);
+    let merged!: () => void;
+    const mergeAttempted = new Promise<void>((resolve) => { merged = resolve; });
+    const exec: ExtensionAPI["exec"] = async (command, args, options) => {
+      const result = await real.exec(command, args, options);
+      if (command === "git" && args[0] === "merge") merged();
+      return result;
+    };
+    const controller = new AbortController();
+    const pending = closeoutPullRequest(exec, "/home/agent", request(fixture.repo), controller.signal);
+    const rejected = expect(pending).rejects.toThrow();
+    await mergeAttempted;
+    controller.abort();
+    await rejected;
+
+    expect(existsSync(indexLock)).toBe(true);
+    expect(existsSync(join(fixture.repo, ".git", "pi-closeout.lock"))).toBe(false);
+    expect(existsSync(fixture.featureWorktree)).toBe(true);
+    rmSync(indexLock);
+    expect((await closeoutPullRequest(real.exec, "/home/agent", request(fixture.repo))).deletedBranch).toBe(true);
+  });
+
+  it("does not retry unrelated merge failures and releases the closeout lock", async () => {
+    const fixture = createCloseoutFixture();
+    const { exec, calls } = createExec(fixture, {}, ({ command, args }) =>
+      command === "git" && args[0] === "merge"
+        ? { stdout: "", stderr: "fatal: unrelated merge failure", code: 1, killed: false }
+        : undefined,
+    );
+    await expect(closeoutPullRequest(exec, "/home/agent", request(fixture.repo))).rejects.toThrow("unrelated merge failure");
+    expect(calls.filter(({ args }) => args[0] === "merge")).toHaveLength(1);
+    expect(existsSync(join(fixture.repo, ".git", "pi-closeout.lock"))).toBe(false);
+    expect(existsSync(fixture.featureWorktree)).toBe(true);
+  });
+
+  it("closes different PRs concurrently through worktrees of the same repository", async () => {
+    const fixture = createCloseoutFixture();
+    writeFileSync(join(fixture.unrelatedWorktree, "second.txt"), "second\n");
+    git(fixture.unrelatedWorktree, "add", "second.txt");
+    git(fixture.unrelatedWorktree, "commit", "-m", "second feature");
+    const secondHead = git(fixture.unrelatedWorktree, "rev-parse", "HEAD");
+    git(fixture.unrelatedWorktree, "push", "origin", "feat/unrelated");
+    const integrator = join(fixture.repo, "..", "integrator");
+    git(integrator, "fetch", "origin");
+    git(integrator, "merge", "--squash", "origin/feat/unrelated");
+    git(integrator, "commit", "-m", "merge second feature");
+    git(integrator, "push", "origin", "main");
+    const expectedBase = git(integrator, "rev-parse", "HEAD");
+    const first = createExec(fixture);
+    const second = createExec(fixture, {
+      url: "https://github.com/acme/demo/pull/43",
+      headRefName: "feat/unrelated",
+      headRefOid: secondHead,
+      mergeCommit: { oid: expectedBase },
+    });
+
+    let atMerge!: () => void;
+    const firstAtMerge = new Promise<void>((resolve) => { atMerge = resolve; });
+    let resumeMerge!: () => void;
+    const mergeAllowed = new Promise<void>((resolve) => { resumeMerge = resolve; });
+    let secondFoundRepository!: () => void;
+    const secondReady = new Promise<void>((resolve) => { secondFoundRepository = resolve; });
+    let firstFinished = false;
+    let overlappingWorkflow = false;
+    const firstExec: ExtensionAPI["exec"] = async (command, args, options) => {
+      if (command === "git" && args[0] === "merge") {
+        atMerge();
+        await mergeAllowed;
+      }
+      return first.exec(command, args, options);
+    };
+    const secondExec: ExtensionAPI["exec"] = async (command, args, options) => {
+      if (command === "git" && args[0] === "worktree" && !firstFinished) overlappingWorkflow = true;
+      const result = await second.exec(command, args, options);
+      if (args.includes("--git-common-dir")) secondFoundRepository();
+      return result;
+    };
+    const firstPending = closeoutPullRequest(firstExec, "/home/agent", request(fixture.repo))
+      .finally(() => { firstFinished = true; });
+    await firstAtMerge;
+    const secondPending = closeoutPullRequest(secondExec, "/home/agent", { pr: "43", repoPath: fixture.unrelatedWorktree });
+    await secondReady;
+    resumeMerge();
+    const results = await Promise.allSettled([firstPending, secondPending]);
+
+    expect(results.map((result) => result.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(overlappingWorkflow).toBe(false);
+    expect(git(fixture.repo, "rev-parse", "HEAD")).toBe(expectedBase);
+    expect(existsSync(fixture.featureWorktree)).toBe(false);
+    expect(existsSync(fixture.unrelatedWorktree)).toBe(false);
+    expect(git(fixture.repo, "branch", "--list", "feat/*")).toBe("");
   });
 
   it("rejects an SSH host alias that does not resolve to GitHub", async () => {
