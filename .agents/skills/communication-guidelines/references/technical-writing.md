@@ -64,8 +64,6 @@
 
 ## Comments and log messages
 
-The Documentation section of the [global agent guidelines](../../../../setup/templates/AGENTS.md#documentation) owns when to comment.
-
 - Write a comment as concise descriptive text.
 - Write a log message as a short statement of the event or change and its effects.
 - Use the same terms in logs, code, documentation, and operator procedures.
