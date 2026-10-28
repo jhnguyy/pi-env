@@ -1,22 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
-export type StatusState = "idle" | "running" | "done" | "error";
-
-export interface StatusPalette {
-  idle: string;
-  running: string;
-  done: string;
-  error: string;
-}
+import { isStatusState, statusDefinitions, type StatusState } from "./status";
 
 export interface TmuxStatusOptions {
   socketPath?: string;
   timeoutMs?: number;
 }
 
-const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const priority: Record<StatusState, number> = { idle: 0, done: 1, error: 2, running: 3 };
 const colorPattern =
   /^(?:#[0-9a-fA-F]{6}|colour(?:[0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))$/;
 const ownerOption = "@pi_agent_owner";
@@ -49,10 +40,11 @@ function parsePane(line: string): PaneStatus | undefined {
     !/^%\d+$/.test(pane) ||
     !/^@\d+$/.test(window) ||
     !/^[1-9]\d*-[0-9a-f-]{36}$/.test(owner) ||
-    !Object.hasOwn(priority, state) ||
+    !isStatusState(state) ||
     (seen !== "0" && seen !== "1") ||
     !colorPattern.test(color) ||
-    !/^[0-9]$/.test(frame)
+    !/^[0-9]$/.test(frame) ||
+    Number(frame) >= statusDefinitions[state].frames.length
   )
     return undefined;
   return {
@@ -60,7 +52,7 @@ function parsePane(line: string): PaneStatus | undefined {
     window,
     owner,
     value: [state, seen, color, frame].join("|"),
-    state: state as StatusState,
+    state,
     seen: seen === "1",
     color,
     frame: Number(frame),
@@ -142,29 +134,17 @@ function acknowledge(rows: string[], viewed: boolean): WindowSnapshot {
   return snapshot;
 }
 
-function statusGlyph(pane: PaneStatus): string {
-  switch (pane.state) {
-    case "running":
-      return frames[pane.frame];
-    case "done":
-      return "✓";
-    case "error":
-      return "✗";
-    case "idle":
-      return "○";
-  }
-}
-
 function windowCommand(window: string, snapshot: WindowSnapshot): string[] | undefined {
   snapshot.panes.sort(
     (a, b) =>
-      priority[b.state] - priority[a.state] || Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
+      statusDefinitions[b.state].priority - statusDefinitions[a.state].priority ||
+      Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
   );
   const winner = snapshot.panes[0];
   // push-default/pop-default confines styling to the indicator, preserving
   // both inactive names and the active window's background/highlight.
   const indicator = winner
-    ? `#[push-default]#[fg=${winner.color},nobold,nodim,${winner.seen ? "dim" : "bold"}]${statusGlyph(winner)}#[pop-default]`
+    ? `#[push-default]#[fg=${winner.color},nobold,nodim,${winner.seen ? "dim" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[pop-default]`
     : "";
   // P: iterates pane IDs, whereas list-panes follows layout indices.
   const expected = snapshot.values
@@ -227,26 +207,14 @@ export class TmuxStatus {
     });
   }
 
-  update(state: StatusState, palette: StatusPalette, revision?: number): Promise<void> {
-    if (
-      this.closed ||
-      !this.valid ||
-      !Object.hasOwn(priority, state) ||
-      !Object.values(palette).every((color) => colorPattern.test(color)) ||
-      !colorPattern.test(palette[state])
-    )
+  update(state: StatusState, color: string, revision?: number): Promise<void> {
+    if (this.closed || !this.valid || !isStatusState(state) || !colorPattern.test(color))
       return Promise.resolve();
-    // Copy the selected color: callers may mutate their palette after this call.
-    const color = palette[state];
     this.pending = this.pending.then(async () => {
       // A coalesced running -> done cycle must rearm attention even if the
       // previous published state was also done.
       const unchanged = state === this.state && revision === this.revision;
-      if (!unchanged) {
-        this.frame = 0;
-      } else if (state === "running") {
-        this.frame = (this.frame + 1) % frames.length;
-      }
+      this.frame = unchanged ? (this.frame + 1) % statusDefinitions[state].frames.length : 0;
       this.state = state;
       this.revision = revision;
       // Read acknowledgement at the write boundary: another pane's poll may

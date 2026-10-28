@@ -16,12 +16,12 @@ Status metadata does not change session names. Only the indicator receives statu
 
 ## Interpret the indicator
 
-| Indicator       | Meaning                             | Pi theme role |
-| --------------- | ----------------------------------- | ------------- |
-| Braille spinner | Running, including compaction       | `accent`      |
-| `✓`             | Settled successfully                | `success`     |
-| `✗`             | Final response or compaction failed | `error`       |
-| `○`             | Idle or cancelled                   | `muted`       |
+| Indicator       | Meaning                             |
+| --------------- | ----------------------------------- |
+| Braille spinner | Running, including compaction       |
+| `✓`             | Settled successfully                |
+| `✗`             | Final response or compaction failed |
+| `○`             | Idle or cancelled                   |
 
 A failed tool call does not determine the final status. Retries stay running until settlement. Blocking dialogs keep the underlying state because this display has no separate blocked indicator.
 
@@ -35,4 +35,6 @@ Colors follow the public active-theme API. Indexed colors remain terminal palett
 
 Orderly quit, reload, and session replacement remove the session's metadata. Another running status adapter prunes metadata whose owner PID has exited. If the last Pi process is forcibly killed, its indicator can remain until another Pi adapter polls or the window closes. PID reuse can delay that pruning. Missing or unresponsive tmux never fails the agent run.
 
-Implementation authority: [session lifecycle and theme polling](../.pi/extensions/general/index.ts), [tmux transport](../.pi/extensions/general/tmux-status.ts), and [tab formats](../setup/templates/tmux.conf).
+## Design constraints
+
+Status reporting stays separate from the [session-manager host](../.pi/extensions/session-manager/host.ts): best-effort display updates should not acquire the authority or socket-wide locks used to bind and restore sessions. Pi exposes neither a public subscription to its consolidated program status nor a theme-change subscription, so lifecycle observation and theme polling remain necessary.

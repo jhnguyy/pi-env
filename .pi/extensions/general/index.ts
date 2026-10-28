@@ -1,19 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { colorToHex, type Color } from "@earendil-works/pi-tui";
-import { TmuxStatus, type StatusPalette, type StatusState } from "./tmux-status";
+import { TmuxStatus } from "./tmux-status";
+import { statusDefinitions, type StatusState } from "./status";
 
-function tmuxColor(color: Color): string {
+function toTmuxColor(color: Color): string {
   return color.kind === "indexed" ? `colour${color.index}` : colorToHex(color);
-}
-
-function palette(ctx: ExtensionContext): StatusPalette {
-  const colors = ctx.ui.theme.colors;
-  return {
-    running: tmuxColor(colors.accent),
-    done: tmuxColor(colors.success),
-    error: tmuxColor(colors.error),
-    idle: tmuxColor(colors.muted),
-  };
 }
 
 /** Owns one session's polling and drains its last write before removing metadata. */
@@ -56,7 +47,8 @@ class SessionStatus {
   private async publish(): Promise<void> {
     this.dirty = false;
     try {
-      await this.transport.update(this.state, palette(this.ctx), this.revision);
+      const color = this.ctx.ui.theme.colors[statusDefinitions[this.state].role];
+      await this.transport.update(this.state, toTmuxColor(color), this.revision);
     } catch {
       // Status is best-effort and must not interrupt an agent run or shutdown.
     }
