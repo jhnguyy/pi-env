@@ -1,21 +1,23 @@
-import type { AgentSettledEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSettledEvent,
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import agentNotificationExtension from "../index";
 import * as AgentTools from "../../_shared/agent-tools";
-
-type AgentSettledApi = Parameters<typeof agentNotificationExtension>[0];
 
 type SettledHandler = (event: AgentSettledEvent, context: ExtensionContext) => unknown;
 
 function settledHandler(): SettledHandler {
   let handler: SettledHandler | undefined;
   const pi = {
-    on(event: typeof AgentTools.PiEvent.AgentSettled, candidate: SettledHandler) {
-      if (event === AgentTools.PiEvent.AgentSettled) handler = candidate;
+    on(event: string, candidate: unknown) {
+      if (event === AgentTools.PiEvent.AgentSettled) handler = candidate as SettledHandler;
     },
-  } satisfies AgentSettledApi;
+  };
 
-  agentNotificationExtension(pi);
+  agentNotificationExtension(pi as ExtensionAPI);
   expect(handler).toBeTypeOf("function");
   return handler!;
 }

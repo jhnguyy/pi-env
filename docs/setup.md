@@ -45,6 +45,10 @@ After updating the application checkout, rerun the same setup command. Reuse the
 
 See [themes](themes.md) for Pi selection, terminal installation, and Slack reference strings.
 
+## Tmux agent status
+
+See [agent status in tmux](tmux-agent-status.md) for tab indicators, configuration, and recovery limits.
+
 ## Workflow evidence
 
 Run the focused workflow for the behavior under investigation:
