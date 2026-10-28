@@ -15,8 +15,6 @@ Pass relevant skills and references based on your interpretation of the task. Us
 
 Bound tool access and context to the task's scope and privacy requirements. Supply relevant facts or file references rather than the parent transcript, and gather shared evidence once unless independent investigation is the purpose. Keep children isolated from each other, routing results and new decisions through the parent. For independent reviews, provide the same evidence with distinct review scopes.
 
-Before repository writes, follow [code-contribution](../code-contribution/SKILL.md) and prepare a dedicated worktree for each writer. A subagent `cwd` does not create a worktree.
-
 ## Schedule and integrate
 
 Start independent jobs before waiting, and dispatch dependent work after its inputs settle. Review each child's results and evidence before integrating them. Resolve conflicts and verify the combined result in the parent session, including required repository checks.

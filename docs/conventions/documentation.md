@@ -24,4 +24,4 @@ Create a separate index only when the index adds retrieval information that file
 
 - The [system prompt](../../.pi/agent/APPEND_SYSTEM.md) owns communication values and single ownership of facts, rules, and decisions.
 - The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md#documentation) owns what to document and when to comment.
-- The [technical-writing reference](../../.agents/skills/communication-guidelines/references/technical-writing.md) owns sentence mechanics and comment style.
+- The [communication-guidelines skill](../../.agents/skills/communication-guidelines/SKILL.md) owns technical-writing mechanics and comment style.
