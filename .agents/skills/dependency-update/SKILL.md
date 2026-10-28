@@ -1,13 +1,11 @@
 ---
 name: dependency-update
-description: Explores dependency updates by comparing versions, explaining useful changes and security implications, and identifying compatibility risks. Use when assessing a package upgrade.
+description: Assesses dependency upgrades across the installed-to-target release range for useful changes, security implications, compatibility, and migrations. Use when choosing or evaluating a package update.
 ---
 
 # Dependency Update
 
-A dependency assessment is complete when:
-
-- The installed and target versions are known, and the version choice accounts for compatibility constraints.
-- Primary sources explain useful changes, security implications, and breaking changes across the release range.
-- Required migrations and workarounds that can be removed are identified.
-- The recommendation states what is verified, what remains uncertain, and what must happen before adoption.
+1. Establish the installed and target versions. Account for compatibility constraints when choosing the target.
+2. Consult primary sources for useful changes, security implications, and breaking changes across the full release range.
+3. Identify required migrations and existing workarounds the update makes removable.
+4. Recommend whether to adopt the target version. List adoption prerequisites and unresolved upgrade risks.

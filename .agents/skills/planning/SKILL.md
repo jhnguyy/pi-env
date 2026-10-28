@@ -1,77 +1,46 @@
 ---
 name: planning
-description: Turn an intended change into clear decisions and a verifiable path to the outcome. Use when defining a change, reviewing a design or architecture proposal, or planning delivery.
+description: Define a change's scope, success criteria, implementation sequence, and rollout evidence. Use when defining a change, planning delivery, or reviewing a design or architecture proposal.
 ---
 
 # Planning
 
-Use this workflow to turn a request into a plan and verify the outcome:
+## Frame the change
 
-```text
-request → problem and scope → success criteria → implementation and rollout plan → verified outcome → remaining work
-```
+Identify the affected users, blocked outcome, and the workflow, dependency, or assumption that produces the problem. State what the plan includes and excludes.
 
-## Operating Rules
+Test the premise behind the proposed approach. For uncertainty that could change the approach, choose an observation that could disprove the premise. Consider how the system would look if the requirement had existed from the start, then account for migration from the current design.
 
-- Evaluate the premise before implementation. Identify the assumption that makes the proposed approach necessary and check it against available evidence. When uncertainty can change the approach, choose an observation that could contradict the assumption.
-- Consider how the system would look if the requirement had been present from the start. Use that design to compare approaches.
-- Match planning detail to the change’s risk, uncertainty, and reversibility. Keep low-risk, reversible work brief.
-- Identify who is responsible for implementation, verification, rollout, and follow-up. Record delegated work and the limits of each responsibility.
+Before decomposing work, define:
 
-## Design documents
+- what must become true and what must remain true
+- observable evidence of success
+- constraints, non-goals, and accepted risks
+- unresolved assumptions that could change the plan
 
-Use the design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
+Use a design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
 
-## Workflow
+## Derive the work
 
-### 1. Define the problem and scope
+Evaluate approaches against the success criteria. Derive implementation, verification, and rollout steps from the selected approach, including dependencies and checkpoints.
 
-Use the request to identify the problem and the work needed to solve it:
+For each consequential unknown, record the affected decision, how to resolve it, and who will resolve it or when resolution is required. Include operating concerns when they change scope, sequence, verification, rollout, or responsibility.
 
-- What local behavior is broken, missing, or desired?
-- Who is affected, and what outcome is blocked?
-- What system workflow, dependency, data flow, or assumption produces the condition?
-- Why does this matter to the product or roadmap?
+Identify responsibility for implementation, verification, rollout, and follow-up, including the limits of delegated work.
 
-State what the plan includes and excludes, and explain why.
+## Plan rollout and outcome verification
 
-### 2. Define the success criteria
-
-Before decomposing work, state:
-
-- what must become true
-- what must remain true
-- what observable evidence establishes success
-- constraints and non-goals
-- accepted risks and unresolved assumptions
-
-### 3. Plan implementation, verification, and rollout
-
-Evaluate the proposed approach against the success criteria. Compare alternatives when their tradeoffs can change the decision. Derive implementation, verification, and rollout work from the selected approach.
-
-Include operating concerns only when they can change scope, approach, sequence, verification, rollout, or ownership.
-
-For each unknown that can change the plan, record the question, affected decision, and how to resolve it. State who will resolve it or when it must be resolved.
-
-### 4. Verify the outcome in production
-
-Plan how to deploy the change and verify that it works:
+For changes that require deployment:
 
 1. Establish compatibility, migration, configuration, observability, rollout, and rollback needs.
-2. Confirm the intended revision, configuration, migrations, and flags reached the environment successfully.
-3. Exercise the changed behavior under real conditions and compare the results with the success criteria.
-4. Observe delayed effects, address regressions, remove temporary mechanisms, and capture follow-up work.
+2. Define how to confirm that the intended revision, configuration, migrations, and flags reached the target environment.
+3. Define how to exercise changed behavior under real conditions and compare results with the success criteria.
+4. Assign observation of delayed effects, regression response, and removal of temporary mechanisms.
 
-Deployment confirms that the change reached the environment. Verification establishes whether the changed behavior meets the success criteria.
+Deployment evidence proves arrival, not success. For changes without deployment, choose the environment where the outcome can actually be verified.
 
-### 5. Resolve remaining work
+## Close the plan
 
-For every material remaining item, choose an explicit state:
+Close work only when evidence meets the success criteria. Give each material remaining item a disposition: completed, assigned, deferred with a trigger or date, blocked with an escalation path, or excluded with rationale.
 
-- completed
-- assigned
-- deferred with a trigger or date
-- blocked with an escalation path
-- excluded with rationale
-
-State who needs an update, what they need to know, and who will check for delayed effects. Close the work when the evidence meets the success criteria and each remaining item has an explicit status. Assign responsibility for any further action.
+Identify who needs an update, what they need to know, and who owns any further action or delayed-effect checks.

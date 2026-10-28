@@ -1,26 +1,25 @@
 ---
 name: skill-builder
-description: Build, review, and validate Pi skills with context engineering practice. Use when creating a new skill, revising an existing skill, or reviewing skill quality.
+description: Builds and validates Pi skills with focused methods and retrieval boundaries. Use when creating a skill, revising its instructions, or reviewing its quality.
 disable-model-invocation: true
 ---
 
 # Skill Builder
 
-Pi's skills documentation (`docs/skills.md` in the Pi docs) owns the skill format, frontmatter, discovery locations, and validation method. Read it before you create or change a skill.
+Read `docs/skills.md` in the installed Pi documentation before changing a skill. Use it as the authority for format, frontmatter, discovery, and native validation rather than maintaining a separate specification or validator.
 
-## Decide the form
+## Shape the skill
 
-- Create a skill only when a repeated method needs more context than `AGENTS.md` or a prompt template should carry. Prefer to extend an existing skill that owns the method.
-- Set `disable-model-invocation: true` when the skill applies only on explicit request. A reference skill costs no context until `/skill:name` loads it.
-- Add supporting files only for stable detail that is worth retrieving separately, or for executable helpers that are part of the capability.
+Create a skill for a reusable method that needs more context than a prompt template. Extend an existing skill when it already covers that method.
 
-## Write the method
+Describe both what the skill does and when to load it. Put specialized decisions and procedures in the body, not shared system-prompt values. Reference changing tool contracts and local policy where needed instead of copying them.
 
-- **Brevity and delegation are defaults.** Include only decisions the skill must own. Delegate the rest to authoritative files, tools, or references.
-- **Retrieve changing facts.** Do not copy versions, inventories, commands, or policy that can drift.
-- Make the description specific and actionable: "Extracts text from PDFs and fills forms", not "Helps with PDFs".
+Use `disable-model-invocation: true` for skills intended only for explicit invocation. Preserve that boundary when revising an existing skill unless the user requests a change.
+
+Keep supporting files for detail worth loading separately or executable helpers needed by the method. Resolve bundled references relative to the skill directory. Keep examples and output templates only when they clarify a contract that prose alone would leave ambiguous.
 
 ## Validate and review
 
-- Validate with Pi's native method: run `/reload`, read the skill diagnostics, and confirm that `/skill:name` loads.
-- Request an independent review only when the user asks for qualitative review. Give the reviewer the user's goal and the skill diff. Treat its findings as advisory. Reject findings that add speculative scope, duplicate a source of truth, or reduce concision.
+Run Pi where the skill is discoverable, inspect its diagnostics, and confirm `/skill:name` loads. Run `/reload` after edits in an active session.
+
+Request an independent qualitative review only when the user explicitly asks for one. Give the reviewer the user's goal and skill diff. Treat findings as advisory, rejecting speculative scope, duplicated authority, or added prose that does not improve the method.

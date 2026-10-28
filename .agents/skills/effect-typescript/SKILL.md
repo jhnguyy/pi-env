@@ -1,28 +1,30 @@
 ---
 name: effect-typescript
-description: Use for TypeScript work where Effect is in use or proposed for use.
+description: Designs and tests Effect workflows in TypeScript, including typed failures, dependencies, and resource lifecycles. Use when Effect is in use or proposed.
 ---
 
 # Effect TypeScript
 
-## Retrieve
+## Check the project's Effect version
 
-1. Inspect the project's Effect dependency, configuration, conventions, and nearby code.
+1. Inspect the Effect dependency, configuration, conventions, and nearby code.
 2. Verify APIs against the project's installed declarations.
-3. Consult installed source only after confirming version compatibility.
-4. Treat the repository typecheck and runtime tests as authoritative when external guidance targets a different Effect release.
+3. Confirm version compatibility before consulting installed source.
+4. When external guidance targets another Effect release, use the repository typecheck and runtime tests as authoritative.
 
-## Apply
+## Define the workflow boundary
 
-- Start from the workflow's success, expected-failure, and dependency shape.
-- Parse untrusted input at the edge into the refined domain type that the workflow needs. Do not validate and continue with the broad input type.
+- Start with the workflow's success, expected failures, and dependencies.
+- Parse untrusted input at the edge into the refined domain type the workflow needs. Do not validate and continue with the broad input type.
 - Model expected parse failures explicitly. Complete required parsing before durable or external effects begin.
-- Use Effect for IO, interruption, scoped resources, concurrency policy, or dependency substitution.
-- Keep deterministic transforms plain TypeScript.
+- Use Effect for IO, interruption, scoped resources, concurrency policy, or dependency substitution. Keep deterministic transforms in plain TypeScript.
 - Add services or layers only for meaningful substitution or lifecycle ownership.
 - Preserve public adapters unless the task intentionally changes them. Run the Effect program at the existing boundary.
+
+## Implement and test Effect programs
+
 - Do not use JavaScript `try`/`catch` inside `Effect.gen`. Model expected failures in the Effect error channel.
 - Use `return yield*` for terminal failure and interruption effects in `Effect.gen`.
 - Prefer `Effect.fnUntraced` for reusable functions that only wrap a generator and do not need tracing metadata.
-- Use `Clock` for time in Effect workflows. Use `TestClock` for deterministic Effect tests.
+- Use `Clock` for time in Effect workflows and `TestClock` for deterministic Effect tests.
 - Use `it.effect` for Effect-native tests. Do not use `Effect.runSync` only to adapt an Effect-native unit test.

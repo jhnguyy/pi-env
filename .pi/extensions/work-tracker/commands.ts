@@ -50,7 +50,7 @@ export function registerCommands(pi: ExtensionAPI): void {
       const branch = getCurrentBranch();
 
       pi.sendUserMessage(
-        `Write a handoff for this session following the handoff skill.\n` +
+        `Write a handoff for this session.\n` +
           `Use today's date (${date}) and model-used: ${model} in the frontmatter.\n` +
           (branch ? `Include a \`branch: ${branch}\` field in the frontmatter.\n` : ``) +
           `Save to ~/.pi/agent/handoffs/${date}-<slug>.md where <slug> is derived from the task.\n` +

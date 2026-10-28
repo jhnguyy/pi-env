@@ -1,41 +1,30 @@
 ---
 name: orchestration
-description: Coordinate focused subagents for parallel research, implementation, review, and staged workflows. Use when work benefits from isolated child contexts or independent execution.
+description: Coordinates focused subagents for research, implementation, and review. Use when work benefits from parallel execution, isolated contexts, or dependent stages.
 ---
 
 # Orchestration
 
-Route bounded context to focused subagents. The parent owns scope, sequencing, integration, and completion.
+## Prepare bounded work
 
-```text
-gather once → dispatch independent work → wait → synthesize → verify
-```
+Delegate when a separate context or execution boundary justifies the coordination cost. Keep scope, sequencing, integration, and completion in the parent session.
 
-## Guidance
+Before dispatch, inspect the live `subagent` tool description for its agents, models, actions, tools, job lifecycle, and runtime limits.
 
-- Define the goal, constraints, non-goals, and completion evidence.
-- Delegate when parallel work, isolated context, or independent review can improve speed or quality. Work directly when delegation would add overhead without a useful boundary.
-- Give each child one goal, a bounded scope, required evidence, and an output contract.
-- Follow the `code-contribution` skill before code changes. Isolate each writer in a dedicated worktree.
-- Start independent jobs before waiting. Dispatch dependent work after their inputs settle.
-- Review and distill each child handoff. Do not relay child output without review.
-- Resolve conflicts and run the required repository checks in the parent session.
+Give each child one goal, explicit scope and non-goals, required evidence, and a return format suited to integration. Gather shared evidence once unless independent investigation is the purpose.
 
-Inspect the live `subagent` tool description before dispatch. It is the source of truth for agents, models, actions, tools, job lifecycle, and runtime limits.
+- Grant only the tools and context needed for that task.
+- Supply relevant facts or file references, not the parent transcript.
+- Keep children isolated from each other. Route results and new decisions through the parent.
+- For independent reviews, provide the same evidence and distinct review scopes.
+- Before repository writes, follow [code-contribution](../code-contribution/SKILL.md) and prepare a dedicated worktree for each writer. A subagent `cwd` does not create a worktree.
 
-## Delegation rules
+## Schedule and integrate
 
-- Use least privilege. Give each child only the tools and context that its task requires.
-- Do not pass the parent transcript to a child. Put required facts in the brief or in referenced files.
-- Do not duplicate reconnaissance unless independent review is the goal.
-- Keep children isolated from each other. Route handoffs and new decisions through the parent.
-- For independent review, give children the same evidence and distinct review scopes.
-- Retry only the failed slice. Change its brief, context, tools, model, or scope before retrying.
+Start independent jobs before waiting. Dispatch dependent work only after its inputs settle.
 
-A subagent `cwd` does not create a worktree. Use the `code-contribution` skill to prepare and clean worktrees. The parent remains responsible for inspecting and integrating child changes.
+Review each child's results and evidence before integrating them. Resolve conflicts and verify the combined result in the parent session, including required repository checks.
 
-Do not describe ordinary subagent dispatch as a DAG run. The repository DAG runtime belongs to code-owned domain workflows.
+Retry only the failed slice. Adjust its brief, context, tools, model, or scope before retrying rather than rerunning successful work.
 
-## Boundaries
-
-This skill owns subagent decomposition, routing, and synthesis. The `code-contribution` skill owns repository contribution workflow. Domain skills own implementation and safety policy.
+Ordinary subagent dispatch is not a DAG run. The repository DAG runtime serves code-owned domain workflows.

@@ -1,59 +1,48 @@
 ---
 name: code-contribution
-description: "Plans and delivers complete, atomic repository contributions through scope definition, code design, worktree isolation, validation, commits, pull requests, publishing, and cleanup. Use before modifying a repository or performing branch, commit, push, pull-request, merge, or cleanup work."
+description: Deliver atomic repository changes through worktree isolation, implementation, validation, publication, and post-merge cleanup. Use before modifying a repository or performing branch, commit, push, pull-request, merge, or cleanup work.
 ---
 
 # Code Contribution
 
-Use for repository changes from initial scope through post-merge cleanup.
+## Establish scope and isolate work
 
-## Establish the Contribution
+- Locate the target repository root and task worktree before repository commands. Ask if the target is ambiguous.
+- Read its `README.md`, `CONTRIBUTING.md`, and applicable area instructions. Follow local branch, base synchronization, worktree placement, and initialization requirements.
+- Define one verifiable outcome, including required code, tests, migrations, and obsolete-path removal. Record assumptions that can change the solution, risk, or verification. Preserve unrelated behavior and separate independently useful changes.
+- Perform repository changes in a dedicated worktree. Inspect Git state before creating or resuming it. Keep the base worktree unchanged on the base branch. Avoid worktrees another session may own.
+- Preserve local work. Stop if safe synchronization requires a decision that repository policy does not resolve.
 
-- Identify the target repository from the request or ask if it is ambiguous. Find its root and the task worktree before repository commands, even when Pi starts elsewhere. Read the target repository's `README.md` and `CONTRIBUTING.md` when they exist. Follow applicable area-specific instructions.
-- State the intended outcome, material assumptions, success criteria, and required validation. Record an assumption when it can change the solution, risk, or result.
-- Deliver one coherent outcome in verifiable phases, including the required code, tests, migrations, and cleanup. Preserve unrelated behavior. Separate work with an independent purpose into another contribution or explicit follow-up.
+## Inspect and design
 
-## Inspect Before Implementing
+Trace the affected workflow through its owner, callers, tests, and dependencies before choosing an implementation.
 
-- Identify the module, service, or dependency responsible for the intended result. Inspect its callers, nearby tests, and conventions before selecting an implementation.
-- Before adding a responsibility or changing a boundary, explore prior art around the affected area, in shared modules, and in relevant installed dependencies.
-- Compare candidate inputs, outputs, authority, lifecycle, and failure behavior. Establish equivalent contracts from behavior rather than similar names or shapes.
-- Choose direct reuse, extension of an existing owner, or a separate owner. Record the considered owners and contract difference when the decision affects review.
+Before adding a responsibility or moving a boundary, inspect nearby and shared modules and relevant installed dependencies. Compare candidate owners by inputs, outputs, authority, lifecycle, and failure behavior, not names alone. Choose reuse, extension, or a separate owner. Record consequential contract differences for review.
 
-## Design the Change
+- Choose data structures from access patterns and state transitions. Define types that preserve invariants and prevent invalid call sequences.
+- Examine concurrent actors before sharing mutable state. Isolate state when sharing is unnecessary.
+- Hide internal sequencing behind narrow interfaces. Keep related workflow operations together and make authority and data flow explicit.
+- Separate deterministic transformations from IO, cancellation, resource management, and operational failures.
+- Parse untrusted or weakly constrained inputs into domain values before state changes or external effects. Preserve their invariants and required information afterward.
+- Bound work before allocation. Prefer one-pass transformations and reuse values derived from immutable inputs.
+- Remove obsolete paths and duplicated decisions within scope, but retain checks that enforce current boundary contracts.
+- Keep changes removable or reversible. Base performance changes on measured end-to-end behavior.
 
-- Prefer fewer concepts over fewer lines.
-- Choose data structures before writing logic. Trace the main access patterns and state transitions. Define types and ownership so callers can use the capability without special-case coordination.
-- Before sharing mutable state, examine how concurrent changes affect each actor. Isolate state when sharing is unnecessary.
-- Remove obsolete paths, redundant checks, and duplicated decisions within the contribution’s scope before adding new mechanisms. Preserve checks that enforce current boundary contracts.
-- Use narrow interfaces that hide internal sequencing and data. Keep authority and data flow explicit.
-- Keep deterministic data transformations simple. Put IO, cancellation, resource management, and operational failures behind explicit boundaries.
-- Parse weakly constrained or untrusted inputs into domain values that preserve required invariants before using them to change state or cause external effects. Preserve established invariants and information through later operations.
-- Bound work before allocation. Prefer simple representations, one-pass data flow, and reuse of values derived from immutable inputs.
-- Keep each workflow’s related operations together. Prefer designs that make invalid states harder to express. Keep changes easy to roll back or remove.
-- Use measured end-to-end behavior as the authority for performance changes.
+## Implement and validate
 
-## Isolate the Work
+1. Define expected outcomes and failure cases before implementation.
+2. Inspect current behavior and select evidence for the complete workflow. Reuse existing E2E coverage. Follow the [testing-practices skill](../testing-practices/SKILL.md) when adding tests.
+3. Implement in verifiable phases against those outcomes.
+4. Verify the complete workflow and run repository-required checks before review or merge.
 
-Perform agentic repository changes in a dedicated worktree. Keep the base worktree unchanged on the base branch.
+## Commit and publish
 
-Follow repository policy for branch names, base synchronization, worktree placement, initialization, and resuming existing work. Before using a branch or worktree, inspect current Git state and avoid any location another session can own. Preserve local work and stop when safe synchronization requires a decision that local policy does not resolve.
+Inspect `git status` and the diff before committing. Include only intended changes.
 
-## Implement and Validate
+Before preparing a pull request, read contribution guidance and applicable templates. Explain the behavioral outcome, rationale, consequential decisions, validation, risks, and follow-up work.
 
-Work in phases:
+## Clean up after merge
 
-1. Define expected outcomes and failure cases from requirements before writing implementation code.
-2. Explore the affected workflow and its current behavior. Identify how to verify the intended result. Reuse existing E2E coverage where possible. Follow the [testing-practices skill](../testing-practices/SKILL.md) when new tests are needed.
-3. Implement the change against those expected outcomes.
-4. Verify the complete workflow and run the required repository checks before review or merge.
+Wait for the user to confirm the merge and request cleanup. Verify the merged pull request or equivalent forge status and confirm that the worktree is clean.
 
-## Commit and Publish
-
-- Inspect `git status` and the diff before committing. Commit only the intended changes.
-- Before preparing a pull request, inspect repository contribution guidance and applicable templates. Explain the behavioral outcome, rationale, important decisions, validation, risks, and follow-up work.
-
-## Clean Up
-
-- After merge, verify the merged pull request or equivalent forge status and confirm that the worktree is clean.
-- Remove the worktree, then delete the local branch with `git branch -d`. If squash or rebase history prevents deletion, use `git branch -D` only after the user confirms that the local commits can be discarded.
+Use the designated closeout tool when available. Otherwise, follow repository base-sync policy, remove only the task worktree, then delete its local branch with `git branch -d`. If squash or rebase history prevents deletion, use `git branch -D` only after the user confirms that the local commits can be discarded.
