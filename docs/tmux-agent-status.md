@@ -25,13 +25,13 @@ Status metadata does not change session names. Only the indicator receives statu
 
 A failed tool call does not determine the final status. Retries stay running until settlement. Blocking dialogs keep the underlying state because this display has no separate blocked indicator.
 
-Background state changes use bold styling. Viewing the window in any attached client marks its current state seen and applies faint styling. Animation and theme changes do not make a seen state unseen again. Visibility and theme polling waits one second between updates while resting, or 250 ms while running. A visit shorter than the polling interval can be missed.
+Background state changes use bold styling. Viewing the window in any attached client marks its current state seen and returns the indicator to normal weight. Animation and theme changes do not make a seen state unseen again. Visibility and theme polling waits one second between updates while resting, or 250 ms while running. A visit shorter than the polling interval can be missed.
 
 When several Pi panes share a window, running takes precedence over error, done, and idle. Equal states use the lowest pane ID, including that pane's theme and attention state. The tab is a summary, not a count of unseen panes.
 
 ## Compatibility and recovery
 
-Colors follow the public active-theme API. Indexed colors remain terminal palette indices; RGB and OKLCH colors use truecolor. Bold/faint provides attention contrast without guessing indexed RGB colors. Actual contrast and faint rendering depend on the terminal and tmux background. Custom working indicators from other extensions cannot be read through Pi's public API; the tab uses the default braille frames at a slower cadence.
+Colors follow the public active-theme API. Indexed colors remain terminal palette indices; RGB and OKLCH colors use truecolor. Bold weight marks attention without guessing indexed RGB colors. The indicator suits the bar when Pi and the [tmux template](themes.md#terminals) resolve the same light or dark theme; a fixed Pi theme can mismatch the bar. Custom working indicators from other extensions cannot be read through Pi's public API; the tab uses the default braille frames at a slower cadence.
 
 Orderly quit, reload, and session replacement remove the session's metadata. Another running status adapter prunes metadata whose owner PID has exited. If the last Pi process is forcibly killed, its indicator can remain until another Pi adapter polls or the window closes. PID reuse can delay that pruning. Missing or unresponsive tmux never fails the agent run.
 

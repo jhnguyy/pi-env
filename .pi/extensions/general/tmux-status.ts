@@ -144,7 +144,7 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
   // #[default] restores window-status(-current)-style for the label; pop-default
   // would leave the indicator's colour and attributes active.
   const indicator = winner
-    ? `#[fg=${winner.color},nobold,nodim,${winner.seen ? "dim" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
+    ? `#[fg=${winner.color},nodim,${winner.seen ? "nobold" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
     : "";
   // P: iterates pane IDs, whereas list-panes follows layout indices.
   const expected = snapshot.values
