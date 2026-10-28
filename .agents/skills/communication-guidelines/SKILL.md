@@ -1,41 +1,32 @@
 ---
 name: communication-guidelines
-description: Drafts, rewrites, and reviews substantial human-facing prose for usefulness, accuracy, clarity, and reader effort. Use for correspondence, documentation, code comments, authored log messages, review feedback, commit messages, pull-request text, or difficult style decisions. Routine short replies use the compressed global baseline.
+description: Write and review durable or outward-facing technical text, including documentation, procedures, design documents, comments, logs, commits, pull requests, and correspondence.
 ---
 
 # Communication Guidelines
 
-## Core values
+When drafting or reviewing a design document or architecture proposal, also read [design-documents.md](references/design-documents.md).
 
-- Help the reader understand, decide, or act. Choose content, depth, structure, and medium for that outcome.
-- Preserve facts, scope, uncertainty, and technical meaning. Distinguish evidence, inference, proposals, and unresolved questions.
-- Respect the reader's attention, knowledge, and dignity. Minimize total reader effort, not word count. Supply necessary context without condescension or unnecessary blame.
-- Make consequential reasoning and evidence available for assessment. Explain tradeoffs and risks. Make instructions verifiable.
-- Apply style rules and tool suggestions with judgment. Preserve effective wording and natural voice. Change text only when the change serves the reader.
+Use the terms readers encounter in the relevant code, interfaces, and documentation. Explain unfamiliar terms where they first matter, and distinguish concepts whose similar names could cause confusion. Follow the destination's spelling and terminology conventions.
 
-Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning. Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text.
+## Procedures
 
-## Protocol
+State prerequisites and the tested environment when they affect reproducibility. Distinguish tested support from assumptions about other environments.
 
-1. Identify the purpose, reader, assumed knowledge, required facts, and exact text that must not change.
-2. Review reasoning and completeness before editing sentences. Resolve contradictions and expose consequential gaps rather than polishing over them. Do not invent facts to make an explanation complete.
-3. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
-4. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Summarize relevant linked context rather than requiring a detour to understand the point.
-5. Give each sentence one main idea. Prefer active voice, concrete verbs, and clear subjects. Name actors when responsibility matters. Preserve project terminology and make references unambiguous.
-6. Put conditions before dependent actions or results. Use lists for steps, alternatives, or complex information.
-7. Remove filler, vague emphasis, unclear jargon, and unnecessary synonyms. Retain examples, repetition, or figurative language when they improve understanding without distorting meaning.
-8. Read for natural phrasing and unnecessary repetition. Read aloud when useful. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
+Number steps when order matters. Place prerequisites and conditions before the actions they govern, and keep required actions in the procedure rather than hiding them in notes.
 
-## References
+Make commands copyable, distinguish them from output, and identify values readers must replace. Name each file and show where an edit belongs. Preserve necessary safety confirmations.
 
-Load each reference that applies to the task.
+Keep examples runnable at meaningful checkpoints. Give checks and expected results so readers can distinguish success from failure, and link to a complete runnable example when useful.
 
-- [technical-writing.md](references/technical-writing.md): Write or review technical explanations, procedures, safety information, comments, and logs. Check terminology, sentence construction, step order, runnable checkpoints, and expected results.
-- [design-documents.md](references/design-documents.md): Draft or review design documents and architecture proposals. Check proposal context, scenarios, interfaces, constraints, operational risks, and decision state.
-- [patterns.md](references/patterns.md): Draft or review prose for empty announcements, inflated importance, manufactured contrasts, performative certainty, false intimacy, repetitive rhythm, and false agency.
+## Safety information
 
-## Output
+Place safety information before the action that exposes readers to the hazard. State the relevant condition or protective action, the hazard, and its possible consequence. Use the risk terminology required by the applicable safety policy, distinguishing harm to people from damage to equipment or data.
 
-When rewriting, return the revised prose unless the user asks for an explanation.
+## Operational messages
 
-When reviewing, report only changes that improve meaning, clarity, consistency, or maintenance. Include the source text, the problem, and a suggested revision.
+Write log messages that identify the event or change and its effects. Use the same terms in logs, code, documentation, and operator procedures so readers can connect the message to the affected behavior.
+
+## Review the explanation
+
+Trace a representative example or procedure through the draft to find missing transitions, ambiguous references, and conditions separated from the actions they govern. Repeat a noun when a pronoun could refer to different things. Split or combine sentences and use connecting words to make sequence, cause, contrast, and conditions explicit.

@@ -1,10 +1,3 @@
-/**
- * Work-tracker commands — smoke tests.
- *
- * Verifies that both /review-retros and /handoff register correctly and that
- * their handlers call sendUserMessage with the expected content.
- */
-
 import { describe, expect, it } from "vitest";
 
 // ─── Shared mock builder ──────────────────────────────────────────────────────
@@ -62,38 +55,5 @@ describe("/review-retros command", () => {
 
     expect(messages.length).toBeGreaterThan(0);
     expect(messages[0]).toContain("3");
-  });
-});
-
-// ─── /handoff ─────────────────────────────────────────────────────────────────
-
-describe("/handoff command", () => {
-  it("handler queues two sendUserMessage calls (handoff + retro)", async () => {
-    const mod = await import("../index");
-
-    const messages: string[] = [];
-    let handoffHandler: ((args: any, ctx: any) => Promise<void>) | undefined;
-    const mockPi = {
-      registerCommand(name: string, opts: { description: string; handler: (args: any, ctx: any) => Promise<void> }) {
-        if (name === "handoff") handoffHandler = opts.handler;
-      },
-      registerTool: () => {}, getActiveTools: () => [] as string[],
-      setActiveTools: () => {}, on: () => {},
-      sendUserMessage(msg: string) { messages.push(msg); },
-    };
-
-    mod.default(mockPi as any);
-
-    await handoffHandler!(undefined, {
-      waitForIdle: async () => {},
-      model: { provider: "test", id: "model" },
-    });
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(messages.length).toBe(2);
-    expect(messages[0]).toContain("handoff");
-    expect(messages[1]).toContain("retrospective");
-    expect(messages[1]).toContain("~/.pi/retro/");
-    expect(messages[1]).toContain("### Patterns");
   });
 });

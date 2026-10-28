@@ -1,41 +1,22 @@
 ---
 name: orchestration
-description: Coordinate focused subagents for parallel research, implementation, review, and staged workflows. Use when work benefits from isolated child contexts or independent execution.
+description: Coordinates subagents that investigate tasks, discover relevant skills and tools, and return work for integration. Use when work benefits from parallel execution, isolated contexts, or dependent stages.
 ---
 
 # Orchestration
 
-Route bounded context to focused subagents. The parent owns scope, sequencing, integration, and completion.
+## Prepare bounded work
 
-```text
-gather once → dispatch independent work → wait → synthesize → verify
-```
+Delegate when a separate context or execution boundary justifies the coordination cost. Keep scope, sequencing, integration, and completion in the parent session. Before dispatch, inspect the live `subagent` tool description for available agents, models, actions, tools, job lifecycle, and runtime limits.
 
-## Guidance
+Give each child a goal and enough context to investigate it within explicit boundaries. Explain what evidence the parent needs to assess and integrate the result. Shape the assignment around the task and available capabilities, leaving the child room to choose its approach.
 
-- Define the goal, constraints, non-goals, and completion evidence.
-- Delegate when parallel work, isolated context, or independent review can improve speed or quality. Work directly when delegation would add overhead without a useful boundary.
-- Give each child one goal, a bounded scope, required evidence, and an output contract.
-- Follow the `code-contribution` skill before code changes. Isolate each writer in a dedicated worktree.
-- Start independent jobs before waiting. Dispatch dependent work after their inputs settle.
-- Review and distill each child handoff. Do not relay child output without review.
-- Resolve conflicts and run the required repository checks in the parent session.
+Pass relevant skills and references based on your interpretation of the task. Use tool search when available to discover capabilities, and let children find other applicable skills and tools as their investigation develops. Supplied references are starting points, not an exhaustive procedure.
 
-Inspect the live `subagent` tool description before dispatch. It is the source of truth for agents, models, actions, tools, job lifecycle, and runtime limits.
+Bound tool access and context to the task's scope and privacy requirements. Supply relevant facts or file references rather than the parent transcript, and gather shared evidence once unless independent investigation is the purpose. Keep children isolated from each other, routing results and new decisions through the parent. For independent reviews, provide the same evidence with distinct review scopes.
 
-## Delegation rules
+## Schedule and integrate
 
-- Use least privilege. Give each child only the tools and context that its task requires.
-- Do not pass the parent transcript to a child. Put required facts in the brief or in referenced files.
-- Do not duplicate reconnaissance unless independent review is the goal.
-- Keep children isolated from each other. Route handoffs and new decisions through the parent.
-- For independent review, give children the same evidence and distinct review scopes.
-- Retry only the failed slice. Change its brief, context, tools, model, or scope before retrying.
+Start independent jobs before waiting, and dispatch dependent work after its inputs settle. Review each child's results and evidence before integrating them. Resolve conflicts and verify the combined result in the parent session, including required repository checks.
 
-A subagent `cwd` does not create a worktree. Use the `code-contribution` skill to prepare and clean worktrees. The parent remains responsible for inspecting and integrating child changes.
-
-Do not describe ordinary subagent dispatch as a DAG run. The repository DAG runtime belongs to code-owned domain workflows.
-
-## Boundaries
-
-This skill owns subagent decomposition, routing, and synthesis. The `code-contribution` skill owns repository contribution workflow. Domain skills own implementation and safety policy.
+If a job fails, retry only the failed slice rather than rerunning successful work. Adjust its brief, context, tools, model, or scope before retrying.
