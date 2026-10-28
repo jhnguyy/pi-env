@@ -92,6 +92,9 @@ class TmuxFixture {
   async indicator(): Promise<string> {
     return this.command("display-message", "-p", "-t", this.window, "#{@pi_agent_status}");
   }
+  async rank(): Promise<string> {
+    return this.command("display-message", "-p", "-t", this.window, "#{@pi_agent_rank}");
+  }
   async client(session: string): Promise<void> {
     const count = this.clients.length + 1;
     const child = spawn("tmux", ["-S", this.socket, "-C", "attach-session", "-t", session], {
@@ -250,7 +253,7 @@ async function fixture(): Promise<TmuxFixture> {
 
 function indicator(state: StatusState, seen = false): string {
   const glyph = state === "running" ? "⠋" : glyphs[state];
-  return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}`;
+  return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}#[default]`;
 }
 
 interface Cell {
@@ -300,6 +303,29 @@ function styleOf(rendered: Cell[], text: string): Omit<Cell, "char">[] {
   return rendered
     .slice(start, start + text.length)
     .map(({ fg, bg, bold, dim }) => ({ fg, bg, bold, dim }));
+}
+
+function tab(text: string, style: Omit<Cell, "char">): Record<string, Omit<Cell, "char">[]> {
+  return { [text]: Array([...text].length).fill(style) };
+}
+
+// Loads the pi-env template, forces a theme, and returns a renderer for named status text.
+async function templateTerminal(f: TmuxFixture, theme: "dark" | "light") {
+  await f.command("source-file", template);
+  // The nested client reports no background, so force the theme under test.
+  await f.command("set-option", "-g", "theme", theme);
+  await f.command("set-option", "-g", "status", "on");
+  await f.command("set-option", "-g", "status-interval", "1");
+  const capture = await f.terminal("status-test");
+  await expect
+    .poll(async () => (await f.command("list-clients", "-F", "#{client_name}")).trim(), {
+      timeout: 7_000,
+    })
+    .not.toBe("");
+  return async (...texts: string[]) => {
+    const rendered = cells(await capture());
+    return Object.assign({}, ...texts.map((text) => ({ [text]: styleOf(rendered, text) })));
+  };
 }
 
 // Resolve a real Theme, including indexed and RGB colors, without global theme state.
@@ -446,10 +472,12 @@ describe("tmux status integration (real isolated server)", () => {
       for (let i = 0; i < states.length; i++) await owners[i].update(states[i], palette[states[i]]);
       for (let i = states.length - 1; i >= 0; i--) {
         expect(await f.indicator(), `priority winner ${states[i]}`).toBe(indicator(states[i]));
+        expect(await f.rank(), "rank is priority then colour").toBe(`${i}${palette[states[i]]}`);
         await owners[i].close();
         expect(await f.paneValue(panes[i]), "closed pane metadata removed").toBe("");
       }
       expect(await f.indicator(), "last owner clears window indicator").toBe("");
+      expect(await f.rank(), "last owner clears window rank").toBe("");
     },
   );
 
@@ -485,7 +513,7 @@ describe("tmux status integration (real isolated server)", () => {
     await transport.update("running", palette.running);
     const viewed = await f.paneValue();
     expect(viewed, "second client acknowledges running").toBe("running|1|#123456|1");
-    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠙");
+    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠙#[default]");
     await f.command("switch-client", "-t", "elsewhere");
     await expect
       .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
@@ -496,7 +524,7 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.paneValue(), "animation/theme preserve acknowledgement").toBe(
       "running|1|#abcdef|2",
     );
-    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠹");
+    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠹#[default]");
     await transport.update("done", palette.done);
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
@@ -518,8 +546,9 @@ describe("tmux status integration (real isolated server)", () => {
       accent: "175,58,3",
     },
   ])(
-    "renders the $theme template with status colour across agent tabs only",
+    "renders the $theme template with status colour on agent indicators only",
     async ({ theme, bar, raised, label, accent }) => {
+      const mode = theme as "dark" | "light";
       const f = await fixture();
       await f.command("rename-window", "-t", f.window, "alpha");
       const background = await f.command(
@@ -535,44 +564,63 @@ describe("tmux status integration (real isolated server)", () => {
         "sleep 300",
       );
       await f.command("new-window", "-d", "-t", "status-test", "-n", "gamma", "sleep 300");
-      await f.command("source-file", template);
-      // The nested client reports no background, so force the theme under test.
-      await f.command("set-option", "-g", "theme", theme);
-      await f.command("set-option", "-g", "status", "on");
-      await f.command("set-option", "-g", "status-interval", "1");
-      const capture = await f.terminal("status-test");
-      await expect
-        .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
-          timeout: 7_000,
-        })
-        .toContain(f.window);
+      const render = await templateTerminal(f, mode);
       const current = f.transport();
       const unseen = f.transport(background);
       await unseen.update("running", palette.running);
       await current.update("done", palette.done);
       await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
 
-      const tab = (text: string, style: Omit<Cell, "char">) => ({
-        [text]: Array(text.length).fill(style),
-      });
-      const render = async (...texts: string[]) => {
-        const rendered = cells(await capture());
-        return Object.assign({}, ...texts.map((text) => ({ [text]: styleOf(rendered, text) })));
-      };
       await expect
-        .poll(() => render("✓ 0:alpha", "⠋ 1:beta", "2:gamma"), { timeout: 7_000 })
+        .poll(() => render("✓", "0:alpha", "⠋", "1:beta", "2:gamma"), { timeout: 7_000 })
         .toEqual({
           // A viewed state keeps the current tab's weight; an unseen one is bold.
-          ...tab("✓ 0:alpha", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
-          ...tab("⠋ 1:beta", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          ...tab("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
+          ...tab("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }),
+          ...tab("⠋", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          ...tab("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
           ...tab("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
         });
-      await current.close();
-      await expect
-        .poll(() => render("0:alpha"), { timeout: 7_000 })
-        .toEqual(tab("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }));
     },
   );
+
+  it("colours each overflow arrow by the highest-priority agent on its side", async () => {
+    const f = await fixture();
+    const panes = [f.pane];
+    await f.command("rename-window", "-t", f.window, "window-number-0");
+    for (let i = 1; i < 9; i++)
+      panes.push(
+        await f.command(
+          "new-window",
+          "-d",
+          "-t",
+          "status-test",
+          "-n",
+          `window-number-${i}`,
+          "-P",
+          "-F",
+          "#{pane_id}",
+          "sleep 300",
+        ),
+      );
+    await f.command("select-window", "-t", "status-test:4");
+    const render = await templateTerminal(f, "dark");
+    const left = { done: f.transport(panes[1]), running: f.transport(panes[2]) };
+    const right = { error: f.transport(panes[6]), idle: f.transport(panes[7]) };
+    await left.done.update("done", palette.done);
+    await left.running.update("running", palette.running);
+    await right.idle.update("idle", "#abcdef");
+    await right.error.update("error", "#fedcba");
+    const arrow = (fg: string) => ({ fg, bg: "60,56,54", bold: false, dim: false });
+    await expect
+      .poll(() => render("<", ">"), { timeout: 7_000 })
+      .toEqual({ ...tab("<", arrow("18,52,86")), ...tab(">", arrow("254,220,186")) });
+    await left.running.close();
+    await right.error.close();
+    await expect
+      .poll(() => render("<", ">"), { timeout: 7_000 })
+      .toEqual({ ...tab("<", arrow("52,86,120")), ...tab(">", arrow("171,205,239")) });
+  });
 
   it("rearms unseen completion after coalesced transitions return to the same state", async () => {
     const f = await fixture();
@@ -605,7 +653,7 @@ describe("tmux status integration (real isolated server)", () => {
         .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
       await expect
         .poll(() => f.indicator(), { timeout: 7_000 })
-        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]#\[default\]$/);
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })

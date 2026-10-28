@@ -13,6 +13,7 @@ const colorPattern =
 const ownerOption = "@pi_agent_owner";
 const paneOption = "@pi_agent_pane_status";
 const windowOption = "@pi_agent_status";
+const rankOption = "@pi_agent_rank";
 
 interface PaneStatus {
   pane: string;
@@ -141,11 +142,13 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
       Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
   );
   const winner = snapshot.panes[0];
-  // The style deliberately carries through the label so the whole tab takes the status
-  // colour; seen states keep the tab's own weight and the background stays the tab's.
+  // #[default] returns the label to the tab's own style. Seen states keep the tab's
+  // weight; pop-default would leave the indicator's colour active instead.
   const indicator = winner
-    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}`
+    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
     : "";
+  // Priority digit then colour, so tmux formats can rank windows without parsing styles.
+  const rank = winner ? `${statusDefinitions[winner.state].priority}${winner.color}` : "";
   // P: iterates pane IDs, whereas list-panes follows layout indices.
   const expected = snapshot.values
     .sort((a, b) => Number.parseInt(a.slice(1), 10) - Number.parseInt(b.slice(1), 10))
@@ -160,8 +163,8 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
     window,
     `#{==:#{P:#{pane_id}|#{${ownerOption}}|#{${paneOption}}~},${expected}}`,
     winner
-      ? `set-option -w -t ${window} ${windowOption} '${indicator}'`
-      : `set-option -w -u -t ${window} ${windowOption}`,
+      ? `set-option -w -t ${window} ${windowOption} '${indicator}' ; set-option -w -t ${window} ${rankOption} '${rank}'`
+      : `set-option -w -u -t ${window} ${windowOption} ; set-option -w -u -t ${window} ${rankOption}`,
   ];
 }
 

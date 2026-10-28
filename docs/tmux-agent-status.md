@@ -10,9 +10,9 @@ Load the updated [tmux template](../setup/templates/tmux.conf), then restart Pi 
 tmux source-file /path/to/pi-env/setup/templates/tmux.conf
 ```
 
-Replace `/path/to/pi-env` with the checkout path. This command applies the whole template, including its theme and key settings. For custom tab formats, insert `#{?@pi_agent_status,#{E:@pi_agent_status} ,}` before the window label in both `window-status-format` and `window-status-current-format`. The indicator's color and weight continue through the rest of the tab, and the tab background stays unchanged.
+Replace `/path/to/pi-env` with the checkout path. This command applies the whole template, including its theme and key settings. For custom tab formats, insert `#{?@pi_agent_status,#{E:@pi_agent_status} ,}` before the window label in both `window-status-format` and `window-status-current-format`. The indicator ends with `#[default]`, so put tab colors in `window-status-style` and `window-status-current-style` rather than inline `#[...]` styles before the indicator.
 
-Status metadata does not change session names. The status color covers the indicator and window label; the tab background, including the active-tab highlight, remains intact. Idle uses Pi's muted color, so idle tabs look nearly unstyled.
+Status metadata does not change session names. Only the indicator receives status styling; window labels keep the tab's text color and background, including the active-tab highlight.
 
 ## Interpret the indicator
 
@@ -28,6 +28,8 @@ A failed tool call does not determine the final status. Retries stay running unt
 Background state changes use bold styling. Viewing the window in any attached client marks its current state seen and returns the indicator to normal weight. Animation and theme changes do not make a seen state unseen again. Visibility and theme polling waits one second between updates while resting, or 250 ms while running. A visit shorter than the polling interval can be missed.
 
 When several Pi panes share a window, running takes precedence over error, done, and idle. Equal states use the lowest pane ID, including that pane's theme and attention state. The tab is a summary, not a count of unseen panes.
+
+When tabs overflow the bar, tmux shows `<` and `>` arrows. Each arrow takes the color of the highest-priority agent among all windows on that side of the current window, including windows that remain visible. Custom status formats can reuse the template's `@pi_agent_left_style` and `@pi_agent_right_style`, which read each window's `@pi_agent_rank`.
 
 ## Compatibility and recovery
 
