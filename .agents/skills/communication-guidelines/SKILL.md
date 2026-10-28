@@ -5,13 +5,7 @@ description: Drafts, rewrites, and reviews substantial human-facing prose for us
 
 # Communication Guidelines
 
-## Core values
-
-- Help the reader understand, decide, or act. Choose content, depth, structure, and medium for that outcome.
-- Preserve facts, scope, uncertainty, and technical meaning. Distinguish evidence, inference, proposals, and unresolved questions.
-- Respect the reader's attention, knowledge, and dignity. Minimize total reader effort, not word count. Supply necessary context without condescension or unnecessary blame.
-- Make consequential reasoning and evidence available for assessment. Explain tradeoffs and risks. Make instructions verifiable.
-- Apply style rules and tool suggestions with judgment. Preserve effective wording and natural voice. Change text only when the change serves the reader.
+The system instructions own the communication values. This skill applies them to substantial prose.
 
 Follow explicit user requests for tone, style, and format when they preserve facts and technical meaning. Keep exact quotations, identifiers, values, commands, paths, and machine syntax unchanged when accuracy requires exact text.
 
@@ -19,12 +13,10 @@ Follow explicit user requests for tone, style, and format when they preserve fac
 
 1. Identify the purpose, reader, assumed knowledge, required facts, and exact text that must not change.
 2. Review reasoning and completeness before editing sentences. Resolve contradictions and expose consequential gaps rather than polishing over them. Do not invent facts to make an explanation complete.
-3. Lead with the answer, request, or intended outcome. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
+3. Order supporting information by reader need. Read headings alone to check navigation and logical hierarchy.
 4. Explain unfamiliar concepts before readers must use them. Give enough local context to continue. Summarize relevant linked context rather than requiring a detour to understand the point.
-5. Give each sentence one main idea. Prefer active voice, concrete verbs, and clear subjects. Name actors when responsibility matters. Preserve project terminology and make references unambiguous.
-6. Put conditions before dependent actions or results. Use lists for steps, alternatives, or complex information.
-7. Remove filler, vague emphasis, unclear jargon, and unnecessary synonyms. Retain examples, repetition, or figurative language when they improve understanding without distorting meaning.
-8. Read for natural phrasing and unnecessary repetition. Read aloud when useful. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
+5. Remove filler, vague emphasis, unclear jargon, and unnecessary synonyms. Retain examples, repetition, or figurative language when they improve understanding without distorting meaning.
+6. Read for natural phrasing and unnecessary repetition. Read aloud when useful. Confirm that the revision preserves facts, sequence, contrast, uncertainty, scope, and technical meaning.
 
 ## References
 

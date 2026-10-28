@@ -22,5 +22,6 @@ Create a separate index only when the index adds retrieval information that file
 
 ## Content, prose, and comments
 
-- The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md) owns what to document and where each fact lives.
-- The [technical-writing reference](../../.agents/skills/communication-guidelines/references/technical-writing.md) owns prose and comment style.
+- The [system prompt](../../.pi/agent/APPEND_SYSTEM.md) owns communication values and single ownership of facts, rules, and decisions.
+- The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md#documentation) owns what to document and when to comment.
+- The [technical-writing reference](../../.agents/skills/communication-guidelines/references/technical-writing.md) owns sentence mechanics and comment style.
