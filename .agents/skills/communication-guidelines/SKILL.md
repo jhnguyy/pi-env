@@ -7,72 +7,26 @@ description: Write and review durable or outward-facing technical text, includin
 
 When drafting or reviewing a design document or architecture proposal, also read [design-documents.md](references/design-documents.md).
 
-## Vocabulary and terminology
-
-- Prefer common, familiar words. Use each word with one meaning and one part of speech in a given context.
-- Ground terminology in the surrounding work.
-- Use one term for each concept.
-- Use technical nouns only to name defined items or concepts. Use technical verbs only to name defined actions or processes.
-- Avoid contractions when they can reduce clarity.
-- Use American English spelling unless another authority requires a different spelling.
-
-## Verbs and voice
-
-- Prefer the infinitive, imperative, simple present, simple past, or simple future form.
-- Avoid progressive, perfect, and other complex verb constructions when a simple form has the same meaning.
-- Use a verb to state an action. Avoid nominalizations that hide the action or the actor.
-- Limit an `-ing` form to a defined technical term when practical. Rewrite the sentence when the form creates ambiguity.
-
-## Sentences and lists
-
-- Write complete, clear sentences. Do not remove necessary articles, subjects, verbs, or other words to make a sentence shorter.
-- Put one topic in each descriptive sentence.
-- Put a condition first when the reader must know the condition before the action.
-- Use a vertical list when a sentence contains a complex sequence, a set of alternatives, or several conditions.
-- Use stable connecting words to show addition, contrast, sequence, cause, or result.
-- Use articles and demonstrative adjectives when they identify which item the text means.
-- Do not use a semicolon. Divide the text into separate sentences.
-- Use parentheses only for short references, identifiers, abbreviations, explanations, or alternatives. Move important information into the main sentence.
+Use the terms readers encounter in the relevant code, interfaces, and documentation. Explain unfamiliar terms where they first matter, and distinguish concepts whose similar names could cause confusion. Follow the destination's spelling and terminology conventions.
 
 ## Procedures
 
-- Use no more than 20 words in an instruction when practical.
-- Put one instruction in each sentence. Combine actions only when they occur at the same time or form one operation.
-- Start an instruction with an imperative verb.
-- Use a note for information only. Do not hide an instruction in a note.
-- Show the order of steps with numbers or letters when order is important.
-- State prerequisites and the tested environment when they affect reproducibility. Do not imply support for untested environments.
-- Make commands copyable. Distinguish commands from output and identify values the reader must replace. Preserve necessary safety confirmations.
-- Name each file and show where an edit belongs. Keep examples runnable at meaningful checkpoints.
-- Give checks and expected results at checkpoints and completion so readers can distinguish success from failure. Link to a complete runnable example when useful.
+State prerequisites and the tested environment when they affect reproducibility. Distinguish tested support from assumptions about other environments.
 
-## Descriptions
+Number steps when order matters. Place prerequisites and conditions before the actions they govern, and keep required actions in the procedure rather than hiding them in notes.
 
-- Use no more than 25 words in a descriptive sentence when practical.
-- Give information gradually. Start with the main subject and add details in a logical order.
-- Keep one topic in each paragraph.
-- Keep a paragraph to six sentences when practical.
-- Repeat key terms and key phrases when repetition makes the relationship between ideas clear.
+Make commands copyable, distinguish them from output, and identify values readers must replace. Name each file and show where an edit belongs. Preserve necessary safety confirmations.
+
+Keep examples runnable at meaningful checkpoints. Give checks and expected results so readers can distinguish success from failure, and link to a complete runnable example when useful.
 
 ## Safety information
 
-- Identify the level and type of risk with the term that the applicable safety policy requires.
-- Start with a clear command or condition.
-- State the hazard and its possible result. Do not rely on vague statements about importance.
-- Distinguish harm to people from damage to equipment or data.
+Place safety information before the action that exposes readers to the hazard. State the relevant condition or protective action, the hazard, and its possible consequence. Use the risk terminology required by the applicable safety policy, distinguishing harm to people from damage to equipment or data.
 
-## Pronouns and ambiguous constructions
+## Operational messages
 
-- Make each pronoun refer to one clear noun. Repeat the noun if more than one interpretation is possible.
-- Use `this` with a noun when `this` alone can refer to more than one idea.
-- Check each use of `with`. State whether it shows association, accompaniment, or the means of an action.
-- Use `that` when it clearly separates a main clause from a dependent clause.
-- Write English phrases instead of Latin abbreviations such as `e.g.`, `i.e.`, or `etc.`.
-- Use neutral and inclusive terms.
-- Use a possessive form only when ownership or association is clear.
+Write log messages that identify the event or change and its effects. Use the same terms in logs, code, documentation, and operator procedures so readers can connect the message to the affected behavior.
 
-## Comments and log messages
+## Review the explanation
 
-- Write a comment as concise descriptive text.
-- Write a log message as a short statement of the event or change and its effects.
-- Use the same terms in logs, code, documentation, and operator procedures.
+Trace a representative example or procedure through the draft to find missing transitions, ambiguous references, and conditions separated from the actions they govern. Repeat a noun when a pronoun could refer to different things. Split or combine sentences and use connecting words to make sequence, cause, contrast, and conditions explicit.

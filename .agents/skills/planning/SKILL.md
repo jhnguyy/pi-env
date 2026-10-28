@@ -18,7 +18,7 @@ Before decomposing work, define:
 - constraints, non-goals, and accepted risks
 - unresolved assumptions that could change the plan
 
-Use a design document to work through consequential decisions and gather feedback. Explain the problem, intended outcome, proposed approach, and unresolved questions. Include implementation and delivery details when reviewers need them to assess the proposal.
+Use a design document to work through consequential decisions and gather feedback. Include implementation and delivery details when reviewers need them to assess the proposal.
 
 ## Derive the work
 
