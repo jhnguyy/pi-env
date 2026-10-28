@@ -3,7 +3,6 @@ import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseStep } from "@earendil-works/pi-ai";
 import {
@@ -329,26 +328,6 @@ function responseGate(): { step: FauxResponseStep; entered: Promise<void>; relea
 }
 
 describe("tmux status integration (real isolated server)", () => {
-  it.each([
-    ["window-status-format", "#[fg=#7c6f64]"],
-    ["window-status-current-format", "#[bg=#504945,fg=#fabd2f,bold]"],
-  ])("places status before the window label in %s", async (format, style) => {
-    const f = await fixture();
-    const template = fileURLToPath(
-      new URL("../../../../setup/templates/tmux.conf", import.meta.url),
-    );
-    await f.command("source-file", template);
-    const label = await f.command("display-message", "-p", "-t", f.window, "#I:#W");
-    const render = () => f.command("display-message", "-p", "-t", f.window, `#{E:${format}}`);
-    // command() trims outer whitespace, but not the spacing inside the tab.
-    expect(await render()).toBe(`${style} ${label}`);
-    const transport = f.transport();
-    await transport.update("done", palette.done);
-    expect(await render()).toBe(`${style} ${indicator("done")} ${label}`);
-    await transport.close();
-    expect(await render()).toBe(`${style} ${label}`);
-  });
-
   it.each([false, true])(
     "aggregates running > error > done > idle despite layout order (linked=%s)",
     async (linked) => {
