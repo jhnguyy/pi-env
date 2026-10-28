@@ -22,7 +22,7 @@ Use for repository changes from initial scope through post-merge cleanup.
 
 ## Design the Change
 
-- Make the smallest change that solves the problem. Prefer fewer concepts over fewer lines. Give each concept one owner and one stable term.
+- Prefer fewer concepts over fewer lines.
 - Choose data structures before writing logic. Trace the main access patterns and state transitions. Define types and ownership so callers can use the capability without special-case coordination.
 - Before sharing mutable state, examine how concurrent changes affect each actor. Isolate state when sharing is unnecessary.
 - Remove obsolete paths, redundant checks, and duplicated decisions within the contribution’s scope before adding new mechanisms. Preserve checks that enforce current boundary contracts.

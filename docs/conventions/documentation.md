@@ -1,6 +1,6 @@
 # Documentation conventions
 
-This file owns repository documentation policy. Other files can point here. Do not copy these rules into navigation files.
+This file owns repository documentation policy.
 
 ## Placement
 
