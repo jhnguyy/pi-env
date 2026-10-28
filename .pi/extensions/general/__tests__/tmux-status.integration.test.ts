@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseStep } from "@earendil-works/pi-ai";
 import {
@@ -27,6 +28,7 @@ const palette: Record<StatusState, string> = {
   error: "colour196",
 };
 const glyphs = { idle: "○", done: "✓", error: "✗" };
+const template = fileURLToPath(new URL("../../../../setup/templates/tmux.conf", import.meta.url));
 
 // Native Pi drives lifecycle events; only inference and the terminal UI adapter are
 // local fixtures. Transport scenarios below drive the public transport directly.
@@ -37,10 +39,12 @@ class TmuxFixture {
   readonly clients: { child: ChildProcess; closed: Promise<void> }[] = [];
   readonly transports: TmuxStatus[] = [];
   readonly sessions: AgentSession[] = [];
+  readonly terminalSocket: string;
   pane = "";
   window = "";
   constructor(readonly root: string) {
     this.socket = join(root, "tmux.sock");
+    this.terminalSocket = join(root, "terminal.sock");
   }
 
   async command(...args: string[]): Promise<string> {
@@ -108,6 +112,38 @@ class TmuxFixture {
       .toBe(count);
   }
 
+  // An outer tmux pane acts as the terminal, so capture-pane reports what the client drew.
+  async terminal(session: string): Promise<() => Promise<string>> {
+    const attach = `env -u TMUX TERM=xterm-256color COLORTERM=truecolor tmux -S '${this.socket}' attach-session -t ${session}`;
+    await execute(
+      "tmux",
+      [
+        "-S",
+        this.terminalSocket,
+        "-f",
+        "/dev/null",
+        "new-session",
+        "-d",
+        "-x",
+        "80",
+        "-y",
+        "4",
+        attach,
+      ],
+      { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
+    );
+    return async () => {
+      const { stdout } = await execute(
+        "tmux",
+        ["-S", this.terminalSocket, "capture-pane", "-p", "-e", "-t", "0"],
+        { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
+      );
+      const line = stdout.trimEnd().split("\n").at(-1) ?? "";
+      this.observations.push({ renderedStatusLine: line });
+      return line;
+    };
+  }
+
   async cleanup(): Promise<unknown[]> {
     const failures: unknown[] = [];
     try {
@@ -153,6 +189,12 @@ class TmuxFixture {
     } catch (error) {
       failures.push(String(error));
     }
+    try {
+      await execute("tmux", ["-S", this.terminalSocket, "kill-server"], { timeout: 5_000 });
+    } catch (error) {
+      // The terminal server exists only in rendering scenarios and exits with its client.
+      if (!/no server running|error connecting/.test(String(error))) failures.push(String(error));
+    }
     return failures;
   }
 }
@@ -171,7 +213,7 @@ async function fixture(): Promise<TmuxFixture> {
       JSON.stringify(
         {
           evidenceBoundary:
-            "Real isolated tmux, native Pi, local faux provider and UI adapter; no remote inference or terminal renderer",
+            "Real isolated tmux, native Pi, local faux provider and UI adapter; status rendering through a nested tmux client, not a physical terminal; no remote inference",
           reproduce:
             "nub run test:integration .pi/extensions/general/__tests__/tmux-status.integration.test.ts",
           inputs: {
@@ -208,7 +250,50 @@ async function fixture(): Promise<TmuxFixture> {
 
 function indicator(state: StatusState, seen = false): string {
   const glyph = state === "running" ? "⠋" : glyphs[state];
-  return `#[push-default]#[fg=${palette[state]},nobold,nodim,${seen ? "dim" : "bold"}]${glyph}#[pop-default]`;
+  return `#[fg=${palette[state]},nobold,nodim,${seen ? "dim" : "bold"}]${glyph}#[default]`;
+}
+
+interface Cell {
+  char: string;
+  fg: string;
+  bold: boolean;
+  dim: boolean;
+}
+
+// Tracks only the SGR attributes the status line asserts on.
+function cells(line: string): Cell[] {
+  const out: Cell[] = [];
+  let fg = "default";
+  let bold = false;
+  let dim = false;
+  for (const [, sgr, char] of line.matchAll(/\x1b\[([0-9;]*)m|(.)/gsu)) {
+    if (char !== undefined) {
+      out.push({ char, fg, bold, dim });
+      continue;
+    }
+    const codes = (sgr || "0").split(";").map(Number);
+    for (let i = 0; i < codes.length; i++) {
+      const code = codes[i];
+      if (code === 0) [fg, bold, dim] = ["default", false, false];
+      else if (code === 1) bold = true;
+      else if (code === 2) dim = true;
+      else if (code === 22) [bold, dim] = [false, false];
+      else if (code === 39) fg = "default";
+      else if (code === 38 && codes[i + 1] === 2) {
+        fg = codes.slice(i + 2, i + 5).join(",");
+        i += 4;
+      } else if ((code === 38 || code === 48) && codes[i + 1] === 5) i += 2;
+      else if (code === 48 && codes[i + 1] === 2) i += 4;
+    }
+  }
+  return out;
+}
+
+function styleOf(rendered: Cell[], text: string): Omit<Cell, "char">[] {
+  const chars = rendered.map((cell) => cell.char).join("");
+  const start = chars.indexOf(text);
+  if (start < 0) return [];
+  return rendered.slice(start, start + text.length).map(({ fg, bold, dim }) => ({ fg, bold, dim }));
 }
 
 // Resolve a real Theme, including indexed and RGB colors, without global theme state.
@@ -410,6 +495,58 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
 
+  it("renders status styling on the indicator only under the pi-env template", async () => {
+    const f = await fixture();
+    await f.command("rename-window", "-t", f.window, "alpha");
+    const background = await f.command(
+      "new-window",
+      "-d",
+      "-t",
+      "status-test",
+      "-n",
+      "beta",
+      "-P",
+      "-F",
+      "#{pane_id}",
+      "sleep 300",
+    );
+    await f.command("source-file", template);
+    await f.command("set-option", "-g", "status", "on");
+    await f.command("set-option", "-g", "status-interval", "1");
+    const capture = await f.terminal("status-test");
+    await expect
+      .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
+        timeout: 7_000,
+      })
+      .toContain(f.window);
+    const current = f.transport();
+    const unseen = f.transport(background);
+    await unseen.update("running", palette.running);
+    await current.update("done", palette.done);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
+
+    const viewedDone = { fg: "52,86,120", bold: false, dim: true };
+    const unseenRunning = { fg: "18,52,86", bold: true, dim: false };
+    let rendered: Cell[] = [];
+    await expect
+      .poll(
+        async () => {
+          rendered = cells(await capture());
+          return [styleOf(rendered, "✓")[0], styleOf(rendered, "⠋")[0]];
+        },
+        { timeout: 7_000 },
+      )
+      .toEqual([viewedDone, unseenRunning]);
+    const currentLabel = { fg: "250,189,47", bold: true, dim: false };
+    const inactiveLabel = { fg: "124,111,100", bold: false, dim: false };
+    expect(styleOf(rendered, "0:alpha"), "current tab keeps its highlight").toEqual(
+      Array(7).fill(currentLabel),
+    );
+    expect(styleOf(rendered, "1:beta"), "inactive tab keeps its label style").toEqual(
+      Array(6).fill(inactiveLabel),
+    );
+  });
+
   it("rearms unseen completion after coalesced transitions return to the same state", async () => {
     const f = await fixture();
     await f.command("new-session", "-d", "-s", "elsewhere", "sleep 300");
@@ -441,9 +578,7 @@ describe("tmux status integration (real isolated server)", () => {
         .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
       await expect
         .poll(() => f.indicator(), { timeout: 7_000 })
-        .toMatch(
-          /^#\[push-default\]#\[fg=#123456,nobold,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]#\[pop-default\]$/,
-        );
+        .toMatch(/^#\[fg=#123456,nobold,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]#\[default\]$/);
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })

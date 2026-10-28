@@ -141,10 +141,10 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
       Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
   );
   const winner = snapshot.panes[0];
-  // push-default/pop-default confines styling to the indicator, preserving
-  // both inactive names and the active window's background/highlight.
+  // #[default] restores window-status(-current)-style for the label; pop-default
+  // would leave the indicator's colour and attributes active.
   const indicator = winner
-    ? `#[push-default]#[fg=${winner.color},nobold,nodim,${winner.seen ? "dim" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[pop-default]`
+    ? `#[fg=${winner.color},nobold,nodim,${winner.seen ? "dim" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
     : "";
   // P: iterates pane IDs, whereas list-panes follows layout indices.
   const expected = snapshot.values
