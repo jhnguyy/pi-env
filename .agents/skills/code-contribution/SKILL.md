@@ -13,11 +13,23 @@ Define one verifiable outcome that includes the required code, tests, migrations
 
 Perform repository changes in a dedicated worktree, inspecting Git state before you create or resume it. Keep the base worktree unchanged on the base branch, and avoid worktrees another session may own. Preserve local work and stop if safe synchronization requires a decision that repository policy does not resolve.
 
-## Inspect and design
+## Inspect and choose the owner
 
 Trace the affected workflow through its owner, callers, tests, and dependencies before choosing an implementation. Before adding a responsibility or moving a boundary, inspect nearby and shared modules as well as relevant installed dependencies. Compare candidate owners by inputs, outputs, authority, lifecycle, and failure behavior rather than names alone. Use that comparison to choose reuse, extension, or a separate owner, and record consequential contract differences for review.
 
-Choose data structures from access patterns and state transitions, with types that preserve invariants and prevent invalid call sequences. Examine concurrent actors before sharing mutable state, and isolate state when sharing is unnecessary.
+## Establish production contracts
+
+Choose data structures from access patterns and state transitions, with types that preserve invariants and prevent invalid call sequences.
+
+For stateful, concurrent, or resource-owning work, establish:
+
+- who owns mutable state and which actors may share it
+- who acquires resources and when their release completes
+- what readiness, completion, cancellation, and shutdown mean to callers
+- which failures callers can handle and where recovery belongs
+- which operations may repeat and how partial completion or duplicate execution is handled
+
+Make these decisions in the production design rather than leaving tests or callers to infer them. Isolate state when sharing is unnecessary.
 
 Keep related workflow operations together behind narrow interfaces that hide internal sequencing while making authority and data flow explicit. Separate deterministic transformations from IO, cancellation, resource management, and operational failures. Parse untrusted or weakly constrained inputs into domain values before state changes or external effects, then preserve their invariants and required information.
 
@@ -26,7 +38,7 @@ Bound work before allocation. Prefer one-pass transformations and reuse values d
 ## Implement and validate
 
 1. Define expected outcomes and failure cases before implementation.
-2. Inspect current behavior and select evidence for the complete workflow. Reuse existing E2E coverage, and follow the [testing-practices skill](../testing-practices/SKILL.md) when adding tests.
+2. Inspect current behavior and use the [testing-practices skill](../testing-practices/SKILL.md) to select evidence while the design can still change.
 3. Implement in verifiable phases against those outcomes.
 4. Verify the complete workflow and run repository-required checks before review or merge.
 

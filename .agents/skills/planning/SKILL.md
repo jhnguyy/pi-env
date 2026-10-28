@@ -14,15 +14,17 @@ Test the premise behind the proposed approach. For uncertainty that could change
 Before decomposing work, define:
 
 - what must become true and what must remain true
-- observable evidence of success
+- observable evidence that would establish success or expose failure
 - constraints, non-goals, and accepted risks
 - unresolved assumptions that could change the plan
 
 Use a design document to work through consequential decisions and gather feedback. Include implementation and delivery details when reviewers need them to assess the proposal.
 
-## Derive the work
+## Derive implementation and verification
 
 Evaluate approaches against the success criteria. Derive implementation, verification, and rollout steps from the selected approach, including dependencies and checkpoints.
+
+Choose evidence while the design can still change. Identify where the outcome can be observed and which claims require real operating conditions. Follow the [testing-practices skill](../testing-practices/SKILL.md) to select checks and assess their limits.
 
 For each consequential unknown, record the affected decision, how to resolve it, and who will resolve it or when resolution is required. Include operating concerns when they change scope, sequence, verification, rollout, or responsibility.
 

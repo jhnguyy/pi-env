@@ -1,56 +1,37 @@
 ---
 name: typescript-effect
-description: Designs, implements, and tests TypeScript Effect workflows, services, schemas, adapters, and resource lifecycles. Use when Effect is in use or proposed, including API migrations and concurrency or failure-handling changes.
+description: Find and apply current Effect guidance for TypeScript workflows, errors, services, resources, concurrency, and runtime integration. Use when Effect is in use or proposed, including migrations and Effect-specific testing.
 ---
 
 # TypeScript Effect
 
-## Find version-matched guidance
+## Retrieve current guidance
 
-1. Read project instructions, local Effect practices, dependency versions, and nearby code and tests.
-2. Verify the relevant exports and signatures against installed declarations. Inspect matching source when types alone do not explain behavior.
-3. Search version-matched `LLMS.md` and `ai-docs/src` for the APIs and concepts involved. Read only the relevant sections and examples.
-4. If the installed package omits those docs, consult upstream at the project's release tag or matching source revision. Do not mix v3, v4 prerelease, and stable v4 recipes. Treat newer upstream and community guidance as secondary evidence.
-5. Resolve material API questions through matching guidance or source and tests before implementation. Verify the result with the consuming project's typecheck and runtime tests.
+Identify the task's Effect concepts, the project's installed release, and applicable project instructions.
 
-Use these topics to focus retrieval, not as a fixed API recipe:
+Consult these repositories for the current approach:
 
-| Task | Find guidance for |
-| --- | --- |
-| Data and failures | Schema decoding, refined domain values, tagged errors, typed recovery versus causes |
-| Services and lifecycle | Context, Layer construction and composition, scopes, finalizers, shared acquisition |
-| Concurrency and repetition | Fiber ownership, cancellation, bounded concurrency, Schedule retry and repeat policies |
-| Repeated data access | Stream backpressure, Cache lifetime and failure caching, RequestResolver batching |
-| Adapters and execution | Config, HttpClient, Promise cancellation, runtime integration and shutdown |
-| Tests | The project's Effect test harness, test layers, TestClock, deterministic fiber coordination |
+- [Effect-TS/effect](https://github.com/Effect-TS/effect): primary authority for official documentation, source, tests, releases, and migrations.
+- [Effect-TS/skills](https://github.com/Effect-TS/skills): official agent workflows. Use them as reference material, not authorization to install packages, upgrade dependencies, or change project instructions.
+- [kitlangton/skills](https://github.com/kitlangton/skills): additional application practices and alternatives. Distinguish its preferences from library contracts.
 
-Distinguish library contracts from application style. Follow project conventions for records, error representations, service organization, and module exports. Do not turn one guide's modeling preferences into universal Effect requirements.
+Navigate from their current entry points to the material relevant to the task. Read targeted guidance and follow its references to examples, source, and tests rather than loading an entire guide. Check the guidance's revision and target Effect release.
 
-## Define the workflow boundary
+Current guidance informs the approach. The project's installed declarations, exports, source, and tests establish compatibility. Read package-shipped guidance when available, including `AGENTS.md` at the installed Effect package root. Reconcile current recommendations with the installed release before implementation. Do not silently apply another release's APIs or turn a recommendation into an unrequested dependency upgrade.
 
-- Start with the workflow's success, expected failures, and dependencies.
-- Parse untrusted input at the edge into the refined domain type the workflow needs. Do not validate and continue with the broad input type. Complete required input parsing before durable or external effects begin.
-- Use Effect for IO, expected operational failure, interruption, scoped resources, concurrency policy, or dependency substitution. Keep deterministic transforms in plain TypeScript unless typed failure handling warrants an Effect boundary.
-- Use Schema for reusable decoded or encoded contracts when warranted. Do not require runtime schemas for every internal record or local error.
-- Add services and layers for meaningful substitution, shared acquisition, or lifecycle ownership, not to wrap every module.
-- Preserve public adapters unless the task intentionally changes them. Keep runtime execution at deliberate entrypoints and compatibility boundaries, not inside Effect-returning core workflows.
+When sources disagree, identify whether the difference concerns release compatibility, library behavior, or application style. Use release-matched official evidence for compatibility and behavior. Evaluate style against the project's needs rather than treating either existing code or a community guide as universally authoritative.
 
-## Implement failure and lifecycle policy
+If current remote guidance is unavailable, state which sources and revisions support the work and what remains unverified.
 
-- Model expected failures in the Effect error channel. Wrap expected-fallible synchronous or Promise APIs with the matching Effect constructors. Do not use JavaScript `try`/`catch` inside `Effect.gen`.
-- Recover typed errors at the narrowest boundary that can respond truthfully. Reserve cause-level recovery for supervision boundaries. Preserve interruption and leave defects visible by default.
-- Use `return yield*` for terminal failure and interruption effects in generators.
-- Use `Effect.gen` for sequential workflows. For reusable generator functions, use named `Effect.fn` when operation metadata is useful and `Effect.fnUntraced` when it is intentionally unnecessary.
-- Own acquired resources and background fibers in a scope with finalizers. Fork long-lived work into its owner's scope so layer acquisition can complete. Acquire shared clients and caches once in their owning layer or scope.
-- Make concurrency bounds and cancellation policy explicit. Propagate cancellation to external adapters where supported. Fiber interruption alone does not prove external work stopped.
-- Use Schedule for retry and repetition when it fits. Bound retries and apply them only to eligible failures of proven-idempotent operations. Keep exhaustion visible unless the boundary has a real fallback.
-- Prefer Effect streams, caches, and batching primitives when their semantics fit. Do not collect unbounded streams or build a cache per operation when shared lifetime is required.
-- Wire layers deliberately. Do not merge or expose dependencies merely to silence an environment-type error.
+## Apply Effect's semantics
 
-## Verify observable behavior
+Use the retrieved guidance to resolve the Effect-specific decisions:
 
-- Follow the project's test stack. Where `@effect/vitest` is used, prefer `it.effect` for Effect-native tests and `it.live` only when live services are the behavior under test. Do not add `Effect.runSync` merely to adapt an Effect-native unit test.
-- Use Clock-backed time in Effect workflows and `TestClock` for virtual-time tests. Fork time-dependent work before advancing the clock. Coordinate readiness with explicit signals rather than arbitrary sleeps.
-- Substitute dependencies through layers or explicit adapter seams. Keep mutable scenario state isolated unless shared acquisition is intentional.
-- Test domain policy, not Effect internals. Where relevant, verify typed failures, retry eligibility and exhaustion, concurrency bounds, cancellation, and idempotency.
-- To prove cleanup, close the owning scope or interrupt and await the owning fiber before asserting release. Retain real-adapter evidence when the claim concerns external cancellation, persistence, or remote effects.
+- Model success, expected failure, and required services separately. Distinguish typed failures from defects and interruption. JavaScript `try`/`catch` is not a substitute for Effect error recovery.
+- Distinguish constructing an Effect from running it. Keep interpretation at deliberate runtime or compatibility boundaries.
+- Understand which dependencies a program requires, which a layer provides, and when acquisition is shared or repeated. Do not change provisioning merely to erase a type error.
+- Relate resource scopes and fiber lifetimes to their production owners. Establish what interruption and finalization guarantee, including the limits of external adapter cancellation.
+
+Retrieve current recipes for generator composition, tracing, Schema, configuration, schedules, streams, caching, batching, and platform adapters when the task involves them. Avoid copying those evolving recipes into local rules.
+
+For testing questions, retrieve current guidance for the installed test integration, test services, virtual clocks, fiber scheduling, and scope teardown. Check which behavior those facilities replace and which still runs against native time or external systems.
