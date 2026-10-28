@@ -10,16 +10,16 @@ Read `docs/skills.md` in the installed Pi documentation before changing a skill.
 
 ## Shape the skill
 
-Create a skill for a reusable method that needs more context than a prompt template. Extend an existing skill when it already covers that method.
+Create a skill for a reusable method that needs more context than a prompt template, or extend an existing skill when it already covers that method.
 
-Describe both what the skill does and when to load it. Put specialized decisions and procedures in the body, not shared system-prompt values. Reference changing tool contracts and local policy where needed instead of copying them.
+Describe both what the skill does and when to load it. Put specialized decisions and procedures in the body, leaving shared values in the system prompt. Where the method depends on changing tool contracts or local policy, reference those authorities instead of copying them.
 
-Use `disable-model-invocation: true` for skills intended only for explicit invocation. Preserve that boundary when revising an existing skill unless the user requests a change.
+For skills intended only for explicit invocation, use `disable-model-invocation: true`. Preserve that boundary when revising an existing skill unless the user requests a change.
 
-Keep supporting files for detail worth loading separately or executable helpers needed by the method. Resolve bundled references relative to the skill directory. Keep examples and output templates only when they clarify a contract that prose alone would leave ambiguous.
+Keep supporting files for detail worth loading separately or executable helpers needed by the method, and resolve bundled references relative to the skill directory. Keep examples and output templates only when they clarify a contract that prose alone would leave ambiguous.
 
 ## Validate and review
 
-Run Pi where the skill is discoverable, inspect its diagnostics, and confirm `/skill:name` loads. Run `/reload` after edits in an active session.
+Run Pi where the skill is discoverable, inspect its diagnostics, and confirm `/skill:name` loads. After edits in an active session, run `/reload`.
 
-Request an independent qualitative review only when the user explicitly asks for one. Give the reviewer the user's goal and skill diff. Treat findings as advisory, rejecting speculative scope, duplicated authority, or added prose that does not improve the method.
+Request an independent qualitative review only when the user explicitly asks for one. When requested, give the reviewer the user's goal and skill diff. Treat findings as advisory, rejecting speculative scope, duplicated authority, or added prose that does not improve the method.

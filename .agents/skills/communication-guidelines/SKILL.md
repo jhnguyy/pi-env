@@ -1,12 +1,11 @@
 ---
 name: communication-guidelines
-description: Specialized writing guidance for technical prose, design documents, and recurring phrasing problems. Use when drafting or reviewing explanations, procedures, safety information, comments, logs, or architecture proposals, or diagnosing ineffective phrasing.
+description: Select writing references for text that will persist beyond this chat or reach other readers. Use for documentation, proposals, procedures, comments, logs, commits, pull requests, and correspondence.
 ---
 
 # Writing References
 
-Load each reference that applies to the task.
+Load the reference that fits the writing task, or both when needed.
 
-- [technical-writing.md](references/technical-writing.md): Check technical terminology, sentence construction, procedures, runnable checkpoints, safety information, comments, and logs.
-- [design-documents.md](references/design-documents.md): Draft or review proposals for scope, scenarios, interfaces, constraints, operational risks, and decision state.
-- [patterns.md](references/patterns.md): Diagnose empty announcements, inflated importance, manufactured contrasts, performative certainty, false intimacy, repetitive rhythm, and false agency.
+- [technical-writing.md](references/technical-writing.md): Technical terminology, sentence construction, procedures, runnable checkpoints, safety information, comments, and logs.
+- [design-documents.md](references/design-documents.md): Proposals covering scope, scenarios, interfaces, constraints, operational risks, and decision state.
