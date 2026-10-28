@@ -250,7 +250,7 @@ async function fixture(): Promise<TmuxFixture> {
 
 function indicator(state: StatusState, seen = false): string {
   const glyph = state === "running" ? "⠋" : glyphs[state];
-  return `#[fg=${palette[state]},nodim,${seen ? "nobold" : "bold"}]${glyph}#[default]`;
+  return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}`;
 }
 
 interface Cell {
@@ -485,7 +485,7 @@ describe("tmux status integration (real isolated server)", () => {
     await transport.update("running", palette.running);
     const viewed = await f.paneValue();
     expect(viewed, "second client acknowledges running").toBe("running|1|#123456|1");
-    expect(await f.indicator()).toContain(",nobold]");
+    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠙");
     await f.command("switch-client", "-t", "elsewhere");
     await expect
       .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
@@ -496,7 +496,7 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.paneValue(), "animation/theme preserve acknowledgement").toBe(
       "running|1|#abcdef|2",
     );
-    expect(await f.indicator()).toContain("fg=#abcdef,nodim,nobold]");
+    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠹");
     await transport.update("done", palette.done);
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
@@ -518,7 +518,7 @@ describe("tmux status integration (real isolated server)", () => {
       accent: "175,58,3",
     },
   ])(
-    "renders the $theme template with status styling on the indicator only",
+    "renders the $theme template with status colour across agent tabs only",
     async ({ theme, bar, raised, label, accent }) => {
       const f = await fixture();
       await f.command("rename-window", "-t", f.window, "alpha");
@@ -534,6 +534,7 @@ describe("tmux status integration (real isolated server)", () => {
         "#{pane_id}",
         "sleep 300",
       );
+      await f.command("new-window", "-d", "-t", "status-test", "-n", "gamma", "sleep 300");
       await f.command("source-file", template);
       // The nested client reports no background, so force the theme under test.
       await f.command("set-option", "-g", "theme", theme);
@@ -551,24 +552,25 @@ describe("tmux status integration (real isolated server)", () => {
       await current.update("done", palette.done);
       await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
 
-      const viewedDone = { fg: "52,86,120", bg: raised, bold: false, dim: false };
-      const unseenRunning = { fg: "18,52,86", bg: bar, bold: true, dim: false };
-      let rendered: Cell[] = [];
+      const tab = (text: string, style: Omit<Cell, "char">) => ({
+        [text]: Array(text.length).fill(style),
+      });
+      const render = async (...texts: string[]) => {
+        const rendered = cells(await capture());
+        return Object.assign({}, ...texts.map((text) => ({ [text]: styleOf(rendered, text) })));
+      };
       await expect
-        .poll(
-          async () => {
-            rendered = cells(await capture());
-            return [styleOf(rendered, "✓")[0], styleOf(rendered, "⠋")[0]];
-          },
-          { timeout: 7_000 },
-        )
-        .toEqual([viewedDone, unseenRunning]);
-      expect(styleOf(rendered, "0:alpha"), "current tab keeps its highlight").toEqual(
-        Array(7).fill({ fg: accent, bg: raised, bold: true, dim: false }),
-      );
-      expect(styleOf(rendered, "1:beta"), "inactive tab keeps its label style").toEqual(
-        Array(6).fill({ fg: label, bg: bar, bold: false, dim: false }),
-      );
+        .poll(() => render("✓ 0:alpha", "⠋ 1:beta", "2:gamma"), { timeout: 7_000 })
+        .toEqual({
+          // A viewed state keeps the current tab's weight; an unseen one is bold.
+          ...tab("✓ 0:alpha", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
+          ...tab("⠋ 1:beta", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          ...tab("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
+        });
+      await current.close();
+      await expect
+        .poll(() => render("0:alpha"), { timeout: 7_000 })
+        .toEqual(tab("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }));
     },
   );
 
@@ -603,7 +605,7 @@ describe("tmux status integration (real isolated server)", () => {
         .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
       await expect
         .poll(() => f.indicator(), { timeout: 7_000 })
-        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]#\[default\]$/);
+        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })

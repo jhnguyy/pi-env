@@ -141,10 +141,10 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
       Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
   );
   const winner = snapshot.panes[0];
-  // #[default] restores window-status(-current)-style for the label; pop-default
-  // would leave the indicator's colour and attributes active.
+  // The style deliberately carries through the label so the whole tab takes the status
+  // colour; seen states keep the tab's own weight and the background stays the tab's.
   const indicator = winner
-    ? `#[fg=${winner.color},nodim,${winner.seen ? "nobold" : "bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
+    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}`
     : "";
   // P: iterates pane IDs, whereas list-panes follows layout indices.
   const expected = snapshot.values
