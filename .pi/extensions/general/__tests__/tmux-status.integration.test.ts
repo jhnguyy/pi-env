@@ -308,7 +308,10 @@ function styleOf(rendered: Cell[], text: string): Omit<Cell, "char">[] {
     .map(({ fg, bg, bold, dim }) => ({ fg, bg, bold, dim }));
 }
 
-function tab(text: string, style: Omit<Cell, "char">): Record<string, Omit<Cell, "char">[]> {
+function expectedStyle(
+  text: string,
+  style: Omit<Cell, "char">,
+): Record<string, Omit<Cell, "char">[]> {
   return { [text]: Array([...text].length).fill(style) };
 }
 
@@ -611,11 +614,11 @@ describe("tmux status integration (real isolated server)", () => {
         .poll(() => render("✓", "0:alpha", "⠾", "1:beta", "2:gamma"), { timeout: 7_000 })
         .toEqual({
           // A viewed state keeps the current tab's weight; an unseen one is bold.
-          ...tab("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
-          ...tab("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }),
-          ...tab("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
-          ...tab("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
-          ...tab("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
+          ...expectedStyle("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
+          ...expectedStyle("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }),
+          ...expectedStyle("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          ...expectedStyle("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
+          ...expectedStyle("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
         });
     },
   );
@@ -661,7 +664,10 @@ describe("tmux status integration (real isolated server)", () => {
     const label = (fg: string) => ({ fg, bg: "60,56,54", bold: false, dim: false });
     await expect
       .poll(() => render("1:beta", "2:gamma"), { timeout: 7_000 })
-      .toEqual({ ...tab("1:beta", label("255,0,255")), ...tab("2:gamma", label("0,255,255")) });
+      .toEqual({
+        ...expectedStyle("1:beta", label("255,0,255")),
+        ...expectedStyle("2:gamma", label("0,255,255")),
+      });
   });
 
   it("keeps labels readable beside indicators from earlier extension versions", async () => {
@@ -673,7 +679,9 @@ describe("tmux status integration (real isolated server)", () => {
     await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", legacy);
     await expect
       .poll(() => render("0:alpha"), { timeout: 7_000 })
-      .toEqual(tab("0:alpha", { fg: "250,189,47", bg: "80,73,69", bold: true, dim: false }));
+      .toEqual(
+        expectedStyle("0:alpha", { fg: "250,189,47", bg: "80,73,69", bold: true, dim: false }),
+      );
   });
 
   it("colours each overflow arrow by the highest-priority agent on its side", async () => {
@@ -706,12 +714,18 @@ describe("tmux status integration (real isolated server)", () => {
     const arrow = (fg: string) => ({ fg, bg: "60,56,54", bold: false, dim: false });
     await expect
       .poll(() => render("<", ">"), { timeout: 7_000 })
-      .toEqual({ ...tab("<", arrow("18,52,86")), ...tab(">", arrow("254,220,186")) });
+      .toEqual({
+        ...expectedStyle("<", arrow("18,52,86")),
+        ...expectedStyle(">", arrow("254,220,186")),
+      });
     await left.running.close();
     await right.error.close();
     await expect
       .poll(() => render("<", ">"), { timeout: 7_000 })
-      .toEqual({ ...tab("<", arrow("52,86,120")), ...tab(">", arrow("171,205,239")) });
+      .toEqual({
+        ...expectedStyle("<", arrow("52,86,120")),
+        ...expectedStyle(">", arrow("171,205,239")),
+      });
   });
 
   it("rearms unseen completion after coalesced transitions return to the same state", async () => {
@@ -730,9 +744,7 @@ describe("tmux status integration (real isolated server)", () => {
   it("uses native Pi for errors, recovery, cancellation, theme polling and shutdown", async () => {
     const f = await fixture();
     const n = await nativeSession(f);
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^idle\|[01]\|colour8\|0$/);
     await expect.poll(() => f.indicator(), { timeout: 7_000 }).toBe(indicator("idle"));
 
     const gate = responseGate();
@@ -742,19 +754,17 @@ describe("tmux status integration (real isolated server)", () => {
     try {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#123456\|0$/);
       await expect.poll(() => f.indicator(), { timeout: 7_000 }).toBe(indicator("running"));
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#abcdef\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#abcdef\|0$/);
     } finally {
       gate.release();
       await run;
     }
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^done\|[01]\|#345678\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^done\|[01]\|#345678\|0$/);
 
     n.provider.setResponses([
       fauxAssistantMessage("", {
@@ -765,13 +775,11 @@ describe("tmux status integration (real isolated server)", () => {
     await n.session.prompt("Return a deterministic failure.");
     await expect
       .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^error\|[01]\|colour196\|[0-9]$/);
+      .toMatch(/^error\|[01]\|colour196\|0$/);
     await expect.poll(() => f.indicator(), { timeout: 7_000 }).toBe(indicator("error"));
     n.provider.setResponses([fauxAssistantMessage("recovered")]);
     await n.session.prompt("Recover from that failure.");
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^done\|[01]\|#345678\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^done\|[01]\|#345678\|0$/);
 
     const cancel = responseGate();
     n.provider.setResponses([cancel.step]);
@@ -780,16 +788,14 @@ describe("tmux status integration (real isolated server)", () => {
     try {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#abcdef\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#abcdef\|0$/);
       await n.session.abort();
       await cancelled;
     } finally {
       cancel.release();
     }
     expect(n.session.messages.at(-1)).toMatchObject({ role: "assistant", stopReason: "aborted" });
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^idle\|[01]\|colour8\|0$/);
 
     expect(n.uiCalls, "no extension UI modifications").toEqual([]);
     expect(n.errors, "no native extension errors").toEqual([]);
@@ -815,15 +821,13 @@ describe("tmux status integration (real isolated server)", () => {
     try {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#123456\|0$/);
       expect(retryEvents, "native retry really occurred").toContain("auto_retry_start");
     } finally {
       gate.release();
       await run;
     }
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^done\|[01]\|#345678\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^done\|[01]\|#345678\|0$/);
     expect(n.provider.state.callCount, "retry consumed exactly two responses").toBe(2);
     expect(n.errors, "no native extension errors").toEqual([]);
   });
@@ -847,24 +851,20 @@ describe("tmux status integration (real isolated server)", () => {
     try {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#123456\|0$/);
       n.session.abortCompaction();
       await run;
     } finally {
       gate.release();
     }
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^idle\|[01]\|colour8\|0$/);
     expect(n.errors, "no native extension errors").toEqual([]);
   });
 
   it("uses native manual compaction and resets status on a repeated session start", async () => {
     const f = await fixture();
     const n = await nativeSession(f);
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^idle\|[01]\|colour8\|0$/);
     // Real compaction consumes native conversation history and the local provider.
     n.provider.setResponses([fauxAssistantMessage("history ".repeat(200))]);
     await n.session.prompt("Create history for manual compaction.");
@@ -875,14 +875,12 @@ describe("tmux status integration (real isolated server)", () => {
     try {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
+        .toMatch(/^running\|[01]\|#123456\|0$/);
     } finally {
       compactGate.release();
       await compacting;
     }
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^done\|[01]\|#345678\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^done\|[01]\|#345678\|0$/);
     expect(n.session.sessionManager.getEntries().some((entry) => entry.type === "compaction")).toBe(
       true,
     );
@@ -896,9 +894,7 @@ describe("tmux status integration (real isolated server)", () => {
     // Public rebinding emits session_start again. This proves handler replacement,
     // not AgentSessionRuntime's separate session-file switching implementation.
     await n.session.bindExtensions({});
-    await expect
-      .poll(() => f.paneValue(), { timeout: 7_000 })
-      .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+    await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toMatch(/^idle\|[01]\|colour8\|0$/);
     await expect
       .poll(
         async () => {
@@ -930,7 +926,7 @@ describe("tmux status integration (real isolated server)", () => {
       await n.session.prompt("Create synthetic history for compaction.");
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
-        .toMatch(/^done\|[01]\|#345678\|[0-9]$/);
+        .toMatch(/^done\|[01]\|#345678\|0$/);
       if (outcome === "failure") {
         n.provider.setResponses([
           fauxAssistantMessage("", {
@@ -941,7 +937,7 @@ describe("tmux status integration (real isolated server)", () => {
         await expect(n.session.compact("Summarize.")).rejects.toThrow();
         await expect
           .poll(() => f.paneValue(), { timeout: 7_000 })
-          .toMatch(/^error\|[01]\|colour196\|[0-9]$/);
+          .toMatch(/^error\|[01]\|colour196\|0$/);
       } else {
         const gate = responseGate();
         n.provider.setResponses([gate.step]);
@@ -952,7 +948,7 @@ describe("tmux status integration (real isolated server)", () => {
         try {
           await expect
             .poll(() => f.paneValue(), { timeout: 7_000 })
-            .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
+            .toMatch(/^running\|[01]\|#123456\|0$/);
           n.session.abortCompaction();
           await rejected;
         } finally {
@@ -960,7 +956,7 @@ describe("tmux status integration (real isolated server)", () => {
         }
         await expect
           .poll(() => f.paneValue(), { timeout: 7_000 })
-          .toMatch(/^idle\|[01]\|colour8\|[0-9]$/);
+          .toMatch(/^idle\|[01]\|colour8\|0$/);
       }
       expect(n.errors, "no native extension errors").toEqual([]);
     },

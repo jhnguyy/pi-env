@@ -43,7 +43,7 @@ function parsePane(line: string): PaneStatus | undefined {
     !isStatusState(state) ||
     (seen !== "0" && seen !== "1") ||
     !colorPattern.test(color) ||
-    // Earlier versions animated a spinner through this field; it is now always 0.
+    // Accept legacy frame digits; current writers emit 0.
     !/^[0-9]$/.test(frame)
   )
     return undefined;
