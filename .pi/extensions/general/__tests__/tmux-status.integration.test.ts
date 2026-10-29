@@ -28,7 +28,7 @@ const palette: Record<StatusState, string> = {
   done: "#345678",
   error: "colour196",
 };
-const glyphs = { idle: "○", done: "✓", error: "✗" };
+const glyphs = { idle: "○", done: "✓", error: "✗", running: "⠾" };
 const template = fileURLToPath(new URL("../../../../setup/templates/tmux.conf", import.meta.url));
 
 // Native Pi drives lifecycle events; only inference and the terminal UI adapter are
@@ -231,7 +231,7 @@ async function fixture(): Promise<TmuxFixture> {
           expected: {
             scenario,
             palette,
-            paneFormat: "state|seen(0/1)|color|frame(0-9)",
+            paneFormat: "state|seen(0/1)|color|0 (former frame field)",
             assertions: ".pi/extensions/general/__tests__/tmux-status.integration.test.ts",
           },
           actual: f.observations,
@@ -255,7 +255,7 @@ async function fixture(): Promise<TmuxFixture> {
 }
 
 function indicator(state: StatusState, seen = false): string {
-  const glyph = state === "running" ? "⠶" : glyphs[state];
+  const glyph = glyphs[state];
   return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}`;
 }
 
@@ -484,7 +484,7 @@ describe("tmux status integration (real isolated server)", () => {
     },
   );
 
-  it("aggregates running panes written with an earlier version's longer spinner", async () => {
+  it("aggregates running panes written by an earlier, animated version", async () => {
     const f = await fixture();
     const earlier = await f.command(
       "split-window",
@@ -496,7 +496,7 @@ describe("tmux status integration (real isolated server)", () => {
       "#{pane_id}",
       "sleep 300",
     );
-    // Earlier versions advanced a ten-frame spinner and stored frames up to 9.
+    // Earlier versions animated a ten-frame spinner and stored its frame, up to 9.
     await f.command(
       "set-option",
       "-p",
@@ -514,7 +514,7 @@ describe("tmux status integration (real isolated server)", () => {
       "running|0|#123456|7",
     );
     await f.transport().update("idle", palette.idle);
-    expect(await f.indicator(), "frame 7 wraps onto the pulse").toBe("#[fg=#123456,nodim,bold]⠿");
+    expect(await f.indicator(), "an earlier frame value is accepted").toBe(indicator("running"));
   });
 
   it("keeps a replacement owner's metadata safe from stale updates and cleanup", async () => {
@@ -538,7 +538,7 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.indicator(), "closed owner cannot rearm").toBe("");
   });
 
-  it("acknowledges viewing by any real client without animation or theme rearming unseen", async () => {
+  it("acknowledges viewing by any real client without polling or theme rearming unseen", async () => {
     const f = await fixture();
     await f.command("new-session", "-d", "-s", "elsewhere", "sleep 300");
     await f.client("elsewhere");
@@ -548,8 +548,8 @@ describe("tmux status integration (real isolated server)", () => {
     await f.client("status-test");
     await transport.update("running", palette.running);
     const viewed = await f.paneValue();
-    expect(viewed, "second client acknowledges running").toBe("running|1|#123456|1");
-    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠿");
+    expect(viewed, "second client acknowledges running").toBe("running|1|#123456|0");
+    expect(await f.indicator()).toBe(indicator("running", true));
     await f.command("switch-client", "-t", "elsewhere");
     await expect
       .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
@@ -557,10 +557,10 @@ describe("tmux status integration (real isolated server)", () => {
       })
       .not.toContain(f.window);
     await transport.update("running", "#abcdef");
-    expect(await f.paneValue(), "animation/theme preserve acknowledgement").toBe(
+    expect(await f.paneValue(), "polling and theme changes preserve acknowledgement").toBe(
       "running|1|#abcdef|0",
     );
-    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠶");
+    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠾");
     await transport.update("done", palette.done);
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
@@ -608,12 +608,12 @@ describe("tmux status integration (real isolated server)", () => {
       await expect.poll(() => f.paneValue(), { timeout: 7_000 }).toBe("done|1|#345678|0");
 
       await expect
-        .poll(() => render("✓", "0:alpha", "⠶", "1:beta", "2:gamma"), { timeout: 7_000 })
+        .poll(() => render("✓", "0:alpha", "⠾", "1:beta", "2:gamma"), { timeout: 7_000 })
         .toEqual({
           // A viewed state keeps the current tab's weight; an unseen one is bold.
           ...tab("✓", { fg: "52,86,120", bg: raised, bold: true, dim: false }),
           ...tab("0:alpha", { fg: accent, bg: raised, bold: true, dim: false }),
-          ...tab("⠶", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
+          ...tab("⠾", { fg: "18,52,86", bg: bar, bold: true, dim: false }),
           ...tab("1:beta", { fg: label, bg: bar, bold: false, dim: false }),
           ...tab("2:gamma", { fg: label, bg: bar, bold: false, dim: false }),
         });
@@ -743,9 +743,7 @@ describe("tmux status integration (real isolated server)", () => {
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
         .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
-      await expect
-        .poll(() => f.indicator(), { timeout: 7_000 })
-        .toMatch(/^#\[fg=#123456,nodim,bold\][⠶⠿]$/);
+      await expect.poll(() => f.indicator(), { timeout: 7_000 }).toBe(indicator("running"));
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })

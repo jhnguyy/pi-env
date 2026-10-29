@@ -38,7 +38,6 @@ class SessionStatus {
       if (this.dirty) this.refresh();
       else {
         // The public API exposes the current theme but no theme-change subscription.
-        // Running shares the resting interval: the pulse is best effort, not Pi's loader cadence.
         this.timer = setTimeout(() => this.refresh(), 1000);
         this.timer.unref();
       }

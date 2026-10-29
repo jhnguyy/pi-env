@@ -23,7 +23,6 @@ interface PaneStatus {
   state: StatusState;
   seen: boolean;
   color: string;
-  frame: number;
 }
 
 function alive(pid: number): boolean {
@@ -44,6 +43,7 @@ function parsePane(line: string): PaneStatus | undefined {
     !isStatusState(state) ||
     (seen !== "0" && seen !== "1") ||
     !colorPattern.test(color) ||
+    // Earlier versions animated a spinner through this field; it is now always 0.
     !/^[0-9]$/.test(frame)
   )
     return undefined;
@@ -55,8 +55,6 @@ function parsePane(line: string): PaneStatus | undefined {
     state,
     seen: seen === "1",
     color,
-    // Earlier versions wrote frames for a longer spinner; wrap them onto the current one.
-    frame: Number(frame) % statusDefinitions[state].frames.length,
   };
 }
 
@@ -120,7 +118,7 @@ function acknowledge(rows: string[], viewed: boolean): WindowSnapshot {
         value = `${pane.pane}||~`;
       } else {
         if (viewed && !pane.seen) {
-          const acknowledged = `${pane.state}|1|${pane.color}|${pane.frame}`;
+          const acknowledged = `${pane.state}|1|${pane.color}|0`;
           snapshot.commands.push(
             guarded(pane, `set-option -p -t ${pane.pane} ${paneOption} '${acknowledged}'`),
           );
@@ -144,7 +142,7 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
   const winner = snapshot.panes[0];
   // The tab format resets the style after the indicator; seen states keep the tab's weight.
   const indicator = winner
-    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}`
+    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].glyph}`
     : "";
   // Priority digit then colour, so tmux formats can rank windows without parsing styles.
   const rank = winner ? `${statusDefinitions[winner.state].priority}${winner.color}` : "";
@@ -177,7 +175,6 @@ export class TmuxStatus {
   private closed = false;
   private state: StatusState | undefined;
   private revision: number | undefined;
-  private frame = 0;
   private pending: Promise<void> = Promise.resolve();
 
   constructor(
@@ -216,14 +213,13 @@ export class TmuxStatus {
       // A coalesced running -> done cycle must rearm attention even if the
       // previous published state was also done.
       const unchanged = state === this.state && revision === this.revision;
-      this.frame = unchanged ? (this.frame + 1) % statusDefinitions[state].frames.length : 0;
       this.state = state;
       this.revision = revision;
       // Read acknowledgement at the write boundary: another pane's poll may
       // have marked this pane viewed since our previous update.
       const seen = unchanged ? `#{?#{m:${state}|1|*,#{${paneOption}}},1,0}` : "0";
-      const value = `${state}|0|${color}|${this.frame}`;
-      const set = `set-option -p -F -t ${this.pane} ${paneOption} '${state}|${seen}|${color}|${this.frame}'`;
+      const value = `${state}|0|${color}|0`;
+      const set = `set-option -p -F -t ${this.pane} ${paneOption} '${state}|${seen}|${color}|0'`;
       const commands = this.claimed
         ? ["if-shell", "-F", "-t", this.pane, equal(ownerOption, this.owner), set]
         : batch([
