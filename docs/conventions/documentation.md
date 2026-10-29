@@ -1,6 +1,6 @@
 # Documentation conventions
 
-This file owns repository documentation policy.
+This file defines repository documentation policy.
 
 ## Placement
 
@@ -22,6 +22,7 @@ Create a separate index only when the index adds retrieval information that file
 
 ## Content, prose, and comments
 
-- The [system prompt](../../.pi/agent/APPEND_SYSTEM.md) owns communication values and single ownership of facts, rules, and decisions.
-- The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md#documentation) owns what to document and when to comment.
-- The [communication-guidelines skill](../../.agents/skills/communication-guidelines/SKILL.md) owns technical-writing mechanics and comment style.
+- The [system prompt](../../.pi/agent/APPEND_SYSTEM.md) defines the shared vocabulary, practice, and communication values, including a single authoritative home for each fact, rule, and decision.
+- The Documentation section of the [global agent guidelines](../../setup/templates/AGENTS.md#documentation) defines what to document and when to comment.
+- The [communication-guidelines skill](../../.agents/skills/communication-guidelines/SKILL.md) develops technical-writing methods and comment style.
+- The [skill-builder skill](../../.agents/skills/skill-builder/SKILL.md) defines skill authoring and validation, including how task-specific methods apply the shared concepts.

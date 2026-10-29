@@ -14,7 +14,7 @@ See [settings registration and rollback](../setup/apply-managed-settings.mjs) fo
 
 After updating guidance, rerun setup, then start a new Pi session or use `/reload`. A trusted project `.pi/APPEND_SYSTEM.md` overrides the agent-directory file.
 
-See [the philosophy](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../setup/pi-config.mjs), and [managed-block preservation rules](../setup/managed-block.mjs).
+See [the shared vocabulary and practice](../.pi/agent/APPEND_SYSTEM.md), [guidance installation](../setup/pi-config.mjs), and [managed-block preservation rules](../setup/managed-block.mjs).
 
 ## Runtime integration
 
