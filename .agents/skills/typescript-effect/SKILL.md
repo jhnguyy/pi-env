@@ -7,7 +7,7 @@ description: Find and apply current Effect guidance for TypeScript workflows, er
 
 ## Retrieve current guidance
 
-Identify the task's Effect concepts, the project's installed release, and applicable project instructions.
+Identify the outcome the workflow must deliver, who depends on it, and which failures or resource lifetimes could affect them. Use those needs to identify the task's Effect concepts, the project's installed release, and applicable project instructions.
 
 Consult these repositories for the current approach:
 
@@ -19,7 +19,7 @@ Navigate from their current entry points to the material relevant to the task. R
 
 Current guidance informs the approach. The project's installed declarations, exports, source, and tests establish compatibility. Read package-shipped guidance when available, including `AGENTS.md` at the installed Effect package root. Reconcile current recommendations with the installed release before implementation. Do not silently apply another release's APIs or turn a recommendation into an unrequested dependency upgrade.
 
-When sources disagree, identify whether the difference concerns release compatibility, library behavior, or application style. Use release-matched official evidence for compatibility and behavior. Evaluate style against the project's needs rather than treating either existing code or a community guide as universally authoritative.
+When sources disagree or a correction challenges the approach, ask what differs: release compatibility, library behavior, or application style. Inspect the relevant declarations, source, or tests to resolve behavioral claims, and revise the approach as the evidence warrants. Use release-matched official evidence for compatibility and behavior. Evaluate style against the project's needs rather than treating either existing code or a community guide as universally authoritative.
 
 If current remote guidance is unavailable, state which sources and revisions support the work and what remains unverified.
 
@@ -35,3 +35,7 @@ Use the retrieved guidance to resolve the Effect-specific decisions:
 Retrieve current recipes for generator composition, tracing, Schema, configuration, schedules, streams, caching, batching, and platform adapters when the task involves them. Avoid copying those evolving recipes into local rules.
 
 For testing questions, retrieve current guidance for the installed test integration, test services, virtual clocks, fiber scheduling, and scope teardown. Check which behavior those facilities replace and which still runs against native time or external systems.
+
+## Check the resulting workflow
+
+Trace the intended result through service provisioning, runtime execution, failure handling, interruption, and finalization wherever those concerns apply. Use the project's verification requirements to check the observable outcome. Report what the evidence establishes, its release and environment limits, and any unresolved compatibility or lifecycle questions with their next action and responsible owner.

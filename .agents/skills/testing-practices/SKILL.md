@@ -9,13 +9,15 @@ Read the repository's testing policy and requirements before selecting checks. U
 
 ## Define what the evidence must establish
 
-Derive expected outcomes from requirements and supported contracts, not implementation details. Identify the observable result that distinguishes success from failure.
+Start with the result people or dependent systems need and the benefit it serves. Derive expected outcomes from requirements and supported contracts, not implementation details. Identify the observable result that distinguishes success from failure, including consequences for affected users, data, and resources.
 
 If readiness, completion, cleanup, or cancellation has no defined meaning, resolve the production contract before writing assertions. A test should verify that contract, not invent it.
 
-Distinguish evidence of an intermediate action from evidence of the claimed outcome. A recorded call proves arrival, not that its result was used.
+Distinguish evidence of an intermediate action from evidence of the claimed outcome. A recorded call proves arrival, not that its result was used. State the conditions and limits within which a check supports its claim.
 
-## Select coverage
+When a failure or review finding challenges an expectation, inspect the inputs, observations, and governing contract. Ask whether it exposes a production defect, an incorrect expectation, or an uncontrolled condition. Correct the cause supported by that inquiry rather than changing an assertion merely to pass.
+
+## Select proportionate coverage
 
 This skill defaults to E2E-first verification. Exercise the workflow people use and check its final result. Prefer E2E as the only behavioral test layer where it can establish the required contracts reliably. Follow explicit repository requirements.
 
@@ -57,4 +59,6 @@ Before removing safety coverage, verify that replacement evidence detects violat
 
 For each run, record inputs, expected and actual results, and instructions to reproduce and check the run. Use CI logs or uploaded artifacts when CI can run the check. Keep local artifacts for checks CI cannot run.
 
-Preserve failure evidence. Follow repository privacy and storage policy.
+Preserve failure evidence. Follow repository privacy and storage policy; exclude secrets from retained artifacts.
+
+Close verification by comparing the observed outcomes with the original claims. Report gaps and limits, and give remaining checks, failures, or cleanup responsibilities an explicit resolution: complete them, agree who will follow through, or state what blocks completion. A passing subset does not establish an unchecked outcome.

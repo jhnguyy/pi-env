@@ -7,6 +7,10 @@ description: Write and review durable or outward-facing technical text, includin
 
 When drafting or reviewing a design document or architecture proposal, also read [design-documents.md](references/design-documents.md).
 
+## Establish the reader's task
+
+Identify what the reader needs to understand, decide, or do, and what benefit the text should make possible. Lead with that purpose. Select detail with care for the reader's knowledge, working conditions, and consequences of misunderstanding.
+
 Use the terms readers encounter in the relevant code, interfaces, and documentation. Explain unfamiliar terms where they first matter, and distinguish concepts whose similar names could cause confusion. Follow the destination's spelling and terminology conventions.
 
 ## Procedures
@@ -27,6 +31,10 @@ Place safety information before the action that exposes readers to the hazard. S
 
 Write log messages that identify the event or change and its effects. Use the same terms in logs, code, documentation, and operator procedures so readers can connect the message to the affected behavior.
 
-## Review the explanation
+## Check understanding and complete the explanation
 
-Trace a representative example or procedure through the draft to find missing transitions, ambiguous references, and conditions separated from the actions they govern. Repeat a noun when a pronoun could refer to different things. Split or combine sentences and use connecting words to make sequence, cause, contrast, and conditions explicit.
+Trace a representative example or procedure through the draft. Can the intended reader reach the result, recognize success, and find who is responsible if it fails? Use that inquiry to find missing transitions, ambiguous references, and conditions separated from the actions they govern. Repeat a noun when a pronoun could refer to different things. Split or combine sentences and use connecting words to make sequence, cause, contrast, and conditions explicit.
+
+Match claims to evidence and state its limits: distinguish observations from inferences, tested results from proposed checks, and commitments from possibilities. Keep the detail proportionate to the decision or action the reader faces.
+
+When receiving a correction, examine the passage and its supporting evidence. Ask which fact, interpretation, or reader need differs when that is unclear; revise the explanation as the reasons warrant. Check dependent examples and instructions after a correction so the repair is complete.

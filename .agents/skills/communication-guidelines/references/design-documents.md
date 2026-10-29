@@ -1,6 +1,6 @@
 # Design Documents
 
-Use this reference when drafting or reviewing a design document or architecture proposal. Its purpose is to help reviewers understand and assess consequential decisions before implementation makes them expensive to change.
+Use this reference when drafting or reviewing a design document or architecture proposal to make consequential decisions inspectable before implementation makes them expensive to change.
 
 ## Select the depth
 
@@ -12,7 +12,7 @@ Select content by what reviewers must decide or challenge. The sections below ar
 
 Use a recognizable title. Make the document's owner, authoritative location, and review or approval state clear through the host system or document metadata. Do not imply agreement that reviewers have not given.
 
-Open with the problem, intended outcome, and recommended approach. Make the opening understandable to the expected stakeholders without an oral briefing. Explain the motivation and relevant prior attempts. State goals as benefits or observable outcomes, not merely technology choices.
+Open with the problem, intended outcome, and recommended approach. Make the opening understandable to the expected stakeholders without an oral briefing. Explain the motivation and relevant prior attempts. State goals as benefits or observable outcomes, not merely technology choices. Identify whose needs the proposal serves, the conditions they face, and who bears the costs or risks of the change.
 
 Order later detail for the readers who need it. Explain unfamiliar terms where they first matter rather than relying on a glossary. Link to related designs, specifications, and test plans when they supply necessary context.
 
@@ -40,6 +40,8 @@ Leave inexpensive, reversible implementation choices to implementation unless re
 
 Separate settled decisions, assumptions, and open questions. Apply the planning skill's resolution-path guidance to consequential unknowns. Give reviewers enough context to understand what remains blocked or provisional.
 
+When feedback challenges a claim, inspect its evidence and ask which assumption, requirement, or consequence differs. Revise the proposal as the inquiry warrants, including dependent decisions and checks.
+
 When a question is resolved, preserve the decision and non-obvious rationale in the appropriate durable source. Link to supporting discussion when useful. Do not copy the full discussion history into the document by default.
 
 Distinguish measurements and completed experiments from estimates and proposed checks. Never present planned validation as evidence already obtained.
@@ -49,3 +51,5 @@ Distinguish measurements and completed experiments from estimates and proposed c
 Read the opening and headings without the body. Can each intended reviewer find the proposal, its justification, and the decisions that need their input?
 
 Then trace a representative scenario through the design. Check for missing transitions, conflicting requirements, unexplained assumptions, and interfaces whose behavior is ambiguous. Resolve those issues before sentence-level editing.
+
+Close review by recording the decision state and the evidence supporting it. Give remaining validation, approvals, and follow-up work an explicit owner and resolution path; keep provisional decisions visibly provisional. Design completeness means reviewers can assess the proposal and locate remaining responsibilities, not that implementation or planned validation has already succeeded.
