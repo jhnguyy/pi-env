@@ -267,13 +267,13 @@ export class TmuxStatus {
       if (command) commands.push(command);
     }
     if (commands.length) await this.run(batch(commands));
-    if (this.state === "running" && !this.closed) this.ticker.demand(this.owner, this.pane, leader);
+    if (this.state === "running" && !this.closed) this.ticker.demand(this, this.pane, leader);
   }
 
   close(): Promise<void> {
     if (this.closed) return this.pending;
     this.closed = true;
-    this.ticker.release(this.owner);
+    this.ticker.release(this);
     if (!this.valid) return this.pending;
     this.pending = this.pending.then(async () => {
       if (!this.claimed) return;
