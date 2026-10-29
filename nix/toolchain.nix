@@ -31,6 +31,12 @@ let
     assert pkgs.lib.assertMsg (pkgs.lib.versionAtLeast node.version nodeMinimum)
       "Locked ${nodeAttr} is below engines.node (${manifest.engines.node}); update nixpkgs";
     node;
+  # setup/templates/tmux.conf uses tmux 3.8 theme colours and its default status format.
+  tmuxFor =
+    pkgs:
+    assert pkgs.lib.assertMsg (pkgs.lib.versionAtLeast pkgs.tmux.version "3.8")
+      "Locked tmux ${pkgs.tmux.version} is below the 3.8 baseline; update nixpkgs";
+    pkgs.tmux;
   piVersion =
     (builtins.fromJSON (builtins.readFile "${pi}/packages/coding-agent/package.json")).version;
   piFor =
@@ -78,7 +84,7 @@ let
     pkgs.gnused
     pkgs.neovim
     pkgs.ripgrep
-    pkgs.tmux
+    (tmuxFor pkgs)
     pkgs.flock
   ];
   toolchainPackages = pkgs: toolsPackages pkgs ++ [ (piFor pkgs) ];

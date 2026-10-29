@@ -33,6 +33,8 @@ When tabs overflow the bar, tmux shows `<` and `>` arrows. Each arrow takes the 
 
 ## Compatibility and recovery
 
+The [tmux template](../setup/templates/tmux.conf) requires tmux 3.8 or newer for its theme colors and status format. The [Nix toolchain](../nix/toolchain.nix) rejects an older locked tmux, and the [container image](../Dockerfile) builds the pinned release with [`scripts/install-tmux.sh`](../scripts/install-tmux.sh). Portable hosts must provide tmux 3.8 themselves.
+
 Colors follow the public active-theme API. Indexed colors remain terminal palette indices; RGB and OKLCH colors use truecolor. Bold weight marks attention without guessing indexed RGB colors. The indicator suits the bar when Pi and the [tmux template](themes.md#terminals) resolve the same light or dark theme; a fixed Pi theme can mismatch the bar. Custom working indicators from other extensions cannot be read through Pi's public API; the tab uses the default braille frames at a slower cadence.
 
 Orderly quit, reload, and session replacement remove the session's metadata. Another running status adapter prunes metadata whose owner PID has exited. If the last Pi process is forcibly killed, its indicator can remain until another Pi adapter polls or the window closes. PID reuse can delay that pruning. Missing or unresponsive tmux never fails the agent run.
