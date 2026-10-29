@@ -584,6 +584,50 @@ describe("tmux status integration (real isolated server)", () => {
     },
   );
 
+  it("keeps last-window and bell colour overrides on agent tab labels", async () => {
+    const f = await fixture();
+    await f.command("rename-window", "-t", f.window, "alpha");
+    const last = await f.command(
+      "new-window",
+      "-d",
+      "-t",
+      "status-test",
+      "-n",
+      "beta",
+      "-P",
+      "-F",
+      "#{pane_id}",
+      "sleep 300",
+    );
+    const belled = await f.command(
+      "new-window",
+      "-d",
+      "-t",
+      "status-test",
+      "-n",
+      "gamma",
+      "-P",
+      "-F",
+      "#{pane_id}",
+      "sleep 300",
+    );
+    // beta becomes the last window; gamma raises a bell while in the background.
+    await f.command("select-window", "-t", "status-test:1");
+    await f.command("select-window", "-t", "status-test:0");
+    const render = await templateTerminal(f, "dark");
+    await f.command("set-option", "-g", "window-status-last-style", "fg=#ff00ff");
+    await f.command("set-option", "-g", "window-status-bell-style", "fg=#00ffff");
+    await f.command("set-option", "-g", "monitor-bell", "on");
+    await f.command("set-option", "-g", "bell-action", "any");
+    await f.command("run-shell", "-t", belled, "printf '\\a' > #{pane_tty}");
+    await f.transport(last).update("done", palette.done);
+    await f.transport(belled).update("error", "#fedcba");
+    const label = (fg: string) => ({ fg, bg: "60,56,54", bold: false, dim: false });
+    await expect
+      .poll(() => render("1:beta", "2:gamma"), { timeout: 7_000 })
+      .toEqual({ ...tab("1:beta", label("255,0,255")), ...tab("2:gamma", label("0,255,255")) });
+  });
+
   it("keeps labels readable beside indicators from earlier extension versions", async () => {
     const f = await fixture();
     await f.command("rename-window", "-t", f.window, "alpha");
