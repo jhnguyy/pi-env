@@ -10,7 +10,7 @@ Load the updated [tmux template](../setup/templates/tmux.conf), then restart Pi 
 tmux source-file /path/to/pi-env/setup/templates/tmux.conf
 ```
 
-Replace `/path/to/pi-env` with the checkout path. This command applies the whole template, including its theme and key settings. For custom tab formats, insert `#{?@pi_agent_status,#{E:@pi_agent_status} ,}` before the window label in both `window-status-format` and `window-status-current-format`. The indicator ends with `#[default]`, so put tab colors in `window-status-style` and `window-status-current-style` rather than inline `#[...]` styles before the indicator.
+Replace `/path/to/pi-env` with the checkout path. This command applies the whole template, including its theme and key settings. For custom tab formats, insert the indicator before the window label and then restore the tab style, as the template's `window-status-format` and `window-status-current-format` do.
 
 Status metadata does not change session names. Only the indicator receives status styling; window labels keep the tab's text color and background, including the active-tab highlight.
 

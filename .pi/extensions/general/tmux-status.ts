@@ -142,10 +142,9 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
       Number(a.pane.slice(1)) - Number(b.pane.slice(1)),
   );
   const winner = snapshot.panes[0];
-  // #[default] returns the label to the tab's own style. Seen states keep the tab's
-  // weight; pop-default would leave the indicator's colour active instead.
+  // The tab format resets the style after the indicator; seen states keep the tab's weight.
   const indicator = winner
-    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}#[default]`
+    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}`
     : "";
   // Priority digit then colour, so tmux formats can rank windows without parsing styles.
   const rank = winner ? `${statusDefinitions[winner.state].priority}${winner.color}` : "";

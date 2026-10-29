@@ -253,7 +253,7 @@ async function fixture(): Promise<TmuxFixture> {
 
 function indicator(state: StatusState, seen = false): string {
   const glyph = state === "running" ? "⠋" : glyphs[state];
-  return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}#[default]`;
+  return `#[fg=${palette[state]},nodim${seen ? "" : ",bold"}]${glyph}`;
 }
 
 interface Cell {
@@ -513,7 +513,7 @@ describe("tmux status integration (real isolated server)", () => {
     await transport.update("running", palette.running);
     const viewed = await f.paneValue();
     expect(viewed, "second client acknowledges running").toBe("running|1|#123456|1");
-    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠙#[default]");
+    expect(await f.indicator()).toBe("#[fg=#123456,nodim]⠙");
     await f.command("switch-client", "-t", "elsewhere");
     await expect
       .poll(async () => (await f.command("list-clients", "-F", "#{window_id}")).split("\n"), {
@@ -524,7 +524,7 @@ describe("tmux status integration (real isolated server)", () => {
     expect(await f.paneValue(), "animation/theme preserve acknowledgement").toBe(
       "running|1|#abcdef|2",
     );
-    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠹#[default]");
+    expect(await f.indicator()).toBe("#[fg=#abcdef,nodim]⠹");
     await transport.update("done", palette.done);
     expect(await f.indicator(), "new state rearms unseen").toBe(indicator("done"));
   });
@@ -583,6 +583,18 @@ describe("tmux status integration (real isolated server)", () => {
         });
     },
   );
+
+  it("keeps labels readable beside indicators from earlier extension versions", async () => {
+    const f = await fixture();
+    await f.command("rename-window", "-t", f.window, "alpha");
+    const render = await templateTerminal(f, "dark");
+    // The format written before the template owned the reset.
+    const legacy = "#[push-default]#[fg=#123456,nobold,nodim,dim]✓#[pop-default]";
+    await f.command("set-option", "-w", "-t", f.window, "@pi_agent_status", legacy);
+    await expect
+      .poll(() => render("0:alpha"), { timeout: 7_000 })
+      .toEqual(tab("0:alpha", { fg: "250,189,47", bg: "80,73,69", bold: true, dim: false }));
+  });
 
   it("colours each overflow arrow by the highest-priority agent on its side", async () => {
     const f = await fixture();
@@ -653,7 +665,7 @@ describe("tmux status integration (real isolated server)", () => {
         .toMatch(/^running\|[01]\|#123456\|[0-9]$/);
       await expect
         .poll(() => f.indicator(), { timeout: 7_000 })
-        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]#\[default\]$/);
+        .toMatch(/^#\[fg=#123456,nodim,bold\][⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
       n.setTheme(theme("#abcdef"));
       await expect
         .poll(() => f.paneValue(), { timeout: 7_000 })
