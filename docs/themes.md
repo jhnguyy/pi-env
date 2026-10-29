@@ -8,7 +8,7 @@ Use `/settings` to choose a theme, or `system` to follow terminal colors. After 
 
 ## Terminals
 
-[Terminal setup](../setup/terminal-config.mjs) installs Ghostty's light/dark palettes on GUI hosts and a fixed dark tmux style. Set `PI_ENV_LINK_GHOSTTY=1` to install Ghostty files elsewhere.
+[Terminal setup](../setup/terminal-config.mjs) installs Ghostty's light/dark palettes on GUI hosts and a tmux style that follows the background each client reports, treating an unknown background as dark. Set `PI_ENV_LINK_GHOSTTY=1` to install Ghostty files elsewhere.
 
 Keep Ghostty overrides in `~/.config/ghostty/config.local`. Reload Ghostty after setup and run `ghostty +validate-config`.
 

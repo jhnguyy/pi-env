@@ -15,6 +15,11 @@
 #   pi-env                        published image; the default (last) stage
 #   session-manager-e2e-evidence  exports session-manager E2E evidence
 #   session-manager-e2e           fails when the session-manager E2E fails
+# Debian's tmux predates the 3.8 baseline that the tmux template and its tests need.
+FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS tmux-build
+COPY scripts/install-tmux.sh /tmp/install-tmux.sh
+RUN sh /tmp/install-tmux.sh
+
 FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6dae8aab81a99eb797b3e AS toolchain
 
 ENV PI_ENV_HOME=/opt/pi-env \
@@ -31,6 +36,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    libevent-core-2.1-7 \
     tini \
     util-linux \
   && npm install --global --omit=dev "$(node -p 'JSON.parse(require("fs").readFileSync("/tmp/pi-env-package.json")).packageManager.replace("nub@", "@nubjs/nub@")')" \
@@ -38,6 +44,9 @@ RUN export DEBIAN_FRONTEND=noninteractive \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && rm -rf /var/lib/apt/lists/* /tmp/pi-env-package.json \
   && node --version
+
+COPY --from=tmux-build /usr/local/bin/tmux /usr/local/bin/tmux
+RUN tmux -V
 
 WORKDIR ${PI_ENV_HOME}
 
@@ -84,11 +93,7 @@ CMD ["nub", "run", "verify:install"]
 # which needs Git metadata. The run stage always succeeds so that evidence can
 # be exported; the session-manager-e2e stage is the pass/fail gate.
 FROM toolchain AS session-manager-e2e-run
-RUN export DEBIAN_FRONTEND=noninteractive \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends tmux \
-  && rm -rf /var/lib/apt/lists/* \
-  && chown node:node ${PI_ENV_HOME}
+RUN chown node:node ${PI_ENV_HOME}
 COPY --chown=node:node . .
 USER node
 RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=1000 \
