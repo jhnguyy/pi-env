@@ -18,14 +18,14 @@ Status metadata does not change session names. Only the indicator receives statu
 
 | Indicator       | Meaning                             |
 | --------------- | ----------------------------------- |
-| Braille spinner | Running, including compaction       |
+| `⠶`/`⠿` pulse   | Running, including compaction       |
 | `✓`             | Settled successfully                |
 | `✗`             | Final response or compaction failed |
 | `○`             | Idle or cancelled                   |
 
 A failed tool call does not determine the final status. Retries stay running until settlement. Blocking dialogs keep the underlying state because this display has no separate blocked indicator.
 
-Background state changes use bold styling. Viewing the window in any attached client marks its current state seen and returns the indicator to normal weight. Animation and theme changes do not make a seen state unseen again. Visibility and theme polling waits one second between updates while resting, or 250 ms while running. A visit shorter than the polling interval can be missed.
+Background state changes use bold styling. Viewing the window in any attached client marks its current state seen and returns the indicator to normal weight. Animation and theme changes do not make a seen state unseen again. Visibility and theme polling waits one second between updates, and the running pulse advances with it. A visit shorter than the polling interval can be missed.
 
 When several Pi panes share a window, running takes precedence over error, done, and idle. Equal states use the lowest pane ID, including that pane's theme and attention state. The tab is a summary, not a count of unseen panes.
 
@@ -35,7 +35,7 @@ When tabs overflow the bar, tmux shows `<` and `>` arrows. Each arrow takes the 
 
 The [tmux template](../setup/templates/tmux.conf) requires tmux 3.8 or newer for its theme colors and status format. The [Nix toolchain](../nix/toolchain.nix) rejects an older locked tmux, and the [container image](../Dockerfile) builds the pinned release with [`scripts/install-tmux.sh`](../scripts/install-tmux.sh). Portable hosts must provide tmux 3.8 themselves.
 
-Colors follow the public active-theme API. Indexed colors remain terminal palette indices; RGB and OKLCH colors use truecolor. Bold weight marks attention without guessing indexed RGB colors. The indicator suits the bar when Pi and the [tmux template](themes.md#terminals) resolve the same light or dark theme; a fixed Pi theme can mismatch the bar. Custom working indicators from other extensions cannot be read through Pi's public API; the tab uses the default braille frames at a slower cadence.
+Colors follow the public active-theme API. Indexed colors remain terminal palette indices; RGB and OKLCH colors use truecolor. Bold weight marks attention without guessing indexed RGB colors. The indicator suits the bar when Pi and the [tmux template](themes.md#terminals) resolve the same light or dark theme; a fixed Pi theme can mismatch the bar. The pulse is best effort and does not follow Pi's own working indicator. Matching Pi's 80 ms loader would need a frame write per tick; a shared control-mode ticker cost about 3% of a core while any agent ran, which this display does not justify.
 
 Orderly quit, reload, and session replacement remove the session's metadata. Another running status adapter prunes metadata whose owner PID has exited. If the last Pi process is forcibly killed, its indicator can remain until another Pi adapter polls or the window closes. PID reuse can delay that pruning. Missing or unresponsive tmux never fails the agent run.
 

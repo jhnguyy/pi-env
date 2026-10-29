@@ -44,8 +44,7 @@ function parsePane(line: string): PaneStatus | undefined {
     !isStatusState(state) ||
     (seen !== "0" && seen !== "1") ||
     !colorPattern.test(color) ||
-    !/^[0-9]$/.test(frame) ||
-    Number(frame) >= statusDefinitions[state].frames.length
+    !/^[0-9]$/.test(frame)
   )
     return undefined;
   return {
@@ -56,7 +55,8 @@ function parsePane(line: string): PaneStatus | undefined {
     state,
     seen: seen === "1",
     color,
-    frame: Number(frame),
+    // Earlier versions wrote frames for a longer spinner; wrap them onto the current one.
+    frame: Number(frame) % statusDefinitions[state].frames.length,
   };
 }
 

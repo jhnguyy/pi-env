@@ -7,7 +7,9 @@ export const statusDefinitions = {
   running: {
     role: "accent",
     priority: 3,
-    frames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+    // A two-frame pulse reads as deliberate at the best-effort polling cadence,
+    // where a full braille spinner would look stalled.
+    frames: ["⠶", "⠿"],
   },
 } as const satisfies Record<
   string,
