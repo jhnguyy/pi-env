@@ -40,7 +40,7 @@ function vacant(leader: string): boolean {
  */
 export class TmuxTicker {
   private readonly token = `${process.pid}-${randomUUID()}`;
-  private readonly users = new Set<object>();
+  private readonly users = new Set<string>();
   private client: ChildProcess | undefined;
   private frameTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -65,8 +65,8 @@ export class TmuxTicker {
     return this.client !== undefined;
   }
 
-  /** Called by a running session with the leader value it last observed. */
-  demand(user: object, pane: string, leader: string): void {
+  /** Called by a running session, identified by its owner token, with the leader it observed. */
+  demand(user: string, pane: string, leader: string): void {
     this.users.add(user);
     if (this.client || this.claiming || Date.now() < this.retryAfter) return;
     if (leader !== this.token && !vacant(leader)) return;
@@ -76,7 +76,7 @@ export class TmuxTicker {
     });
   }
 
-  release(user: object): void {
+  release(user: string): void {
     this.users.delete(user);
     if (!this.users.size) this.stop();
   }
@@ -127,15 +127,17 @@ export class TmuxTicker {
   }
 
   private watchIdle(): void {
-    this.idleTimer = setTimeout(async () => {
-      if (!this.client) return;
-      const ranks = await this.run(["list-windows", "-a", "-F", "#{@pi_agent_rank}"]);
-      const running = String(statusDefinitions.running.priority);
-      if (ranks !== undefined && !ranks.split("\n").some((rank) => rank.startsWith(running)))
-        this.stop();
-      else this.watchIdle();
-    }, idleCheckMs);
+    this.idleTimer = setTimeout(() => void this.checkIdle(), idleCheckMs);
     this.idleTimer.unref();
+  }
+
+  private async checkIdle(): Promise<void> {
+    if (!this.client) return;
+    const ranks = await this.run(["list-windows", "-a", "-F", "#{@pi_agent_rank}"]);
+    const running = String(statusDefinitions.running.priority);
+    if (ranks !== undefined && !ranks.split("\n").some((rank) => rank.startsWith(running)))
+      this.stop();
+    else this.watchIdle();
   }
 
   private stop(): void {
