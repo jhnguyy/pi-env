@@ -124,10 +124,12 @@ class TmuxFixture {
 
   // An outer tmux pane acts as the terminal, so capture-pane reports what the client drew.
   async terminal(session: string): Promise<() => Promise<string>> {
-    const attach = `env -u TMUX TERM=xterm-256color COLORTERM=truecolor tmux -S '${this.socket}' attach-session -t ${session}`;
+    // -u keeps glyphs intact where the host locale is not UTF-8, as in the container image.
+    const attach = `env -u TMUX TERM=xterm-256color COLORTERM=truecolor tmux -u -S '${this.socket}' attach-session -t ${session}`;
     await execute(
       "tmux",
       [
+        "-u",
         "-S",
         this.terminalSocket,
         "-f",
@@ -145,7 +147,7 @@ class TmuxFixture {
     this.screen = async () => {
       const { stdout } = await execute(
         "tmux",
-        ["-S", this.terminalSocket, "capture-pane", "-p", "-e", "-t", "0"],
+        ["-u", "-S", this.terminalSocket, "capture-pane", "-p", "-e", "-t", "0"],
         { timeout: 5_000, env: { ...process.env, TMUX: "", TMUX_PANE: "" } },
       );
       const line = stdout.trimEnd().split("\n").at(-1) ?? "";
