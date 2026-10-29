@@ -5,17 +5,17 @@ description: Deliver atomic repository changes through scope definition, design,
 
 # Code Contribution
 
-## Establish scope and isolate work
+## Establish the outcome and protect local work
 
 Locate the target repository root and task worktree before running repository commands. If the target is ambiguous, ask before proceeding. Read its `README.md`, `CONTRIBUTING.md`, and applicable area instructions for local branch, base synchronization, worktree placement, and initialization requirements.
 
-Define one verifiable outcome that includes the required code, tests, migrations, and obsolete-path removal. Record assumptions that could change the solution, risk, or verification. Keep independently useful changes separate and preserve unrelated behavior.
+Define one verifiable outcome and the benefit it serves, including the required code, tests, migrations, and obsolete-path removal. Identify who depends on the affected behavior and what must remain true for them. Record assumptions that could change the solution, risk, or verification. Keep independently useful changes separate and preserve unrelated behavior.
 
 Perform repository changes in a dedicated worktree, inspecting Git state before you create or resume it. Keep the base worktree unchanged on the base branch, and avoid worktrees another session may own. Preserve local work and stop if safe synchronization requires a decision that repository policy does not resolve.
 
 ## Inspect and choose the owner
 
-Trace the affected workflow through its owner, callers, tests, and dependencies before choosing an implementation. Before adding a responsibility or moving a boundary, inspect nearby and shared modules as well as relevant installed dependencies. Compare candidate owners by inputs, outputs, authority, lifecycle, and failure behavior rather than names alone. Use that comparison to choose reuse, extension, or a separate owner, and record consequential contract differences for review.
+Trace the affected workflow through its owner, callers, tests, and dependencies before choosing an implementation. Ask which observed condition produces the problem and what evidence would change that explanation. Before adding a responsibility or moving a boundary, inspect nearby and shared modules as well as relevant installed dependencies. Compare candidate owners by inputs, outputs, authority, lifecycle, and failure behavior rather than names alone. Use that comparison to choose reuse, extension, or a separate owner, and record consequential contract differences for review.
 
 ## Establish production contracts
 
@@ -39,11 +39,11 @@ Bound work before allocation. Prefer one-pass transformations and reuse values d
 
 1. Define expected outcomes and failure cases before implementation.
 2. Inspect current behavior and use the [testing-practices skill](../testing-practices/SKILL.md) to select evidence while the design can still change.
-3. Implement in verifiable phases against those outcomes.
-4. Verify the complete workflow and run repository-required checks before review or merge.
+3. Implement in verifiable phases against those outcomes. When results challenge an assumption, investigate the difference and revise the approach; surface changes that affect scope, risk, or commitments.
+4. Verify the complete workflow and run repository-required checks before review or merge. State what the results establish and where verification remains limited.
 
 ## Commit and publish
 
 Inspect `git status` and the diff before committing so the commit includes only intended changes.
 
-Before preparing a pull request, read contribution guidance and applicable templates. Explain the behavioral outcome and rationale, including consequential decisions, validation, risks, and follow-up work.
+Before preparing a pull request, read contribution guidance and applicable templates. Explain the behavioral outcome and rationale, including consequential decisions, validation, risks, and follow-up work. Make remaining responsibilities explicit: identify their owner and next action, or explain why they are deferred or outside scope. Follow local authorization requirements for publication.

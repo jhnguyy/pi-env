@@ -7,9 +7,9 @@ description: Define a change's scope, success criteria, implementation sequence,
 
 ## Frame the change
 
-Identify the affected users, blocked outcome, and the workflow, dependency, or assumption that produces the problem. State what the plan includes and excludes.
+Identify the affected users, the outcome they need, and the benefit it would provide. Trace the workflow, dependency, or assumption that blocks that outcome, including the conditions and consequences for those affected. State what the plan includes and excludes.
 
-Test the premise behind the proposed approach. For uncertainty that could change the approach, choose an observation that could disprove the premise. Consider how the system would look if the requirement had existed from the start, then account for migration from the current design.
+Test the premise behind the proposed approach. Ask what is observed, what is inferred, and which uncertainty could change the approach. Choose an observation that could disprove the premise. Consider how the system would look if the requirement had existed from the start, then account for migration from the current design.
 
 Before decomposing work, define:
 
@@ -22,13 +22,13 @@ Use a design document to work through consequential decisions and gather feedbac
 
 ## Derive implementation and verification
 
-Evaluate approaches against the success criteria. Derive implementation, verification, and rollout steps from the selected approach, including dependencies and checkpoints.
+Compare viable approaches against the success criteria, consequences, and ease of repair. Choose the smallest approach that can fulfill the outcome. Derive implementation, verification, and rollout steps from it, including dependencies and checkpoints.
 
 Choose evidence while the design can still change. Identify where the outcome can be observed and which claims require real operating conditions. Follow the [testing-practices skill](../testing-practices/SKILL.md) to select checks and assess their limits.
 
 For each consequential unknown, record the affected decision, how to resolve it, and who will resolve it or when resolution is required. Include operating concerns when they change scope, sequence, verification, rollout, or responsibility.
 
-Identify responsibility for implementation, verification, rollout, and follow-up, including the limits of delegated work.
+Identify responsibility for implementation, verification, rollout, and follow-up, including the limits of delegated work. Use checkpoints to ask whether new evidence changes the approach, scope, or commitments; communicate revisions to those who depend on the plan.
 
 ## Plan rollout and outcome verification
 
@@ -39,7 +39,7 @@ For changes that require deployment:
 3. Define how to exercise changed behavior under real conditions and compare results with the success criteria.
 4. Assign observation of delayed effects, regression response, and removal of temporary mechanisms.
 
-Deployment evidence proves arrival, not success. For changes without deployment, choose the environment where the outcome can actually be verified.
+Use deployment evidence to confirm arrival, then outcome evidence to assess success. For changes without deployment, choose the environment where the outcome can actually be verified. State the conditions and limits of that evidence.
 
 ## Close the plan
 

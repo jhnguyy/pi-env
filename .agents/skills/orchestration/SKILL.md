@@ -9,7 +9,7 @@ description: Coordinates subagents that investigate tasks, discover relevant ski
 
 Delegate when a separate context or execution boundary justifies the coordination cost. Keep scope, sequencing, integration, and completion in the parent session. Before dispatch, inspect the live `subagent` tool description for available agents, models, actions, tools, job lifecycle, and runtime limits.
 
-Give each child a goal and enough context to investigate it within explicit boundaries. Explain what evidence the parent needs to assess and integrate the result. Shape the assignment around the task and available capabilities, leaving the child room to choose its approach.
+Give each child a goal, its contribution to the overall outcome, and enough context to investigate it within explicit boundaries. Explain what evidence the parent needs to assess and integrate the result, including uncertainties or contrary findings that could change the approach. Shape the assignment around the task and available capabilities, leaving the child room to choose its approach.
 
 Pass relevant skills and references based on your interpretation of the task. Use tool search when available to discover capabilities, and let children find other applicable skills and tools as their investigation develops. Supplied references are starting points, not an exhaustive procedure.
 
@@ -17,6 +17,8 @@ Bound tool access and context to the task's scope and privacy requirements. Supp
 
 ## Schedule and integrate
 
-Start independent jobs before waiting, and dispatch dependent work after its inputs settle. Review each child's results and evidence before integrating them. Resolve conflicts and verify the combined result in the parent session, including required repository checks.
+Start independent jobs before waiting, and dispatch dependent work after its inputs settle. Review each child's results and evidence before integrating them. When findings conflict, compare their inputs, assumptions, and observed results; use a focused question or check to resolve the difference before integration. Verify the combined result in the parent session, including required repository checks.
 
-If a job fails, retry only the failed slice rather than rerunning successful work. Adjust its brief, context, tools, model, or scope before retrying.
+If a job fails, inspect the failure evidence and retry only the failed slice rather than rerunning successful work. Adjust its brief, context, tools, model, or scope before retrying. Communicate changes that affect dependent work or commitments.
+
+Close the parent task against the overall outcome, accounting for unfinished, failed, or unverified child work. Give remaining work an explicit disposition and responsibility; a completed child job alone does not establish that the integrated result is complete.
