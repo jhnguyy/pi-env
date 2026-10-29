@@ -2,13 +2,10 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { isStatusState, statusDefinitions, type StatusState } from "./status";
-import { alive, leaderOption, spinnerOption, tickerFor, type TmuxTicker } from "./tmux-ticker";
 
 export interface TmuxStatusOptions {
   socketPath?: string;
   timeoutMs?: number;
-  /** Defaults to this process's shared ticker for the socket. */
-  ticker?: TmuxTicker;
 }
 
 const colorPattern =
@@ -27,6 +24,15 @@ interface PaneStatus {
   seen: boolean;
   color: string;
   frame: number;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 function parsePane(line: string): PaneStatus | undefined {
@@ -137,14 +143,8 @@ function windowCommand(window: string, snapshot: WindowSnapshot): string[] | und
   );
   const winner = snapshot.panes[0];
   // The tab format resets the style after the indicator; seen states keep the tab's weight.
-  // Running frames come from the shared ticker's global option, so tabs animate at
-  // Pi's cadence without a write per frame; the first frame stands in until it ticks.
-  const glyph =
-    winner?.state === "running"
-      ? `#{?${spinnerOption},#{${spinnerOption}},${statusDefinitions.running.frames[0]}}`
-      : winner && statusDefinitions[winner.state].frames[winner.frame];
   const indicator = winner
-    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${glyph}`
+    ? `#[fg=${winner.color},nodim${winner.seen ? "" : ",bold"}]${statusDefinitions[winner.state].frames[winner.frame]}`
     : "";
   // Priority digit then colour, so tmux formats can rank windows without parsing styles.
   const rank = winner ? `${statusDefinitions[winner.state].priority}${winner.color}` : "";
@@ -177,8 +177,8 @@ export class TmuxStatus {
   private closed = false;
   private state: StatusState | undefined;
   private revision: number | undefined;
+  private frame = 0;
   private pending: Promise<void> = Promise.resolve();
-  private readonly ticker: TmuxTicker;
 
   constructor(
     private readonly pane: string,
@@ -186,7 +186,6 @@ export class TmuxStatus {
   ) {
     this.valid = /^%\d+$/.test(pane);
     this.args = options.socketPath ? ["-S", options.socketPath] : [];
-    this.ticker = options.ticker ?? tickerFor(this.args);
     this.timeoutMs = Number.isFinite(options.timeoutMs)
       ? Math.max(1, Math.min(options.timeoutMs!, 5_000))
       : 1_000;
@@ -217,14 +216,14 @@ export class TmuxStatus {
       // A coalesced running -> done cycle must rearm attention even if the
       // previous published state was also done.
       const unchanged = state === this.state && revision === this.revision;
+      this.frame = unchanged ? (this.frame + 1) % statusDefinitions[state].frames.length : 0;
       this.state = state;
       this.revision = revision;
       // Read acknowledgement at the write boundary: another pane's poll may
       // have marked this pane viewed since our previous update.
       const seen = unchanged ? `#{?#{m:${state}|1|*,#{${paneOption}}},1,0}` : "0";
-      // The frame field stays for compatibility with earlier versions; the ticker animates.
-      const value = `${state}|0|${color}|0`;
-      const set = `set-option -p -F -t ${this.pane} ${paneOption} '${state}|${seen}|${color}|0'`;
+      const value = `${state}|0|${color}|${this.frame}`;
+      const set = `set-option -p -F -t ${this.pane} ${paneOption} '${state}|${seen}|${color}|${this.frame}'`;
       const commands = this.claimed
         ? ["if-shell", "-F", "-t", this.pane, equal(ownerOption, this.owner), set]
         : batch([
@@ -246,19 +245,9 @@ export class TmuxStatus {
       `#{pane_id}|#{window_id}|#{${ownerOption}}|#{${paneOption}}`,
     ]);
     if (output === undefined) return;
-    // No-output clients, such as the ticker, receive no pane content and view nothing.
-    const clients = await this.run([
-      "display-message",
-      "-p",
-      `#{${leaderOption}}`,
-      ";",
-      "list-clients",
-      "-F",
-      "#{?#{m:*no-output*,#{client_flags}},,#{window_id}}",
-    ]);
+    const clients = await this.run(["list-clients", "-F", "#{window_id}"]);
     if (clients === undefined) return;
-    const [leader = "", ...viewing] = clients.split("\n");
-    const viewed = new Set(viewing.filter(Boolean));
+    const viewed = new Set(clients.trim().split("\n"));
     const commands: string[][] = [];
     for (const [window, rows] of windowRows(output)) {
       const snapshot = acknowledge(rows, viewed.has(window));
@@ -267,13 +256,11 @@ export class TmuxStatus {
       if (command) commands.push(command);
     }
     if (commands.length) await this.run(batch(commands));
-    if (this.state === "running" && !this.closed) this.ticker.demand(this, this.pane, leader);
   }
 
   close(): Promise<void> {
     if (this.closed) return this.pending;
     this.closed = true;
-    this.ticker.release(this);
     if (!this.valid) return this.pending;
     this.pending = this.pending.then(async () => {
       if (!this.claimed) return;

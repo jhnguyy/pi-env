@@ -38,8 +38,7 @@ class SessionStatus {
       if (this.dirty) this.refresh();
       else {
         // The public API exposes the current theme but no theme-change subscription.
-        // Spinner frames come from the shared ticker, so running needs no faster poll.
-        this.timer = setTimeout(() => this.refresh(), 1000);
+        this.timer = setTimeout(() => this.refresh(), this.state === "running" ? 250 : 1000);
         this.timer.unref();
       }
     });
