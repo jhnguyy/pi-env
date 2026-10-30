@@ -26,6 +26,43 @@ The model roster in the tool description describes the parent configuration for 
 
 A completed initial result stays unchanged when a human continues the child. Use the native session for later messages. Job handles and live owners do not survive a parent restart.
 
+## Opt-in shared service
+
+The shared native service is a separate, explicit entrypoint. It does not change the default `subagent` tool or `/subagents` browser. On Linux, start one foreground service with a private state directory on a local filesystem:
+
+```bash
+nub run build
+mkdir -m 700 /tmp/pi-env-subagents
+nub run subagent:service /tmp/pi-env-subagents
+```
+
+Use a persistent private directory instead of `/tmp` when history must survive temporary-directory cleanup. An optional second argument selects the service's native Pi agent directory. The service uses that directory's saved project-trust decisions; it never inherits a client's transient trust, providers, tools, or settings. Native children load their own target configuration as usual. This is not a sandbox.
+
+In another terminal, send one JSON command on stdin. The command returns after admission, not after inference:
+
+```bash
+printf '%s\n' '{"action":"submit","request":{"requestId":"example-1","name":"inspect","task":"Summarize the repository instructions.","cwd":"/absolute/path/to/repository","tools":["read"]}}' \
+  | nub run subagent:client /tmp/pi-env-subagents
+printf '%s\n' '{"action":"status"}' \
+  | nub run subagent:client /tmp/pi-env-subagents
+```
+
+The receipt contains `childId` and `operationId`. Other commands are:
+
+- `input`: `request` contains a unique `requestId`, `childId`, `mode` (`prompt`, `steer`, or `followUp`), and `text`.
+- `cancel`: `request` contains a unique `requestId` and the exact `operationId` to cancel. Acknowledgement records intent, not settlement; it cannot cancel a later operation accidentally. Already-dispatched steering/follow-up input cannot be withdrawn and rejects cancellation; its actual delivery outcome remains authoritative.
+- `inspect`: supply `childId` for bounded native conversation/configuration/provenance inspection. Output may be truncated; the native transcript remains complete.
+
+Programmatic clients use `connect()` in [`src/subagent-service/client.ts`](../src/subagent-service/client.ts). Its Chord view exposes the same control methods and a subscribed `snapshot`. Closing a client or dropping its connection does not cancel accepted work. Two clients control the same retained native owner; attaching does not create another transcript writer. Results of the initial operation remain separate from later human operations. A steering/follow-up result of `queued` is delivery acknowledgement, not model consumption.
+
+Access is deliberately per OS user: the state directory must be owned, non-symlink mode `0700`, and the Unix socket owned mode `0600`. There is no TCP listener, multi-user ACL, automatic discovery, auto-start, or automatic reconnect. A process lock excludes a second service before it opens SQLite. Runtime changes require drain/restart; hot reload is not enabled.
+
+The first slice caps pending/active operations at 20 and retains at most 128 admitted operations and 128 cancellation identities per store. Inputs are at most 16,384 characters and 64 KiB encoded; result previews retain 4 KiB, inspection 16 KiB. Capacity exhaustion rejects admission without deleting history. Native admission also retains its existing workspace serialization and limits; it does not coordinate independently running root Pi writers.
+
+Service state and request deduplication persist in SQLite. Retry the same request identity after losing an acknowledgement; different content under that identity is rejected. Restart requires the same executable digest, Node version, and agent directory. A changed bundle is rejected rather than silently resuming incompatible work.
+
+**Recovery limit:** accepted but undispatched initial work can resume. Dispatched native operations become `interrupted` with an unknown effect outcome after service loss; they never automatically rerun. Completed results remain available. Native input queues and partially executed tool batches are not recoverable in this slice, and historical native owners are not automatically reopened. A new input to an unavailable owner fails; submit new work explicitly. This provides durable control state and interruption containment, not durable native inference. SIGINT/SIGTERM stop admission and request native settlement; non-cooperative tools can delay shutdown indefinitely. Use the same state directory on restart after a forced termination.
+
 ## Direct interaction
 
 Run `/subagents` in terminal mode. The roster includes retained blocking children, background children, and internal native children such as review nodes. Type to search; use the arrow keys and Enter to select a child.
