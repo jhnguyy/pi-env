@@ -75,11 +75,11 @@ export const NOTES_ACTIONS = [
 export const NOTES_COLLECTIONS = ["store", "inbox", "projects", "worklog", "wiki"] as const;
 const NOTES_COLLECTION_DESCRIPTIONS = {
   store:
-    "Catchall provider store for notes outside the core collections, orientation, global search, and bounded maintenance. Omit collection for Store.",
+    "Provider store for policy discovery, store-specific layouts, orientation, global search, and bounded maintenance. Omit collection for Store.",
   inbox:
     "Unclassified captures. Read the earliest item or a date; write a Note or unchecked Follow-up for today.",
   projects:
-    "Active plans, owners, status, next actions, and linked tickets. List, read, or revision-guard a document write.",
+    "Project documents organized by the store's contracts. List, read, or revision-guard a document write.",
   wiki: "Maintained current knowledge. Read a folder listing or Markdown file; revision-guard document writes.",
   worklog:
     "Brief completed-work outcomes. Read by date or range; record a bullet for today, not plans or session narrative.",
@@ -500,11 +500,14 @@ export interface NotesContractOptions {
 }
 
 export const NOTES_DESCRIPTION = [
-  "Read and maintain four note collections through the configured provider.",
-  "Inbox holds unclassified captures. Projects hold active plans, owners, status, next actions, and linked tickets.",
-  "Wiki holds maintained knowledge. Worklog holds completed outcomes.",
+  "Read and maintain notes through the configured provider.",
+  "Start with Store index; discover and read the store's policy entrypoint and relevant destination contracts before writing (for example, _meta/overview.md and its links).",
+  "Use Store list for authoritative inventory and read the existing owner and nearby project overview before choosing a destination.",
+  "Honor local contracts for structure, subprojects, tasks, and history; do not invent a competing taxonomy. If no applicable contract or owner establishes the destination, ask before creating durable structure.",
+  "Integrate updates into the current explanation rather than appending session history: reconcile superseded claims, remove repetition, and preserve useful reasoning and human-authored content. Do not automatically move older material to Worklog or records.",
+  "Inbox supports captures, Projects project documents, Wiki maintained knowledge, and Worklog brief dated completed-work bullets. These collection helpers have fixed paths and formats; use Store operations when local contracts need a different layout.",
   "Choose collection and action: inbox read/write; projects list/read/write; wiki read/write; worklog read/record.",
-  "Omit collection for Store index/list/read/search/resolve/write/edit/delete, used for catchall access, orientation, search, and maintenance.",
+  "Omit collection for Store index/list/read/search/resolve/write/edit/delete, including writes where collection helpers do not fit the local contract.",
   "Reads are bounded and non-destructive. Mutations preserve unrelated content and use revision preconditions.",
 ].join(" ");
 

@@ -25,12 +25,20 @@ An external extension can register a provider such as `notes-assistant`, then se
 
 Put machine-wide configuration in `~/.pi/agent/settings.json`. A trusted project can override it through `.pi/settings.json`.
 
+## Store-owned contracts
+
+The model-facing tool instructions require agents to start with Store `index`, discover and read the store's policy entrypoint and relevant destination contracts, and inspect the existing owner before writing. A vault can publish its contracts through `_meta/overview.md` and linked documents; this is an example, not a required path. Use Store `list` for the authoritative inventory. Ask before creating durable structure when neither a contract nor an existing owner establishes the destination.
+
+The store owns project structure, subproject boundaries, task placement, and history policy. Pi-env does not require a particular project template or a separate tasks file. Integrate updates into the current explanation rather than accumulating session summaries. Reconcile superseded claims and repetition while preserving useful reasoning and human-authored content. Age alone does not justify moving content to Worklog or records.
+
+These are agent instructions, not automatic contract discovery, schema enforcement, rewriting, or archival. Providers do not need a policy-specific API.
+
 ## Collection behavior
 
-Pi-env owns four portable collections. Providers remain storage-neutral and own storage, transport, credentials, revisions, conflicts, and commit behavior.
+Pi-env supplies four collection helpers with fixed paths and formats. Use them when they fit the store's contracts; otherwise use Store operations. Providers own storage, transport, credentials, revisions, conflicts, and commit behavior.
 
 - Inbox contains unclassified captures.
-- Projects contain active plans, owners, status, next actions, and linked tickets.
+- Projects contain project documents whose structure follows local contracts.
 - Wiki contains maintained knowledge.
 - Worklog contains completed outcomes.
 
@@ -44,7 +52,7 @@ An Inbox write records one Note or unchecked Follow-up for the Pi process system
 
 Project targets are Markdown paths relative to `projects/`. A list returns project documents. A read returns one project document and its revision. Project writes require a null revision for explicit creation or the revision returned by a prior read for update.
 
-Keep only active project state in this collection. Each project document records its plan, owners, status, next actions, and linked tickets. Move completed outcomes to Worklog and maintained knowledge to Wiki.
+The store's contracts define each document's structure and lifecycle, including parent projects, subprojects, designs, and tasks. Project writes replace Markdown without enforcing a template or moving content to another collection.
 
 ### Wiki
 
@@ -58,7 +66,7 @@ All collection list results are bounded. A returned opaque cursor continues the 
 
 ## Store compatibility
 
-Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These catchall actions remain available for orientation, global search, notes outside the core collections, and bounded maintenance or migration work. Use collection actions for new Inbox, Projects, Wiki, and Worklog writes.
+Omit `collection` or select `store` to use the provider-neutral `index`, `list`, `read`, `search`, `resolve`, `write`, `edit`, and `delete` operations. These actions support policy discovery, orientation, global search, store-specific layouts, and bounded maintenance or migration work. Use collection actions for new Inbox, Projects, Wiki, and Worklog writes only when their fixed behavior matches the destination contract.
 
 Each provider supplies a bounded index response for store-specific orientation. Use list as the authoritative inventory when working outside the core collections.
 
