@@ -13,9 +13,22 @@
     "@opentelemetry/sdk-trace-node",
     "effect",
     "esbuild",
-    "playwright"
+    "playwright",
+    "@earendil-works/chord",
+    "@earendil-works/pi-durable",
+    "ws"
   ],
   "sidecars": {
+    "subagent": [
+      {
+        "entry": "service-main.ts",
+        "outfile": "dist/service.js"
+      },
+      {
+        "entry": "service-client-main.ts",
+        "outfile": "dist/service-client.js"
+      }
+    ],
     "analyze": [
       {
         "entry": "worker-main.ts",
