@@ -2,6 +2,7 @@
   self,
   pkgs,
   nodeFor,
+  tmuxFor,
   piFor,
   toolsFor,
   toolchainPackages,
@@ -56,6 +57,7 @@ in
     default = toolchain;
     tools = toolsFor pkgs;
     inherit toolchain pi;
+    tmux = tmuxFor pkgs;
   };
   apps = {
     default = {

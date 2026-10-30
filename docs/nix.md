@@ -10,6 +10,8 @@ The [toolchain](../nix/toolchain.nix) applies the [Nub GVS lock-access patch](..
 
 `packages.<system>.tools` (`nix build .#tools`) supplies Node, Nub, and the baseline command-line tools without Pi. External consumers can pin this package separately from the application checkout. See [external runtime setup](setup.md#externally-managed-tools-with-checkout-owned-pi) for the environment and lifecycle contract.
 
+`packages.<system>.tmux` exports the same managed tmux package as the tools and toolchain. Consumers can select it for system or Home Manager packages without installing the full toolchain. It enforces the template's tmux baseline.
+
 `packages.<system>.toolchain` and the default package still include upstream Nix-packaged Pi. Local setup apps, the development shell, and Home Manager retain their Nix Pi bindings.
 
 ## Pi release review

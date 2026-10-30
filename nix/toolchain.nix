@@ -113,6 +113,7 @@ in
     systems
     pkgsFor
     nodeFor
+    tmuxFor
     piFor
     toolsFor
     toolchainPackages

@@ -28,6 +28,7 @@
           inherit self;
           inherit (toolchain)
             nodeFor
+            tmuxFor
             piFor
             toolsFor
             toolchainPackages
