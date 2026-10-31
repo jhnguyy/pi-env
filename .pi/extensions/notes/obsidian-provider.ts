@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Dirent, Stats } from "node:fs";
 import {
   chmod,
   chown,
@@ -89,6 +90,9 @@ class ObsidianProvider implements NotesProvider {
     return {
       text: formatObsidianIndex(entries),
       entries: entries.slice(0, MAX_INDEX_ENTRIES),
+      ...(entries.some((entry) => entry.path === "_meta/overview.md")
+        ? { policy: { path: "_meta/overview.md" } }
+        : {}),
     };
   }
 
@@ -106,8 +110,7 @@ class ObsidianProvider implements NotesProvider {
       let hasMore = false;
       for (const notePath of paths) {
         signal?.throwIfAborted();
-        if (explicitPrefix && !notePath.startsWith(explicitPrefix)) continue;
-        if (cursor !== undefined && notePath.localeCompare(cursor) <= 0) continue;
+        if (!matchesListScope(notePath, explicitPrefix, cursor)) continue;
         if (entries.length === limit) {
           hasMore = true;
           break;
@@ -143,15 +146,7 @@ class ObsidianProvider implements NotesProvider {
     request: NotesSearchRequest,
     signal?: AbortSignal,
   ): Promise<readonly NoteSearchResult[]> {
-    if (request.query.trim().length === 0) {
-      throw new NotesProviderError({
-        code: "invalid-path",
-        message: "Notes search requires a non-empty query.",
-      });
-    }
-    if (request.query.length > MAX_SEARCH_QUERY_LENGTH) {
-      throw resourceLimit(`Notes search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters.`);
-    }
+    validateSearchQuery(request.query);
     try {
       const { entries: notes, nextCursor } = await this.list({ limit: MAX_NOTE_COUNT }, signal);
       if (nextCursor !== undefined) {
@@ -436,13 +431,7 @@ async function readBoundedText(
     }
     if (total > initial.size) throw conflict(identityPath);
     const metadata = await handle.stat();
-    if (
-      metadata.dev !== initial.dev ||
-      metadata.ino !== initial.ino ||
-      metadata.size !== initial.size ||
-      metadata.mtimeMs !== initial.mtimeMs ||
-      metadata.ctimeMs !== initial.ctimeMs
-    ) {
+    if (!sameFileSnapshot(metadata, initial)) {
       throw conflict(identityPath);
     }
     const bytes = buffer.subarray(0, total);
@@ -460,6 +449,39 @@ async function readBoundedText(
     };
   } finally {
     await handle.close();
+  }
+}
+
+function sameFileSnapshot(left: Stats, right: Stats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs
+  );
+}
+
+function matchesListScope(
+  notePath: string,
+  prefix: string | undefined,
+  cursor: string | undefined,
+): boolean {
+  return (
+    (!prefix || notePath.startsWith(prefix)) &&
+    (cursor === undefined || notePath.localeCompare(cursor) > 0)
+  );
+}
+
+function validateSearchQuery(query: string): void {
+  if (query.trim().length === 0) {
+    throw new NotesProviderError({
+      code: "invalid-path",
+      message: "Notes search requires a non-empty query.",
+    });
+  }
+  if (query.length > MAX_SEARCH_QUERY_LENGTH) {
+    throw resourceLimit(`Notes search query exceeds ${MAX_SEARCH_QUERY_LENGTH} characters.`);
   }
 }
 
@@ -745,7 +767,7 @@ async function walkMarkdownFiles(
       await walkMarkdownFiles(root, absolute, signal, state, depth + 1);
       continue;
     }
-    if (!entry.isFile() || path.extname(entry.name).toLocaleLowerCase() !== MARKDOWN_EXTENSION) {
+    if (!isMarkdownFile(entry)) {
       continue;
     }
     const notePath = path.relative(root, absolute).split(path.sep).join("/");
@@ -756,6 +778,10 @@ async function walkMarkdownFiles(
     }
   }
   return state.paths;
+}
+
+function isMarkdownFile(entry: Dirent): boolean {
+  return entry.isFile() && path.extname(entry.name).toLocaleLowerCase() === MARKDOWN_EXTENSION;
 }
 
 function isPortableNotePath(notePath: string): boolean {

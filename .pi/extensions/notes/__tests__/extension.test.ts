@@ -11,10 +11,10 @@ import * as AgentTools from "../../_shared/agent-tools";
 import type { SettingsEnv } from "../../_shared/settings";
 
 const roots: string[] = [];
-const shutdowns: Array<() => void> = [];
+const shutdowns: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
-  for (const shutdown of shutdowns.splice(0)) shutdown();
+  for (const shutdown of shutdowns.splice(0)) await shutdown();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -37,6 +37,7 @@ function harness() {
   const testHarness = {
     tools,
     pi: {
+      registerCommand() {},
       registerTool(tool: any) {
         tools.push(tool);
       },
@@ -59,16 +60,17 @@ function harness() {
         if (event === AgentTools.PiEvent.SessionShutdown) shutdownHandlers.push(handler);
       },
     },
-    startSession() {
+    async startSession() {
       for (const handler of sessionHandlers) {
-        handler({ type: AgentTools.PiEvent.SessionStart, reason: "startup" }, {
+        await handler({ type: AgentTools.PiEvent.SessionStart, reason: "startup" }, {
           cwd: "/repo",
-        } as ExtensionContext);
+          ui: { notify() {} },
+        } as unknown as ExtensionContext);
       }
     },
-    shutdownSession() {
+    async shutdownSession() {
       for (const handler of shutdownHandlers) {
-        handler({ type: AgentTools.PiEvent.SessionShutdown, reason: "reload" }, {
+        await handler({ type: AgentTools.PiEvent.SessionShutdown, reason: "reload" }, {
           cwd: "/repo",
         } as ExtensionContext);
       }
@@ -172,7 +174,7 @@ describe("notes extension", () => {
     testHarness.pi.events.emit(NotesProviderEvent.Register, { provider: second });
     expect(resolveNotesProvider("notes-assistant")).toBe(second);
 
-    testHarness.shutdownSession();
+    await testHarness.shutdownSession();
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
     testHarness.pi.events.emit(NotesProviderEvent.Register, { provider: first });
     expect(() => resolveNotesProvider("notes-assistant")).toThrow("not registered");
@@ -191,7 +193,7 @@ describe("notes extension", () => {
         notes: { provider: "obsidian", vaultPath: vault },
       }),
     );
-    testHarness.startSession();
+    await testHarness.startSession();
 
     expect(testHarness.tools).toHaveLength(1);
     expect(testHarness.tools[0].name).toBe("notes");
