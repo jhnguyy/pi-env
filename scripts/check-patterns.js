@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { relative } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -31,8 +31,13 @@ const ACTIVE_EXTENSION_ROOTS = (() => {
 
 function trackedFiles(pathspecs = []) {
   const result = spawnSync("git", ["ls-files", ...pathspecs], { encoding: "utf8" });
-  if (result.status !== 0) throw new Error(result.stderr || "git ls-files failed");
-  return result.stdout.split("\n").filter(Boolean);
+  if (result.status === 0) return result.stdout.split("\n").filter(Boolean);
+  if (result.status === 128 && result.stderr?.includes("not a git repository")) {
+    return globSync(pathspecs.length ? pathspecs.map((root) => `${root}/**/*`) : "**/*", {
+      exclude: ["**/node_modules/**", "**/dist/**", ".git/**"],
+    });
+  }
+  throw new Error(result.stderr || "git ls-files failed");
 }
 
 export function gitFiles() {
@@ -281,12 +286,12 @@ export function reportFindings(findings, root = ROOT) {
   ].join("\n");
 }
 
-export function main() {
-  const findings = findPatternFindings();
+export function main(files = process.argv.slice(2)) {
+  const findings = files.length ? findPatternFindings(files, []) : findPatternFindings();
   console.log(reportFindings(findings));
   return findings.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exit(main());
 }

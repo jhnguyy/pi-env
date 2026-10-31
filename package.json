@@ -27,7 +27,6 @@
     "test": "node scripts/dev.mjs test",
     "test:unit": "nub run test --project unit",
     "test:integration": "nub run test --project integration",
-    "test:safe": "node scripts/dev.mjs test:safe",
     "test:setup": "bash setup/__tests__/run.sh",
     "test:e2e": "nub run test --project e2e",
     "test:e2e:session-manager:docker": "node scripts/dev.mjs test:docker",
@@ -41,9 +40,8 @@
     "sensors": "nub run lint:sensors . && nub run analyze -- --diff --checks async-risk",
     "check:duplicates": "nub run analyze -- --checks duplicates . --fail-on error",
     "check:quality": "nub run analyze -- --all --checks duplicates,dependencies,knip --fail-on error && nub run check:patterns",
-    "verify": "node scripts/dev.mjs verify standard",
-    "verify:safe": "node scripts/dev.mjs verify safe",
-    "verify:pre-commit": "node scripts/dev.mjs verify pre-commit",
+    "verify": "node scripts/dev.mjs verify",
+    "verify:full": "node scripts/dev.mjs verify --full",
     "verify:install": "node scripts/verify-install.mjs",
     "verify:image-artifact": "node scripts/verify-image-artifact.mjs",
     "verify:phase": "node scripts/dev.mjs verify phase",
@@ -57,8 +55,7 @@
     "check:patterns": "node scripts/check-patterns.js",
     "licenses:generate": "node scripts/generate-license-bundle.mjs",
     "licenses:check": "node scripts/generate-license-bundle.mjs --check",
-    "security:trivy": "bash scripts/trivy-scan.sh",
-    "quality:changed": "node scripts/check-changed-quality.mjs"
+    "security:trivy": "bash scripts/trivy-scan.sh"
   },
   "dependencies": {
     "@effect/opentelemetry": "4.0.5",
@@ -125,6 +122,9 @@
     "@google/genai": true,
     "esbuild": true
   },
+  "patchedDependencies": {
+    "bash-language-server@5.8.1": "patches/bash-language-server@5.8.1.patch"
+  },
   "pi": {
     "extensions": [
       ".pi/extensions/analyze",
@@ -144,8 +144,5 @@
     "themes": [
       "themes"
     ]
-  },
-  "patchedDependencies": {
-    "bash-language-server@5.8.1": "patches/bash-language-server@5.8.1.patch"
   }
 }

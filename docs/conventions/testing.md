@@ -28,4 +28,10 @@ Share fixture lifecycle and evidence handling when multiple workflows need the s
 
 Use `*.integration.test.ts` or `*.integration.test.mjs` for workflows that require real process or storage lifecycles. [`vitest.config.ts`](../../vitest.config.ts) owns project selection and timeout defaults. Keep readiness and completion event-driven. Use explicit tighter watchdogs when the scenario needs them, and distinguish watchdog activation from the expected outcome.
 
-E2E-first does not replace type, static policy, packaging, or install checks. Use [the canonical verification portfolio](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
+E2E-first does not replace type, static policy, packaging, or install checks. Use [the change-scoped and full verification plans](../../scripts/verification-phases.mjs) and follow [the contribution requirements](../../CONTRIBUTING.md).
+
+Local verification checks complete changed files, not just edited lines. Select tests through the owning component and Vitest's import graph; do not create a second dependency graph. An empty delta selects no checks. No automatic local phase may substitute a whole-repository scan when its delta is empty or unavailable. Full verification is an explicit CI/manual operation, including for source snapshots without Git metadata.
+
+Run verification phases sequentially and finish process cleanup before advancing. Use Vitest's isolated fork lifecycle rather than a second batching runner. Worker count is not a memory limit: tests that launch subprocesses must own their full lifecycle, including failed startup, cancellation, and teardown failure. Treat subprocess count and peak memory as properties of the scenario, not of its file suffix.
+
+Review expensive coverage by contract, not by matching test names. Consolidate only when the replacement workflow detects the same failure modes, including denied access, stale state, partial failure, cancellation, and cleanup. Preserve those assertions while moving shared setup to its existing lifecycle owner.

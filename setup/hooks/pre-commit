@@ -9,8 +9,4 @@ if ! command -v nub >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "pre-commit: shell syntax"
-bash -n setup/*.sh setup/__tests__/*.sh setup/hooks/* scripts/*.sh
-
-# CI runs the full portfolio; keep this to fast checks that need no strict containment.
-nub run verify:pre-commit
+nub run verify --checks-only

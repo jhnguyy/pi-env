@@ -19,7 +19,7 @@ Oxlint owns cyclomatic complexity and awaits inside loops. Run `nub run lint:sen
 
 `nub run sensors` runs Oxlint across production source, then runs Analyze's repeated-scan check on the diff. Analyze retains `async-risk` for repeated scans inside loops. It no longer reports awaits or accepts the `complexity` check. The custom cognitive-complexity score is retired.
 
-The complexity threshold remains 15. Oxlint's branch counting differs from the retired custom implementation. `quality:changed` gates complexity in complete changed and untracked source files, not only functions that intersect diff hunks. Unchanged files do not enter that gate. Await warnings remain advisory.
+The complexity threshold remains 15. Oxlint's branch counting differs from the retired custom implementation. `nub run verify --checks-only` gates complexity in complete changed and untracked source files, not only functions that intersect diff hunks. Unchanged files do not enter that gate. Await warnings remain advisory.
 
 For intentional sequential awaits, use a native suppression immediately before the await:
 

@@ -39,13 +39,17 @@ Source-owned contracts:
 - lifecycle manifest: [`scripts/extension-manifest.mjs`](scripts/extension-manifest.mjs)
 - scripts: [`package.json#scripts`](package.json)
 
-Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. TypeScript checking remains repository-wide for soundness.
+Arguments to `nub run` are forwarded directly. Do not insert `--` before a Vitest file filter. TypeScript checking remains repository-wide for soundness and runs in CI or through explicit `nub run typecheck` / `nub run verify:full`, not automatically on commit.
 
 ## Testing and review
 
 Follow [`docs/conventions/testing.md`](docs/conventions/testing.md) for E2E-first testing and evidence requirements. Catching tests are ephemeral and may not be committed.
 
-Canonical standard and safe verification phases live in [`scripts/verification-phases.mjs`](scripts/verification-phases.mjs). Test projects live in [`vitest.config.ts`](vitest.config.ts). Run the safe verification portfolio before integration when the full workspace contract is required.
+Run `nub run verify` for changed-file checks and affected component/import-related tests. Use `--list` to inspect the plan, `--base <ref>` to override the default `main` merge base, or `--checks-only` for the pre-commit checks without tests. The delta includes branch commits, staged/unstaged edits, untracked files, and deleted paths; discovery never fetches or silently widens the scope.
+
+CI runs `nub run verify:full` in the image toolchain. Do not run repository-wide type analysis or full verification in a shared interactive workspace unless the user explicitly requests a local full run; use CI for the normal integration gate. Full verification includes repository-wide type checking, type-aware lint, packaging, and the complete default test portfolio. It does not require Git metadata. `verify:phase` remains available for explicit individual checks and the real-workspace canary below.
+
+[`scripts/verification-phases.mjs`](scripts/verification-phases.mjs) owns both plans. [`vitest.config.ts`](vitest.config.ts) uses a single isolated fork at a time and stops scheduling after the first failure. Local selection includes component suites for generated/CLI inputs and Vitest's reverse import graph for consumers. Built-bundle E2E, dynamic inputs outside those components, configuration/dependency changes, and deleted imports still require the full CI gate; a green local run is not whole-workspace evidence.
 
 Run the dev-tools real-workspace canary with retained evidence:
 

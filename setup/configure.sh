@@ -55,5 +55,6 @@ setup_print_done() {
   echo "  Pi CLI:         $PI_BIN_DIR/pi"
   echo "  Machine config: $PI_AGENT_DIR/{auth.json,settings.json}"
   echo "  Install check:  cd $REPO && nub run verify:install"
-  echo "  Merge check:    cd $REPO && nub run verify"
+  echo "  Local check:    cd $REPO && nub run verify"
+  echo "  Full check:     cd $REPO && nub run verify:full"
 }

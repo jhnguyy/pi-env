@@ -5,7 +5,7 @@
 # This image intentionally mirrors the canonical local Nub build path:
 #   nub install --frozen-lockfile
 #   nub run build
-#   nub run verify
+#   nub run verify:full
 #
 # The image is a reusable CI/toolchain artifact with prebuilt extension bundles. It
 # is not the only supported build path and does not run setup.sh or hydrate any
@@ -70,7 +70,7 @@ RUN --mount=type=cache,target=/home/node/.local/share/nub/store,uid=1000,gid=100
   && nub run licenses:generate \
     --package-root /usr/local/lib/node_modules \
     --system-license node-LICENSE.txt=/usr/local/LICENSE \
-  && tini -s -- nub run verify \
+  && tini -s -- nub run verify:full \
   && find ${PI_ENV_HOME}/node_modules/.store \
     -path '*/node_modules/@oxlint-tsgolint/*/tsgolint' -type f -delete
 
@@ -88,10 +88,9 @@ USER node
 ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["nub", "run", "verify:install"]
 
-# Session-manager E2E: real Pi in an isolated tmux server. It builds from the
-# toolchain stage so it does not depend on the published image's verify gate,
-# which needs Git metadata. The run stage always succeeds so that evidence can
-# be exported; the session-manager-e2e stage is the pass/fail gate.
+# Session-manager E2E: real Pi in an isolated tmux server. Build from the
+# toolchain stage so a failed image qualification cannot block evidence export.
+# The run stage always succeeds; session-manager-e2e is the pass/fail gate.
 FROM toolchain AS session-manager-e2e-run
 RUN chown node:node ${PI_ENV_HOME}
 COPY --chown=node:node . .
