@@ -1,6 +1,14 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { serviceClientFixture } from "./service-client.fixture";
+
+// The registered workflow owns transport integration; this port controls startup races.
+const transport = { close: vi.fn(async () => {}) };
 import { noopToolingDiagnostics } from "../../../../src/telemetry/tooling";
 import {
   SubagentSessionRuntime,
@@ -40,6 +48,7 @@ const telemetryRuntimeFactory: NonNullable<
 
 describe("SubagentSessionRuntime telemetry lifecycle", () => {
   beforeEach(() => {
+    transport.close.mockClear();
     runtimeState.blocked = false;
     runtimeState.release = undefined;
     runtimeState.onBlockedStart = undefined;
@@ -47,22 +56,48 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     runtimeState.disposed.clear();
   });
 
-  function makeRuntime() {
+  const runtimes: SubagentSessionRuntime[] = [];
+  const directories: string[] = [];
+  afterEach(async () => {
+    runtimeState.release?.();
+    try {
+      await Promise.all(runtimes.splice(0).map((runtime) => runtime.shutdownSession()));
+    } finally {
+      for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  function makeRuntime(factory = telemetryRuntimeFactory) {
     const pi = {
       appendEntry: () => {},
       registerTool: () => {},
       on: () => {},
       events: { emit: () => {}, on: () => {} },
     };
-    return new SubagentSessionRuntime(pi as any, { telemetryRuntimeFactory });
+    const runtime = new SubagentSessionRuntime(pi as any, {
+      telemetryRuntimeFactory: factory,
+      serviceConnectionFactory: async () => serviceClientFixture(transport),
+    });
+    runtimes.push(runtime);
+    return runtime;
   }
 
   function sessionContext() {
+    const cwd = mkdtempSync(join(tmpdir(), "pi-telemetry-lifecycle-"));
+    directories.push(cwd);
     return {
-      cwd: "/tmp",
-      sessionManager: SessionManager.inMemory("/tmp"),
+      cwd,
+      sessionManager: SessionManager.create(cwd, cwd),
     } as any;
   }
+
+  it("closes the acquired client when telemetry startup fails", async () => {
+    const runtime = makeRuntime(() => Effect.die(new Error("telemetry unavailable")));
+    await expect(runtime.startSession(sessionContext())).rejects.toThrow("telemetry unavailable");
+    expect(transport.close).toHaveBeenCalledTimes(1);
+    await runtime.shutdownSession();
+    expect(transport.close).toHaveBeenCalledTimes(1);
+  });
 
   it("disposes replaced telemetry exactly once and ignores repeated shutdown", async () => {
     const runtime = makeRuntime();
@@ -73,6 +108,7 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
     await runtime.shutdownSession();
     await runtime.shutdownSession();
 
+    expect(transport.close).toHaveBeenCalledTimes(2);
     expect(runtimeState.created).toBe(2);
     expect([...runtimeState.disposed.values()]).toEqual([1, 1]);
     expect(runtime.state).toBe("inactive");
@@ -98,16 +134,15 @@ describe("SubagentSessionRuntime telemetry lifecycle", () => {
 
     runtimeState.blocked = false;
     runtimeState.release?.();
-    await Promise.all([startup, shutdown]);
+    const [activated] = await Promise.all([startup, shutdown]);
+    expect(activated).toBe(false);
+    expect(transport.close).toHaveBeenCalledTimes(1);
 
     expect(runtimeState.created).toBe(1);
     expect([...runtimeState.disposed.values()]).toEqual([1]);
     expect(runtime.state).toBe("inactive");
 
-    const job = runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any);
-    expect(job.details.status).toBe("inactive");
-    expect(job.content[0]?.type === "text" ? job.content[0].text : "").toContain(
-      "Cannot start a subagent job",
-    );
+    await expect(runtime.startJob({ name: "job", task: "task" }, { cwd: "/tmp" } as any))
+      .rejects.toThrow("Parent subagent session is not active.");
   });
 });

@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { openServiceRuntime } from "../../../src/subagent-service/runtime.js";
 import { serve } from "../../../src/subagent-service/transport.js";
+import { resolveReviewCapability } from "../../../src/subagent-service/review-capability.js";
 
 const [directory, agentDir] = process.argv.slice(2);
 if (!directory) throw new Error("Usage: subagent:service <private-state-directory> [agent-directory]");
 const bundleId = createHash("sha256").update(await readFile(fileURLToPath(import.meta.url))).update(process.version).digest("hex");
-const runtime = await openServiceRuntime({ directory, agentDir, bundleId });
+const runtime = await openServiceRuntime({ directory, agentDir, bundleId, resolveCapability: resolveReviewCapability });
 let transport: Awaited<ReturnType<typeof serve>>;
 try { transport = await serve(directory, runtime); }
 catch (error) { await runtime.close(); throw error; }

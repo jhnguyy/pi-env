@@ -46,24 +46,46 @@ describe("shared subagent run supervisor", () => {
     await Promise.resolve();
     await expect(supervisor.shutdown()).rejects.toMatchObject({ errors: expect.arrayContaining([expect.objectContaining({ cause: failure })]) });
   });
-  it("coalesces parent disposal until held work settles without reopening admission", async () => {
+  it("does not evict a reopened owner when the previous owner's close settles", async () => {
+    const supervisor = new Control.SubagentRunSupervisor("reopen-eviction", config({ maxRetainedJobs: 1 }));
+    let release!: () => void;
+    const closing = new Promise<void>((resolve) => { release = resolve; });
+    const child = (id: string, close: () => Promise<void>) => ({
+      id, runId: id,
+      summary: () => ({ id, runId: id, name: id, task: "task", cwd: "/fixture", sessionFile: undefined, model: undefined, state: ChildTypes.NativeChildState.Idle }),
+      inspect: () => { throw new Error("unused inspection"); },
+      input: async () => { throw new Error("unused input"); },
+      cancel: async () => {}, close,
+    });
+    supervisor.retainChild(child("reopened", () => closing));
+    supervisor.retainChild(child("retained", async () => {}));
+    supervisor.pruneChildren();
+    const replacement = child("reopened", async () => {});
+    supervisor.retainChild(replacement);
+    release();
+    try {
+      await closing;
+      expect(supervisor.children.get(replacement.id) === replacement).toBe(true);
+    } finally { await supervisor.shutdown(); }
+  });
+
+  it("coalesces shutdown until held work settles without reopening admission", async () => {
     // Hold admission directly: this isolates coordinator disposal, not native SDK execution.
-    const supervisor = Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config());
+    const supervisor = new Control.SubagentRunSupervisor("coalesced-dispose", config());
     const lease = await supervisor.acquire(request("/coalesced"));
     let secondFinished = false;
-    const first = Control.disposeSubagentRunSupervisor("coalesced-dispose");
-    const second = Control.disposeSubagentRunSupervisor("coalesced-dispose").then(() => { secondFinished = true; });
+    const first = supervisor.shutdown();
+    const second = supervisor.shutdown().then(() => { secondFinished = true; });
     try {
       await Promise.resolve();
       await Promise.resolve();
       expect(secondFinished).toBe(false);
-      expect(Control.getOrCreateSubagentRunSupervisor("coalesced-dispose", config())).toBe(supervisor);
       await expect(supervisor.acquire(request("/late"))).rejects.toMatchObject({reason:"closed"});
     } finally {
       lease.release();
       await Promise.all([first,second]);
     }
-    expect(Control.getSubagentRunSupervisor("coalesced-dispose")).toBeUndefined();
+    await expect(supervisor.acquire(request("/still-closed"))).rejects.toMatchObject({ reason: "closed" });
   });
 
   it("bounds shared admission and removes an aborted pending run", async () => {

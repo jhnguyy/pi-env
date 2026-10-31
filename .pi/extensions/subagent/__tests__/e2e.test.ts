@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,9 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
+import { RegisteredServiceFixture } from "./registered-service.fixture";
+import { connectSubagentService, type SubagentServiceConnection } from "../service-host";
+
 const repo = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const bundle = join(repo, ".pi/extensions/subagent/dist/index.js");
 
@@ -19,6 +22,8 @@ const bundle = join(repo, ".pi/extensions/subagent/dist/index.js");
 it.each(["on", "only"] as const)("delegates through native codemode (%s) without recursive delegation", async (mode) => {
   const root = mkdtempSync(join(tmpdir(), "pi-native-delegation-"));
   const agentDir = join(root, "agent");
+  const service = new RegisteredServiceFixture(agentDir);
+  let connection: SubagentServiceConnection | undefined;
   const target = join(root, "target");
   vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
   const evidenceDir = process.env.PI_ENV_NATIVE_TOOL_ARTIFACT_DIR ?? tmpdir();
@@ -79,6 +84,7 @@ export default function(pi) {
       defaultTools: ["+codemode"], codemode: { mode },
     }));
     writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { "native-delegation": { apiKey: "fixture-key" } } }));
+    await service.start();
     const services = await createAgentSessionServices({
       cwd: root, agentDir,
       settingsManager: SettingsManager.create(root, agentDir, { projectTrusted: true }),
@@ -108,10 +114,13 @@ export default function(pi) {
     expect(result.isError).toBe(false);
     expect(JSON.stringify(result.content)).toContain("child complete");
     expect(result.nestedCalls?.calls.map((call) => call.name)).toEqual(["subagent", "subagent", "subagent", "subagent"]);
-    const childDirectory = join(parent.sessionManager.getSessionDir(), "_children", parent.sessionId);
-    const files = readdirSync(childDirectory).filter((file) => file.endsWith(".jsonl"));
+    connection = await connectSubagentService(parent.sessionId);
+    const files = connection.view.snapshot.value.children.map((child) => child.sessionFile);
     expect(files).toHaveLength(2);
-    const children = files.map((file) => SessionManager.open(join(childDirectory, file)));
+    const children = files.map((file) => {
+      if (!file) throw new Error("Settled child has no native session file");
+      return SessionManager.open(file);
+    });
     evidence.children = children.map((child) => child.buildSessionContext().messages);
     const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     for (const child of children) {
@@ -179,6 +188,8 @@ export default function(pi) {
       await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
     } finally {
       parent?.dispose();
+      await connection?.close();
+      await service.close();
       vi.unstubAllEnvs();
       writeFileSync(artifact, JSON.stringify(evidence, null, 2) + "\n");
       console.info(`Native delegation evidence: ${artifact}`);

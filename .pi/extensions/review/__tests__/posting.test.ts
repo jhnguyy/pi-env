@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { Effect } from "effect";
+import { registerDagRuntimeService, unregisterDagRuntimeService } from "../../_shared/dag-runtime-service";
 import { ReviewEvent, type ReviewState } from "../core";
 import { postReview, restore } from "../index";
 import {
@@ -535,6 +537,15 @@ describe("review pull request posting", () => {
     });
     runtime = { ...h.session(), ui: { ...view.ctx.ui, confirm, editor: async () => "human-new" } };
     h.handlers.session_start({}, runtime);
+    const registration = registerDagRuntimeService(h.pi, {
+      parentSessionId: runtime.sessionManager.getSessionId(), sessionGeneration: "posting-fixture",
+      service: {
+        submit: () => Effect.die("Posting must not submit DAG work"),
+        reconstruct: () => Effect.die("Posting must not reconstruct DAG work"),
+        closeChildren: async () => {},
+      },
+    });
+    onTestFinished(() => unregisterDagRuntimeService(h.pi, registration));
     await h.command("pr post r comment", runtime);
     expect(payload.body).toContain(review.preface);
     expect(payload.body).not.toContain("human-new");

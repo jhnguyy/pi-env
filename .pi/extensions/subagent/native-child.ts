@@ -16,6 +16,8 @@ import {
   type SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
+import { Type, type Static } from "typebox";
+import { Check } from "typebox/value";
 import * as ChildContext from "../_shared/child-context";
 import type * as ExecutionTypes from "./execution-types";
 import * as Resolver from "./resolver";
@@ -24,6 +26,13 @@ import * as Usage from "./usage";
 import type * as Types from "./types";
 
 import * as ChildTypes from "./child-types";
+
+const InputModes = new Set<ChildTypes.NativeInputMode>(Object.values(ChildTypes.NativeInputMode));
+const RecordedInput = Type.Object({
+  source: Type.Union([Type.Literal("human"), Type.Literal("coordinator")]),
+  mode: Type.Union([Type.Literal("prompt"), Type.Literal("steer"), Type.Literal("followUp")]),
+  text: Type.String(), at: Type.String(),
+}, { additionalProperties: false });
 
 export class NativeChildOwner implements ChildTypes.NativeChildSession {
   readonly id: string;
@@ -211,8 +220,9 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       const lease = await this.supervisor.acquire({
         runId: initial ? this.runId : `${this.runId}:human:${randomUUID()}`,
         cwd: this.run.cwd,
-        workspaceAccess: Control.WorkspaceAccess.Write,
+        workspaceAccess: this.run.workspaceAccess ?? this.options.workspaceAccess ?? Control.WorkspaceAccess.Write,
         signal,
+        ...this.options.admission,
       });
       this.activeSignal = lease.signal;
       this.updateUsage = (usage) => lease.updateUsage(usage);
@@ -256,7 +266,29 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     });
   }
 
+  /** Initialize the supplied historical manager without replaying any native operation. */
+  async reopen(options: ChildTypes.NativeChildReopenOptions = {}): Promise<void> {
+    if (this.session || this.state !== ChildTypes.NativeChildState.Idle)
+      throw new Error(`Child cannot reopen from ${this.state}${this.session ? " (already initialized)" : ""}`);
+    const recorded = this.manager.getEntries().flatMap((entry): Static<typeof RecordedInput>[] =>
+      entry.type === "custom" && entry.customType === "subagent-input" && Check(RecordedInput, entry.data) ? [entry.data] : [],
+    );
+    const inputs = structuredClone(recorded.length ? recorded : options.inputs ?? []);
+    const initialResult = options.initialResult && structuredClone(options.initialResult);
+    try {
+      await this.schedule(true, async () => {
+        this.inputs.push(...inputs);
+        this.initialResult = initialResult;
+      });
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
+  }
+
   async runInitial(): Promise<AgentToolResult<Types.SubagentDetails>> {
+    if (this.session || this.state !== ChildTypes.NativeChildState.Idle)
+      throw new Error("Child initial operation requires an uninitialized idle owner");
     try {
       return await this.schedule(true, async () => {
         const session = this.session!;
@@ -321,17 +353,21 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
     }
   }
 
-  async input(text: string, mode: ChildTypes.NativeInputMode): Promise<ChildTypes.NativeInputResult> {
+  async input(text: string, mode: ChildTypes.NativeInputMode, source: ChildTypes.NativeInputSource = ChildTypes.NativeInputSource.Human): Promise<ChildTypes.NativeInputResult> {
     if (this.state === ChildTypes.NativeChildState.Closing || this.state === ChildTypes.NativeChildState.Closed)
       throw new Error(`Child is ${this.state}`);
-    if (mode !== ChildTypes.NativeInputMode.Prompt && mode !== ChildTypes.NativeInputMode.Steer && mode !== ChildTypes.NativeInputMode.FollowUp)
+    if (!InputModes.has(mode))
       throw new Error("Invalid input mode");
+    if (source !== ChildTypes.NativeInputSource.Human && source !== ChildTypes.NativeInputSource.Coordinator)
+      throw new Error("Invalid input source");
+    if (!this.session) throw new Error("Child is not initialized");
+    const nativeSource = source === ChildTypes.NativeInputSource.Coordinator ? "extension" : "interactive";
     if (mode !== ChildTypes.NativeInputMode.Prompt) {
       if (this.state !== ChildTypes.NativeChildState.Running || !this.session?.isStreaming)
         throw new Error(`${mode} requires a streaming child`);
       const pending = this.context(async () => {
-        this.record(text, mode, ChildTypes.NativeInputSource.Human);
-        return { outcome: await this.session![mode](text, undefined, { source: "interactive" }) };
+        this.record(text, mode, source);
+        return { outcome: await this.session![mode](text, undefined, { source: nativeSource }) };
       });
       this.pendingInputs.add(pending);
       try {
@@ -341,7 +377,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       }
     }
     return this.schedule(false, async () => {
-      this.record(text, mode, ChildTypes.NativeInputSource.Human);
+      this.record(text, mode, source);
       const usage = new Usage.SubagentRunAccumulator({ name: this.run.name, task: text, toolNames: this.session!.getActiveToolNames(), modelOverride: this.run.modelOverride, cwd: this.run.cwd, sessionId: this.id, sessionName: this.manager.getSessionName() ?? this.run.name }, () => false);
       const unsubscribe = this.session!.subscribe((event) => {
         if (event.type !== "message_end") return;
@@ -351,7 +387,7 @@ export class NativeChildOwner implements ChildTypes.NativeChildSession {
       let outcome: ChildTypes.NativeInputResult["outcome"] = ChildTypes.NativeInputOutcome.Started;
       try {
         await this.session!.prompt(text, {
-          source: "interactive",
+          source: nativeSource,
           preflightResult: (value) => { outcome = value; },
         });
         await this.session!.waitForIdle();

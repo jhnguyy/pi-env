@@ -7,7 +7,6 @@ import {
   SessionManager,
   SettingsManager,
   type ExtensionAPI,
-  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
@@ -20,21 +19,37 @@ import {
 } from "../../../../src/dag/index.js";
 import * as DagRuntimeService from "../../_shared/dag-runtime-service";
 import initSubagent from "../../subagent/index";
-import * as Control from "../../subagent/control";
+import { connectSubagentService, waitForOperation, type SubagentServiceConnection } from "../../subagent/service-host";
+import { reviewFixture } from "./fixtures/review-flow";
+import { reviewDagToolNames } from "../dag-tools";
+import { resolveReviewCapability } from "../../../../src/subagent-service/review-capability";
 import * as DagRuntime from "../../subagent/dag-runtime";
-import * as ChildTypes from "../../subagent/child-types";
+import { RegisteredServiceFixture } from "../../subagent/__tests__/registered-service.fixture";
 
-// The unavailable boundary is inference only. This deliberately uses a minimal
-// review submission authority rather than runReviewDag's full pinned Git snapshot,
-// evidence resolver and multi-role synthesis fixture. It covers the shared native
-// handoff/retention contract, not review plan validation or synthesis semantics.
+
+// Inference is synthetic; capability reconstruction, DAG dispatch and native
+// child retention use the production service. Full synthesis has a separate fixture.
 it("dispatches run-local review authority through the real DAG and retains its native child", async () => {
   const root = await mkdtemp(join(tmpdir(), "native-review-dag-"));
   const agentDir = join(root, "agent");
+  const daemon = new RegisteredServiceFixture(agentDir);
   const target = join(root, "target");
   const runId = "private-review-native";
-  const submissionPath = join(target, "review-submission.json");
-  const submission = { verdict: "approve", findings: [], snapshot: "fixture-snapshot" };
+  const fixture = reviewFixture();
+  const names = reviewDagToolNames(fixture.state.snapshot.id);
+  const deck = await readFile(fixture.deckPath, "utf8");
+  const capability = {
+    kind: "review-v1" as const, reviewId: fixture.state.snapshot.id, runId,
+    snapshot: { ...fixture.state.snapshot, worktree: target },
+    deckPath: fixture.deckPath, artifactRoot: fixture.artifactRoot,
+    evidence: {
+      v: 1 as const, snapshotId: fixture.state.snapshot.id, worktree: target,
+      headOid: fixture.state.snapshot.metadata.headOid, diffHash: fixture.state.snapshot.diffHash,
+      diffPath: fixture.state.snapshot.diffPath, changedPaths: ["a.ts"],
+      planOutputName: "plan", reviewerContextWindow: 272_000,
+    },
+  };
+  let connection: SubagentServiceConnection | undefined;
   let parent: Awaited<ReturnType<typeof createAgentSessionFromServices>>["session"] | undefined;
   let service: DagRuntimeService.ActiveDagRuntimeService | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -56,7 +71,7 @@ export default function(pi) {
       p.setResponses([fauxAssistantMessage('Human continuation complete')]);
     } else {
       p.setResponses([
-        fauxAssistantMessage(fauxToolCall('submit_private_review', ${JSON.stringify(submission)}), {stopReason:'toolUse'}),
+        fauxAssistantMessage(fauxToolCall(${JSON.stringify(names.deck)}, {}), {stopReason:'toolUse'}),
         fauxAssistantMessage('Initial review submitted')
       ]);
     }
@@ -72,6 +87,7 @@ export default function(pi) {
     const observeRuntime = (pi: ExtensionAPI) => {
       unsubscribe = DagRuntimeService.listenForDagRuntimeService(pi, registration => { service = registration.service; });
     };
+    await daemon.start();
     const services = await createAgentSessionServices({
       cwd: target,
       agentDir,
@@ -84,18 +100,12 @@ export default function(pi) {
     expect(service).toBeDefined();
     const runtime = service!;
     expect(runtime.closeChildren).toBeTypeOf("function");
-    expect(parent.getActiveToolNames()).not.toContain("submit_private_review");
+    expect(parent.getActiveToolNames()).not.toContain(names.deck);
+    connection = await connectSubagentService(parent.sessionId);
     const parentBefore = { messages: structuredClone(parent.messages), model: parent.model, tools: parent.getActiveToolNames() };
-    const privateTool: ToolDefinition = {
-      name: "submit_private_review",
-      label: "Submit private review",
-      description: "Persist the submission for this review run only",
-      parameters: { type: "object", properties: { verdict: { type: "string" }, findings: { type: "array", items: { type: "string" } }, snapshot: { type: "string" } }, required: ["verdict", "findings", "snapshot"], additionalProperties: false },
-      async execute(_id, params) {
-        await writeFile(submissionPath, JSON.stringify(params));
-        return { content: [{ type: "text", text: "Review submission persisted" }], details: { path: submissionPath } };
-      },
-    };
+    await expect(resolveReviewCapability({ capability: { ...capability, callback: () => {} }, runId, cwd: target })).rejects.toThrow(/data|authority/);
+    await expect(resolveReviewCapability({ capability, runId: "wrong-run", cwd: target })).rejects.toThrow(/mismatched/);
+    await expect(resolveReviewCapability({ capability, runId, cwd: root })).rejects.toThrow(/mismatched/);
     const validated = validateDagDefinition({
       runId,
       concurrency: 1,
@@ -110,7 +120,7 @@ export default function(pi) {
             name: "private-review",
             instructions: "Submit the pinned review using the private submission tool.",
             model: "dag-review-fixture/faux-1",
-            tools: [privateTool.name],
+            tools: [names.deck],
             workspace: { cwd: target, access: "read" },
             context: { outputs: [] },
             output: { name: "review_result" },
@@ -132,10 +142,11 @@ export default function(pi) {
     });
     expect(validated._tag, JSON.stringify(validated)).toBe(DagValidationResultTag.Valid);
     if (validated._tag !== DagValidationResultTag.Valid) throw new Error(JSON.stringify(validated));
-    const handle = await Effect.runPromise(runtime.submit(validated.graph, { workspaceRoot: target, customTools: [privateTool] }));
+    await expect(Effect.runPromise(runtime.submit(validated.graph, { customTools: [{ execute() {} } as never] }))).rejects.toThrow(/custom|ToolDefinitions/);
+    const handle = await Effect.runPromise(runtime.submit(validated.graph, { workspaceRoot: target, reviewCapability: capability }));
     await Effect.runPromise(handle.accepted);
     await Effect.runPromise(handle.await);
-    expect(JSON.parse(await readFile(submissionPath, "utf8"))).toEqual(submission);
+
     const initialDag = await Effect.runPromise(runtime.reconstruct(runId));
     const node = initialDag.state.nodes[0];
     expect(node.status).toBe(DagNodeStatus.Succeeded);
@@ -148,45 +159,58 @@ export default function(pi) {
     const artifactRoot = join(parent.sessionManager.getSessionDir(), "dag-artifacts", parent.sessionId);
     expect(await readFile(join(artifactRoot, reference.path), "utf8")).toBe("Initial review submitted");
 
-    const supervisor = Control.getSubagentRunSupervisor(parent.sessionId)!;
-    expect(supervisor.children.size).toBe(2);
-    const child = [...supervisor.children.values()].find((owner) => owner.summary().name === "private-review")!;
-    const toolFree = [...supervisor.children.values()].find((owner) => owner.summary().name === "tool-free-default")!;
-    expect(toolFree.inspect().model).toBe("dag-default-fixture/faux-1");
-    expect(toolFree.inspect().activeTools).toEqual([]);
-    expect(toolFree.inspect().callableTools).toEqual([]);
-    expect(toolFree.inspect().initialResult).toMatchObject({ isError: false, finalOutput: "Native default without tools", usage: { turns: 1 } });
-    expect(child.inspect().model).toBe("dag-review-fixture/faux-1");
-    expect(child.inspect().activeTools).toEqual([privateTool.name]);
-    expect(child.inspect().systemPrompt).toContain("Pinned review target context");
-    expect(child.summary().state).toBe("idle");
-    const initialResult = structuredClone(child.inspect().initialResult);
+    const children = connection.view.snapshot.value.children.filter(child => child.runId === runId);
+    expect(children).toHaveLength(2);
+    const child = children.find(child => child.name === "private-review")!;
+    const toolFree = children.find(child => child.name === "tool-free-default")!;
+    const inspection = await connection.inspect(child.childId);
+    const toolFreeInspection = await connection.inspect(toolFree.childId);
+    await inspection.refresh({});
+    await toolFreeInspection.refresh({});
+    expect(toolFreeInspection.snapshot.value?.model).toBe("dag-default-fixture/faux-1");
+    expect(toolFreeInspection.snapshot.value?.activeTools).toEqual([]);
+    expect(toolFreeInspection.snapshot.value?.callableTools).toEqual([]);
+    expect(toolFreeInspection.snapshot.value?.initialResult).toMatchObject({ isError: false, finalOutput: "Native default without tools", usage: { turns: 1 } });
+    expect(inspection.snapshot.value?.model).toBe("dag-review-fixture/faux-1");
+    expect(inspection.snapshot.value?.activeTools).toEqual([names.deck]);
+    expect(inspection.snapshot.value?.systemPrompt).toContain("Pinned review target context");
+    expect(child.state).toBe("idle");
+    const initialResult = structuredClone(inspection.snapshot.value?.initialResult);
     expect(initialResult?.isError).toBe(false);
     expect(initialResult?.finalOutput).toBe("Initial review submitted");
-    const childFile = child.summary().sessionFile!;
-    expect(await readFile(childFile, "utf8")).toContain("Review submission persisted");
-    await child.input("Human continuation\nkeep original DAG result", ChildTypes.NativeInputMode.Prompt);
+    const childFile = child.sessionFile!;
+    expect(await readFile(childFile, "utf8")).toContain(JSON.stringify(deck).slice(1, -1));
+    // Dropping the parent connection must not dispose accepted native sessions.
+    await connection.close();
+    connection = await connectSubagentService(parent.sessionId);
+    const continued = await connection.view.input({ requestId: "human-continuation", childId: child.childId, mode: "prompt", source: "human", text: "Human continuation\nkeep original DAG result" });
+    await waitForOperation(connection, continued.operationId);
+    const refreshed = await connection.inspect(child.childId);
+    await refreshed.refresh({});
     expect(await readFile(childFile, "utf8")).toContain("Human continuation complete");
-    expect(child.inspect().inputs.at(-1)).toMatchObject({ source: "human", mode: "prompt", text: "Human continuation\nkeep original DAG result" });
-    expect(child.inspect().initialResult).toEqual(initialResult);
+    expect(refreshed.snapshot.value?.inputs.at(-1)).toMatchObject({ source: "human", mode: "prompt", text: "Human continuation\nkeep original DAG result" });
+    expect(refreshed.snapshot.value?.initialResult).toEqual(initialResult);
     expect(await Effect.runPromise(runtime.reconstruct(runId))).toEqual(initialDag);
     expect(await readFile(join(artifactRoot, reference.path), "utf8")).toBe("Initial review submitted");
     expect({ messages: parent.messages, model: parent.model, tools: parent.getActiveToolNames() }).toEqual(parentBefore);
 
     // Closing the run owner must precede removing any target/artifact resources.
-    await runtime.closeChildren!(runId);
-    expect(child.summary().state).toBe("closed");
-    expect(toolFree.summary().state).toBe("closed");
-    await expect(child.input("must not run after close", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow(/closed/);
+    await runtime.closeChildren(runId);
+    await expect(connection.view.input({ requestId: "after-close", childId: child.childId, mode: "prompt", source: "human", text: "must not run after close" })).rejects.toThrow(/closed/);
     passed = true;
   } finally {
-    await service?.closeChildren?.(runId);
-    await parent?.abort();
-    await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
-    parent?.dispose();
-    unsubscribe?.();
-    vi.unstubAllEnvs();
-    if (passed) await rm(root, { recursive: true, force: true });
-    else console.error(`Native DAG failure evidence (synthetic inputs only): ${root}`);
+    try {
+      await service?.closeChildren(runId);
+      await connection?.close();
+      await parent?.abort();
+      await parent?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
+      parent?.dispose();
+    } finally {
+      unsubscribe?.();
+      vi.unstubAllEnvs();
+      await daemon.close();
+      if (passed) await rm(root, { recursive: true, force: true });
+      else console.error(`Native DAG failure evidence (synthetic inputs only): ${root}`);
+    }
   }
 }, 30_000);

@@ -19,19 +19,20 @@ export async function bundles(): Promise<string> {
   const output = await mkdtemp(join(cache, "subagent-process-"));
   try {
     await build({ entryPoints: {
-      service: join(repo, ".pi/extensions/subagent/service-main.ts"),
+      service: join(sources, "service-worker.fixture.ts"),
       client: join(sources, "client-worker.fixture.ts"),
-      cli: join(repo, ".pi/extensions/subagent/service-client-main.ts"),
       provider: join(sources, "provider.fixture.ts"),
     }, outdir: output, bundle: true, platform: "node", format: "esm", packages: "external", target: "node24" });
     return output;
   } catch (error) { await rm(output, { recursive: true, force: true }); throw error; }
 }
 
-type Message = { ready?: boolean; snapshot?: Snapshot; id?: number; result?: unknown; error?: string };
+type Message = { ready?: boolean; armed?: boolean; paused?: Snapshot; snapshot?: Snapshot; id?: number; result?: unknown; error?: string };
 export class Peer {
   readonly events = new EventEmitter();
   snapshot?: Snapshot;
+  paused?: Snapshot;
+  armed = false;
   ready = false;
   exited = false;
   private sequence = 0;
@@ -40,6 +41,8 @@ export class Peer {
     process.on("message", (message: Message) => {
       this.transcript.push(message);
       if (message.snapshot) this.snapshot = message.snapshot;
+      if (message.paused) this.paused = message.paused;
+      if (message.armed) this.armed = true;
       if (message.ready) this.ready = true;
       this.events.emit("change");
       if (message.id !== undefined) this.events.emit(`reply:${message.id}`, message);
@@ -62,7 +65,7 @@ export class Peer {
       changed();
     });
   }
-  async call<T>(command: Omit<Extract<Command, { action: "submit" }>, "id"> | Omit<Extract<Command, { action: "input" }>, "id"> | Omit<Extract<Command, { action: "cancel" }>, "id"> | Omit<Extract<Command, { action: "inspect" }>, "id">): Promise<T> {
+  async call<T = unknown>(command: Command extends infer C ? C extends Command ? Omit<C, "id"> : never : never): Promise<T> {
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const event = `reply:${id}`;
@@ -96,8 +99,8 @@ export class ProcessFixture {
     await writeFile(join(this.agent, "models.json"), JSON.stringify({ providers: { "service-fixture": { apiKey: "synthetic-unused-key" } } }));
     new ProjectTrustStore(this.agent).set(this.root, true);
   }
-  spawn(file: string, directory = this.state, input?: string): Peer {
-    const peer = new Peer(fork(join(this.output, file), [directory, this.agent], {
+  spawn(file: string, directory = this.state, input?: string, parentSessionId = "fixture-parent"): Peer {
+    const peer = new Peer(fork(join(this.output, file), [directory, this.agent, parentSessionId], {
       cwd: this.root, execArgv: [], stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe", "ipc"],
       env: { PATH: process.env.PATH, HOME: join(this.root, "home"), TMPDIR: this.root, PI_CODING_AGENT_DIR: this.agent, SUBAGENT_FIXTURE_ROOT: this.root, NO_COLOR: "1" },
     }));
@@ -106,8 +109,8 @@ export class ProcessFixture {
     return peer;
   }
   async service(): Promise<Peer> { const p = this.spawn("service.js"); await p.wait("service ready", () => p.ready ? true : undefined); return p; }
-  async client(): Promise<Peer> { const p = this.spawn("client.js"); await p.wait("client ready", () => p.ready ? true : undefined); return p; }
-  submit(requestId = "shared-submit", task = "blocked initial"): Submit { return { requestId, name: "shared", task, cwd: this.root, tools: ["fixture_gate"] }; }
+  async client(parentSessionId = "fixture-parent"): Promise<Peer> { const p = this.spawn("client.js", this.state, undefined, parentSessionId); await p.wait("client ready", () => p.ready ? true : undefined); return p; }
+  submit(requestId = "shared-submit", task = "blocked initial"): Submit { return { requestId, runId: "fixture-run", name: "shared", task, cwd: this.root, tools: ["fixture_gate"] }; }
   async entered(file = "entered"): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => { clearTimeout(timer); watcher.close(); error ? reject(error) : resolve(); };
@@ -118,17 +121,32 @@ export class ProcessFixture {
     });
   }
   async release(): Promise<void> { await writeFile(join(this.root, "release"), "release"); }
-  async effects(): Promise<string[]> { return (await readFile(join(this.root, "effects.jsonl"), "utf8")).trim().split("\n"); }
+  async effects(): Promise<string[]> {
+    if (!existsSync(join(this.root, "effects.jsonl"))) return [];
+    return (await readFile(join(this.root, "effects.jsonl"), "utf8")).trim().split("\n");
+  }
+  async inferenceCalls(): Promise<number> {
+    return (await readFile(join(this.root, "requests.jsonl"), "utf8")).trim().split("\n").reduce((sum, line) => sum + (JSON.parse(line) as { calls: number }).calls, 0);
+  }
+  async holdStartup(): Promise<void> { await writeFile(join(this.root, "hold-startup"), "hold"); }
+  async secondWorkspace(): Promise<string> {
+    const cwd = join(this.root, "other-workspace");
+    await mkdir(cwd);
+    new ProjectTrustStore(this.agent).set(cwd, true);
+    await rm(join(this.root, "entered"), { force: true });
+    return cwd;
+  }
   async publicState(): Promise<void> { await chmod(this.state, 0o755); }
-  async cleanup(testResult?: unknown): Promise<void> {
+  async cleanup(testResult?: { state?: string }): Promise<void> {
     const outcomes = await Promise.allSettled(this.peers.map((p) => p.kill()));
+    const retainState = testResult?.state === "fail" || outcomes.some((outcome) => outcome.status === "rejected");
     const evidence = resolve(process.env.PI_ENV_CANARY_ARTIFACT_DIR ?? join(repo, "node_modules/.cache/subagent-service-evidence"), `${this.scenario}-${Date.now()}`);
     await mkdir(evidence, { recursive: true });
-    if (this.root) {
+    if (this.root && retainState) {
       await cp(this.state, join(evidence, "state"), { recursive: true, filter: (path) => !path.endsWith("/service.sock") }).catch((error: unknown) => {
         this.observations.push({ stateCaptureError: String(error) });
       });
-      for (const file of ["effects.jsonl", "entered", "release", "aborted"]) {
+      for (const file of ["effects.jsonl", "requests.jsonl", "entered", "release", "aborted"]) {
         if (existsSync(join(this.root, file))) await cp(join(this.root, file), join(evidence, file));
       }
     }
@@ -137,6 +155,7 @@ export class ProcessFixture {
       expected: "shared ownership, no replay of dispatched effects, private exclusive service",
       actual: this.observations, processes: this.peers.map((p) => p.transcript),
       cleanup: outcomes.map((o) => o.status === "rejected" ? String(o.reason) : o.status),
+      stateRetained: retainState,
       reproduce: "node node_modules/vitest/vitest.mjs run --project integration src/subagent-service/__tests__/multiprocess.integration.test.ts",
     }, null, 2));
     console.info(`Subagent process evidence: ${evidence}`);

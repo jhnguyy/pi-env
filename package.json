@@ -24,8 +24,6 @@
     "build": "node scripts/build-extensions.mjs",
     "clean:extensions": "node scripts/clean-extension-artifacts.mjs",
     "worktree:init": "bash scripts/init-worktree.sh",
-    "subagent:service": "node .pi/extensions/subagent/dist/service.js",
-    "subagent:client": "node .pi/extensions/subagent/dist/service-client.js",
     "test": "node scripts/dev.mjs test",
     "test:unit": "nub run test --project unit",
     "test:integration": "nub run test --project integration",
