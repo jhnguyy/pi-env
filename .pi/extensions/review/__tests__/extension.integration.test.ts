@@ -605,6 +605,7 @@ describe("review extension pull request surface", () => {
       parentSessionId: "parent",
       sessionGeneration: "generation",
       service: {
+        closeChildren: async () => {},
         submit: () => Effect.die("submit must not run during reconstruction"),
         reconstruct: () =>
           Effect.fail(
@@ -643,6 +644,7 @@ describe("review extension pull request surface", () => {
       parentSessionId: "parent",
       sessionGeneration: "generation",
       service: {
+        closeChildren: async () => {},
         submit: () => Effect.die("submit must not run during reconstruction"),
         reconstruct: () =>
           Effect.succeed({
@@ -690,6 +692,7 @@ describe("review extension pull request surface", () => {
       parentSessionId: "parent",
       sessionGeneration: "old-generation",
       service: {
+        closeChildren: async () => {},
         submit: () => Effect.die("submit must not run"),
         reconstruct: () => {
           firstCalled = true;
@@ -710,6 +713,7 @@ describe("review extension pull request surface", () => {
       parentSessionId: "parent",
       sessionGeneration: "new-generation",
       service: {
+        closeChildren: async () => {},
         submit: () => Effect.die("submit must not run"),
         reconstruct: () =>
           Effect.succeed({
@@ -1107,6 +1111,7 @@ describe("review extension pull request surface", () => {
       parentSessionId: "session-a",
       sessionGeneration: "generation-a",
       service: {
+        closeChildren: async () => {},
         submit,
         reconstruct: () => Effect.die("reconstruction must not run"),
       },

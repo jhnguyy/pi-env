@@ -1,151 +1,27 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { createSubagentHarness } from "./harness";
 
-import initSubagent from "../index";
-function createHarness() {
-  const tools = new Map<string, any>();
-  const handlers = new Map<string, any>();
-  initSubagent({
-    getAllTools: () => [], appendEntry: () => {}, registerCommand: () => {},
-    registerTool: (tool: any) => tools.set(tool.name, tool),
-    on: (name: string, handler: any) => handlers.set(name, handler),
-    events: { emit: () => {}, on: () => {} },
-  } as any);
-  return { tools, handlers };
-}
-import { SubagentJobManager } from "../jobs";
+// Admission and accepted-work survival belong to registered-native and the
+// service multiprocess workflow. These checks never connect or invoke a model.
+describe("subagent extension inactive lifecycle", () => {
+  it("rejects starts before activation, during shutdown, and after shutdown", async () => {
+    const harness = createSubagentHarness();
+    const subagent = harness.tools.get("subagent")!;
+    const ctx = {
+      cwd: "/tmp",
+      sessionManager: SessionManager.inMemory("/tmp"),
+      modelRegistry: { getAvailable: () => [] },
+      scopedModels: [],
+    } as any;
+    const start = () => subagent.execute("start", { action: "start", name: "audit", task: "x" }, undefined, undefined, ctx);
 
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-function sessionContext(cwd: string) {
-  return {
-    cwd,
-    sessionManager: SessionManager.inMemory(cwd),
-    modelRegistry: {
-      getAvailable: () => [],
-    },
-    scopedModels: [],
-  } as any;
-}
-
-describe("subagent extension session lifecycle", () => {
-  it("does not let a stale session_start reactivate after a newer shutdown", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
-    temporaryDirectories.push(directory);
-    const harness = createHarness();
-    const startSession = harness.handlers.get("session_start")!;
-    const shutdownSession = harness.handlers.get("session_shutdown")!;
-    const subagent = harness.tools.get("subagent");
-    const ctx = sessionContext(directory);
-    await startSession({ type: "session_start" }, ctx);
-
-    let release!: () => void;
-    const blocked = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let oldManager: SubagentJobManager | undefined;
-    const originalShutdown = SubagentJobManager.prototype.shutdown;
-    vi.spyOn(SubagentJobManager.prototype, "shutdown").mockImplementationOnce(
-      function (this: SubagentJobManager) {
-        oldManager = this;
-        return blocked;
-      },
-    );
-
-    const staleStart = startSession({ type: "session_start" }, ctx);
-    await Promise.resolve();
-    let shutdownSettled = false;
-    const shutdown = shutdownSession({ type: "session_shutdown" }, ctx).then(() => {
-      shutdownSettled = true;
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(shutdownSettled).toBe(false);
-    release();
-    await Promise.all([staleStart, shutdown]);
-
-    const result = await subagent.execute(
-      "after",
-      { action: "start", name: "after", task: "x" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(result.details).toMatchObject({ status: "inactive", name: "after", task: "x" });
+    await expect(start()).rejects.toThrow("Parent subagent session is not active.");
+    const shutdown = harness.handlers.get("session_shutdown")!({}, ctx);
+    await expect(start()).rejects.toThrow("Parent subagent session is not active.");
+    await shutdown;
+    await expect(start()).rejects.toThrow("Parent subagent session is not active.");
     const list = await subagent.execute("list", { action: "list" }, undefined, undefined, ctx);
     expect(list.content[0]?.text).toBe("No subagent jobs.");
-    if (oldManager) await originalShutdown.call(oldManager);
-  });
-
-  it("rejects async starts during/after shutdown and creates jobs only after session_start", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-subagent-lifecycle-"));
-    temporaryDirectories.push(directory);
-    const harness = createHarness();
-    const startSession = harness.handlers.get("session_start")!;
-    const shutdownSession = harness.handlers.get("session_shutdown")!;
-    const subagent = harness.tools.get("subagent");
-    const ctx = sessionContext(directory);
-
-    const beforeStart = await subagent.execute(
-      "before",
-      { action: "start", name: "before", task: "x" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(beforeStart.details).toMatchObject({ status: "inactive", name: "before", task: "x" });
-
-    await startSession({ type: "session_start" }, ctx);
-    const shutdown = shutdownSession({ type: "session_shutdown" }, ctx);
-    const duringShutdown = await subagent.execute(
-      "during",
-      { action: "start", name: "during", task: "x" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(duringShutdown.details).toMatchObject({ status: "shutting-down" });
-    await shutdown;
-
-    const afterShutdown = await subagent.execute(
-      "after",
-      { action: "start", name: "after", task: "x" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(afterShutdown.details).toMatchObject({ status: "inactive" });
-
-    await startSession({ type: "session_start" }, ctx);
-    const active = await subagent.execute(
-      "active",
-      { action: "start", name: "active", task: "x" },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(active.details.jobId).toEqual(expect.any(String));
-    const status = await subagent.execute(
-      "status",
-      { action: "status", job_id: active.details.jobId },
-      undefined,
-      undefined,
-      ctx,
-    );
-    expect(status.details).toMatchObject({
-      jobId: active.details.jobId,
-      name: "active",
-      task: "x",
-    });
-    await shutdownSession({ type: "session_shutdown" }, ctx);
   });
 });

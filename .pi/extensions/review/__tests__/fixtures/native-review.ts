@@ -15,7 +15,8 @@ import { vi, type TestContext } from "vitest";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import initReview from "../../index";
 import initSubagent from "../../../subagent/index";
-import { getSubagentRunSupervisor } from "../../../subagent/control";
+import { connectSubagentService, type SubagentServiceConnection } from "../../../subagent/service-host";
+import { RegisteredServiceFixture } from "../../../subagent/__tests__/registered-service.fixture";
 import { git, reviewRepo } from "./review-repo";
 import {
   ParentProvider,
@@ -46,6 +47,8 @@ export function createNativeReviewFixture(
   const root = mkdtempSync(join(tmpdir(), "public-native-review-"));
   const agentDir = join(root, "agent");
   const cwd = join(root, "parent");
+  const service = new RegisteredServiceFixture(agentDir);
+  let connection: SubagentServiceConnection | undefined;
   let session: AgentSession | undefined;
   let starting: Promise<void> | undefined;
   let pendingAbort: Promise<void> | undefined;
@@ -70,15 +73,25 @@ export function createNativeReviewFixture(
     await starting?.catch(() => {});
     await pendingAbort?.catch(() => {});
     let children: { name: string; model: string | undefined; state: string }[] = [];
-    await settle(() => {
-      children = childSnapshots().map(({ name, model, state }) => ({ name, model, state }));
+    await settle(async () => {
+      children = (await childSnapshots()).map(({ name, model, state }) => ({ name, model, state }));
     });
     await settle(() => session?.abort());
-    await settle(() => session && getSubagentRunSupervisor(session.sessionId)?.shutdown());
+    if (connection) {
+      const snapshot = connection.view.snapshot.value;
+      const runIds = new Set([
+        ...snapshot.children.map((child) => child.runId),
+        ...snapshot.operations.map((operation) => operation.runId),
+      ]);
+      for (const runId of runIds)
+        await settle(() => connection!.view.closeRun({ runId }));
+    }
     await settle(() =>
       session?.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" }),
     );
     await settle(() => session?.dispose());
+    await settle(() => connection?.close());
+    await settle(() => service.close());
     context.signal.removeEventListener("abort", requestAbort);
     vi.unstubAllEnvs();
     const testFailed = context.task.result?.state === "fail";
@@ -138,10 +151,19 @@ export function createNativeReviewFixture(
       .find((item) => item.type === "custom" && item.customType === REVIEW_ENTRY_TYPE);
     return entry?.type === "custom" ? (entry.data as { state: ReviewState }).state : undefined;
   }
-  function childSnapshots() {
-    return [
-      ...(session ? (getSubagentRunSupervisor(session.sessionId)?.children.values() ?? []) : []),
-    ].map((child) => child.inspect());
+  async function childSnapshots() {
+    if (!connection) return [];
+    return Promise.all(connection.view.snapshot.value.children.map(async (child) => {
+      const inspection = await connection!.inspect(child.childId);
+      try {
+        await inspection.refresh({});
+        const snapshot = inspection.snapshot.value;
+        if (!snapshot) throw new Error(`Missing native child inspection: ${child.childId}`);
+        return snapshot;
+      } finally {
+        inspection.release();
+      }
+    }));
   }
   async function start() {
     context.signal.throwIfAborted();
@@ -194,6 +216,7 @@ export function createNativeReviewFixture(
             ? repo.exec(command, args, execOptions)
             : pi.exec(command, args, execOptions),
       });
+    await service.start();
     const services = await createAgentSessionServices({
       cwd,
       agentDir,
@@ -218,6 +241,7 @@ export function createNativeReviewFixture(
       tools: ["review"],
     }));
     context.signal.throwIfAborted();
+    connection = await connectSubagentService(session.sessionId, agentDir);
     await session.bindExtensions({
       mode: "print",
       onError: (error) => {

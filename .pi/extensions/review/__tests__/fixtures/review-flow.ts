@@ -5,7 +5,7 @@ import { onTestFinished } from "vitest";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { resolveReviewCapability, type ReviewCapability } from "../../../../../src/subagent-service/review-capability";
 import type { Model } from "@earendil-works/pi-ai";
 import {
   DagExecutorKind,
@@ -288,19 +288,26 @@ export async function runRealReviewFlow(
     });
     cleanup.defer(() => unregisterDagExecutor(evidenceRegistration));
   }
-  let customTools: readonly ToolDefinition[] = [];
-  const findTool = (prefix: string) => {
-    const tool = customTools.find((candidate) => candidate.name.startsWith(prefix));
-    if (!tool) throw new Error(`Missing run-scoped tool ${prefix}`);
-    return {
-      execute: (id: string, params: any, signal?: AbortSignal) =>
-        tool.execute(id, params, signal, undefined, ctx),
-    };
-  };
+  let reviewCapability: ReviewCapability | undefined;
   let invalidSynthesisRejected = false;
   let dossierRawIds: string[] = [];
   let dossier: ModelDossier | undefined;
   const scriptedText = async (request: Parameters<DagEffectExecutor>[0]) => {
+    // Scripted inference uses the same data-only authority reconstruction as the service.
+    const reconstruction = await Effect.runPromise(services[0].service.reconstruct(request.runId));
+    const { customTools } = await resolveReviewCapability({
+      capability: JSON.parse(JSON.stringify({ ...reviewCapability, reconstruction })),
+      runId: request.runId,
+      cwd: (request.node.executor.payload as { workspace: { cwd: string } }).workspace.cwd,
+    });
+    const findTool = (prefix: string) => {
+      const tool = customTools.find((candidate) => candidate.name.startsWith(prefix));
+      if (!tool) throw new Error(`Missing run-scoped tool ${prefix}`);
+      return {
+        execute: (id: string, params: any, signal?: AbortSignal) =>
+          tool.execute(id, params, signal, undefined, ctx),
+      };
+    };
     if (request.node.id === "reading-plan") {
       const deckReply = await findTool("review_deck_").execute("deck", {});
       const deck: ReviewDeck = JSON.parse(
@@ -440,11 +447,9 @@ export async function runRealReviewFlow(
   };
   const runtime = await DagSessionRuntime.create(pi, ctx, {
     sessionGeneration: generation,
-    supervisor: {
-      usage: () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 }),
-    } as any,
+    serviceConnection: { view: { closeRun: async () => {} } } as any,
     telemetryRuntime: {} as any,
-    ledger: {} as any,
+    ledger: { rows: () => [] } as any,
     executorRegistry: registry,
   });
   cleanup.defer(() => runtime.dispose());
@@ -456,7 +461,7 @@ export async function runRealReviewFlow(
   const service: DagRuntimeServiceRegistration["service"] = {
     ...services[0].service,
     submit: (graph, authority) => {
-      customTools = authority?.customTools ?? [];
+      reviewCapability = authority?.reviewCapability;
       workspaceRoot = authority?.workspaceRoot;
       submissionState = saved.at(-1);
       return services[0].service.submit(graph, authority);
@@ -519,7 +524,13 @@ export async function runRealReviewFlow(
         state: persisted,
         reconstruction,
       }),
-    readDeck: (signal) => findTool("review_deck_").execute("retained-deck", {}, signal),
+    readDeck: async (signal) => {
+      const { customTools } = await resolveReviewCapability({
+        capability: JSON.parse(JSON.stringify(reviewCapability)), runId: reviewCapability!.runId, cwd: reviewCapability!.snapshot.worktree,
+      });
+      return customTools.find((tool) => tool.name.startsWith("review_deck_"))!
+        .execute("retained-deck", {}, signal, undefined, ctx);
+    },
     entries,
     invalidSynthesisRejected,
     dossierRawIds,

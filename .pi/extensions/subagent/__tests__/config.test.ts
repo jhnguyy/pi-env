@@ -1,24 +1,8 @@
-import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
+import { DEFAULT_SUBAGENT_LIMITS, resolveSubagentRuntimeConfig } from "../config";
 
-import {
-  resolveSubagentRuntimeConfig,
-  SubagentSessionStorage,
-  SubagentSettingsSchema,
-} from "../config";
-
-describe("subagent session storage configuration", () => {
-  it("defaults to nested child storage", () => {
-    expect(resolveSubagentRuntimeConfig({}).sessionStorage).toBe(SubagentSessionStorage.Nested);
-  });
-
-  it("accepts sibling storage as a compatibility override", () => {
-    const settings = Schema.decodeUnknownSync(SubagentSettingsSchema)({
-      sessionStorage: "sibling",
-    });
-
-    expect(resolveSubagentRuntimeConfig(settings).sessionStorage).toBe(
-      SubagentSessionStorage.Sibling,
-    );
-  });
+it("bounds admission settings and retains defaults for invalid limits", () => {
+  expect(resolveSubagentRuntimeConfig({})).toEqual(DEFAULT_SUBAGENT_LIMITS);
+  expect(resolveSubagentRuntimeConfig({ maxConcurrentRuns: 2, maxPendingRuns: 3, maxRunMs: 1000, maxRetainedJobs: 4 })).toEqual({ maxConcurrentRuns: 2, maxPendingRuns: 3, maxRunMs: 1000, maxRetainedJobs: 4 });
+  expect(resolveSubagentRuntimeConfig({ maxConcurrentRuns: NaN, maxPendingRuns: -1, maxRunMs: Infinity, maxRetainedJobs: 0 })).toEqual(DEFAULT_SUBAGENT_LIMITS);
 });

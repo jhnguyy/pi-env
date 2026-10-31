@@ -1,61 +1,18 @@
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-import {
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
-import { createHash } from "node:crypto";
-import { join } from "node:path";
 import * as Tooling from "../../../src/telemetry/tooling";
-import * as Slug from "../_shared/slug";
-import * as Config from "./config";
-import * as Control from "./control";
 import * as Errors from "./errors";
 import * as Resolver from "./resolver";
 import type * as Types from "./types";
 import * as Usage from "./usage";
-import * as NativeChild from "./native-child";
+import { connectSubagentService, waitForOperation, type SubagentServiceConnection } from "./service-host";
+import type { Receipt, Submit } from "../../../src/subagent-service/contract";
+import type * as ExecutionTypes from "./execution-types";
+export type { RunSubagentOptions, ResolvedSubagentRun, SubagentParentContext } from "./execution-types";
 export type { NativeChildSession } from "./child-types";
 
 export const SUBAGENT_TELEMETRY_SERVICE_NAME = "pi-env-subagent" as const;
-function getSubagentSessionName(name: string): string {
-  return `sub-${Slug.slugify(name, { fallback: "agent" })}`;
-}
-interface PersistentSubagentSession {
-  manager: SessionManager;
-  file?: string;
-  id: string;
-  name: string;
-}
-
-function childSessionDirectory(ctx: ExecutionTypes.SubagentParentContext): string | undefined {
-  const parentDirectory = ctx.sessionManager.getSessionDir();
-  if (!parentDirectory) return undefined;
-
-  const parentId = ctx.sessionManager.getSessionId();
-  const directoryName =
-    parentId.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(parentId)
-      ? parentId
-      : `sha256-${createHash("sha256").update(parentId).digest("hex")}`;
-  return join(parentDirectory, "_children", directoryName);
-}
-
-export function createPersistentSubagentSession(
-  name: string,
-  ctx: ExecutionTypes.SubagentParentContext,
-  cwd = ctx.cwd,
-  sessionStorage: Config.SubagentSessionStorage = Config.SubagentSessionStorage.Nested,
-): PersistentSubagentSession {
-  const sessionDir =
-    sessionStorage === Config.SubagentSessionStorage.Nested
-      ? childSessionDirectory(ctx)
-      : ctx.sessionManager.getSessionDir();
-  const manager = SessionManager.create(cwd, sessionDir, {
-    parentSession: ctx.sessionManager.getSessionFile(),
-  });
-  const sessionName = getSubagentSessionName(name);
-  manager.appendSessionInfo(sessionName);
-  return { manager, file: manager.getSessionFile(), id: manager.getSessionId(), name: sessionName };
-}
 
 export function buildErrorDetails(
   params: Resolver.SubagentParams,
@@ -64,175 +21,106 @@ export function buildErrorDetails(
   reason: string,
 ): Types.SubagentDetails {
   return {
-    name: params.name ?? "unnamed",
-    task: params.task,
-    toolNames,
-    modelOverride,
-    cwd: params.cwd,
-    finalOutput: "",
-    toolCallCount: 0,
-    usage: Usage.zeroUsage(),
-    stopReason: reason,
-    isError: true,
-    turnLimitExceeded: false,
+    name: params.name ?? "unnamed", task: params.task, toolNames, modelOverride,
+    cwd: params.cwd, finalOutput: "", toolCallCount: 0, usage: Usage.zeroUsage(),
+    stopReason: reason, isError: true, turnLimitExceeded: false,
   };
 }
 
-export type { RunSubagentOptions, ResolvedSubagentRun, SubagentParentContext } from "./execution-types";
-import type * as ExecutionTypes from "./execution-types";
-function executionError(phase: Errors.SubagentExecutionPhase, cause?: unknown): Errors.SubagentExecutionError {
-  return new Errors.SubagentExecutionError({
-    phase,
-    message: cause instanceof Error ? cause.message : `Subagent ${phase} failed`,
-  });
-}
-function resolveSessionStorage(ctx: ExecutionTypes.SubagentParentContext): Config.SubagentSessionStorage {
-  try {
-    return Config.loadSubagentRuntimeConfig(ctx.cwd).sessionStorage;
-  } catch {
-    return Config.SubagentSessionStorage.Nested;
-  }
+function submission(run: ExecutionTypes.ResolvedSubagentRun, runId: string, requestId: string): Submit {
+  return {
+    requestId, runId, name: run.name, task: run.task, cwd: run.cwd,
+    ...(run.modelOverride !== undefined ? { model: run.modelOverride } : {}),
+    ...(run.systemPrompt !== undefined ? { systemPrompt: run.systemPrompt } : {}),
+    ...(run.toolNames !== undefined ? { tools: [...run.toolNames] } : {}),
+    ...(run.reasoning !== undefined ? { reasoning: run.reasoning } : {}),
+    ...(run.maxTurns !== undefined ? { maxTurns: run.maxTurns } : {}),
+    ...(run.workspaceAccess !== undefined ? { workspaceAccess: run.workspaceAccess } : {}),
+    ...(run.reviewCapability !== undefined ? { capability: JSON.parse(JSON.stringify(run.reviewCapability)) } : {}),
+  };
 }
 
-function resolveSupervisor(
-  ctx: ExecutionTypes.SubagentParentContext,
-  options: ExecutionTypes.RunSubagentOptions,
-): Control.SubagentRunSupervisor {
-  if (options.supervisor) return options.supervisor;
-  const sessionId = ctx.sessionManager.getSessionId();
-  let config;
-  try {
-    config = Config.loadSubagentRuntimeConfig(ctx.cwd);
-  } catch {
-    config = Config.resolveSubagentRuntimeConfig({});
-  }
-  return Control.getOrCreateSubagentRunSupervisor(sessionId, config);
+async function initialResult(connection: SubagentServiceConnection, receipt: Receipt, run: ExecutionTypes.ResolvedSubagentRun): Promise<AgentToolResult<Types.SubagentDetails>> {
+  const result = await connection.view.resultFull({ operationId: receipt.operationId });
+  if (result) return result;
+  const operation = connection.view.snapshot.value.operations.find((item) => item.operationId === receipt.operationId);
+  const details = buildErrorDetails({ name: run.name, task: run.task, cwd: run.cwd }, [...run.toolNames ?? []], run.modelOverride, operation?.status ?? "missing_result");
+  details.errorMessage = "Child did not produce a settled initial result; interrupted effects are not retried.";
+  return { content: [{ type: "text", text: details.errorMessage }], details };
 }
 
-function withSubagentTelemetry(
-  options: ExecutionTypes.RunSubagentOptions,
-  workflowWith: (
-    runtime: Tooling.ToolingTelemetryRuntime,
-  ) => Effect.Effect<
-    AgentToolResult<Types.SubagentDetails>,
-    Errors.SubagentExecutionError | Control.SubagentAdmissionError
-  >,
-): Effect.Effect<
-  AgentToolResult<Types.SubagentDetails>,
-  Errors.SubagentExecutionError | Control.SubagentAdmissionError
-> {
-  if (options.telemetryRuntime) {
-    return options.telemetryRuntime.provide(workflowWith(options.telemetryRuntime));
-  }
-
-  return Tooling.withToolingTelemetryRuntime(
-    {
-      env: options.env ?? process.env,
-      exporter: options.telemetryExporter,
-      serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
-    },
-    workflowWith,
-  ).pipe(
-    Effect.catchTag("ToolingOtelConfigError", () =>
-      Effect.fail(executionError(Errors.SubagentExecutionPhase.Session)),
-    ),
-  );
+function explicitCancellation(connection: SubagentServiceConnection, receipt: Receipt, requestId: string, signal?: AbortSignal) {
+  let request: Promise<void> | undefined;
+  const cancel = () => {
+    request ??= connection.view.cancel({ requestId: `${requestId}:cancel`, operationId: receipt.operationId });
+    void request.catch(() => undefined);
+  };
+  signal?.addEventListener("abort", cancel, { once: true });
+  if (signal?.aborted) cancel();
+  return {
+    acknowledge: () => request,
+    dispose: () => signal?.removeEventListener("abort", cancel),
+  };
 }
 
+/** The only internal execution path. Native ownership and effects stay in the service. */
 export function runResolvedSubagentEffect(
   run: ExecutionTypes.ResolvedSubagentRun,
   ctx: ExecutionTypes.SubagentParentContext,
   options: ExecutionTypes.RunSubagentOptions = {},
-): Effect.Effect<
-  AgentToolResult<Types.SubagentDetails>,
-  Errors.SubagentExecutionError | Control.SubagentAdmissionError
-> {
-  return withSubagentTelemetry(options, (runtime) =>
-    runtime.diagnostics.span(
-      "tooling.subagent.run",
-      { operation: "run", mode: options.executionMode ?? Usage.SubagentUsageMode.Sync },
-      Effect.callback<
-        AgentToolResult<Types.SubagentDetails>,
-        Errors.SubagentExecutionError | Control.SubagentAdmissionError
-      >((resume) => {
-        let child: NativeChild.NativeChildOwner | undefined;
-        const work = (async () => {
-          const persistent = createPersistentSubagentSession(
-            run.name,
-            ctx,
-            run.cwd,
-            options.sessionStorage ?? resolveSessionStorage(ctx),
-          );
-          const supervisor = resolveSupervisor(ctx, options);
-          child = new NativeChild.NativeChildOwner(run, ctx, persistent.manager, supervisor, options);
-          try {
-            supervisor.retainChild(child);
-            options.onChild?.(child);
-            const result = await child.runInitial();
-            return Usage.recordSubagentResult(
-              options.ledger,
-              options.runId,
-              options.executionMode ?? Usage.SubagentUsageMode.Sync,
-              result,
-            );
-          } catch (error) {
-            await child.close();
-            throw error;
-          }
-        })();
-        work.then(
-          (result) => resume(Effect.succeed(result)),
-          (error) =>
-            resume(
-              Effect.fail(
-                error instanceof Control.SubagentAdmissionError
-                  ? error
-                  : executionError(Errors.SubagentExecutionPhase.Session, error),
-              ),
-            ),
-        );
-        // Effect interruption waits native abort and settlement, not a timer or an early lease release.
-        return Effect.promise(async () => {
-          await child?.cancel();
-          await work.catch(() => undefined);
-        });
-      }),
-    ),
+): Effect.Effect<AgentToolResult<Types.SubagentDetails>, Errors.SubagentExecutionError> {
+  const execute = Effect.tryPromise({
+    try: async () => {
+      options.signal?.throwIfAborted();
+      if (run.customTools?.length) throw new Error("Executable private tools cannot cross the service boundary; supply a service-owned capability.");
+      const connection = options.serviceConnection ?? await connectSubagentService(ctx.sessionManager.getSessionId());
+      try {
+        const runId = options.runId ?? randomUUID();
+        const requestId = options.requestId ?? runId;
+        const receipt = await connection.view.submit(submission(run, runId, requestId));
+        options.onAdmitted?.();
+        // A tool's explicit abort requests cancellation. A dropped client or Effect waiter does not.
+        const cancellation = explicitCancellation(connection, receipt, requestId, options.signal);
+        try {
+          await waitForOperation(connection, receipt.operationId);
+          await cancellation.acknowledge();
+          const result = await initialResult(connection, receipt, run);
+          options.onUpdate?.(result);
+          return Usage.recordSubagentResult(options.ledger, runId, options.executionMode ?? Usage.SubagentUsageMode.Sync, result);
+        } finally { cancellation.dispose(); }
+      } finally { if (!options.serviceConnection) await connection.close(); }
+    },
+    catch: (cause) => new Errors.SubagentExecutionError({
+      phase: Errors.SubagentExecutionPhase.Session,
+      message: cause instanceof Error ? cause.message : "Subagent service execution failed",
+    }),
+  });
+  const traced = (runtime: Tooling.ToolingTelemetryRuntime) => runtime.diagnostics.span(
+    "tooling.subagent.run", { operation: "run", mode: options.executionMode ?? Usage.SubagentUsageMode.Sync }, execute,
   );
+  if (options.telemetryRuntime) return options.telemetryRuntime.provide(traced(options.telemetryRuntime));
+  return Tooling.withToolingTelemetryRuntime({
+    env: options.env ?? process.env, exporter: options.telemetryExporter, serviceName: SUBAGENT_TELEMETRY_SERVICE_NAME,
+  }, traced).pipe(Effect.catchTag("ToolingOtelConfigError", (error) => Effect.fail(new Errors.SubagentExecutionError({
+    phase: Errors.SubagentExecutionPhase.Session, message: error.message,
+  }))));
 }
 
 export function runSubagentEffect(
   params: Resolver.SubagentParams,
   ctx: ExecutionTypes.SubagentParentContext,
   options: ExecutionTypes.RunSubagentOptions = {},
-): Effect.Effect<
-  AgentToolResult<Types.SubagentDetails>,
-  Errors.SubagentExecutionError | Control.SubagentAdmissionError
-> {
+): Effect.Effect<AgentToolResult<Types.SubagentDetails>, Errors.SubagentExecutionError> {
   return Effect.suspend(() => {
     const plan = Resolver.resolveSubagentExecutionPlan(params, ctx);
-    if (!Resolver.isResolutionOk(plan))
-      return Effect.succeed({
-        content: [{ type: "text" as const, text: plan.error.message }],
-        details: buildErrorDetails(
-          params,
-          plan.error.toolNames,
-          plan.error.modelOverride,
-          plan.error.reason,
-        ),
-      });
-    return runResolvedSubagentEffect(
-      {
-        name: params.name ?? "unnamed",
-        task: params.task,
-        cwd: plan.value.effectiveCwd,
-        modelOverride: plan.value.modelOverride,
-        systemPrompt: plan.value.systemPrompt,
-        toolNames: plan.value.toolNames,
-        workspaceAccess: plan.value.workspaceAccess,
-      },
-      ctx,
-      options,
-    );
+    if (!Resolver.isResolutionOk(plan)) return Effect.succeed({
+      content: [{ type: "text" as const, text: plan.error.message }],
+      details: buildErrorDetails(params, plan.error.toolNames, plan.error.modelOverride, plan.error.reason),
+    });
+    return runResolvedSubagentEffect({
+      name: params.name ?? "unnamed", task: params.task, cwd: plan.value.effectiveCwd,
+      modelOverride: plan.value.modelOverride, systemPrompt: plan.value.systemPrompt,
+      toolNames: plan.value.toolNames, workspaceAccess: plan.value.workspaceAccess,
+    }, ctx, options);
   });
 }

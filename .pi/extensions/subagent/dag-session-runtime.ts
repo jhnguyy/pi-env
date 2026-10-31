@@ -6,6 +6,7 @@ import {
   DagExecutorRegistryLayer,
   DagRuntimeLive,
   DagRuntimeNotAccepting,
+  DagRuntimeCoordinatorFatal,
   DagRuntimeRunAlreadyExists,
   createDagSessionWriter,
   reconstructDagSession,
@@ -28,23 +29,18 @@ import {
   type DagRuntimeSubmissionAuthority,
   type DagRuntimeUsage,
 } from "../_shared/dag-runtime-service";
-import {
-  DEFAULT_SUBAGENT_CONFIG,
-  type SubagentSessionStorage,
-} from "./config";
-import type { SubagentRunSupervisor } from "./control";
+import type { SubagentServiceConnection } from "./service-host";
 import { createDagSubagentExecutorRegistry } from "./dag-runtime";
 import { createDagSessionStore, persistedDagRunIds } from "./dag-session-store";
-import type { SubagentUsageLedger } from "./usage";
+import { addUsage, zeroUsage, type SubagentUsageLedger } from "./usage";
 
 export type DagSubagentExecutorRegistryFactory = typeof createDagSubagentExecutorRegistry;
 
 interface DagSessionRuntimeDependencies {
   readonly sessionGeneration: string;
-  readonly supervisor: SubagentRunSupervisor;
+  readonly serviceConnection: SubagentServiceConnection;
   readonly telemetryRuntime: ToolingTelemetryRuntime;
   readonly ledger: SubagentUsageLedger;
-  readonly sessionStorage?: SubagentSessionStorage;
   readonly executorRegistry?: DagExecutorRegistryService;
   readonly executorRegistryFactory?: DagSubagentExecutorRegistryFactory;
 }
@@ -63,7 +59,8 @@ export class DagSessionRuntime {
     private readonly runtimeLayer: Layer.Layer<DagExecutorRegistry | DagRuntimeService>,
     private readonly claimedRunIds: Set<string>,
     private readonly authorities: Map<string, DagRuntimeSubmissionAuthority>,
-    private readonly supervisor: SubagentRunSupervisor,
+    private readonly serviceConnection: SubagentServiceConnection,
+    private readonly ledger: SubagentUsageLedger,
     private readonly parentSessionId: string,
     private readonly sessionGeneration: string,
     ctx: ExtensionContext,
@@ -75,15 +72,13 @@ export class DagSessionRuntime {
       ) => this.submit(graph, authority),
       reconstruct: (runId: string) => reconstructDagSession(this.store, runId),
       closeChildren: async (runId: string): Promise<void> => {
-        const prefix = dagUsagePrefix(runId);
-        const children = [...this.supervisor.children.values()].filter((child) => child.runId.startsWith(prefix));
-        const outcomes = await Promise.allSettled(children.map((child) => child.close()));
-        const failures = outcomes.filter((outcome) => outcome.status === "rejected");
-        if (failures.length) throw new AggregateError(failures.map((failure) => failure.reason), "Review child shutdown failed.");
+        await this.serviceConnection.view.closeRun({ runId });
       },
       usage: (runId: string): DagRuntimeUsage => {
         const prefix = dagUsagePrefix(runId);
-        return Object.freeze(this.supervisor.usage(prefix));
+        return Object.freeze(this.ledger.rows()
+          .filter((row) => row.id.startsWith(prefix))
+          .reduce((total, row) => addUsage(total, row.usage), zeroUsage()));
       },
     });
     this.registration = registerDagRuntimeService(pi, {
@@ -105,6 +100,10 @@ export class DagSessionRuntime {
       parentSessionId,
     );
     const authorities = new Map<string, DagRuntimeSubmissionAuthority>();
+    const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
+      appendCustomEntry(customType: string, data?: unknown): string;
+    };
+    const store = createDagSessionStore(writableSessionManager);
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
     const registry =
       dependencies.executorRegistry ??
@@ -114,19 +113,19 @@ export class DagSessionRuntime {
         dependencies.sessionGeneration,
         {
           workspaceRootForRun: (runId) => authorities.get(runId)?.workspaceRoot,
-          customToolsForRun: (runId) => authorities.get(runId)?.customTools ?? [],
-          onChild: (child) => dependencies.supervisor.retainChild(child),
+          reviewCapabilityForRun: async (runId) => {
+            const descriptor = authorities.get(runId)?.reviewCapability;
+            if (!descriptor) return undefined;
+            const reconstruction = await Effect.runPromise(reconstructDagSession(store, runId));
+            // Replay failures can contain Error instances; transport only their data.
+            return structuredClone({ ...descriptor, reconstruction: JSON.parse(JSON.stringify(reconstruction)) });
+          },
           ledger: dependencies.ledger,
-          supervisor: dependencies.supervisor,
+          serviceConnection: dependencies.serviceConnection,
           telemetryRuntime: dependencies.telemetryRuntime,
-          sessionStorage: dependencies.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
         },
       );
     const scope = await Effect.runPromise(Scope.make());
-    const writableSessionManager = ctx.sessionManager as typeof ctx.sessionManager & {
-      appendCustomEntry(customType: string, data?: unknown): string;
-    };
-    const store = createDagSessionStore(writableSessionManager);
     try {
       return new DagSessionRuntime(
         pi,
@@ -135,7 +134,8 @@ export class DagSessionRuntime {
         Layer.mergeAll(DagRuntimeLive, DagExecutorRegistryLayer(registry)),
         persistedDagRunIds(store),
         authorities,
-        dependencies.supervisor,
+        dependencies.serviceConnection,
+        dependencies.ledger,
         parentSessionId,
         dependencies.sessionGeneration,
         ctx,
@@ -187,6 +187,14 @@ export class DagSessionRuntime {
           new DagRuntimeNotAccepting({ message: "The session DAG runtime is shutting down." }),
         );
       }
+      if (authority?.customTools?.length) {
+        return Effect.fail(new DagRuntimeNotAccepting({
+          message: "Arbitrary custom ToolDefinitions are unsupported; supply a data-only review capability.",
+        }));
+      }
+      if (authority?.reviewCapability && authority.reviewCapability.runId !== graph.runId) {
+        return Effect.fail(new DagRuntimeNotAccepting({ message: "Review capability does not match the DAG run." }));
+      }
       if (this.claimedRunIds.has(graph.runId)) {
         return Effect.fail(
           new DagRuntimeRunAlreadyExists({
@@ -195,8 +203,14 @@ export class DagSessionRuntime {
           }),
         );
       }
+      let detachedAuthority: DagRuntimeSubmissionAuthority | undefined;
+      try {
+        detachedAuthority = authority ? structuredClone(authority) : undefined;
+      } catch {
+        return Effect.fail(new DagRuntimeNotAccepting({ message: "DAG authority must be data-only." }));
+      }
       this.claimedRunIds.add(graph.runId);
-      if (authority) this.authorities.set(graph.runId, authority);
+      if (detachedAuthority) this.authorities.set(graph.runId, detachedAuthority);
       let resolveSubmission!: () => void;
       const pendingSubmission = new Promise<void>((resolve) => {
         resolveSubmission = resolve;
@@ -260,7 +274,16 @@ export class DagSessionRuntime {
             accepted: handle.accepted,
             snapshot: handle.snapshot,
             await: removeAfterTerminal(handle.await),
-            cancel: removeAfterTerminal(handle.cancel),
+            cancel: removeAfterTerminal(
+              handle.cancel.pipe(
+                Effect.tap(() => Effect.tryPromise({
+                  try: () => this.serviceConnection.view.closeRun({ runId: graph.runId }),
+                  catch: (cause) => new DagRuntimeCoordinatorFatal({
+                    message: "Native DAG cancellation could not settle its service run.", cause,
+                  }),
+                })),
+              ),
+            ),
           } satisfies DagRunHandle);
         }),
         Effect.ensuring(finishSubmission),

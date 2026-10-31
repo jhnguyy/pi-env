@@ -1,4 +1,4 @@
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Data, Effect } from "effect";
 
 import * as DagExecutorRegistration from "../_shared/dag-executor-registration";
@@ -16,6 +16,8 @@ import {
 import * as Control from "./control";
 import * as Execute from "./execute";
 import * as Resolver from "./resolver";
+import type { ReviewCapability } from "../../../src/subagent-service/review-capability";
+import * as Usage from "./usage";
 
 export const DagSubagentExecutorKey = "pi/subagent-v1" as const;
 
@@ -55,7 +57,7 @@ function resolveContainedCwd(
 function resolveRun(
   request: DagSubagentRuntimeRequest,
   ctx: ExtensionContext,
-  customTools: readonly ToolDefinition[],
+  reviewCapability: ReviewCapability | undefined,
   workspaceRoot?: string,
 ): Execute.ResolvedSubagentRun {
   const cwd = resolveContainedCwd(request, ctx, workspaceRoot);
@@ -68,7 +70,7 @@ function resolveRun(
     name: request.payload.name,
     task: request.prompt.user,
     toolNames: [...request.payload.tools],
-    customTools: customTools.filter((tool) => request.payload.tools.includes(tool.name)),
+    reviewCapability,
     modelOverride: request.payload.model,
     systemPrompt,
     cwd,
@@ -80,7 +82,7 @@ function resolveRun(
 
 interface DagSubagentRuntimeOptions extends Execute.RunSubagentOptions {
   readonly workspaceRootForRun?: (runId: string) => string | undefined;
-  readonly customToolsForRun?: (runId: string) => readonly ToolDefinition[];
+  readonly reviewCapabilityForRun?: (runId: string) => Promise<ReviewCapability | undefined>;
   readonly executeResolved?: typeof Execute.runResolvedSubagentEffect;
 }
 export function makeDagSubagentRuntime(
@@ -90,12 +92,16 @@ export function makeDagSubagentRuntime(
   return {
     run: (request) =>
       Effect.gen(function* () {
+        const reviewCapability = yield* Effect.tryPromise({
+          try: async () => options.reviewCapabilityForRun?.(request.runId),
+          catch: (cause) => new DagSubagentRuntimeFailure({ phase: "resolution", message: "Review capability reconstruction failed.", cause }),
+        });
         const run = yield* Effect.try({
           try: () =>
             resolveRun(
               request,
               ctx,
-              options.customToolsForRun?.(request.runId) ?? [],
+              reviewCapability,
               options.workspaceRootForRun?.(request.runId),
             ),
           catch: (cause) =>
@@ -112,7 +118,10 @@ export function makeDagSubagentRuntime(
         const executeResolved = options.executeResolved ?? Execute.runResolvedSubagentEffect;
         const result = yield* executeResolved(run, ctx, {
           ...options,
-          runId: `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          // Group lifetime by graph, but deduplicate only the same node attempt.
+          runId: request.runId,
+          requestId: `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          ledger: undefined,
           workspaceAccess: run.workspaceAccess,
         }).pipe(
           Effect.mapError(
@@ -123,6 +132,11 @@ export function makeDagSubagentRuntime(
                 cause,
               }),
           ),
+        );
+        options.ledger?.record(
+          `${DagRuntimeService.dagUsagePrefix(request.runId)}${request.nodeId}:${request.attemptId}`,
+          options.executionMode ?? Usage.SubagentUsageMode.Sync,
+          result.details,
         );
         const admissibleOneRequestResult =
           request.payload.maxTurns === 1 &&

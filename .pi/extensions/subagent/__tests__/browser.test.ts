@@ -16,12 +16,13 @@ it("renders authoritative views and parses only supported editor shortcut keys",
   let editorTitle = "";
   const tui = { terminal: { rows: 60 }, requestRender: () => {} };
   const theme = { fg: (_color: string, text: string) => text };
-  const source = { listChildren: () => [child], inspectChild: () => child, cancelChild: async () => {} };
+  const source = { listChildren: () => [child], inspectChild: async () => child, cancelChild: async () => {}, reopenChild: async () => {} };
   const browser = new Browser.SubagentBrowser(source, tui as any, theme as any, () => { viewOpen = false; }, async (id, mode) => { editorTitle = `${mode} · ${id}`; });
   try {
     browser.focused = true;
     browser.render(160);
     browser.handleInput("\r");
+    await Promise.resolve();
     browser.handleInput("\t");
     const instructions = browser.render(160).map((line) => line.trimEnd()).join("\n");
     expect(instructions).toContain("First line\nSecond line");
@@ -61,7 +62,7 @@ it("renders authoritative views and parses only supported editor shortcut keys",
 
 it("bounds native rendering on resize and ignores keys after view disposal", () => {
   const tui = { terminal: { rows: 20 }, requestRender: () => {} };
-  const source = { listChildren: () => [], inspectChild: () => undefined, cancelChild: async () => {} };
+  const source = { listChildren: () => [], inspectChild: async () => undefined, cancelChild: async () => {}, reopenChild: async () => {} };
   let viewOpen = true;
   const browser = new Browser.SubagentBrowser(source, tui as any, { fg: (_color: string, text: string) => text } as any, () => { viewOpen = false; }, async () => {});
   try {

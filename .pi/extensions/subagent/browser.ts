@@ -4,11 +4,24 @@ import * as ChildTypes from "./child-types";
 import type * as SessionRuntime from "./session-runtime";
 import * as Transcript from "./transcript";
 
-type BrowserSource = Pick<SessionRuntime.SubagentSessionRuntime, "listChildren" | "inspectChild" | "cancelChild">;
-type Child = NonNullable<ReturnType<BrowserSource["inspectChild"]>>;
+type BrowserSource = Pick<SessionRuntime.SubagentSessionRuntime, "listChildren" | "inspectChild" | "cancelChild" | "reopenChild">;
+type Child = NonNullable<Awaited<ReturnType<BrowserSource["inspectChild"]>>>;
 type ChildSummary = ReturnType<BrowserSource["listChildren"]>[number];
-const VIEWS = ["conversation", "instructions", "configuration", "provenance"] as const;
-type View = typeof VIEWS[number];
+export const VIEWS = ["conversation", "instructions", "configuration", "provenance"] as const;
+export type View = typeof VIEWS[number];
+
+export function childViewText(child: Child, view: View): string {
+  switch (view) {
+    case "instructions":
+      return `Original coordinator task\n${child.task}\n\nNative system prompt\n${child.systemPrompt}`;
+    case "configuration":
+      return `Child: ${child.id}\nParent operation: ${child.runId}\nCwd: ${child.cwd}\nModel: ${child.model ?? "unavailable"}\nNative session: ${child.sessionFile ?? "unavailable"}\n\nActive tools\n${child.activeTools.join("\n") || "(none)"}\n\nCallable tools\n${child.callableTools.join("\n") || "(none)"}\n\nInitial result\n${child.initialResult ? child.initialResult.isError ? "Failed" : "Completed" : "Pending"}\n\nHistorical owners require explicit reopen. Only continue with pi --session after this owner closes. The session file is not deleted on eviction.`;
+    case "provenance":
+      return child.inputs.map((input) => `${input.source} · ${input.mode} · ${input.at}\n${input.text}`).join("\n\n") || "No recorded inputs.";
+    case "conversation":
+      return `Native conversation (compaction may summarize earlier messages)\n\n${Transcript.childMessagesText(child.messages)}`;
+  }
+}
 
 function oneLine(text: string): string {
   return Transcript.plainChildText(text).replace(/\s+/g, " ").trim();
@@ -29,6 +42,11 @@ export class SubagentBrowser implements Component, Focusable {
   private list: SelectList;
   private rosterKey = "";
   private selectedId: string | undefined;
+  private child: Child | undefined;
+  private selectionGeneration = 0;
+  private loading = false;
+  private loadError = "";
+  private reopening = false;
   private view: View = "conversation";
   private readonly text = new Text("", 0, 0);
   private readonly scroll = new ScrollView(this.text, { follow: "end", scrollbar: "hidden" });
@@ -48,7 +66,10 @@ export class SubagentBrowser implements Component, Focusable {
   ) {
     this.list = this.createList();
     this.timer = setInterval(() => {
-      if (!this.disposed) this.tui.requestRender();
+      if (!this.disposed) {
+        void this.refreshSelected();
+        this.tui.requestRender();
+      }
     }, 500);
     this.timer.unref();
   }
@@ -78,6 +99,10 @@ export class SubagentBrowser implements Component, Focusable {
     });
     list.onSelect = (item) => {
       this.selectedId = item.value;
+      this.selectionGeneration++;
+      this.child = undefined;
+      this.loadError = "";
+      void this.refreshSelected();
       this.view = "conversation";
       this.search.focused = false;
       this.status = "";
@@ -104,16 +129,44 @@ export class SubagentBrowser implements Component, Focusable {
     this.tui.requestRender();
   }
 
-  private contents(child: Child): string {
-    switch (this.view) {
-      case "instructions":
-        return `Original coordinator task\n${child.task}\n\nNative system prompt\n${child.systemPrompt}`;
-      case "configuration":
-        return `Child: ${child.id}\nParent operation: ${child.runId}\nCwd: ${child.cwd}\nModel: ${child.model ?? "unavailable"}\nNative session: ${child.sessionFile ?? "unavailable"}\n\nActive tools\n${child.activeTools.join("\n") || "(none)"}\n\nCallable tools\n${child.callableTools.join("\n") || "(none)"}\n\nInitial result\n${child.initialResult ? child.initialResult.isError ? "Failed" : "Completed" : "Pending"}\n\nOnly continue with pi --session after this owner closes. The session file is not deleted on eviction.`;
-      case "provenance":
-        return child.inputs.map((input) => `${input.source} · ${input.mode} · ${input.at}\n${input.text}`).join("\n\n") || "No recorded inputs.";
-      case "conversation":
-        return `Native conversation (compaction may summarize earlier messages)\n\n${Transcript.childMessagesText(child.messages)}`;
+  private async refreshSelected(): Promise<void> {
+    const id = this.selectedId;
+    if (!id || this.loading || this.disposed) return;
+    const generation = this.selectionGeneration;
+    this.loading = true;
+    try {
+      const child = await this.source.inspectChild(id);
+      if (this.disposed || generation !== this.selectionGeneration) return;
+      this.child = child;
+      this.loadError = "";
+    } catch (error) {
+      if (!this.disposed && generation === this.selectionGeneration) {
+        this.loadError = oneLine(error instanceof Error ? error.message : String(error));
+      }
+    } finally {
+      this.loading = false;
+      if (!this.disposed) {
+        if (generation !== this.selectionGeneration) void this.refreshSelected();
+        this.tui.requestRender();
+      }
+    }
+  }
+
+  private async reopenSelected(id: string): Promise<void> {
+    if (this.reopening) return;
+    this.reopening = true;
+    const generation = this.selectionGeneration;
+    this.showStatus("Reopening historical child without replaying inputs.");
+    try {
+      await this.source.reopenChild(id);
+      if (!this.disposed && generation === this.selectionGeneration) {
+        this.showStatus("Child reopened.");
+        await this.refreshSelected();
+      }
+    } catch (error) {
+      if (!this.disposed && generation === this.selectionGeneration) this.showStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.reopening = false;
     }
   }
 
@@ -136,6 +189,9 @@ export class SubagentBrowser implements Component, Focusable {
   private handleChildInput(data: string): void {
     if (getKeybindings().matches(data, "tui.select.cancel")) {
       this.selectedId = undefined;
+      this.selectionGeneration++;
+      this.child = undefined;
+      this.loadError = "";
       this.search.focused = this.hasFocus;
       this.status = "";
       return;
@@ -149,12 +205,16 @@ export class SubagentBrowser implements Component, Focusable {
     }
     const mode = inputMode(data);
     if (mode) {
-      const child = this.source.inspectChild(id);
+      const child = this.source.listChildren().find((entry) => entry.id === id);
       if (!child) throw new Error("Child session is no longer retained.");
       if (mode === ChildTypes.NativeInputMode.Prompt ? child.state !== ChildTypes.NativeChildState.Idle : child.state !== ChildTypes.NativeChildState.Running) {
         throw new Error(mode === ChildTypes.NativeInputMode.Prompt ? "Use prompt only when idle; use steer or follow-up while running." : "Steer and follow-up require a running child; use prompt when idle.");
       }
       void this.compose(id, mode).catch((error) => this.showStatus(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    if (data === "r") {
+      void this.reopenSelected(id);
       return;
     }
     if (data === "c") {
@@ -176,12 +236,13 @@ export class SubagentBrowser implements Component, Focusable {
     this.height = Math.max(1, budget - 4);
     try {
       this.updateRoster();
-      const child = this.selectedId ? this.source.inspectChild(this.selectedId) : undefined;
-      const text = child ? Transcript.plainChildText(this.contents(child)) : "This child is no longer retained. Its native transcript has not been deleted.";
+      const child = this.child;
+      const summary = this.selectedId ? this.source.listChildren().find((entry) => entry.id === this.selectedId) : undefined;
+      const text = child ? Transcript.plainChildText(childViewText(child, this.view)) : this.loadError || (this.loading ? "Loading selected child…" : "No live inspection available. Press r to reopen a historical child explicitly. Its native transcript has not been deleted.");
       if (text !== this.bodyText) { this.bodyText = text; this.text.setText(text); }
       const body = this.selectedId ? this.renderChild(width) : [...this.search.render(width), ...this.list.render(width)];
-      const title = child ? `${oneLine(child.name)} [${child.state}] · ${this.view}` : `Subagents · ${this.source.listChildren().length} retained sessions`;
-      return [this.theme.fg("accent", title), ...(this.status ? [this.theme.fg("warning", this.status)] : []), ...body, this.theme.fg("dim", this.selectedId ? "Esc roster · Tab view · p prompt · s steer · f follow-up · c cancel · ↑↓ scroll" : "Esc parent · Type to search · ↑↓ select · Enter inspect")].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
+      const title = summary ? `${oneLine(summary.name)} [${summary.state}] · ${this.view}` : `Subagents · ${this.source.listChildren().length} retained sessions`;
+      return [this.theme.fg("accent", title), ...(this.status ? [this.theme.fg("warning", this.status)] : []), ...body, this.theme.fg("dim", this.selectedId ? "Esc roster · Tab view · p prompt · s steer · f follow-up · c cancel · r reopen · ↑↓ scroll" : "Esc parent · Type to search · ↑↓ select · Enter inspect")].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
     } catch (error) {
       return ["Subagent view unavailable.", oneLine(error instanceof Error ? error.message : String(error)), "Esc back"].slice(0, budget).map((line) => truncateToWidth(line, Math.max(1, width)));
     }
@@ -195,5 +256,5 @@ export class SubagentBrowser implements Component, Focusable {
 
   invalidate(): void { this.search.invalidate(); this.list.invalidate(); this.text.invalidate(); }
   close(): void { if (!this.disposed) { this.dispose(); this.done(); } }
-  dispose(): void { if (!this.disposed) { this.disposed = true; clearInterval(this.timer); } }
+  dispose(): void { if (!this.disposed) { this.disposed = true; this.child = undefined; this.selectionGeneration++; clearInterval(this.timer); } }
 }

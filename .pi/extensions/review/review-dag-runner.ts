@@ -587,18 +587,6 @@ export async function runReviewDag(options: {
   const startedAt = Date.now();
   let state = options.state;
   const runId = `review-pr-${state.snapshot.id}`;
-  const store = {
-    get state() {
-      return state;
-    },
-    set state(next: ReviewState) {
-      state = next;
-    },
-    save(next: ReviewState) {
-      state = next;
-      options.save(next);
-    },
-  };
   const root = artifactRoot(options.ctx);
   const evidence = {
     v: 1 as const,
@@ -613,21 +601,21 @@ export async function runReviewDag(options: {
       ...ReviewerNodes.map((node) => options.assignments[node.role].contextWindow),
     ),
   };
-  const tools = DagTools.createReviewDagTools({
+  const reviewCapability = {
+    kind: "review-v1" as const,
     reviewId: state.snapshot.id,
     runId,
+    snapshot: structuredClone(state.snapshot),
     deckPath: options.deckPath,
     artifactRoot: root,
-    store,
-    service: options.service,
     evidence,
-  });
+  };
   try {
     const graph = compileReviewGraph({
       runId,
       cwd: state.snapshot.worktree,
       assignments: options.assignments,
-      tools: tools.names,
+      tools: DagTools.reviewDagToolNames(state.snapshot.id),
       evidence,
     });
     state = {
@@ -645,7 +633,7 @@ export async function runReviewDag(options: {
     await awaitSubmittedGraph(
       options.service,
       graph,
-      { workspaceRoot: state.snapshot.worktree, customTools: tools.customTools },
+      { workspaceRoot: state.snapshot.worktree, reviewCapability },
       state.snapshot.id,
       () => {
         state = { ...state, dag: { ...state.dag!, submitted: true } };
@@ -662,7 +650,6 @@ export async function runReviewDag(options: {
       reconstruction,
       service: options.service,
       startedAt,
-      admission: tools.admission(options.signal),
       synthesisProtocol: 2,
     });
     options.save(state);

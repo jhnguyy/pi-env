@@ -7,7 +7,7 @@ export const NativeInputOutcome = { Started: "started", Queued: "queued", Handle
 export type NativeInputOutcome = typeof NativeInputOutcome[keyof typeof NativeInputOutcome];
 export const NativeInputSource = { Coordinator: "coordinator", Human: "human" } as const;
 export type NativeInputSource = typeof NativeInputSource[keyof typeof NativeInputSource];
-export const NativeChildState = { Idle: "idle", Running: "running", Queued: "queued", Closing: "closing", Closed: "closed" } as const;
+export const NativeChildState = { Historical: "historical", Idle: "idle", Running: "running", Queued: "queued", Closing: "closing", Closed: "closed" } as const;
 export type NativeChildState = typeof NativeChildState[keyof typeof NativeChildState];
 
 export interface NativeInputResult {
@@ -18,6 +18,11 @@ export interface NativeChildInput {
   mode: NativeInputMode;
   text: string;
   at: string;
+}
+/** Historical metadata supplied by the persistence owner; reopening never replays inputs. */
+export interface NativeChildReopenOptions {
+  inputs?: readonly NativeChildInput[];
+  initialResult?: Types.SubagentDetails;
 }
 export interface NativeChildSnapshot {
   id: string;
@@ -42,7 +47,7 @@ export interface NativeChildSession {
   readonly id: string;
   readonly runId: string;
   inspect(): NativeChildSnapshot;
-  input(text: string, mode: NativeInputMode): Promise<NativeInputResult>;
+  input(text: string, mode: NativeInputMode, source?: NativeInputSource): Promise<NativeInputResult>;
   cancel(): Promise<void>;
   close(): Promise<void>;
 }

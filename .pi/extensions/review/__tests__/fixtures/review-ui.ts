@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { onTestFinished, vi } from "vitest";
 import { REVIEW_ENTRY_TYPE, type ReviewState } from "../../core";
 import reviewExtension from "../../index";
@@ -54,8 +55,15 @@ export function registeredReview(options: {
   const appended: any[] = [];
   let githubCalls = 0;
   useReviewAgentDir(options.root);
+  const events = new EventEmitter();
   const pi = {
-    events: { on: () => () => {} },
+    events: {
+      emit: (event: string, data: unknown) => { events.emit(event, data); },
+      on: (event: string, handler: (data: unknown) => void) => {
+        events.on(event, handler);
+        return () => { events.off(event, handler); };
+      },
+    },
     registerTool() {},
     registerCommand(name: string, command: any) {
       commands[name] = command.handler;
@@ -87,6 +95,7 @@ export function registeredReview(options: {
     modelRegistry: { getAvailable: () => [] },
   });
   return {
+    pi,
     command: commands.review,
     handlers,
     appended,

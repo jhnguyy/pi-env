@@ -54,7 +54,7 @@ it("honors authenticated scope order through native review, persistence, reuse, 
   const deck = JSON.parse(await readFile(state.deck!.path, "utf8"));
   expect(deck.laterRefs.readingPlanRefs).toHaveLength(1);
   expect(deck.laterRefs.rawResultRefs).toHaveLength(6);
-  const children = review.children();
+  const children = await review.children();
   expect(children).toHaveLength(8);
   expect(new Set(children.map((child) => child.model))).toEqual(new Set([preferred, secondary]));
   for (const child of children) {
@@ -74,7 +74,7 @@ it("honors authenticated scope order through native review, persistence, reuse, 
   expect(state.posts).toEqual([]);
   const reused = await review.create("Create the same fixture review again.");
   expect(reused).toMatchObject({ isError: false, details: { reused: true, status: "succeeded" } });
-  expect(review.children()).toHaveLength(8);
+  expect(await review.children()).toHaveLength(8);
   expect(await review.readPersistedState()).toBe(persisted);
   await review.reload();
   const restored = await review.create("Open the existing fixture review after reload.");
@@ -89,7 +89,7 @@ it("honors authenticated scope order through native review, persistence, reuse, 
     "The exported value violates the requested contract.",
   );
   expect(review.state()).toEqual(state);
-  expect(review.children()).toHaveLength(0);
+  expect(await review.children()).toHaveLength(8);
   expect(await review.readPersistedState()).toBe(persisted);
 });
 
@@ -107,8 +107,7 @@ it("honors an eligible role pin in the native child model", async (context) => {
     "reading-plan": { model: preferred, pinned: false },
     correctness: { model: secondary, pinned: true },
   });
-  const child = review
-    .children()
+  const child = (await review.children())
     .find((candidate) => JSON.parse(candidate.initialResult!.finalOutput).role === "correctness");
   expect(child?.model).toBe(secondary);
   expect(review.state().result?.coverage?.status).toBe("complete");
@@ -173,7 +172,7 @@ it.for(rejections)("rejects $name before review children start", async (input, c
   expect(state.roleAssignments).toBeUndefined();
   expect(state.preparation?.worktreeCleaned).toBe(true);
   expect(existsSync(state.snapshot.worktree)).toBe(false);
-  expect(review.children()).toHaveLength(0);
+  expect(await review.children()).toHaveLength(0);
 });
 
 it("preserves a real planner provider error and failed-result reuse after reload", async (context) => {
@@ -209,7 +208,7 @@ it("preserves a real planner provider error and failed-result reuse after reload
   if (!sessionFile) throw new Error("Missing planner transcript reference");
   expect(content).toContain(sessionFile);
   expect(await readFile(sessionFile, "utf8")).toContain("Provider quota exhausted");
-  expect(review.children()).toHaveLength(1);
+  expect(await review.children()).toHaveLength(1);
   const persisted = await review.readPersistedState();
   await review.reload();
   const reused = await review.create("Open the failed fixture review after reload.");
@@ -217,5 +216,5 @@ it("preserves a real planner provider error and failed-result reuse after reload
   expect(JSON.stringify(reused.content)).toContain("Provider quota exhausted");
   expect(review.state()).toEqual(state);
   expect(await review.readPersistedState()).toBe(persisted);
-  expect(review.children()).toHaveLength(0);
+  expect(await review.children()).toHaveLength(1);
 });

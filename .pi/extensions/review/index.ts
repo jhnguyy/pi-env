@@ -1470,7 +1470,12 @@ async function finishReviewCleanup(
   state: ReviewState,
   scope: ReviewCoordinatorScope,
 ): Promise<string> {
-  if (state.dag) await coordinator.dagRegistration?.service.closeChildren?.(state.dag.runId);
+  if (state.dag) {
+    const service = coordinator.dagRegistration?.service;
+    if (!service?.closeChildren)
+      throw new Error("Review cleanup requires the subagent service closeRun acknowledgment. Resources remain available for recovery.");
+    await service.closeChildren(state.dag.runId);
+  }
   if (!coordinator.isScopeActive(scope) || coordinator.review(state.snapshot.id) !== state)
     return "The review session changed during cleanup. Resources remain available for recovery.";
   const cleaned = await removeManagedWorktree(pi, state, coordinator.operationSignal(scope));

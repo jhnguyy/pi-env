@@ -5,6 +5,11 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Cause, Effect, Fiber, Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { serviceClientFixture } from "./service-client.fixture";
+
+// Native child execution belongs to registered-native; these scenarios inject client failures.
+const transport = { close: vi.fn(async () => {}), closeRun: vi.fn(async (_run: { runId: string }) => undefined) };
+
 const state = {
   adapterCalls: [] as Array<{
     ctx: unknown;
@@ -32,7 +37,6 @@ import {
   listenForDagRuntimeService as subscribeToDagRuntimeService,
   type DagRuntimeServiceRegistration,
 } from "../../_shared/dag-runtime-service";
-import { SubagentJobManager } from "../jobs";
 import type { DagSubagentExecutorRegistryFactory } from "../dag-session-runtime";
 import {
   SubagentSessionRuntime,
@@ -66,11 +70,18 @@ const dagExecutorRegistryFactory: DagSubagentExecutorRegistryFactory = (
 };
 
 const runtimeDependencies: SubagentSessionRuntimeDependencies = {
+  serviceConnectionFactory: async () => serviceClientFixture(transport),
   telemetryRuntimeFactory,
   dagExecutorRegistryFactory,
 };
 
 const tempDirectories: string[] = [];
+const runtimes: SubagentSessionRuntime[] = [];
+function makeRuntime(pi: any) {
+  const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
+  runtimes.push(runtime);
+  return runtime;
+}
 
 function makePi() {
   const handlers = new Map<string, Array<(data: unknown) => void>>();
@@ -131,17 +142,25 @@ function listenForDagRuntimeService(...args: Parameters<typeof subscribeToDagRun
 }
 
 beforeEach(() => {
+  transport.close.mockReset();
+  transport.close.mockResolvedValue(undefined);
+  transport.closeRun.mockReset();
+  transport.closeRun.mockResolvedValue(undefined);
   state.adapterCalls = [];
   state.executor = () => Effect.succeed({ artifact: "ref" });
   state.telemetry = undefined;
   state.lifecycle = [];
 });
 
-afterEach(() => {
-  for (const stop of subscriptions.splice(0)) stop();
-  vi.clearAllMocks();
-  for (const directory of tempDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  try {
+    await Promise.all(runtimes.splice(0).map((runtime) => runtime.shutdownSession()));
+  } finally {
+    for (const stop of subscriptions.splice(0)) stop();
+    vi.restoreAllMocks();
+    for (const directory of tempDirectories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -156,7 +175,7 @@ describe("session-owned DAG runtime composition", () => {
     tempDirectories.push(cwd);
     const pi = makePi();
     const ctx = makeContext(cwd);
-    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
+    const runtime = makeRuntime(pi);
 
     await runtime.startSession(ctx);
     const registrations: DagRuntimeServiceRegistration[] = [];
@@ -165,7 +184,7 @@ describe("session-owned DAG runtime composition", () => {
 
     const adapter = state.adapterCalls[0];
     expect(adapter.ctx).toBe(ctx);
-    expect(adapter.options.supervisor).toBeDefined();
+    expect(adapter.options.serviceConnection).toBeDefined();
     expect(adapter.options.telemetryRuntime).toBe(state.telemetry);
     expect(adapter.artifactRoot).toBe(
       path.join(
@@ -244,7 +263,7 @@ describe("session-owned DAG runtime composition", () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-append-failure-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
+    const runtime = makeRuntime(pi);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(pi, (active) => {
@@ -288,11 +307,40 @@ describe("session-owned DAG runtime composition", () => {
     await runtime.shutdownSession();
   });
 
-  it("cancels active work and unregisters before shared telemetry disposal", async () => {
+  it("waits for service run closure on explicit cancellation, not parent disconnection", async () => {
+    const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-cancel-"));
+    tempDirectories.push(cwd);
+    const pi = makePi();
+    const runtime = makeRuntime(pi);
+    let registration: DagRuntimeServiceRegistration | undefined;
+    listenForDagRuntimeService(pi, (active) => { registration = active; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    state.executor = () => Effect.sync(entered).pipe(Effect.andThen(Effect.never));
+    await runtime.startSession(makeContext(cwd));
+    const handle = await Effect.runPromise(registration!.service.submit(graph("explicit-cancel")));
+    await started;
+    let closing!: () => void;
+    let release!: () => void;
+    const closeStarted = new Promise<void>((resolve) => { closing = resolve; });
+    const settled = new Promise<void>((resolve) => { release = resolve; });
+    transport.closeRun.mockImplementationOnce(async () => { closing(); await settled; return undefined; });
+    let finished = false;
+    const cancel = Effect.runPromise(handle.cancel).then(() => { finished = true; });
+    try {
+      await Promise.race([closeStarted, cancel.then(() => { throw new Error("DAG cancellation returned before native settlement"); })]);
+      expect(finished).toBe(false);
+      expect(transport.closeRun).toHaveBeenCalledWith({ runId: "explicit-cancel" });
+    } finally { release(); await cancel; }
+    await runtime.shutdownSession();
+    expect(transport.closeRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles parent-local transforms and unregisters even when transport close fails", async () => {
     const cwd = mkdtempSync(path.join(tmpdir(), "pi-dag-shutdown-"));
     tempDirectories.push(cwd);
     const pi = makePi();
-    const runtime = new SubagentSessionRuntime(pi, runtimeDependencies);
+    const runtime = makeRuntime(pi);
     const ctx = makeContext(cwd);
     let registration: DagRuntimeServiceRegistration | undefined;
     listenForDagRuntimeService(
@@ -320,10 +368,14 @@ describe("session-owned DAG runtime composition", () => {
     pi.events.on(DagRuntimeServiceEvent.Unregister, () => {
       throw new Error("consumer unregister failure");
     });
-    const jobShutdownFailure = new Error("job shutdown failure");
-    vi.spyOn(SubagentJobManager.prototype, "shutdown").mockRejectedValueOnce(jobShutdownFailure);
+    const disconnectFailure = new Error("transport disconnect failure");
+    transport.close.mockRejectedValueOnce(disconnectFailure);
 
     const shutdown = runtime.shutdownSession();
+    await expect(shutdown).rejects.toMatchObject({
+      message: "Subagent client cleanup failed",
+      errors: [disconnectFailure],
+    });
     const admissionExit = await Effect.runPromise(
       Effect.exit(registration!.service.submit(graph("late-run"))),
     );
@@ -332,11 +384,13 @@ describe("session-owned DAG runtime composition", () => {
       const failure = Cause.findErrorOption(admissionExit.cause);
       expect(Option.isSome(failure) && failure.value instanceof DagRuntimeNotAccepting).toBe(true);
     }
-    await expect(shutdown).rejects.toBe(jobShutdownFailure);
     expect(runtime.state).toBe("inactive");
+    expect(transport.closeRun).not.toHaveBeenCalled();
     const cancelled = await Effect.runPromise(handle.await);
     expect(cancelled.state.nodes[0]).toMatchObject({ status: "cancelled" });
-    expect(state.lifecycle).toEqual(["executor-interrupted", "unregistered", "telemetry-disposed"]);
+    expect(state.lifecycle).toContain("executor-interrupted");
+    expect(state.lifecycle).toContain("unregistered");
+    expect(state.lifecycle).toContain("telemetry-disposed");
 
     const late: DagRuntimeServiceRegistration[] = [];
     listenForDagRuntimeService(pi, (active) => late.push(active));
