@@ -10,6 +10,7 @@ export default function provider(pi: ExtensionAPI): void {
   const root = process.env.SUBAGENT_FIXTURE_ROOT!;
   const p = fauxProvider({ provider: "service-fixture" });
   pi.registerProvider(p.provider);
+  pi.on("session_shutdown", async () => { await appendFile(join(root, "requests.jsonl"), JSON.stringify({ calls: p.state.callCount }) + "\n"); });
   pi.registerTool({
     name: "fixture_gate", label: "Gate", description: "Record one external effect, then await release",
     parameters: Type.Object({ cooperative: Type.Optional(Type.Boolean()) }),
@@ -30,7 +31,22 @@ export default function provider(pi: ExtensionAPI): void {
       return { content: [{ type: "text", text: "external effect settled" }], details: {} };
     },
   });
-  pi.on("input", (event) => {
+  const hold = async (marker: string) => {
+    await writeFile(join(root, marker), "ready");
+    await new Promise<void>((resolve) => {
+      const check = () => { if (existsSync(join(root, "release"))) { watcher.close(); resolve(); } };
+      const watcher = watch(root, check);
+      check();
+    });
+  };
+  pi.on("session_start", async () => {
+    if (existsSync(join(root, "hold-startup"))) await hold("startup-entered");
+  });
+  pi.on("input", async (event) => {
+    if (event.text === "blocked preflight") {
+      await hold("preflight-entered");
+      p.setResponses([fauxAssistantMessage(fauxToolCall("fixture_gate", {}), { stopReason: "toolUse" }), fauxAssistantMessage("unexpected inference")]);
+    }
     if (event.text === "blocked initial") p.setResponses([
       fauxAssistantMessage(fauxToolCall("fixture_gate", {}), { stopReason: "toolUse" }),
       fauxAssistantMessage("initial answer"),

@@ -4,7 +4,7 @@ import { createConnection, type Socket } from "node:net";
 import { join } from "node:path";
 import { createHost, webSocketLink } from "@earendil-works/chord";
 import { WebSocketServer } from "ws";
-import { SnapshotSchema, SubagentService, type Principal, type ServiceRuntime } from "./contract.ts";
+import { MaxServiceRequestBytes, InspectionSchema, SnapshotSchema, SubagentInspection, SubagentService, type Principal, type ServiceRuntime } from "./contract.ts";
 
 /** The entry owns the process lock, private directory, and runtime throughout this lifetime. */
 export async function serve(directory: string, runtime: ServiceRuntime): Promise<{ close(): Promise<void> }> {
@@ -18,7 +18,7 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
-  const ws = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
+  const ws = new WebSocketServer({ noServer: true, maxPayload: MaxServiceRequestBytes + 65_536, perMessageDeflate: false });
   let accepting = false;
   let ownedSocket: Awaited<ReturnType<typeof lstat>> | undefined;
   let closing: Promise<void> | undefined;
@@ -54,13 +54,13 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
   })();
 
   try {
-    host.serve(SubagentService, (_input, _principal, self) => {
-      const snapshot = self.state("snapshot", SnapshotSchema, { init: () => runtime.snapshot() });
+    host.serve(SubagentService, ({ parentSessionId }, _principal, self) => {
+      const snapshot = self.state("snapshot", SnapshotSchema, { init: () => runtime.snapshot(parentSessionId) });
       // Subscribe first, then reconcile: activation may have yielded since init captured its value.
       const source = {
-        subscribe(listener: Parameters<ServiceRuntime["subscribe"]>[0]) {
-          const stop = runtime.subscribe(listener);
-          try { listener(runtime.snapshot()); } catch (error) {
+        subscribe(listener: Parameters<ServiceRuntime["subscribe"]>[1]) {
+          const stop = runtime.subscribe(parentSessionId, listener);
+          try { listener(runtime.snapshot(parentSessionId)); } catch (error) {
             try { stop(); } catch (cleanup) {
               throw new AggregateError([error, cleanup], "Runtime subscription and cleanup failed", { cause: cleanup });
             }
@@ -76,11 +76,18 @@ export async function serve(directory: string, runtime: ServiceRuntime): Promise
         variant: "owner",
         snapshot,
         // The runtime owns accepted operations, not the calling link or its cancellation context.
-        submit: (input) => runtime.submit(input),
-        input: (input) => runtime.input(input),
-        cancel: (input) => runtime.cancel(input),
-        inspect: ({ childId }) => runtime.inspect(childId),
+        submit: (input) => runtime.submit(parentSessionId, input),
+        input: (input) => runtime.input(parentSessionId, input),
+        cancel: (input) => runtime.cancel(parentSessionId, input),
+        result: (input) => runtime.result(parentSessionId, input),
+        resultFull: ({ operationId }) => runtime.resultFull(parentSessionId, operationId),
+        reopen: ({ childId }) => runtime.reopen(parentSessionId, childId),
+        closeRun: ({ runId }) => runtime.closeRun(runId, parentSessionId),
       };
+    });
+    host.serve(SubagentInspection, ({ parentSessionId, childId }, _principal, self) => {
+      const snapshot = self.state("snapshot", InspectionSchema, { init: () => runtime.inspect(parentSessionId, childId) });
+      return { variant: "owner", snapshot, refresh: (_input, ctx) => { snapshot.replace(ctx, runtime.inspect(parentSessionId, childId)); } };
     });
     http.on("upgrade", (request, socket, head) => {
       if (!accepting) { socket.destroy(); return; }

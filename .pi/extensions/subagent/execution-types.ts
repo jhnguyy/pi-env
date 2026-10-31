@@ -7,7 +7,8 @@ import type * as Config from "./config";
 import type * as Control from "./control";
 import type * as Types from "./types";
 import type * as Usage from "./usage";
-import type * as ChildTypes from "./child-types";
+import type { SubagentServiceConnection } from "./service-host";
+import type { ReviewCapability } from "../../../src/subagent-service/review-capability";
 
 export type SubagentParentContext = Pick<ExtensionContext, "cwd" | "sessionManager" | "isProjectTrusted">;
 
@@ -17,16 +18,15 @@ export interface RunSubagentOptions {
   signal?: AbortSignal;
   ledger?: Usage.SubagentUsageLedger;
   runId?: string;
+  requestId?: string;
   env?: Readonly<Record<string, string | undefined>>;
   telemetryExporter?: SpanExporter;
   telemetryRuntime?: Tooling.ToolingTelemetryRuntime;
   executionMode?: Usage.SubagentUsageMode;
-  supervisor?: Control.SubagentRunSupervisor;
+  serviceConnection?: SubagentServiceConnection;
+  admission?: { scopeId: string; limits: Config.SubagentRuntimeConfig };
   workspaceAccess?: Control.WorkspaceAccess;
-  sessionStorage?: Config.SubagentSessionStorage;
   onAdmitted?: () => void;
-  /** Retention only: the child owns all native execution. */
-  onChild?: (child: ChildTypes.NativeChildSession) => void;
 }
 
 export interface ResolvedSubagentRun {
@@ -37,6 +37,7 @@ export interface ResolvedSubagentRun {
   systemPrompt?: string;
   toolNames?: readonly string[];
   customTools?: readonly ToolDefinition[];
+  reviewCapability?: ReviewCapability;
   reasoning?: ThinkingLevel;
   maxTurns?: number;
   workspaceAccess?: Control.WorkspaceAccess;

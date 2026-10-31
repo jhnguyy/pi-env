@@ -79,7 +79,7 @@ Declare `parameters` as one top-level object. Some provider adapters, including 
 
 The helper registers one native tool. It does not publish a second AgentTool or maintain a process-wide tool catalog. [toPiTool](../../.pi/extensions/_shared/tool-contract.ts) adapts contracts into native definitions. Native execution supplies each invocation's cwd, signal, and progress callback.
 
-Pass run-private definitions through the existing [DAG submission authority](../../.pi/extensions/_shared/dag-runtime-service.ts). Do not publish run-bound callbacks globally or serialize functions into graph artifacts. Native child sessions load ordinary extensions and receive only their run's supplied definitions.
+Pass review-private authority as a data-only capability through [DAG submission authority](../../.pi/extensions/_shared/dag-runtime-service.ts). The [shared subagent service](../../src/subagent-service/review-capability.ts) constructs run-scoped native definitions; executable callbacks never cross its connection or enter graph artifacts. Native children still load ordinary extensions. Await service-owned run closure before removing private resources.
 
 Use the [tool adapter tests](../../.pi/extensions/__tests__/tool-contract.test.ts) for invocation context, cancellation, and progress, and representative native tool tests, such as [closeout](../../.pi/extensions/dev-tools/__tests__/closeout.integration.test.ts), for execution behavior. State side effects and operational limits in safety-sensitive descriptions.
 

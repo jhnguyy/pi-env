@@ -1,61 +1,80 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
-import * as ChildContext from "../../_shared/child-context";
+import { expect, it, vi } from "vitest";
+import { ProjectTrustStore, SessionManager } from "@earendil-works/pi-coding-agent";
 import * as SessionRuntime from "../session-runtime";
+import { RegisteredServiceFixture } from "./registered-service.fixture";
 import { settleOperations, testCleanup } from "./cleanup";
 
-// The marker comes from a real native tool observing abort, not just a supervisor timer.
-it.each(["deadline", "shutdown"] as const)("settles cooperative native work on %s", async (mode) => {
+// Real native tools distinguish explicit cancellation from a parent disconnect.
+// Admission bounds belong to control.test and the service multiprocess workflow.
+it("cancels explicitly but preserves accepted work and history across parent disconnect", async () => {
   const root = mkdtempSync(join(tmpdir(), "native-root-limits-"));
   const cleanup = testCleanup();
   cleanup(() => rmSync(root, { recursive: true, force: true }));
+  const agentDir = join(root, "agent");
+  const service = new RegisteredServiceFixture(agentDir);
   const runtime = new SessionRuntime.SubagentSessionRuntime({ appendEntry: () => {}, events: { emit: () => {} } } as any);
   const operations: Promise<unknown>[] = [];
-  cleanup(() => runtime.shutdownSession(), () => settleOperations(operations));
-  mkdirSync(join(root, ".pi"));
-  const extension = join(root, ".pi", "provider.mjs");
-  writeFileSync(extension, `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
-import { writeFileSync } from 'node:fs';
+  cleanup(
+    () => { writeFileSync(join(root, "release-cancel"), "release"); writeFileSync(join(root, "release-survive"), "release"); },
+    () => runtime.shutdownSession(),
+    () => service.close(),
+    () => settleOperations(operations),
+    () => vi.unstubAllEnvs(),
+  );
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+  {
+    mkdirSync(agentDir);
+    const extension = join(agentDir, "provider.mjs");
+    writeFileSync(extension, `import { fauxProvider, fauxAssistantMessage, fauxToolCall } from ${JSON.stringify(import.meta.resolve("@earendil-works/pi-ai"))};
+import { existsSync, writeFileSync } from 'node:fs';
+const root = ${JSON.stringify(root)};
 export default function(pi) {
  const p = fauxProvider({provider:'bounded'});
- p.setResponses([fauxAssistantMessage(fauxToolCall('wait_for_abort',{}),{stopReason:'toolUse'}),fauxAssistantMessage('settled')]);
  pi.registerProvider(p.provider);
- pi.registerTool({name:'wait_for_abort',label:'Wait',description:'Cooperative test wait',parameters:{type:'object',properties:{}},
+ pi.on('input', event => p.setResponses([fauxAssistantMessage(fauxToolCall('wait_for_release',{name:event.text}),{stopReason:'toolUse'}),fauxAssistantMessage('settled:'+event.text)]));
+ pi.registerTool({name:'wait_for_release',label:'Wait',description:'Cooperative test wait',parameters:{type:'object',properties:{name:{type:'string'}},required:['name']},
  async execute(id,params,signal) {
-   writeFileSync(${JSON.stringify(join(root, "entered"))},'entered');
-   await new Promise(resolve => { if(signal.aborted) resolve(); else signal.addEventListener('abort',resolve,{once:true}); });
-   writeFileSync(${JSON.stringify(join(root, "aborted"))},'aborted');
+   writeFileSync(root+'/entered-'+params.name,'entered');
+   while(!existsSync(root+'/release-'+params.name) && !signal.aborted) await new Promise(resolve=>setTimeout(resolve,5));
+   if(signal.aborted) writeFileSync(root+'/aborted-'+params.name,'aborted');
    return {content:[{type:'text',text:'settled'}],details:{}};
  }});
 }`);
-  writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension], subagent: { maxConcurrentRuns: 1, maxPendingRuns: 1, maxRunMs: mode === "deadline" ? 1000 : 10000 } }));
-  const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
-  await ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, async () => {
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: [extension], defaultProvider: "bounded", defaultModel: "faux-1", retry: { enabled: false } }));
+    writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { bounded: { apiKey: "synthetic-local-only" } } }));
+    new ProjectTrustStore(agentDir).set(root, true);
+    const ctx: any = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
+    await service.start();
     await runtime.startSession(ctx);
-    const params = { name: "bounded", task: "wait", model: "bounded/faux-1", tools: ["wait_for_abort"] };
-    const running = runtime.execute("active", params, undefined, undefined, ctx);
+    const params = { name: "bounded", model: "bounded/faux-1", tools: ["wait_for_release"] };
+    const controller = new AbortController();
+    cleanup(() => controller.abort());
+    const running = runtime.execute("explicit-cancel", { ...params, task: "cancel" }, controller.signal, undefined, ctx);
     operations.push(running);
-    await expect.poll(() => existsSync(join(root, "entered"))).toBe(true);
-    if (mode === "shutdown") {
-      const queued = runtime.execute("queued", params, undefined, undefined, ctx);
-      operations.push(queued);
-      await expect.poll(() => runtime.listChildren().filter(child => child.state === "queued").length).toBe(1);
-      const rejected = await runtime.execute("overflow", params, undefined, undefined, ctx);
-      expect(rejected.details.isError).toBe(true);
-      expect(rejected.details.stopReason).toContain("admission");
-      // No deadline has fired: shutdown must cancel the held active lease and its queue.
-      expect(existsSync(join(root, "aborted"))).toBe(false);
-      await runtime.shutdownSession();
-      expect((await queued).details.isError).toBe(true);
-    }
-    expect((await running).details.isError).toBe(true);
-    expect(existsSync(join(root, "aborted"))).toBe(true);
+    try {
+      await expect.poll(() => existsSync(join(root, "entered-cancel"))).toBe(true);
+    } finally { controller.abort(); }
+    const cancelled = await running;
+    expect(cancelled.details.isError).toBe(true);
+    expect(existsSync(join(root, "aborted-cancel"))).toBe(true);
+
+    const started = await runtime.startJob({ ...params, task: "survive" }, ctx);
+    const id = started.details.jobId!;
+    await expect.poll(() => existsSync(join(root, "entered-survive"))).toBe(true);
     await runtime.shutdownSession();
     expect(runtime.listChildren()).toEqual([]);
-    expect(runtime.usageText()).toBe("No subagent usage recorded.");
-    expect((await runtime.execute("late", params, undefined, undefined, ctx)).details.stopReason).toBe("inactive");
-  });
-}, 15000);
+    await runtime.startSession(ctx);
+    expect(runtime.getJob(id)?.status).toBe("running");
+    expect(existsSync(join(root, "aborted-survive"))).toBe(false);
+    writeFileSync(join(root, "release-survive"), "release");
+    expect((await runtime.waitJob(id)).job?.status).toBe("completed");
+    expect(await runtime.resultJob(id)).toMatchObject({ text: "settled:survive", truncated: false });
+    await runtime.shutdownSession();
+    await runtime.startSession(ctx);
+    expect(runtime.getJob(id)?.status).toBe("completed");
+    expect(await runtime.resultJob(id)).toMatchObject({ text: "settled:survive" });
+  }
+}, 30000);

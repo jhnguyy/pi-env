@@ -23,10 +23,6 @@
       {
         "entry": "service-main.ts",
         "outfile": "dist/service.js"
-      },
-      {
-        "entry": "service-client-main.ts",
-        "outfile": "dist/service-client.js"
       }
     ],
     "analyze": [

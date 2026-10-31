@@ -1,43 +1,29 @@
 import { Schema } from "effect";
+import { join } from "node:path";
 
-import { decodeSettingsBlockSync } from "../_shared/settings";
-
-export const SubagentSessionStorage = {
-  Nested: "nested",
-  Sibling: "sibling",
-} as const;
-export type SubagentSessionStorage =
-  (typeof SubagentSessionStorage)[keyof typeof SubagentSessionStorage];
+import { decodeSettingsBlockSync, defaultSettingsEnv } from "../_shared/settings";
 
 export const DEFAULT_SUBAGENT_LIMITS = {
   maxConcurrentRuns: 4,
   maxPendingRuns: 16,
   maxRetainedJobs: 32,
-  maxResultBytes: 50 * 1024,
   maxRunMs: 30 * 60 * 1000,
 } as const;
 
-export const DEFAULT_SUBAGENT_CONFIG = {
-  ...DEFAULT_SUBAGENT_LIMITS,
-  sessionStorage: SubagentSessionStorage.Nested,
-} as const;
+export const DEFAULT_SUBAGENT_CONFIG = DEFAULT_SUBAGENT_LIMITS;
 
 export const SubagentSettingsSchema = Schema.Struct({
   maxConcurrentRuns: Schema.optionalKey(Schema.Number),
   maxPendingRuns: Schema.optionalKey(Schema.Number),
   maxRetainedJobs: Schema.optionalKey(Schema.Number),
-  maxResultBytes: Schema.optionalKey(Schema.Number),
   maxRunMs: Schema.optionalKey(Schema.Number),
-  sessionStorage: Schema.optionalKey(Schema.Literals(["nested", "sibling"])),
 });
 
 export interface SubagentRuntimeConfig {
   readonly maxConcurrentRuns: number;
   readonly maxPendingRuns: number;
   readonly maxRetainedJobs: number;
-  readonly maxResultBytes: number;
   readonly maxRunMs: number;
-  readonly sessionStorage: SubagentSessionStorage;
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {
@@ -60,16 +46,14 @@ export function resolveSubagentRuntimeConfig(
       settings.maxRetainedJobs,
       DEFAULT_SUBAGENT_LIMITS.maxRetainedJobs,
     ),
-    maxResultBytes: positiveInteger(
-      settings.maxResultBytes,
-      DEFAULT_SUBAGENT_LIMITS.maxResultBytes,
-    ),
     maxRunMs: positiveInteger(settings.maxRunMs, DEFAULT_SUBAGENT_LIMITS.maxRunMs),
-    sessionStorage: settings.sessionStorage ?? DEFAULT_SUBAGENT_CONFIG.sessionStorage,
   };
 }
 
-export function loadSubagentRuntimeConfig(cwd: string): SubagentRuntimeConfig {
-  const settings = decodeSettingsBlockSync("subagent", SubagentSettingsSchema, cwd);
+export function loadSubagentRuntimeConfig(cwd: string, agentDir?: string): SubagentRuntimeConfig {
+  const env = agentDir === undefined ? defaultSettingsEnv : {
+    ...defaultSettingsEnv, globalSettingsPath: () => join(agentDir, "settings.json"),
+  };
+  const settings = decodeSettingsBlockSync("subagent", SubagentSettingsSchema, cwd, env);
   return resolveSubagentRuntimeConfig(settings);
 }

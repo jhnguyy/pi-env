@@ -1,8 +1,10 @@
 import { rm } from "node:fs/promises";
 import { stop } from "esbuild";
 import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
-import type { Receipt } from "../contract.js";
+import type { NativeChildSnapshot } from "../../../.pi/extensions/subagent/child-types.js";
+import type { FullResult, ResultPage, Receipt } from "../contract.js";
 import { bundles, ProcessFixture } from "./process.fixture.js";
+import { connect } from "../client.js";
 
 let output: string;
 let fixture: ProcessFixture | undefined;
@@ -20,7 +22,7 @@ async function allocate(name: string): Promise<ProcessFixture> {
 
 it("shares one native owner across clients, survives submitter death, and preserves initial result and steering provenance", async () => {
   const f = await allocate("shared-owner");
-  await f.service();
+  const service = await f.service();
   const [a, b] = await Promise.all([f.client(), f.client()]);
   const input = f.submit();
   const [receipt, duplicate] = await Promise.all([
@@ -32,31 +34,41 @@ it("shares one native owner across clients, survives submitter death, and preser
   await f.entered();
   await b.operation(receipt, "dispatched");
   expect(await f.effects()).toHaveLength(1);
-  const steer = await b.call<Receipt>({ action: "input", input: { requestId: "steer", childId: receipt.childId, mode: "steer", text: "original human steer" } });
+  const steer = await b.call<Receipt>({ action: "input", input: { requestId: "steer", childId: receipt.childId, mode: "steer", source: "human", text: "original human steer" } });
   const queued = await b.operation(steer, "completed");
   expect(queued.childId).toBe(receipt.childId);
-  expect(queued.result?.disposition).toBe("queued");
-  const followUp = await b.call<Receipt>({ action: "input", input: { requestId: "follow-up", childId: receipt.childId, mode: "followUp", text: "original human follow-up" } });
-  expect((await b.operation(followUp, "completed")).result?.disposition).toBe("queued");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: steer.operationId } })).disposition).toBe("queued");
+  const followUp = await b.call<Receipt>({ action: "input", input: { requestId: "follow-up", childId: receipt.childId, mode: "followUp", source: "human", text: "original human follow-up" } });
+  await b.operation(followUp, "completed");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: followUp.operationId } })).disposition).toBe("queued");
   await a.kill();
   expect(b.snapshot?.operations.find((op) => op.operationId === receipt.operationId)?.status).toBe("dispatched");
   await f.release();
   const initial = await b.operation(receipt, "completed");
-  expect(initial.result).toMatchObject({ text: "follow-up answer", truncated: false });
-  const later = await b.call<Receipt>({ action: "input", input: { requestId: "later", childId: receipt.childId, mode: "prompt", text: "human later" } });
-  expect((await b.operation(later, "completed")).result?.text).toBe("later answer");
-  const failed = await b.call<Receipt>({ action: "input", input: { requestId: "human-failure", childId: receipt.childId, mode: "prompt", text: "human failure" } });
-  expect((await b.operation(failed, "failed")).result?.disposition).toBe("failed");
+  expect(await b.call<ResultPage>({ action: "result", input: { operationId: receipt.operationId } })).toMatchObject({ text: "follow-up answer", truncated: false });
+  expect(initial).not.toHaveProperty("result");
+  const later = await b.call<Receipt>({ action: "input", input: { requestId: "later", childId: receipt.childId, mode: "prompt", source: "human", text: "human later" } });
+  await b.operation(later, "completed");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: later.operationId } })).text).toBe("later answer");
+  const failed = await b.call<Receipt>({ action: "input", input: { requestId: "human-failure", childId: receipt.childId, mode: "prompt", source: "human", text: "human failure" } });
+  await b.operation(failed, "failed");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: failed.operationId } })).disposition).toBe("failed");
   expect(b.snapshot?.operations.find((op) => op.operationId === receipt.operationId)).toEqual(initial);
-  const inspection = await b.call<string>({ action: "inspect", input: { childId: receipt.childId } });
-  expect(Buffer.byteLength(inspection)).toBeLessThanOrEqual(16_384);
-  const parsed = JSON.parse(inspection);
+  const parsed = { native: await b.call<NativeChildSnapshot>({ action: "inspect", input: { childId: receipt.childId } }) };
   expect(parsed.native.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ text: "original human steer", source: "human", mode: "steer" })]));
   expect(parsed.native).toMatchObject({ task: input.task, name: input.name, cwd: input.cwd, runId: receipt.operationId });
   expect(parsed.native.inputs).toEqual(expect.arrayContaining([expect.objectContaining({ text: "original human follow-up", source: "human", mode: "followUp" })]));
-  expect(parsed.native.initialResult.finalOutput).toBe("follow-up answer");
+  expect(parsed.native.initialResult?.finalOutput).toBe("follow-up answer");
   expect(await f.effects()).toHaveLength(1);
-  f.observations.push({ receipt, initial, inspection: parsed, effects: await f.effects() });
+  await b.kill();
+  await service.kill();
+  await f.service();
+  const restored = await f.client();
+  const historical = await restored.call<NativeChildSnapshot>({ action: "inspect", input: { childId: receipt.childId } });
+  expect(historical.inputs).toEqual(parsed.native.inputs);
+  expect(historical.initialResult).toEqual(parsed.native.initialResult);
+  expect(historical.messages).toEqual(parsed.native.messages);
+  f.observations.push({ receipt, initial, inspection: parsed, historical, effects: await f.effects() });
 }, 60_000);
 
 it("marks crash-after-effect unknown and deduplicates after restart without replay, while admitting fresh work", async () => {
@@ -73,12 +85,13 @@ it("marks crash-after-effect unknown and deduplicates after restart without repl
   await f.service();
   const b = await f.client();
   const interrupted = await b.operation(receipt, "interrupted");
-  expect(interrupted.result).toMatchObject({ disposition: "unknown" });
+  expect(await b.call<ResultPage>({ action: "result", input: { operationId: receipt.operationId } })).toMatchObject({ disposition: "unknown" });
   expect(b.snapshot?.serviceId).toBe(identity.serviceId);
   expect(b.snapshot?.epoch).not.toBe(identity.epoch);
   expect(await b.call<Receipt>({ action: "submit", input })).toEqual(receipt);
   const fresh = await b.call<Receipt>({ action: "submit", input: f.submit("fresh", "fresh work") });
-  expect((await b.operation(fresh, "completed")).result?.text).toBe("fresh answer");
+  await b.operation(fresh, "completed");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: fresh.operationId } })).text).toBe("fresh answer");
   expect(await f.effects()).toHaveLength(1);
   expect(b.snapshot?.operations.find((op) => op.operationId === receipt.operationId)).toEqual(interrupted);
   f.observations.push({ receipt, interrupted, snapshot: b.snapshot, effects: await f.effects() });
@@ -87,18 +100,15 @@ it("marks crash-after-effect unknown and deduplicates after restart without repl
 it("refuses a second service owner and a non-private state directory", async () => {
   const f = await allocate("exclusive-private");
   const service = await f.service();
+  await expect(connect(f.state, "fixture-parent", "0".repeat(64))).rejects.toThrow(/incompatible_service_bundle/);
   const second = f.spawn("service.js");
   await second.wait("second owner refused", () => second.exited ? true : undefined, true);
   expect(second.ready).toBe(false);
   expect(second.process.exitCode).not.toBe(0);
   const client = await f.client();
   const receipt = await client.call<Receipt>({ action: "submit", input: f.submit("healthy", "fresh work") });
-  expect((await client.operation(receipt, "completed")).result?.text).toBe("fresh answer");
-  const cli = f.spawn("cli.js", f.state, JSON.stringify({ action: "status" }));
-  await cli.wait("status CLI exit", () => cli.exited ? true : undefined, true);
-  expect(cli.process.exitCode).toBe(0);
-  expect(JSON.stringify(cli.transcript)).toContain(receipt.operationId);
-  expect(JSON.stringify(cli.transcript)).toContain("fresh answer");
+  await client.operation(receipt, "completed");
+  expect((await client.call<ResultPage>({ action: "result", input: { operationId: receipt.operationId } })).text).toBe("fresh answer");
   await client.kill();
   await service.kill();
   await f.publicState();
@@ -123,7 +133,8 @@ it("holds cancellation until a non-cooperative native tool settles and shuts dow
   await f.release();
   await a.operation(receipt, "cancelled");
   const fresh = await a.call<Receipt>({ action: "submit", input: f.submit("fresh", "fresh work") });
-  expect((await a.operation(fresh, "completed")).result?.text).toBe("fresh answer");
+  await a.operation(fresh, "completed");
+  expect((await a.call<ResultPage>({ action: "result", input: { operationId: fresh.operationId } })).text).toBe("fresh answer");
   await a.call({ action: "cancel", input: { requestId: "stale-cancel", operationId: receipt.operationId } });
   expect(a.snapshot?.operations.find((op) => op.operationId === fresh.operationId)?.status).toBe("completed");
   await a.kill();
@@ -152,4 +163,151 @@ it("settles cooperative cancellation of an executing native tool without repeati
   expect(await f.effects()).toHaveLength(1);
   expect(await a.call<Receipt>({ action: "submit", input: f.submit() })).toEqual(receipt);
   f.observations.push({ receipt, cancelled, effects: await f.effects() });
+}, 60_000);
+
+it.each(["startup", "later-prompt"])("settles %s cancellation without inference after asynchronous native preflight", async (phase) => {
+  const f = await allocate(`cancel-${phase}`);
+  await f.service();
+  const a = await f.client();
+  if (phase === "startup") await f.holdStartup();
+  const initial = await a.call<Receipt>({ action: "submit", input: f.submit("initial", "fresh work") });
+  let receipt = initial;
+  if (phase === "startup") await f.entered("startup-entered");
+  else {
+    await a.operation(initial, "completed");
+    receipt = await a.call<Receipt>({ action: "input", input: { requestId: "later", childId: initial.childId, mode: "prompt", source: "human", text: "blocked preflight" } });
+    await f.entered("preflight-entered");
+  }
+  await a.call({ action: "cancel", input: { requestId: "cancel", operationId: receipt.operationId } });
+  expect(a.snapshot?.operations.find((op) => op.operationId === receipt.operationId)?.status).toBe("dispatched");
+  await f.release();
+  await a.operation(receipt, "cancelled");
+  await a.call({ action: "closeRun", input: { runId: "fixture-run" } });
+  expect(await f.effects()).toEqual([]);
+  expect(await f.inferenceCalls()).toBe(phase === "startup" ? 0 : 1);
+  f.observations.push({ receipt, snapshot: a.snapshot, inferenceCalls: await f.inferenceCalls() });
+}, 60_000);
+
+it("publishes dynamic summaries without transcripts and closes a run only after native settlement", async () => {
+  const f = await allocate("close-run");
+  await f.service();
+  const a = await f.client();
+  const input = f.submit("close", "uncooperative initial");
+  const receipt = await a.call<Receipt>({ action: "submit", input });
+  await f.entered();
+  await a.wait("running summary", () => a.snapshot?.children.find((child) => child.childId === receipt.childId && child.state === "running"));
+  expect(JSON.stringify(a.snapshot)).not.toContain("messages");
+  expect(JSON.stringify(a.snapshot)).not.toContain("systemPrompt");
+  let settled = false;
+  const closed = a.call({ action: "closeRun", input: { runId: input.runId } }).then(() => { settled = true; });
+  await f.entered("aborted");
+  expect(settled).toBe(false);
+  await expect(a.call({ action: "submit", input: f.submit("too-late", "fresh work") })).rejects.toThrow(/run_closed/);
+  await f.release();
+  await closed;
+  await a.operation(receipt, "cancelled");
+  expect(a.snapshot?.children.find((child) => child.childId === receipt.childId)?.state).toBe("closed");
+  await expect(a.call({ action: "reopen", input: { childId: receipt.childId } })).rejects.toThrow(/run_closed/);
+  f.observations.push({ receipt, snapshot: a.snapshot });
+}, 60_000);
+
+it("reopens historical children explicitly without replay and keeps immutable initial results", async () => {
+  const f = await allocate("explicit-reopen");
+  const service = await f.service();
+  const a = await f.client();
+  const receipt = await a.call<Receipt>({ action: "submit", input: f.submit("initial") });
+  await f.entered();
+  const steer = await a.call<Receipt>({ action: "input", input: { requestId: "steer", childId: receipt.childId, mode: "steer", source: "human", text: "preserve provenance" } });
+  await a.operation(steer, "completed");
+  await f.release();
+  await a.operation(receipt, "completed");
+  const before = await a.call<NativeChildSnapshot>({ action: "inspect", input: { childId: receipt.childId } });
+  const original = await a.call<FullResult>({ action: "resultFull", input: { operationId: receipt.operationId } });
+  await a.kill();
+  await service.kill();
+  await f.service();
+  const b = await f.client();
+  expect(b.snapshot?.children.find((child) => child.childId === receipt.childId)?.state).toBe("historical");
+  const input = { requestId: "later", childId: receipt.childId, mode: "prompt" as const, source: "human" as const, text: "human later" };
+  await expect(b.call({ action: "input", input })).rejects.toThrow(/explicit_reopen_required/);
+  await Promise.all([b.call({ action: "reopen", input: { childId: receipt.childId } }), b.call({ action: "reopen", input: { childId: receipt.childId } })]);
+  const inspection = await b.call<NativeChildSnapshot>({ action: "inspect", input: { childId: receipt.childId } });
+  expect(inspection.messages).toEqual(before.messages);
+  expect(inspection.inputs).toEqual(before.inputs);
+  expect(inspection.inputs).toHaveLength(2);
+  expect(inspection.initialResult).toEqual(original.details);
+  const later = await b.call<Receipt>({ action: "input", input });
+  await b.operation(later, "completed");
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: later.operationId } })).text).toBe("later answer");
+  expect(await b.call({ action: "resultFull", input: { operationId: receipt.operationId } })).toEqual(original);
+  expect(await f.effects()).toHaveLength(1);
+  f.observations.push({ receipt, inspection, snapshot: b.snapshot });
+}, 60_000);
+
+it("scopes metadata, results, inspection, and run closure to the explicit parent", async () => {
+  const f = await allocate("parent-scope");
+  await f.service();
+  const a = await f.client();
+  const b = await f.client("other-parent");
+  const input = f.submit("shared-identity", "fresh work");
+  const first = await a.call<Receipt>({ action: "submit", input });
+  await a.operation(first, "completed");
+  expect(b.snapshot?.operations).toEqual([]);
+  expect(b.snapshot?.children).toEqual([]);
+  await expect(b.call({ action: "result", input: { operationId: first.operationId } })).rejects.toThrow(/operation_not_found/);
+  await expect(b.call({ action: "resultFull", input: { operationId: first.operationId } })).rejects.toThrow(/operation_not_found/);
+  await expect(b.call({ action: "inspect", input: { childId: first.childId } })).rejects.toThrow(/child_not_found/);
+  await expect(b.call({ action: "reopen", input: { childId: first.childId } })).rejects.toThrow(/child_not_found/);
+  await a.call({ action: "closeRun", input: { runId: input.runId } });
+  const second = await b.call<Receipt>({ action: "submit", input });
+  expect(second.childId).not.toBe(first.childId);
+  await b.operation(second, "completed");
+  expect(b.snapshot?.children).toHaveLength(1);
+  const page = await b.call<ResultPage>({ action: "result", input: { operationId: second.operationId, limit: 5 } });
+  expect(page).toMatchObject({ text: "fresh", nextOffset: 5, total: 12, truncated: true });
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: second.operationId, offset: page.nextOffset! } })).text).toBe(" answer");
+  f.observations.push({ first, second, page, a: a.snapshot, b: b.snapshot });
+}, 60_000);
+
+it("keeps native leases distinct for children sharing a logical run across workspaces", async () => {
+  const f = await allocate("same-run-distinct-leases");
+  await f.service();
+  const a = await f.client();
+  const first = await a.call<Receipt>({ action: "submit", input: f.submit("first") });
+  await f.entered();
+  const cwd = await f.secondWorkspace();
+  const second = await a.call<Receipt>({ action: "submit", input: { ...f.submit("second"), cwd } });
+  await f.entered();
+  expect(await f.effects()).toHaveLength(2);
+  await a.call({ action: "cancel", input: { requestId: "cancel-first", operationId: first.operationId } });
+  await a.operation(first, "cancelled");
+  await a.call({ action: "cancel", input: { requestId: "cancel-second", operationId: second.operationId } });
+  await a.operation(second, "cancelled");
+  const fresh = await a.call<Receipt>({ action: "submit", input: f.submit("fresh", "fresh work") });
+  await a.operation(fresh, "completed");
+  f.observations.push({ first, second, fresh, snapshot: a.snapshot });
+}, 60_000);
+
+it("resumes accepted-undispatched initial work after restart exactly once", async () => {
+  const f = await allocate("accepted-restart");
+  const service = await f.service();
+  const a = await f.client();
+  service.process.send("pause-accepted");
+  await service.wait("pause armed", () => service.armed ? true : undefined);
+  const input = f.submit("accepted", "fresh work");
+  const pending = a.call<Receipt>({ action: "submit", input }).catch(() => undefined);
+  const paused = await service.wait("accepted before dispatch", () => service.paused);
+  const receipt = paused.operations[0];
+  expect(receipt.status).toBe("accepted");
+  await service.kill();
+  await a.kill();
+  await f.service();
+  const b = await f.client();
+  await b.operation(receipt, "completed");
+  expect(await b.call({ action: "submit", input })).toEqual({ childId: receipt.childId, operationId: receipt.operationId });
+  const inspection = await b.call<NativeChildSnapshot>({ action: "inspect", input: { childId: receipt.childId } });
+  expect(inspection.inputs).toHaveLength(1);
+  expect((await b.call<ResultPage>({ action: "result", input: { operationId: receipt.operationId } })).text).toBe("fresh answer");
+  await pending;
+  f.observations.push({ receipt, inspection, snapshot: b.snapshot });
 }, 60_000);

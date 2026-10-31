@@ -2,17 +2,19 @@ import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as ChildContext from "../../_shared/child-context";
-import * as Execute from "../execute";
+import type { ResolvedSubagentRun } from "../execution-types";
+import { NativeChildOwner } from "../native-child";
 import * as ChildTypes from "../child-types";
 import * as Config from "../config";
 import * as Control from "../control";
 import { settleOperations, testCleanup } from "./cleanup";
 
+// The service uses this same owner. Direct construction exposes startup rollback
+// and input-preflight races that serialized public requests cannot coordinate.
 async function fixture(body: string, maxRunMs = 5000) {
   const root = await mkdtemp(join(tmpdir(), "native-lifecycle-"));
   const cleanup = testCleanup();
@@ -32,20 +34,27 @@ export default function(pi) {
   await writeFile(join(root, ".pi", "settings.json"), JSON.stringify({ extensions: [extension], defaultProvider: "lifecycle-provider", defaultModel: "faux-1" }));
   const supervisor = new Control.SubagentRunSupervisor("lifecycle", Config.resolveSubagentRuntimeConfig({ maxRunMs }));
   cleanup(() => supervisor.shutdown());
-  const parent = { cwd: root, sessionManager: SessionManager.create(root, join(root, "sessions")), isProjectTrusted: () => true };
+  const context = { cwd: root, isProjectTrusted: () => true };
   let child: ChildTypes.NativeChildSession | undefined;
   cleanup(() => writeFile(join(root, "release"), "release"), () => child?.close());
   return {
     root, supervisor, cleanup,
     child: () => child!,
-    execute: (run: Partial<Execute.ResolvedSubagentRun> = {}) => ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => Effect.runPromise(Execute.runResolvedSubagentEffect({ name: "lifecycle", task: "initial", cwd: root, ...run }, parent, { supervisor, onChild: (value) => { child = value; } }))),
+    execute: (run: Partial<ResolvedSubagentRun> = {}) => {
+      const owner = ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => new NativeChildOwner(
+        { name: "lifecycle", task: "initial", cwd: root, ...run }, context,
+        SessionManager.create(root, join(root, "sessions")), supervisor, {},
+      ));
+      child = owner;
+      supervisor.retainChild(owner);
+      return owner.runInitial();
+    },
   };
 }
 
 it.each([
   { initial: true, cancellation: "close" },
   { initial: false, cancellation: "cancel" },
-  { initial: false, cancellation: "deadline" },
 ] as const)("prevents post-cancel native effects across input preflight: $initial / $cancellation", async ({ initial, cancellation }) => {
   const f = await fixture(`
  pi.registerTool({name:'effect',label:'Effect',description:'Record a test-owned effect',parameters:{type:'object',properties:{}},async execute() { writeFileSync(root+'/effect',''); return {content:[{type:'text',text:'effect'}],details:{}}; }});
@@ -56,7 +65,7 @@ it.each([
    p.setResponses([fauxAssistantMessage(fauxToolCall('effect',{}),{stopReason:'toolUse'}),fauxAssistantMessage('post-cancel result')]);
  });
  pi.on('before_agent_start', event => { if(event.prompt === 'delayed input') writeFileSync(root+'/started',''); });
-`, cancellation === "deadline" ? 1000 : 5000);
+`);
   let work: Promise<unknown> | undefined;
   let cancellationWork: Promise<void> | undefined;
   f.cleanup(
@@ -64,27 +73,14 @@ it.each([
     () => settleOperations([work, cancellationWork]),
   );
   {
-    let deadline: Promise<void> | undefined;
     if (initial) work = f.execute({ task: "delayed input" });
     else {
       expect((await f.execute()).details.isError).toBe(false);
       await expect(f.child().input("invalid idle steer", ChildTypes.NativeInputMode.Steer)).rejects.toThrow("requires a streaming child");
-      if (cancellation === "deadline") {
-        const acquire = f.supervisor.acquire.bind(f.supervisor);
-        deadline = new Promise<void>((resolve) => {
-          const spy = vi.spyOn(f.supervisor, "acquire").mockImplementation(async (request) => {
-            const lease = await acquire(request);
-            lease.signal.addEventListener("abort", () => resolve(), { once: true });
-            return lease;
-          });
-          f.cleanup(() => spy.mockRestore());
-        });
-      }
       work = f.child().input("delayed input", ChildTypes.NativeInputMode.Prompt);
     }
     await vi.waitFor(() => expect(existsSync(join(f.root, "entered"))).toBe(true));
-    if (cancellation === "deadline") await deadline;
-    else cancellationWork = f.child()[cancellation]();
+    cancellationWork = f.child()[cancellation]();
     await writeFile(join(f.root, "release"), "release");
     await Promise.all([work, cancellationWork]);
     expect(existsSync(join(f.root, "started"))).toBe(false);

@@ -2,12 +2,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
 import { expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import * as ChildContext from "../../_shared/child-context";
 import * as ChildTypes from "../child-types";
-import * as Execute from "../execute";
+import { NativeChildOwner } from "../native-child";
+import { resolveSubagentRuntimeConfig } from "../config";
 import * as Control from "../control";
 
 import { testCleanup } from "./cleanup";
@@ -36,6 +36,8 @@ for await (const line of createInterface({input:process.stdin})) {
 }
 `;
 
+// Direct native ownership lets us observe MCP process release and assert that
+// startup failures never invoke inference, without a service injection seam.
 async function fixture(options: { broken?: boolean; timeout?: boolean; handled?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "native-mcp-"));
   const cleanup = testCleanup();
@@ -78,23 +80,23 @@ export default function(pi) {
   await writeFile(join(agentDir, "auth.json"), JSON.stringify({
     "mcp-integration": { type: "api_key", key: "synthetic-local-only" },
   }));
-  const parent = SessionManager.create(root, join(root, "sessions"));
+  const supervisor = new Control.SubagentRunSupervisor("native-mcp", resolveSubagentRuntimeConfig({}));
   let child: ChildTypes.NativeChildSession | undefined;
   cleanup(
     () => child?.close(),
-    () => Control.disposeSubagentRunSupervisor(parent.getSessionId()),
+    () => supervisor.shutdown(),
   );
   return {
     root,
     child: () => child!,
-    execute: (toolNames?: string[]) => ChildContext.withChildContext({ cwd: root, agentDir }, () =>
-      Effect.runPromise(Execute.runResolvedSubagentEffect({
+    execute: (toolNames?: string[]) => {
+      const owner = ChildContext.withChildContext({ cwd: root, agentDir }, () => new NativeChildOwner({
         name: "mcp", task: "run echo", cwd: root, modelOverride: "mcp-integration/faux-1", toolNames,
-      }, { cwd: root, sessionManager: parent, isProjectTrusted: () => true }, {
-        onChild: (value) => { child = value; },
-      })),
-    ),
-    // Registered teardown retains the root until child and supervisor shutdown finish.
+      }, { cwd: root, isProjectTrusted: () => true }, SessionManager.create(root, join(root, "sessions")), supervisor, {}));
+      child = owner;
+      supervisor.retainChild(owner);
+      return owner.runInitial();
+    },
   };
 }
 

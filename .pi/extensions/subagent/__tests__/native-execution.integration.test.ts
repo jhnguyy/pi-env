@@ -2,20 +2,13 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { Effect } from "effect";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import * as Execute from "../execute";
+import { NativeChildOwner } from "../native-child";
 import * as ChildTypes from "../child-types";
 import * as Control from "../control";
 import * as Config from "../config";
 import * as ChildContext from "../../_shared/child-context";
 import { settleOperations, testCleanup } from "./cleanup";
-
-function execute(...args: Parameters<typeof Execute.runResolvedSubagentEffect>) {
-  return ChildContext.withChildContext({ cwd: args[0].cwd, agentDir: join(args[0].cwd, "agent") }, () =>
-    Effect.runPromise(Execute.runResolvedSubagentEffect(...args)),
-  );
-}
 
 // Registered-tool scenarios own configuration, selection and persistence.
 // Hold the tool after abort here to prove close retains its lease until settlement.
@@ -32,10 +25,6 @@ it("holds native ownership until close settles and rejects overlapping input", a
     runId: "blocker",
     cwd: root,
     workspaceAccess: Control.WorkspaceAccess.Write,
-  });
-  let retained!: () => void;
-  const retention = new Promise<void>((resolve) => {
-    retained = resolve;
   });
   let enter!: () => void;
   let release!: () => void;
@@ -74,10 +63,9 @@ export default function(pi) {
     );
     const ctx = {
       cwd: root,
-      sessionManager: SessionManager.create(root, join(root, "sessions")),
       isProjectTrusted: () => true,
     };
-    const running = execute(
+    const owner = ChildContext.withChildContext({ cwd: root, agentDir: join(root, "agent") }, () => new NativeChildOwner(
       {
         name: "gated",
         task: "run gate",
@@ -100,23 +88,21 @@ export default function(pi) {
         ],
       },
       ctx,
-      {
-        supervisor,
-        onChild: (value) => {
-          child = value;
-          retained();
-        },
-      },
-    );
+      SessionManager.create(root, join(root, "children")),
+      supervisor,
+      {},
+    ));
+    child = owner;
+    supervisor.retainChild(owner);
+    const running = owner.runInitial();
     operations.push(running);
-    await retention;
-    expect(child!.inspect().state).toBe("queued");
-    await expect(child!.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
+    expect(child.inspect().state).toBe("queued");
+    await expect(child.input("not yet streaming", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     blocker.release();
     await entered;
-    await expect(child!.input("overlap", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
+    await expect(child.input("overlap", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     let closed = false;
-    const closing = child!.close().then(() => {
+    const closing = child.close().then(() => {
       closed = true;
     });
     operations.push(closing);
@@ -132,17 +118,18 @@ export default function(pi) {
     await Promise.resolve();
     expect(competingAdmitted).toBe(false);
     expect(closed).toBe(false);
-    expect(child!.inspect().state).toBe("closing");
-    await expect(child!.input("too late", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
+    expect(child.inspect().state).toBe("closing");
+    await expect(child.input("too late", ChildTypes.NativeInputMode.Prompt)).rejects.toThrow();
     release();
     await closing;
     await running;
     await competing;
-    expect(child!.inspect().state).toBe("closed");
-    await child!.close();
-    const entries = SessionManager.open(child!.inspect().sessionFile!).getEntries();
+    expect(child.inspect().state).toBe("closed");
+    await child.close();
+    const entries = SessionManager.open(child.inspect().sessionFile!).getEntries();
     expect(
       entries.filter((e) => e.type === "custom" && e.customType === "shutdown-hook"),
     ).toHaveLength(1);
+
   }
 }, 30000);
