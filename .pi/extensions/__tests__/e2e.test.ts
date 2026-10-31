@@ -50,7 +50,7 @@ describe("native tool workflows", () => {
         webFetches: "synthetic result from deferred codemode and activated direct calls",
         composition: "nested read and Bash results combined with session context",
         bashFailure: "direct Bash reports an error; codemode receives structured exit_code 9",
-        notes: "create and read a Wiki note in a temporary vault; reject an unguarded overwrite and release the provider",
+        notes: "load provider policy, create and read a note in a temporary vault; reject an unguarded overwrite and release the provider",
       },
       actual: {},
       verdict: "failed",
@@ -79,6 +79,8 @@ describe("native tool workflows", () => {
       modelRuntime.registerNativeProvider(faux.provider);
       const vault = join(workspace, "vault");
       mkdirSync(vault);
+      mkdirSync(join(vault, "_meta"));
+      writeFileSync(join(vault, "_meta/overview.md"), "Use this temporary vault for synthetic notes only.");
       writeFileSync(join(workspace, "settings.json"), JSON.stringify({ notes: { provider: "obsidian", vaultPath: vault } }));
       const resourceLoader = new DefaultResourceLoader({
         cwd: workspace,
@@ -142,11 +144,11 @@ describe("native tool workflows", () => {
         fauxAssistantMessage("done"),
         fauxAssistantMessage(fauxToolCall("bash", { command: "exit 9" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "# Smoke\n\nsynthetic-note", revision: null }), { stopReason: "toolUse" }),
+        fauxAssistantMessage(fauxToolCall("notes", { action: "write", path: "smoke.md", content: "# Smoke\n\nsynthetic-note", revision: null }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "read", target: "smoke.md" }), { stopReason: "toolUse" }),
+        fauxAssistantMessage(fauxToolCall("notes", { action: "read", path: "smoke.md" }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
-        fauxAssistantMessage(fauxToolCall("notes", { collection: "wiki", action: "write", target: "smoke.md", content: "unguarded overwrite", revision: null }), { stopReason: "toolUse" }),
+        fauxAssistantMessage(fauxToolCall("notes", { action: "write", path: "smoke.md", content: "unguarded overwrite", revision: null }), { stopReason: "toolUse" }),
         fauxAssistantMessage("done"),
       ]);
       phase = "deferred codemode call";
@@ -176,23 +178,23 @@ describe("native tool workflows", () => {
       const nestedBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "codemode").at(-1);
       await session.prompt("Run a failing Bash command directly.");
       const directBashResult = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "bash").at(-1);
-      const notePath = join(vault, "wiki/smoke.md");
+      const notePath = join(vault, "smoke.md");
       phase = "notes creation";
-      await session.prompt("Create a synthetic Wiki note in the temporary vault.");
+      await session.prompt("Create a synthetic note in the temporary vault.");
       const noteCreated = existsSync(notePath);
       evidence.actual = { ...(evidence.actual as object), noteCreated };
       expect(noteCreated).toBe(true);
       phase = "notes read";
-      await session.prompt("Read the synthetic Wiki note.");
+      await session.prompt("Read the synthetic note.");
       const noteRead = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
       const noteReadReturnedContent = JSON.stringify(noteRead).includes("synthetic-note");
       evidence.actual = { ...(evidence.actual as object), noteReadReturnedContent };
       expect(noteReadReturnedContent).toBe(true);
       phase = "notes create-only conflict";
-      await session.prompt("Attempt an unguarded overwrite of the synthetic Wiki note.");
+      await session.prompt("Attempt an unguarded overwrite of the synthetic note.");
       const noteConflict = session.messages.filter((message) => message.role === "toolResult" && message.toolName === "notes").at(-1);
       const noteConflictIsError = !!noteConflict && "isError" in noteConflict && noteConflict.isError === true;
-      const noteConflictSpecific = JSON.stringify(noteConflict).includes("Note changed since it was read: wiki/smoke.md");
+      const noteConflictSpecific = JSON.stringify(noteConflict).includes("Note changed since it was read: smoke.md");
       const noteContentPreserved = readFileSync(notePath, "utf8") === "# Smoke\n\nsynthetic-note";
       evidence.actual = { ...(evidence.actual as object), noteConflictIsError, noteConflictSpecific, noteContentPreserved };
       expect(noteConflictIsError && noteConflictSpecific && noteContentPreserved).toBe(true);
