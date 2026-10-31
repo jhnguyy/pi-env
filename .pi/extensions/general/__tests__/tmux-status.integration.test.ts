@@ -451,6 +451,27 @@ function responseGate(): { step: FauxResponseStep; entered: Promise<void>; relea
 }
 
 describe("tmux status integration (real isolated server)", () => {
+  it("reloads the template without accumulating settings or replacing user capabilities", async () => {
+    const f = await fixture();
+    await f.command("set-option", "-as", "terminal-features", ",pi-test:RGB");
+    await f.command("set-option", "-as", "terminal-overrides", ",pi-test:AX");
+    const features = await f.command("show-options", "-s", "terminal-features");
+    const overrides = await f.command("show-options", "-s", "terminal-overrides");
+    await f.command("source-file", template);
+    const server = await f.command("show-options", "-s");
+    const session = await f.command("show-options", "-g");
+    const window = await f.command("show-options", "-gw");
+    for (let reload = 0; reload < 2; reload++) {
+      await f.command("source-file", template);
+      expect(await f.command("show-options", "-s")).toBe(server);
+      expect(await f.command("show-options", "-g")).toBe(session);
+      expect(await f.command("show-options", "-gw")).toBe(window);
+    }
+    expect(await f.command("show-options", "-s", "terminal-features")).toBe(features);
+    expect(await f.command("show-options", "-s", "terminal-overrides")).toBe(overrides);
+    expect(await f.command("show-options", "-sv", "set-clipboard")).toBe("on");
+  });
+
   it.each([false, true])(
     "aggregates running > error > done > idle despite layout order (linked=%s)",
     async (linked) => {

@@ -82,6 +82,7 @@ let
         pkgs.gnugrep
         pkgs.gnused
         pkgs.neovim
+        pkgs.ncurses
         pkgs.ripgrep
         tmux
         pkgs.flock

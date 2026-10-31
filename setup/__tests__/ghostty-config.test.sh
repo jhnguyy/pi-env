@@ -32,7 +32,7 @@ const e = process.env;
 const checks = {
   installation: {expected: 'setup links config and both palettes into the XDG theme directory; reruns preserve links', verdict: e.INSTALL},
   explicitLoading: {expected: 'Ghostty loads each installed config by path, resolves both palettes from XDG, and loads ~/.config/ghostty/config.local through the symlinked config', verdict: e.LOADING, note: e.LOADING_NOTE},
-  xdgDiscovery: {expected: 'Ghostty default discovery reports Gruvbox colors and local override values', verdict: e.DISCOVERY, note: e.DISCOVERY_NOTE},
+  xdgDiscovery: {expected: 'Ghostty default discovery reports Gruvbox colors, local override values, and SSH integration features', verdict: e.DISCOVERY, note: e.DISCOVERY_NOTE},
 };
 const verdicts = Object.values(checks).map((check) => check.verdict);
 fs.writeFileSync(`${e.EVIDENCE}/result.json`, JSON.stringify({
@@ -122,6 +122,10 @@ for mode in dark light; do
   printf 'font-size = 19\ntheme = pi-env-gruvbox-%s\n' "$mode" >"$LOCAL_OVERRIDE"
   "$GHOSTTY" +show-config >"$EVIDENCE/xdg/$mode-colors.txt" 2>&1
   grep -Fxq 'font-size = 19' "$EVIDENCE/xdg/$mode-colors.txt"
+  for feature in ssh-env ssh-terminfo; do
+    grep -E '^shell-integration-features = ' "$EVIDENCE/xdg/$mode-colors.txt" |
+      grep -Eq "(^|[, ])$feature(,|$)"
+  done
   if [ "$mode" = dark ]; then
     grep -Fxq 'background = #282828' "$EVIDENCE/xdg/$mode-colors.txt"
     grep -Fxq 'foreground = #ebdbb2' "$EVIDENCE/xdg/$mode-colors.txt"

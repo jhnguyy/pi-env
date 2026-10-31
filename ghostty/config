@@ -17,6 +17,8 @@ clipboard-write = allow
 confirm-close-surface = false
 window-save-state = always
 shell-integration = detect
+# Install remote terminfo and preserve Ghostty's identity when available.
+shell-integration-features = ssh-env,ssh-terminfo
 
 # Slightly roomier text at 18pt without making panes feel padded.
 window-padding-x = 6
