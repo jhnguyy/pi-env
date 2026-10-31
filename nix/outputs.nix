@@ -1,17 +1,10 @@
 {
   self,
   pkgs,
-  nodeFor,
-  tmuxFor,
-  piFor,
-  toolsFor,
-  toolchainPackages,
-  toolchainFor,
+  packages,
 }:
 let
-  node = nodeFor pkgs;
-  pi = piFor pkgs;
-  toolchain = toolchainFor pkgs;
+  inherit (packages) node pi toolchain;
   selectorEnv.PI_ENV_AGENT_DIR_SCRIPT = "${../setup/agent-dir.sh}";
   runtimeEnv = {
     PI_ENV_NODE_BIN = "${node}/bin/node";
@@ -55,9 +48,7 @@ in
 {
   packages = {
     default = toolchain;
-    tools = toolsFor pkgs;
-    inherit toolchain pi;
-    tmux = tmuxFor pkgs;
+    inherit (packages) tools toolchain pi tmux;
   };
   apps = {
     default = {
@@ -96,7 +87,7 @@ in
   devShells.default = pkgs.mkShell (
     runtimeEnv
     // {
-      packages = toolchainPackages pkgs;
+      packages = packages.toolchainPackages;
     }
   );
 }
