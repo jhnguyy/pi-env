@@ -1,8 +1,6 @@
 {
   self,
-  toolchainPackages,
-  nodeFor,
-  piFor,
+  packagesFor,
 }:
 {
   config,
@@ -12,6 +10,7 @@
 }:
 let
   cfg = config.pi-env;
+  packages = packagesFor pkgs;
   ghosttyDirectory =
     if pkgs.stdenv.isDarwin then
       "Library/Application Support/com.mitchellh.ghostty"
@@ -67,12 +66,12 @@ in
   config = lib.mkIf cfg.enable (
     lib.mkMerge [
       (lib.mkIf cfg.installTools {
-        home.packages = toolchainPackages pkgs;
+        home.packages = packages.toolchainPackages;
         home.sessionVariables = {
-          PI_ENV_NODE_BIN = "${nodeFor pkgs}/bin/node";
-          NODE_EXECUTABLE = "${nodeFor pkgs}/bin/node";
-          PI_PACKAGE_DIR = "${piFor pkgs}/lib/pi/node_modules/@earendil-works/pi-coding-agent";
-          PI_ENV_PI_EXECUTABLE = lib.getExe (piFor pkgs);
+          PI_ENV_NODE_BIN = "${packages.node}/bin/node";
+          NODE_EXECUTABLE = "${packages.node}/bin/node";
+          PI_PACKAGE_DIR = "${packages.pi}/lib/pi/node_modules/@earendil-works/pi-coding-agent";
+          PI_ENV_PI_EXECUTABLE = lib.getExe packages.pi;
         };
       })
 

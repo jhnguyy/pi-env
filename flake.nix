@@ -24,16 +24,12 @@
       toolchain = import ./nix/toolchain.nix { inherit nixpkgs nub pi; };
       perSystem = nixpkgs.lib.genAttrs toolchain.systems (
         system:
-        import ./nix/outputs.nix {
-          inherit self;
-          inherit (toolchain)
-            nodeFor
-            piFor
-            toolsFor
-            toolchainPackages
-            toolchainFor
-            ;
+        let
           pkgs = toolchain.pkgsFor system;
+        in
+        import ./nix/outputs.nix {
+          inherit self pkgs;
+          packages = toolchain.packagesFor pkgs;
         }
       );
     in
@@ -44,7 +40,7 @@
       devShells = nixpkgs.lib.mapAttrs (_: outputs: outputs.devShells) perSystem;
       homeManagerModules.default = import ./nix/home-manager.nix {
         inherit self;
-        inherit (toolchain) toolchainPackages nodeFor piFor;
+        inherit (toolchain) packagesFor;
       };
     };
 }
