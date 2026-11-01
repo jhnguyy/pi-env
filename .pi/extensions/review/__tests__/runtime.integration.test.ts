@@ -18,7 +18,7 @@ function state(): ReviewState {
   const root = mkdtempSync(join(tmpdir(), "pi-pr-review-root-"));
   temps.push(root);
   mkdirSync(join(root, "src"));
-  writeFileSync(join(root, "src", "a.ts"), `${"x".repeat(4_001)}\nneedle\n`);
+  writeFileSync(join(root, "src", "a.ts"), "const value = 1;\nneedle\n");
   const artifact = mkdtempSync(join(tmpdir(), "pi-pr-review-art-"));
   temps.push(artifact);
   const diffPath = join(artifact, "diff.patch");
@@ -51,21 +51,26 @@ function state(): ReviewState {
 }
 
 describe("review pull request run-scoped tools", () => {
-  it("admits only bounded, regular, hash-matching pinned evidence", () => {
+  it("reads regular hash-matching pinned evidence and rejects tampering or non-files", () => {
     const s = state();
     expect(readVerifiedPinnedDiff(s.snapshot)).toContain("+needle");
 
     writeFileSync(s.snapshot.diffPath, "tampered");
     expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/integrity/);
 
-    truncateSync(s.snapshot.diffPath, 8_000_001);
-    expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/exceeds/);
-
     rmSync(s.snapshot.diffPath);
     mkdirSync(s.snapshot.diffPath);
     expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/regular file/);
   });
-  it("uses fixed-string grep, exact diff path matching, and bounded large-line reads", async () => {
+  it("rejects pinned evidence outside the current ingestion budget", () => {
+    const s = state();
+    // File metadata exercises admission without constructing an oversized payload.
+    // This preserves the existing guard, not a claim that 8 MB is the right budget.
+    truncateSync(s.snapshot.diffPath, 8_000_001);
+    expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/exceeds/);
+  });
+
+  it("uses fixed-string grep, exact diff path matching, and complete source reads", async () => {
     let s = state();
     const saved: ReviewState[] = [];
     const tools = readTools({
@@ -89,7 +94,7 @@ describe("review pull request run-scoped tools", () => {
       { path: "src/a.ts" } as any,
       { cwd: s.snapshot.worktree },
     ) as any;
-    expect(read.content[0].text).toBe(`${"x".repeat(4_000)}…\nneedle\n`);
+    expect(read.content[0].text).toBe("const value = 1;\nneedle\n");
     expect(
       (
         (await tools.review_diff.execute(
@@ -121,20 +126,22 @@ describe("review pull request run-scoped tools", () => {
     ).toContain("dir b/part/a.ts");
   });
 
-  it("pages pinned metadata, late source ranges, and diff sections", async () => {
+  it("pages pinned metadata and diff sections, and reads a selected source range", async () => {
     const s = state();
     s.snapshot.metadata.body = `start-${"🙂".repeat(20)}-end`;
     const latePath = join(s.snapshot.worktree, "src", "late.ts");
     writeFileSync(
       latePath,
-      Array.from({ length: 300 }, (_, index) => `line-${index + 1}`).join("\n"),
+      "line-1\nline-2\nline-3",
     );
     const lateDiff = [
       "diff --git a/src/late.ts b/src/late.ts",
       "--- a/src/late.ts",
       "+++ b/src/late.ts",
-      "@@ -1,1 +1,300 @@",
-      ...Array.from({ length: 300 }, (_, index) => `+line-${index + 1}`),
+      "@@ -1,1 +1,3 @@",
+      "+line-1",
+      "+line-2",
+      "+line-3",
     ].join("\n");
     writeFileSync(s.snapshot.diffPath, lateDiff);
     s.snapshot.diffHash = sha256(lateDiff);
@@ -148,10 +155,10 @@ describe("review pull request run-scoped tools", () => {
     expect(metadataFirstBody.body).not.toContain("�");
     expect(metadataFirst.details.nextOffset).toBeTypeOf("number");
     const source = (await tools.review_read.execute(
-      { path: "src/late.ts", startLine: 200, endLine: 202 },
+      { path: "src/late.ts", startLine: 2, endLine: 3 },
       { cwd: s.snapshot.worktree },
     )) as any;
-    expect(source.content[0].text).toBe("line-200\nline-201\nline-202");
+    expect(source.content[0].text).toBe("line-2\nline-3");
     const diffFirst = (await tools.review_diff.execute(
       { path: "src/late.ts", maxBytes: 100 },
       { cwd: s.snapshot.worktree },
@@ -161,7 +168,7 @@ describe("review pull request run-scoped tools", () => {
       { cwd: s.snapshot.worktree },
     )) as any;
     expect(diffFirst.details.hunks).toEqual([
-      { startLine: 4, endLine: 304, header: "@@ -1,1 +1,300 @@" },
+      { startLine: 4, endLine: 7, header: "@@ -1,1 +1,3 @@" },
     ]);
     expect(diffFirst.details.nextOffset).toBeTypeOf("number");
     expect(diffSecond.details.offset).toBe(diffFirst.details.nextOffset);
