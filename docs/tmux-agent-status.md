@@ -4,7 +4,7 @@ The `general` extension adds a persistent status indicator to tmux window tabs i
 
 ## Enable the display
 
-Load the updated [tmux template](../setup/templates/tmux.conf), then restart Pi or use `/reload`. Setup normally sources this template from `~/.tmux.conf`; externally managed environments must arrange that integration themselves. With `pi-env.tmux.enable`, the [Home Manager module](nix.md#home-manager) sources the template from the locked pi-env flake input, not the checkout. Update that input and activate the new generation, then run `tmux source-file ~/.config/tmux/tmux.conf`. To try the template in the current server:
+Load the updated [tmux template](../setup/templates/tmux.conf), then restart Pi or use `/reload`. Setup normally sources this template from `~/.tmux.conf`; externally managed environments must arrange that integration themselves. With `pi-env.tmux.enable`, the [Home Manager integration](setup.md#declarative-host-integration) sources the template from the locked pi-env flake input, not the checkout. Update that input and activate the new generation, then run `tmux source-file ~/.config/tmux/tmux.conf`. To try the template in the current server:
 
 ```bash
 tmux source-file /path/to/pi-env/setup/templates/tmux.conf
@@ -16,12 +16,12 @@ Status metadata does not change session names. Only the indicator receives statu
 
 ## Interpret the indicator
 
-| Indicator       | Meaning                             |
-| --------------- | ----------------------------------- |
-| `⠾`             | Running, including compaction       |
-| `✓`             | Settled successfully                |
-| `✗`             | Final response or compaction failed |
-| `○`             | Idle or cancelled                   |
+| Indicator | Meaning                             |
+| --------- | ----------------------------------- |
+| `⠾`       | Running, including compaction       |
+| `✓`       | Settled successfully                |
+| `✗`       | Final response or compaction failed |
+| `○`       | Idle or cancelled                   |
 
 A failed tool call does not determine the final status. Retries stay running until settlement. Blocking dialogs keep the underlying state because this display has no separate blocked indicator.
 

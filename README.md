@@ -14,14 +14,14 @@ Portable components define reusable practice. Local adapters define storage, cre
 
 ## Setup choices
 
-Nix supplies tools and can package Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [Nix ownership](docs/nix.md).
+Nix supplies tools and can package Pi through its upstream flake. Nub installs repository dependencies and runs scripts. Without Nix, Nub supplies the portable runtime path. See [runtime integration](docs/setup.md#runtime-integration).
 
-| Environment | Command |
-| --- | --- |
-| Fresh machine with local Nix + flakes | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` |
-| Existing checkout with local Nix | `nix run .#setup` or `./setup.sh --use-nix` |
-| Externally Nix-managed runtime/container | `./setup.sh --nix-managed` |
-| No Nix | `./setup.sh --portable` |
+| Environment                              | Command                                               |
+| ---------------------------------------- | ----------------------------------------------------- |
+| Fresh machine with local Nix + flakes    | `nix run github:jhnguyy/pi-env#bootstrap -- ~/pi-env` |
+| Existing checkout with local Nix         | `nix run .#setup` or `./setup.sh --use-nix`           |
+| Externally Nix-managed runtime/container | `./setup.sh --nix-managed`                            |
+| No Nix                                   | `./setup.sh --portable`                               |
 
 `--use-nix` means “invoke local Nix now.” Use it only when the machine can realize Nix store paths. `--nix-managed` means “Nix already provided the toolchain/config ownership boundary.” It does not call `nix run`. It uses existing host tools. For externally managed tools with Nub-installed Pi, follow the [external runtime setup contract](docs/setup.md#externally-managed-tools-with-checkout-owned-pi).
 
