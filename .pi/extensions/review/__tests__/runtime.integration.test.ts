@@ -90,6 +90,12 @@ describe("review pull request run-scoped tools", () => {
         )) as any
       ).content[0].text,
     ).toContain("No matches");
+    writeFileSync(join(s.snapshot.worktree, "src", "literal.txt"), "literal [not-regex\n");
+    const literalMatch = await tools.review_grep.execute(
+      { pattern: "[not-regex", path: "src" } as any,
+      { cwd: s.snapshot.worktree },
+    ) as any;
+    expect(literalMatch.content[0].text).toBe("src/literal.txt:1:literal [not-regex");
     const read = await tools.review_read.execute(
       { path: "src/a.ts" } as any,
       { cwd: s.snapshot.worktree },
@@ -116,19 +122,16 @@ describe("review pull request run-scoped tools", () => {
     writeFileSync(s.snapshot.diffPath, ambiguousDiff);
     s.snapshot.diffHash = sha256(ambiguousDiff);
     const ambiguousTools = readTools({ state: s, save: () => {} });
-    expect(
-      (
-        (await ambiguousTools.review_diff.execute(
-          { path: "dir b/part/a.ts" } as any,
-          { cwd: s.snapshot.worktree },
-        )) as any
-      ).content[0].text,
-    ).toContain("dir b/part/a.ts");
+    const ambiguous = await ambiguousTools.review_diff.execute(
+      { path: "dir b/part/a.ts" } as any,
+      { cwd: s.snapshot.worktree },
+    ) as any;
+    expect(JSON.parse(ambiguous.content[0].text).text).toBe(ambiguousDiff);
   });
 
   it("pages pinned metadata and diff sections, and reads a selected source range", async () => {
     const s = state();
-    s.snapshot.metadata.body = `start-${"🙂".repeat(20)}-end`;
+    s.snapshot.metadata.body = "start-🙂🙂-end";
     const latePath = join(s.snapshot.worktree, "src", "late.ts");
     writeFileSync(
       latePath,
@@ -146,14 +149,23 @@ describe("review pull request run-scoped tools", () => {
     writeFileSync(s.snapshot.diffPath, lateDiff);
     s.snapshot.diffHash = sha256(lateDiff);
     const tools = readTools({ state: s, save: () => {} });
-    const metadataFirst = (await tools.review_metadata.execute(
-      { offset: 0, maxBytes: 8 },
-      { cwd: s.snapshot.worktree },
-    )) as any;
-    const metadataFirstBody = JSON.parse(metadataFirst.content[0].text);
-    expect(metadataFirstBody.title).toBe("Pinned title");
-    expect(metadataFirstBody.body).not.toContain("�");
-    expect(metadataFirst.details.nextOffset).toBeTypeOf("number");
+    let metadataBody = "";
+    let metadataOffset = 0;
+    const metadataParts = ["start-", "🙂🙂", "-end"];
+    for (const [index, expected] of metadataParts.entries()) {
+      const response = await tools.review_metadata.execute(
+        { offset: metadataOffset, maxBytes: 8 },
+        { cwd: s.snapshot.worktree },
+      ) as any;
+      const page = JSON.parse(response.content[0].text);
+      expect(page.title).toBe("Pinned title");
+      expect(page.bodyOffset).toBe(metadataOffset);
+      expect(page.body).toBe(expected);
+      metadataBody += page.body;
+      metadataOffset = Buffer.byteLength(metadataBody);
+      expect(page.nextOffset).toBe(index < metadataParts.length - 1 ? metadataOffset : undefined);
+    }
+    expect(metadataBody).toBe(s.snapshot.metadata.body);
     const source = (await tools.review_read.execute(
       { path: "src/late.ts", startLine: 2, endLine: 3 },
       { cwd: s.snapshot.worktree },
@@ -170,9 +182,12 @@ describe("review pull request run-scoped tools", () => {
     expect(diffFirst.details.hunks).toEqual([
       { startLine: 4, endLine: 7, header: "@@ -1,1 +1,3 @@" },
     ]);
-    expect(diffFirst.details.nextOffset).toBeTypeOf("number");
-    expect(diffSecond.details.offset).toBe(diffFirst.details.nextOffset);
-    expect(diffSecond.content[0].text).not.toBe(diffFirst.content[0].text);
+    const firstPage = JSON.parse(diffFirst.content[0].text);
+    const secondPage = JSON.parse(diffSecond.content[0].text);
+    expect(firstPage.nextOffset).toBe(Buffer.byteLength(firstPage.text));
+    expect(secondPage.offset).toBe(firstPage.nextOffset);
+    expect(secondPage.nextOffset).toBeUndefined();
+    expect(firstPage.text + secondPage.text).toBe(lateDiff);
   });
 
   it("pages the complete changed-file manifest beyond prompt and scan limits", async () => {
@@ -181,30 +196,28 @@ describe("review pull request run-scoped tools", () => {
       path: `src/${index.toString().padStart(5, "0")}-${"x".repeat(20)}.ts`,
     }));
     const tools = readTools({ state: s, save: () => {} });
-    const first = await tools.review_changed_files.execute(
-      { page: 1, pageSize: 500 },
-      { cwd: s.snapshot.worktree },
-    );
-    const last = await tools.review_changed_files.execute(
-      { page: 3, pageSize: 500 },
-      { cwd: s.snapshot.worktree },
-    );
-    expect(
-      s.snapshot.metadata.changedFiles.map((file) => file.path).join("\n").length,
-    ).toBeGreaterThan(24_000);
-    expect(JSON.parse((first as any).content[0].text).items).toHaveLength(500);
-    expect(JSON.parse((last as any).content[0].text).items.at(-1)).toBe(
-      s.snapshot.metadata.changedFiles.at(-1)?.path,
-    );
+    const expectedPaths = s.snapshot.metadata.changedFiles.map((file) => file.path);
+    expect(expectedPaths.join("\n").length).toBeGreaterThan(24_000);
+    const paths: string[] = [];
+    for (const page of [1, 2, 3]) {
+      const response = await tools.review_changed_files.execute(
+        { page, pageSize: 500 },
+        { cwd: s.snapshot.worktree },
+      ) as any;
+      const result = JSON.parse(response.content[0].text);
+      expect(result).toMatchObject({ page, pageSize: 500, total: expectedPaths.length, totalPages: 3 });
+      paths.push(...result.items);
+    }
+    expect(paths).toEqual(expectedPaths);
   });
 
-  it("checks cancellation in tool execution", async () => {
+  it("rejects pre-aborted metadata execution", async () => {
     const s = state();
-    const tools = buildReviewReadToolContracts({ state: s, save: () => {} });
+    const tools = readTools({ state: s, save: () => {} });
     const ac = new AbortController();
     ac.abort();
     await expect(
-      tools[0].execute({ path: "src/a.ts" } as any, { cwd: s.snapshot.worktree, signal: ac.signal }),
+      tools.review_metadata.execute({}, { cwd: s.snapshot.worktree, signal: ac.signal }),
     ).rejects.toThrow(/cancelled/);
   });
 });

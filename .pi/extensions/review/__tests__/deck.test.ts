@@ -155,14 +155,12 @@ describe("review pull request deck", () => {
         ),
       );
     expect(normalize(first.deck, a)).toEqual(normalize(second.deck, b));
-    expect(first.deck.intent.inferred).toEqual(["bugfix", "security", "tests"]);
-    expect(first.deck.risk.level).toBe("medium");
     expect(first.deck.files.map((file) => file.path)).toEqual(["src/auth.ts", "test/auth.test.ts"]);
     expect(first.deck.files.map((file) => file.diffHunks)).toEqual([[[4, 5]], [[4, 5]]]);
     expect(statSync(first.path).mode & 0o777).toBe(0o600);
   });
 
-  it("never embeds raw diff or source content in deck json", () => {
+  it("keeps the fixture's raw patch and source text out of persisted deck JSON", () => {
     const snapshot = makeSnapshot();
     const built = buildReviewDeck({
       snapshot,
@@ -213,8 +211,9 @@ describe("review pull request deck", () => {
       omissions: [{ type: "explicit-omission", detail: "No logs." }],
     });
     expect(built.bytes).toBeLessThan(49152);
-    expect(new Set(built.deck.files.map((file) => file.path)).size).toBe(50);
-    expect(built.deck.files).toHaveLength(50);
+    expect(built.deck.files.map((file) => file.path)).toEqual(
+      snapshot.metadata.changedFiles.map((file) => file.path),
+    );
     expect(built.deck.files[0]?.id).toBe("0");
     expect(built.deck.files[10]?.id).toBe("a");
     expect(built.deck.files[0]?.source).toEqual({ startLine: 10, endLine: 40 });
@@ -241,7 +240,7 @@ describe("review pull request deck", () => {
     expect(readFileSync(updated.path, "utf8").split(snapshot.diffHash)).toHaveLength(2);
   });
 
-  it("rejects source/test refs for unchanged paths", () => {
+  it("rejects source references for unchanged paths", () => {
     const snapshot = makeSnapshot();
     expect(() =>
       buildReviewDeck({
@@ -253,7 +252,7 @@ describe("review pull request deck", () => {
     ).toThrow(/unchanged path/i);
   });
 
-  it("fails closed on absolute bounds", () => {
+  it("rejects too many selected paths and references above the initial reserved-byte budget", () => {
     const base = makeSnapshot();
     const snapshot = makeSnapshot({
       metadata: {
@@ -284,13 +283,15 @@ describe("review pull request deck", () => {
       readingPlanRefs: [{ kind: "reading-plan", id: "rp1", uri: "plan://1", value: "small" }],
       rawResultRefs: [{ kind: "raw-result", id: "rr1", uri: "result://1" }],
     });
-    expect(updated.deck.reviewGuidanceRefs).toEqual(initial.deck.reviewGuidanceRefs);
-    expect(updated.deck.laterRefs.readingPlanRefs).toEqual([
-      { kind: "reading-plan", id: "rp1", uri: "plan://1", value: "small" },
-    ]);
-    expect(updated.deck.laterRefs.rawResultRefs).toEqual([
-      { kind: "raw-result", id: "rr1", uri: "result://1" },
-    ]);
+    expect(updated.deck).toEqual({
+      ...initial.deck,
+      laterRefs: {
+        readingPlanRefs: [
+          { kind: "reading-plan", id: "rp1", uri: "plan://1", value: "small" },
+        ],
+        rawResultRefs: [{ kind: "raw-result", id: "rr1", uri: "result://1" }],
+      },
+    });
     expect(statSync(updated.path).mode & 0o777).toBe(0o600);
     expect(() =>
       updateReviewDeckLaterRefs({

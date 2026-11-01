@@ -28,7 +28,7 @@ describe("duplicate analyzer behavior", () => {
     }),
   );
 
-  it.effect("finds equivalent test callbacks in nested groups without including setup callbacks", () =>
+  it.effect("matches normalized callback bodies in nested groups without including setup callbacks", () =>
     Effect.gen(function* () {
       const source = sourceFile(`
         describe("outer", () => {

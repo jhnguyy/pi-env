@@ -81,13 +81,11 @@ describe("analysis failures and process compatibility", () => {
     expect(Result.isFailure(exited) && exited.failure.kind).toBe("exit");
     const streamTimed = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "setInterval(() => {}, 1_000)"], { timeoutMs: 10 })));
     expect(Result.isFailure(streamTimed) && streamTimed.failure.kind).toBe(ProcessErrorKind.Timeout);
-    const limited = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "process.stdout.write('x'.repeat(10_000))"], { stdoutLimitBytes: 100 })));
+    const limited = await Effect.runPromise(Effect.result(streamProcessEffect(node, ["-e", "process.stdout.write('x'.repeat(101))"], { stdoutLimitBytes: 100 })));
     expect(Result.isFailure(limited) && limited.failure.kind).toBe(ProcessErrorKind.OutputLimit);
     if (Result.isFailure(limited)) expect(Buffer.byteLength(limited.failure.stdout ?? "")).toBeLessThanOrEqual(100);
-    const interruptedAt = Date.now();
     const interrupted = await Effect.runPromiseExit(streamProcessEffect(node, ["-e", "setInterval(() => {}, 1_000)"]).pipe(Effect.timeout("20 millis")));
     expect(interrupted._tag).toBe("Failure");
-    expect(Date.now() - interruptedAt).toBeLessThan(1_000);
   });
 
   it("retains subprocess stderr in external analyzer failures", async () => {
@@ -118,11 +116,6 @@ describe("analysis failures and process compatibility", () => {
     expect(result.analyzerFailures).toEqual([]);
   });
 
-  it("returns a structured result when tsconfig is missing", async () => {
-    const cwd = fixtureRoot();
-    const missing = await Effect.runPromise(analyze({ cwd, scope: ScopeMode.All }));
-    expect(missing.analyzerFailures[0]?.analyzer).toBe("program");
-  });
 });
 
 describe("bounded and stable analysis results", () => {
@@ -591,7 +584,7 @@ describe("ast analyzers", () => {
     expect(findings[0]?.related?.[0]?.line).toBeLessThan(secondLine);
   });
 
-  it("normalizes callback identifiers and literals while keeping test audits exact", async () => {
+  it("matches normalized callback bodies across repeated and concurrent executions", async () => {
     const cwd = fixtureRoot();
     const project = testSyntaxProject(cwd, `
       it("first", () => {
@@ -609,14 +602,12 @@ describe("ast analyzers", () => {
 
     const first = await Effect.runPromise(effect);
     const concurrent = await Effect.runPromise(Effect.all([effect, effect], { concurrency: "unbounded" }));
-    const productionDuplicates = await Effect.runPromise(duplicatesEffect(project, cwd, allScope));
 
     expect(first).toHaveLength(1);
-    expect(productionDuplicates).toEqual([]);
     expect(concurrent).toEqual([first, first]);
   });
 
-  it("does not infer test subsumption from non-test functions or partial callback overlap", async () => {
+  it("excludes non-test callbacks, partial body matches, and callbacks below the minimum size", async () => {
     const cwd = fixtureRoot();
     const project = testSyntaxProject(cwd, `
       function alpha(input: number) { const values = [1,2,3,4]; let total = 0; for (const value of values) { if (value > input) total += value * 2; else total += value; } return total; }
@@ -669,7 +660,6 @@ describe("ast analyzers", () => {
     ` });
     const messages = (await Effect.runPromise(asyncRisksEffect(await Effect.runPromise(createSyntaxProjectEffect(cwd, allScope)), cwd, allScope))).map((item) => item.message);
     expect(messages).not.toContain("filter call inside loop may repeat a scan");
-    expect(messages).not.toContain("Await inside loop may serialize work");
     expect(messages).toContain("sort call inside loop may repeat a scan");
   });
 

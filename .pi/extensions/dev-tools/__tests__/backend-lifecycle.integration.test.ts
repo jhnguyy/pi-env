@@ -56,7 +56,7 @@ function testBackend(countFile: string): LspBackend {
 }
 
 describe("LspBackend lifecycle", () => {
-  it("coalesces concurrent startup and shutdown, then restarts cleanly", async () => {
+  it("coalesces startup, completes concurrent shutdown calls, and restarts with reset semantic state", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-dev-tools-backend-"));
     const countFile = join(root, "starts");
     const backend = testBackend(countFile);
@@ -107,7 +107,7 @@ describe("LspBackend lifecycle", () => {
     }
   });
 
-  it("does not publish a child after shutdown overtakes startup", async () => {
+  it("immediate shutdown rejects startup without reporting a running backend", async () => {
     const backend = new LspBackend({
       mode: "lsp",
       name: "typescript",

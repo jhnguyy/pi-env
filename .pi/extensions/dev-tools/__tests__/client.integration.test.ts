@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import { it as effectIt } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ClientClosedError,
   ClientTransportError,
   LspClient,
   RequestTimeoutError,
@@ -199,7 +200,7 @@ describe("LspClient", () => {
       await expect(client.request({ action: "status" })).rejects.toThrow("Client closed");
     });
 
-    it("rejects active Promise requests synchronously on close without a coordination sleep", async () => {
+    it("close rejects active Promise requests and releases their resources without a coordination sleep", async () => {
       let markWritten!: () => void;
       const written = new Promise<void>((resolve) => {
         markWritten = resolve;
@@ -510,9 +511,15 @@ describe("LspClient", () => {
         yield* Deferred.await(bothWritten);
 
         client.close();
-        const exits = yield* Effect.forEach(requests, Fiber.await);
+        const errors = yield* Effect.forEach(requests, (request) =>
+          Fiber.join(request).pipe(Effect.flip),
+        );
 
-        expect(exits.every(Exit.isFailure)).toBe(true);
+        expect(errors).toHaveLength(requests.length);
+        for (const error of errors) {
+          expect(error).toBeInstanceOf(ClientClosedError);
+          expect(error.message).toBe("Client closed");
+        }
         expect(client.pendingRequestCount).toBe(0);
         expect(client.activeRequestTimerCount).toBe(0);
         expect(client.connectionWaiterCount).toBe(0);
@@ -574,12 +581,18 @@ describe("LspClient", () => {
           yield* waitUntil(() => client.connectionWaiterCount === requests.length);
 
           client.close();
-          const exits = yield* Effect.forEach(requests, Fiber.await);
+          const errors = yield* Effect.forEach(requests, (request) =>
+            Fiber.join(request).pipe(Effect.flip),
+          );
           yield* waitUntil(
             () => socket.listenerCount("connect") === 0 && socket.listenerCount("error") === 0,
           );
 
-          expect(exits.every(Exit.isFailure)).toBe(true);
+          expect(errors).toHaveLength(requests.length);
+          for (const error of errors) {
+            expect(error).toBeInstanceOf(ClientClosedError);
+            expect(error.message).toBe("Client closed");
+          }
           expect(client.connectionWaiterCount).toBe(0);
           expect(client.pendingRequestCount).toBe(0);
           expect(client.activeRequestTimerCount).toBe(0);
@@ -629,6 +642,7 @@ describe("LspClient", () => {
         );
 
         expect(errors.every((error) => error instanceof ClientTransportError)).toBe(true);
+        expect(errors.every((error) => error instanceof Error)).toBe(true);
         expect(
           errors.every(
             (error) => error.message === (event === "error" ? "socket boom" : "Socket closed"),
@@ -666,9 +680,4 @@ describe("LspClient", () => {
     });
   });
 
-  it("keeps transport failures as typed operational errors", () => {
-    const error = new ClientTransportError({ message: "boom" });
-    expect(error).toBeInstanceOf(Error);
-    expect(error.message).toBe("boom");
-  });
 });

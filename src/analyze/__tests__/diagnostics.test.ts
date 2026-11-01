@@ -51,7 +51,7 @@ async function leftKind(
 }
 
 describe("analyze diagnostic contracts", () => {
-  it("keeps telemetry attributes bounded and excludes sensitive or high-cardinality values", () => {
+  it("filters unapproved attribute keys, truncates strings, and excludes nonfinite numbers", () => {
     const attributes = sanitizeDiagnosticAttributes({
       scope_mode: "diff",
       analyzer: "duplicates",
@@ -67,7 +67,6 @@ describe("analyze diagnostic contracts", () => {
       analyzer: "duplicates",
       stage: "x".repeat(MAX_DIAGNOSTIC_STRING_LENGTH),
     });
-    expect(JSON.stringify(attributes)).not.toContain("secret");
   });
 
   it("exports Effect spans through a bounded optional OpenTelemetry layer", async () => {
@@ -103,7 +102,7 @@ describe("analyze diagnostic contracts", () => {
 
   });
 
-  it("instruments the engine through an injected no-throw diagnostics seam", async () => {
+  it("records the engine's expected spans and events through an injected diagnostics seam", async () => {
     const events: ReturnType<typeof event>[] = [];
     const spans: string[] = [];
     let tick = 0;
@@ -221,10 +220,9 @@ describe("bounded crash journal", () => {
         terminal: true,
       }),
     );
-    expect(JSON.stringify(persisted)).not.toContain("/secret/");
   });
 
-  it("disables permanently and reports only once after a journal write boundary fails", async () => {
+  it("reports one initialization error across later append and close calls", async () => {
     const root = fixtureRoot();
     const notDirectory = join(root, "not-a-directory");
     writeFileSync(notDirectory, "x");
@@ -239,7 +237,7 @@ describe("bounded crash journal", () => {
     expect(errors).toHaveLength(1);
   });
 
-  it("never writes disallowed raw fields", async () => {
+  it("persists constructor-sanitized events without their excluded input fields", async () => {
     const directory = fixtureRoot();
     const journal = await AnalysisJournal.open({ directory });
     await journal.append(

@@ -184,7 +184,7 @@ emit({ version: 1, type: "complete", runId: request.runId });`,
     await waitFor(() => !isAlive(descendantPid));
   });
 
-  it("kills a worker that exceeds cumulative output bounds", async () => {
+  it("reports a cumulative-output-limit failure from a worker", async () => {
     const cwd = fixtureRoot();
     const worker = writeWorker(
       cwd,
