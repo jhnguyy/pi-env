@@ -38,6 +38,13 @@
       apps = nixpkgs.lib.mapAttrs (_: outputs: outputs.apps) perSystem;
       checks = nixpkgs.lib.mapAttrs (_: outputs: outputs.checks) perSystem;
       devShells = nixpkgs.lib.mapAttrs (_: outputs: outputs.devShells) perSystem;
+      lib.themes.gruvbox = {
+        palettes = builtins.mapAttrs (_: file: (builtins.fromJSON (builtins.readFile file)).vars) {
+          dark = ./themes/gruvbox-dark.json;
+          light = ./themes/gruvbox-light.json;
+        };
+        ghostty.theme = "light:${self}/ghostty/themes/pi-env-gruvbox-light,dark:${self}/ghostty/themes/pi-env-gruvbox-dark";
+      };
       homeManagerModules.default = import ./nix/home-manager.nix {
         inherit self;
         inherit (toolchain) packagesFor;
