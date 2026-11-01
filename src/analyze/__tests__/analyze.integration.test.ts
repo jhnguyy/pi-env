@@ -874,12 +874,14 @@ describe("explicit path scope integrity and bounds", () => {
 describe("duplicate canonicalization bounds", () => {
   it("skips duplicate candidates that exceed canonicalization bounds", async () => {
     const cwd = fixtureRoot();
-    const expression = `${"value + ".repeat(6_000)}1`;
+    const expression = `${"value + ".repeat(20_000)}1`;
     const source = ts.createSourceFile(
       join(cwd, "src/huge.ts"),
       `const value = 1;
        export function first() { return ${expression}; }
-       export function second() { return ${expression}; }`,
+       export function second() { return ${expression}; }
+       it("first", () => { return ${expression}; });
+       it("second", () => { return ${expression}; });`,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
@@ -888,5 +890,9 @@ describe("duplicate canonicalization bounds", () => {
       duplicatesEffect({ files: [source], testFiles: [] }, cwd, allScope),
     );
     expect(findings).toEqual([]);
+    const testFindings = await Effect.runPromise(
+      testDuplicatesEffect({ files: [], testFiles: [source] }, cwd, allScope),
+    );
+    expect(testFindings).toEqual([]);
   });
 });
