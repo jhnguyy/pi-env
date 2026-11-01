@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import ts from "typescript";
 import { Effect, Result } from "effect";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { asyncRisksEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
+import { DUPLICATE_CANONICAL_CAPS, asyncRisksEffect, duplicatesEffect, similarTypesEffect, testDuplicatesEffect } from "../analyzers.js";
 import { runBenchmarkEffect } from "../benchmark.js";
 import { analyze, analyzeEffect } from "../engine.js";
 import { bundleAnalyzerEffect, dependencyAnalyzerEffect, discoverExtensionEntrypointsEffect, eslintAnalyzerEffect, normalizeBundleMetafile, parseDependencyCruiserJson, parseKnipOutput, parseOxlintJson } from "../external.js";
@@ -872,16 +872,23 @@ describe("explicit path scope integrity and bounds", () => {
 });
 
 describe("duplicate canonicalization bounds", () => {
-  it("skips duplicate candidates that exceed canonicalization bounds", async () => {
+  it("reports duplicates at the node cap and skips candidates just beyond it", async () => {
     const cwd = fixtureRoot();
-    const expression = `${"value + ".repeat(20_000)}1`;
+    // Each increment contributes three AST nodes; the body block contributes one.
+    const statements = Math.floor((DUPLICATE_CANONICAL_CAPS.nodesPerFunction - 1) / 3);
+    const body = "value++;\n".repeat(statements);
+    const oversizedBody = `${body}value++;`;
     const source = ts.createSourceFile(
-      join(cwd, "src/huge.ts"),
-      `const value = 1;
-       export function first() { return ${expression}; }
-       export function second() { return ${expression}; }
-       it("first", () => { return ${expression}; });
-       it("second", () => { return ${expression}; });`,
+      join(cwd, "src/bounded.ts"),
+      `let value = 1;
+       export function first() { ${body} }
+       export function second() { ${body} }
+       export function oversizedFirst() { ${oversizedBody} }
+       export function oversizedSecond() { ${oversizedBody} }
+       it("first", () => { ${body} });
+       it("second", () => { ${body} });
+       it("oversized first", () => { ${oversizedBody} });
+       it("oversized second", () => { ${oversizedBody} });`,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TS,
@@ -889,10 +896,12 @@ describe("duplicate canonicalization bounds", () => {
     const findings = await Effect.runPromise(
       duplicatesEffect({ files: [source], testFiles: [] }, cwd, allScope),
     );
-    expect(findings).toEqual([]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].related).toHaveLength(3);
     const testFindings = await Effect.runPromise(
       testDuplicatesEffect({ files: [], testFiles: [source] }, cwd, allScope),
     );
-    expect(testFindings).toEqual([]);
+    expect(testFindings).toHaveLength(1);
+    expect(testFindings[0].related).toHaveLength(1);
   });
 });

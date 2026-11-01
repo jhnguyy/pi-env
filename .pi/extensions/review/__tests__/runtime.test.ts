@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ function state(): ReviewState {
   const root = mkdtempSync(join(tmpdir(), "pi-pr-review-root-"));
   temps.push(root);
   mkdirSync(join(root, "src"));
-  writeFileSync(join(root, "src", "a.ts"), `${"x".repeat(6000)}\nneedle\n`);
+  writeFileSync(join(root, "src", "a.ts"), `${"x".repeat(4_001)}\nneedle\n`);
   const artifact = mkdtempSync(join(tmpdir(), "pi-pr-review-art-"));
   temps.push(artifact);
   const diffPath = join(artifact, "diff.patch");
@@ -58,7 +58,7 @@ describe("review pull request run-scoped tools", () => {
     writeFileSync(s.snapshot.diffPath, "tampered");
     expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/integrity/);
 
-    writeFileSync(s.snapshot.diffPath, Buffer.alloc(8_000_001));
+    truncateSync(s.snapshot.diffPath, 8_000_001);
     expect(() => readVerifiedPinnedDiff(s.snapshot)).toThrow(/exceeds/);
 
     rmSync(s.snapshot.diffPath);
@@ -85,14 +85,11 @@ describe("review pull request run-scoped tools", () => {
         )) as any
       ).content[0].text,
     ).toContain("No matches");
-    expect(
-      (
-        (await tools.review_read.execute(
-          { path: "src/a.ts" } as any,
-          { cwd: s.snapshot.worktree },
-        )) as any
-      ).content[0].text.length,
-    ).toBeLessThan(13000);
+    const read = await tools.review_read.execute(
+      { path: "src/a.ts" } as any,
+      { cwd: s.snapshot.worktree },
+    ) as any;
+    expect(read.content[0].text).toBe(`${"x".repeat(4_000)}…\nneedle\n`);
     expect(
       (
         (await tools.review_diff.execute(

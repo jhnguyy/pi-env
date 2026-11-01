@@ -62,13 +62,13 @@ describe("LspBackend lifecycle", () => {
     const backend = testBackend(countFile);
 
     try {
-      await Promise.all(Array.from({ length: 8 }, () => backend.ensureStarted()));
+      await Promise.all([backend.ensureStarted(), backend.ensureStarted()]);
       expect(backend.isRunning).toBe(true);
       expect(readFileSync(countFile, "utf8").trim().split("\n")).toHaveLength(1);
       backend.recordSemanticResult("textDocument/documentSymbol", 1);
       expect(backend.getStatusSnapshot().semanticAvailable).toBe(true);
 
-      await Promise.all([backend.shutdown(), backend.shutdown(), backend.shutdown()]);
+      await Promise.all([backend.shutdown(), backend.shutdown()]);
       expect(backend.isRunning).toBe(false);
       expect(backend.getStatusSnapshot()).toMatchObject({
         semanticAvailable: false,

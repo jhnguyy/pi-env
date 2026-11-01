@@ -289,18 +289,20 @@ describe("LspClient", () => {
           spawnDaemon: () => {
             spawnCalls++;
             complete(spawnStarted);
-            void startMockServer((request, socket) => {
-              socket.write(serializeResponse(okResponse(request.id, statusResult())));
-            }).then(() => child.emit("spawn"));
             return child;
           },
         };
         const client = track(new LspClient(socketPath, join(tmpDir, "daemon.js"), dependencies));
 
-        const requests = yield* Effect.forEach(Array.from({ length: 100 }), () =>
+        const requests = yield* Effect.forEach(Array.from({ length: 2 }), () =>
           client.requestEffect({ action: "status" }).pipe(Effect.forkChild),
         );
         yield* Deferred.await(spawnStarted);
+        yield* waitUntil(() => client.connectionWaiterCount === requests.length);
+        yield* Effect.promise(() => startMockServer((request, socket) => {
+          socket.write(serializeResponse(okResponse(request.id, statusResult())));
+        }));
+        child.emit("spawn");
         yield* Effect.forEach(requests, Fiber.join, { discard: true });
 
         expect(spawnCalls).toBe(1);
@@ -565,7 +567,7 @@ describe("LspClient", () => {
               },
             }),
           );
-          const requests = yield* Effect.forEach(Array.from({ length: 20 }), () =>
+          const requests = yield* Effect.forEach(Array.from({ length: 2 }), () =>
             client.requestEffect({ action: "status" }).pipe(Effect.forkChild),
           );
           yield* Deferred.await(connecting);

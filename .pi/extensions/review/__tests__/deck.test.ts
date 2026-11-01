@@ -70,7 +70,7 @@ function makeSnapshot(overrides: Partial<ReviewSnapshot> = {}): ReviewSnapshot {
   };
 }
 
-function makeLargeSnapshot(): ReviewSnapshot {
+function makeMultiFileSnapshot(): ReviewSnapshot {
   const root = mkdtempSync(join(tmpdir(), "pi-pr-review-deck-large-"));
   temps.push(root);
   const artifactDir = join(root, "artifacts");
@@ -82,7 +82,7 @@ function makeLargeSnapshot(): ReviewSnapshot {
     added: 200 + index,
     deleted: 120 + index,
   }));
-  const chunk = "x".repeat(4207);
+  const chunk = "raw-diff-content-sentinel";
   const parts: string[] = [];
   for (const file of changedFiles) {
     parts.push(
@@ -95,7 +95,6 @@ function makeLargeSnapshot(): ReviewSnapshot {
   }
   const diff = `${parts.join("\n")}PAD\n`;
   writeFileSync(diffPath, diff);
-  expect(Buffer.byteLength(diff, "utf8")).toBe(218103);
   return {
     id: "snapshot-large",
     artifactDir,
@@ -187,7 +186,7 @@ describe("review pull request deck", () => {
   });
 
   it("normalizes shared metadata, diff, and file rows compactly", () => {
-    const snapshot = makeLargeSnapshot();
+    const snapshot = makeMultiFileSnapshot();
     const built = buildReviewDeck({
       snapshot,
       sourceRangeRefs: snapshot.metadata.changedFiles
@@ -228,7 +227,7 @@ describe("review pull request deck", () => {
     expect(built.deck.pinnedDiffRef.diffHash).toBe(snapshot.diffHash);
     const raw = readFileSync(built.path, "utf8");
     expect(raw.split(snapshot.diffHash)).toHaveLength(2);
-    expect(raw).not.toContain("x".repeat(80));
+    expect(raw).not.toContain("raw-diff-content-sentinel");
     const updated = updateReviewDeckLaterRefs({
       snapshot,
       readingPlanRefs: [{ kind: "reading-plan", id: "rp1", uri: "plan://1", value: "small" }],

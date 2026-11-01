@@ -90,7 +90,7 @@ const changed = (scope: Scope, value: Location): boolean =>
   || scope.files.includes(value.path)
     && intersectsHunks(value.line, value.endLine ?? value.line, scope.hunks.get(value.path));
 
-const DUPLICATE_CANONICAL_CAPS = {
+export const DUPLICATE_CANONICAL_CAPS = {
   nodesPerFunction: 10_000,
   bytesPerFunction: 256 * 1024,
   minimumNodeCount: 40,
