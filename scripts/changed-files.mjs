@@ -10,7 +10,7 @@ export function changedFiles({ cwd = process.cwd(), base, env = process.env } = 
     mergeBase = git("merge-base", ref, "HEAD").trim();
   } catch {
     throw new Error(
-      `Cannot resolve change base ${ref}. Fetch it explicitly or pass --base <ref>; use --full for a source snapshot.`,
+      `Cannot resolve change base ${ref}. Fetch it explicitly or pass --base <ref>. For a source snapshot, use nub run verify:full in an environment with adequate capacity.`,
     );
   }
   // No rename detection: both the old and new ownership boundaries must be considered.

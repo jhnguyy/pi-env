@@ -5,56 +5,34 @@ description: Design verification and select behavioral checks, test doubles, and
 
 # Testing Practices
 
-Read the repository's testing policy and requirements before selecting checks. Use this method during design, not only after code exists.
+Tests are evidence about intended behavior, not a record of how an implementation happens to work. Start with the change's risks and the observation that would distinguish success from a plausible failure. Use the repository's guidance to understand its contracts and available checks.
 
-## Define what the evidence must establish
+## Choose the evidence boundary
 
-Derive expected outcomes from requirements and supported contracts, not implementation details. Identify the observable result that distinguishes success from failure.
+Workflow tests are valuable when correctness depends on components working together. Focused tests are valuable when they make policy, edge cases, or operational failures cheaper and clearer to exercise. Choose by the question being answered, rather than requiring every feature to follow the same test hierarchy.
 
-If readiness, completion, cleanup, or cancellation has no defined meaning, resolve the production contract before writing assertions. A test should verify that contract, not invent it.
+Prefer existing coverage and fixtures when they can establish the changed contract. An additional boundary should catch a distinct failure or resolve uncertainty that existing evidence leaves open. A test that repeats an assertion through a different helper does not necessarily increase confidence; a test that catches a broken integration can be useful even when the underlying logic is already covered.
 
-Distinguish evidence of an intermediate action from evidence of the claimed outcome. A recorded call proves arrival, not that its result was used.
+Establish expectations independently of the implementation. For a regression, reproduce the reported failure when practical before changing the code. For new behavior, work through meaningful success and failure cases early enough to influence the design. If readiness, cancellation, or completion is ambiguous, resolve the production contract rather than letting the test invent it.
 
-## Select coverage
+## Make scenarios informative
 
-This skill defaults to E2E-first verification. Exercise the workflow people use and check its final result. Prefer E2E as the only behavioral test layer where it can establish the required contracts reliably. Follow explicit repository requirements.
+Control incidental time, randomness, and external behavior when they obscure the result. Use real conditions when those conditions are the behavior under test. Prefer explicit readiness and completion signals over elapsed-time assumptions; a watchdog limits a stalled test but does not prove the expected outcome occurred.
 
-Reuse existing checks. Add a check only when it detects a contract violation that existing checks cannot detect. Similar outcomes do not make checks redundant. Show that each new check fails when its target contract is violated.
+Keep scenarios independently understandable. Shared setup can reduce expensive initialization, but shared mutable state can conceal ordering dependencies. Parameterization helps when the same scenario has clear input and outcome variations; separate scenarios often explain different workflows better.
 
-Add isolated tests only for failures that E2E cannot exercise reliably:
+Observe results after the relevant boundary has completed. A recorded call proves that a request arrived, not that its result was used. An abort request proves less than the promised termination or external effect. Assertions should make that distinction visible.
 
-1. Identify the E2E coverage gap.
-2. List the failure modes and expected outcomes.
-3. Write failing tests before the corresponding production code. For existing code, reproduce the failure before changing it.
+## Use realistic collaborators deliberately
 
-## Control the scenario
+Keep inexpensive, deterministic local components real where that helps establish the contract. Substitute external services, credentials, nondeterminism, or hard-to-induce failures at an existing boundary. State what the substitute cannot establish and obtain real-adapter evidence where compatibility or lifecycle behavior depends on it.
 
-Control incidental time, randomness, and external behavior when they would obscure the result. Use real conditions when those conditions are the behavior under test.
+Use the framework's lifecycle, scheduling, and test services when they fit. Resource ownership should remain clear through failed startup, cancellation, and teardown failure. A test must not leave work running merely because an assertion failed; cleanup should attempt independent releases and preserve useful failure information.
 
-Coordinate concurrent work through explicit readiness or completion signals rather than arbitrary delays. Keep independent scenarios isolated, while deliberately exercising sharing when shared behavior is part of the contract.
+## Maintain confidence and cost
 
-Assert lifecycle outcomes after the relevant completion boundary. To establish cleanup, observe release after the owner's lifecycle ends. To establish cancellation, observe the promised termination or external outcome rather than only the request to cancel.
+Review coverage by failure mode before deleting or combining tests. Preserve distinct safety, compatibility, integrity, and expected-failure evidence. Retire assertions for retired requirements, and distinguish temporary diagnostic checks from independently justified regressions. Follow repository rules for retaining those experiments.
 
-Use the framework's native facilities where they fit. Retrieve library-specific guidance for virtual time, scheduling, resource teardown, and asynchronous completion.
+Consider startup time, peak resource use, subprocess count, and diagnostic quality when choosing a check. A narrow test with real lifecycle behavior may be more expensive than many pure cases. Measure consequential performance changes rather than treating fewer tests or fewer workers as proof of lower cost.
 
-## Choose and verify test doubles
-
-Run local, deterministic components with synthetic data, including binaries, files, parsers, and in-process services.
-
-Reserve doubles for external services, credentials, time, randomness, unavailable platform APIs, or failures that cannot otherwise be induced. Replace dependencies at an existing integration boundary rather than patching internal methods. Prefer injected seams and fakes, and use real implementations for internal collaborators.
-
-For each double, identify a contract test, sandbox run, or recorded response that checks its assumptions about the real dependency. State what the double cannot establish.
-
-Label tests that capture current third-party behavior as change detectors, not requirements.
-
-## Retain current contracts
-
-Delete assertions and fixtures that serve only retired requirements. Keep coverage for current outcomes, compatibility, integrity, and expected failures.
-
-Before removing safety coverage, verify that replacement evidence detects violations of the same contracts. Keep regression tests for current contracts. Leave temporary catching tests uncommitted.
-
-## Leave reproducible evidence
-
-For each run, record inputs, expected and actual results, and instructions to reproduce and check the run. Use CI logs or uploaded artifacts when CI can run the check. Keep local artifacts for checks CI cannot run.
-
-Preserve failure evidence. Follow repository privacy and storage policy.
+Leave enough information to reproduce and assess the result: the relevant inputs, expected outcome, actual outcome, and environment constraints. CI logs are often sufficient. Retain artifacts when they expose evidence logs cannot, especially on failure, and follow local privacy and storage policy.

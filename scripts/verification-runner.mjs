@@ -1,40 +1,27 @@
 import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 
-function formatPhase(phase) {
-  return phase.skip
-    ? `${phase.id}: ${phase.label} — skipped (${phase.skip})`
-    : `${phase.id}: ${phase.label} — ${[phase.command, ...phase.args].join(" ")}`;
+export function listPlan(steps) {
+  return steps.map(({ label, command, args }) => `${label}: ${[command, ...args].join(" ")}`);
 }
 
-export function listPlan(phases) {
-  return phases.map(formatPhase);
-}
-
-export function runPlan(phases, options = {}) {
-  const name = options.name ?? "verify";
-  const log = options.log ?? console.log;
-  const logError = options.logError ?? console.error;
-  for (const phase of phases) {
-    if (phase.skip) {
-      log(`\n==> ${phase.label} (skipped: ${phase.skip})`);
-      continue;
-    }
-    log(`\n==> ${phase.label}`);
+export function runPlan(steps) {
+  for (const { label, command, args } of steps) {
+    console.log(`\n==> ${label}`);
     const startedAt = performance.now();
-    const result = spawnSync(phase.command, phase.args, { stdio: "inherit" });
+    const result = spawnSync(command, args, { stdio: "inherit" });
     const elapsedMs = Math.max(0, Math.round(performance.now() - startedAt));
     if (result.error) {
-      logError(
-        `${name}: ${phase.label} failed to start after ${elapsedMs} ms: ${result.error.message}`,
+      console.error(
+        `verify: ${label} failed to start after ${elapsedMs} ms: ${result.error.message}`,
       );
       return 1;
     }
     if (result.status !== 0) {
-      logError(`${name}: ${phase.label} failed after ${elapsedMs} ms (exit ${result.status ?? 1})`);
+      console.error(`verify: ${label} failed after ${elapsedMs} ms (exit ${result.status ?? 1})`);
       return result.status ?? 1;
     }
-    log(`<== ${phase.label} passed in ${elapsedMs} ms`);
+    console.log(`<== ${label} passed in ${elapsedMs} ms`);
   }
   return 0;
 }

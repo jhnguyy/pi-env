@@ -28,6 +28,6 @@ Host profile activation, builder access, and binary-cache trust belong in the co
 
 ## Validation
 
-Inspect available outputs with `nix flake show` and run `nix flake check` for package and setup checks. Run the [repository verification portfolio](../scripts/verification-phases.mjs) for dependency-backed workflows.
+Inspect available outputs with `nix flake show` and run `nix flake check` for package and setup checks. See [contribution guidance](../CONTRIBUTING.md#verification) for dependency-backed verification.
 
 Use isolated homes and agent directories for setup validation. Do not activate a live host profile or reset live settings to validate a contribution.

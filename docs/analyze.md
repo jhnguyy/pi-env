@@ -1,72 +1,45 @@
 # Analyze
 
-> **Safe mode:** public Analyze uses a detached, bounded worker supervisor. The parent never loads the engine, TypeScript, or program implementation. Safe requests use diff scope or non-empty explicit paths with an explicit non-empty subset of `async-risk,duplicates,test-duplicates`. Only diff scope accepts a base ref. Only paths scope accepts paths. Syntax inputs are capped at 1,024 files, 256 KiB per file, and 2 MiB total before parsing. Duplicate checks compare only their selected diff or path corpus. Use explicit path `.` for the bounded whole-source corpus.
->
-> All scope, semantic type, eslint, dependency, knip, bundle, benchmark, profiling, and `all` requests require strict OS containment. This runtime has no strict containment adapter, so those requests are refused before a worker is spawned. A process group and heap flag are cleanup limits. They are not containment.
+Analyze provides targeted syntax evidence for code review. Its findings help locate repeated work and structurally similar implementations or tests; they do not establish that code is defective or that one test can safely replace another.
 
-Safe examples:
+## Choose a useful scope
 
-```sh
-nub run analyze -- --diff --checks async-risk
-nub run analyze -- --checks async-risk src/analyze/policy.ts
-nub run analyze -- --checks duplicates .
-nub run analyze -- --checks test-duplicates .pi/extensions
-```
-
-## Built-in lint sensors
-
-Oxlint owns cyclomatic complexity and awaits inside loops. Run `nub run lint:sensors .` for advisory warnings, or supply source paths instead of `.`. The [sensor config](../.oxlintrc-sensors.json) keeps these checks separate from strict type-aware lint. Tests, generated output, and the vendored lint plugin are excluded.
-
-`nub run sensors` runs Oxlint across production source, then runs Analyze's repeated-scan check on the diff. Analyze retains `async-risk` for repeated scans inside loops. It no longer reports awaits or accepts the `complexity` check. The custom cognitive-complexity score is retired.
-
-The complexity threshold remains 15. Oxlint's branch counting differs from the retired custom implementation. `nub run verify --checks-only` gates complexity in complete changed and untracked source files, not only functions that intersect diff hunks. Unchanged files do not enter that gate. Await warnings remain advisory.
-
-For intentional sequential awaits, use a native suppression immediately before the await:
-
-```ts
-// oxlint-disable-next-line no-await-in-loop -- These writes must remain ordered.
-await writeNext();
-```
-
-The former `analyze: allow-sequential` marker no longer suppresses findings. Oxlint runs directly through repository scripts, not through Analyze's safe worker. Analyze's containment requirements do not change.
-
-## Test portfolio audits
-
-The `duplicates` check excludes test files. The `test-duplicates` check scans selected `__tests__` directories and `*.test.*` or `*.spec.*` JavaScript and TypeScript files. It compares inline `it` and `test` callback bodies, including modifier and `each` forms.
-
-`test-duplicates` reports exact structural matches after identifier and literal normalization. It does not report shared setup, statement-prefix overlap, repeated assertion text alone, or small callbacks below the duplicate-analysis threshold. A finding identifies a review candidate. It does not prove that one test subsumes another. Apply the [testing composition rules](conventions/testing.md) before pruning a test.
-
-`check:quality` is intentionally absent from normal and safe verification plans until strict containment exists. Use source-owned verification scripts instead:
-
-- [`package.json#scripts`](../package.json)
-- [`scripts/verification-phases.mjs`](../scripts/verification-phases.mjs)
-- [`scripts/verification-runner.mjs`](../scripts/verification-runner.mjs)
-
-## Containment rationale
-
-Process groups guarantee descendant cleanup but are not aggregate memory/PID containment. Node old-space limits do not cover every native/external allocation. Safe syntax budgets are portable workload bounds for a stable local worktree, not a filesystem security sandbox against concurrent mutation. Strict requests therefore remain unavailable until a real cgroup/container/job adapter enforces aggregate limits.
-
-Await-in-loop warnings are review signals, not automatic defects. Benchmark runs and bundle entries may intentionally remain sequential when concurrency would distort measurements or increase peak memory.
-
-## User-facing configuration
-
-OTLP trace export is off by default. Enabling it requires both:
+Start with the change or a small set of relevant paths:
 
 ```sh
-PI_ENV_ANALYZE_OTEL_ENABLED=true
-PI_ENV_ANALYZE_OTEL_ENDPOINT=http://collector:4318
+nub run analyze --diff --checks async-risk
+nub run analyze --checks duplicates src/analyze/policy.ts
+nub run analyze --checks test-duplicates .pi/extensions/review/__tests__
 ```
 
-Analyze never emits the endpoint as telemetry.
+Diff scope can use a comparison ref; explicit paths describe a separate scope. Directory paths expand the selected corpus, so even a bounded request can be broader than useful feedback requires. Duplicate analysis compares only the selected corpus: absence of a finding is not evidence that no similar code exists elsewhere.
 
-The supervisor writes a bounded NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze` or `~/.local/state/pi-env/analyze`. Override that path with `PI_ENV_ANALYZE_JOURNAL_DIR`. Set `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it.
+`async-risk` looks for repeated scans inside loops. `duplicates` examines production code; `test-duplicates` examines test callback bodies, including parameterized and modifier forms. A structural match is a candidate for investigation, not proof of equivalent requirements. Similar tests may protect different boundaries, while expensive shared setup may be worth improving without removing any assertions.
 
-## Source navigation
+## Understand the safety boundary
 
-- CLI entrypoint: [`scripts/analyze.ts`](../scripts/analyze.ts)
-- Public boundary: [`src/analyze/public.ts`](../src/analyze/public.ts)
-- Policy and containment decisions: [`src/analyze/policy.ts`](../src/analyze/policy.ts)
-- Syntax projects and analyzers: [`src/analyze/program.ts`](../src/analyze/program.ts), [`src/analyze/analyzers.ts`](../src/analyze/analyzers.ts)
-- Supervisor and protocol: [`src/analyze/supervisor.ts`](../src/analyze/supervisor.ts), [`src/analyze/protocol.ts`](../src/analyze/protocol.ts)
-- Diagnostics, journal, telemetry: [`src/analyze/diagnostics.ts`](../src/analyze/diagnostics.ts), [`src/analyze/journal.ts`](../src/analyze/journal.ts), [`src/analyze/otel.ts`](../src/analyze/otel.ts)
-- Analyze extension: [`.pi/extensions/analyze`](../.pi/extensions/analyze)
+The public entrypoint admits bounded syntax requests to a supervised worker. Workload limits apply before parsing as well as to worker execution and output; [the policy](../src/analyze/policy.ts) owns the supported capabilities and current limits.
+
+Requests needing semantic type analysis, external analyzers, profiling, or other strict capabilities are refused because this runtime has no strict OS-containment adapter. A package script that requests one of those capabilities does not bypass that restriction. In particular, broad `all` scope is different from a directory path selected for bounded syntax analysis.
+
+Process-group signalling helps stop members of the owned group, but cannot guarantee control of descendants that detach from it. Node heap limits do not cover all native or external allocations. Neither mechanism provides an aggregate memory or process boundary. The syntax budgets also do not make a changing worktree a filesystem security sandbox.
+
+Treat a refused request as a missing operating capability, not a reason to bypass the public boundary. Strict work needs an environment that can enforce the aggregate limits it relies on.
+
+## Interpret signals in context
+
+Oxlint owns the repository's complexity and await-in-loop sensors; [its configuration](../.oxlintrc-sensors.json) defines their scope and thresholds. `nub run lint:sensors <paths>` reports those signals without asking Analyze to load a type program. [Contribution guidance](../CONTRIBUTING.md#verification) explains how they participate in verification.
+
+An await inside a loop may preserve ordering, bound resource use, or keep a benchmark meaningful. Investigate the work and its constraints before changing concurrency. When a warning is intentionally suppressed, explain that constraint at the relevant operation rather than merely restating the warning.
+
+Likewise, investigate a duplicate-test finding by comparing the failure each scenario exposes. Shared syntax, setup, or assertions are not enough to justify pruning safety coverage. See [testing guidance](conventions/testing.md) for that judgment.
+
+## Diagnostics and privacy
+
+The supervisor keeps a bounded local NDJSON journal under `$XDG_STATE_HOME/pi-env/analyze`, or `~/.local/state/pi-env/analyze` when that variable is absent. Use `PI_ENV_ANALYZE_JOURNAL_DIR` to choose another location or `PI_ENV_ANALYZE_JOURNAL_ENABLED=false` to disable it. Preserve relevant failure evidence before rerunning work that may replace it, and review diagnostic files before sharing them.
+
+OTLP trace export is off by default. Enable it by setting both `PI_ENV_ANALYZE_OTEL_ENABLED=true` and `PI_ENV_ANALYZE_OTEL_ENDPOINT` to the intended collector. The endpoint is not emitted as telemetry.
+
+## Maintaining Analyze
+
+The [CLI](../scripts/analyze.ts) and [public boundary](../src/analyze/public.ts) connect requests to the [policy](../src/analyze/policy.ts) and [supervisor](../src/analyze/supervisor.ts). The [syntax project loader](../src/analyze/program.ts) and [analyzers](../src/analyze/analyzers.ts) define the evidence produced. Keep operating guidance focused on interpreting that evidence and its limits rather than duplicating their implementation.

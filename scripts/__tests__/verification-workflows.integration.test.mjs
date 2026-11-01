@@ -22,7 +22,6 @@ const git = (cwd, ...args) =>
     cwd,
     stdio: "pipe",
   });
-const quiet = { log: () => {}, logError: () => {} };
 const complexSource = `export function complex(value: number) {\n${Array.from({ length: 14 }, (_, i) => `if (value === ${i}) return ${i};`).join("\n")}\nreturn -1;\n}\n`;
 const format = (file) =>
   execFileSync(join(repo, "scripts/tool-node-run.sh"), [
@@ -74,15 +73,15 @@ const it = test.extend({
       git(root, "add", ".");
       git(root, "commit", "-m", "baseline");
       git(root, "checkout", "-b", "feature");
-      const verify = (args = []) =>
+      const run = (script, args = []) =>
         Effect.runPromise(
-          runProcess("nub", ["--no-env-file", "run", "verify", ...args], {
+          runProcess("nub", ["--no-env-file", "run", script, ...args], {
             cwd: root,
             env,
             timeoutMs: 40_000,
           }),
         );
-      await use({ root, verify });
+      await use({ root, run, verify: (args = []) => run("verify", args) });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -91,7 +90,6 @@ const it = test.extend({
 
 function phase(id, marker, exitCode) {
   return {
-    id,
     label: id,
     command: node,
     args: [
@@ -108,20 +106,17 @@ it("stops sequential verification at failure and preserves its exit status", asy
   workspace,
 }) => {
   const marker = join(workspace.root, "completed-phases");
-  expect(runPlan([phase("first", marker, 7), phase("second", marker, 0)], quiet)).toBe(7);
+  expect(runPlan([phase("first", marker, 7), phase("second", marker, 0)])).toBe(7);
   expect(await readFile(marker, "utf8")).toBe("first\n");
 });
 
 it("stops when a phase cannot start", async ({ workspace }) => {
   const marker = join(workspace.root, "completed-phases");
   expect(
-    runPlan(
-      [
-        { id: "missing", label: "missing", command: join(workspace.root, "missing"), args: [] },
-        phase("later", marker, 0),
-      ],
-      quiet,
-    ),
+    runPlan([
+      { label: "missing", command: join(workspace.root, "missing"), args: [] },
+      phase("later", marker, 0),
+    ]),
   ).toBe(1);
   expect(existsSync(marker)).toBe(false);
 });
@@ -209,7 +204,7 @@ it("checks source policy only on the delta, while explicit full policy also work
   expect(rejected.exitCode).toBe(1);
   expect(rejected.stdout).toContain("flow(...) composition is not allowed");
   await rm(join(workspace.root, ".git"), { recursive: true, force: true });
-  const full = await workspace.verify(["phase", "pattern-check"]);
+  const full = await workspace.run("check:patterns");
   expect(full.exitCode).toBe(1);
   expect(full.stdout).toContain("src/unrelated/policy.ts");
 });
@@ -260,7 +255,7 @@ it("keeps both sides of a rename for impact selection but never passes deleted p
   ).toBe(true);
   expect(
     lines.some(
-      (line) => /format|sensors|patterns/.test(line) && line.includes("src/feature/value.ts"),
+      (line) => /format|lint:|patterns/.test(line) && line.includes("src/feature/value.ts"),
     ),
   ).toBe(false);
 });
@@ -315,25 +310,48 @@ it("selects component suites for non-imported filesystem inputs", async ({ works
   expect(await readFile(join(workspace.root, "observed"), "utf8")).toBe("feature\n");
 });
 
-it("exposes complete analysis only in the explicit full plan, including Git-free snapshots", async ({
-  workspace,
-}) => {
-  await rm(join(workspace.root, ".git"), { recursive: true, force: true });
-  const scoped = await workspace.verify(["--list"]);
-  expect(scoped.exitCode).not.toBe(0);
-  const result = await workspace.verify(["--full", "--list"]);
-  expect(result.exitCode, result.stderr).toBe(0);
-  for (const label of [
-    "typecheck",
-    "type-aware lint",
-    "setup tests",
-    "runtime tests",
-    ".pi/extensions/dev-tools/__tests__/e2e.test.ts",
-    ".pi/extensions/share/__tests__/e2e.test.ts",
-  ])
-    expect(result.stdout).toContain(label);
-  expect(result.stdout).not.toContain("test:safe");
+it("rejects unsupported full-run options before starting work", async ({ workspace }) => {
+  const result = await workspace.run("verify:full", ["--list"]);
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stderr).toContain("--list");
 });
+
+for (const failure of [undefined, "typecheck"]) {
+  it(`runs the package-owned full sequence ${failure ? "until a failed tool" : "without Git metadata"}`, async ({
+    workspace,
+  }) => {
+    const tools = [
+      "format:check",
+      "check:patterns",
+      "check:dependencies",
+      "licenses:check",
+      "typecheck",
+      "lint:type",
+      "build",
+      "test:setup",
+      "test",
+      "verify:install",
+      "test:workflows",
+    ];
+    const marker = join(workspace.root, "completed-tools");
+    const file = join(workspace.root, "package.json");
+    const pkg = JSON.parse(await readFile(file, "utf8"));
+    // The real Nub pipeline runs small executable tools here; their analysis and
+    // build behavior is outside this sequencing/exit-propagation scenario.
+    for (const tool of tools) {
+      const program = `require('node:fs').appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(`${tool}\\n`)}); process.exit(${tool === failure ? 7 : 0});`;
+      pkg.scripts[tool] = `node -e '${program.replaceAll("'", "'\\''")}'`;
+    }
+    await writeFile(file, JSON.stringify(pkg));
+    await rm(join(workspace.root, ".git"), { recursive: true, force: true });
+    const scoped = await workspace.verify(["--list"]);
+    expect(scoped.exitCode).not.toBe(0);
+    const result = await workspace.run("verify:full");
+    expect(result.exitCode, `${result.stdout}\\n${result.stderr}`).toBe(failure ? 7 : 0);
+    const expected = failure ? tools.slice(0, tools.indexOf(failure) + 1) : tools;
+    expect(await readFile(marker, "utf8")).toBe(expected.map((tool) => `${tool}\\n`).join(""));
+  }, 45_000);
+}
 
 it("fails clearly on an unknown base instead of fetching or widening the analysis", async ({
   workspace,

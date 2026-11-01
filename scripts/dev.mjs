@@ -6,12 +6,7 @@ import { parseArgs } from "node:util";
 import * as HeavyweightLock from "./heavyweight-lock.mjs";
 import { changedFiles } from "./changed-files.mjs";
 import { runSupervisedNode } from "./run-supervised-node.mjs";
-import {
-  changedVerificationPlan,
-  EXPLICIT_VERIFICATION_PHASES,
-  FULL_VERIFICATION_PHASES,
-  verificationPhaseById,
-} from "./verification-phases.mjs";
+import { changedVerificationPlan } from "./verification-plan.mjs";
 import { listPlan, runPlan } from "./verification-runner.mjs";
 
 const repo = resolve(import.meta.dirname, "..");
@@ -23,7 +18,45 @@ function capture(command, args, cwd = process.cwd()) {
   }).trim();
 }
 
-async function runDockerTests(args) {
+async function verify(args) {
+  const {
+    values: { base, list, "checks-only": checksOnly },
+  } = parseArgs({
+    args,
+    options: {
+      base: { type: "string" },
+      list: { type: "boolean" },
+      "checks-only": { type: "boolean" },
+    },
+  });
+  const change = changedFiles({ base });
+  const steps = changedVerificationPlan(change, { checksOnly });
+  console.log(`Verification scope: ${change.files.length} changed paths since ${change.base}.`);
+  console.log("Local feedback does not replace CI's changed-file policy and integration checks.");
+  if (list) {
+    console.log(listPlan(steps).join("\n"));
+    return;
+  }
+  if (!steps.length) {
+    console.log("No checks selected for this delta.");
+    return;
+  }
+  process.exitCode = await HeavyweightLock.withHeavyweightLock(
+    (lease) => {
+      const previous = process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
+      process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = lease.token;
+      try {
+        return runPlan(steps);
+      } finally {
+        if (previous === undefined) delete process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
+        else process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = previous;
+      }
+    },
+    { timeoutMs: HeavyweightLock.heavyweightLockTimeoutMs() },
+  );
+}
+
+async function dockerTests(args) {
   process.env.PI_ENV_REVISION = capture("git", ["describe", "--always", "--dirty", "--abbrev=40"]);
   await runSupervisedNode([
     "--command",
@@ -43,118 +76,27 @@ async function runDockerTests(args) {
     ]);
 }
 
-function lintArguments(args) {
-  return [
-    "--command",
-    join(repo, "scripts/tool-node-run.sh"),
-    join(repo, "node_modules/oxlint/bin/oxlint"),
-    ".",
-    "--type-aware",
-    "--threads=1",
-    "--deny-warnings",
-    "--ignore-pattern",
-    "tests/**",
-    "--ignore-pattern",
-    "**/dist/**",
-    ...args,
-  ];
-}
-function typecheckArguments(args) {
-  const compiler = capture(
-    process.execPath,
-    [join(repo, "node_modules/@effect/tsgo/dist/effect-tsgo.cjs"), "get-exe-path"],
-    repo,
-  );
-  return ["--command", compiler, ...args];
-}
-
-function verificationPlan(args) {
-  if (args[0] === "phase") {
-    if (args.length === 2 && args[1] === "--list") return EXPLICIT_VERIFICATION_PHASES;
-    if (args.length !== 2) throw new Error("usage: nub run verify:phase <phase-id> | --list");
-    const selected = verificationPhaseById(args[1]);
-    if (!selected) throw new Error(`Unknown verification phase: ${args[1]}`);
-    return [selected];
-  }
-  const {
-    values: { full, base, "checks-only": checksOnly },
-  } = parseArgs({
-    args,
-    options: {
-      full: { type: "boolean" },
-      "checks-only": { type: "boolean" },
-      list: { type: "boolean" },
-      base: { type: "string" },
-    },
-  });
-  if (full) {
-    if (checksOnly || base)
-      throw new Error("--full cannot be combined with --checks-only or --base");
-    console.log("Verification scope: complete repository (explicit full verification).");
-    return FULL_VERIFICATION_PHASES;
-  }
-  const change = changedFiles({ base });
-  console.log(`Verification scope: ${change.files.length} changed paths since ${change.base}.`);
-  console.log(
-    "Full type analysis, packaging and complete coverage remain the CI/verify:full gate.",
-  );
-  return changedVerificationPlan(change, { checksOnly });
-}
-
-async function runVerification(args) {
-  const phases = verificationPlan(args);
-  if (args.includes("--list")) {
-    console.log(listPlan(phases).join("\n"));
-    return;
-  }
-  if (!phases.length) {
-    console.log("No checks selected for this delta.");
-    return;
-  }
-  const commonDir = HeavyweightLock.gitCommonDir(process.cwd(), { allowMissing: true });
-  const execute = () => runPlan(phases, { name: "verify" });
-  process.exitCode = commonDir
-    ? await HeavyweightLock.withHeavyweightLock(
-        (lease) => {
-          const previous = process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
-          process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = lease.token;
-          try {
-            return execute();
-          } finally {
-            if (previous === undefined) delete process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN;
-            else process.env.PI_ENV_HEAVYWEIGHT_LOCK_TOKEN = previous;
-          }
-        },
-        { timeoutMs: HeavyweightLock.heavyweightLockTimeoutMs() },
-      )
-    : execute();
-}
-
 async function main([command, ...args]) {
-  if (command === "verify") return runVerification(args);
-  if (command === "test:docker") return runDockerTests(args);
-  let commandArgs;
   switch (command) {
-    case "test": {
-      const [mode, ...rest] = args;
-      commandArgs = [
-        join(repo, "node_modules/vitest/vitest.mjs"),
-        ...(mode === "related" ? ["related", "--run", ...rest] : ["--run", ...args]),
-      ];
-      break;
-    }
-    case "lint":
-      commandArgs = lintArguments(args);
-      break;
-    case "typecheck":
-      commandArgs = typecheckArguments(args);
-      break;
-    default:
-      throw new Error(
-        "usage: node scripts/dev.mjs <test|test:docker|verify|lint|typecheck> [args...]",
+    case "verify":
+      return verify(args);
+    case "test:docker":
+      return dockerTests(args);
+    case "full":
+      // Reject obsolete inspection flags before a broad pipeline can allocate work.
+      parseArgs({ args, options: {} });
+      return runSupervisedNode(["--heavyweight", "--command", "nub", "run", "verify:integration"]);
+    case "typecheck": {
+      const compiler = capture(
+        process.execPath,
+        [join(repo, "node_modules/@effect/tsgo/dist/effect-tsgo.cjs"), "get-exe-path"],
+        repo,
       );
+      return runSupervisedNode(["--heavyweight", "--command", compiler, ...args]);
+    }
+    default:
+      throw new Error("usage: node scripts/dev.mjs <verify|full|typecheck|test:docker> [args...]");
   }
-  await runSupervisedNode(["--heavyweight", ...commandArgs]);
 }
 
 try {
