@@ -43,7 +43,7 @@ source /path/to/pi-env/setup/templates/bash-prompt.sh
 
 This opt-in owns `PS1` and displays `[user@host:cwd]$ ` (root uses `#`), with no space before the marker. Bash inherits its palette from the terminal: native ANSI green (SGR 32) provides supplemental identity emphasis, the directory is bold terminal-default text, and brackets, colon, marker, and input explicitly reset to terminal-default foreground (SGR 39) and nonbold styling. With the Ghostty light/dark pair active, these are Gruvbox colors; the fragment does not parse Pi themes or remap colors. Contrast depends on the terminal palette: current Ghostty light green reaches 4.29:1, below the 4.5:1 normal-text target; dark passes that target. This is not a blanket accessibility claim. The fragment leaves hooks and `TERM` alone and does nothing in noninteractive shells or with unset/empty `TERM` or `TERM=dumb`. Setup does not install it automatically.
 
-With Home Manager, enable `pi-env.shell.bashPrompt.enable = true` alongside `programs.bash.enable = true`. This option is off by default and independent of the PATH option `pi-env.shell.enable`; an explicit consumer `programs.bash.promptInit` takes precedence.
+With Home Manager, enable `pi-env.shell.bashPrompt.enable = true` alongside `programs.bash.enable = true`. This option is off by default and independent of the PATH option `pi-env.shell.enable`. It appends the prompt after existing interactive initialization with `lib.mkAfter` and owns `PS1`; disable this option before choosing another prompt.
 
 ### Ghostty over SSH and tmux
 

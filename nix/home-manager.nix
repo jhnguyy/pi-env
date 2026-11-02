@@ -102,7 +102,7 @@ in
             message = "pi-env.shell.bashPrompt.enable requires programs.bash.enable.";
           }
         ];
-        programs.bash.promptInit = lib.mkDefault ''
+        programs.bash.initExtra = lib.mkAfter ''
           source ${self}/setup/templates/bash-prompt.sh
         '';
       })
