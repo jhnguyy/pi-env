@@ -4,7 +4,12 @@ import { Data, Effect } from "effect";
 import { Type } from "typebox";
 import { PiEvent } from "../_shared/agent-tools";
 import { txt } from "../_shared/result";
-import { definePublicTool, registerPublicTool, toolExpandHint } from "../_shared/tool-render";
+import {
+  definePublicTool,
+  registerPublicTool,
+  toolExpandHint,
+  toolResultText,
+} from "../_shared/tool-render";
 import {
   injectAnthropicHostedWebTools,
   isAnthropicHostedWebToolsModel,
@@ -151,8 +156,7 @@ async function readResponseBytes(
       chunks.push(value);
     }
   } catch (cause) {
-    if (signal.aborted) throw signal.reason ?? cause;
-    throw cause;
+    throw signal.reason ?? cause;
   } finally {
     signal.removeEventListener("abort", onAbort);
     try {
@@ -506,10 +510,7 @@ export default function webContext(pi: ExtensionAPI) {
       }
     },
     renderResult(result, { expanded }, theme, context) {
-      const output = result.content
-        .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-        .map((part) => part.text)
-        .join("\n");
+      const output = toolResultText(result);
       if (expanded) return new Text(output || "(no output)", 0, 0);
 
       const details = result.details as (WebFetchResult & { error?: string }) | undefined;

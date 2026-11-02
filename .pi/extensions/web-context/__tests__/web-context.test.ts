@@ -1,4 +1,5 @@
 import "../../__tests__/tui-setup";
+import { componentText, expansionHints } from "../../__tests__/rendering";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,10 +65,6 @@ function registeredWebFetchTool() {
   return registerTool.mock.calls.map(([tool]) => tool).find((tool) => tool.name === "web_fetch");
 }
 
-function componentText(component: unknown): string {
-  return (component as { text: string }).text;
-}
-
 function webFetchToolResult() {
   const hiddenTail = "end of fetched output";
   const body = `Fetched body ${"full output ".repeat(200)}${hiddenTail}`;
@@ -113,10 +110,8 @@ describe("web fetch", () => {
     const beforeRender = structuredClone(result);
 
     const collapsed = componentText(
-      tool.renderResult(result, { expanded: false }, mockTheme, {
-        keyText: () => "alt+e",
-        keyHint: (_id: string, description: string) => `alt+e ${description}`,
-      }),
+      tool.renderResult(result, { expanded: false }, mockTheme, expansionHints("alt+e")),
+      120,
     );
 
     expect(collapsed).toContain("HTTP 200");
@@ -134,12 +129,8 @@ describe("web fetch", () => {
     const tool = registeredWebFetchTool();
     const { result } = webFetchToolResult();
     const collapsed = componentText(
-      tool.renderResult(result, { expanded: false }, mockTheme, {
-        keyText: () => "",
-        keyHint: () => {
-          throw new Error("Disabled bindings must not be formatted");
-        },
-      }),
+      tool.renderResult(result, { expanded: false }, mockTheme, expansionHints("")),
+      120,
     );
     expect(collapsed).toContain("Fetched body");
     expect(collapsed).not.toMatch(/to expand|ctrl\+o|\(\)/u);
@@ -150,16 +141,35 @@ describe("web fetch", () => {
     const { body, result } = webFetchToolResult();
 
     const expanded = componentText(
-      tool.renderResult(result, { expanded: true }, mockTheme, {
-        keyText: () => "alt+e",
-        keyHint: (_id: string, description: string) => `alt+e ${description}`,
-      }),
+      tool.renderResult(result, { expanded: true }, mockTheme, expansionHints("alt+e")),
+      4096,
     );
 
     expect(expanded).toContain(body);
     expect(expanded).toContain("URL: https://example.com/");
     expect(expanded).not.toContain("ctrl+o");
     expect(expanded).not.toContain("alt+e");
+  });
+
+  it("renders text blocks in order and omits non-text blocks when expanded", () => {
+    const tool = registeredWebFetchTool();
+    const rendered = componentText(
+      tool.renderResult(
+        {
+          content: [
+            { type: "text", text: "first" },
+            { type: "image", data: "not displayed", mimeType: "image/png" },
+            { type: "text", text: "  second" },
+          ],
+        },
+        { expanded: true },
+        mockTheme,
+        expansionHints(""),
+      ),
+      20,
+    );
+
+    expect(rendered).toBe(`${"first".padEnd(20)}\n${"  second".padEnd(20)}`);
   });
 
   it("rejects non-web protocols", () => {
@@ -244,6 +254,21 @@ describe("web fetch", () => {
     });
   });
 
+  it("preserves a stream read failure and releases the reader", async () => {
+    const cause = new Error("stream read failed");
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(cause);
+      },
+    });
+    await expect(
+      fetchWebText("https://example.com", {}, undefined, {
+        fetch: async () => new Response(body),
+      }),
+    ).rejects.toMatchObject({ kind: WebFetchFailureKind.Body, cause });
+    expect(body.locked).toBe(false);
+  });
+
   it("passes caller cancellation to the Promise adapter as a typed failure", async () => {
     const controller = new AbortController();
     let listenerReady!: () => void;
@@ -269,8 +294,15 @@ describe("web fetch", () => {
     });
   });
 
-  it("cancels a response body stream on Promise caller abort after headers", async () => {
+  it.each([
+    [new Error("caller aborted body"), "caller aborted body"],
+    [false, "false"],
+    [0, "0"],
+    ["", ""],
+    [null, "reader cancelled"],
+  ])("cancels a response body stream with reason %s after headers", async (reason, message) => {
     const controller = new AbortController();
+    const readFailure = new Error("reader cancelled");
     let bodyStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       bodyStarted = resolve;
@@ -293,9 +325,9 @@ describe("web fetch", () => {
               new Promise<ReadableStreamReadResult<Uint8Array>>((_resolve, reject) => {
                 rejectRead = reject;
               }),
-            cancel: (reason?: unknown) => {
+            cancel: () => {
               bodyCancelled();
-              rejectRead?.(reason);
+              rejectRead?.(readFailure);
               return Promise.resolve();
             },
             releaseLock: () => undefined,
@@ -310,11 +342,12 @@ describe("web fetch", () => {
     promise.catch(() => undefined);
 
     await started;
-    controller.abort(new Error("caller aborted body"));
+    controller.abort(reason);
     await expect(cancelled).resolves.toBeUndefined();
     await expect(promise).rejects.toMatchObject({
       kind: WebFetchFailureKind.Body,
-      message: "Web fetch body read failed: caller aborted body",
+      message: `Web fetch body read failed: ${message}`,
+      cause: reason ?? readFailure,
     });
   });
 

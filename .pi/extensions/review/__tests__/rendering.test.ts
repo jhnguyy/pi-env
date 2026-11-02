@@ -1,5 +1,6 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
+import { componentText as textOf, expansionHints } from "../../__tests__/rendering";
 import { reviewActionResult, reviewProgressResult, withoutNestedUsage } from "../index";
 import { projectReviewProgress, renderReviewResult } from "../render";
 
@@ -10,13 +11,8 @@ const recordingTheme = {
 
 const context = {
   isError: false,
-  keyText: () => "alt+e",
-  keyHint: (_id: string, description: string) => `alt+e ${description}`,
+  ...expansionHints("alt+e"),
 };
-
-function textOf(component: unknown): string {
-  return (component as { text: string }).text;
-}
 
 describe("review tool rendering", () => {
   it("shows a bounded one-line verdict, zero cost, and the exact review ID without usage counters", () => {
@@ -78,7 +74,7 @@ describe("review tool rendering", () => {
       ),
     );
 
-    expect(expanded).toContain(verdict);
+    for (const line of verdict.split("\n")) expect(expanded).toContain(line);
     expect(expanded).toContain(detailed);
     expect(expanded).toContain("$1.2500");
     expect(expanded).toContain("review-expanded");

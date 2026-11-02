@@ -6,9 +6,9 @@
  */
 
 import "../../__tests__/tui-setup";
-import { describe, expect, it } from "vitest";
-import { Container, type Text } from "@earendil-works/pi-tui";
-import initSubagent from "../index";
+import { beforeEach, describe, expect, it } from "vitest";
+import { componentText as extractText, expansionHints } from "../../__tests__/rendering";
+import { createSubagentHarness } from "./harness";
 
 // ─── Mock theme ───────────────────────────────────────────────────────────────
 
@@ -17,39 +17,19 @@ const mockTheme = {
   bold: (text: string) => text,
 };
 
-const hints = {
-  keyText: () => "alt+e",
-  keyHint: (_id: string, description: string) => `alt+e ${description}`,
-};
+const hints = expansionHints("alt+e");
 
 // ─── Mock ExtensionAPI ────────────────────────────────────────────────────────
 
 let registeredTool: any;
 
-const mockPi = {
-  getAllTools: () => [],
-  registerCommand: () => {},
-  registerTool: (tool: any) => {
-    if (tool.name === "subagent") registeredTool = tool;
-  },
-  on: () => {},
-  events: { on: () => {}, emit: () => {} },
-} as any;
-
-// Initialize once — captures the tool registration and event listeners
-initSubagent(mockPi);
+beforeEach(() => {
+  registeredTool = createSubagentHarness().tools.get("subagent");
+});
 
 // ─── Mock ctx for execute ─────────────────────────────────────────────────────
 
 const mockCtx = { cwd: "/tmp/test" } as any;
-
-/** Extract text string from a Text or Container component. */
-function extractText(component: Text | Container): string {
-  if (component instanceof Container) {
-    return component.children.map((c: any) => extractText(c as Text | Container)).join("\n");
-  }
-  return (component as any).text ?? "";
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -129,13 +109,13 @@ describe("subagent extension", () => {
       expect(collapsed).toContain("/sessions/sub-audit.jsonl");
       expect(collapsed).toContain("result truncated");
       expect(collapsed).not.toContain("B".repeat(100));
-      expect(collapsed).not.toContain(fullOutput);
+      for (const line of fullOutput.split("\n")) expect(collapsed).not.toContain(line);
 
       const expanded = extractText(
         registeredTool.renderResult(result, { expanded: true }, mockTheme, context),
       );
       expect(expanded).toContain(longTask);
-      expect(expanded).toContain(fullOutput);
+      for (const line of fullOutput.split("\n")) expect(expanded).toContain(line);
     });
   });
 
@@ -189,7 +169,9 @@ describe("subagent extension", () => {
       expect(rendered).toContain("2 turns");
       expect(rendered).toContain("sub-schema-audit");
       expect(rendered).not.toContain(successDetails.task);
-      expect(rendered).not.toContain(successDetails.finalOutput);
+      for (const line of successDetails.finalOutput.split("\n")) {
+        expect(rendered).not.toContain(line);
+      }
     });
 
     it.each([
@@ -236,7 +218,7 @@ describe("subagent extension", () => {
       );
 
       expect(rendered).toContain(successDetails.task);
-      expect(rendered).toContain(successDetails.finalOutput);
+      for (const line of successDetails.finalOutput.split("\n")) expect(rendered).toContain(line);
       expect(rendered).toContain(successDetails.modelOverride);
       expect(rendered).toContain(successDetails.sessionName);
       expect(rendered).toContain(successDetails.sessionFile);

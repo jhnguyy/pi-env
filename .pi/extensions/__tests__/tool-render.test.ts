@@ -1,4 +1,5 @@
 import "./tui-setup";
+import { componentText, expansionHints } from "./rendering";
 import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
@@ -45,12 +46,9 @@ describe("shared compact tool rendering", () => {
       { content: [{ type: "text", text: "denied" }], details: undefined },
       { expanded: false, isPartial: false },
       theme,
-      { isError: true, keyText: () => "", keyHint: () => "" },
+      { isError: true, ...expansionHints("") },
     );
-    if (!("text" in rendered) || typeof rendered.text !== "string") {
-      throw new TypeError("Expected a rendered text component");
-    }
-    expect(rendered.text).toContain("<error>✗</error>");
+    expect(componentText(rendered)).toContain("<error>✗</error>");
   });
 
   it("requires injected hints at compile time", () => {

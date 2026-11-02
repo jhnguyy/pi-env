@@ -1,5 +1,6 @@
 import "../../__tests__/tui-setup";
 import { describe, expect, it } from "vitest";
+import { componentText as text, expansionHints } from "../../__tests__/rendering";
 import { renderDevToolsResult, renderDevToolsCall, type RenderTheme } from "../renderers";
 import type { DiagnosticsResult, HoverResult } from "../protocol";
 import "../register-actions"; // side-effect: populates the action registry for renderer dispatch
@@ -11,22 +12,7 @@ const mockTheme: RenderTheme = {
   bold: (text: string) => `**${text}**`,
 };
 
-const hints = {
-  keyText: () => "alt+e",
-  keyHint: (_id: string, description: string) => `alt+e ${description}`,
-};
-
-function text(rendered: unknown): string {
-  if (
-    typeof rendered !== "object" ||
-    rendered === null ||
-    !("text" in rendered) ||
-    typeof rendered.text !== "string"
-  ) {
-    throw new TypeError("Expected a rendered text component");
-  }
-  return rendered.text;
-}
+const hints = expansionHints("alt+e");
 
 describe("Renderers", () => {
   // ─── renderDevToolsCall ───────────────────────────────────────────────────────
@@ -145,7 +131,8 @@ describe("Renderers", () => {
           hints,
         ),
       );
-      expect(t).toContain('{\n  "action": "diagnostics"');
+      expect(t.split("\n")[0]).toMatch(/^\{ *$/u);
+      expect(t.split("\n")[1]).toMatch(/^  "action": "diagnostics", *$/u);
       expect(t).toContain('"line": 5');
       expect(t).toContain('"code": "TS2339"');
     });
@@ -221,7 +208,7 @@ describe("Renderers", () => {
           hints,
         ),
       );
-      expect(t).toBe("[error:✗ No hover information]");
+      expect(t).toMatch(/^\[error:✗ No hover information\] *$/u);
     });
   });
 
@@ -239,7 +226,7 @@ describe("Renderers", () => {
       const t = text(
         renderDevToolsResult({ isError: false, content: [], details: r }, {}, mockTheme, hints),
       );
-      expect(t).toBe("[success:✓ hover]");
+      expect(t).toMatch(/^\[success:✓ hover\] *$/u);
     });
   });
 });
