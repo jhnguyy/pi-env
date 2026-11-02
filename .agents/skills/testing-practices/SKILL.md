@@ -5,64 +5,46 @@ description: Design functional tests at meaningful responsibility boundaries, se
 
 # Testing Practices
 
-## Discover the project's guidance
+A functional test establishes what a unit promises while leaving it free to change how it keeps that promise. Useful tests distinguish broken behavior from correct alternatives, making the system easier to understand and maintain.
 
-Locate the target repository and read its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing guidance when present. Discover local conventions from that project rather than resolving repository policy relative to this skill.
+Find the target project's guidance through its `README.md`, `CONTRIBUTING.md`, applicable agent instructions, and linked testing conventions. Discover that guidance in the target repository rather than relative to this skill.
 
-## Choose the responsibility to prove
+## Define the promise
 
-Begin with what the target unit promises: given its inputs and permitted collaborator outcomes, what outputs, state changes, effects, and failures should follow? Resolve unclear readiness, completion, cancellation, or recovery semantics in the production contract before choosing assertions.
+Discover useful units through design. An internal function or module can own a responsibility with independently testable expectations. Choose seams that make its inputs, collaborator outcomes, and ownership controllable; a unit test need not enter through the application's public CLI.
 
-Discover useful units through design. An internal function or module can own a legitimate responsibility with independently testable expectations. Choose seams that make inputs, failures, and ownership controllable; public CLI access is not a prerequisite for a unit test.
+Describe what follows from those inputs: outputs, state changes, effects, and failures. Include meaningful input distinctions and failure stages, especially where an effect may have occurred before confirmation was lost. Resolve unclear readiness, completion, cancellation, or recovery semantics in the production contract so the test can establish what callers may safely do next.
 
-Rely on established collaborator contracts and focus the target's tests on its own decisions, translations, composition, and failure handling.
+Rely on established collaborator contracts and focus on the target's decisions, translations, composition, and failure handling. Select integration evidence when compatibility, an interaction, or shared lifecycle behavior is itself the promise under examination.
 
-Retain targeted integration evidence when compatibility, an interaction, or shared lifecycle behavior is itself the responsibility being tested.
+## Derive expectations from behavior
 
-## Derive independent expectations
+Requirements and caller needs supply the expected result. Hand-worked examples, invariants, and independent references can make that expectation concrete without reproducing the implementation's calculation. Each test should distinguish a plausible violation of the promise from a correct implementation.
 
-Derive expected results from requirements and caller needs, using hand-worked examples, invariants, or an independent reference where useful. Each test should distinguish a plausible violation of the target's promise from a correct implementation.
+Reject tautological assertions and implementation-locking tests that merely echo production configuration, constants, internal structure, or calculations. They detect edits rather than broken behavior and turn one design choice into two things to maintain. Treat configuration as an input: prove the routing, permissions, selection, or other outcome it enables instead of comparing it with a copied object. Observe a unit's promised result rather than pinning a private helper sequence that is not part of its contract.
 
-Reject tautological assertions and implementation-locking tests: checks whose expectations merely repeat production configuration, constants, internal structure, or the same calculation used by the implementation. They detect edits rather than broken behavior and turn one design choice into two things to maintain.
+A behavior-preserving refactor should leave the test valid. If it would require rewriting an expectation, move the assertion to the promised outcome or remove the check when it protects no independent requirement.
 
-Treat configuration as an input to behavior. Prove the routing, permissions, selection, or other outcome it enables instead of asserting that the configuration equals a copied object. Likewise, observe a unit's promised result rather than pinning its private helper sequence when that sequence is not part of the contract.
+## Design a controlled scenario
 
-A behavior-preserving refactor should leave the test valid. When it would require rewriting an expectation, move the assertion to the promised outcome or remove the check if it protects no independent requirement.
+Use small, deterministic examples sized to distinguish behavior, not to match the host's capacity. Keep scenarios independent, parameterizing variations within one workflow when that clarifies them and separating genuinely different workflows. Control incidental time and randomness; use real conditions when those conditions are the contract. Observable readiness and completion signals establish progress more reliably than elapsed-time guesses.
 
-Cover meaningful success, input distinctions, and failure stages. Distinguish failures before an effect from failures after it may have occurred when that changes safe retry or recovery.
+Choose collaborators for the evidence needed. Inexpensive, deterministic implementations can make a scenario clearer; doubles can supply relevant inputs, failures, timing, or expensive dependencies. Preserve the collaborator assumptions the target relies on, including error and lifecycle behavior. Reuse existing adapter or contract evidence, adding real-adapter qualification where compatibility is consequential or assumptions are uncertain or changed. Each use of a double need not repeat a real-service test.
 
-Assert the complete result required by the contract: returned content, resulting state, relevant effects, and actionable failures. Complete means contractual information, not every incidental representation. A recorded request can prove request translation; it does not by itself prove the requested operation completed.
+Design the fixture's lifecycle alongside the scenario. It owns resources from allocation, including partial startup that cannot return successfully. Arrange cleanup as resources are acquired, attempt independent releases, and preserve useful original failures alongside cleanup failures.
 
-Name each test for what its assertions actually establish. When an absence claim could be vacuous, use a positive control to show the observation can detect the effect and check after the operation had its chance to produce it.
+Account for import, startup, build, child-process, native-allocation, and retained-state costs when choosing execution resources. Select scale and resource qualification separately with explicit inputs, limits, and claims. Small fixtures, serial execution, and unit classification do not establish aggregate memory containment; generated artifacts and dynamic inputs also affect which evidence a change needs.
 
-## Construct controlled scenarios
+## Observe the promised outcome
 
-Use small, deterministic examples that distinguish correct behavior from plausible errors. Size functional fixtures for that purpose, not for the host's available capacity. Select scale and resource qualification separately, with explicit inputs, limits, and claims.
+Assert the contractual result: returned content, resulting state, relevant effects, and actionable failures. Completeness means the information the contract covers, not every incidental representation. A recorded request may establish request translation, while completion requires evidence that the requested operation finished. Name the test for the claim its assertions actually establish.
 
-Keep inexpensive, deterministic collaborators real when that makes the test clearer. Use doubles to control relevant inputs, failures, timing, or expensive dependencies. Preserve the collaborator assumptions on which the target depends, including error and lifecycle behavior.
+For lifecycle promises, observe the result after awaited shutdown, scope closure, or process termination rather than only after requesting cancellation. For an absence that could be vacuous, use a positive control to establish that the observation can detect the effect and check after the operation had its chance to produce it. A watchdog bounds a stalled scenario; the assertions determine whether the promise was kept.
 
-Reuse adequate adapter or contract evidence for those assumptions. Add focused real-adapter evidence when compatibility is consequential or assumptions are uncertain or changed; every use of a double does not require another real-service test.
+## Evolve the suite with the design
 
-Keep scenario state independent. Parameterize variations within the same workflow when that clarifies the cases; separate genuinely different workflows.
+Compare tests by the contract violations they detect, not by similar assertions or test count. Permission, integrity, persistence, cancellation, readiness, completion, and lifecycle can be distinct promises. When production design or verification strategy changes, revisit the suite as a whole and replace boundaries and fixtures that embody obsolete assumptions rather than only adding cases to them. Before removing protection for a current requirement, show that retained or replacement evidence detects the same violations; retire obsolete requirements explicitly.
 
-Control incidental time and randomness. Use real conditions when they are the contract. Coordinate readiness and completion through observable signals rather than elapsed-time guesses. A watchdog bounds a stall; it does not establish success.
+For regressions, reproduce the failure without the fix when practical and retain the meaningful case. Use negative controls or relevant production mutations when they resolve consequential uncertainty about detection, rather than as a ritual for every trivial edit.
 
-## Own resources and execution cost
-
-Fixtures own resources from allocation, including partial startup and setup that cannot return successfully. Arrange cleanup as resources are acquired, attempt independent releases, and preserve useful original failures alongside cleanup failures.
-
-Assert lifecycle outcomes after the promised completion boundary: for example, after awaited shutdown, scope closure, or process termination—not merely after requesting cancellation.
-
-Inspect import, startup, build, child-process, native-allocation, and retained-state costs before choosing execution resources. Small fixtures, serial execution, and unit classification do not establish aggregate memory containment. Account for generated artifacts and dynamic inputs when selecting evidence.
-
-## Preserve useful coverage and evidence
-
-For regressions, reproduce the failure without the fix when practical and retain the meaningful regression case. Where detection is uncertain or consequential, use a relevant negative control or production mutation. Apply these techniques when they add information, rather than requiring a mutation ritual for every trivial edit.
-
-Compare tests by the contract violations they detect, not assertion syntax or test count. Permission, integrity, persistence, cancellation, readiness, completion, and lifecycle may be separate promises despite similar assertions.
-
-When production design or verification strategy changes, revisit the suite as a whole. Replace test boundaries and fixtures that embody obsolete assumptions instead of only adding cases to them.
-
-When consolidating or replacing coverage, preserve independently meaningful contracts and failure cases. Before removing protection for a current requirement, show that retained or replacement evidence detects the same violations. Retire obsolete requirements explicitly.
-
-Keep temporary diagnostic or catching experiments uncommitted. Retain enough information to reproduce consequential evidence; existing CI output may suffice. Report what was checked, its outcome, and material gaps without extending the claim beyond the evidence.
+Keep temporary diagnostic or catching experiments uncommitted. Retain enough evidence to reproduce consequential results; existing CI output may suffice. Report what was checked, the outcome, and material gaps so the claim stays within the evidence.
